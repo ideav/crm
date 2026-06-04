@@ -3,17 +3,37 @@
    с остальными рабочими местами в main.html. Планшетная раскладка оператора. */
 
 .atex-sc {
-    --sc-border: #d9dee5;
-    --sc-bg: #ffffff;
-    --sc-muted: #6b7280;
+    --sc-border: var(--input-border, #d9dee5);
+    --sc-border-soft: var(--border-color, #eef1f5);
+    --sc-bg: var(--input-bg, #ffffff);
+    --sc-surface: var(--bg-secondary, #f8fafc);
+    --sc-muted: var(--text-secondary, #6b7280);
     --sc-accent: var(--atex-navy, #134174);
     --sc-accent-d: var(--atex-navy-d, #0e3158);
-    --sc-warn: #b91c1c;
-    --sc-ok: #15803d;
-    color: #1f2933;
+    --sc-active-bg: #e0ecff;
+    --sc-badge-bg: var(--bg-secondary, #e2e8f0);
+    --sc-info-bg: #dbeafe;
+    --sc-info-text: var(--sc-accent-d);
+    --sc-success-bg: var(--color-success-bg, #dcfce7);
+    --sc-success-border: var(--color-success-border, #bbf7d0);
+    --sc-success-hover-bg: var(--color-success-bg, #d1fae5);
+    --sc-add-border: #bfdbfe;
+    --sc-danger-border: #fecaca;
+    --sc-warn: var(--color-error, #b91c1c);
+    --sc-ok: var(--color-success, #15803d);
+    color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-sc {
+    --sc-active-bg: rgba(96, 165, 250, 0.16);
+    --sc-info-bg: rgba(96, 165, 250, 0.16);
+    --sc-info-text: #93c5fd;
+    --sc-add-border: rgba(96, 165, 250, 0.45);
+    --sc-danger-border: rgba(248, 113, 113, 0.45);
+}
+
 .atex-sc *,
 .atex-sc *::before,
 .atex-sc *::after { box-sizing: border-box; }
@@ -46,7 +66,7 @@
 .atex-sc-sidebar-head {
     padding: 12px 14px;
     border-bottom: 1px solid var(--sc-border);
-    background: #f8fafc;
+    background: var(--sc-surface);
 }
 .atex-sc-sidebar-head h2 { margin: 0; font-size: 15px; }
 .atex-sc-cuts { display: flex; flex-direction: column; max-height: 74vh; overflow: auto; }
@@ -58,14 +78,14 @@
     text-align: left;
     padding: 12px 14px;
     border: none;
-    border-bottom: 1px solid #eef1f5;
+    border-bottom: 1px solid var(--sc-border-soft);
     background: transparent;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-sc-cut-item:hover { background: #f1f5f9; }
-.atex-sc-cut-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-sc-cut-item:hover { background: var(--sc-surface); }
+.atex-sc-cut-item.is-active { background: var(--sc-active-bg); font-weight: 600; }
 .atex-sc-cut-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sc-empty { padding: 14px; color: var(--sc-muted); }
 
@@ -86,12 +106,12 @@
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
-    background: #e2e8f0;
-    color: #334155;
+    background: var(--sc-badge-bg);
+    color: var(--sc-muted);
     white-space: nowrap;
 }
-.atex-sc-badge-done { background: #dcfce7; color: var(--sc-ok); }
-.atex-sc-badge-wip { background: #dbeafe; color: var(--sc-accent-d); }
+.atex-sc-badge-done { background: var(--sc-success-bg); color: var(--sc-ok); }
+.atex-sc-badge-wip { background: var(--sc-info-bg); color: var(--sc-info-text); }
 
 /* Сводка */
 .atex-sc-summary {
@@ -101,7 +121,7 @@
     margin: 4px 0 18px;
     padding: 14px;
     border-radius: 8px;
-    background: #f8fafc;
+    background: var(--sc-surface);
     border: 1px solid var(--sc-border);
 }
 .atex-sc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 96px; }
@@ -114,9 +134,9 @@
     border: 1px solid var(--sc-border);
     border-radius: 8px;
     padding: 14px;
-    background: #fff;
+    background: var(--sc-bg);
 }
-.atex-sc-card.is-done { background: #f6fdf8; border-color: #bbf7d0; }
+.atex-sc-card.is-done { background: var(--sc-success-bg); border-color: var(--sc-success-border); }
 .atex-sc-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .atex-sc-card-num { font-weight: 600; color: var(--sc-muted); }
 
@@ -126,14 +146,15 @@
     gap: 12px;
 }
 .atex-sc-field { display: flex; flex-direction: column; gap: 5px; }
-.atex-sc-label { font-weight: 600; color: #374151; font-size: 13px; }
+.atex-sc-label { font-weight: 600; color: var(--text-primary, #374151); font-size: 13px; }
 .atex-sc-input {
     width: 100%;
     padding: 9px 10px;
     border: 1px solid var(--sc-border);
     border-radius: 6px;
     font: inherit;
-    background: #fff;
+    background: var(--sc-bg);
+    color: var(--text-primary, #1f2933);
 }
 .atex-sc-input:focus {
     outline: none;
@@ -146,25 +167,25 @@
 .atex-sc-btn {
     border: 1px solid var(--sc-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--sc-bg);
     padding: 9px 16px;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-sc-btn:hover { background: #f1f5f9; }
+.atex-sc-btn:hover { background: var(--sc-surface); }
 .atex-sc-btn-primary { background: var(--sc-accent); border-color: var(--sc-accent); color: #fff; }
 .atex-sc-btn-primary:hover { background: var(--sc-accent-d); }
-.atex-sc-btn-advance { background: #ecfdf5; border-color: #86efac; color: var(--sc-ok); font-weight: 600; }
-.atex-sc-btn-advance:hover { background: #d1fae5; }
-.atex-sc-btn-add { margin-top: 14px; color: var(--sc-accent); border-color: #bfdbfe; }
+.atex-sc-btn-advance { background: var(--sc-success-bg); border-color: var(--sc-success-border); color: var(--sc-ok); font-weight: 600; }
+.atex-sc-btn-advance:hover { background: var(--sc-success-hover-bg); }
+.atex-sc-btn-add { margin-top: 14px; color: var(--sc-accent); border-color: var(--sc-add-border); }
 .atex-sc-btn-del {
     margin-left: auto;
     padding: 6px 12px;
     line-height: 1;
     font-size: 18px;
     color: var(--sc-warn);
-    border-color: #fecaca;
+    border-color: var(--sc-danger-border);
 }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
@@ -186,3 +207,11 @@
 .atex-sc-toast-success { background: #15803d; }
 .atex-sc-toast-error { background: #b91c1c; }
 .atex-sc-toast-info { background: #334155; }
+
+/* Подсказка «нет втулкореза под диаметр» в карточке задания. */
+#atex-sleeve-cutter .atex-sc-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #b45309;
+}

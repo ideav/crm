@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # Создание ролей и пользователей Интеграм по спецификации (PowerShell, Windows 10)
 # ============================================================================
 #
@@ -26,21 +26,24 @@
 # таким именем/логином уже есть. Сервер _m_new записи НЕ дедуплицирует, поэтому
 # проверка обязательна, иначе повторный прогон создал бы дубли.
 #
-# Пункты меню (таблица 151), права роли на объекты (t117) и загрузка начальных
-# данных (шаги 12-14 спеки) — вне объёма этого скрипта, остаются для следующих
-# фаз.
+# Пункты меню (таблица 151) создаёт отдельный скрипт create_atex_menu.ps1.
+# Права роли на объекты (t117) и загрузка начальных данных (шаги 12-14 спеки)
+# остаются для следующих фаз.
 #
 # Запуск (PowerShell 5.1+ / PowerShell 7):
 #   .\create_roles_users.ps1 -BaseUrl https://ideav.ru -DbName atex `
-#       -Login claude -Password "***"
+#       -Token "***"
+#
+# Токен можно передать параметром -Token или переменной INTEGRAM_TOKEN
+# в scope Process/User/Machine.
 #
 # Предварительный прогон без обращения к серверу (показывает план вызовов):
 #   .\create_roles_users.ps1 -DryRun
 # ============================================================================
 
 param(
-    [string]$Login = "api",
-    [string]$Password = "",
+    [string]$Token,
+    [string]$XsrfToken,
     [string]$BaseUrl = "https://ideav.ru",
     [string]$DbName = "atex",
     [string]$DataPath = (Join-Path $PSScriptRoot "atex_roles_users.json"),
@@ -59,6 +62,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-IntegramEnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($target in @(
+        [System.EnvironmentVariableTarget]::Process,
+        [System.EnvironmentVariableTarget]::User,
+        [System.EnvironmentVariableTarget]::Machine
+    )) {
+        try {
+            $value = [Environment]::GetEnvironmentVariable($Name, $target)
+        } catch {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return ""
+}
+
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    $Token = Get-IntegramEnvironmentValue -Name "INTEGRAM_TOKEN"
+}
+if ([string]::IsNullOrWhiteSpace($XsrfToken)) {
+    $XsrfToken = Get-IntegramEnvironmentValue -Name "INTEGRAM_XSRF"
+}
 
 # --------------------------------------------------------------------------
 # Логирование. Пишем и в файл, и в консоль.
@@ -99,9 +129,17 @@ function Invoke-ApiRequest {
     foreach ($key in $FormData.Keys) {
         $body[$key] = $FormData[$key]
     }
+    $headers = @{}
     if (-not $Anonymous) {
         if ($script:XsrfToken) { $body["_xsrf"] = $script:XsrfToken }
-        if ($script:AuthToken) { $body["token"] = $script:AuthToken }
+        if ($script:AuthToken) {
+            $body["token"] = $script:AuthToken
+            # issue #3000: токен доходит до сервера только заголовком X-Authorization.
+            # Живой Integram игнорирует cookie, заданный вручную через -Headers, и
+            # строку запроса ?token= (см. atex#44), поэтому без этого заголовка
+            # сервер отвечает 401 "No authorization token provided".
+            $headers["X-Authorization"] = $script:AuthToken
+        }
     }
 
     if ($body.Count -gt 0) {
@@ -121,9 +159,9 @@ function Invoke-ApiRequest {
 
     try {
         if ($Method -eq "POST") {
-            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded" -Headers $headers
         } else {
-            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body
+            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body -Headers $headers
         }
         return $response
     } catch {
@@ -157,12 +195,65 @@ function Get-HttpErrorBody {
     return $null
 }
 
+function Get-XsrfByToken {
+    param([Parameter(Mandatory = $true)][string]$TokenValue)
+
+    $url = "$BaseUrl/$DbName/xsrf"
+    if ($url -notmatch "\?") {
+        $url = "$url`?JSON=1"
+    } elseif ($url -notmatch "(^|[?&])JSON=") {
+        $url = "$url&JSON=1"
+    }
+
+    Write-Log "  GET xsrf  [X-Authorization ***; cookie idb_$DbName=***]"
+    try {
+        # issue #3000: токен в заголовке X-Authorization — транспорт, который
+        # сервер реально читает; cookie дублируем для совместимости.
+        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ "X-Authorization" = $TokenValue; Cookie = "idb_$DbName=$TokenValue" }
+    } catch {
+        $bodyText = Get-HttpErrorBody -ErrorRecord $_
+        Write-Log "  ERROR: $($_.Exception.Message)"
+        if ($bodyText) { Write-Log "  Response Body: $bodyText" }
+        throw
+    }
+}
+
+function Initialize-TokenSession {
+    Write-Log "1. Подключение по токену..."
+
+    if ($DryRun) {
+        $script:AuthToken = "dryrun-token"
+        $script:XsrfToken = "dryrun-xsrf"
+        Write-Log "   DRY-RUN: token/_xsrf заданы синтетически"
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        throw "Передайте -Token или задайте INTEGRAM_TOKEN в scope Process/User/Machine. POST /auth с логином и паролем в этом сценарии не используется."
+    }
+
+    $script:AuthToken = $Token
+    if (-not [string]::IsNullOrWhiteSpace($XsrfToken)) {
+        $script:XsrfToken = $XsrfToken
+        Write-Log "   OK, _xsrf взят из параметра/INTEGRAM_XSRF"
+        return
+    }
+
+    $xsrfResponse = Get-XsrfByToken -TokenValue $Token
+    if (-not $xsrfResponse -or -not $xsrfResponse._xsrf) {
+        throw "Не удалось получить _xsrf по токену через $BaseUrl/$DbName/xsrf"
+    }
+    $script:XsrfToken = $xsrfResponse._xsrf
+    if ($xsrfResponse.token) { $script:AuthToken = $xsrfResponse.token }
+    Write-Log "   OK, user id: $($xsrfResponse.id)"
+}
+
 # Синтетические ответы для -DryRun (форма совпадает с реальным API).
 $script:DryRunSeq = 2000
 function New-DryRunResponse {
     param([string]$Endpoint)
     $script:DryRunSeq++
-    if ($Endpoint -eq "auth") {
+    if ($Endpoint -eq "xsrf") {
         return [pscustomobject]@{ token = "dryrun-token"; _xsrf = "dryrun-xsrf"; id = "1" }
     }
     if ($Endpoint -like "object/*") {
@@ -240,16 +331,9 @@ $users = @($data.users)
 Write-Log ""
 Write-Log "Загружено ролей: $($roles.Count), пользователей: $($users.Count)"
 
-# --- Авторизация ---
+# --- Подключение по токену ---
 Write-Log ""
-Write-Log "1. Авторизация..."
-$authResponse = Invoke-ApiRequest -Endpoint "auth" -FormData @{ login = $Login; pwd = $Password } -Anonymous -SensitiveKeys @("pwd")
-if (-not $authResponse -or -not $authResponse.token -or -not $authResponse._xsrf) {
-    throw "Авторизация не удалась"
-}
-$script:XsrfToken = $authResponse._xsrf
-$script:AuthToken = $authResponse.token
-Write-Log "   OK, user id: $($authResponse.id)"
+Initialize-TokenSession
 
 # --- Этап 1. Роли (таблица 42) ---
 Write-Log ""

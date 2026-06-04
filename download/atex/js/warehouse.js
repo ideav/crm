@@ -6,18 +6,18 @@
  * и docs/WORKSPACE_DEVELOPMENT_GUIDE.md §3). Перевод чтений на защищённый слой
  * `report/` — следующий этап и в объём этого тикета не входит.
  *
- * Таблицы (id берутся из data-атрибутов, реквизиты резолвятся из metadata по имени,
- * чтобы не хардкодить t{reqId} — id зависят от сборки базы):
- *   113 «Партия ГП»             — up=1; первая колонка — «Дата прихода» (DATETIME,
- *                                 проставляется сервером = now при создании);
- *                                 ссылка → 110 «Производственная резка».
- *   110 «Производственная резка» — источник завершённых резок для оприходования.
- *   109 «Обеспечение» ⊂ 108 «Позиция заказа» — ссылка → 113 «Партия ГП»
- *                                 (FIFO-списание партии в обеспечение позиции).
+ * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
+ * object id и t{reqId} — id зависят от сборки базы:
+ *   «Партия ГП»             — up=1; первая колонка — «Дата прихода» (DATETIME,
+ *                             проставляется сервером = now при создании);
+ *                             ссылка → «Производственная резка».
+ *   «Производственная резка» — источник завершённых резок для оприходования.
+ *   «Обеспечение» ⊂ «Позиция заказа» — ссылка → «Партия ГП»
+ *                             (FIFO-списание партии в обеспечение позиции).
  *
  * Действия (приёмочные критерии §3.8):
  *   1. Оприходовать партию ГП из завершённой резки (ширина, кол-во рулонов,
- *      метраж, адрес хранения) — `_m_new/113?JSON&up=1`.
+ *      метраж, адрес хранения) — `_m_new/{Партия ГП}?JSON&up=1`.
  *   2. Сменить статус партии (Есть → Зарезервирован → Отгружен) — `_m_set/{id}`.
  *   3. FIFO-списание: привязать партию ГП к обеспечению позиции — `_m_set/{id}`
  *      у «Обеспечение» (реквизит «Партия ГП»). Выбор партии — самая ранняя
@@ -26,9 +26,7 @@
 (function(window, document) {
     'use strict';
 
-    var DEFAULT_BATCH_TABLE = '113';
-    var DEFAULT_PROVISION_TABLE = '109';
-    var DEFAULT_CUTTING_TABLE = '110';
+    var TABLE = { batch: 'Партия ГП', provision: 'Обеспечение', cutting: 'Производственная резка' };
     var LIST_LIMIT = 5000;
 
     // Статусы — свободный текст (тип 3). Наборы можно переопределить data-атрибутами
@@ -40,7 +38,7 @@
     // Резку считаем готовой к оприходованию в этих статусах.
     var COMPLETED_CUTTING_STATUSES = ['Завершён', 'Завершен', 'Готово', 'Готов'];
 
-    // Карта полей таблицы «Партия ГП» (113). `main: true` — первая колонка (дата прихода).
+    // Карта полей таблицы «Партия ГП». `main: true` — первая колонка (дата прихода).
     var BATCH_FIELDS = [
         { key: 'arrived', label: 'Дата прихода', main: true },
         { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
@@ -51,7 +49,7 @@
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
-    // Карта полей подчинённой таблицы «Обеспечение» (109).
+    // Карта полей подчинённой таблицы «Обеспечение».
     var PROVISION_FIELDS = [
         { key: 'length', label: 'Метраж, м', names: ['Метраж, м', 'Метраж'] },
         { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
@@ -59,7 +57,7 @@
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
-    // Карта полей таблицы «Производственная резка» (110) — для подбора завершённых резок.
+    // Карта полей таблицы «Производственная резка» — для подбора завершённых резок.
     var CUTTING_FIELDS = [
         { key: 'number', label: 'Номер', main: true },
         { key: 'slitter', label: 'Слиттер', names: ['Слиттер'], ref: true },
@@ -70,9 +68,9 @@
     var state = {
         root: null,
         db: '',
-        batchTable: DEFAULT_BATCH_TABLE,
-        provisionTable: DEFAULT_PROVISION_TABLE,
-        cuttingTable: DEFAULT_CUTTING_TABLE,
+        batchTable: '',
+        provisionTable: '',
+        cuttingTable: '',
         batchStatuses: DEFAULT_BATCH_STATUSES,
         provisionStatuses: DEFAULT_PROVISION_STATUSES,
         batchMeta: null,
@@ -85,6 +83,7 @@
         provisions: [],
         cuttings: [],
         cuttingById: {},
+        refOptions: {},
         statusFilter: '',
         creating: false
     };
@@ -186,6 +185,37 @@
                 reqId: source ? source.id : null
             };
         });
+    }
+
+    function findMetadataById(all, id) {
+        var wanted = trimValue(id);
+        if (!wanted) return null;
+        for (var i = 0; i < (all || []).length; i++) {
+            if (String(all[i].id) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function findMetadataByName(all, name) {
+        var wanted = normalizeFieldName(name);
+        for (var i = 0; i < (all || []).length; i++) {
+            if (normalizeFieldName(all[i].val) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function resolveTableMetadata(all, tableNames, overrides) {
+        var resolved = {};
+        Object.keys(tableNames || {}).forEach(function(key) {
+            var override = trimValue(overrides && overrides[key]);
+            var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
+            if (!meta) {
+                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                    (override ? ' (id ' + override + ')' : ''));
+            }
+            resolved[key] = meta;
+        });
+        return resolved;
     }
 
     function getColumn(columns, key) {
@@ -344,11 +374,7 @@
     // ------------------------------------------------------------------
 
     function getApiBase() {
-        var dbName = state.db || window.db || '';
-        if (!dbName && window.location && window.location.pathname) {
-            dbName = window.location.pathname.split('/').filter(Boolean)[0] || '';
-        }
-        return dbName;
+        return state.db || window.db || '';
     }
 
     function getXsrf() {
@@ -388,10 +414,9 @@
         });
     }
 
-    function loadMetadata(tableId) {
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata/' +
-            encodeURIComponent(tableId) + '?JSON').then(function(payload) {
-            return Array.isArray(payload) ? payload[0] : payload;
+    function loadAllMetadata() {
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata').then(function(payload) {
+            return Array.isArray(payload) ? payload : [];
         });
     }
 
@@ -424,6 +449,34 @@
         return '<select class="atex-wh-status"' + (dataAttrs || '') + '>' + options.join('') + '</select>';
     }
 
+    function refSearchHelper() {
+        return (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+    }
+
+    // Дата прихода партии — DATETIME (type 4), приходит unix-штампом. Выводим
+    // как «ДД.ММ.ГГГГ ЧЧ:ММ» через общий форматтер; без него — значение как есть.
+    function fmtDate(value) {
+        var helper = refSearchHelper();
+        return helper && helper.formatDateTime ? helper.formatDateTime(value)
+            : (value == null ? '' : String(value));
+    }
+
+    function loadRefOptions(reqId, query, limit) {
+        var helper = refSearchHelper();
+        if (!helper) return Promise.resolve([]);
+        return fetchJson(helper.buildRefOptionsUrl(getApiBase(), reqId, query, limit));
+    }
+
+    function attachRefSearchEvents() {
+        var helper = refSearchHelper();
+        if (!helper || !state.root) return;
+        helper.attach(state.root, {
+            cache: state.refOptions,
+            db: getApiBase,
+            loadOptions: loadRefOptions
+        });
+    }
+
     function cuttingLabel(cutting) {
         if (!cutting) return '';
         var parts = ['Резка №' + (cutting.main || cutting.id)];
@@ -433,10 +486,28 @@
     }
 
     function cuttingOptionsHtml(selectId) {
+        var helper = refSearchHelper();
+        var refOptions = completedCuttings(state.cuttings).map(function(cutting) {
+            return { id: cutting.id, label: cuttingLabel(cutting) };
+        });
+        if (helper && typeof helper.selectHtml === 'function') {
+            return helper.selectHtml({
+                id: selectId,
+                classPrefix: 'atex-wh',
+                inputClass: 'atex-wh-input',
+                options: refOptions,
+                placeholder: 'Выберите резку',
+                cacheKey: 'completed-cuttings',
+                cache: state.refOptions,
+                replaceCache: true,
+                hiddenAttrs: { id: selectId }
+            });
+        }
+
         var options = ['<option value="">Выберите резку</option>'];
-        completedCuttings(state.cuttings).forEach(function(cutting) {
+        refOptions.forEach(function(cutting) {
             options.push('<option value="' + escapeHtml(cutting.id) + '">' +
-                escapeHtml(cuttingLabel(cutting)) + '</option>');
+                escapeHtml(cutting.label) + '</option>');
         });
         return '<select id="' + escapeHtml(selectId) + '" class="atex-wh-input">' + options.join('') + '</select>';
     }
@@ -472,7 +543,7 @@
         var rows = batches.map(function(batch) {
             return '<tr class="atex-wh-row" data-batch-id="' + escapeHtml(batch.id) + '">' +
                 '<td>' + escapeHtml(batch.id) + '</td>' +
-                '<td>' + escapeHtml(batch.values.arrived || batch.main || '') + '</td>' +
+                '<td>' + escapeHtml(fmtDate(batch.values.arrived || batch.main)) + '</td>' +
                 '<td>' + escapeHtml(batch.values.cutting || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.width || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.rolls || '') + '</td>' +
@@ -490,19 +561,47 @@
     }
 
     function batchOptionsHtml(provision) {
+        var helper = refSearchHelper();
         var fifo = pickFifoBatch(state.batches, provision.refs.cutting, AVAILABLE_BATCH_STATUS);
         var assigned = trimValue(provision.refs.batch);
-        var options = ['<option value="">— партия —</option>'];
+        var selectedValue = assigned || (fifo ? fifo.id : '');
+        var refOptions = [];
         state.batches.forEach(function(batch) {
             var available = trimValue(batch.values.status) === trimValue(AVAILABLE_BATCH_STATUS);
             var sameCut = !provision.refs.cutting ||
                 trimValue(batch.refs.cutting) === trimValue(provision.refs.cutting);
             var isAssigned = trimValue(batch.id) === assigned;
             if (!isAssigned && (!available || !sameCut)) return;
-            var selected = (assigned ? isAssigned : (fifo && batch.id === fifo.id)) ? ' selected' : '';
+            refOptions.push({
+                id: batch.id,
+                label: 'Партия №' + batch.id + ' · ' + fmtDate(batch.values.arrived) +
+                    ' · ' + (batch.values.length || '') + ' м'
+            });
+        });
+        if (helper && typeof helper.selectHtml === 'function') {
+            return helper.selectHtml({
+                id: 'atex-wh-batch-pick-' + provision.id,
+                classPrefix: 'atex-wh',
+                inputClass: 'atex-wh-input',
+                options: refOptions,
+                value: selectedValue,
+                placeholder: '— партия —',
+                cacheKey: 'batch-pick-' + provision.id,
+                cache: state.refOptions,
+                replaceCache: true,
+                hiddenAttrs: {
+                    id: 'atex-wh-batch-pick-' + provision.id,
+                    class: 'atex-wh-batch-pick',
+                    dataset: { batchPick: provision.id }
+                }
+            });
+        }
+
+        var options = ['<option value="">— партия —</option>'];
+        refOptions.forEach(function(batch) {
+            var selected = trimValue(batch.id) === trimValue(selectedValue) ? ' selected' : '';
             options.push('<option value="' + escapeHtml(batch.id) + '"' + selected + '>' +
-                escapeHtml('Партия №' + batch.id + ' · ' + (batch.values.arrived || '') +
-                    ' · ' + (batch.values.length || '') + ' м') + '</option>');
+                escapeHtml(batch.label) + '</option>');
         });
         return '<select class="atex-wh-input atex-wh-batch-pick" data-batch-pick="' +
             escapeHtml(provision.id) + '">' + options.join('') + '</select>';
@@ -723,7 +822,7 @@
         var panel = document.getElementById('atex-wh-create');
         if (panel) panel.hidden = false;
         renderCreateForm();
-        var cutting = document.getElementById('atex-wh-cutting');
+        var cutting = document.getElementById('atex-wh-cutting-search') || document.getElementById('atex-wh-cutting');
         if (cutting) cutting.focus();
     }
 
@@ -737,6 +836,8 @@
     // ------------------------------------------------------------------
 
     function attachEvents() {
+        attachRefSearchEvents();
+
         var createBtn = document.getElementById('atex-wh-create-btn');
         if (createBtn) {
             createBtn.addEventListener('click', openCreateForm);
@@ -823,10 +924,12 @@
         state.root = document.getElementById('atex-warehouse-app');
         if (!state.root) return;
 
-        state.db = state.root.getAttribute('data-db') || window.db || '';
-        state.batchTable = state.root.getAttribute('data-batch-table') || DEFAULT_BATCH_TABLE;
-        state.provisionTable = state.root.getAttribute('data-provision-table') || DEFAULT_PROVISION_TABLE;
-        state.cuttingTable = state.root.getAttribute('data-cutting-table') || DEFAULT_CUTTING_TABLE;
+        state.db = window.db || state.root.getAttribute('data-db') || '';
+        var tableOverrides = {
+            batch: state.root.getAttribute('data-batch-table'),
+            provision: state.root.getAttribute('data-provision-table'),
+            cutting: state.root.getAttribute('data-cutting-table')
+        };
         state.batchStatuses = parseStatusesAttr(state.root.getAttribute('data-batch-statuses'), DEFAULT_BATCH_STATUSES);
         state.provisionStatuses = parseStatusesAttr(state.root.getAttribute('data-provision-statuses'), DEFAULT_PROVISION_STATUSES);
 
@@ -834,14 +937,14 @@
         renderFilter();
         setMessage('Загрузка данных…', 'info');
 
-        Promise.all([
-            loadMetadata(state.batchTable),
-            loadMetadata(state.provisionTable),
-            loadMetadata(state.cuttingTable)
-        ]).then(function(metas) {
-            state.batchMeta = metas[0] || {};
-            state.provisionMeta = metas[1] || {};
-            state.cuttingMeta = metas[2] || {};
+        loadAllMetadata().then(function(allMetadata) {
+            var metas = resolveTableMetadata(allMetadata, TABLE, tableOverrides);
+            state.batchMeta = metas.batch || {};
+            state.provisionMeta = metas.provision || {};
+            state.cuttingMeta = metas.cutting || {};
+            state.batchTable = String(state.batchMeta.id || '');
+            state.provisionTable = String(state.provisionMeta.id || '');
+            state.cuttingTable = String(state.cuttingMeta.id || '');
             state.batchColumns = buildColumns(BATCH_FIELDS, state.batchMeta);
             state.provisionColumns = buildColumns(PROVISION_FIELDS, state.provisionMeta);
             state.cuttingColumns = buildColumns(CUTTING_FIELDS, state.cuttingMeta);
@@ -863,6 +966,8 @@
         parseRef: parseRef,
         buildFieldSources: buildFieldSources,
         buildColumns: buildColumns,
+        findMetadataByName: findMetadataByName,
+        resolveTableMetadata: resolveTableMetadata,
         normalizeObjects: normalizeObjects,
         extractNewObjectId: extractNewObjectId,
         isCompletedCutting: isCompletedCutting,
@@ -874,6 +979,7 @@
         buildCreateBatchRequest: buildCreateBatchRequest,
         buildSetStatusRequest: buildSetStatusRequest,
         buildAssignBatchRequest: buildAssignBatchRequest,
+        TABLE: TABLE,
         BATCH_FIELDS: BATCH_FIELDS,
         PROVISION_FIELDS: PROVISION_FIELDS,
         CUTTING_FIELDS: CUTTING_FIELDS,

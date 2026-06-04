@@ -3,14 +3,8 @@
 <link rel="stylesheet" href="/download/{_global_.z}/css/orders.css?0{_global_.version}">
 <script src="/download/{_global_.z}/js/orders.js?0{_global_.version}" defer></script>
 
-<header class="atex-brand atex-brand-header">
-    <img class="atex-brand-logo" src="/download/{_global_.z}/img/atex-logo.svg?0{_global_.version}" alt="АТЕХ" width="116" height="32">
-    <span class="atex-brand-title">Приём и ведение заказов</span>
-</header>
 <div id="atex-orders-app" class="atex-orders atex-brand"
-     data-db="{_global_.z}"
-     data-order-table="107"
-     data-position-table="108">
+     data-db="{_global_.z}">
     <div class="atex-orders-toolbar">
         <button id="atex-orders-create" class="atex-orders-btn atex-orders-btn-primary" type="button" title="Создать заказ">
             <i class="pi pi-plus"></i><span>Создать заказ</span>
@@ -21,6 +15,13 @@
                 <option value="">Все статусы</option>
             </select>
         </label>
+        <label class="atex-orders-filter-wrap"><span>С:</span>
+            <input id="atex-orders-from" type="date" class="atex-orders-input" aria-label="Дата создания с"></label>
+        <label class="atex-orders-filter-wrap"><span>По:</span>
+            <input id="atex-orders-to" type="date" class="atex-orders-input" aria-label="Дата создания по"></label>
+        <label class="atex-orders-filter-wrap atex-orders-search-wrap">
+            <i class="pi pi-search"></i>
+            <input id="atex-orders-search" type="search" class="atex-orders-input" placeholder="Поиск…" aria-label="Быстрый поиск"></label>
         <button id="atex-orders-refresh" class="atex-orders-btn atex-orders-btn-secondary" type="button" title="Обновить список">
             <i class="pi pi-refresh"></i><span>Обновить</span>
         </button>

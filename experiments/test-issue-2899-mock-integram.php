@@ -112,6 +112,10 @@ case 'reset':
 case 'auth':
     send_json(['token' => 'mock-token', '_xsrf' => 'mock-xsrf', 'id' => 1, 'user' => $req['login'] ?? '']);
 
+case 'xsrf':
+    $token = $_COOKIE['idb_' . ($segments[0] ?? '')] ?? ($req['token'] ?? 'mock-token');
+    send_json(['token' => $token, '_xsrf' => 'mock-xsrf', 'id' => 1, 'user' => 'tester', 'role' => 'admin', 'msg' => '']);
+
 case '_d_new':
     if ($val === '') die_err('Empty type');
     if (!isset(BASE_TYPES[$t]) && $t !== 0) die_err("Invalid base type: $t");
@@ -204,6 +208,44 @@ case '_m_new':
     $id = $state['next_id']++;
     $state['rows'][] = ['id' => $id, 'up' => $up, 't' => $tableId, 'val' => $recVal,
                         'ord' => next_ord($state, $up), 'data' => $data];
+    save_state($STATE_FILE, $state);
+    send_json(['obj' => (string)$id]);
+
+case '_m_set':
+    // Update an existing record. $arg = record id. The first-column key
+    // t{tableId} updates the row's val; other t{colId} values update `data`.
+    $id = (int)$arg;
+    $record = &row_by_id($state, $id);
+    if (!$record || (int)$record['up'] === 0) die_err("Record $id not found");
+    $tableId = (int)$record['t'];
+    $nameKey = 't' . $tableId;
+    if (isset($req[$nameKey])) {
+        $record['val'] = trim($req[$nameKey]);
+    }
+    if (!isset($record['data']) || !is_array($record['data'])) {
+        $record['data'] = [];
+    }
+    foreach ($req as $k => $v) {
+        if ($k === $nameKey || $k === 'token' || $k === '_xsrf' || $k === 'JSON' || $k === 'full') continue;
+        if (strlen($k) > 1 && $k[0] === 't' && ctype_digit(substr($k, 1))) {
+            $record['data'][substr($k, 1)] = $v;
+        }
+    }
+    save_state($STATE_FILE, $state);
+    send_json(['obj' => (string)$id]);
+
+case '_m_del':
+    // Delete an existing data record. The menu cleanup test only deletes leaf
+    // records, but remove direct children as well to match the API shape.
+    $id = (int)$arg;
+    $record = &row_by_id($state, $id);
+    if (!$record || (int)$record['up'] === 0) die_err("Record $id not found");
+    $filtered = [];
+    foreach ($state['rows'] as $r) {
+        if ((int)$r['id'] === $id || (int)$r['up'] === $id) continue;
+        $filtered[] = $r;
+    }
+    $state['rows'] = $filtered;
     save_state($STATE_FILE, $state);
     send_json(['obj' => (string)$id]);
 

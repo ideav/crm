@@ -839,7 +839,7 @@ function t9n($msg)
 # Check file extension
 function BlackList($ext)
 {
-	if(stripos(". php cgi pl fcgi fpl phtml shtml php2 php3 php4 php5 asp jsp ", " $ext "))
+	if(stripos(". php php2 php3 php4 php5 php6 php7 php8 phps phtml pht phar shtml cgi pl fcgi fpl asp jsp htaccess htpasswd sh ", " $ext "))
 		my_die(t9n("[RU]Недопустимый тип файла![EN]Wrong file extension!"));
 }
 # Get a hashed string
@@ -7417,6 +7417,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$add_path = "";
 			$blocks[$block]["path"][] = $path;
 			$blocks[$block]["add_path"][] = $add_path;
+			# API-режим: при ?JSON=1 команды dir_admin отвечают JSON-статусом вместо HTML-редиректа
+			# (обратносовместимо: без JSON поведение прежнее). Удобно для скриптов/агентов.
+			$apiJson = isset($_REQUEST["JSON"]);
+			$apiFolder = $blocks[$block]["folder"][0];
+			$apiResp = function($action) use ($apiJson, $apiFolder, $add_path) {
+				if(!$apiJson) return;
+				header("Content-Type: application/json; charset=utf-8");
+				echo json_encode(array("ok"=>true, "action"=>$action, "folder"=>$apiFolder, "add_path"=>$add_path), JSON_UNESCAPED_UNICODE);
+				myexit();
+			};
 			$fname = isset($_REQUEST["dir_name"])?strtolower(trim($_REQUEST["dir_name"])):"";
 			if(isset($_REQUEST["mkdir"]))
 			{
@@ -7428,6 +7438,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					if(is_dir($path."/".$fname))
 						die(t9n("[RU]Такой каталог уже существует![EN]This directory already exists!".BACK_LINK));
 					mkdir($path."/".$fname);
+					$apiResp("mkdir");
 					header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 					myexit();
 				}
@@ -7447,6 +7458,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     if(is_file($path."/".$fname))
 						die(t9n("[RU]Такой файл ($fname) уже существует![EN]File ($fname) already exists!".BACK_LINK));
 					touch($path."/".$fname);
+					$apiResp("touch");
 					header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 					myexit();
 				}
@@ -7467,6 +7479,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						if(strlen($value["name"]) > 0)
 						{
             			    trace("upload ".$value["name"]);
+							# Защита от path traversal: только базовое имя файла (без .. / \)
+							$value["name"] = basename(str_replace("\\", "/", $value["name"]));
+							if($value["name"] === "" || strpos($value["name"], "..") !== false)
+								die(t9n("[RU]Недопустимое имя файла[EN]Invalid file name".BACK_LINK));
 							BlackList(substr(strrchr($value["name"], '.'), 1)); # Check the file extension
 							if(file_exists($path."/".$value["name"]))
 								if(isset($_REQUEST["rewrite"]))
@@ -7476,6 +7492,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 							if(!move_uploaded_file($value['tmp_name'], $path."/".$value["name"]))
 								die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed"));
 							$warning = t9n("[RU]Файл [EN]File ").$value["name"].t9n("[RU] загружен[EN] uploaded").$warning;
+							$apiResp("upload");
 							header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path&warning=$warning");
 							myexit();
 						}
@@ -7492,9 +7509,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				check();
 				if(is_array($_POST["del"]))
 					foreach($_POST["del"] as $value)
-						if(strlen($value))
+						# Защита от path traversal: имя должно быть простым (без / \ ..)
+						if(strlen($value) && strpos($value, "..") === false && strpos($value, "/") === false && strpos($value, "\\") === false)
+						{
+							trace("dir_admin delete: ".$path."/".$value);
 							RemoveDir($path."/".$value);
+						}
 #print_r($GLOBALS); die("is_dir($path./.$value) =".is_dir($path."/".$value));
+				$apiResp("delete");
 				header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 				myexit();
 			}

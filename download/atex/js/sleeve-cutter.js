@@ -9,7 +9,7 @@
 // (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={резкаId}`,
 // правки — `_m_set/{заданиеId}`, новые задания — `_m_new/{Задание на втулки}`
 // с `up={резкаId}`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata?JSON` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
+// из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 // Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
 // задачи не входит.
 //
@@ -47,6 +47,7 @@
         factQty: 'Кол-во факт',
         status: 'Статус'
     };
+    var CUTTER_REQ = { diaMin: 'Диаметр min, мм', diaMax: 'Диаметр max, мм' };
 
     // Статусы задания по дизайн-спеке atex (§3.6): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'В работе', 'Готово'];
@@ -111,13 +112,55 @@
         return Math.round(n * 1000) / 1000;
     }
 
+    // Подбор втулкореза по диаметру задания: запись, чей диапазон
+    // [diaMin..diaMax] покрывает diameter (границы включительно); при нескольких —
+    // с самым узким диапазоном; нет подходящего → null. Пустой диаметр → null.
+    function pickCutter(diameter, cutters) {
+        var d = toNumber(diameter);
+        if (!d || !cutters) return null;
+        var best = null, bestWidth = Infinity;
+        cutters.forEach(function(c) {
+            var min = (c.diaMin === '' || c.diaMin == null) ? -Infinity : toNumber(c.diaMin);
+            var max = (c.diaMax === '' || c.diaMax == null) ? Infinity : toNumber(c.diaMax);
+            if (d < min || d > max) return;
+            var width = max - min;
+            if (best === null || width < bestWidth) { best = c; bestWidth = width; }
+        });
+        return best;
+    }
+
+    // Подпись диапазона диаметров: «20–25 мм», «от 20 мм», «до 76 мм» или ''.
+    function formatRange(min, max) {
+        var hasMin = !(min === '' || min == null);
+        var hasMax = !(max === '' || max == null);
+        if (hasMin && hasMax) return toNumber(min) + '–' + toNumber(max) + ' мм';
+        if (hasMin) return 'от ' + toNumber(min) + ' мм';
+        if (hasMax) return 'до ' + toNumber(max) + ' мм';
+        return '';
+    }
+
+    // Авто-назначение втулкореза заданию по диаметру. Ручной выбор оператора
+    // (cutterId задан и не авто) не перетирается. Иначе — pickCutter и признак
+    // cutterAuto. Мутирует и возвращает задание.
+    function autoAssignCutter(task, cutters) {
+        if (!task) return task;
+        if (task.cutterId && !task.cutterAuto) return task;
+        var picked = pickCutter(task.diameter, cutters);
+        task.cutterId = picked ? picked.id : null;
+        task.cutterAuto = !!picked;
+        return task;
+    }
+
     var core = {
         STATUSES: STATUSES,
         toNumber: toNumber,
         normalizeStatus: normalizeStatus,
         nextStatus: nextStatus,
         isDone: isDone,
-        summarize: summarize
+        summarize: summarize,
+        pickCutter: pickCutter,
+        formatRange: formatRange,
+        autoAssignCutter: autoAssignCutter
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -164,9 +207,10 @@
 
     function AtexSleeveCutter(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cut: null, task: null, cutter: null };
         this.cutters = [];        // справочник втулкорезов [{ id, label }]
+        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status }]
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // { id, label, status }
@@ -186,6 +230,38 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexSleeveCutter.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexSleeveCutter.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-sc',
+                inputClass: 'atex-sc-input',
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var nativeSelect = el('select', { class: 'atex-sc-input' });
+        nativeSelect.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            nativeSelect.appendChild(o);
+        });
+        nativeSelect.addEventListener('change', function() { opts.onChange(nativeSelect.value); });
+        return nativeSelect;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -214,7 +290,7 @@
 
     AtexSleeveCutter.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {
@@ -232,10 +308,27 @@
     AtexSleeveCutter.prototype.loadCutters = function() {
         var self = this;
         if (!this.meta.cutter) { this.cutters = []; return Promise.resolve(); }
-        return this.getJson('object/' + this.meta.cutter.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+        var meta = this.meta.cutter;
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var minIdx = colIndex(meta, CUTTER_REQ.diaMin);
+            var maxIdx = colIndex(meta, CUTTER_REQ.diaMax);
             self.cutters = (rows || []).map(function(r) {
-                return { id: String(r.i), label: (r.r && r.r[0]) || ('#' + r.i) };
+                var row = r.r || [];
+                return {
+                    id: String(r.i),
+                    label: row[0] || ('#' + r.i),
+                    diaMin: minIdx >= 0 ? (row[minIdx] || '') : '',
+                    diaMax: maxIdx >= 0 ? (row[maxIdx] || '') : ''
+                };
             });
+        });
+    };
+
+    // Опции выпадающего списка втулкорезов с подписью диапазона.
+    AtexSleeveCutter.prototype.cutterOptions = function() {
+        return (this.cutters || []).map(function(c) {
+            var range = core.formatRange(c.diaMin, c.diaMax);
+            return { id: c.id, label: range ? (c.label + ' (' + range + ')') : c.label };
         });
     };
 
@@ -274,6 +367,7 @@
                     name: r[0] || '',
                     planQty: planIdx >= 0 ? (r[planIdx] || '') : '',
                     cutterId: cutterRef.id,
+                    cutterAuto: false,
                     diameter: diamIdx >= 0 ? (r[diamIdx] || '') : '',
                     factQty: factIdx >= 0 ? (r[factIdx] || '') : '',
                     status: statusIdx >= 0 ? normalizeStatus(r[statusIdx]) : STATUSES[0]
@@ -283,7 +377,7 @@
     };
 
     AtexSleeveCutter.prototype.blankTask = function() {
-        return { id: null, name: '', planQty: '', cutterId: null, diameter: '', factQty: '', status: STATUSES[0] };
+        return { id: null, name: '', planQty: '', cutterId: null, cutterAuto: false, diameter: '', factQty: '', status: STATUSES[0] };
     };
 
     // ── Рендеринг ──
@@ -367,7 +461,7 @@
 
     AtexSleeveCutter.prototype.renderTaskCard = function(task, idx) {
         var self = this;
-        var card = el('div', { class: 'atex-sc-card' + (core.isDone(task.status) ? ' is-done' : '') });
+        var card = el('div', { class: 'atex-sc-card' + (core.isDone(task.status) ? ' is-done' : ''), 'data-submit-scope': '' });
 
         card.appendChild(el('div', { class: 'atex-sc-card-head' }, [
             el('span', { class: 'atex-sc-card-num', text: '№ ' + (idx + 1) }),
@@ -376,20 +470,28 @@
 
         var grid = el('div', { class: 'atex-sc-card-grid' });
 
-        // Втулкорез (ссылка).
-        var sel = el('select', { class: 'atex-sc-input' });
-        sel.appendChild(el('option', { value: '', text: '— втулкорез —' }));
-        this.cutters.forEach(function(m) {
-            var o = el('option', { value: m.id, text: m.label });
-            if (String(task.cutterId) === String(m.id)) o.selected = true;
-            sel.appendChild(o);
+        // Втулкорез (ссылка). Подписи с диапазоном; ручной выбор снимает авто-признак.
+        var cutterRef = this.refSelect({
+            options: this.cutterOptions(),
+            value: task.cutterId,
+            placeholder: '— втулкорез —',
+            reqId: reqIdByName(this.meta.task, TASK_REQ.cutter),
+            onChange: function(value) { task.cutterId = value || null; task.cutterAuto = false; }
         });
-        sel.addEventListener('change', function() { task.cutterId = sel.value || null; });
-        grid.appendChild(this.cardField('Втулкорез', sel));
+        var cutterField = this.cardField('Втулкорез', cutterRef);
+        if (task.diameter !== '' && task.diameter != null && !core.pickCutter(task.diameter, this.cutters)) {
+            cutterField.appendChild(el('span', { class: 'atex-sc-hint', text: 'нет втулкореза под Ø' + core.toNumber(task.diameter) }));
+        }
+        grid.appendChild(cutterField);
 
-        // Диаметр.
+        // Диаметр. По завершении ввода — авто-подбор втулкореза.
         var diam = numInput(task.diameter, '76');
         diam.addEventListener('input', function() { task.diameter = diam.value; });
+        diam.addEventListener('change', function() {
+            task.diameter = diam.value;
+            core.autoAssignCutter(task, self.cutters);
+            self.renderTasks();
+        });
         grid.appendChild(this.cardField('Диаметр, мм', diam));
 
         // Кол-во план.

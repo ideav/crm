@@ -3,17 +3,25 @@
    с остальными рабочими местами в main.html. */
 
 .atex-in {
-    --in-border: #d9dee5;
-    --in-bg: #ffffff;
-    --in-muted: #6b7280;
+    --in-border: var(--input-border, #d9dee5);
+    --in-border-soft: var(--border-color, #eef1f5);
+    --in-bg: var(--input-bg, #ffffff);
+    --in-surface: var(--bg-secondary, #f8fafc);
+    --in-muted: var(--text-secondary, #6b7280);
     --in-accent: var(--atex-navy, #134174);
     --in-accent-d: var(--atex-navy-d, #0e3158);
-    --in-warn: #b91c1c;
-    --in-ok: #15803d;
-    color: #1f2933;
+    --in-active-bg: #e0ecff;
+    --in-warn: var(--color-error, #b91c1c);
+    --in-ok: var(--color-success, #15803d);
+    color: var(--text-primary, #1f2933);
     font-size: 14px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-in {
+    --in-active-bg: rgba(96, 165, 250, 0.16);
+}
+
 .atex-in *,
 .atex-in *::before,
 .atex-in *::after { box-sizing: border-box; }
@@ -48,9 +56,36 @@
 .atex-in-sidebar-head {
     padding: 12px 14px;
     border-bottom: 1px solid var(--in-border);
-    background: #f8fafc;
+    background: var(--in-surface);
 }
 .atex-in-sidebar-head h2 { margin: 0; font-size: 15px; }
+
+.atex-in-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 1fr) minmax(140px, .9fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--in-border);
+    background: var(--in-bg);
+}
+.atex-in-filter-field { min-width: 0; }
+.atex-in-filter-label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--in-muted);
+}
+.atex-in-filter-action { display: flex; justify-content: flex-end; }
+.atex-in-filter-reset { white-space: nowrap; }
+@media (max-width: 1040px) {
+    .atex-in-filters { grid-template-columns: 1fr 1fr; }
+    .atex-in-filter-action { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+    .atex-in-filters { grid-template-columns: 1fr; }
+}
 
 .atex-in-summary {
     display: flex;
@@ -58,19 +93,27 @@
     gap: 14px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--in-border);
-    background: #fbfcfe;
+    background: var(--in-surface);
 }
 .atex-in-metric { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
 .atex-in-metric-label { font-size: 11px; color: var(--in-muted); text-transform: uppercase; letter-spacing: .03em; }
 .atex-in-metric-value { font-size: 20px; font-weight: 700; }
 
 .atex-in-list { display: flex; flex-direction: column; max-height: 70vh; overflow: auto; }
+.atex-in-list.is-loading { opacity: .65; }
 .atex-in-row {
     display: grid;
-    grid-template-columns: 32px 1.4fr 1fr .9fr .9fr;
+    grid-template-columns: 32px minmax(120px, 1.3fr) minmax(110px, 1fr) minmax(105px, .9fr) minmax(95px, .85fr) minmax(95px, .85fr);
     gap: 8px;
     align-items: center;
+    min-width: 760px;
     padding: 9px 12px;
+}
+.atex-in-row > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .atex-in-row-head {
     font-size: 11px;
@@ -79,21 +122,22 @@
     text-transform: uppercase;
     letter-spacing: .03em;
     border-bottom: 1px solid var(--in-border);
-    background: #f8fafc;
+    background: var(--in-surface);
 }
 .atex-in-row-item {
     text-align: left;
     border: none;
-    border-bottom: 1px solid #eef1f5;
+    border-bottom: 1px solid var(--in-border-soft);
     background: transparent;
     cursor: pointer;
     font: inherit;
     color: inherit;
     width: 100%;
 }
-.atex-in-row-item:hover { background: #f1f5f9; }
-.atex-in-row-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-in-row-item:hover { background: var(--in-surface); }
+.atex-in-row-item.is-active { background: var(--in-active-bg); font-weight: 600; }
 .atex-in-num { text-align: center; color: var(--in-muted); }
+.atex-in-code { font-variant-numeric: tabular-nums; }
 .atex-in-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .atex-in-empty { padding: 14px; color: var(--in-muted); }
 
@@ -111,7 +155,7 @@
     display: block;
     margin-bottom: 5px;
     font-weight: 600;
-    color: #374151;
+    color: var(--text-primary, #374151);
 }
 .atex-in-hint { margin-top: 4px; font-size: 12px; color: var(--in-muted); }
 .atex-in-input {
@@ -120,7 +164,8 @@
     border: 1px solid var(--in-border);
     border-radius: 6px;
     font: inherit;
-    background: #fff;
+    background: var(--in-bg);
+    color: var(--text-primary, #1f2933);
 }
 .atex-in-input:focus {
     outline: none;
@@ -131,16 +176,16 @@
 .atex-in-btn {
     border: 1px solid var(--in-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--in-bg);
     padding: 8px 16px;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-in-btn:hover { background: #f1f5f9; }
+.atex-in-btn:hover { background: var(--in-surface); }
 .atex-in-btn-primary { background: var(--in-accent); border-color: var(--in-accent); color: #fff; }
 .atex-in-btn-primary:hover { background: var(--in-accent-d); }
-.atex-in-btn-secondary { background: #f8fafc; }
+.atex-in-btn-secondary { background: var(--in-surface); }
 .atex-in-actions { display: flex; gap: 10px; margin-top: 18px; }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */

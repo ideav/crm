@@ -12,23 +12,21 @@
  * Текущий клиент резолвится сопоставлением логина пользователя ({_global_.user})
  * с реквизитом «Логин» таблицы «Клиент»; заказы фильтруются по ссылке «Клиент».
  *
- * Таблицы (id берутся из data-атрибутов, реквизиты резолвятся из metadata по имени,
- * чтобы не хардкодить t{reqId} — id зависят от сборки базы):
- *   107 «Заказ»          — ссылка «Клиент» → 103
- *   108 «Позиция заказа» — up={orderId} (подчинённая Заказу)
- *   103 «Клиент»         — реквизит «Логин» для сопоставления с пользователем.
+ * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
+ * object id и t{reqId} — id зависят от сборки базы:
+ *   «Заказ»          — ссылка «Клиент» → «Клиент»
+ *   «Позиция заказа» — up={orderId} (подчинённая Заказу)
+ *   «Клиент»         — реквизит «Логин» для сопоставления с пользователем.
  */
 (function(window, document) {
     'use strict';
 
-    var DEFAULT_ORDER_TABLE = '107';
-    var DEFAULT_POSITION_TABLE = '108';
-    var DEFAULT_CLIENT_TABLE = '103';
+    var TABLE = { order: 'Заказ', position: 'Позиция заказа', client: 'Клиент' };
     var LIST_LIMIT = 5000;
 
     // Статусы заказа — свободный текст (тип 3). Набор для фильтра можно
     // переопределить data-атрибутом data-order-statuses.
-    var DEFAULT_ORDER_STATUSES = ['Новый', 'Согласован', 'В производстве', 'Выполнен', 'Отменён'];
+    var DEFAULT_ORDER_STATUSES = ['Новый', 'Согласован', 'К выполнению', 'Выполнен', 'Отменён'];
 
     // Карта полей таблицы «Заказ» (только нужное порталу — чтение).
     var ORDER_FIELDS = [
@@ -59,9 +57,9 @@
     var state = {
         root: null,
         db: '',
-        orderTable: DEFAULT_ORDER_TABLE,
-        positionTable: DEFAULT_POSITION_TABLE,
-        clientTable: DEFAULT_CLIENT_TABLE,
+        orderTable: '',
+        positionTable: '',
+        clientTable: '',
         orderStatuses: DEFAULT_ORDER_STATUSES,
         user: '',
         userId: '',
@@ -172,6 +170,37 @@
         });
     }
 
+    function findMetadataById(all, id) {
+        var wanted = trimValue(id);
+        if (!wanted) return null;
+        for (var i = 0; i < (all || []).length; i++) {
+            if (String(all[i].id) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function findMetadataByName(all, name) {
+        var wanted = normalizeFieldName(name);
+        for (var i = 0; i < (all || []).length; i++) {
+            if (normalizeFieldName(all[i].val) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function resolveTableMetadata(all, tableNames, overrides) {
+        var resolved = {};
+        Object.keys(tableNames || {}).forEach(function(key) {
+            var override = trimValue(overrides && overrides[key]);
+            var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
+            if (!meta) {
+                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                    (override ? ' (id ' + override + ')' : ''));
+            }
+            resolved[key] = meta;
+        });
+        return resolved;
+    }
+
     function getColumn(columns, key) {
         for (var i = 0; i < columns.length; i++) {
             if (columns[i].key === key) return columns[i];
@@ -265,11 +294,7 @@
     // ------------------------------------------------------------------
 
     function getApiBase() {
-        var dbName = state.db || window.db || '';
-        if (!dbName && window.location && window.location.pathname) {
-            dbName = window.location.pathname.split('/').filter(Boolean)[0] || '';
-        }
-        return dbName;
+        return state.db || window.db || '';
     }
 
     function fetchJson(url, options) {
@@ -294,10 +319,9 @@
         });
     }
 
-    function loadMetadata(tableId) {
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata/' +
-            encodeURIComponent(tableId) + '?JSON').then(function(payload) {
-            return Array.isArray(payload) ? payload[0] : payload;
+    function loadAllMetadata() {
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata').then(function(payload) {
+            return Array.isArray(payload) ? payload : [];
         });
     }
 
@@ -498,10 +522,12 @@
         state.root = document.getElementById('atex-portal-app');
         if (!state.root) return;
 
-        state.db = state.root.getAttribute('data-db') || window.db || '';
-        state.orderTable = state.root.getAttribute('data-order-table') || DEFAULT_ORDER_TABLE;
-        state.positionTable = state.root.getAttribute('data-position-table') || DEFAULT_POSITION_TABLE;
-        state.clientTable = state.root.getAttribute('data-client-table') || DEFAULT_CLIENT_TABLE;
+        state.db = window.db || state.root.getAttribute('data-db') || '';
+        var tableOverrides = {
+            order: state.root.getAttribute('data-order-table'),
+            position: state.root.getAttribute('data-position-table'),
+            client: state.root.getAttribute('data-client-table')
+        };
         state.orderStatuses = parseStatusesAttr(state.root.getAttribute('data-order-statuses'), DEFAULT_ORDER_STATUSES);
         state.user = trimValue(state.root.getAttribute('data-user')) ||
             (typeof window.user !== 'undefined' ? trimValue(window.user) : '');
@@ -512,14 +538,14 @@
         renderFilter();
         setMessage('Загрузка данных…', 'info');
 
-        Promise.all([
-            loadMetadata(state.orderTable),
-            loadMetadata(state.positionTable),
-            loadMetadata(state.clientTable)
-        ]).then(function(metas) {
-            state.orderColumns = buildColumns(ORDER_FIELDS, metas[0] || {});
-            state.positionColumns = buildColumns(POSITION_FIELDS, metas[1] || {});
-            state.clientColumns = buildColumns(CLIENT_FIELDS, metas[2] || {});
+        loadAllMetadata().then(function(allMetadata) {
+            var metas = resolveTableMetadata(allMetadata, TABLE, tableOverrides);
+            state.orderTable = String(metas.order.id || '');
+            state.positionTable = String(metas.position.id || '');
+            state.clientTable = String(metas.client.id || '');
+            state.orderColumns = buildColumns(ORDER_FIELDS, metas.order || {});
+            state.positionColumns = buildColumns(POSITION_FIELDS, metas.position || {});
+            state.clientColumns = buildColumns(CLIENT_FIELDS, metas.client || {});
             return loadClient();
         }).then(function(clientId) {
             if (!clientId) {
@@ -547,10 +573,13 @@
         parseRef: parseRef,
         buildFieldSources: buildFieldSources,
         buildColumns: buildColumns,
+        findMetadataByName: findMetadataByName,
+        resolveTableMetadata: resolveTableMetadata,
         normalizeObjects: normalizeObjects,
         buildListUrl: buildListUrl,
         resolveClient: resolveClient,
         filterOrdersByClient: filterOrdersByClient,
+        TABLE: TABLE,
         ORDER_FIELDS: ORDER_FIELDS,
         POSITION_FIELDS: POSITION_FIELDS,
         CLIENT_FIELDS: CLIENT_FIELDS,

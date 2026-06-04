@@ -1,4 +1,6 @@
 .atex-orders {
+    --atex-orders-info-bg: #eff6ff;
+    --atex-orders-info-text: #1e40af;
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -8,6 +10,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+[data-theme="dark"] .atex-orders {
+    --atex-orders-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-orders-info-text: #93c5fd;
 }
 
 .atex-orders * {
@@ -51,7 +58,7 @@
 }
 
 .atex-orders-btn-secondary:hover {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
 }
 
 .atex-orders-filter-wrap {
@@ -70,9 +77,98 @@
     font: inherit;
 }
 
+.atex-orders-fields .atex-orders-input {
+    width: 100%;
+    min-width: 0;
+}
+
 .atex-orders-input:focus {
     outline: 2px solid rgba(19, 65, 116, 0.18);
     border-color: var(--atex-navy, #134174);
+}
+
+.atex-orders-ref-select {
+    position: relative;
+    width: 100%;
+}
+
+.atex-orders-ref-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.atex-orders-ref-search {
+    padding-right: 34px;
+}
+
+.atex-orders-ref-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+}
+
+.atex-orders-ref-clear:hover {
+    background: #e2e8f0;
+    color: var(--text-primary, #111827);
+}
+
+.atex-orders-ref-dropdown {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+}
+
+.atex-orders-ref-option {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid #e2e8f0;
+    background: transparent;
+    color: var(--text-primary, #111827);
+    padding: 7px 10px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.atex-orders-ref-option:last-child {
+    border-bottom: 0;
+}
+
+.atex-orders-ref-option:hover,
+.atex-orders-ref-option.is-active {
+    background: #eff6ff;
+}
+
+.atex-orders-ref-option.is-selected {
+    color: var(--atex-navy, #134174);
+    font-weight: 600;
+}
+
+.atex-orders-ref-empty {
+    padding: 10px;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.88rem;
 }
 
 .atex-orders-message {
@@ -83,18 +179,18 @@
 }
 
 .atex-orders-message--info {
-    background: #eff6ff;
-    color: #1e40af;
+    background: var(--atex-orders-info-bg);
+    color: var(--atex-orders-info-text);
 }
 
 .atex-orders-message--success {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--color-success-bg, #ecfdf5);
+    color: var(--color-success, #047857);
 }
 
 .atex-orders-message--error {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--color-error-bg, #fef2f2);
+    color: var(--color-error, #b91c1c);
 }
 
 .atex-orders-create {
@@ -160,7 +256,7 @@
 
 .atex-orders-table thead th,
 .atex-orders-subtable thead th {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
     color: var(--text-secondary, #475569);
     font-weight: 600;
     position: sticky;
@@ -168,7 +264,7 @@
 }
 
 .atex-orders-row:hover {
-    background: #f8fafc;
+    background: var(--bg-secondary, #f8fafc);
 }
 
 .atex-orders-toggle-cell {
@@ -199,7 +295,7 @@
 }
 
 .atex-orders-detail-row > td {
-    background: #f8fafc;
+    background: var(--bg-primary, #f8fafc);
     padding: 0;
 }
 
@@ -207,14 +303,114 @@
     padding: 12px 16px;
 }
 
-.atex-orders-position-form {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px dashed var(--input-border, #cbd5e1);
-}
-
 .atex-orders-empty {
     padding: 18px;
     text-align: center;
     color: var(--text-secondary, #64748b);
 }
+
+.atex-orders-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.atex-orders-search-wrap { flex: 1 1 220px; }
+.atex-orders-search-wrap input { width: 100%; }
+.atex-orders-table th[data-sort].is-sorted-asc::after { content: ' \25B2'; }
+.atex-orders-table th[data-sort].is-sorted-desc::after { content: ' \25BC'; }
+
+/* Кнопка удаления в строке позиции (🗑) */
+.atex-orders-pos-actions {
+    white-space: nowrap;
+    width: 1%;
+    text-align: center;
+}
+
+.atex-orders-icon-btn {
+    border: 1px solid var(--input-border, #cbd5e1);
+    background: var(--input-bg, #fff);
+    color: var(--text-secondary, #475569);
+    border-radius: 6px;
+    padding: 4px 7px;
+    cursor: pointer;
+    line-height: 1;
+    margin: 0 2px;
+}
+
+.atex-orders-icon-btn:hover {
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-primary, #111827);
+}
+
+.atex-orders-icon-btn--danger:hover,
+.atex-orders-icon-btn--danger.is-confirm {
+    background: var(--danger-bg, #fee2e2);
+    border-color: var(--danger, #ef4444);
+    color: var(--danger, #ef4444);
+}
+
+.atex-orders-icon-btn--danger.is-confirm {
+    animation: atex-orders-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes atex-orders-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Поячейковая правка позиций по клику                                  */
+/* ------------------------------------------------------------------ */
+
+/* Ячейка-отображение: кликабельна, превращается в контрол по клику. */
+.atex-orders-cell {
+    cursor: pointer;
+    position: relative;
+    min-width: 64px;
+}
+
+.atex-orders-cell:hover {
+    background: var(--bg-secondary, #eff6ff);
+}
+
+.atex-orders-cell:focus {
+    outline: 2px solid rgba(19, 65, 116, 0.25);
+    outline-offset: -2px;
+}
+
+/* Высота ячейки позиции фиксирована — текст и контрол правки не двигают строку. */
+.atex-orders-subtable td.atex-orders-cell {
+    height: 34px;
+}
+
+/* Активная (редактируемая) ячейка: индикатор без изменения геометрии (высота фиксирована). */
+.atex-orders-cell.is-editing {
+    cursor: default;
+    background: var(--bg-secondary, #f8fafc);
+    box-shadow: inset 0 0 0 2px var(--atex-navy, #134174);
+    padding: 4px 6px;
+    vertical-align: middle;
+}
+
+/* Контролы правки вписываются ровно в ячейку (без переполнения и скачка верстки). */
+.atex-orders-cell-input,
+.atex-orders-cell .atex-orders-ref-search,
+.atex-orders-cell select.atex-orders-cell-input {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    height: 26px;
+    margin: 0;
+    padding: 0 6px;
+    font: inherit;
+    line-height: 24px;
+}
+
+.atex-orders-cell .atex-orders-ref-search {
+    padding-right: 28px;            /* место под кнопку очистки */
+}
+
+/* Ref-select в ячейке не расширяет колонку; список — поверх (position:absolute). */
+.atex-orders-cell .atex-orders-ref-select {
+    min-width: 0;
+    width: 100%;
+}
+
+/* Черновая строка новой позиции (до первого сохранения) */
+.atex-orders-draft-row td { background: #fffdf2; }

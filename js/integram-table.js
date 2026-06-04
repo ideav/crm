@@ -4149,7 +4149,7 @@ class IntegramTable{
                         } else {
                             this.selectedRows.clear();
                         }
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     });
                 }
 
@@ -4162,7 +4162,7 @@ class IntegramTable{
                         } else {
                             this.selectedRows.delete(rowIndex);
                         }
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     });
                 });
             }
@@ -17506,7 +17506,7 @@ class IntegramTable{
             if (!this.checkboxMode) {
                 this.selectedRows.clear();
             }
-            this.render();
+            this.renderPreservingScroll(() => this.render());
         }
 
         /**

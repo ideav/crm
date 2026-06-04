@@ -95,4 +95,20 @@ assertEqual(rem, 100, 'cycle: cancel restores full 50 → 100');
 assertEqual(core.formatDateTime(new Date(2026, 4, 30, 9, 5, 7)), '2026-05-30 09:05:07',
     'formatDateTime pads month/day/time to YYYY-MM-DD HH:MM:SS');
 
+// ── остаток,м по дельте погонажа (используем applyConsumption/restoreConsumption) ──
+assertEqual(core.applyConsumption(4000, 300 - 0), 3700, 'остаток,м: первое списание погонажа');
+assertEqual(core.restoreConsumption(3700, 300 - 250), 3750, 'остаток,м: правка погонажа вниз возвращает');
+assertEqual(core.applyConsumption(100, 300), 0, 'остаток,м: не ниже нуля');
+
+// ── defectM2: брак,м² = брак,м × ширина_мм/1000 ──
+assertEqual(core.defectM2(10, 910), 9.1, 'defectM2: 10 м при 910 мм = 9.1 м²');
+assertEqual(core.defectM2('5,5', 880), 4.84, 'defectM2: запятая-десятичная, 880 мм');
+assertEqual(core.defectM2(0, 910), 0, 'defectM2: ноль метров → 0');
+assertEqual(core.defectM2(10, 0), 0, 'defectM2: нет ширины → 0');
+assertEqual(core.defectM2(-3, 910), 0, 'defectM2: отрицательные метры → 0');
+
+// ── photoFieldKey: ключ multipart-поля для реквизита FILE ──
+assertEqual(core.photoFieldKey('1118'), 't1118', 'photoFieldKey: t + reqId');
+assertEqual(core.photoFieldKey(null), '', 'photoFieldKey: нет reqId → пусто');
+
 console.log('\n' + passed + ' assertions passed');

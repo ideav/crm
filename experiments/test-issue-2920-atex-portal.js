@@ -33,9 +33,9 @@ assert(template.includes('/download/{_global_.z}/js/portal.js?0{_global_.version
 assert(!/<script\b(?![^>]*\bsrc=)/i.test(template), 'template does not contain inline scripts');
 assert(!/<style\b/i.test(template), 'template does not contain inline styles');
 assert(template.includes('id="atex-portal-app"'), 'template contains the app root');
-assert(template.includes('data-order-table="107"'), 'template wires the order table id');
-assert(template.includes('data-position-table="108"'), 'template wires the position table id');
-assert(template.includes('data-client-table="103"'), 'template wires the client table id');
+assert(!template.includes('data-order-table="107"'), 'template does not hardcode the order table id');
+assert(!template.includes('data-position-table="108"'), 'template does not hardcode the position table id');
+assert(!template.includes('data-client-table="103"'), 'template does not hardcode the client table id');
 assert(template.includes('data-user="{_global_.user}"'), 'template passes the current login for client isolation');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
@@ -69,15 +69,16 @@ vm.runInNewContext(source, sandbox, { filename: scriptPath });
 const helpers = sandbox.window.AtexPortalTesting;
 assert(helpers, 'AtexPortalTesting helper API is exposed');
 
-// --- Метаданные из docs/atex_metadata.json (таблицы 103/107/108) ---
+// --- Метаданные из docs/atex_metadata.json (таблицы резолвятся по имени) ---
 const metadata = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'atex_metadata.json'), 'utf8'));
-function tableById(id) {
-    return metadata.filter(function(t) { return String(t.id) === String(id); })[0];
-}
-const orderMeta = tableById('107');
-const positionMeta = tableById('108');
-const clientMeta = tableById('103');
+const resolvedTables = helpers.resolveTableMetadata(metadata, helpers.TABLE, {});
+const orderMeta = resolvedTables.order;
+const positionMeta = resolvedTables.position;
+const clientMeta = resolvedTables.client;
 assert(orderMeta && positionMeta && clientMeta, 'metadata for tables 103/107/108 found');
+assert.strictEqual(orderMeta.id, '107', 'order table id resolved from metadata');
+assert.strictEqual(positionMeta.id, '108', 'position table id resolved from metadata');
+assert.strictEqual(clientMeta.id, '103', 'client table id resolved from metadata');
 
 const orderColumns = helpers.buildColumns(helpers.ORDER_FIELDS, orderMeta);
 const positionColumns = helpers.buildColumns(helpers.POSITION_FIELDS, positionMeta);

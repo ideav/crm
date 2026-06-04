@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 3047 Atex Reference Search Preview</title>
+    <link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+    <style>
+        body {
+            margin: 0;
+            background: #f3f6fa;
+            color: #1f2933;
+        }
+        .preview {
+            max-width: 960px;
+            margin: 32px auto;
+            padding: 0 24px;
+        }
+        .preview h1 {
+            margin: 0 0 20px;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+        }
+        .preview-field {
+            display: grid;
+            gap: 6px;
+            padding: 16px;
+            border: 1px solid #d5dde7;
+            border-radius: 8px;
+            background: #ffffff;
+        }
+        .preview-field label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #51606f;
+        }
+        .atex-in-input,
+        .atex-cc-input,
+        .atex-pp-input,
+        .atex-sl-input,
+        .atex-sc-input,
+        .atex-wh-input {
+            box-sizing: border-box;
+            width: 100%;
+            min-height: 40px;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            padding: 0.55rem 0.75rem;
+            background: #ffffff;
+            color: #1f2933;
+            font: inherit;
+        }
+        .atex-in-input:focus,
+        .atex-cc-input:focus,
+        .atex-pp-input:focus,
+        .atex-sl-input:focus,
+        .atex-sc-input:focus,
+        .atex-wh-input:focus {
+            border-color: var(--atex-navy);
+            box-shadow: 0 0 0 3px rgba(19, 65, 116, 0.12);
+            outline: none;
+        }
+    </style>
+</head>
+<body class="atex-brand">
+    <main class="preview">
+        <h1>Searchable Atex Reference Controls</h1>
+        <div id="preview-grid" class="preview-grid"></div>
+    </main>
+    <script src="../download/atex/js/ref-search.js"></script>
+    <script>
+        var samples = [
+            ['Приёмка сырья', 'atex-in', 'atex-in-input', 'Вид сырья', 'ПЭТ 12 мкм'],
+            ['Калькулятор резки', 'atex-cc', 'atex-cc-input', 'Вид сырья', 'БОПП 20 мкм'],
+            ['Планирование', 'atex-pp', 'atex-pp-input', 'Партия сырья', 'Партия сырья 2026-05'],
+            ['Пульт слиттера', 'atex-sl', 'atex-sl-input', 'Партия сырья', 'Партия №42 - остаток 820 м²'],
+            ['Пульт втулкореза', 'atex-sc', 'atex-sc-input', 'Втулкорез', 'Втулкорез B'],
+            ['Склад ГП', 'atex-wh', 'atex-wh-input', 'Партия ГП', 'Партия №118 - 2400 м']
+        ];
+        var grid = document.getElementById('preview-grid');
+        samples.forEach(function(sample, idx) {
+            var field = document.createElement('div');
+            field.className = 'preview-field';
+            var label = document.createElement('label');
+            label.textContent = sample[0] + ' · ' + sample[3];
+            field.appendChild(label);
+            field.appendChild(window.AtexRefSearch.createSelect({
+                classPrefix: sample[1],
+                inputClass: sample[2],
+                id: 'issue-3047-ref-' + idx,
+                options: [
+                    { id: '1', label: sample[4] },
+                    { id: '2', label: sample[4] + ' / резерв' },
+                    { id: '3', label: sample[4] + ' / архив' }
+                ],
+                value: '1',
+                placeholder: 'Начните вводить название',
+                loadOptions: function() { return Promise.resolve([]); }
+            }));
+            grid.appendChild(field);
+        });
+    </script>
+</body>
+</html>

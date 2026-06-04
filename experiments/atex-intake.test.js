@@ -5,7 +5,9 @@
 //
 // Run with: node experiments/atex-intake.test.js
 
-var calc = require('../download/atex/js/intake.js').calc;
+var intake = require('../download/atex/js/intake.js');
+var calc = intake.calc;
+var helpers = intake.helpers;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
@@ -83,5 +85,75 @@ assertEqual(calc.summarize([
     { received: '500', remainder: '250' }
 ]), { count: 2, totalReceived: 1500.5, totalRemaining: 1250.5 },
     'summarize parses comma decimals and spaces');
+
+// ── materialDefaultLength: длина джамбо по умолчанию из вида сырья ──
+var materials = [
+    { id: '1', label: 'MR194', rollLength: '4000' },
+    { id: '2', label: 'MWR110L', rollLength: '' }
+];
+assertEqual(calc.materialDefaultLength(materials, '1'), 4000, 'default length from material roll length');
+assertEqual(calc.materialDefaultLength(materials, 1), 4000, 'numeric id matches string stored id');
+assertEqual(calc.materialDefaultLength(materials, '2'), 0, 'empty roll length → 0');
+assertEqual(calc.materialDefaultLength(materials, '999'), 0, 'unknown material → 0');
+assertEqual(calc.materialDefaultLength(materials, null), 0, 'null material → 0');
+
+// ── barcode + server-side filters (#3094) ──
+var batchMeta = {
+    id: '106',
+    val: 'Партия сырья',
+    reqs: [
+        { id: '1044', val: 'Вид сырья' },
+        { id: '1155', val: 'Штрих-код' },
+        { id: '1046', val: 'Дата прихода' },
+        { id: '1048', val: 'Получено, м²' },
+        { id: '1050', val: 'Остаток, м²' },
+        { id: '1147', val: 'Длина, м' },
+        { id: '1148', val: 'Остаток, м' }
+    ]
+};
+
+assertEqual(helpers.reqIdByName(batchMeta, 'штрих-код'), '1155', 'reqIdByName finds barcode id');
+assertEqual(helpers.columnIndex(batchMeta, 'Штрих-код'), 2, 'columnIndex includes barcode after material');
+
+assertEqual(helpers.mapBatchRecord({
+    i: 301,
+    r: ['MR131 от 2026-06-01', '201:MR131', '4607001234567', '2026-06-01', '1000', '750', '1200', '900']
+}, batchMeta), {
+    id: '301',
+    name: 'MR131 от 2026-06-01',
+    materialId: '201',
+    materialLabel: 'MR131',
+    barcode: '4607001234567',
+    arrivedAt: '2026-06-01',
+    received: '1000',
+    remainder: '750',
+    lengthM: '1200',
+    remainderM: '900'
+}, 'mapBatchRecord reads barcode from JSON_OBJ row');
+
+assertEqual(helpers.buildBatchListPath(batchMeta, {
+    materialId: '201',
+    barcode: '460700',
+    arrivedAt: '2026-06-01'
+}, 5000), 'object/106/?JSON_OBJ&LIMIT=0,5000&FR_1044=%40201&FR_1155=460700%25&FR_1046=2026-06-01',
+    'buildBatchListPath re-queries object endpoint with material/barcode/date filters');
+
+assertEqual(helpers.buildBatchFields(batchMeta, {
+    materialId: '201',
+    barcode: ' 4607001234567 ',
+    arrivedAt: '2026-06-01',
+    received: '1 000,5',
+    remainder: '',
+    lengthM: '1200',
+    remainderM: ''
+}), {
+    t1044: '201',
+    t1155: '4607001234567',
+    t1046: '2026-06-01',
+    t1048: 1000.5,
+    t1050: 1000.5,
+    t1147: 1200,
+    t1148: 1200
+}, 'buildBatchFields includes barcode and default remainders');
 
 console.log('\n' + passed + ' assertions passed');

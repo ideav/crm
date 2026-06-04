@@ -1,18 +1,21 @@
 // Рабочее место atex «Дашборды и отчёты» (роль Руководитель).
 //
-// Сводки только для чтения по живым данным: заказы по статусам, загрузка
-// слиттеров, выпуск готовой продукции (ГП), остатки сырья. Решение задачи
+// Сводки только для чтения по живым данным: путь продукции по этапам, заказы по
+// статусам, загрузка слиттеров, выпуск готовой продукции (ГП), остатки сырья.
+// Решение задачи
 // ideav/crm#2919 (часть #2903). Правила разработки рабочих мест —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, раздел про дашборды — atex_workplaces.md §3.9.
 //
-// На этом этапе рабочее место читает данные напрямую из таблиц (#2903):
-//   • счётчики    — `GET /{db}/object/{typeId}/?_count=` (+ фильтры F_{reqId});
-//   • списки/срезы — `GET /{db}/object/{typeId}/?JSON_OBJ&LIMIT={offset},{count}`
-//     постранично (WORKSPACE_DEVELOPMENT_GUIDE.md, раздел 6).
-// Запись отсутствует — дашборд только читает. ID таблиц и реквизитов не
-// хардкодятся: они резолвятся по именам из `GET /{db}/metadata?JSON`, поэтому
-// код переживает пересборку базы. Перевод чтений на защищённый слой `report/` —
-// следующий этап и в объём этой задачи не входит (atex_workplaces.md §3.9).
+// Данные берутся двумя отчётами (`report/`), агрегации считаются на клиенте —
+// минимум серверных запросов (правило: docs/integram-reports.md):
+//   • `GET /{db}/report/order_pipeline?JSON_KV`  — плоская цепочка
+//     Заказ→Позиция→Обеспечение→Резка→ГП; `rowsToEntities` разворачивает строки
+//     в сущности (dedup по *_id) → заказы по статусам, загрузка слиттеров,
+//     выпуск ГП, путь продукции;
+//   • `GET /{db}/report/material_stock?JSON_KV` — остатки сырья (Партия сырья).
+// Запись отсутствует — дашборд только читает. Счётчики берутся как длины
+// массивов сущностей; отдельные `_count`/`object/`-чтения и резолв метаданных
+// больше не нужны.
 //
 // Чистое ядро агрегации вынесено в объект `agg` и экспортируется через
 // module.exports для модульных тестов (experiments/atex-dashboards.test.js).
@@ -36,18 +39,6 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     'use strict';
 
-    // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
-    // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = {
-        order: 'Заказ',
-        cut: 'Производственная резка',
-        gp: 'Партия ГП',
-        rawBatch: 'Партия сырья'
-    };
-    var ORDER_REQ = { status: 'Статус', created: 'Дата создания' };
-    var CUT_REQ = { slitter: 'Слиттер', status: 'Статус', footage: 'Погонаж факт, м' };
-    var GP_REQ = { status: 'Статус', rolls: 'Кол-во рулонов', footage: 'Метраж, м' };
-    var RAW_REQ = { material: 'Вид сырья', received: 'Получено, м²', remainder: 'Остаток, м²' };
 
     // Метка для записей без значения в группирующем поле.
     var UNSET = '— не задано —';
@@ -137,18 +128,269 @@
     function materialStock(batches) {
         var rows = groupBy(batches, function(b) { return b.material; }, function(acc, b) {
             acc.received = round3((acc.received || 0) + toNumber(b.received));
-            acc.remainder = round3((acc.remainder || 0) + toNumber(b.remainder));
+            // Остаток суммируем точно; округляем до целых м² одним проходом ниже.
+            acc.remainder = (acc.remainder || 0) + toNumber(b.remainder);
+        });
+        // Остаток сырья округляем до целых м² — дробные м² на складе это шум.
+        rows.forEach(function(r) { r.remainder = Math.round(r.remainder); });
+        // #3073: остатки сырья сортируем по убыванию остатка (а не по count),
+        // ключ — вторичный для стабильности.
+        rows.sort(function(a, b) {
+            if (b.remainder !== a.remainder) return b.remainder - a.remainder;
+            return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
         });
         return {
             total: (batches || []).length,
             totalReceived: sumBy(batches, function(b) { return b.received; }),
-            totalRemainder: sumBy(batches, function(b) { return b.remainder; }),
+            totalRemainder: Math.round(sumBy(batches, function(b) { return b.remainder; })),
             rows: rows
         };
     }
 
+    function normalizeStatus(value) {
+        return String(value == null ? '' : value)
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е');
+    }
+
+    function statusIn(status, list) {
+        var wanted = normalizeStatus(status);
+        return (list || []).map(normalizeStatus).indexOf(wanted) !== -1;
+    }
+
+    // Терминальные статусы заказа (#3073): из «пути продукции» исключаются совсем,
+    // а в «заказах по статусам» показываются в конце серыми барами.
+    var TERMINAL_STATUSES = ['Выполнен', 'Отменён'];
+
+    function isTerminalStatus(status) {
+        return statusIn(status, TERMINAL_STATUSES);
+    }
+
+    // Счётчики завершённых/отменённых заказов из отчёта orders_status_count
+    // (строки {order_status, cnt}). Эти заказы НЕ грузятся в order_pipeline (там
+    // только активные), поэтому их количество берём отдельным лёгким запросом.
+    function terminalOrderCounts(statusRows) {
+        var done = 0, cancelled = 0;
+        (statusRows || []).forEach(function(r) {
+            var n = toNumber(r.cnt != null ? r.cnt : r.count);
+            if (statusIn(r.order_status, ['Выполнен'])) done += n;
+            else if (statusIn(r.order_status, ['Отменён'])) cancelled += n;
+        });
+        return { done: done, cancelled: cancelled, total: done + cancelled };
+    }
+
+    // Дата (ISO YYYY-MM-DD) в диапазоне [from, to] включительно; пустые границы
+    // открыты, пустая дата не входит ни в какой непустой диапазон.
+    function dateInRange(date, from, to) {
+        var d = String(date == null ? '' : date).trim();
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+    }
+
+    // Выбор заказов под фильтр диапазона дат (#3073):
+    //   • обе границы пустые → только актуальные (не Выполнен/Отменён);
+    //   • иначе → заказы, чей «срок выполнения» (deadline) в диапазоне включительно.
+    function selectOrders(orders, from, to) {
+        var f = from ? String(from).trim() : '';
+        var t = to ? String(to).trim() : '';
+        if (!f && !t) {
+            return (orders || []).filter(function(o) { return !isTerminalStatus(o.status); });
+        }
+        return (orders || []).filter(function(o) { return dateInRange(o.deadline, f, t); });
+    }
+
+    function stageState(status, doneStatuses) {
+        var text = String(status == null ? '' : status).trim();
+        if (!text) return 'pending';
+        return statusIn(text, doneStatuses) ? 'done' : 'active';
+    }
+
+    function stage(key, labelText, status, doneStatuses, detail) {
+        var text = String(status == null ? '' : status).trim();
+        return {
+            key: key,
+            label: labelText,
+            status: text || 'нет данных',
+            state: stageState(text, doneStatuses),
+            detail: String(detail == null ? '' : detail).trim()
+        };
+    }
+
+    function first(list) {
+        return list && list.length ? list[0] : null;
+    }
+
+    function byParent(list, parentKey) {
+        var map = {};
+        (list || []).forEach(function(item) {
+            var key = String(item && item[parentKey] != null ? item[parentKey] : '');
+            if (!key) return;
+            if (!map[key]) map[key] = [];
+            map[key].push(item);
+        });
+        return map;
+    }
+
+    function byId(list) {
+        var map = {};
+        (list || []).forEach(function(item) {
+            if (item && item.id != null) map[String(item.id)] = item;
+        });
+        return map;
+    }
+
+    function productionFlow(data) {
+        var orders = data && data.orders || [];
+        var positionsByOrder = byParent(data && data.positions, 'orderId');
+        var provisionsByPosition = byParent(data && data.provisions, 'positionId');
+        var cutsById = byId(data && data.cuts);
+        var gpById = byId(data && data.gpBatches);
+        var gpByCut = byParent(data && data.gpBatches, 'cutId');
+        var rows = [];
+
+        function makeRow(order, position, provision) {
+            var cut = provision && provision.cutId ? cutsById[String(provision.cutId)] : null;
+            var gp = provision && provision.gpId ? gpById[String(provision.gpId)] : null;
+            if (!gp && cut) gp = first(gpByCut[String(cut.id)]);
+
+            var positionLabel = position
+                ? [
+                    position.cutType || ('позиция #' + position.id),
+                    position.width ? position.width + ' мм' : '',
+                    position.length ? position.length + ' м' : ''
+                ].filter(Boolean).join(' · ')
+                : 'позиция не создана';
+
+            var stages = [
+                stage('order', 'Заказ', order.status, ['Выполнен'], order.number || ('#' + order.id)),
+                stage('position', 'Позиция', position && position.status,
+                    ['Отгружена'], positionLabel),
+                stage('provision', 'Обеспечение', provision && provision.status,
+                    ['Выполнено'], provision && provision.footage ? provision.footage + ' м' : ''),
+                stage('cut', 'Резка', cut && cut.status,
+                    ['Завершён', 'Завершен', 'Готово', 'Готова'],
+                    cut ? [cut.number ? '№ ' + cut.number : '', cut.slitter || '', cut.footage ? cut.footage + ' м' : ''].filter(Boolean).join(' · ') : ''),
+                stage('gp', 'ГП / отгрузка', gp && gp.status,
+                    ['Отгружен', 'Отгружено'],
+                    gp ? [gp.rolls ? gp.rolls + ' рул.' : '', gp.footage ? gp.footage + ' м' : '', gp.address || ''].filter(Boolean).join(' · ') : '')
+            ];
+            var done = stages.filter(function(s) { return s.state === 'done'; }).length;
+            var active = stages.filter(function(s) { return s.state === 'active'; }).length;
+            var percent = Math.round((done + active * 0.5) / stages.length * 100);
+
+            return {
+                orderId: String(order.id),
+                positionId: position ? String(position.id) : '',
+                provisionId: provision ? String(provision.id) : '',
+                cutId: cut ? String(cut.id) : '',
+                gpId: gp ? String(gp.id) : '',
+                product: position ? positionLabel : (order.number || ('Заказ #' + order.id)),
+                order: order.number || ('Заказ #' + order.id),
+                stages: stages,
+                completeStages: done,
+                activeStages: active,
+                progress: percent,
+                done: done === stages.length
+            };
+        }
+
+        orders.forEach(function(order) {
+            // #3073: заказы Выполнен/Отменён в «пути продукции» не показываем — неактуально.
+            if (isTerminalStatus(order.status)) return;
+            var positions = positionsByOrder[String(order.id)] || [null];
+            positions.forEach(function(position) {
+                var provisions = position ? (provisionsByPosition[String(position.id)] || [null]) : [null];
+                provisions.forEach(function(provision) {
+                    rows.push(makeRow(order, position, provision));
+                });
+            });
+        });
+
+        rows.sort(function(a, b) {
+            if (a.done !== b.done) return a.done ? 1 : -1;
+            if (b.activeStages !== a.activeStages) return b.activeStages - a.activeStages;
+            return Number(b.orderId) - Number(a.orderId);
+        });
+
+        return {
+            total: rows.length,
+            done: rows.filter(function(row) { return row.done; }).length,
+            active: rows.filter(function(row) { return !row.done; }).length,
+            rows: rows
+        };
+    }
+
+    // Плоские строки отчёта order_pipeline → массивы сущностей (dedup по *_id),
+    // под ключи существующих агрегаторов и productionFlow. Пустые поздние стадии
+    // (LEFT JOIN) не создают фантомных записей.
+    function rowsToEntities(rows) {
+        var orders = {}, positions = {}, provisions = {}, cuts = {}, gp = {};
+        function vals(o) { return Object.keys(o).map(function(k) { return o[k]; }); }
+        (rows || []).forEach(function(r) {
+            if (r.order_id && !orders[r.order_id]) {
+                orders[r.order_id] = { id: r.order_id, number: r.order_no || ('#' + r.order_id), status: r.order_status, deadline: r.order_deadline || '' };
+            }
+            if (r.position_id && !positions[r.position_id]) {
+                positions[r.position_id] = { id: r.position_id, orderId: r.order_id || '', cutType: r.position_cut_type, width: r.position_width_mm, length: r.position_length_m, status: r.position_status };
+            }
+            if (r.provision_id && !provisions[r.provision_id]) {
+                provisions[r.provision_id] = { id: r.provision_id, positionId: r.position_id || '', cutId: r.cut_id || '', gpId: r.gp_id || '', footage: r.provision_used_m, status: r.provision_status };
+            }
+            if (r.cut_id && !cuts[r.cut_id]) {
+                cuts[r.cut_id] = { id: r.cut_id, number: r.cut_no || ('#' + r.cut_id), slitter: r.cut_slitter, status: r.cut_status, footage: r.cut_footage_m };
+            }
+            if (r.gp_id && !gp[r.gp_id]) {
+                gp[r.gp_id] = { id: r.gp_id, cutId: r.gp_cut_id || '', status: r.gp_status, rolls: r.gp_rolls, footage: r.gp_footage_m, address: r.gp_address };
+            }
+        });
+        return { orders: vals(orders), positions: vals(positions), provisions: vals(provisions), cuts: vals(cuts), gpBatches: vals(gp) };
+    }
+
+    // Сводки из строк отчётов под фильтр диапазона дат (#3073). Заказы отбираются
+    // через selectOrders (пустой диапазон → актуальные; заполненный → по сроку
+    // выполнения), затем плоские строки order_pipeline сужаются до отобранных
+    // заказов — так все зависимые агрегации (статусы, слиттеры, ГП, путь) считаются
+    // по одному и тому же срезу. Остатки сырья не привязаны к заказу — не фильтруются.
+    function buildSummaries(pipelineRows, materialRows, filter) {
+        filter = filter || {};
+        var from = filter.from ? String(filter.from).trim() : '';
+        var to = filter.to ? String(filter.to).trim() : '';
+        var allOrders = rowsToEntities(pipelineRows || []).orders;
+        var allowed = {};
+        selectOrders(allOrders, from, to).forEach(function(o) { allowed[String(o.id)] = true; });
+        var rows = (pipelineRows || []).filter(function(r) { return allowed[String(r.order_id)]; });
+        var e = rowsToEntities(rows);
+        var rawBatches = (materialRows || []).map(function(r) {
+            return { material: r.material, received: r.material_received_m2, remainder: r.material_remainder_m2 };
+        });
+        return {
+            counts: { order: e.orders.length, cut: e.cuts.length, gp: e.gpBatches.length, rawBatch: rawBatches.length },
+            orders: ordersByStatus(e.orders),
+            slitters: slitterLoad(e.cuts),
+            gp: gpOutput(e.gpBatches),
+            materials: materialStock(rawBatches),
+            flow: productionFlow({ orders: e.orders, positions: e.positions, provisions: e.provisions, cuts: e.cuts, gpBatches: e.gpBatches }),
+            filter: { from: from, to: to, active: !from && !to }
+        };
+    }
+
+    // Ширина бара по логарифмической шкале: диапазон [min..max] → [2..100]%.
+    // Равные ОТНОШЕНИЯ значений дают равные расстояния, поэтому рядом с огромными
+    // остатками видно и соотношение маленьких. v<=0 или min<=0 → минимум (2%).
+    function logBarWidth(v, min, max) {
+        v = toNumber(v); min = toNumber(min); max = toNumber(max);
+        if (v <= 0 || min <= 0) return 2;
+        if (max <= min) return 100;
+        var pct = Math.round((Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) * 98) + 2;
+        return Math.max(2, Math.min(100, pct));
+    }
+
     var agg = {
         toNumber: toNumber,
+        logBarWidth: logBarWidth,
         round3: round3,
         groupBy: groupBy,
         sumBy: sumBy,
@@ -156,13 +398,20 @@
         slitterLoad: slitterLoad,
         gpOutput: gpOutput,
         materialStock: materialStock,
+        productionFlow: productionFlow,
+        stageState: stageState,
+        rowsToEntities: rowsToEntities,
+        buildSummaries: buildSummaries,
+        selectOrders: selectOrders,
+        isTerminalStatus: isTerminalStatus,
+        terminalOrderCounts: terminalOrderCounts,
+        dateInRange: dateInRange,
+        TERMINAL_STATUSES: TERMINAL_STATUSES,
         UNSET: UNSET
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
     // Ниже — DOM-контроллер. Требует window/document/fetch; в Node не выполняется.
-
-    var PAGE = 1000; // размер страницы для постраничного чтения списков
 
     function el(tag, attrs, children) {
         var node = document.createElement(tag);
@@ -179,20 +428,6 @@
         return node;
     }
 
-    // Значение реквизита из метаданных по имени → его числовой id.
-    function reqIdByName(meta, name) {
-        var found = (meta && meta.reqs || []).filter(function(r) {
-            return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
-        })[0];
-        return found ? String(found.id) : null;
-    }
-
-    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → подпись (или сырьё).
-    function refLabel(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? m[2] : String(raw == null ? '' : raw);
-    }
-
     // Форматирование чисел для показа: целые без дробной части, иначе до 2 знаков,
     // с разделением тысяч пробелом.
     function fmt(n) {
@@ -204,9 +439,12 @@
 
     function AtexDashboards(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
-        this.meta = { order: null, cut: null, gp: null, rawBatch: null };
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.busy = false;
+        // Фильтр диапазона дат (#3073): пустой → только актуальные заказы.
+        this.filter = { from: '', to: '' };
+        // Сырые строки отчётов — чтобы перефильтровывать по датам без перезапроса.
+        this.raw = null;
     }
 
     AtexDashboards.prototype.url = function(path) {
@@ -223,112 +461,35 @@
         });
     };
 
-    // Счётчик записей таблицы: `?_count=` → { count: N } (index.php:6832).
-    AtexDashboards.prototype.count = function(typeId) {
-        return this.getJson('object/' + typeId + '/?_count=').then(function(res) {
-            return res && typeof res.count !== 'undefined' ? Number(res.count) : 0;
-        });
-    };
-
-    // Постраничное чтение всех записей таблицы через JSON_OBJ.
-    AtexDashboards.prototype.loadAll = function(typeId) {
-        var self = this;
-        var rows = [];
-        function page(offset) {
-            return self.getJson('object/' + typeId + '/?JSON_OBJ&LIMIT=' + offset + ',' + PAGE).then(function(batch) {
-                var list = batch || [];
-                rows = rows.concat(list);
-                if (list.length === PAGE) return page(offset + PAGE);
-                return rows;
-            });
-        }
-        return page(0);
-    };
-
-    // Построитель доступа к колонкам JSON_OBJ по имени реквизита.
-    // Колонки идут в порядке: [главное значение, ...reqs по порядку].
-    function columnReader(meta) {
-        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
-        return function(reqName) {
-            var rid = reqIdByName(meta, reqName);
-            var idx = order.indexOf(String(rid));
-            return function(rec) {
-                var r = (rec && rec.r) || [];
-                return idx >= 0 ? r[idx] : undefined;
-            };
-        };
-    }
-
-    // ── Загрузка метаданных ──
-
-    AtexDashboards.prototype.loadMetadata = function() {
-        var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
-            var list = Array.isArray(all) ? all : [all];
-            function byName(name) {
-                return list.filter(function(t) {
-                    return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
-                })[0] || null;
-            }
-            self.meta.order = byName(TABLE.order);
-            self.meta.cut = byName(TABLE.cut);
-            self.meta.gp = byName(TABLE.gp);
-            self.meta.rawBatch = byName(TABLE.rawBatch);
-            var missing = Object.keys(TABLE).filter(function(k) { return !self.meta[k]; })
-                .map(function(k) { return TABLE[k]; });
-            if (missing.length) throw new Error('В метаданных не найдены таблицы: ' + missing.join(', '));
-        });
-    };
-
     // ── Сбор сводок ──
 
-    // Возвращает Promise<{ counts, orders, slitters, gp, materials }>.
+    // Сбор сводок из двух отчётов (минимум запросов; агрегации — на клиенте).
+    // Сырые строки сохраняются, чтобы фильтр дат перестраивал сводки без перезапроса.
+    //
+    // ⚠️ На дашборд тянем ТОЛЬКО АКТИВНЫЕ заказы (не «Выполнен»/«Отменён») — иначе при
+    // тысячах завершённых заказов выгрузка распухает. Фильтр серверный: в отчёте
+    // order_pipeline есть колонка-формула `order_active` (= '1' для активных, NULL для
+    // терминальных: `IF([THIS] IN ('Выполнен','Отменён'),NULL,'1')` на Заказ.Статус),
+    // а `FR_order_active=%` (LIKE — матчит непустое, отсекает NULL) оставляет только их.
     AtexDashboards.prototype.collect = function() {
         var self = this;
-        var m = this.meta;
-
-        var countsP = Promise.all([
-            this.count(m.order.id), this.count(m.cut.id),
-            this.count(m.gp.id), this.count(m.rawBatch.id)
-        ]).then(function(c) {
-            return { order: c[0], cut: c[1], gp: c[2], rawBatch: c[3] };
+        return Promise.all([
+            this.getJson('report/order_pipeline?JSON_KV&FR_order_active=%25'),
+            this.getJson('report/material_stock?JSON_KV'),
+            // Лёгкий агрегат: завершённые/отменённые заказы (их нет в order_pipeline).
+            this.getJson('report/orders_status_count?JSON_KV')
+        ]).then(function(res) {
+            self.raw = { pipelineRows: res[0] || [], materialRows: res[1] || [] };
+            self.statusCounts = res[2] || [];
+            return buildSummaries(self.raw.pipelineRows, self.raw.materialRows, self.filter);
         });
+    };
 
-        var ordersP = this.loadAll(m.order.id).then(function(rows) {
-            var col = columnReader(m.order);
-            var status = col(ORDER_REQ.status);
-            return ordersByStatus(rows.map(function(rec) {
-                return { status: status(rec) };
-            }));
-        });
-
-        var slittersP = this.loadAll(m.cut.id).then(function(rows) {
-            var col = columnReader(m.cut);
-            var slitter = col(CUT_REQ.slitter), status = col(CUT_REQ.status), footage = col(CUT_REQ.footage);
-            return slitterLoad(rows.map(function(rec) {
-                return { slitter: refLabel(slitter(rec)), status: status(rec), footage: footage(rec) };
-            }));
-        });
-
-        var gpP = this.loadAll(m.gp.id).then(function(rows) {
-            var col = columnReader(m.gp);
-            var status = col(GP_REQ.status), rolls = col(GP_REQ.rolls), footage = col(GP_REQ.footage);
-            return gpOutput(rows.map(function(rec) {
-                return { status: status(rec), rolls: rolls(rec), footage: footage(rec) };
-            }));
-        });
-
-        var materialsP = this.loadAll(m.rawBatch.id).then(function(rows) {
-            var col = columnReader(m.rawBatch);
-            var material = col(RAW_REQ.material), received = col(RAW_REQ.received), remainder = col(RAW_REQ.remainder);
-            return materialStock(rows.map(function(rec) {
-                return { material: refLabel(material(rec)), received: received(rec), remainder: remainder(rec) };
-            }));
-        });
-
-        return Promise.all([countsP, ordersP, slittersP, gpP, materialsP]).then(function(res) {
-            return { counts: res[0], orders: res[1], slitters: res[2], gp: res[3], materials: res[4] };
-        });
+    // Перестроить сводки из уже загруженных строк под текущий фильтр и перерисовать.
+    // Используется при смене диапазона дат — без повторного запроса к серверу.
+    AtexDashboards.prototype.applyFilter = function() {
+        if (!this.raw) return;
+        this.render(buildSummaries(this.raw.pipelineRows, this.raw.materialRows, this.filter));
     };
 
     // ── Рендеринг ──
@@ -336,36 +497,75 @@
     AtexDashboards.prototype.render = function(data) {
         var grid = this.gridEl;
         grid.innerHTML = '';
+        grid.appendChild(this.cardProductionFlow(data.flow));
         grid.appendChild(this.cardOrders(data.counts.order, data.orders));
         grid.appendChild(this.cardSlitters(data.counts.cut, data.slitters));
         grid.appendChild(this.cardGp(data.counts.gp, data.gp));
         grid.appendChild(this.cardMaterials(data.counts.rawBatch, data.materials));
     };
 
-    function card(title, count, body) {
+    function card(title, count, body, className) {
         var head = el('div', { class: 'atex-db-card-head' }, [
             el('h2', { class: 'atex-db-card-title', text: title }),
             el('span', { class: 'atex-db-card-count', text: fmt(count) })
         ]);
-        return el('section', { class: 'atex-db-card' }, [head, body]);
+        return el('section', { class: 'atex-db-card' + (className ? ' ' + className : '') }, [head, body]);
     }
 
     // Горизонтальная гистограмма по строкам [{ key, count, ... }].
-    function bars(rows, valueFn, formatFn) {
+    function bars(rows, valueFn, formatFn, opts) {
         if (!rows.length) return el('div', { class: 'atex-db-empty', text: 'Нет данных' });
+        opts = opts || {};
         var max = rows.reduce(function(m, r) { return Math.max(m, toNumber(valueFn(r))); }, 0) || 1;
-        var box = el('div', { class: 'atex-db-bars' });
+        // Для лог-шкалы нижняя граница диапазона — минимальное положительное значение.
+        var minPos = 1;
+        if (opts.logScale) {
+            minPos = rows.reduce(function(m, r) {
+                var x = toNumber(valueFn(r));
+                return x > 0 ? Math.min(m, x) : m;
+            }, Infinity);
+            if (!isFinite(minPos)) minPos = 1;
+        }
+        function widthPct(v) {
+            return opts.logScale ? logBarWidth(v, minPos, max) : Math.max(2, Math.round(v / max * 100));
+        }
+        var box = el('div', { class: 'atex-db-bars' + (opts.logScale ? ' atex-db-bars-log' : '') });
         rows.forEach(function(r) {
             var v = toNumber(valueFn(r));
             var row = el('div', { class: 'atex-db-bar-row' }, [
                 el('span', { class: 'atex-db-bar-key', text: r.key, title: r.key }),
                 el('span', { class: 'atex-db-bar-track' }, [
-                    el('span', { class: 'atex-db-bar-fill', style: 'width:' + Math.max(2, Math.round(v / max * 100)) + '%' })
+                    el('span', { class: 'atex-db-bar-fill', style: 'width:' + widthPct(v) + '%' })
                 ]),
                 el('span', { class: 'atex-db-bar-val', text: (formatFn ? formatFn(r) : fmt(v)) })
             ]);
             box.appendChild(row);
         });
+        return box;
+    }
+
+    // «Заказы по статусам» (#3073): активные статусы рисуются как обычно, масштаб
+    // баров считается только по ним; терминальные (Выполнен/Отменён) выводятся в
+    // конце серыми барами и не влияют на пропорции остальных.
+    function ordersBars(rows) {
+        var all = rows || [];
+        if (!all.length) return el('div', { class: 'atex-db-empty', text: 'Нет данных' });
+        var active = all.filter(function(r) { return !isTerminalStatus(r.key); });
+        var terminal = all.filter(function(r) { return isTerminalStatus(r.key); });
+        var max = active.reduce(function(m, r) { return Math.max(m, toNumber(r.count)); }, 0) || 1;
+        var box = el('div', { class: 'atex-db-bars' });
+        function addRow(r, muted) {
+            var pct = Math.max(2, Math.min(100, Math.round(toNumber(r.count) / max * 100)));
+            box.appendChild(el('div', { class: 'atex-db-bar-row' }, [
+                el('span', { class: 'atex-db-bar-key', text: r.key, title: r.key }),
+                el('span', { class: 'atex-db-bar-track' }, [
+                    el('span', { class: 'atex-db-bar-fill' + (muted ? ' atex-db-bar-fill-muted' : ''), style: 'width:' + pct + '%' })
+                ]),
+                el('span', { class: 'atex-db-bar-val', text: fmt(r.count) })
+            ]));
+        }
+        active.forEach(function(r) { addRow(r, false); });
+        terminal.forEach(function(r) { addRow(r, true); });
         return box;
     }
 
@@ -379,9 +579,65 @@
         }));
     }
 
+    AtexDashboards.prototype.cardProductionFlow = function(data) {
+        var rows = data && data.rows || [];
+        var body = el('div', {}, [
+            metrics([
+                { label: 'позиций в пути', value: data ? data.total : 0 },
+                { label: 'активных', value: data ? data.active : 0 },
+                { label: 'завершено', value: data ? data.done : 0 }
+            ])
+        ]);
+
+        if (!rows.length) {
+            body.appendChild(el('div', { class: 'atex-db-empty', text: 'Нет данных по позициям заказа' }));
+            return card('Путь продукции', 0, body, 'atex-db-card-wide');
+        }
+
+        var list = el('div', { class: 'atex-db-flow-list' });
+        rows.slice(0, 8).forEach(function(row) {
+            var stages = el('div', { class: 'atex-db-flow-stages' });
+            row.stages.forEach(function(st) {
+                stages.appendChild(el('div', {
+                    class: 'atex-db-flow-stage atex-db-flow-stage-' + st.state,
+                    title: st.detail || st.status
+                }, [
+                    el('span', { class: 'atex-db-flow-stage-label', text: st.label }),
+                    el('span', { class: 'atex-db-flow-stage-status', text: st.status }),
+                    st.detail ? el('span', { class: 'atex-db-flow-stage-detail', text: st.detail }) : null
+                ]));
+            });
+
+            list.appendChild(el('article', { class: 'atex-db-flow-row' }, [
+                el('div', { class: 'atex-db-flow-row-head' }, [
+                    el('div', {}, [
+                        el('div', { class: 'atex-db-flow-order', text: row.order }),
+                        el('div', { class: 'atex-db-flow-product', text: row.product })
+                    ]),
+                    el('span', { class: 'atex-db-flow-progress', text: row.progress + '%' })
+                ]),
+                stages
+            ]));
+        });
+        body.appendChild(list);
+        if (rows.length > 8) {
+            body.appendChild(el('div', { class: 'atex-db-flow-more', text: 'Показаны 8 из ' + rows.length }));
+        }
+
+        return card('Путь продукции', data.total, body, 'atex-db-card-wide');
+    };
+
     AtexDashboards.prototype.cardOrders = function(count, data) {
+        // Завершённые/отменённые заказы на дашборд не грузятся (только активные),
+        // поэтому их счётчики берём из отдельного отчёта orders_status_count.
+        var term = terminalOrderCounts(this.statusCounts || []);
         return card('Заказы по статусам', count, el('div', {}, [
-            bars(data.rows, function(r) { return r.count; })
+            metrics([
+                { label: 'завершено', value: term.done },
+                { label: 'отменено', value: term.cancelled }
+            ]),
+            el('h3', { class: 'atex-db-subhead', text: 'Активные по статусам' }),
+            ordersBars(data.rows)
         ]));
     };
 
@@ -413,15 +669,16 @@
     };
 
     AtexDashboards.prototype.cardMaterials = function(count, data) {
+        // #3073: показываем только остаток сырья (без «получено»), отсортированный
+        // по убыванию (сортировка — в agg.materialStock).
         return card('Остатки сырья', count, el('div', {}, [
             metrics([
-                { label: 'получено, м²', value: data.totalReceived },
                 { label: 'остаток, м²', value: data.totalRemainder }
             ]),
-            el('h3', { class: 'atex-db-subhead', text: 'По видам сырья (остаток, м²)' }),
+            el('h3', { class: 'atex-db-subhead', text: 'По видам сырья (остаток, м² — лог. шкала)', title: 'Длина бара — по логарифмической шкале: видно соотношение и маленьких остатков рядом с огромными. Число справа — точный остаток.' }),
             bars(data.rows, function(r) { return r.remainder; }, function(r) {
-                return fmt(r.remainder) + ' / ' + fmt(r.received) + ' м²';
-            })
+                return fmt(r.remainder) + ' м²';
+            }, { logScale: true })
         ]));
     };
 
@@ -450,12 +707,32 @@
         });
     };
 
+    // Поле «дата» с подписью для диапазона дат (#3073). При изменении меняет фильтр
+    // и перестраивает сводки из уже загруженных строк, без повторного запроса.
+    AtexDashboards.prototype.dateField = function(labelText, key) {
+        var self = this;
+        var input = el('input', { type: 'date', class: 'atex-db-date', value: this.filter[key] || '', 'aria-label': 'Срок выполнения ' + labelText });
+        input.addEventListener('change', function() {
+            self.filter[key] = input.value || '';
+            self.applyFilter();
+        });
+        return el('label', { class: 'atex-db-filter' }, [
+            el('span', { class: 'atex-db-filter-label', text: labelText }),
+            input
+        ]);
+    };
+
     AtexDashboards.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
         var toolbar = el('div', { class: 'atex-db-toolbar' }, [
             el('h1', { class: 'atex-db-heading', text: 'Дашборды и отчёты' })
         ]);
+        // #3073: диапазон дат по сроку выполнения. Пусто → только актуальные заказы.
+        toolbar.appendChild(el('div', { class: 'atex-db-range', title: 'Срок выполнения заказа' }, [
+            this.dateField('С', 'from'),
+            this.dateField('По', 'to')
+        ]));
         var refreshBtn = el('button', { class: 'atex-db-btn', type: 'button', text: 'Обновить' });
         refreshBtn.addEventListener('click', function() { self.refresh(); });
         toolbar.appendChild(refreshBtn);
@@ -465,8 +742,7 @@
         this.gridEl.appendChild(el('div', { class: 'atex-db-loading', text: 'Загрузка сводок…' }));
         this.root.appendChild(this.gridEl);
 
-        return this.loadMetadata()
-            .then(function() { return self.refresh(); })
+        return this.refresh()
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 

@@ -3,8 +3,8 @@
 # ============================================
 
 param(
-    [string]$Login = "api",
-    [string]$Password = "",
+    [string]$Token,
+    [string]$XsrfToken,
     [string]$BaseUrl = "https://ideav.ru",
     [string]$DbName = "perelidoz",
     [string]$LogPath = "api_log.txt",
@@ -12,6 +12,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-IntegramEnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($target in @(
+        [System.EnvironmentVariableTarget]::Process,
+        [System.EnvironmentVariableTarget]::User,
+        [System.EnvironmentVariableTarget]::Machine
+    )) {
+        try {
+            $value = [Environment]::GetEnvironmentVariable($Name, $target)
+        } catch {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return ""
+}
+
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    $Token = Get-IntegramEnvironmentValue -Name "INTEGRAM_TOKEN"
+}
+if ([string]::IsNullOrWhiteSpace($XsrfToken)) {
+    $XsrfToken = Get-IntegramEnvironmentValue -Name "INTEGRAM_XSRF"
+}
 
 function Write-Log {
     param([string]$Message)
@@ -42,24 +69,32 @@ function Invoke-ApiRequest {
         $body[$key] = $FormData[$key]
     }
 
+    $headers = @{}
     if ($XsrfToken) {
         $body["_xsrf"] = $XsrfToken
     }
     if ($AuthToken) {
         $body["token"] = $AuthToken
+        # issue #3000: токен доходит до сервера только заголовком X-Authorization.
+        # Живой Integram игнорирует cookie, заданный вручную через -Headers, и
+        # строку запроса ?token= (см. atex#44), поэтому без этого заголовка
+        # сервер отвечает 401 "No authorization token provided".
+        $headers["X-Authorization"] = $AuthToken
     }
 
     Write-Log "Request: $Method $url"
     if ($body.Count -gt 0) {
-        $bodyString = ($body.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
+        $bodyString = ($body.GetEnumerator() |
+            Where-Object { $_.Key -ne "token" -and $_.Key -ne "_xsrf" } |
+            Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
         Write-Log "Body: $bodyString"
     }
 
     try {
         if ($Method -eq "POST") {
-            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded" -Headers $headers
         } else {
-            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body
+            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body -Headers $headers
         }
         Write-Log "Response: $($response | ConvertTo-Json -Compress -Depth 20)"
         return $response
@@ -73,6 +108,58 @@ function Invoke-ApiRequest {
         }
         throw
     }
+}
+
+function Get-XsrfByToken {
+    param([Parameter(Mandatory = $true)][string]$TokenValue)
+
+    $url = "$BaseUrl/$DbName/xsrf"
+    if ($url -notmatch "\?") {
+        $url = "$url`?JSON=1"
+    } elseif ($url -notmatch "(^|[?&])JSON=") {
+        $url = "$url&JSON=1"
+    }
+
+    Write-Log "Request: GET $url"
+    Write-Log "Headers: X-Authorization=***; Cookie: idb_$DbName=***"
+    try {
+        # issue #3000: токен в заголовке X-Authorization — транспорт, который
+        # сервер реально читает; cookie дублируем для совместимости.
+        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ "X-Authorization" = $TokenValue; Cookie = "idb_$DbName=$TokenValue" }
+    } catch {
+        Write-Log "ERROR: $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            $reader.BaseStream.Position = 0
+            $reader.DiscardBufferedData()
+            Write-Log "Response Body: $($reader.ReadToEnd())"
+        }
+        throw
+    }
+}
+
+function Initialize-TokenSession {
+    Write-Log "1. Token connection..."
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        throw "Pass -Token or set INTEGRAM_TOKEN in the Process/User/Machine scope. POST /auth with login/password is not used by this script."
+    }
+
+    $script:AuthToken = $Token
+    if (-not [string]::IsNullOrWhiteSpace($XsrfToken)) {
+        $script:XsrfToken = $XsrfToken
+        Write-Log "   OK XSRF token supplied"
+        return
+    }
+
+    $xsrfResponse = Get-XsrfByToken -TokenValue $Token
+    if (-not $xsrfResponse -or -not $xsrfResponse._xsrf) {
+        throw "Failed to get _xsrf by token from $BaseUrl/$DbName/xsrf"
+    }
+    $script:XsrfToken = $xsrfResponse._xsrf
+    if ($xsrfResponse.token) { $script:AuthToken = $xsrfResponse.token }
+    Write-Log "   OK Token connection successful"
+    Write-Log "   User ID: $($xsrfResponse.id)"
 }
 
 function New-IntegramType {
@@ -171,17 +258,7 @@ Write-Log "Base URL: $BaseUrl"
 Write-Log "========================================"
 
 Write-Log ""
-Write-Log "1. Authorization..."
-
-$authResponse = Invoke-ApiRequest -Endpoint "auth" -FormData @{ login = $Login; pwd = $Password } -AuthToken $null -XsrfToken $null
-if (-not $authResponse -or -not $authResponse.token -or -not $authResponse._xsrf) {
-    throw "Authorization failed"
-}
-
-$script:XsrfToken = $authResponse._xsrf
-$script:AuthToken = $authResponse.token
-Write-Log "   OK Authorization successful"
-Write-Log "   User ID: $($authResponse.id)"
+Initialize-TokenSession
 
 $tableDefinitions = [ordered]@{
     Project = @{

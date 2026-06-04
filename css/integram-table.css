@@ -856,6 +856,20 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     z-index: 100;
     letter-spacing: 0.25px;
     transition: opacity 0.2s ease;
+    display: flex;
+    align-items: center;
+}
+
+/*
+ * Restore the space before the total-count number (issue #3108).
+ * Making .scroll-counter a flex container (#3103) turned the trailing
+ * text node "Показано N из " and the <span> counter into separate flex
+ * items, collapsing the literal space between them ("из258"). A small
+ * left margin re-introduces that visual gap without breaking the
+ * vertical centering added in #3103.
+ */
+.scroll-counter-total {
+    margin-left: 0.25em;
 }
 
 /* Make semi-transparent when table rows are beneath it (issue #1922) */

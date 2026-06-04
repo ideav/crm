@@ -12,7 +12,7 @@
 // `_m_new/{Расход сырья}` с `up={резкаId}` (и `_m_set` остатка партии); событие —
 // `_m_new/{Событие смены}`; список «мои резки» — `object/{Производственная резка}/`
 // с фильтром по слиттеру/статусу. ID таблиц и реквизитов не хардкодятся: они
-// берутся по именам из `GET /{db}/metadata?JSON` (WORKSPACE_DEVELOPMENT_GUIDE.md,
+// берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
 // разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
 // в объём этой задачи не входит.
 //
@@ -45,7 +45,9 @@
         cut: 'Производственная резка',
         consumption: 'Расход сырья',
         event: 'Событие смены',
-        batch: 'Партия сырья'
+        batch: 'Партия сырья',
+        material: 'Вид сырья',
+        cutType: 'Тип резки'
     };
     var CUT_REQ = {
         slitter: 'Слиттер',
@@ -57,11 +59,14 @@
         counterEnd: 'Счётчик кон.',
         meterage: 'Погонаж факт, м',
         defect: 'Брак, м²',
+        defectM: 'Брак, м',
+        defectPhoto: 'Фото брака',
         notes: 'Примечания'
     };
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
     var EVENT_REQ = { type: 'Тип события', cut: 'Производственная резка', user: 'Пользователь', value: 'Значение', notes: 'Примечания' };
-    var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²' };
+    var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²', remainderM: 'Остаток, м' };
+    var MATERIAL_REQ = { width: 'Ширина, мм' };
 
     // Статусы резки по дизайн-спеке atex (§3.5): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'Наладка', 'В работе', 'Завершён'];
@@ -155,6 +160,19 @@
         return round3(toNumber(remainder) + toNumber(restored));
     }
 
+    // Брак в м²: метры брака × ширина сырья (мм → м). Любой нуль → 0.
+    function defectM2(defectMeters, widthMm) {
+        var m = toNumber(defectMeters);
+        var w = toNumber(widthMm);
+        if (m <= 0 || w <= 0) return 0;
+        return round3(m * (w / 1000));
+    }
+
+    // Ключ multipart-поля для файлового реквизита: 't' + reqId (или '' если нет).
+    function photoFieldKey(reqId) {
+        return reqId ? ('t' + reqId) : '';
+    }
+
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
@@ -178,7 +196,9 @@
         pickFifoBatch: pickFifoBatch,
         applyConsumption: applyConsumption,
         restoreConsumption: restoreConsumption,
-        formatDateTime: formatDateTime
+        formatDateTime: formatDateTime,
+        defectM2: defectM2,
+        photoFieldKey: photoFieldKey
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -225,10 +245,12 @@
 
     function AtexSlitter(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
         this.meta = { cut: null, consumption: null, event: null, batch: null };
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder }]
+        this.materialWidths = {}; // { materialId: widthMm }
+        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter, cutType }]
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
@@ -250,6 +272,38 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexSlitter.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexSlitter.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-sl',
+                inputClass: 'atex-sl-input',
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var nativeSelect = el('select', { class: 'atex-sl-input' });
+        nativeSelect.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            nativeSelect.appendChild(o);
+        });
+        nativeSelect.addEventListener('change', function() { opts.onChange(nativeSelect.value); });
+        return nativeSelect;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -274,11 +328,28 @@
         });
     };
 
+    // Multipart-POST для файловых реквизитов (паттерн платформы, issue #1310):
+    // тело FormData с _xsrf и t{reqId}=<File>. Возвращает разобранный JSON.
+    AtexSlitter.prototype.postFile = function(path, reqKey, file) {
+        var fd = new FormData();
+        fd.append('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
+        if (reqKey && file) fd.append(reqKey, file);
+        return fetch(this.url(path), { method: 'POST', credentials: 'same-origin', body: fd })
+            .then(function(resp) {
+                return resp.text().then(function(text) {
+                    var result;
+                    try { result = JSON.parse(text); } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
+                    if (result && (result.error || result.err)) throw new Error(result.error || result.err);
+                    return result;
+                });
+            });
+    };
+
     // ── Загрузка метаданных и справочников ──
 
     AtexSlitter.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {
@@ -289,6 +360,8 @@
             self.meta.consumption = byName(TABLE.consumption);
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
+            self.meta.material = byName(TABLE.material);
+            self.meta.cutType = byName(TABLE.cutType);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
         });
@@ -301,15 +374,47 @@
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             var dateIdx = colIndex(meta, BATCH_REQ.date);
             var remIdx = colIndex(meta, BATCH_REQ.remainder);
+            var remMIdx = colIndex(meta, BATCH_REQ.remainderM);
             self.batches = (rows || []).map(function(r) {
                 var row = r.r || [];
                 return {
                     id: String(r.i),
                     label: row[0] || ('Партия #' + r.i),
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
-                    remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0
+                    remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
+                    remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0
                 };
             });
+        });
+    };
+
+    // Карта ширин видов сырья: { id: Ширина,мм }. Для пересчёта брака,м → м².
+    AtexSlitter.prototype.loadMaterialWidths = function() {
+        var self = this;
+        var meta = this.meta.material;
+        if (!meta) { this.materialWidths = {}; return Promise.resolve(); }
+        var wIdx = colIndex(meta, MATERIAL_REQ.width);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(r) {
+                var row = r.r || [];
+                map[String(r.i)] = wIdx >= 0 ? core.toNumber(row[wIdx]) : 0;
+            });
+            self.materialWidths = map;
+        });
+    };
+
+    // Ширина сырья текущей резки: Тип резки → Вид сырья → Ширина,мм.
+    AtexSlitter.prototype.resolveCutWidth = function() {
+        var self = this;
+        var cut = this.currentCut;
+        var typeMeta = this.meta.cutType;
+        if (!cut || !cut.cutTypeId || !typeMeta) { if (cut) cut.materialWidthMm = 0; return Promise.resolve(); }
+        var matIdx = colIndex(typeMeta, 'Вид сырья');
+        return this.getJson('object/' + typeMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cut.cutTypeId) + '&LIMIT=0,1').then(function(rows) {
+            var rec = (rows || [])[0];
+            var matId = rec && matIdx >= 0 ? parseRef((rec.r || [])[matIdx]).id : null;
+            cut.materialWidthMm = matId ? (self.materialWidths[String(matId)] || 0) : 0;
         });
     };
 
@@ -348,13 +453,18 @@
                 label: 'Резка №' + (row[0] || rec.i),
                 slitter: parseRef(val(CUT_REQ.slitter)).label,
                 cutType: parseRef(val(CUT_REQ.cutType)).label,
+                cutTypeId: parseRef(val(CUT_REQ.cutType)).id,
                 batch: parseRef(val(CUT_REQ.batch)).label,
+                batchId: parseRef(val(CUT_REQ.batch)).id,
+                savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 planDate: val(CUT_REQ.planDate),
                 status: core.normalizeStatus(val(CUT_REQ.status)),
                 counterStart: val(CUT_REQ.counterStart),
                 counterEnd: val(CUT_REQ.counterEnd),
                 meterage: val(CUT_REQ.meterage),
                 defect: val(CUT_REQ.defect),
+                defectM: val(CUT_REQ.defectM),
+                defectPhoto: val(CUT_REQ.defectPhoto),
                 notes: val(CUT_REQ.notes)
             };
         });
@@ -555,9 +665,31 @@
         meterField.appendChild(hint);
         grid.appendChild(meterField);
 
-        var defect = numInput(cut.defect, '0');
-        defect.addEventListener('input', function() { cut.defect = defect.value; });
-        grid.appendChild(field('Брак, м²', defect));
+        var defectM = numInput(cut.defectM, '0');
+        var defectHint = el('div', { class: 'atex-sl-hint', text: '' });
+        function refreshDefectM2() {
+            var m2 = core.defectM2(cut.defectM, cut.materialWidthMm);
+            cut.defect = m2 ? String(m2) : '';
+            defectHint.textContent = (core.toNumber(cut.defectM) > 0 && cut.materialWidthMm > 0)
+                ? ('= ' + m2 + ' м² (ширина ' + cut.materialWidthMm + ' мм)')
+                : (cut.materialWidthMm > 0 ? '' : 'ширина сырья не определена — м² не посчитать');
+        }
+        defectM.addEventListener('input', function() { cut.defectM = defectM.value; refreshDefectM2(); });
+        refreshDefectM2();
+        var defectField = field('Брак, м', defectM);
+        defectField.appendChild(defectHint);
+        grid.appendChild(defectField);
+
+        // Фото брака: выбор файла (камера на планшете) → multipart в реквизит FILE.
+        var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
+        var photoBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Фото брака' });
+        var photoStatus = el('span', { class: 'atex-sl-hint', text: cut.defectPhoto ? 'фото загружено' : '' });
+        photoBtn.addEventListener('click', function() { photoInput.click(); });
+        photoInput.addEventListener('change', function() {
+            var file = photoInput.files && photoInput.files[0];
+            if (file) self.uploadDefectPhoto(file, photoStatus);
+        });
+        grid.appendChild(field('Фото брака', el('div', { class: 'atex-sl-photo' }, [photoBtn, photoStatus, photoInput])));
 
         section.appendChild(grid);
 
@@ -612,15 +744,17 @@
         var self = this;
         var card = el('div', { class: 'atex-sl-row' });
 
-        var sel = el('select', { class: 'atex-sl-input' });
-        sel.appendChild(el('option', { value: '', text: '— партия сырья —' }));
-        core.sortFifo(this.batches).forEach(function(b) {
-            var o = el('option', { value: b.id, text: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' });
-            if (String(row.batchId) === String(b.id)) o.selected = true;
-            sel.appendChild(o);
+        var batchOptions = core.sortFifo(this.batches).map(function(b) {
+            return { id: b.id, label: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' };
         });
-        sel.addEventListener('change', function() { row.batchId = sel.value || null; });
-        card.appendChild(field('Партия сырья', sel));
+        var batchRef = this.refSelect({
+            options: batchOptions,
+            value: row.batchId,
+            placeholder: '— партия сырья —',
+            reqId: reqIdByName(this.meta.consumption, CONS_REQ.batch),
+            onChange: function(value) { row.batchId = value || null; }
+        });
+        card.appendChild(field('Партия сырья', batchRef));
 
         var amount = numInput(row.amount, '0');
         amount.addEventListener('input', function() { row.amount = amount.value; });
@@ -695,7 +829,9 @@
         set(CUT_REQ.counterStart, num(cut.counterStart));
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
         set(CUT_REQ.meterage, num(cut.meterage));
-        set(CUT_REQ.defect, num(cut.defect));
+        set(CUT_REQ.defectM, num(cut.defectM));
+        var defM2 = core.defectM2(cut.defectM, cut.materialWidthMm);
+        if (defM2 > 0) set(CUT_REQ.defect, defM2);
         set(CUT_REQ.notes, cut.notes || '');
         return fields;
     };
@@ -726,12 +862,59 @@
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         this.setBusy(true);
+        var meterageNow = core.toNumber(cut.meterage);
+        var meterageWas = core.toNumber(cut.savedMeterage);
+        var delta = meterageNow - meterageWas; // сколько ещё списать с остатка,м
+        var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
+        var batchMeta = this.meta.batch;
+
+        // Порядок «резка → остаток партии» безопасен для повтора: cut.savedMeterage
+        // двигаем только после успеха всей цепочки, поэтому при сбое второго POST
+        // повторное сохранение применит дельту заново без двойного списания.
         this.post('_m_set/' + cut.id + '?JSON', this.cutFields(cut)).then(function() {
+            // Списываем дельту погонажа с остатка,м партии резки.
+            if (!batch || !batchMeta || delta === 0) return null;
+            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
+            if (!remReq) return null;
+            var newRem = delta > 0
+                ? core.applyConsumption(batch.remainderM, delta)
+                : core.restoreConsumption(batch.remainderM, -delta);
+            var bf = {};
+            bf['t' + remReq] = newRem;
+            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
+                batch.remainderM = newRem;
+            });
+        }).then(function() {
+            cut.savedMeterage = meterageNow;
+            return self.loadBatches();
+        }).then(function() {
             self.setBusy(false);
-            self.notify('Показания сохранены', 'success');
+            self.notify('Показания сохранены; остаток партии (м) обновлён', 'success');
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');
+        });
+    };
+
+    AtexSlitter.prototype.uploadDefectPhoto = function(file, statusEl) {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+        var reqId = reqIdByName(this.meta.cut, CUT_REQ.defectPhoto);
+        var key = core.photoFieldKey(reqId);
+        if (!key) { this.notify('Реквизит «Фото брака» не найден', 'error'); return; }
+        this.setBusy(true);
+        if (statusEl) statusEl.textContent = 'загрузка…';
+        this.postFile('_m_set/' + cut.id + '?JSON', key, file).then(function() {
+            self.setBusy(false);
+            // флаг «фото есть» (серверное значение подтянется при следующей загрузке резки)
+            cut.defectPhoto = '1';
+            if (statusEl) statusEl.textContent = 'фото загружено';
+            self.notify('Фото брака загружено', 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            if (statusEl) statusEl.textContent = 'ошибка';
+            self.notify('Ошибка загрузки фото: ' + err.message, 'error');
         });
     };
 
@@ -872,17 +1055,20 @@
         var self = this;
         this.setBusy(true);
         this.currentCutId = String(cutId);
-        Promise.all([
-            this.loadCut(cutId),
-            this.loadConsumptions(cutId),
-            this.loadEvents(cutId)
-        ]).then(function() {
-            self.setBusy(false);
-            self.render();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось открыть резку: ' + err.message, 'error');
-        });
+        this.loadCut(cutId)
+            .then(function() { return self.resolveCutWidth(); })
+            .then(function() {
+                return Promise.all([
+                    self.loadConsumptions(cutId),
+                    self.loadEvents(cutId)
+                ]);
+            }).then(function() {
+                self.setBusy(false);
+                self.render();
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Не удалось открыть резку: ' + err.message, 'error');
+            });
     };
 
     AtexSlitter.prototype.setBusy = function(on) {
@@ -939,7 +1125,7 @@
         this.mainEl.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadBatches(), self.loadCuts()]); })
+            .then(function() { return Promise.all([self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

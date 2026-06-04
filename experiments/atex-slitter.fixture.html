@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- Браузерный стенд для рабочего места «Пульт слиттера» (#2915).
-     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Мокает fetch: metadata, object/{id} и команды _m_*.
      Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
 <html lang="ru">
 <head>
@@ -83,7 +83,7 @@ window.fetch = function(url, opts) {
     function json(data) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
-    if (/\/metadata\?JSON/.test(u)) return json(META);
+    if (/\/metadata(?:$|\?)/.test(u)) return json(META);
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj) {
         var tid = mObj[1];

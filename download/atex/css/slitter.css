@@ -3,17 +3,41 @@
    остальными рабочими местами в main.html. Планшетная раскладка оператора. */
 
 .atex-sl {
-    --sl-border: #d9dee5;
-    --sl-bg: #ffffff;
-    --sl-muted: #6b7280;
+    --sl-border: var(--input-border, #d9dee5);
+    --sl-border-soft: var(--border-color, #eef1f5);
+    --sl-bg: var(--input-bg, #ffffff);
+    --sl-surface: var(--bg-secondary, #f8fafc);
+    --sl-muted: var(--text-secondary, #6b7280);
     --sl-accent: var(--atex-navy, #134174);
     --sl-accent-d: var(--atex-navy-d, #0e3158);
-    --sl-warn: #b91c1c;
-    --sl-ok: #15803d;
-    color: #1f2933;
+    --sl-active-bg: #e0ecff;
+    --sl-badge-bg: var(--bg-secondary, #e2e8f0);
+    --sl-warning-bg: #fef9c3;
+    --sl-warning-text: #854d0e;
+    --sl-info-bg: #dbeafe;
+    --sl-info-text: var(--sl-accent-d);
+    --sl-success-bg: var(--color-success-bg, #dcfce7);
+    --sl-success-border: var(--color-success-border, #bbf7d0);
+    --sl-success-hover-bg: var(--color-success-bg, #d1fae5);
+    --sl-add-border: #bfdbfe;
+    --sl-danger-border: #fecaca;
+    --sl-warn: var(--color-error, #b91c1c);
+    --sl-ok: var(--color-success, #15803d);
+    color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-sl {
+    --sl-active-bg: rgba(96, 165, 250, 0.16);
+    --sl-warning-bg: rgba(251, 191, 36, 0.16);
+    --sl-warning-text: #fbbf24;
+    --sl-info-bg: rgba(96, 165, 250, 0.16);
+    --sl-info-text: #93c5fd;
+    --sl-add-border: rgba(96, 165, 250, 0.45);
+    --sl-danger-border: rgba(248, 113, 113, 0.45);
+}
+
 .atex-sl *,
 .atex-sl *::before,
 .atex-sl *::after { box-sizing: border-box; }
@@ -47,7 +71,7 @@
 .atex-sl-sidebar-head {
     padding: 12px 14px;
     border-bottom: 1px solid var(--sl-border);
-    background: #f8fafc;
+    background: var(--sl-surface);
 }
 .atex-sl-sidebar-head h2 { margin: 0 0 8px; font-size: 15px; }
 .atex-sl-filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sl-muted); cursor: pointer; }
@@ -60,14 +84,14 @@
     text-align: left;
     padding: 12px 14px;
     border: none;
-    border-bottom: 1px solid #eef1f5;
+    border-bottom: 1px solid var(--sl-border-soft);
     background: transparent;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-sl-cut-item:hover { background: #f1f5f9; }
-.atex-sl-cut-item.is-active { background: #e0ecff; }
+.atex-sl-cut-item:hover { background: var(--sl-surface); }
+.atex-sl-cut-item.is-active { background: var(--sl-active-bg); }
 .atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .atex-sl-cut-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-sub { font-size: 12px; color: var(--sl-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -91,14 +115,14 @@
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
-    background: #e2e8f0;
-    color: #334155;
+    background: var(--sl-badge-bg);
+    color: var(--sl-muted);
     white-space: nowrap;
 }
-.atex-sl-badge-wait { background: #f1f5f9; color: #475569; }
-.atex-sl-badge-setup { background: #fef9c3; color: #854d0e; }
-.atex-sl-badge-run { background: #dbeafe; color: var(--sl-accent-d); }
-.atex-sl-badge-done { background: #dcfce7; color: var(--sl-ok); }
+.atex-sl-badge-wait { background: var(--sl-surface); color: var(--sl-muted); }
+.atex-sl-badge-setup { background: var(--sl-warning-bg); color: var(--sl-warning-text); }
+.atex-sl-badge-run { background: var(--sl-info-bg); color: var(--sl-info-text); }
+.atex-sl-badge-done { background: var(--sl-success-bg); color: var(--sl-ok); }
 
 /* Секции */
 .atex-sl-section {
@@ -106,7 +130,7 @@
     border-radius: 8px;
     padding: 14px 16px;
     margin-bottom: 14px;
-    background: #fff;
+    background: var(--sl-bg);
 }
 .atex-sl-section-title { margin: 0 0 12px; font-size: 15px; }
 .atex-sl-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
@@ -117,13 +141,13 @@
     padding: 8px 16px;
     border: 1px solid var(--sl-border);
     border-radius: 999px;
-    background: #fff;
+    background: var(--sl-bg);
     cursor: pointer;
     font: inherit;
     color: var(--sl-muted);
 }
-.atex-sl-step:hover { background: #f1f5f9; }
-.atex-sl-step.is-past { background: #eef6ef; border-color: #bbf7d0; color: var(--sl-ok); }
+.atex-sl-step:hover { background: var(--sl-surface); }
+.atex-sl-step.is-past { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); }
 .atex-sl-step.is-current { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; font-weight: 600; }
 
 /* Сетка полей */
@@ -133,14 +157,15 @@
     gap: 12px;
 }
 .atex-sl-field { display: flex; flex-direction: column; gap: 5px; position: relative; }
-.atex-sl-label { font-weight: 600; color: #374151; font-size: 13px; }
+.atex-sl-label { font-weight: 600; color: var(--text-primary, #374151); font-size: 13px; }
 .atex-sl-input {
     width: 100%;
     padding: 10px 11px;
     border: 1px solid var(--sl-border);
     border-radius: 6px;
     font: inherit;
-    background: #fff;
+    background: var(--sl-bg);
+    color: var(--text-primary, #1f2933);
 }
 .atex-sl-input:focus {
     outline: none;
@@ -167,10 +192,10 @@
     grid-template-columns: 2fr 1fr auto;
     gap: 12px;
     align-items: end;
-    border: 1px solid #eef1f5;
+    border: 1px solid var(--sl-border-soft);
     border-radius: 8px;
     padding: 12px;
-    background: #fafbfc;
+    background: var(--sl-surface);
 }
 @media (max-width: 560px) {
     .atex-sl-row { grid-template-columns: 1fr; }
@@ -198,11 +223,11 @@
     border-radius: 6px;
     font-size: 13px;
 }
-.atex-sl-event:nth-child(odd) { background: #f8fafc; }
+.atex-sl-event:nth-child(odd) { background: var(--sl-surface); }
 .atex-sl-event-when { color: var(--sl-muted); white-space: nowrap; }
 .atex-sl-event-type { font-weight: 600; }
 .atex-sl-event-val { color: var(--sl-accent-d); }
-.atex-sl-event-note { color: #475569; overflow: hidden; text-overflow: ellipsis; }
+.atex-sl-event-note { color: var(--text-secondary, #475569); overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 680px) {
     .atex-sl-event { grid-template-columns: 1fr 1fr; }
 }
@@ -211,25 +236,27 @@
 .atex-sl-btn {
     border: 1px solid var(--sl-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--sl-bg);
     padding: 10px 16px;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-sl-btn:hover { background: #f1f5f9; }
+.atex-sl-btn:hover { background: var(--sl-surface); }
 .atex-sl-btn-primary { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; }
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
-.atex-sl-btn-advance { background: #ecfdf5; border-color: #86efac; color: var(--sl-ok); font-weight: 600; }
-.atex-sl-btn-advance:hover { background: #d1fae5; }
-.atex-sl-btn-add { color: var(--sl-accent); border-color: #bfdbfe; }
+.atex-sl-btn-advance { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); font-weight: 600; }
+.atex-sl-btn-advance:hover { background: var(--sl-success-hover-bg); }
+.atex-sl-btn-add { color: var(--sl-accent); border-color: var(--sl-add-border); }
 .atex-sl-btn-del {
     padding: 8px 13px;
     line-height: 1;
     font-size: 18px;
     color: var(--sl-warn);
-    border-color: #fecaca;
+    border-color: var(--sl-danger-border);
 }
+.atex-sl-btn-secondary { background: var(--sl-surface); }
+.atex-sl-photo { display: flex; align-items: center; gap: 8px; }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-sl-toast {

@@ -1,0 +1,55 @@
+{
+  "_comment": "Пункты меню для тестовых пользователей проекта atex. Используется скриптом docs/create_atex_menu.ps1 после docs/create_roles_users.ps1: записи создаются в системной таблице Меню (151) как дочерние записи роли (up=<role_id>). Поле href хранит относительный адрес рабочего места внутри базы: orders -> /atex/orders.",
+  "roles": [
+    {
+      "role": "Администратор",
+      "menus": [
+        { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" },
+        { "name": "Расчёт резки", "href": "cut-planning", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
+        { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" },
+        { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
+        { "name": "Пульт слиттера", "href": "slitter", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
+        { "name": "Пульт втулкореза", "href": "sleeve-cutter", "icon": "<i class=\"pi pi-cog\"></i>" },
+        { "name": "Карта раскроя", "href": "cut-map", "icon": "<i class=\"pi pi-map\"></i>" },
+        { "name": "Склад готовой продукции", "href": "warehouse", "icon": "<i class=\"pi pi-box\"></i>" },
+        { "name": "Дашборды и отчёты", "href": "dashboards", "icon": "<i class=\"pi pi-chart-bar\"></i>" },
+        { "name": "Клиентский портал", "href": "portal", "icon": "<i class=\"pi pi-globe\"></i>" }
+      ]
+    },
+    {
+      "role": "Менеджер",
+      "menus": [
+        { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" }
+      ]
+    },
+    {
+      "role": "Диспетчер",
+      "menus": [
+        { "name": "Расчёт резки", "href": "cut-planning", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
+        { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" }
+      ]
+    },
+    {
+      "role": "Оператор",
+      "menus": [
+        { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
+        { "name": "Пульт слиттера", "href": "slitter", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
+        { "name": "Пульт втулкореза", "href": "sleeve-cutter", "icon": "<i class=\"pi pi-cog\"></i>" },
+        { "name": "Карта раскроя", "href": "cut-map", "icon": "<i class=\"pi pi-map\"></i>" },
+        { "name": "Склад готовой продукции", "href": "warehouse", "icon": "<i class=\"pi pi-box\"></i>" }
+      ]
+    },
+    {
+      "role": "Руководитель",
+      "menus": [
+        { "name": "Дашборды и отчёты", "href": "dashboards", "icon": "<i class=\"pi pi-chart-bar\"></i>" }
+      ]
+    },
+    {
+      "role": "Клиент",
+      "menus": [
+        { "name": "Клиентский портал", "href": "portal", "icon": "<i class=\"pi pi-globe\"></i>" }
+      ]
+    }
+  ]
+}

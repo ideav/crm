@@ -10,7 +10,8 @@
 - структура из [`docs/atex_metadata.json`](atex_metadata.json);
 - роли и пользователи из [`docs/atex_roles_users.json`](atex_roles_users.json);
 - шаблоны из `templates/atex/` и ассеты из `download/atex/`;
-- пункты меню на соответствующие рабочие места.
+- пункты меню из [`docs/atex_menu.json`](atex_menu.json), созданные
+  [`docs/create_atex_menu.ps1`](create_atex_menu.ps1).
 
 ## Тестовые учётные записи
 
@@ -22,7 +23,7 @@
 | Менеджер | `manager / manager_atex_2026` | `templates/atex/orders.html` |
 | Диспетчер | `dispatcher / dispatcher_atex_2026` | `templates/atex/cut-calc.html`, `templates/atex/production-planning.html` |
 | Оператор | `operator / operator_atex_2026` | `templates/atex/slitter.html`, `templates/atex/sleeve-cutter.html`, `templates/atex/cut-map.html` |
-| Кладовщик | `operator / operator_atex_2026` или `admin / admin_atex_2026`, если меню склада выдано только администратору | `templates/atex/intake.html`, `templates/atex/warehouse.html` |
+| Кладовщик | `operator / operator_atex_2026` | `templates/atex/intake.html`, `templates/atex/warehouse.html` |
 | Руководитель | `director / director_atex_2026` | `templates/atex/dashboards.html` |
 | Клиент | `client / client_atex_2026` | `templates/atex/portal.html` |
 

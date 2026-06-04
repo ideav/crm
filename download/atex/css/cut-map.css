@@ -3,22 +3,37 @@
    с остальными рабочими местами в main.html. */
 
 .atex-cm {
-    --cm-border: #d9dee5;
-    --cm-bg: #ffffff;
-    --cm-muted: #6b7280;
+    --cm-border: var(--input-border, #d9dee5);
+    --cm-border-soft: var(--border-color, #eef1f5);
+    --cm-bg: var(--input-bg, #ffffff);
+    --cm-surface: var(--bg-secondary, #f8fafc);
+    --cm-muted: var(--text-secondary, #6b7280);
     --cm-accent: var(--atex-navy, #134174);
-    --cm-warn: #b91c1c;
-    --cm-ok: #15803d;
+    --cm-active-bg: #e0ecff;
+    --cm-status-bg: #eef2f7;
+    --cm-warn: var(--color-error, #b91c1c);
+    --cm-ok: var(--color-success, #15803d);
     /* Цвета сегментов по назначению полосы */
     --cm-order: var(--atex-navy, #134174);
     --cm-stock: #0d9488;
     --cm-waste: #b45309;
-    --cm-other: #6b7280;
+    --cm-other: var(--text-secondary, #6b7280);
     --cm-remainder: #cbd5e1;
-    color: #1f2933;
+    --cm-bar-stripe-a: #f1f5f9;
+    --cm-bar-stripe-b: #e2e8f0;
+    color: var(--text-primary, #1f2933);
     font-size: 14px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-cm {
+    --cm-active-bg: rgba(96, 165, 250, 0.16);
+    --cm-status-bg: rgba(148, 163, 184, 0.14);
+    --cm-remainder: #475569;
+    --cm-bar-stripe-a: rgba(148, 163, 184, 0.16);
+    --cm-bar-stripe-b: rgba(148, 163, 184, 0.28);
+}
+
 .atex-cm *,
 .atex-cm *::before,
 .atex-cm *::after { box-sizing: border-box; }
@@ -57,7 +72,7 @@
     justify-content: space-between;
     padding: 10px 14px;
     border-bottom: 1px solid var(--cm-border);
-    background: #f8fafc;
+    background: var(--cm-surface);
 }
 .atex-cm-sidebar-head h2 { margin: 0; font-size: 15px; }
 .atex-cm-list { display: flex; flex-direction: column; max-height: 72vh; overflow: auto; }
@@ -69,20 +84,20 @@
     text-align: left;
     padding: 10px 14px;
     border: none;
-    border-bottom: 1px solid #eef1f5;
+    border-bottom: 1px solid var(--cm-border-soft);
     background: transparent;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-cm-list-item:hover { background: #f1f5f9; }
-.atex-cm-list-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-cm-list-item:hover { background: var(--cm-surface); }
+.atex-cm-list-item.is-active { background: var(--cm-active-bg); font-weight: 600; }
 .atex-cm-list-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .atex-cm-list-status {
     flex: none;
     font-size: 11px;
     color: var(--cm-muted);
-    background: #eef2f7;
+    background: var(--cm-status-bg);
     border-radius: 999px;
     padding: 2px 8px;
 }
@@ -127,7 +142,7 @@
     border-radius: 8px;
     overflow: hidden;
     background:
-        repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px);
+        repeating-linear-gradient(45deg, var(--cm-bar-stripe-a), var(--cm-bar-stripe-a) 6px, var(--cm-bar-stripe-b) 6px, var(--cm-bar-stripe-b) 12px);
 }
 .atex-cm-bar.is-overflow { box-shadow: 0 0 0 2px rgba(185, 28, 28, .35); }
 .atex-cm-seg {
@@ -153,7 +168,7 @@
 .atex-cm-seg-other { background: var(--cm-other); }
 .atex-cm-seg-remainder {
     background: var(--cm-remainder);
-    color: #475569;
+    color: var(--text-secondary, #475569);
     border-right: none;
 }
 .atex-cm-warn {
@@ -183,10 +198,10 @@
     color: var(--cm-muted);
     text-transform: uppercase;
     letter-spacing: .03em;
-    background: #f8fafc;
+    background: var(--cm-surface);
     border-bottom: 1px solid var(--cm-border);
 }
-.atex-cm-legend-row { border-bottom: 1px solid #eef1f5; }
+.atex-cm-legend-row { border-bottom: 1px solid var(--cm-border-soft); }
 .atex-cm-legend-row:last-child { border-bottom: none; }
 .atex-cm-legend-num { display: flex; align-items: center; gap: 8px; }
 .atex-cm-swatch {
@@ -204,7 +219,7 @@
     gap: 14px;
     padding: 14px;
     border-radius: 8px;
-    background: #f8fafc;
+    background: var(--cm-surface);
     border: 1px solid var(--cm-border);
 }
 .atex-cm-metric { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
@@ -216,15 +231,15 @@
 .atex-cm-btn {
     border: 1px solid var(--cm-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--cm-bg);
     padding: 4px 10px;
     cursor: pointer;
     font: inherit;
     color: inherit;
     line-height: 1.2;
 }
-.atex-cm-btn:hover { background: #f1f5f9; }
-.atex-cm-btn-secondary { background: #f8fafc; }
+.atex-cm-btn:hover { background: var(--cm-surface); }
+.atex-cm-btn-secondary { background: var(--cm-surface); }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-cm-toast {

@@ -3,17 +3,27 @@
    пересекаться с остальными рабочими местами в main.html. */
 
 .atex-pp {
-    --pp-border: #d9dee5;
-    --pp-bg: #ffffff;
-    --pp-muted: #6b7280;
+    --pp-border: var(--input-border, #d9dee5);
+    --pp-border-soft: var(--border-color, #eef1f5);
+    --pp-bg: var(--input-bg, #ffffff);
+    --pp-surface: var(--bg-secondary, #f8fafc);
+    --pp-muted: var(--text-secondary, #6b7280);
     --pp-accent: var(--atex-navy, #134174);
     --pp-accent-d: var(--atex-navy-d, #0e3158);
-    --pp-warn: #b91c1c;
-    --pp-ok: #15803d;
-    color: #1f2933;
+    --pp-info-bg: #eef2ff;
+    --pp-info-text: #3730a3;
+    --pp-warn: var(--color-error, #b91c1c);
+    --pp-ok: var(--color-success, #15803d);
+    color: var(--text-primary, #1f2933);
     font-size: 14px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-pp {
+    --pp-info-bg: rgba(129, 140, 248, 0.18);
+    --pp-info-text: #c4b5fd;
+}
+
 .atex-pp *,
 .atex-pp *::before,
 .atex-pp *::after { box-sizing: border-box; }
@@ -49,7 +59,7 @@
     display: block;
     margin-bottom: 5px;
     font-weight: 600;
-    color: #374151;
+    color: var(--text-primary, #374151);
 }
 .atex-pp-input {
     width: 100%;
@@ -57,7 +67,8 @@
     border: 1px solid var(--pp-border);
     border-radius: 6px;
     font: inherit;
-    background: #fff;
+    background: var(--pp-bg);
+    color: var(--text-primary, #1f2933);
 }
 .atex-pp-input:focus {
     outline: none;
@@ -69,13 +80,13 @@
 .atex-pp-btn {
     border: 1px solid var(--pp-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--pp-bg);
     padding: 8px 16px;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-pp-btn:hover { background: #f1f5f9; }
+.atex-pp-btn:hover { background: var(--pp-surface); }
 .atex-pp-btn-primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
 .atex-pp-btn-primary:hover { background: var(--pp-accent-d); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
@@ -95,7 +106,7 @@
     justify-content: space-between;
     align-items: baseline;
     padding: 6px 10px;
-    background: #f1f5f9;
+    background: var(--pp-surface);
     border-radius: 6px;
     margin-bottom: 8px;
 }
@@ -113,12 +124,12 @@
     margin-bottom: 6px;
     border: 1px solid var(--pp-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--pp-bg);
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-pp-cut:hover { background: #f8fafc; }
+.atex-pp-cut:hover { background: var(--pp-surface); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 .atex-pp-cut-num { font-weight: 700; }
 .atex-pp-cut-type { font-weight: 600; }
@@ -128,8 +139,8 @@
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 999px;
-    background: #eef2ff;
-    color: #3730a3;
+    background: var(--pp-info-bg);
+    color: var(--pp-info-text);
     text-align: center;
     justify-self: start;
 }
@@ -140,15 +151,79 @@
     .atex-pp-filters { grid-template-columns: 1fr; }
 }
 
+/* Кнопка «Полосы» в строке резки */
+.atex-pp-strips {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    white-space: nowrap;
+}
+.atex-pp-strips:hover { background: var(--pp-surface); }
+
+/* Инлайн-редактор полос резки */
+.atex-pp-strip-panel {
+    border: 1px solid var(--pp-accent);
+    border-radius: 8px;
+    background: var(--pp-surface);
+    padding: 14px 16px;
+    margin: 0 0 14px;
+}
+.atex-pp-strip-loading { color: var(--pp-muted); padding: 6px 0; }
+.atex-pp-strip-header { font-weight: 600; margin-bottom: 12px; }
+
+.atex-pp-strip-table { margin-bottom: 10px; }
+.atex-pp-strip-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr 40px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.atex-pp-strip-head { font-size: 12px; color: var(--pp-muted); font-weight: 600; }
+.atex-pp-strip-del { padding: 6px 0; text-align: center; }
+.atex-pp-strip-add { margin-bottom: 12px; }
+
+.atex-pp-strip-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+    padding: 8px 0;
+    border-top: 1px solid var(--pp-border-soft);
+    border-bottom: 1px solid var(--pp-border-soft);
+    margin-bottom: 12px;
+}
+.atex-pp-strip-metric { display: flex; flex-direction: column; }
+.atex-pp-strip-metric-label { font-size: 11px; color: var(--pp-muted); }
+.atex-pp-strip-metric-value { font-weight: 700; }
+.atex-pp-strip-metric.is-ok .atex-pp-strip-metric-value { color: var(--pp-ok); }
+.atex-pp-strip-metric.is-warn .atex-pp-strip-metric-value { color: var(--pp-warn); }
+.atex-pp-strip-badge {
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 999px;
+}
+.atex-pp-strip-badge.is-ok { background: rgba(21, 128, 61, .15); color: var(--pp-ok); }
+.atex-pp-strip-badge.is-warn { background: rgba(185, 28, 28, .12); color: var(--pp-warn); }
+
+.atex-pp-strip-pref { margin-bottom: 12px; }
+.atex-pp-strip-pref-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.atex-pp-strip-pref-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.atex-pp-strip-pref-item { font-size: 12px; padding: 5px 10px; }
+
 /* Привязка обеспечения */
 .atex-pp-linked { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
 .atex-pp-linked-title { margin: 0 0 8px; font-size: 14px; }
 .atex-pp-linked-item {
     padding: 7px 10px;
-    border: 1px solid #eef1f5;
+    border: 1px solid var(--pp-border-soft);
     border-radius: 6px;
     margin-bottom: 6px;
-    background: #f8fafc;
+    background: var(--pp-surface);
 }
 
 .atex-pp-empty { padding: 14px; color: var(--pp-muted); }

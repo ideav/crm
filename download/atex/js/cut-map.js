@@ -1,20 +1,21 @@
 // Рабочее место atex «Карта раскроя» (роль Оператор).
 //
-// Визуализация раскроя выбранной производственной резки: полосы её типа резки
+// Визуализация раскроя выбранной производственной резки: её полосы
 // (ширина × количество, назначение) на ширине входа плюс остаток. Решение
 // задачи ideav/crm#2917 (часть #2903). Правила разработки рабочих мест —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, раздел 3.7 docs/atex_workplaces.md.
 //
 // Рабочее место преимущественно читающее. На этом этапе оно обращается к данным
 // напрямую командами `_m_*`/`object` (#2903): список резок и одна резка —
-// `object/{Производственная резка}/?JSON_OBJ[&F_I=…]`, далее по ссылке «Тип
-// резки» читается сам тип (`F_I={типРезкиId}`) и его полосы
-// (`object/{Полоса}/?F_U={типРезкиId}`). ID таблиц и реквизитов не хардкодятся:
-// они берутся по именам из `GET /{db}/metadata?JSON` (WORKSPACE_DEVELOPMENT_GUIDE.md,
-// разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
-// в объём этой задачи не входит.
+// `object/{Производственная резка}/?JSON_OBJ[&F_I=…]`; полосы резки — её
+// подчинённые записи `object/{Полоса}/?F_U={резкаId}` (после упразднения «Типа
+// резки» «Полоса» подчинена напрямую «Производственной резке»). Ширина входа
+// (джамбо) берётся из Партии сырья резки → Вид сырья «Ширина, мм». ID таблиц и
+// реквизитов не хардкодятся: они берутся по именам из `GET /{db}/metadata`
+// (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6). Перевод чтений на защищённый
+// слой `report/` — следующий этап и в объём этой задачи не входит.
 //
-// Геометрия карты (дизайн-спека atex, разделы «Тип резки»/«Полоса»):
+// Геометрия карты (дизайн-спека atex, раздел «Полоса»):
 //   • ширина входа — общая ширина рулона на входе слиттера;
 //   • каждая полоса даёт «количество» ножей по «ширине»;
 //   • «Занято, мм» = Σ(ширина полосы × количество);
@@ -44,14 +45,15 @@
 
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = { cut: 'Производственная резка', cutType: 'Тип резки', strip: 'Полоса' };
-    var CUT_REQ = { cutType: 'Тип резки', slitter: 'Слиттер', status: 'Статус', planDate: 'Дата план' };
-    var CUTTYPE_REQ = {
-        material: 'Вид сырья',
-        inputWidth: 'Ширина входа, мм',
-        tolerance: 'Допуск, мм',
-        remainder: 'Остаток, мм'
+    var TABLE = {
+        cut: 'Производственная резка',
+        strip: 'Полоса',
+        materialBatch: 'Партия сырья',
+        material: 'Вид сырья'
     };
+    var CUT_REQ = { materialBatch: 'Партия сырья', slitter: 'Слиттер', status: 'Статус', planDate: 'Дата план' };
+    var BATCH_REQ = { material: 'Вид сырья' };
+    var MATERIAL_REQ = { width: 'Ширина, мм' };
     var STRIP_REQ = { width: 'Ширина, мм', qty: 'Количество', purpose: 'Назначение' };
 
     // ───────────────────────── Чистое ядро раскладки ─────────────────────────
@@ -196,9 +198,9 @@
 
     function AtexCutMap(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
-        this.meta = { cut: null, cutType: null, strip: null };
-        this.cuts = [];          // список производственных резок [{ id, name, statusLabel, cutTypeRef }]
+        this.db = window.db || root.getAttribute('data-db') || '';
+        this.meta = { cut: null, strip: null, materialBatch: null, material: null };
+        this.cuts = [];          // список производственных резок [{ id, name, statusLabel }]
         this.current = null;     // выбранная резка с раскладкой
         this.busy = false;
     }
@@ -236,7 +238,7 @@
 
     AtexCutMap.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {
@@ -244,10 +246,12 @@
                 })[0] || null;
             }
             self.meta.cut = byName(TABLE.cut);
-            self.meta.cutType = byName(TABLE.cutType);
             self.meta.strip = byName(TABLE.strip);
+            // Партия сырья / Вид сырья нужны для ширины входа (джамбо). Опциональны:
+            // если их нет в метаданных — сработает fallback по сумме ширин полос.
+            self.meta.materialBatch = byName(TABLE.materialBatch);
+            self.meta.material = byName(TABLE.material);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
-            if (!self.meta.cutType) throw new Error('В метаданных не найдена таблица «' + TABLE.cutType + '»');
             if (!self.meta.strip) throw new Error('В метаданных не найдена таблица «' + TABLE.strip + '»');
         });
     };
@@ -262,14 +266,17 @@
                 return {
                     id: String(rec.i),
                     name: (rec.r && rec.r[0]) || ('#' + rec.i),
-                    statusLabel: parseRef(cellValue(rec, meta, CUT_REQ.status)).label || '',
-                    cutTypeRef: parseRef(cellValue(rec, meta, CUT_REQ.cutType))
+                    statusLabel: parseRef(cellValue(rec, meta, CUT_REQ.status)).label || ''
                 };
             });
         });
     };
 
-    // ── Чтение одной резки: тип резки → ширина входа, допуск; полосы по F_U ──
+    // ── Чтение одной резки: её полосы (F_U) + ширина входа из сырья ──
+    // «Полоса» подчинена напрямую «Производственной резке», поэтому полосы
+    // грузятся по F_U={резкаId}. Ширина входа (джамбо) берётся из Партии сырья
+    // резки → Вид сырья «Ширина, мм» (как в F3); если её не достать — fallback
+    // на сумму ширин полос (визуализация без остатка).
 
     AtexCutMap.prototype.loadCut = function(id) {
         var self = this;
@@ -277,55 +284,40 @@
         return this.getJson('object/' + cutMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(id)).then(function(rows) {
             var rec = (rows || [])[0];
             if (!rec) throw new Error('Производственная резка #' + id + ' не найдена');
-            var cutTypeRef = parseRef(cellValue(rec, cutMeta, CUT_REQ.cutType));
+            var batchRef = parseRef(cellValue(rec, cutMeta, CUT_REQ.materialBatch));
             self.current = {
                 id: String(rec.i),
                 name: (rec.r && rec.r[0]) || ('#' + rec.i),
                 slitter: parseRef(cellValue(rec, cutMeta, CUT_REQ.slitter)).label || '',
                 status: parseRef(cellValue(rec, cutMeta, CUT_REQ.status)).label || '',
                 planDate: cellValue(rec, cutMeta, CUT_REQ.planDate) || '',
-                cutTypeId: cutTypeRef.id,
-                cutTypeLabel: cutTypeRef.label || '',
-                material: '',
+                materialBatchId: batchRef.id,
+                material: batchRef.label || '',
                 inputWidth: '',
                 tolerance: '',
                 strips: [],
                 layout: null
             };
-            if (!self.current.cutTypeId) {
-                // Резка без типа резки — раскраивать нечего, но это валидное состояние.
-                self.current.layout = computeLayout(0, []);
-                return null;
-            }
-            return self.loadCutType(self.current.cutTypeId);
+            return self.loadStrips(self.current.id);
         }).then(function() {
-            if (self.current && self.current.cutTypeId) {
-                return self.loadStrips(self.current.cutTypeId);
-            }
+            // Ширина входа: Партия сырья → Вид сырья «Ширина, мм». Best-effort.
+            return self.loadJumboWidth(self.current.materialBatchId);
         }).then(function() {
-            if (self.current && self.current.cutTypeId) {
-                self.current.layout = computeLayout(self.current.inputWidth, self.current.strips, self.current.tolerance);
-            }
+            var c = self.current;
+            if (!c) return;
+            // Fallback: нет ширины джамбо из сырья → берём сумму ширин полос,
+            // тогда остаток нулевой и карта показывает только сами полосы.
+            var inputWidth = layout.toNumber(c.inputWidth);
+            if (inputWidth <= 0) inputWidth = layout.usedWidth(c.strips);
+            c.layout = computeLayout(inputWidth, c.strips, c.tolerance);
         });
     };
 
-    AtexCutMap.prototype.loadCutType = function(cutTypeId) {
-        var self = this;
-        var meta = this.meta.cutType;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cutTypeId)).then(function(rows) {
-            var rec = (rows || [])[0];
-            if (!rec) return;
-            self.current.cutTypeName = (rec.r && rec.r[0]) || self.current.cutTypeLabel;
-            self.current.material = parseRef(cellValue(rec, meta, CUTTYPE_REQ.material)).label || '';
-            self.current.inputWidth = cellValue(rec, meta, CUTTYPE_REQ.inputWidth) || '';
-            self.current.tolerance = cellValue(rec, meta, CUTTYPE_REQ.tolerance) || '';
-        });
-    };
-
-    AtexCutMap.prototype.loadStrips = function(cutTypeId) {
+    // Полосы резки — её подчинённые записи по F_U={резкаId}.
+    AtexCutMap.prototype.loadStrips = function(cutId) {
         var self = this;
         var meta = this.meta.strip;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutTypeId) + '&LIMIT=0,1000').then(function(rows) {
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,1000').then(function(rows) {
             self.current.strips = (rows || []).map(function(rec) {
                 return {
                     id: String(rec.i),
@@ -334,6 +326,28 @@
                     qty: cellValue(rec, meta, STRIP_REQ.qty) || '',
                     purpose: cellValue(rec, meta, STRIP_REQ.purpose) || ''
                 };
+            });
+        });
+    };
+
+    // Ширина входа (джамбо) из сырья: Партия сырья (batchId) → Вид сырья → «Ширина,
+    // мм». Best-effort: при отсутствии метаданных/записей/ссылок тихо выходит,
+    // оставляя current.inputWidth пустым (сработает fallback в loadCut).
+    AtexCutMap.prototype.loadJumboWidth = function(batchId) {
+        var self = this;
+        var batchMeta = this.meta.materialBatch;
+        var materialMeta = this.meta.material;
+        if (!batchId || !batchMeta || !materialMeta) return Promise.resolve();
+        return this.getJson('object/' + batchMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(batchId)).then(function(rows) {
+            var rec = (rows || [])[0];
+            if (!rec) return null;
+            var materialRef = parseRef(cellValue(rec, batchMeta, BATCH_REQ.material));
+            if (self.current && materialRef.label) self.current.material = materialRef.label;
+            if (!materialRef.id) return null;
+            return self.getJson('object/' + materialMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(materialRef.id)).then(function(mrows) {
+                var mrec = (mrows || [])[0];
+                if (!mrec || !self.current) return;
+                self.current.inputWidth = cellValue(mrec, materialMeta, MATERIAL_REQ.width) || '';
             });
         });
     };
@@ -379,8 +393,8 @@
         // Шапка резки.
         view.appendChild(this.renderHeader(c));
 
-        if (!c.cutTypeId) {
-            view.appendChild(el('div', { class: 'atex-cm-placeholder', text: 'У этой резки не задан тип резки — раскраивать нечего.' }));
+        if (!c.strips || !c.strips.length) {
+            view.appendChild(el('div', { class: 'atex-cm-placeholder', text: 'У этой резки нет полос — раскраивать нечего.' }));
             return;
         }
 
@@ -396,7 +410,6 @@
     AtexCutMap.prototype.renderHeader = function(c) {
         var rows = [
             ['Резка', c.name],
-            ['Тип резки', c.cutTypeName || c.cutTypeLabel || ('#' + c.cutTypeId)],
             ['Вид сырья', c.material || '—'],
             ['Слиттер', c.slitter || '—'],
             ['Статус', c.status || '—']
@@ -480,7 +493,7 @@
             ]));
         });
         if (!(strips || []).length) {
-            legend.appendChild(el('div', { class: 'atex-cm-empty', text: 'У типа резки нет полос' }));
+            legend.appendChild(el('div', { class: 'atex-cm-empty', text: 'У резки нет полос' }));
         }
         return legend;
     };
