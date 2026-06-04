@@ -141,15 +141,17 @@ assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitte
 
 // ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
 var posRows = [
-    { position_id: '8207', position_no: '1', position_width: '25.00', position_qty: '70' },
-    { position_id: '8300', position_no: '2', position_width: '110.00', position_qty: '5' }
+    { position_id: '8207', order_no: 'АТХ-3002', position_no: '1', position_width: '25.00', position_qty: '70' },
+    { position_id: '8300', order_no: 'АТХ-3002', position_no: '2', position_width: '110.00', position_qty: '5' }
 ];
 assertEqual(planning.rowsToPositions(posRows), [
-    { id: '8207', label: '№1 · 25.00мм' },
-    { id: '8300', label: '№2 · 110.00мм' }
-], 'rowsToPositions: «№<номер> · <ширина>мм»');
-assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_width: '' }]),
-    [{ id: '9', label: '№3' }], 'rowsToPositions: без ширины — только номер');
+    { id: '8207', label: 'АТХ-3002/1 · 25.00 мм' },
+    { id: '8300', label: 'АТХ-3002/2 · 110.00 мм' }
+], 'rowsToPositions: «<№заказа>/<№позиции> · <ширина> мм» (#3116 п.3)');
+assertEqual(planning.rowsToPositions([{ position_id: '9', order_no: 'АТХ-7', position_no: '3', position_width: '' }]),
+    [{ id: '9', label: 'АТХ-7/3' }], 'rowsToPositions: без ширины — заказ/позиция');
+assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_width: '25.00' }]),
+    [{ id: '9', label: '№3 · 25.00 мм' }], 'rowsToPositions: нет order_no (старый отчёт) — деградация до №<номер>');
 assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой ввод → пустой список');
 
 // ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──

@@ -36,7 +36,7 @@
 
 .atex-pp-layout {
     display: grid;
-    grid-template-columns: 300px 1fr 320px;
+    grid-template-columns: 1fr 340px;
     gap: 16px;
     padding: 16px;
     align-items: start;
@@ -44,6 +44,17 @@
 @media (max-width: 1080px) {
     .atex-pp-layout { grid-template-columns: 1fr; }
 }
+
+/* Шапка панели очереди: заголовок слева + «+ Новая резка» справа (#3116 п.1). */
+.atex-pp-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.atex-pp-panel-head .atex-pp-form-title { margin: 0; }
+.atex-pp-add { white-space: nowrap; }
 
 .atex-pp-panel {
     border: 1px solid var(--pp-border);
@@ -101,17 +112,6 @@
 .atex-pp-filters .atex-pp-field { margin-bottom: 0; }
 
 .atex-pp-queue-group { margin-bottom: 16px; }
-.atex-pp-queue-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 6px 10px;
-    background: var(--pp-surface);
-    border-radius: 6px;
-    margin-bottom: 8px;
-}
-.atex-pp-queue-slitter { font-weight: 700; }
-.atex-pp-queue-count { color: var(--pp-muted); font-size: 12px; }
 
 .atex-pp-cut {
     display: grid;
@@ -219,12 +219,31 @@
 .atex-pp-linked { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
 .atex-pp-linked-title { margin: 0 0 8px; font-size: 14px; }
 .atex-pp-linked-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     padding: 7px 10px;
     border: 1px solid var(--pp-border-soft);
     border-radius: 6px;
     margin-bottom: 6px;
     background: var(--pp-surface);
 }
+.atex-pp-linked-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Значок удаления связи на плашке (#3116 п.4). */
+.atex-pp-linked-del {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    line-height: 1;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--pp-muted);
+    font-size: 18px;
+    cursor: pointer;
+}
+.atex-pp-linked-del:hover { background: var(--pp-warn); color: #fff; }
 
 .atex-pp-empty { padding: 14px; color: var(--pp-muted); }
 
@@ -247,3 +266,83 @@
 .atex-pp-toast-success { background: #15803d; }
 .atex-pp-toast-error { background: #b91c1c; }
 .atex-pp-toast-info { background: #334155; }
+
+/* Модалка формы новой резки (#3116 п.1) */
+.atex-pp-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow: auto;
+    background: rgba(15, 23, 42, .45);
+}
+.atex-pp-modal.is-open { display: flex; }
+.atex-pp-modal-dialog {
+    position: relative;
+    width: 100%;
+    max-width: 460px;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
+    border-radius: 10px;
+    padding: 22px 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+}
+.atex-pp-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    width: 30px;
+    height: 30px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--pp-muted);
+    font-size: 24px;
+    cursor: pointer;
+}
+.atex-pp-modal-close:hover { color: var(--pp-accent); }
+.atex-pp-modal .atex-pp-form { padding: 0; }
+
+/* Закладки очереди по станкам (#3116 п.2) */
+.atex-pp-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--pp-border);
+}
+.atex-pp-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    background: transparent;
+    color: var(--pp-muted);
+    font: inherit;
+    cursor: pointer;
+    margin-bottom: -1px;
+}
+.atex-pp-tab:hover { background: var(--pp-surface); }
+.atex-pp-tab.is-active {
+    border-color: var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-accent);
+    font-weight: 600;
+}
+.atex-pp-tab-count {
+    min-width: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--pp-surface);
+    color: var(--pp-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+}
+.atex-pp-tab.is-active .atex-pp-tab-count { background: var(--pp-accent); color: #fff; }
