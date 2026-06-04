@@ -633,6 +633,37 @@
         };
     }
 
+    // Кандидаты-партии для FIFO-резерва вида сырья (Фаза 1b): из genBatches берём партии
+    // нужного материала со СВОБОДНЫМ погонным остатком = Остаток,м − (зарезервировано м² по
+    // партии / ширина джамбо в м). reservedM2ByBatch — карта чужих резервов «Расход сырья».
+    // → [{id,label,arrivalKey,freeLinearM}] для reserveFifo. Вход не мутирует.
+    function fifoBatchesForMaterial(genBatches, reservedM2ByBatch, materialId, widthM){
+        var mat = String(materialId == null ? '' : materialId);
+        var w = Number(widthM) || 0;
+        var res = reservedM2ByBatch || {};
+        return (genBatches || []).filter(function(b){ return String(b.materialId) === mat; }).map(function(b){
+            var reservedLin = w > 0 ? ((Number(res[String(b.id)]) || 0) / w) : 0;
+            var free = (Number(b.remainderLinear) || 0) - reservedLin;
+            return { id: String(b.id), label: b.label || '', arrivalKey: Number(b.dateKey) || 0, freeLinearM: free > 0 ? round3(free) : 0 };
+        });
+    }
+
+    // Материал резки из обеспечиваемых позиций (#3120 Фаза 2): cutId → вид сырья (id) её
+    // позиций (все позиции резки — один вид сырья; берём первый непустой). Демэнд-источник
+    // материала вместо ссылки «Партия сырья» (1159). genPositions — [{id, materialId}];
+    // supplies — [{cutId, positionId}]. → { cutId: materialId }.
+    function materialByCut(cuts, supplies, genPositions){
+        var posMat = {};
+        (genPositions || []).forEach(function(p){ posMat[String(p.id)] = String(p.materialId == null ? '' : p.materialId); });
+        var out = {};
+        (supplies || []).forEach(function(s){
+            if (s == null || s.positionId == null) return;
+            var cutId = String(s.cutId), m = posMat[String(s.positionId)] || '';
+            if (m && !out[cutId]) out[cutId] = m;
+        });
+        return out;
+    }
+
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
@@ -745,6 +776,8 @@
         cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
         reserveFifo: reserveFifo,
+        fifoBatchesForMaterial: fifoBatchesForMaterial,
+        materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
         buildSchedule: buildSchedule,
@@ -953,18 +986,98 @@
         var matIdx = columnIndex(meta, 'Вид сырья');
         var dateIdx = columnIndex(meta, 'Дата прихода');
         var remIdx = columnIndex(meta, 'Остаток, м²');
+        var remLinIdx = columnIndex(meta, 'Остаток, м');   // погонный остаток — для FIFO-резерва (Фаза 1b)
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
             self.genBatches = (rows || []).map(function(rec) {
                 var r = rec.r || [];
                 var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
                 return {
                     id: String(rec.i),
+                    label: r[0] == null ? '' : String(r[0]),
                     materialId: mat.id ? String(mat.id) : '',
                     dateKey: dateIdx >= 0 ? batchDateKey(r[dateIdx]) : Infinity,
-                    remainder: remIdx >= 0 ? (Number(r[remIdx]) || 0) : 0
+                    remainder: remIdx >= 0 ? (Number(r[remIdx]) || 0) : 0,
+                    remainderLinear: remLinIdx >= 0 ? (Number(r[remLinIdx]) || 0) : 0
                 };
             });
         });
+    };
+
+    // Расход сырья (1079, подчинён резке): this.consumptionByCut = {cutId:[{id,batchId,m2}]},
+    // this.reservedM2ByBatch = {batchId: Σ Израсходовано, м²}. Источник «зарезервированного»
+    // сырья для FIFO-резерва (Фаза 1b) и подсветки. Таблица резолвится по имени из _metaAll.
+    AtexProductionPlanning.prototype.loadConsumption = function() {
+        var self = this;
+        var list = this._metaAll || [];
+        var meta = list.filter(function(t) {
+            return String(t.val).trim().toLowerCase() === 'расход сырья';
+        })[0] || null;
+        if (!meta) { this.consumptionByCut = {}; this.reservedM2ByBatch = {}; this.consumptionMeta = null; return Promise.resolve(); }
+        this.consumptionMeta = meta;
+        var batchIdx = columnIndex(meta, 'Партия сырья');
+        var m2Idx = columnIndex(meta, 'Израсходовано, м²');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var byCut = {}, byBatch = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var cutId = String(rec.u);   // up = резка
+                var batch = batchIdx >= 0 ? parseRef(r[batchIdx]) : { id: null };
+                var m2 = m2Idx >= 0 ? (Number(r[m2Idx]) || 0) : 0;
+                if (!byCut[cutId]) byCut[cutId] = [];
+                byCut[cutId].push({ id: String(rec.i), batchId: batch.id ? String(batch.id) : '', m2: m2 });
+                if (batch.id) byBatch[String(batch.id)] = (byBatch[String(batch.id)] || 0) + m2;
+            });
+            self.consumptionByCut = byCut;
+            self.reservedM2ByBatch = byBatch;
+        });
+    };
+
+    // FIFO-резерв сырья резки в «Расход сырья» (Фаза 1b): требуемый прогон (max «Метраж, м»
+    // обеспечений) набираем по партиям вида сырья (FIFO по приходу), исключая чужие резервы;
+    // прежние записи расхода этой резки удаляем и создаём заново (идемпотентно). Триггер —
+    // явное действие (кнопка/планирование). Возвращает Promise.
+    AtexProductionPlanning.prototype.reserveCutMaterial = function(cut) {
+        var self = this;
+        var meta = this.consumptionMeta;
+        if (!meta || !cut) return Promise.resolve();
+        if (this.busy) return Promise.resolve();
+        var materialId = cut.materialId ? String(cut.materialId) : '';
+        if (materialId === '') { this.notify('У резки не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
+        var widthM = (Number(this.jumboWidthByMaterial[materialId]) || 0) / 1000;
+        var foot = [];
+        (this.supplies || []).forEach(function(s) {
+            if (String(s.cutId) === String(cut.id)) foot.push(Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0);
+        });
+        var requiredLin = requiredRunLengthM(foot);
+        // свободный остаток без учёта собственных прежних резервов этой резки (их перезапишем)
+        var existing = (this.consumptionByCut && this.consumptionByCut[String(cut.id)]) || [];
+        var reservedExcl = {};
+        for (var k in this.reservedM2ByBatch) { if (Object.prototype.hasOwnProperty.call(this.reservedM2ByBatch, k)) reservedExcl[k] = this.reservedM2ByBatch[k]; }
+        existing.forEach(function(e) { if (e.batchId) reservedExcl[e.batchId] = (reservedExcl[e.batchId] || 0) - e.m2; });
+        var batches = fifoBatchesForMaterial(this.genBatches, reservedExcl, materialId, widthM);
+        var plan = reserveFifo(batches, requiredLin, widthM);
+        var reqBatch = reqIdByName(meta, 'Партия сырья');
+        var reqM2 = reqIdByName(meta, 'Израсходовано, м²');
+        var ops = [];
+        existing.forEach(function(e) { ops.push(function() { return self.post('_m_del/' + e.id + '?JSON', {}); }); });
+        plan.allocations.forEach(function(a) {
+            var fields = {};
+            if (reqBatch) fields['t' + reqBatch] = a.batchId;
+            if (reqM2) fields['t' + reqM2] = a.m2;
+            ops.push(function() { return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(cut.id), fields); });
+        });
+        this.setBusy(true);
+        return ops.reduce(function(p, op) { return p.then(op); }, Promise.resolve())
+            .then(function() { return self.loadConsumption(); })
+            .then(function() {
+                self.setBusy(false);
+                self.notify(plan.fullyReserved
+                    ? ('Зарезервировано сырьё: ' + plan.allocations.length + ' партий(и)')
+                    : ('Не хватило сырья: дефицит ' + plan.shortfallLinearM + ' м'),
+                    plan.fullyReserved ? 'success' : 'error');
+                self.render();
+            })
+            .catch(function(err) { self.setBusy(false); self.notify('Ошибка резерва: ' + err.message, 'error'); });
     };
 
     // Полосы всех резок отчётом cut_strips (JSON_KV) → this.stripAgg
@@ -1012,15 +1125,17 @@
         var widthIdx = columnIndex(meta, 'Ширина, мм');
         var tolIdx = columnIndex(meta, 'Допуск, мм');   // #3120: допуск по виду сырья (иначе дефолт)
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {}, tol = {};
+            var map = {}, tol = {}, names = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
                 // сырое значение допуска (пустое — если не задано): resolveTolerance даст дефолт
                 tol[String(rec.i)] = tolIdx >= 0 ? r[tolIdx] : '';
+                names[String(rec.i)] = r[0] == null ? '' : String(r[0]);   // имя вида сырья (для подписи)
             });
             self.jumboWidthByMaterial = map;
             self.toleranceByMaterial = tol;
+            self.materialNameById = names;
         });
     };
 
@@ -1094,6 +1209,23 @@
             });
             self.cuts = p.cuts;
             self.supplies = p.supplies;
+        });
+    };
+
+    // Применить материал из обеспечиваемых позиций к this.cuts (#3120 Фаза 2): приоритет —
+    // демэнд (позиции, materialByCut); если у резки нет таких позиций — остаётся материал из
+    // cut_planning (ссылка «Партия сырья» 1159 как fallback, пока она есть). Вызывать после
+    // загрузки позиций и очереди.
+    AtexProductionPlanning.prototype.resolveCutMaterials = function() {
+        var self = this;
+        if (!this.cuts) return;
+        var byCut = materialByCut(this.cuts, this.supplies, this.genPositions);
+        this.cuts.forEach(function(c) {
+            var m = byCut[String(c.id)];
+            if (m) {
+                c.materialId = m;
+                c.materialName = (self.materialNameById && self.materialNameById[m]) || c.materialName || '';
+            }
         });
     };
 
@@ -1214,7 +1346,8 @@
     AtexProductionPlanning.prototype.reload = function() {
         var self = this;
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
-        return this.loadCutStrips().then(function() { return self.loadPlanning(); });
+        return this.loadCutStrips().then(function() { return self.loadPlanning(); })
+            .then(function() { self.resolveCutMaterials(); });
     };
 
     // ── Встроенный редактор Полос резки (база cut-calc renderStrips/computeSummary/syncStrips) ──
@@ -1928,11 +2061,9 @@
 
         form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
-        // Партии предзагружены отчётом material_batches (обогащённые подписи) —
-        // статический клиентский список (как дропдаун позиций), без серверного
-        // поиска, иначе при вводе подпись свелась бы к голому номеру.
-        form.appendChild(field('Партия сырья', this.selectRef(this.materialBatches, d.materialBatchId, '— не выбрано —',
-            function(v) { d.materialBatchId = v; }, null, { cacheKey: 'batches' })));
+        // Поле «Партия сырья» убрано (#3120 Фаза 2): материал/сырьё резки определяются
+        // по обеспечиваемым позициям (resolveCutMaterials), а расход — записями
+        // «Расход сырья» (FIFO-резерв). Прямая ссылка на партию в форме больше не нужна.
 
         var dateInput = el('input', { class: 'atex-pp-input', type: 'date' });
         dateInput.value = d.planDate || '';
@@ -2037,9 +2168,20 @@
             // информация (клик = выбор резки) и контролы (↑/↓/Полосы). Панель полос
             // (#3120 п.8) openStrips добавляет внутрь этой же карточки (контейнер —
             // cardPanel), а не внизу всей очереди — поэтому она строго одна на карточку.
-            // #3120 п.4 (Фаза 1a): подсветка резки, у которой задан материал, но нет
-            // подходящей партии сырья с остатком (обеспечить нечем).
+            // #3120 п.4: подсветка резки, которую нечем обеспечить — нет подходящей
+            // партии (Фаза 1a) ЛИБО есть потребность (метраж), но «Расход сырья» её не
+            // покрывает (Фаза 1b: не удалось зарезервировать полностью).
             var unreserved = cutMissingBatch(c, self.genBatches);
+            if (!unreserved) {
+                var needLin = Number(runLenByCut[String(c.id)]) || 0;
+                if (needLin > 0) {
+                    var cons = (self.consumptionByCut && self.consumptionByCut[String(c.id)]) || [];
+                    var resM2 = 0; cons.forEach(function(e) { resM2 += Number(e.m2) || 0; });
+                    var wM = (Number(self.jumboWidthByMaterial[String(c.materialId)]) || 0) / 1000;
+                    var resLin = wM > 0 ? resM2 / wM : 0;
+                    if (resLin + 1e-6 < needLin) unreserved = true;
+                }
+            }
             var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
 
             var info = el('div', { class: 'atex-pp-cut-info' }, [
@@ -2122,6 +2264,15 @@
             self.createSupply({ positionId: draft.positionId, cutId: cut.id, footage: draft.footage, status: draft.status });
         });
         actions.appendChild(linkBtn);
+
+        // FIFO-резерв сырья резки в «Расход сырья» (Фаза 1b): подобрать партии по приходу
+        // под требуемый прогон и записать расход. Идемпотентно (перезапишет прежние).
+        var reserveBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Зарезервировать сырьё' });
+        reserveBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            self.reserveCutMaterial(cut);
+        });
+        actions.appendChild(reserveBtn);
         box.appendChild(actions);
 
         // Уже привязанные позиции.
@@ -2226,11 +2377,12 @@
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
+                    self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
             })
-            .then(function() { self.render(); })
+            .then(function() { self.resolveCutMaterials(); self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
