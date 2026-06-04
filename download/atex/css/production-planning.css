@@ -199,7 +199,17 @@
     margin: 0 0 14px;
 }
 .atex-pp-strip-loading { color: var(--pp-muted); padding: 6px 0; }
-.atex-pp-strip-header { font-weight: 600; margin-bottom: 12px; }
+.atex-pp-strip-header { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.atex-pp-strip-header-text { flex: 1; min-width: 0; }
+/* Иконка закрытия панели полос справа вверху (#3127). */
+.atex-pp-strip-close {
+    flex: 0 0 auto;
+    width: 26px; height: 26px; line-height: 1;
+    border: none; border-radius: 50%;
+    background: transparent; color: var(--pp-muted);
+    font-size: 20px; cursor: pointer;
+}
+.atex-pp-strip-close:hover { background: var(--pp-warn); color: #fff; }
 
 .atex-pp-strip-table { margin-bottom: 10px; }
 .atex-pp-strip-row {
@@ -238,7 +248,8 @@
 
 .atex-pp-strip-pref { margin-bottom: 12px; }
 .atex-pp-strip-pref-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
-.atex-pp-strip-pref-list { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Ходовые: не выше ~3 рядов бейджей, дальше вертикальный скролл (#3128). */
+.atex-pp-strip-pref-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 108px; overflow-y: auto; }
 .atex-pp-strip-pref-item { font-size: 12px; padding: 5px 10px; }
 
 /* Привязка обеспечения */
