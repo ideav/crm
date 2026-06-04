@@ -20,6 +20,7 @@
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность |
 | Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
+| Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 
 **Соседние справочники (не дублируем — ссылаемся):**
 [integram-reports.md](../integram-reports.md) (полный справочник отчётов) ·
@@ -44,6 +45,8 @@
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
 | правки в `integram-table.js` пропадают | это сгенерированный бандл — править модули + `build.sh` | [table-component.md](table-component.md) |
 | таблица не фильтрует по родителю | прокинуть `F_U`/`up`/`F_I` в URL | [table-component.md](table-component.md) |
+| импорт «склеивает» строки в одно поле | нет завершающего `;` в строке данных | [import.md](import.md) |
+| импорт >8 МБ отклоняется | лимит файла 8 МБ — бить на чанки | [import.md](import.md) |
 
 ## Как дополнять (правило для всех агентов)
 
