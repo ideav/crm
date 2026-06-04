@@ -410,4 +410,16 @@ assertEqual(planning.cutMissingBatch({ materialId: '' }, gb), false, 'cutMissing
 // вход не мутируется (порядок исходного массива сохранён).
 assertEqual(fifoBatches[0].id, '10', 'reserveFifo: вход не мутируется (сортировка на копии)');
 
+// Длительность намотки: точки из WIND_*, интерполяция метры→минуты (старт/финиш резок).
+var opT = { WIND_300: 1.2, WIND_600: 4.0, WIND_900: 5.0, WIND_1100: 5.6, MATERIAL_WINDING: 15, KNIFE_220_59: 30 };
+var pts = planning.windingPointsFromTimes(opT);
+assertEqual(pts, [{m:300,min:1.2},{m:600,min:4.0},{m:900,min:5.0},{m:1100,min:5.6}], 'windingPointsFromTimes: только WIND_<метры>, по возрастанию');
+assertEqual(planning.windingMinutes(0, pts), 0, 'windingMinutes: 0 м → 0');
+assertEqual(planning.windingMinutes(300, pts), 1.2, 'windingMinutes: 300 м → 1.2 (точка)');
+assertEqual(planning.windingMinutes(1100, pts), 5.6, 'windingMinutes: 1100 м → 5.6 (точка)');
+assertEqual(planning.windingMinutes(150, pts), 0.6, 'windingMinutes: 150 м → 0.6 (пропорц. от 0 до первой)');
+assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 4.5 (между 600 и 900)');
+assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
+assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
+
 console.log('\n' + passed + ' assertions passed');

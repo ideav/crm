@@ -451,6 +451,39 @@
     // Округление до 3 знаков — убрать артефакты float-арифметики.
     function round3(n) { return Math.round(n * 1000) / 1000; }
 
+    // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
+    // (WIND_300=1.2 … WIND_1100=5.6). Спец-коды (WIND_FOIL_305, WIND_05_110) не парсятся
+    // как серия — это отдельные режимы (учтём позже). → [{m, min}] по возрастанию метров.
+    function windingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0 });
+        });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
+    // пропорционально от 0; между точками — линейно; выше последней — экстраполяция по
+    // последнему отрезку (при одной точке — клампим). Нет точек / runMeters≤0 → 0.
+    function windingMinutes(runMeters, points){
+        var x = Number(runMeters) || 0;
+        var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
+        if (!p.length || x <= 0) return 0;
+        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
+        for (var i = 1; i < p.length; i++){
+            if (x <= p[i].m){
+                var t = (x - p[i-1].m) / (p[i].m - p[i-1].m);
+                return round3(p[i-1].min + t * (p[i].min - p[i-1].min));
+            }
+        }
+        if (p.length < 2) return round3(p[p.length-1].min);
+        var a = p[p.length-2], b = p[p.length-1];
+        var slope = (b.min - a.min) / (b.m - a.m);
+        return round3(b.min + slope * (x - b.m));
+    }
+
     // Занятая полосами ширина — Σ(ширина × количество).
     function stripsUsedWidth(strips) {
         return round3((strips || []).reduce(function(sum, s) {
@@ -642,6 +675,8 @@
         cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
         reserveFifo: reserveFifo,
+        windingPointsFromTimes: windingPointsFromTimes,
+        windingMinutes: windingMinutes,
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
