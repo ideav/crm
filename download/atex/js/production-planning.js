@@ -491,6 +491,41 @@
         return String(avail[0].id);
     }
 
+    // Потребность резки в погонных метрах (#3120 группа C): длина прогона джамбо =
+    // самая длинная обеспечиваемая позиция (параллельный слиттинг — все полосы режутся
+    // за один прогон). supplyFootages — массив «Метраж, м» обеспечений резки.
+    function requiredRunLengthM(supplyFootages){
+        return (supplyFootages || []).reduce(function(m, f){ var n = stripNum(f); return n > m ? n : m; }, 0);
+    }
+
+    // FIFO-резерв сырья из партий (#3120 группа C). batches — [{id, label, arrivalKey, freeLinearM}]
+    // (freeLinearM — СВОБОДНЫЙ погонный остаток партии: Остаток,м − Σ чужих резервов); сортируются
+    // внутри по приходу (arrivalKey ↑, тай-брейк меньший id). requiredLinearM — потребность, пог.м;
+    // widthM — ширина джамбо, м (для справочного м²). Вход не мутируется.
+    // → { allocations:[{batchId,label,linearM,m2}], reservedLinearM, shortfallLinearM, fullyReserved }.
+    function reserveFifo(batches, requiredLinearM, widthM){
+        var need = Math.max(0, Number(requiredLinearM) || 0);
+        var w = Number(widthM) || 0;
+        var sorted = (batches || []).slice().sort(function(a, b){
+            return (Number(a.arrivalKey) || 0) - (Number(b.arrivalKey) || 0) ||
+                   (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+        });
+        var allocs = [], reserved = 0;
+        for (var i = 0; i < sorted.length && need > 1e-9; i++){
+            var free = Math.max(0, Number(sorted[i].freeLinearM) || 0);
+            if (free <= 0) continue;
+            var take = Math.min(free, need);
+            allocs.push({ batchId: String(sorted[i].id), label: sorted[i].label || '', linearM: round3(take), m2: round3(take * w) });
+            reserved += take; need -= take;
+        }
+        return {
+            allocations: allocs,
+            reservedLinearM: round3(reserved),
+            shortfallLinearM: round3(Math.max(0, need)),
+            fullyReserved: need <= 1e-9
+        };
+    }
+
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
@@ -588,6 +623,8 @@
         unsuppliedPositions: unsuppliedPositions,
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
+        requiredRunLengthM: requiredRunLengthM,
+        reserveFifo: reserveFifo,
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
