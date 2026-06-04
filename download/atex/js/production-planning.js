@@ -484,6 +484,41 @@
         return round3(b.min + slope * (x - b.m));
     }
 
+    var SHIFT_START_MIN = 8 * 60;   // фикс. начало смены 08:00 (минут от полуночи) — якорь расписания
+
+    // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
+    // начала смены. setup перед резкой = лидер (BETWEEN_CUTS) + переналадка с предыдущей
+    // (changeoverCost в минутах); длительность = намотка прогона (windingMinutes по метражу).
+    // opts: { windPoints, times, shiftStartMin, runLengthByCut:{cutId:метры} }. Вход не мутирует.
+    function buildSchedule(cuts, opts){
+        opts = opts || {};
+        var wind = opts.windPoints || [];
+        var times = opts.times || DEFAULT_OP_TIMES;
+        var leader = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        var runLen = opts.runLengthByCut || {};
+        var t = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
+        var out = [];
+        (cuts || []).forEach(function(c, i){
+            var setup = leader + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
+            var dur = windingMinutes(Number(runLen[String(c.id)]) || 0, wind);
+            var start = round3(t + setup);
+            var finish = round3(start + dur);
+            out.push({ cutId: String(c.id), startMin: start, finishMin: finish, setupMin: round3(setup), durationMin: dur });
+            t = finish;
+        });
+        return out;
+    }
+
+    // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
+    function formatClock(min){
+        var m = Math.round(Number(min) || 0);
+        var day = Math.floor(m / 1440);
+        var hm = ((m % 1440) + 1440) % 1440;
+        var h = Math.floor(hm / 60), mm = hm % 60;
+        var s = (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+        return day > 0 ? s + ' +' + day + 'д' : s;
+    }
+
     // Занятая полосами ширина — Σ(ширина × количество).
     function stripsUsedWidth(strips) {
         return round3((strips || []).reduce(function(sum, s) {
@@ -677,6 +712,9 @@
         reserveFifo: reserveFifo,
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
+        buildSchedule: buildSchedule,
+        formatClock: formatClock,
+        SHIFT_START_MIN: SHIFT_START_MIN,
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
@@ -900,6 +938,25 @@
         var self = this;
         return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,5000').then(function(rows) {
             self.stripAgg = aggregateStrips(rows || []);
+        });
+    };
+
+    // Метраж обеспечений: this.footageBySupply = { supplyId: «Метраж, м» }. Нужен для
+    // длины прогона резки (макс по её обеспечениям) → длительность намотки (расписание).
+    // Читаем object/ напрямую — колонка отчёта cut_planning поле подчинённой таблицы не
+    // подтянула (reverse-join), а object/ по «Обеспечение» отдаёт «Метраж, м» штатно.
+    AtexProductionPlanning.prototype.loadSupplyFootage = function() {
+        var self = this;
+        var meta = this.meta.supply;
+        if (!meta) { this.footageBySupply = {}; return Promise.resolve(); }
+        var footIdx = columnIndex(meta, SUPPLY_REQ.footage);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                map[String(rec.i)] = footIdx >= 0 ? (Number(r[footIdx]) || 0) : 0;
+            });
+            self.footageBySupply = map;
         });
     };
 
@@ -1904,6 +1961,26 @@
 
         var activeGroup = groups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || groups[0];
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
+
+        // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
+        // Длительность — намотка прогона (метраж обеспечений → windingMinutes), плюс
+        // переналадки между резками (реальные минуты из таблицы «Время операции»).
+        var windPoints = windingPointsFromTimes(self.opTimes || {});
+        var runLenByCut = {};
+        activeGroup.cuts.forEach(function(c) {
+            var maxF = 0;
+            (self.supplies || []).forEach(function(s) {
+                if (String(s.cutId) === String(c.id)) {
+                    var f = Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0;
+                    if (f > maxF) maxF = f;
+                }
+            });
+            runLenByCut[String(c.id)] = maxF;
+        });
+        var schedById = {};
+        buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut })
+            .forEach(function(sc) { schedById[sc.cutId] = sc; });
+
         activeGroup.cuts.forEach(function(c, idx) {
             var active = String(self.selectedCutId) === String(c.id);
             var supplies = self.supplyCount(c.id);
@@ -1927,6 +2004,14 @@
             ]);
             info.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
             cardPanel.appendChild(info);
+
+            // Строка времени: старт–финиш (длительность) от начала смены 08:00.
+            var sc = schedById[String(c.id)];
+            if (sc) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-time',
+                    text: '⏱ ' + formatClock(sc.startMin) + ' – ' + formatClock(sc.finishMin) +
+                          ' · ' + sc.durationMin + ' мин' }));
+            }
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
@@ -2092,6 +2177,7 @@
                     self.loadGenBatches(), // FIFO-партии для генерации резок
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
+                    self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);

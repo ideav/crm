@@ -422,4 +422,15 @@ assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 
 assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
 assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
 
+// Расписание очереди: старт/финиш от 08:00 (480 мин) + лидер 2 + намотка по метражу.
+var schedCuts = [
+    { id:'A', materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60 },
+    { id:'B', materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60 }
+];
+var sched = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut: { A:300, B:600 }, shiftStartMin: 480 });
+assertEqual(sched[0], { cutId:'A', startMin:482, finishMin:483.2, setupMin:2, durationMin:1.2 }, 'buildSchedule: 1-я резка (лидер 2, намотка 300→1.2)');
+assertEqual(sched[1], { cutId:'B', startMin:485.2, finishMin:489.2, setupMin:2, durationMin:4 }, 'buildSchedule: 2-я накопительно (идентична → переналадка 0)');
+assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
+assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
+
 console.log('\n' + passed + ' assertions passed');
