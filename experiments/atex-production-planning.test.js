@@ -368,4 +368,37 @@ var sSrc = [{ width: 110, qty: 2 }];
 planning.stripsUsedWidth(sSrc); planning.stripsTotalKnives(sSrc); planning.stripsRemainder(910, sSrc);
 assertEqual(sSrc, [{ width: 110, qty: 2 }], 'strips-сводка: вход не мутируется');
 
+// ── FIFO-резерв сырья (#3120 группа C): requiredRunLengthM / reserveFifo ──
+assertEqual(planning.requiredRunLengthM([100, 450, 250]), 450, 'requiredRunLengthM: max(Метраж)');
+assertEqual(planning.requiredRunLengthM(['200', '', '500,5']), 500.5, 'requiredRunLengthM: строки/запятая, пустые → 0');
+assertEqual(planning.requiredRunLengthM([]), 0, 'requiredRunLengthM: пусто → 0');
+
+// две партии, FIFO по приходу: нужно 700 пог.м, ширина 0.91 м.
+// b2 раньше (arrivalKey 1) даёт 500, остаток 200 добираем из b1 (arrivalKey 2).
+var fifoBatches = [
+    { id: '10', label: 'B1', arrivalKey: 20260201, freeLinearM: 1000 },
+    { id: '7',  label: 'B2', arrivalKey: 20260115, freeLinearM: 500 }
+];
+var r = planning.reserveFifo(fifoBatches, 700, 0.91);
+assertEqual(r.allocations, [
+    { batchId: '7', label: 'B2', linearM: 500, m2: 455 },
+    { batchId: '10', label: 'B1', linearM: 200, m2: 182 }
+], 'reserveFifo: FIFO по приходу, добор из следующей партии');
+assertEqual([r.reservedLinearM, r.shortfallLinearM, r.fullyReserved], [700, 0, true], 'reserveFifo: полностью зарезервировано');
+
+// нехватка: нужно 2000, доступно 1500 → shortfall 500, не полностью.
+var r2 = planning.reserveFifo(fifoBatches, 2000, 1);
+assertEqual([r2.reservedLinearM, r2.shortfallLinearM, r2.fullyReserved], [1500, 500, false], 'reserveFifo: нехватка → shortfall, fullyReserved=false');
+
+// нет подходящих партий → пустой резерв, вся потребность в shortfall.
+var r3 = planning.reserveFifo([], 300, 0.9);
+assertEqual([r3.allocations.length, r3.reservedLinearM, r3.shortfallLinearM, r3.fullyReserved], [0, 0, 300, false], 'reserveFifo: нет партий → shortfall=N');
+
+// потребность 0 → ничего не резервируем, fullyReserved=true.
+var r4 = planning.reserveFifo(fifoBatches, 0, 0.9);
+assertEqual([r4.allocations.length, r4.fullyReserved], [0, true], 'reserveFifo: N=0 → пусто, fullyReserved');
+
+// вход не мутируется (порядок исходного массива сохранён).
+assertEqual(fifoBatches[0].id, '10', 'reserveFifo: вход не мутируется (сортировка на копии)');
+
 console.log('\n' + passed + ' assertions passed');
