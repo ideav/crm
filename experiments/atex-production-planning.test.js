@@ -457,4 +457,20 @@ assertEqual(planning.resolveTolerance('0', 20), 0, 'resolveTolerance: 0 — эт
 assertEqual(planning.resolveTolerance('2,5', 20), 2.5, 'resolveTolerance: запятая-десятичный');
 assertEqual(planning.resolveTolerance('мусор', 20), 20, 'resolveTolerance: мусор → дефолт');
 
+// fifoBatchesForMaterial (#3120 Фаза 1b): фильтр по материалу + свободный погонный остаток
+// (Остаток,м − зарезервировано м² / ширина джамбо).
+var gbL = [
+    { id:'1', materialId:'M', label:'B1', dateKey:2, remainder:1000, remainderLinear:1000 },
+    { id:'2', materialId:'M', label:'B2', dateKey:1, remainder:500, remainderLinear:500 },
+    { id:'3', materialId:'X', label:'BX', dateKey:1, remainder:999, remainderLinear:999 }
+];
+assertEqual(planning.fifoBatchesForMaterial(gbL, { '1': 91 }, 'M', 0.91), [
+    { id:'1', label:'B1', arrivalKey:2, freeLinearM:900 },
+    { id:'2', label:'B2', arrivalKey:1, freeLinearM:500 }
+], 'fifoBatchesForMaterial: материал M, свободный остаток (b1: 1000−100=900)');
+assertEqual(planning.fifoBatchesForMaterial(gbL, {}, 'Z', 0.91), [], 'fifoBatchesForMaterial: нет партий материала → []');
+// связка с reserveFifo: нужно 700 пог.м → FIFO берёт b2 (приход раньше) 500 + b1 200
+var fbReserve = planning.reserveFifo(planning.fifoBatchesForMaterial(gbL, { '1': 91 }, 'M', 0.91), 700, 0.91);
+assertEqual([fbReserve.allocations[0].batchId, fbReserve.allocations[1].batchId, fbReserve.fullyReserved], ['2', '1', true], 'fifoBatchesForMaterial → reserveFifo: FIFO по приходу, добор');
+
 console.log('\n' + passed + ' assertions passed');
