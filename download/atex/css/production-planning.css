@@ -113,24 +113,25 @@
 
 .atex-pp-queue-group { margin-bottom: 16px; }
 
+/* Карточка резки — панель (#3120 п.1): информация + контролы + панель полос внутри. */
 .atex-pp-cut {
+    padding: 9px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+}
+.atex-pp-cut:hover { background: var(--pp-surface); }
+.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+
+/* Информационная строка — клик выбирает резку. */
+.atex-pp-cut-info {
     display: grid;
     grid-template-columns: 70px 1.4fr 1fr 100px 110px 110px;
     gap: 10px;
     align-items: center;
-    width: 100%;
-    text-align: left;
-    padding: 9px 10px;
-    margin-bottom: 6px;
-    border: 1px solid var(--pp-border);
-    border-radius: 6px;
-    background: var(--pp-bg);
     cursor: pointer;
-    font: inherit;
-    color: inherit;
 }
-.atex-pp-cut:hover { background: var(--pp-surface); }
-.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 .atex-pp-cut-num { font-weight: 700; }
 .atex-pp-cut-type { font-weight: 600; }
 .atex-pp-cut-batch,
@@ -146,8 +147,33 @@
 }
 .atex-pp-cut-supplies { font-size: 12px; color: var(--pp-muted); text-align: right; }
 
+/* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). */
+.atex-pp-cut-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
+}
+.atex-pp-move {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 5px 11px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-move:hover { background: var(--pp-surface); }
+.atex-pp-move:disabled { opacity: .4; cursor: default; }
+/* Пока идёт перемещение (setBusy) — все стрелки неактивны (#3120 п.5). */
+.atex-pp.is-busy .atex-pp-move { pointer-events: none; opacity: .4; }
+
+/* Панель полос — под своей карточкой (#3120 п.8). */
+.atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; }
+
 @media (max-width: 720px) {
-    .atex-pp-cut { grid-template-columns: 1fr 1fr; }
+    .atex-pp-cut-info { grid-template-columns: 1fr 1fr; }
     .atex-pp-filters { grid-template-columns: 1fr; }
 }
 
