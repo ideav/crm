@@ -1,17 +1,19 @@
 // Рабочее место atex «Пульт втулкореза» (роль Оператор, планшет).
 //
 // По заданию на втулки оператор выбирает втулкорез, вводит количество факт и
-// меняет статус задания (Ожидает → В работе → Готово). Решение задачи
-// ideav/crm#2916 (часть #2903). Правила разработки рабочих мест —
-// docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.6.
+// меняет статус задания (Ожидает → В работе → Готово). Задания подчинены
+// «Позиции заказа»: втулки для одной позиции могут планироваться общей партией,
+// даже если сама позиция обеспечивается несколькими производственными резками.
+// Решение задачи ideav/crm#2916 (часть #2903), актуализация #3139. Правила
+// разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих
+// мест — docs/atex_workplaces.md §3.6.
 //
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={резкаId}`,
+// (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={позицияId}`,
 // правки — `_m_set/{заданиеId}`, новые задания — `_m_new/{Задание на втулки}`
-// с `up={резкаId}`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
+// с `up={позицияId}`. Список позиций берётся отчётом `orders_list`, с fallback на
+// `positions_list`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
 // из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
-// Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
-// задачи не входит.
 //
 // Чистое ядро (статусы заданий и сводка) вынесено в объект `core` и
 // экспортируется через module.exports для модульных тестов
@@ -38,8 +40,7 @@
 
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = { cut: 'Производственная резка', task: 'Задание на втулки', cutter: 'Втулкорез' };
-    var CUT_REQ = { status: 'Статус', cutType: 'Тип резки', slitter: 'Слиттер' };
+    var TABLE = { position: 'Позиция заказа', task: 'Задание на втулки', cutter: 'Втулкорез' };
     var TASK_REQ = {
         planQty: 'Кол-во план',
         cutter: 'Втулкорез',
@@ -88,7 +89,7 @@
         return normalizeStatus(status) === STATUSES[STATUSES.length - 1];
     }
 
-    // Сводка по заданиям резки: сколько план/факт суммарно, сколько готово,
+    // Сводка по заданиям позиции: сколько план/факт суммарно, сколько готово,
     // и процент выполнения (по факту от плана). Для шапки и прогресса.
     function summarize(tasks) {
         var list = tasks || [];
@@ -110,6 +111,65 @@
 
     function round3(n) {
         return Math.round(n * 1000) / 1000;
+    }
+
+    function str(value) {
+        return value == null ? '' : String(value);
+    }
+
+    function refLabel(value) {
+        var ref = parseRef(value);
+        return ref.label || ref.id || '';
+    }
+
+    function positionLabel(position) {
+        var p = position || {};
+        var orderNo = str(p.orderNo).trim();
+        var no = str(p.no).trim();
+        var width = str(p.width).trim();
+        var head = '';
+        if (orderNo && no) head = orderNo + '/' + no;
+        else if (orderNo) head = orderNo;
+        else if (no) head = '№' + no;
+        else head = 'Позиция #' + str(p.id);
+        return head + (width ? ' · ' + width + ' мм' : '');
+    }
+
+    // Плоские строки отчётов orders_list/positions_list → позиции для пульта.
+    // Задания на втулки подчинены позиции (#3139), поэтому повторные строки
+    // отчёта по одной позиции дедуплицируются.
+    function rowsToPositions(rows) {
+        var byId = {};
+        var order = [];
+        (rows || []).forEach(function(row) {
+            var id = str(row.position_id);
+            if (!id || byId[id]) return;
+            var p = {
+                id: id,
+                orderNo: str(row.order_no),
+                no: str(row.position_no),
+                qty: str(row.position_qty),
+                width: str(row.position_width) || str(row.position_width_mm),
+                length: str(row.position_length) || str(row.position_length_m),
+                sleeve: str(row.position_sleeve),
+                status: str(row.position_status)
+            };
+            p.label = positionLabel(p);
+            byId[id] = p;
+            order.push(id);
+        });
+        return order.map(function(id) { return byId[id]; });
+    }
+
+    // Значения новой строки задания из выбранной позиции: план = кол-во позиции,
+    // диаметр = справочное значение «Диаметр втулки», если отчёт его отдаёт.
+    function taskDefaultsFromPosition(position) {
+        var qty = position && position.qty != null ? str(position.qty) : '';
+        var sleeve = position && position.sleeve != null ? refLabel(position.sleeve) : '';
+        return {
+            planQty: qty,
+            diameter: sleeve === '' ? '' : toNumber(sleeve)
+        };
     }
 
     // Подбор втулкореза по диаметру задания: запись, чей диапазон
@@ -160,7 +220,9 @@
         summarize: summarize,
         pickCutter: pickCutter,
         formatRange: formatRange,
-        autoAssignCutter: autoAssignCutter
+        autoAssignCutter: autoAssignCutter,
+        rowsToPositions: rowsToPositions,
+        taskDefaultsFromPosition: taskDefaultsFromPosition
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -208,13 +270,13 @@
     function AtexSleeveCutter(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, task: null, cutter: null };
+        this.meta = { position: null, task: null, cutter: null };
         this.cutters = [];        // справочник втулкорезов [{ id, label }]
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
-        this.cuts = [];           // производственные резки [{ id, label, status }]
-        this.currentCutId = null; // выбранная резка
-        this.currentCut = null;   // { id, label, status }
-        this.tasks = [];          // задания выбранной резки [{ id, planQty, cutterId, diameter, factQty, status }]
+        this.positions = [];      // позиции заказа [{ id, label, qty, sleeve, status }]
+        this.currentPositionId = null; // выбранная позиция заказа
+        this.currentPosition = null;   // { id, label, qty, sleeve, status }
+        this.tasks = [];          // задания выбранной позиции [{ id, planQty, cutterId, diameter, factQty, status }]
         this.busy = false;
     }
 
@@ -297,11 +359,11 @@
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
                 })[0] || null;
             }
-            self.meta.cut = byName(TABLE.cut);
+            self.meta.position = byName(TABLE.position);
             self.meta.task = byName(TABLE.task);
             self.meta.cutter = byName(TABLE.cutter);
             if (!self.meta.task) throw new Error('В метаданных не найдена таблица «' + TABLE.task + '»');
-            if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
+            if (!self.meta.position) throw new Error('В метаданных не найдена таблица «' + TABLE.position + '»');
         });
     };
 
@@ -332,28 +394,21 @@
         });
     };
 
-    AtexSleeveCutter.prototype.loadCuts = function() {
+    AtexSleeveCutter.prototype.loadPositions = function() {
         var self = this;
-        var meta = this.meta.cut;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var statusIdx = colIndex(meta, CUT_REQ.status);
-            self.cuts = (rows || []).map(function(r) {
-                var row = r.r || [];
-                return {
-                    id: String(r.i),
-                    label: row[0] || ('Резка #' + r.i),
-                    status: statusIdx >= 0 ? (row[statusIdx] || '') : ''
-                };
-            });
+        return this.getJson('report/orders_list?JSON_KV&LIMIT=0,5000').catch(function() {
+            return self.getJson('report/positions_list?JSON_KV&LIMIT=0,5000');
+        }).then(function(rows) {
+            self.positions = core.rowsToPositions(rows);
         });
     };
 
-    // ── Чтение заданий выбранной резки ──
+    // ── Чтение заданий выбранной позиции заказа ──
 
-    AtexSleeveCutter.prototype.loadTasks = function(cutId) {
+    AtexSleeveCutter.prototype.loadTasks = function(positionId) {
         var self = this;
         var meta = this.meta.task;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,1000').then(function(rows) {
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(positionId) + '&LIMIT=0,1000').then(function(rows) {
             var planIdx = colIndex(meta, TASK_REQ.planQty);
             var cutterIdx = colIndex(meta, TASK_REQ.cutter);
             var diamIdx = colIndex(meta, TASK_REQ.diameter);
@@ -377,35 +432,47 @@
     };
 
     AtexSleeveCutter.prototype.blankTask = function() {
-        return { id: null, name: '', planQty: '', cutterId: null, cutterAuto: false, diameter: '', factQty: '', status: STATUSES[0] };
+        var defaults = core.taskDefaultsFromPosition(this.currentPosition);
+        var task = {
+            id: null,
+            name: '',
+            planQty: defaults.planQty,
+            cutterId: null,
+            cutterAuto: false,
+            diameter: defaults.diameter,
+            factQty: '',
+            status: STATUSES[0]
+        };
+        core.autoAssignCutter(task, this.cutters);
+        return task;
     };
 
     // ── Рендеринг ──
 
     AtexSleeveCutter.prototype.render = function() {
-        this.renderCuts();
+        this.renderPositions();
         this.renderTasks();
     };
 
-    AtexSleeveCutter.prototype.renderCuts = function() {
+    AtexSleeveCutter.prototype.renderPositions = function() {
         var self = this;
-        var box = this.cutsEl;
+        var box = this.positionsEl;
         if (!box) return;
         box.innerHTML = '';
-        if (!this.cuts.length) {
-            box.appendChild(el('div', { class: 'atex-sc-empty', text: 'Резок пока нет' }));
+        if (!this.positions.length) {
+            box.appendChild(el('div', { class: 'atex-sc-empty', text: 'Позиций пока нет' }));
             return;
         }
-        this.cuts.forEach(function(cut) {
-            var active = String(self.currentCutId) === String(cut.id);
+        this.positions.forEach(function(position) {
+            var active = String(self.currentPositionId) === String(position.id);
             var item = el('button', {
                 class: 'atex-sc-cut-item' + (active ? ' is-active' : ''),
                 type: 'button'
             }, [
-                el('span', { class: 'atex-sc-cut-label', text: cut.label }),
-                cut.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(cut.status) }) : null
+                el('span', { class: 'atex-sc-cut-label', text: position.label }),
+                position.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(position.status) }) : null
             ]);
-            item.addEventListener('click', function() { self.openCut(cut.id); });
+            item.addEventListener('click', function() { self.openPosition(position.id); });
             box.appendChild(item);
         });
     };
@@ -416,15 +483,15 @@
         if (!host) return;
         host.innerHTML = '';
 
-        if (!this.currentCutId) {
-            host.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Выберите производственную резку слева, чтобы увидеть задания на втулки.' }));
+        if (!this.currentPositionId) {
+            host.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Выберите позицию заказа слева, чтобы увидеть задания на втулки.' }));
             return;
         }
 
-        var cut = this.currentCut || {};
+        var position = this.currentPosition || {};
         var head = el('div', { class: 'atex-sc-head' }, [
-            el('h2', { class: 'atex-sc-head-title', text: cut.label || ('Резка #' + this.currentCutId) }),
-            cut.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(cut.status) }) : null
+            el('h2', { class: 'atex-sc-head-title', text: position.label || ('Позиция #' + this.currentPositionId) }),
+            position.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(position.status) }) : null
         ]);
         host.appendChild(head);
 
@@ -576,7 +643,7 @@
     AtexSleeveCutter.prototype.saveTask = function(task) {
         var self = this;
         if (this.busy) return;
-        if (!this.currentCutId) { this.notify('Сначала выберите производственную резку', 'error'); return; }
+        if (!this.currentPositionId) { this.notify('Сначала выберите позицию заказа', 'error'); return; }
         var meta = this.meta.task;
         var fields = this.taskFields(task);
         // Имя задания (главное значение) — порядковый номер, если не задано.
@@ -592,7 +659,7 @@
             var createParams = {};
             Object.keys(fields).forEach(function(k) { createParams[k] = fields[k]; });
             createParams['t' + meta.id] = name;
-            chain = this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(this.currentCutId), createParams)
+            chain = this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(this.currentPositionId), createParams)
                 .then(function(res) {
                     var id = res && (res.obj || res.id || res.i);
                     if (!id) throw new Error('Сервер не вернул id нового задания');
@@ -602,7 +669,7 @@
         }
 
         chain.then(function() {
-            return self.loadTasks(self.currentCutId);
+            return self.loadTasks(self.currentPositionId);
         }).then(function() {
             self.setBusy(false);
             self.notify('Задание сохранено', 'success');
@@ -624,7 +691,7 @@
         }
         this.setBusy(true);
         this.post('_m_del/' + task.id + '?JSON', {}).then(function() {
-            return self.loadTasks(self.currentCutId);
+            return self.loadTasks(self.currentPositionId);
         }).then(function() {
             self.setBusy(false);
             self.notify('Задание удалено', 'success');
@@ -635,12 +702,12 @@
         });
     };
 
-    AtexSleeveCutter.prototype.openCut = function(cutId) {
+    AtexSleeveCutter.prototype.openPosition = function(positionId) {
         var self = this;
         this.setBusy(true);
-        this.currentCutId = String(cutId);
-        this.currentCut = this.cuts.filter(function(c) { return String(c.id) === String(cutId); })[0] || null;
-        this.loadTasks(cutId).then(function() {
+        this.currentPositionId = String(positionId);
+        this.currentPosition = this.positions.filter(function(p) { return String(p.id) === String(positionId); })[0] || null;
+        this.loadTasks(positionId).then(function() {
             self.setBusy(false);
             self.render();
         }).catch(function(err) {
@@ -681,21 +748,21 @@
         this.root.innerHTML = '';
         var layout = el('div', { class: 'atex-sc-layout' });
         var aside = el('aside', { class: 'atex-sc-sidebar' }, [
-            el('div', { class: 'atex-sc-sidebar-head' }, [ el('h2', { text: 'Резки' }) ])
+            el('div', { class: 'atex-sc-sidebar-head' }, [ el('h2', { text: 'Позиции' }) ])
         ]);
-        this.cutsEl = el('div', { class: 'atex-sc-cuts' });
-        aside.appendChild(this.cutsEl);
+        this.positionsEl = el('div', { class: 'atex-sc-cuts' });
+        aside.appendChild(this.positionsEl);
         this.tasksEl = el('section', { class: 'atex-sc-main' });
         layout.appendChild(aside);
         layout.appendChild(this.tasksEl);
         this.root.appendChild(layout);
         this.toastHost = this.root;
 
-        this.cutsEl.appendChild(el('div', { class: 'atex-sc-loading', text: 'Загрузка…' }));
+        this.positionsEl.appendChild(el('div', { class: 'atex-sc-loading', text: 'Загрузка…' }));
         this.tasksEl.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadCutters(), self.loadCuts()]); })
+            .then(function() { return Promise.all([self.loadCutters(), self.loadPositions()]); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

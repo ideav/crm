@@ -410,8 +410,8 @@ async function prepareScenario(page, def) {
     await page.evaluate(() => document.getElementById('atex-slitter')._atexSlitter.openCut('1982'));
     await waitTextAll(page, ['TT-АТХ-3002-2026-05-31', '1200', 'Завершён'], 'slitter open');
   } else if (def.js === 'sleeve-cutter') {
-    await waitEval(page, () => !!document.getElementById('atex-sleeve-cutter')._atexSleeveCutter?.cuts?.length, 'sleeve loaded');
-    await page.evaluate(() => document.getElementById('atex-sleeve-cutter')._atexSleeveCutter.openCut('1982'));
+    await waitEval(page, () => !!document.getElementById('atex-sleeve-cutter')._atexSleeveCutter?.positions?.length, 'sleeve loaded');
+    await page.evaluate(() => document.getElementById('atex-sleeve-cutter')._atexSleeveCutter.openPosition('1974'));
     await waitTextAll(page, ['Втулкорез 3', 'Готово', '10'], 'sleeve open');
   } else if (def.js === 'portal') {
     await waitEval(page, () => !!document.querySelector('[data-toggle="1966"]'), 'portal order row');

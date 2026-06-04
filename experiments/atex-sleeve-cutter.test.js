@@ -114,4 +114,43 @@ assertEqual(core.autoAssignCutter(mkTask({diameter:20, cutterId:'3', cutterAuto:
 assertEqual(core.autoAssignCutter(mkTask({diameter:30, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, '2', 'autoAssign: прежний авто пере-подбирается');
 assertEqual(core.autoAssignCutter(mkTask({diameter:100, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, null, 'autoAssign: нет подходящего → очищаем');
 
+// ── rowsToPositions: задания на втулки теперь подчинены «Позиции заказа» (#3139) ──
+var sleevePositions = core.rowsToPositions([
+    { order_no: 'АТХ-1', position_id: '501', position_no: '1', position_qty: '10',
+      position_width: '57.00', position_length: '1200', position_sleeve: '8188:76', position_status: 'В работе' },
+    { order_no: 'АТХ-1', position_id: '501', position_no: '1', position_qty: '10',
+      position_width: '57.00', position_length: '1200', position_sleeve: '8188:76', position_status: 'В работе' },
+    { order_no: 'АТХ-1', position_id: '', position_no: '', position_qty: '' }
+]);
+assertEqual(sleevePositions, [{
+    id: '501',
+    orderNo: 'АТХ-1',
+    no: '1',
+    qty: '10',
+    width: '57.00',
+    length: '1200',
+    sleeve: '8188:76',
+    status: 'В работе',
+    label: 'АТХ-1/1 · 57.00 мм'
+}], 'rowsToPositions: orders_list rows → dedup positions with display label');
+
+assertEqual(core.rowsToPositions([
+    { position_id: '601', position_no: '3', position_qty: '5', position_width: '40.00' }
+]), [{
+    id: '601',
+    orderNo: '',
+    no: '3',
+    qty: '5',
+    width: '40.00',
+    length: '',
+    sleeve: '',
+    status: '',
+    label: '№3 · 40.00 мм'
+}], 'rowsToPositions: positions_list fallback without order/sleeve columns');
+
+assertEqual(core.taskDefaultsFromPosition({
+    qty: '10',
+    sleeve: '8188:76'
+}), { planQty: '10', diameter: 76 }, 'taskDefaultsFromPosition: plan qty and sleeve diameter from position');
+
 console.log('\n' + passed + ' assertions passed');
