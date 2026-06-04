@@ -365,9 +365,12 @@
         });
     }
 
-    // Приоритет планирования: правь эти числа (10..100), чтобы изменить важность.
-    // Больше — тем дороже соответствующая переналадка. Сырьё>намотка>партия>остаток>ножи>ширина.
-    var PLANNING_WEIGHTS = { material: 100, winding: 70, batch: 50, remainder: 40, knife: 25, width: 10 };
+    // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
+    // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
+    //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
+    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база).
+    // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -387,20 +390,24 @@
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
-    // Стоимость перехода prev→next: взвешенная сумма нормированных компонент. weights по умолчанию PLANNING_WEIGHTS.
-    function changeoverCost(prev, next, weights){
-        var w = weights || PLANNING_WEIGHTS;
+    // Стоимость перехода prev→next в МИНУТАХ переналадки (times по кодам, иначе дефолт):
+    //   смена сырья ИЛИ намотки ИЛИ партии → MATERIAL_WINDING (одна операция «смена
+    //   сырья/намотки»; неудобный остаток — её же частный случай, отдельно не считаем);
+    //   смена набора ножей ИЛИ сужение ролика → KNIFE. Минуты суммируются (две операции —
+    //   обе вычитают время смены). Бинарно (изменилось/нет), без нормировок.
+    function changeoverCost(prev, next, times){
+        var t = times || DEFAULT_OP_TIMES;
+        var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
+        var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
         var cost = 0;
-        cost += (w.material || 0) * (String(prev.materialId) !== String(next.materialId) ? 1 : 0);
-        cost += (w.winding || 0) * (normWinding(prev.winding) !== normWinding(next.winding) ? 1 : 0);
-        var batchChange = String(prev.batchId) !== String(next.batchId);
-        cost += (w.batch || 0) * (batchChange ? 1 : 0);
-        cost += (w.remainder || 0) * ((batchChange && awkwardRemainder(prev.jumboRemainingM)) ? 1 : 0);
-        var knifeDist = Math.abs((Number(prev.knifeCount) || 0) - (Number(next.knifeCount) || 0))
-                      + widthSetDistance(prev.knifeWidths, next.knifeWidths);
-        cost += (w.knife || 0) * Math.min(1, knifeDist / KNIFE_SCALE);
-        var drop = Math.max(0, (Number(prev.rollerWidth) || 0) - (Number(next.rollerWidth) || 0));
-        cost += (w.width || 0) * Math.min(1, drop / WIDTH_SCALE);
+        var matWindChange = String(prev.materialId) !== String(next.materialId)
+            || normWinding(prev.winding) !== normWinding(next.winding)
+            || String(prev.batchId) !== String(next.batchId);
+        if (matWindChange) cost += matWind;
+        var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
+            || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
+            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
+        if (knifeChange) cost += knife;
         return cost;
     }
 
@@ -443,6 +450,88 @@
 
     // Округление до 3 знаков — убрать артефакты float-арифметики.
     function round3(n) { return Math.round(n * 1000) / 1000; }
+
+    // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
+    // (WIND_300=1.2 … WIND_1100=5.6). Спец-коды (WIND_FOIL_305, WIND_05_110) не парсятся
+    // как серия — это отдельные режимы (учтём позже). → [{m, min}] по возрастанию метров.
+    function windingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0 });
+        });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
+    // пропорционально от 0; между точками — линейно; выше последней — экстраполяция по
+    // последнему отрезку (при одной точке — клампим). Нет точек / runMeters≤0 → 0.
+    function windingMinutes(runMeters, points){
+        var x = Number(runMeters) || 0;
+        var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
+        if (!p.length || x <= 0) return 0;
+        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
+        for (var i = 1; i < p.length; i++){
+            if (x <= p[i].m){
+                var t = (x - p[i-1].m) / (p[i].m - p[i-1].m);
+                return round3(p[i-1].min + t * (p[i].min - p[i-1].min));
+            }
+        }
+        if (p.length < 2) return round3(p[p.length-1].min);
+        var a = p[p.length-2], b = p[p.length-1];
+        var slope = (b.min - a.min) / (b.m - a.m);
+        return round3(b.min + slope * (x - b.m));
+    }
+
+    var SHIFT_START_MIN = 8 * 60;        // начало смены 08:00 (минут от полуночи)
+    var SHIFT_END_MIN = 16 * 60 + 30;    // конец рабочего времени 16:30 (далее 30 мин уборки до 17:00)
+
+    // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
+    // полуночи дня 0 (через сутки — следующий рабочий день). setup перед резкой = лидер
+    // (BETWEEN_CUTS) + переналадка с предыдущей (changeoverCost, мин); длительность =
+    // намотка прогона (windingMinutes по метражу). Рабочее окно дня — [shiftStartMin,
+    // shiftEndMin] (08:00–16:30); резка, не влезающая до конца окна, переносится на
+    // 08:00 следующего дня. opts: { windPoints, times, shiftStartMin, shiftEndMin,
+    // runLengthByCut:{cutId:метры} }. Вход не мутирует.
+    function buildSchedule(cuts, opts){
+        opts = opts || {};
+        var wind = opts.windPoints || [];
+        var times = opts.times || DEFAULT_OP_TIMES;
+        var leader = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        var runLen = opts.runLengthByCut || {};
+        var shiftStart = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
+        var shiftEnd = Number(opts.shiftEndMin != null ? opts.shiftEndMin : SHIFT_END_MIN) || 0;
+        var hasWindow = shiftEnd > shiftStart;
+        var t = shiftStart;   // день 0, начало смены
+        var out = [];
+        (cuts || []).forEach(function(c, i){
+            var setup = leader + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
+            var dur = windingMinutes(Number(runLen[String(c.id)]) || 0, wind);
+            var start = t + setup;
+            var day = Math.floor(start / 1440);
+            if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
+            // не влезает до конца рабочего окна (16:30) → переносим на 08:00 след. дня
+            if (hasWindow && start + dur > day * 1440 + shiftEnd) {
+                day += 1;
+                start = day * 1440 + shiftStart + setup;
+            }
+            var finish = start + dur;
+            out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur });
+            t = finish;
+        });
+        return out;
+    }
+
+    // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
+    function formatClock(min){
+        var m = Math.round(Number(min) || 0);
+        var day = Math.floor(m / 1440);
+        var hm = ((m % 1440) + 1440) % 1440;
+        var h = Math.floor(hm / 60), mm = hm % 60;
+        var s = (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+        return day > 0 ? s + ' +' + day + 'д' : s;
+    }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
     // к запятой), иначе дефолт. «0» считается заданным значением. #3120 + ideav/crm#3127.
@@ -637,7 +726,7 @@
         rowsToGenPositions: rowsToGenPositions,
         batchDateKey: batchDateKey,
         rowsToBatches: rowsToBatches,
-        PLANNING_WEIGHTS: PLANNING_WEIGHTS,
+        DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
         KNIFE_SCALE: KNIFE_SCALE,
         WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
@@ -656,6 +745,12 @@
         cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
         reserveFifo: reserveFifo,
+        windingPointsFromTimes: windingPointsFromTimes,
+        windingMinutes: windingMinutes,
+        buildSchedule: buildSchedule,
+        formatClock: formatClock,
+        SHIFT_START_MIN: SHIFT_START_MIN,
+        SHIFT_END_MIN: SHIFT_END_MIN,
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
@@ -883,6 +978,25 @@
         });
     };
 
+    // Метраж обеспечений: this.footageBySupply = { supplyId: «Метраж, м» }. Нужен для
+    // длины прогона резки (макс по её обеспечениям) → длительность намотки (расписание).
+    // Читаем object/ напрямую — колонка отчёта cut_planning поле подчинённой таблицы не
+    // подтянула (reverse-join), а object/ по «Обеспечение» отдаёт «Метраж, м» штатно.
+    AtexProductionPlanning.prototype.loadSupplyFootage = function() {
+        var self = this;
+        var meta = this.meta.supply;
+        if (!meta) { this.footageBySupply = {}; return Promise.resolve(); }
+        var footIdx = columnIndex(meta, SUPPLY_REQ.footage);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                map[String(rec.i)] = footIdx >= 0 ? (Number(r[footIdx]) || 0) : 0;
+            });
+            self.footageBySupply = map;
+        });
+    };
+
     // Ширина джамбо по виду сырья: this.jumboWidthByMaterial = { materialId: ширина }.
     // Таблица «Вид сырья» резолвится по имени из закешированного списка метаданных
     // (this._metaAll); ширина — поле «Ширина, мм» (columnIndex по имени). Ключ карты —
@@ -907,6 +1021,34 @@
             });
             self.jumboWidthByMaterial = map;
             self.toleranceByMaterial = tol;
+        });
+    };
+
+    // Времена операций из таблицы «Время операции, мин» (13588) по кодам (колонка
+    // «Код операции»; главное значение записи = минуты). this.opTimes = {КОД: мин},
+    // this.changeTimes = веса переналадок для changeoverCost. Если таблицы/кодов нет —
+    // changeTimes=null (changeoverCost берёт DEFAULT_OP_TIMES).
+    AtexProductionPlanning.prototype.loadOperationTimes = function() {
+        var self = this;
+        var list = this._metaAll || [];
+        var meta = list.filter(function(t) {
+            return String(t.val).trim().toLowerCase() === 'время операции, мин';
+        })[0] || null;
+        if (!meta) { this.opTimes = {}; this.changeTimes = null; return Promise.resolve(); }
+        var codeIdx = columnIndex(meta, 'Код операции');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            var raw = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var code = codeIdx >= 0 ? String(r[codeIdx] == null ? '' : r[codeIdx]).trim() : '';
+                if (code) raw[code] = Number(r[0]) || 0;   // r[0] — главное значение = минуты
+            });
+            self.opTimes = raw;
+            self.changeTimes = {
+                MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
+                KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
+                BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS
+            };
         });
     };
 
@@ -1678,7 +1820,7 @@
         var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
 
         function doRun() {
-            var plan = planQueues(self.cuts);
+            var plan = planQueues(self.cuts, self.changeTimes);
 
             // Отбираем резки с изменившейся очерёдностью.
             var cutsById = {};
@@ -1867,6 +2009,26 @@
 
         var activeGroup = groups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || groups[0];
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
+
+        // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
+        // Длительность — намотка прогона (метраж обеспечений → windingMinutes), плюс
+        // переналадки между резками (реальные минуты из таблицы «Время операции»).
+        var windPoints = windingPointsFromTimes(self.opTimes || {});
+        var runLenByCut = {};
+        activeGroup.cuts.forEach(function(c) {
+            var maxF = 0;
+            (self.supplies || []).forEach(function(s) {
+                if (String(s.cutId) === String(c.id)) {
+                    var f = Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0;
+                    if (f > maxF) maxF = f;
+                }
+            });
+            runLenByCut[String(c.id)] = maxF;
+        });
+        var schedById = {};
+        buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut })
+            .forEach(function(sc) { schedById[sc.cutId] = sc; });
+
         activeGroup.cuts.forEach(function(c, idx) {
             var active = String(self.selectedCutId) === String(c.id);
             var supplies = self.supplyCount(c.id);
@@ -1890,6 +2052,14 @@
             ]);
             info.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
             cardPanel.appendChild(info);
+
+            // Строка времени: старт–финиш (длительность) от начала смены 08:00.
+            var sc = schedById[String(c.id)];
+            if (sc) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-time',
+                    text: '⏱ ' + formatClock(sc.startMin) + ' – ' + formatClock(sc.finishMin) +
+                          ' · ' + sc.durationMin + ' мин' }));
+            }
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
@@ -2054,6 +2224,8 @@
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     self.loadGenBatches(), // FIFO-партии для генерации резок
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
+                    self.loadOperationTimes(), // времена переналадок (веса очереди)
+                    self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);

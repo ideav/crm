@@ -148,6 +148,8 @@
     justify-self: start;
 }
 .atex-pp-cut-supplies { font-size: 12px; color: var(--pp-muted); text-align: right; }
+/* Строка времени резки (старт–финиш от начала смены) в карточке. */
+.atex-pp-cut-time { margin-top: 6px; font-size: 12px; color: var(--pp-accent); font-variant-numeric: tabular-nums; }
 
 /* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). */
 .atex-pp-cut-controls {
