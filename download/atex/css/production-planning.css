@@ -123,6 +123,8 @@
 }
 .atex-pp-cut:hover { background: var(--pp-surface); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+/* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
+.atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); border-color: var(--pp-warn); }
 
 /* Информационная строка — клик выбирает резку. */
 .atex-pp-cut-info {
