@@ -562,11 +562,22 @@
         }
         return result;
     }
-    // Упорядочить резки станка: не-Фольга жадно, затем Фольга жадно; проставить sequence; вход не мутировать.
+    // Внутри последовательности станка число ножей должно убывать к концу дня
+    // (ideav/crm#3130): в начале смены ножей много, к вечеру меньше — переналаживать
+    // тяжелее. Стабильная сортировка по knifeCount ↓; равные — в порядке жадной
+    // последовательности (минимизация переналадок остаётся вторичным критерием).
+    function byKnifeCountDesc(seq){
+        return (seq || []).map(function(c, i){ return { c: c, i: i }; })
+            .sort(function(a, b){ return ((Number(b.c.knifeCount) || 0) - (Number(a.c.knifeCount) || 0)) || (a.i - b.i); })
+            .map(function(x){ return x.c; });
+    }
+
+    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы — жадно
+    // (переналадки), затем по убыванию ножей (#3130); проставить sequence; вход не мутировать.
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
-        var seq = greedySequence(rest, weights).concat(greedySequence(foil, weights));
+        var seq = byKnifeCountDesc(greedySequence(rest, weights)).concat(byKnifeCountDesc(greedySequence(foil, weights)));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -636,6 +647,7 @@
         changeoverCost: changeoverCost,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
+        byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         moveInQueue: moveInQueue,
         unsuppliedPositions: unsuppliedPositions,
