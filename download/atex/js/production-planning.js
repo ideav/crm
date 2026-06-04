@@ -1735,7 +1735,14 @@
         activeGroup.cuts.forEach(function(c, idx) {
             var active = String(self.selectedCutId) === String(c.id);
             var supplies = self.supplyCount(c.id);
-            var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
+
+            // Карточка-панель (#3120 п.1): div-панель вместо кнопки. Внутри —
+            // информация (клик = выбор резки) и контролы (↑/↓/Полосы). Панель полос
+            // (#3120 п.8) openStrips добавляет внутрь этой же карточки (контейнер —
+            // cardPanel), а не внизу всей очереди — поэтому она строго одна на карточку.
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), dataset: { cutId: String(c.id) } });
+
+            var info = el('div', { class: 'atex-pp-cut-info' }, [
                 el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
@@ -1743,11 +1750,12 @@
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);
-            card.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
+            info.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
+            cardPanel.appendChild(info);
 
-            var row = el('div', { class: 'atex-pp-cut-row' });
-            var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑' });
-            var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓' });
+            var controls = el('div', { class: 'atex-pp-cut-controls' });
+            var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
+            var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
             if (idx === 0) up.disabled = true;
             if (idx === activeGroup.cuts.length - 1) down.disabled = true;
             up.addEventListener('click', function() {
@@ -1763,13 +1771,14 @@
             var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
             strips.addEventListener('click', function() {
                 if (self.busy) return;
-                self.openStrips(c, box);
+                self.openStrips(c, cardPanel);
             });
-            row.appendChild(up);
-            row.appendChild(card);
-            row.appendChild(down);
-            row.appendChild(strips);
-            groupEl.appendChild(row);
+            controls.appendChild(up);
+            controls.appendChild(down);
+            controls.appendChild(strips);
+            cardPanel.appendChild(controls);
+
+            groupEl.appendChild(cardPanel);
         });
         box.appendChild(groupEl);
     };
