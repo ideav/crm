@@ -293,15 +293,18 @@
     }
 
     // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
-    // привязки. Подпись: «№<номер> · <ширина>мм» (ширина пропускается, если пустая).
-    // Прежняя метка использовала колонку position_cut_type, удалённую в F2 (упразднён
-    // «Тип резки») — теперь подпись строится из номера позиции и ширины.
+    // привязки и плашек «Связанные позиции». Подпись: «<номер заказа>/<номер
+    // позиции> · <ширина> мм» (#3116 п.3). Номер заказа берётся из колонки
+    // `order_no` отчёта; если её нет (старый отчёт) — деградирует до «№<номер>».
+    // Ширина пропускается, если пустая.
     function rowsToPositions(rows) {
         return (rows || []).map(function(row) {
             var id = row.position_id == null ? '' : String(row.position_id);
+            var orderNo = row.order_no == null ? '' : String(row.order_no).trim();
             var no = row.position_no == null ? '' : String(row.position_no).trim();
             var width = row.position_width == null ? '' : String(row.position_width).trim();
-            var label = '№' + no + (width !== '' ? ' · ' + width + 'мм' : '');
+            var head = orderNo !== '' ? orderNo + '/' + no : '№' + no;
+            var label = head + (width !== '' ? ' · ' + width + ' мм' : '');
             return { id: id, label: label };
         });
     }
@@ -924,6 +927,7 @@
                 self.setBusy(false);
                 self.draft = self.blankDraft();
                 self.selectedCutId = String(id);
+                self.closeForm();
                 self.notify('Производственная резка создана', 'success');
                 self.render();
             });
@@ -965,6 +969,24 @@
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка привязки: ' + err.message, 'error');
+        });
+    };
+
+    // Удалить связь резки с позицией (#3116 п.4): удаляем запись «Обеспечения»
+    // по клику «×» (без подтверждения — решение по задаче) и перечитываем очередь.
+    AtexProductionPlanning.prototype.deleteSupply = function(supplyId) {
+        var self = this;
+        if (this.busy || !supplyId) return;
+        this.setBusy(true);
+        this.post('_m_del/' + encodeURIComponent(supplyId) + '?JSON', {}).then(function() {
+            return self.loadPlanning().then(function() {
+                self.setBusy(false);
+                self.notify('Связь с позицией удалена', 'info');
+                self.render();
+            });
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка удаления связи: ' + err.message, 'error');
         });
     };
 
@@ -1058,11 +1080,19 @@
         function recalc() {
             var used = planning.stripsUsedWidth(strips);
             var knives = planning.stripsTotalKnives(strips);
-            var rem = planning.stripsRemainder(jumbo, strips);
-            var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
             summaryEl.innerHTML = '';
             summaryEl.appendChild(metric('Итого ножей', knives));
             summaryEl.appendChild(metric('Занято, мм', used));
+            // Ширина джамбо неизвестна (нет вида сырья / ширины) → остаток посчитать
+            // нельзя. Не показываем ложный отрицательный «вне допуска» (#3116 п.5),
+            // а нейтрально сигналим, что джамбо не задан.
+            if (!(jumbo > 0)) {
+                summaryEl.appendChild(metric('Остаток, мм', '—'));
+                summaryEl.appendChild(el('span', { class: 'atex-pp-strip-badge', text: 'ширина джамбо не задана' }));
+                return;
+            }
+            var rem = planning.stripsRemainder(jumbo, strips);
+            var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
             var remNode = metric('Остаток, мм', rem);
             if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
             summaryEl.appendChild(remNode);
@@ -1546,6 +1576,17 @@
         this.renderLink();
     };
 
+    // Открыть модалку формы новой резки (#3116 п.1). Содержимое уже отрисовано
+    // renderForm; здесь только показываем оверлей.
+    AtexProductionPlanning.prototype.openForm = function() {
+        this.renderForm();
+        if (this.modalEl) this.modalEl.classList.add('is-open');
+    };
+
+    AtexProductionPlanning.prototype.closeForm = function() {
+        if (this.modalEl) this.modalEl.classList.remove('is-open');
+    };
+
     function field(label, control) {
         return el('div', { class: 'atex-pp-field' }, [
             el('label', { class: 'atex-pp-label', text: label }),
@@ -1649,18 +1690,13 @@
         var box = this.queueEl;
         box.innerHTML = '';
 
-        // Панель фильтров.
+        // Панель фильтров. Фильтр по станку заменён закладками (#3116 п.2).
         var filters = el('div', { class: 'atex-pp-filters' });
-        var slitterFilter = this.selectRef(this.slitters, this.filter.slitter, 'Все станки',
-            function(v) { self.filter.slitter = v; self.renderQueue(); },
-            reqIdByName(this.meta.cut, CUT_REQ.slitter),
-            { clearOnInput: false });
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
         var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
         dateFilter.addEventListener('change', function() { self.filter.date = dateFilter.value; self.renderQueue(); });
-        filters.appendChild(field('Станок', slitterFilter));
         filters.appendChild(field('Дата плана', dateFilter));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
@@ -1675,53 +1711,67 @@
             return;
         }
 
-        groups.forEach(function(g) {
-            var groupEl = el('div', { class: 'atex-pp-queue-group' });
-            groupEl.appendChild(el('div', { class: 'atex-pp-queue-head' }, [
-                el('span', { class: 'atex-pp-queue-slitter', text: g.slitter.label }),
-                el('span', { class: 'atex-pp-queue-count', text: g.cuts.length + ' рез.' })
-            ]));
-            g.cuts.forEach(function(c, idx) {
-                var active = String(self.selectedCutId) === String(c.id);
-                var supplies = self.supplyCount(c.id);
-                var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
-                    el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
-                    el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
-                    el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
-                    el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
-                    el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
-                    el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
-                ]);
-                card.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
+        // Закладки по станкам (#3116 п.2): один таб на станок, контент — резки
+        // только активного станка. Активный таб в this.activeSlitter (ключ как в
+        // groupBySlitter); если выбранного среди групп нет — берём первый.
+        function groupKey(g) { return g.slitter.id == null ? ' none' : String(g.slitter.id); }
+        var keys = groups.map(groupKey);
+        if (keys.indexOf(self.activeSlitter) === -1) self.activeSlitter = keys[0];
 
-                var row = el('div', { class: 'atex-pp-cut-row' });
-                var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑' });
-                var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓' });
-                if (idx === 0) up.disabled = true;
-                if (idx === g.cuts.length - 1) down.disabled = true;
-                up.addEventListener('click', function() {
-                    if (self.busy) return;
-                    var p = moveInQueue(g.cuts, idx, -1);
-                    if (p.length) self.saveSequences(p);
-                });
-                down.addEventListener('click', function() {
-                    if (self.busy) return;
-                    var p = moveInQueue(g.cuts, idx, 1);
-                    if (p.length) self.saveSequences(p);
-                });
-                var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
-                strips.addEventListener('click', function() {
-                    if (self.busy) return;
-                    self.openStrips(c, box);
-                });
-                row.appendChild(up);
-                row.appendChild(card);
-                row.appendChild(down);
-                row.appendChild(strips);
-                groupEl.appendChild(row);
-            });
-            box.appendChild(groupEl);
+        var tabs = el('div', { class: 'atex-pp-tabs' });
+        groups.forEach(function(g) {
+            var key = groupKey(g);
+            var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : ''), type: 'button' }, [
+                el('span', { class: 'atex-pp-tab-label', text: g.slitter.label }),
+                el('span', { class: 'atex-pp-tab-count', text: String(g.cuts.length) })
+            ]);
+            tab.addEventListener('click', function() { self.activeSlitter = key; self.renderQueue(); });
+            tabs.appendChild(tab);
         });
+        box.appendChild(tabs);
+
+        var activeGroup = groups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || groups[0];
+        var groupEl = el('div', { class: 'atex-pp-queue-group' });
+        activeGroup.cuts.forEach(function(c, idx) {
+            var active = String(self.selectedCutId) === String(c.id);
+            var supplies = self.supplyCount(c.id);
+            var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
+                el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
+                el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
+                el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
+                el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
+                el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
+                el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
+            ]);
+            card.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
+
+            var row = el('div', { class: 'atex-pp-cut-row' });
+            var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑' });
+            var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓' });
+            if (idx === 0) up.disabled = true;
+            if (idx === activeGroup.cuts.length - 1) down.disabled = true;
+            up.addEventListener('click', function() {
+                if (self.busy) return;
+                var p = moveInQueue(activeGroup.cuts, idx, -1);
+                if (p.length) self.saveSequences(p);
+            });
+            down.addEventListener('click', function() {
+                if (self.busy) return;
+                var p = moveInQueue(activeGroup.cuts, idx, 1);
+                if (p.length) self.saveSequences(p);
+            });
+            var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
+            strips.addEventListener('click', function() {
+                if (self.busy) return;
+                self.openStrips(c, box);
+            });
+            row.appendChild(up);
+            row.appendChild(card);
+            row.appendChild(down);
+            row.appendChild(strips);
+            groupEl.appendChild(row);
+        });
+        box.appendChild(groupEl);
     };
 
     AtexProductionPlanning.prototype.renderLink = function() {
@@ -1767,7 +1817,12 @@
             var posById = {};
             this.positions.forEach(function(p) { posById[p.id] = p.label; });
             linked.forEach(function(s) {
-                listWrap.appendChild(el('div', { class: 'atex-pp-linked-item', text: posById[s.positionId] || ('позиция #' + s.positionId) }));
+                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
+                del.addEventListener('click', function() { self.deleteSupply(s.id); });
+                listWrap.appendChild(el('div', { class: 'atex-pp-linked-item' }, [
+                    el('span', { class: 'atex-pp-linked-label', text: posById[s.positionId] || ('позиция #' + s.positionId) }),
+                    del
+                ]));
             });
         }
         box.appendChild(listWrap);
@@ -1806,20 +1861,42 @@
         var self = this;
         this.root.innerHTML = '';
         var layout = el('div', { class: 'atex-pp-layout' });
-        this.formEl = el('section', { class: 'atex-pp-panel atex-pp-form', 'data-submit-scope': '' });
-        var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [
-            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' })
+
+        // Форма новой резки живёт в модалке (#3116 п.1), открывается кнопкой «+».
+        this.formEl = el('section', { class: 'atex-pp-form', 'data-submit-scope': '' });
+
+        // Шапка очереди: заголовок слева + кнопка «+ Новая резка» справа вверху.
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
+        addBtn.addEventListener('click', function() { self.openForm(); });
+        var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
+            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),
+            addBtn
         ]);
+        var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [queueHead]);
         this.queueEl = el('div', { class: 'atex-pp-queue' });
         queueWrap.appendChild(this.queueEl);
         this.linkEl = el('section', { class: 'atex-pp-panel atex-pp-link' });
-        layout.appendChild(this.formEl);
         layout.appendChild(queueWrap);
         layout.appendChild(this.linkEl);
         this.root.appendChild(layout);
+
+        // Модалка формы: оверлей + диалог с крестиком; закрытие по ×/оверлею/Esc.
+        var dialog = el('div', { class: 'atex-pp-modal-dialog' });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', function() { self.closeForm(); });
+        dialog.appendChild(closeX);
+        dialog.appendChild(this.formEl);
+        this.modalEl = el('div', { class: 'atex-pp-modal' }, [dialog]);
+        this.modalEl.addEventListener('click', function(e) { if (e.target === self.modalEl) self.closeForm(); });
+        this.root.appendChild(this.modalEl);
+        if (typeof document !== 'undefined') {
+            document.addEventListener('keydown', function(e) {
+                if ((e.key === 'Escape' || e.keyCode === 27) && self.modalEl && self.modalEl.classList.contains('is-open')) self.closeForm();
+            });
+        }
         this.toastHost = this.root;
 
-        this.formEl.appendChild(el('div', { class: 'atex-pp-loading', text: 'Загрузка…' }));
+        this.queueEl.appendChild(el('div', { class: 'atex-pp-loading', text: 'Загрузка…' }));
 
         return this.loadMetadata()
             .then(function() {
