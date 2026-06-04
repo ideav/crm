@@ -365,9 +365,12 @@
         });
     }
 
-    // Приоритет планирования: правь эти числа (10..100), чтобы изменить важность.
-    // Больше — тем дороже соответствующая переналадка. Сырьё>намотка>партия>остаток>ножи>ширина.
-    var PLANNING_WEIGHTS = { material: 100, winding: 70, batch: 50, remainder: 40, knife: 25, width: 10 };
+    // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
+    // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
+    //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
+    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база).
+    // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -387,20 +390,24 @@
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
-    // Стоимость перехода prev→next: взвешенная сумма нормированных компонент. weights по умолчанию PLANNING_WEIGHTS.
-    function changeoverCost(prev, next, weights){
-        var w = weights || PLANNING_WEIGHTS;
+    // Стоимость перехода prev→next в МИНУТАХ переналадки (times по кодам, иначе дефолт):
+    //   смена сырья ИЛИ намотки ИЛИ партии → MATERIAL_WINDING (одна операция «смена
+    //   сырья/намотки»; неудобный остаток — её же частный случай, отдельно не считаем);
+    //   смена набора ножей ИЛИ сужение ролика → KNIFE. Минуты суммируются (две операции —
+    //   обе вычитают время смены). Бинарно (изменилось/нет), без нормировок.
+    function changeoverCost(prev, next, times){
+        var t = times || DEFAULT_OP_TIMES;
+        var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
+        var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
         var cost = 0;
-        cost += (w.material || 0) * (String(prev.materialId) !== String(next.materialId) ? 1 : 0);
-        cost += (w.winding || 0) * (normWinding(prev.winding) !== normWinding(next.winding) ? 1 : 0);
-        var batchChange = String(prev.batchId) !== String(next.batchId);
-        cost += (w.batch || 0) * (batchChange ? 1 : 0);
-        cost += (w.remainder || 0) * ((batchChange && awkwardRemainder(prev.jumboRemainingM)) ? 1 : 0);
-        var knifeDist = Math.abs((Number(prev.knifeCount) || 0) - (Number(next.knifeCount) || 0))
-                      + widthSetDistance(prev.knifeWidths, next.knifeWidths);
-        cost += (w.knife || 0) * Math.min(1, knifeDist / KNIFE_SCALE);
-        var drop = Math.max(0, (Number(prev.rollerWidth) || 0) - (Number(next.rollerWidth) || 0));
-        cost += (w.width || 0) * Math.min(1, drop / WIDTH_SCALE);
+        var matWindChange = String(prev.materialId) !== String(next.materialId)
+            || normWinding(prev.winding) !== normWinding(next.winding)
+            || String(prev.batchId) !== String(next.batchId);
+        if (matWindChange) cost += matWind;
+        var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
+            || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
+            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
+        if (knifeChange) cost += knife;
         return cost;
     }
 
@@ -617,7 +624,7 @@
         rowsToGenPositions: rowsToGenPositions,
         batchDateKey: batchDateKey,
         rowsToBatches: rowsToBatches,
-        PLANNING_WEIGHTS: PLANNING_WEIGHTS,
+        DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
         KNIFE_SCALE: KNIFE_SCALE,
         WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
@@ -881,6 +888,34 @@
                 map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
             });
             self.jumboWidthByMaterial = map;
+        });
+    };
+
+    // Времена операций из таблицы «Время операции, мин» (13588) по кодам (колонка
+    // «Код операции»; главное значение записи = минуты). this.opTimes = {КОД: мин},
+    // this.changeTimes = веса переналадок для changeoverCost. Если таблицы/кодов нет —
+    // changeTimes=null (changeoverCost берёт DEFAULT_OP_TIMES).
+    AtexProductionPlanning.prototype.loadOperationTimes = function() {
+        var self = this;
+        var list = this._metaAll || [];
+        var meta = list.filter(function(t) {
+            return String(t.val).trim().toLowerCase() === 'время операции, мин';
+        })[0] || null;
+        if (!meta) { this.opTimes = {}; this.changeTimes = null; return Promise.resolve(); }
+        var codeIdx = columnIndex(meta, 'Код операции');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            var raw = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var code = codeIdx >= 0 ? String(r[codeIdx] == null ? '' : r[codeIdx]).trim() : '';
+                if (code) raw[code] = Number(r[0]) || 0;   // r[0] — главное значение = минуты
+            });
+            self.opTimes = raw;
+            self.changeTimes = {
+                MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
+                KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
+                BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS
+            };
         });
     };
 
@@ -1645,7 +1680,7 @@
         var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
 
         function doRun() {
-            var plan = planQueues(self.cuts);
+            var plan = planQueues(self.cuts, self.changeTimes);
 
             // Отбираем резки с изменившейся очерёдностью.
             var cutsById = {};
@@ -2021,6 +2056,7 @@
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     self.loadGenBatches(), // FIFO-партии для генерации резок
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
+                    self.loadOperationTimes(), // времена переналадок (веса очереди)
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
