@@ -478,4 +478,16 @@ var gpM = [{ id:'p1', materialId:'M1' }, { id:'p2', materialId:'M1' }, { id:'p3'
 var supM = [{ cutId:'c1', positionId:'p1' }, { cutId:'c1', positionId:'p2' }, { cutId:'c2', positionId:'p3' }, { cutId:'c3', positionId:'pX' }];
 assertEqual(planning.materialByCut([], supM, gpM), { c1:'M1', c2:'M2' }, 'materialByCut: c1→M1 (по позициям), c2→M2, c3 без материала позиции — нет');
 
+// progressPercent (#3148): целый процент 0..100 для окна прогресса генерации резок.
+assertEqual(planning.progressPercent(0, 10), 0, 'progressPercent: 0/10 → 0');
+assertEqual(planning.progressPercent(5, 10), 50, 'progressPercent: 5/10 → 50');
+assertEqual(planning.progressPercent(10, 10), 100, 'progressPercent: 10/10 → 100');
+assertEqual(planning.progressPercent(1, 3), 33, 'progressPercent: 1/3 → 33 (округление)');
+assertEqual(planning.progressPercent(2, 3), 67, 'progressPercent: 2/3 → 67 (округление)');
+assertEqual(planning.progressPercent(0, 0), 0, 'progressPercent: total 0 → 0 (без деления на ноль)');
+assertEqual(planning.progressPercent(5, 0), 0, 'progressPercent: total 0 → 0 даже при done>0');
+assertEqual(planning.progressPercent(20, 10), 100, 'progressPercent: done>total → клампится до 100');
+assertEqual(planning.progressPercent(-3, 10), 0, 'progressPercent: done<0 → клампится до 0');
+assertEqual(planning.progressPercent('абв', 10), 0, 'progressPercent: нечисло → 0');
+
 console.log('\n' + passed + ' assertions passed');

@@ -741,6 +741,17 @@
         return result;
     }
 
+    // Прогресс длительной генерации резок (#3148): целое значение процента 0..100.
+    // total ≤ 0 или нечисловые входы → 0; результат клампится в [0, 100].
+    function progressPercent(done, total) {
+        var d = Number(done), t = Number(total);
+        if (!isFinite(d) || !isFinite(t) || t <= 0) return 0;
+        var p = Math.round((d / t) * 100);
+        if (p < 0) return 0;
+        if (p > 100) return 100;
+        return p;
+    }
+
     var planning = {
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -788,7 +799,8 @@
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
         stripsRemainder: stripsRemainder,
-        resolveTolerance: resolveTolerance
+        resolveTolerance: resolveTolerance,
+        progressPercent: progressPercent
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -832,6 +844,8 @@
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.busy = false;
+        this.progressEl = null;     // окно прогресса генерации резок (#3148)
+        this.progressTotal = 0;
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
@@ -1790,11 +1804,17 @@
 
         var nStrips = 0;
         var nPositions = 0;
+        var nCuts = layouts.length;
+        var doneCuts = 0;
 
         this.setBusy(true);
+        // Окно прогресса (#3148): генерация идёт последовательными запросами
+        // (Резка → Полосы → Обеспечения), может занять заметное время.
+        this.showProgress('Генерация резок…', nCuts);
         var chain = Promise.resolve();
-        layouts.forEach(function(lay) {
+        layouts.forEach(function(lay, layIdx) {
             chain = chain.then(function() {
+                self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
                 // 1) Резка (корневой объект): статус + станок (баланс) + партия (FIFO).
                 var slitterId = pickSlitter(self.slitters, lay.mat, loadBySlitterId);
                 if (slitterId != null) loadBySlitterId[String(slitterId)] = (loadBySlitterId[String(slitterId)] || 0) + 1;
@@ -1837,19 +1857,26 @@
                         });
                         return supChain;
                     });
+                }).then(function() {
+                    // Резка со всеми полосами и обеспечениями готова → +1 к прогрессу.
+                    doneCuts += 1;
+                    self.updateProgress(doneCuts);
                 });
             });
         });
 
         chain.then(function() {
+            self.updateProgress(nCuts, 'Обновление очереди…');
             return self.reload();
         }).then(function() {
+            self.hideProgress();
             self.setBusy(false);
             self.render();
             var reasons = self.groupSkipReasons(skipped);
             self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
         }).catch(function(err) {
+            self.hideProgress();
             self.setBusy(false);
             self.notify('Ошибка генерации резок: ' + err.message, 'error');
         });
@@ -2318,6 +2345,54 @@
             toast.classList.remove('is-visible');
             setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
         }, 3500);
+    };
+
+    // Окно прогресса длительной генерации резок (#3148). Модальный оверлей с
+    // заголовком, полосой прогресса и счётчиком «N из M». Крепится к document.body,
+    // чтобы не тускнеть под .atex-pp.is-busy (opacity .65) и быть поверх всего.
+    // Без кнопок: операция неотменяема, окно — только индикатор хода.
+    AtexProductionPlanning.prototype.showProgress = function(title, total) {
+        this.hideProgress();
+        this.progressTotal = Number(total) || 0;
+        var bar = el('div', { class: 'atex-pp-progress-bar' });
+        var fill = el('div', { class: 'atex-pp-progress-fill' });
+        bar.appendChild(fill);
+        var counter = el('div', { class: 'atex-pp-progress-count', text: '' });
+        var dialog = el('div', { class: 'atex-pp-progress-dialog' }, [
+            el('div', { class: 'atex-pp-progress-title', text: title || 'Генерация резок…' }),
+            bar,
+            counter
+        ]);
+        var overlay = el('div', { class: 'atex-pp-progress is-open' }, [dialog]);
+        (document.body || this.root).appendChild(overlay);
+        this.progressEl = overlay;
+        this.progressFill = fill;
+        this.progressCounter = counter;
+        this.updateProgress(0);
+    };
+
+    // Обновить полосу/счётчик. done — сколько готово; detail — строка под полосой
+    // (если не задана — «done из total»). Без открытого окна — ничего не делает.
+    AtexProductionPlanning.prototype.updateProgress = function(done, detail) {
+        if (!this.progressEl) return;
+        var total = this.progressTotal || 0;
+        var pct = planning.progressPercent(done, total);
+        if (this.progressFill) this.progressFill.style.width = pct + '%';
+        if (this.progressCounter) {
+            this.progressCounter.textContent = detail != null
+                ? detail
+                : ((Number(done) || 0) + ' из ' + total + ' (' + pct + '%)');
+        }
+    };
+
+    AtexProductionPlanning.prototype.hideProgress = function() {
+        if (this.progressEl && this.progressEl.parentNode) {
+            this.progressEl.parentNode.removeChild(this.progressEl);
+        }
+        this.progressEl = null;
+        this.progressFill = null;
+        this.progressCounter = null;
+        this.progressTotal = 0;
     };
 
     AtexProductionPlanning.prototype.fatal = function(message) {
