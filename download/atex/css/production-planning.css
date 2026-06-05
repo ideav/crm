@@ -120,19 +120,19 @@
     border: 1px solid var(--pp-border);
     border-radius: 6px;
     background: var(--pp-bg);
+    cursor: pointer; /* клик по всей карточке выбирает резку (#3149) */
 }
 .atex-pp-cut:hover { background: var(--pp-surface); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 /* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
 .atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); border-color: var(--pp-warn); }
 
-/* Информационная строка — клик выбирает резку. */
+/* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
     display: grid;
     grid-template-columns: 70px 1.4fr 1fr 100px 110px 110px;
     gap: 10px;
     align-items: center;
-    cursor: pointer;
 }
 .atex-pp-cut-num { font-weight: 700; }
 .atex-pp-cut-type { font-weight: 600; }
@@ -151,12 +151,14 @@
 /* Строка времени резки (старт–финиш от начала смены) в карточке. */
 .atex-pp-cut-time { margin-top: 6px; font-size: 12px; color: var(--pp-accent); font-variant-numeric: tabular-nums; }
 
-/* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). */
+/* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). Клик по ним не
+   выбирает резку (#3149) — поэтому курсор-стрелка, а не «указатель» карточки. */
 .atex-pp-cut-controls {
     display: flex;
     gap: 6px;
     align-items: center;
     margin-top: 8px;
+    cursor: default;
 }
 .atex-pp-move {
     border: 1px solid var(--pp-border);
@@ -173,8 +175,9 @@
 /* Пока идёт перемещение (setBusy) — все стрелки неактивны (#3120 п.5). */
 .atex-pp.is-busy .atex-pp-move { pointer-events: none; opacity: .4; }
 
-/* Панель полос — под своей карточкой (#3120 п.8). */
-.atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; }
+/* Панель полос — под своей карточкой (#3120 п.8). Клик внутри не выбирает
+   резку (#3149) — курсор по умолчанию, поля вводят свой. */
+.atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; cursor: default; }
 
 @media (max-width: 720px) {
     .atex-pp-cut-info { grid-template-columns: 1fr 1fr; }
