@@ -46,12 +46,10 @@
         consumption: 'Расход сырья',
         event: 'Событие смены',
         batch: 'Партия сырья',
-        material: 'Вид сырья',
-        cutType: 'Тип резки'
+        material: 'Вид сырья'
     };
     var CUT_REQ = {
         slitter: 'Слиттер',
-        cutType: 'Тип резки',
         batch: 'Партия сырья',
         planDate: 'Дата план',
         status: 'Статус',
@@ -248,10 +246,10 @@
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
         this.meta = { cut: null, consumption: null, event: null, batch: null };
-        this.batches = [];        // справочник партий сырья [{ id, label, date, remainder }]
+        this.batches = [];        // справочник партий сырья [{ id, label, date, remainder, materialId }]
         this.materialWidths = {}; // { materialId: widthMm }
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
-        this.cuts = [];           // производственные резки [{ id, label, status, slitter, cutType }]
+        this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
         this.consumptions = [];   // расход сырья выбранной резки
@@ -361,7 +359,6 @@
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
             self.meta.material = byName(TABLE.material);
-            self.meta.cutType = byName(TABLE.cutType);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
         });
@@ -375,6 +372,7 @@
             var dateIdx = colIndex(meta, BATCH_REQ.date);
             var remIdx = colIndex(meta, BATCH_REQ.remainder);
             var remMIdx = colIndex(meta, BATCH_REQ.remainderM);
+            var kindIdx = colIndex(meta, BATCH_REQ.kind);
             self.batches = (rows || []).map(function(r) {
                 var row = r.r || [];
                 return {
@@ -382,7 +380,8 @@
                     label: row[0] || ('Партия #' + r.i),
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
                     remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
-                    remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0
+                    remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0,
+                    materialId: kindIdx >= 0 ? parseRef(row[kindIdx]).id : null
                 };
             });
         });
@@ -404,18 +403,15 @@
         });
     };
 
-    // Ширина сырья текущей резки: Тип резки → Вид сырья → Ширина,мм.
+    // Ширина сырья текущей резки: Партия сырья → Вид сырья → Ширина,мм.
+    // Партия резки уже подгружена в `this.batches` (с materialId), отдельный
+    // запрос не нужен — синхронно резолвим из карты ширин видов сырья.
     AtexSlitter.prototype.resolveCutWidth = function() {
-        var self = this;
         var cut = this.currentCut;
-        var typeMeta = this.meta.cutType;
-        if (!cut || !cut.cutTypeId || !typeMeta) { if (cut) cut.materialWidthMm = 0; return Promise.resolve(); }
-        var matIdx = colIndex(typeMeta, 'Вид сырья');
-        return this.getJson('object/' + typeMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cut.cutTypeId) + '&LIMIT=0,1').then(function(rows) {
-            var rec = (rows || [])[0];
-            var matId = rec && matIdx >= 0 ? parseRef((rec.r || [])[matIdx]).id : null;
-            cut.materialWidthMm = matId ? (self.materialWidths[String(matId)] || 0) : 0;
-        });
+        if (!cut) return;
+        var batch = cut.batchId ? this.findBatch(cut.batchId) : null;
+        var matId = batch ? batch.materialId : null;
+        cut.materialWidthMm = matId ? (this.materialWidths[String(matId)] || 0) : 0;
     };
 
     AtexSlitter.prototype.loadCuts = function() {
@@ -424,7 +420,7 @@
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             var statusIdx = colIndex(meta, CUT_REQ.status);
             var slitterIdx = colIndex(meta, CUT_REQ.slitter);
-            var cutTypeIdx = colIndex(meta, CUT_REQ.cutType);
+            var batchIdx = colIndex(meta, CUT_REQ.batch);
             self.cuts = (rows || []).map(function(r) {
                 var row = r.r || [];
                 return {
@@ -432,7 +428,7 @@
                     label: 'Резка №' + (row[0] || r.i),
                     status: statusIdx >= 0 ? core.normalizeStatus(row[statusIdx]) : STATUSES[0],
                     slitter: slitterIdx >= 0 ? parseRef(row[slitterIdx]).label : '',
-                    cutType: cutTypeIdx >= 0 ? parseRef(row[cutTypeIdx]).label : ''
+                    batch: batchIdx >= 0 ? parseRef(row[batchIdx]).label : ''
                 };
             });
         });
@@ -452,8 +448,6 @@
                 number: row[0] || '',
                 label: 'Резка №' + (row[0] || rec.i),
                 slitter: parseRef(val(CUT_REQ.slitter)).label,
-                cutType: parseRef(val(CUT_REQ.cutType)).label,
-                cutTypeId: parseRef(val(CUT_REQ.cutType)).id,
                 batch: parseRef(val(CUT_REQ.batch)).label,
                 batchId: parseRef(val(CUT_REQ.batch)).id,
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
@@ -557,7 +551,7 @@
             }, [
                 el('div', { class: 'atex-sl-cut-main' }, [
                     el('span', { class: 'atex-sl-cut-label', text: cut.label }),
-                    el('span', { class: 'atex-sl-cut-sub', text: [cut.slitter, cut.cutType].filter(Boolean).join(' · ') })
+                    el('span', { class: 'atex-sl-cut-sub', text: [cut.slitter, cut.batch].filter(Boolean).join(' · ') })
                 ]),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]);
@@ -594,7 +588,6 @@
         var cut = this.currentCut;
         var meta = [];
         if (cut.slitter) meta.push('Слиттер: ' + cut.slitter);
-        if (cut.cutType) meta.push('Тип резки: ' + cut.cutType);
         if (cut.batch) meta.push('Партия: ' + cut.batch);
         if (cut.planDate) meta.push('План: ' + cut.planDate);
         return el('div', { class: 'atex-sl-head' }, [
@@ -1056,8 +1049,8 @@
         this.setBusy(true);
         this.currentCutId = String(cutId);
         this.loadCut(cutId)
-            .then(function() { return self.resolveCutWidth(); })
             .then(function() {
+                self.resolveCutWidth();
                 return Promise.all([
                     self.loadConsumptions(cutId),
                     self.loadEvents(cutId)

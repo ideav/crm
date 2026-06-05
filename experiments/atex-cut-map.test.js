@@ -1,6 +1,6 @@
 // Unit tests for the «Карта раскроя» layout core (ideav/crm#2917).
 // Verifies the cutting-map geometry derived from the atex spec
-// («Производственная резка» → «Тип резки» → «Полоса»):
+// («Полоса» ⊂ «Производственная резка»; см. docs/atex_data_schema.md §9):
 //   • each strip yields «количество» knives of «ширина»;
 //   • «Занято, мм» = Σ(ширина × количество);
 //   • «Остаток, мм» = «Ширина входа» − «Занято, мм»;

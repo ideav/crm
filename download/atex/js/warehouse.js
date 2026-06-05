@@ -61,7 +61,6 @@
     var CUTTING_FIELDS = [
         { key: 'number', label: 'Номер', main: true },
         { key: 'slitter', label: 'Слиттер', names: ['Слиттер'], ref: true },
-        { key: 'cutType', label: 'Тип резки', names: ['Тип резки'], ref: true },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
@@ -480,7 +479,6 @@
     function cuttingLabel(cutting) {
         if (!cutting) return '';
         var parts = ['Резка №' + (cutting.main || cutting.id)];
-        if (cutting.values && cutting.values.cutType) parts.push(cutting.values.cutType);
         if (cutting.values && cutting.values.slitter) parts.push(cutting.values.slitter);
         return parts.join(' · ');
     }
