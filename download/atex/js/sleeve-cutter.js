@@ -4,9 +4,14 @@
 // меняет статус задания (Ожидает → В работе → Готово). Задания подчинены
 // «Позиции заказа»: втулки для одной позиции могут планироваться общей партией,
 // даже если сама позиция обеспечивается несколькими производственными резками.
-// Решение задачи ideav/crm#2916 (часть #2903), актуализация #3139. Правила
+// Решение задачи ideav/crm#2916 (часть #2903), актуализация #3139, #3159. Правила
 // разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих
 // мест — docs/atex_workplaces.md §3.6.
+//
+// Таблица «Задание на втулки» теперь идентифицируется по alias, а её главное
+// значение (первая колонка) — это плановое количество втулок «К-во план» (#3159).
+// Поэтому таблицы ищутся в метаданных и по `val` (первая колонка), и по `alias`
+// (отображаемое имя), а план берётся/пишется как главное значение, а не реквизит.
 //
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
 // (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={позицияId}`,
@@ -41,8 +46,10 @@
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = { position: 'Позиция заказа', task: 'Задание на втулки', cutter: 'Втулкорез' };
+    // Реквизиты задания. Плановое количество втулок («К-во план») — это главное
+    // значение таблицы (первая колонка), а не реквизит, поэтому в списке его нет
+    // (#3159): оно читается/пишется через `core.taskMainValue`.
     var TASK_REQ = {
-        planQty: 'Кол-во план',
         cutter: 'Втулкорез',
         diameter: 'Диаметр, мм',
         factQty: 'Кол-во факт',
@@ -117,9 +124,112 @@
         return value == null ? '' : String(value);
     }
 
+    // ── Поиск сущностей метаданных по имени (val/alias) ──
+
+    // alias таблицы/реквизита: берём из готового поля `alias`, иначе разбираем
+    // `attrs` (JSON со свойством alias). Таблицы получили alias в #3159.
+    function aliasOf(entry) {
+        if (!entry) return '';
+        if (entry.alias != null && entry.alias !== '') return String(entry.alias);
+        if (entry.attrs) {
+            try {
+                var a = JSON.parse(entry.attrs);
+                if (a && a.alias != null) return String(a.alias);
+            } catch (e) { /* attrs не JSON — alias нет */ }
+        }
+        return '';
+    }
+
+    // Совпадение сущности с искомым именем: и по `val` (первая колонка),
+    // и по `alias` (отображаемое имя). Регистр и пробелы игнорируются (#3159).
+    function matchesName(entry, name) {
+        if (!entry) return false;
+        var target = String(name == null ? '' : name).trim().toLowerCase();
+        if (!target) return false;
+        if (String(entry.val == null ? '' : entry.val).trim().toLowerCase() === target) return true;
+        return aliasOf(entry).trim().toLowerCase() === target;
+    }
+
+    // Таблица из метаданных по имени (val или alias); нет → null.
+    function tableByName(list, name) {
+        var arr = Array.isArray(list) ? list : (list == null ? [] : [list]);
+        for (var i = 0; i < arr.length; i++) {
+            if (matchesName(arr[i], name)) return arr[i];
+        }
+        return null;
+    }
+
+    // Значение реквизита из метаданных по имени (val/alias) → его числовой id.
+    function reqIdByName(meta, name) {
+        var found = (meta && meta.reqs || []).filter(function(r) {
+            return matchesName(r, name);
+        })[0];
+        return found ? String(found.id) : null;
+    }
+
+    // Индекс колонки JSON_OBJ по имени реквизита. Колонки идут в порядке
+    // [главное значение, ...reqs по порядку метаданных].
+    function colIndex(meta, reqName) {
+        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
+        var rid = reqIdByName(meta, reqName);
+        var idx = order.indexOf(String(rid));
+        return idx >= 0 ? idx : -1;
+    }
+
+    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
+    function parseRef(raw) {
+        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
+        return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
+    }
+
     function refLabel(value) {
         var ref = parseRef(value);
         return ref.label || ref.id || '';
+    }
+
+    // ── Маппинг строк задания на втулки ──
+
+    // Строка JSON_OBJ задания → объект задания. Плановое количество — это
+    // главное значение (первая колонка r[0]), остальное — реквизиты (#3159).
+    function taskFromRow(meta, rec) {
+        var r = (rec && rec.r) || [];
+        var cutterIdx = colIndex(meta, TASK_REQ.cutter);
+        var diamIdx = colIndex(meta, TASK_REQ.diameter);
+        var factIdx = colIndex(meta, TASK_REQ.factQty);
+        var statusIdx = colIndex(meta, TASK_REQ.status);
+        var cutterRef = cutterIdx >= 0 ? parseRef(r[cutterIdx]) : { id: null };
+        return {
+            id: rec && rec.i != null ? String(rec.i) : null,
+            planQty: r[0] || '',
+            cutterId: cutterRef.id,
+            cutterAuto: false,
+            diameter: diamIdx >= 0 ? (r[diamIdx] || '') : '',
+            factQty: factIdx >= 0 ? (r[factIdx] || '') : '',
+            status: statusIdx >= 0 ? normalizeStatus(r[statusIdx]) : STATUSES[0]
+        };
+    }
+
+    // Главное значение задания для записи (_m_save / t{tableId}) — план втулок.
+    // Пусто → '' (команда такие поля не отправляет), иначе число.
+    function taskMainValue(task) {
+        var v = task ? task.planQty : '';
+        return (v === '' || v == null) ? '' : toNumber(v);
+    }
+
+    // Реквизиты задания для _m_set/_m_new в форме `t{reqId}` (по именам из
+    // метаданных). Без главного значения — его пишем отдельно (taskMainValue).
+    function taskReqFields(meta, task) {
+        var fields = {};
+        function set(reqName, value) {
+            var rid = reqIdByName(meta, reqName);
+            if (rid) fields['t' + rid] = value;
+        }
+        function num(v) { return (v === '' || v == null) ? '' : toNumber(v); }
+        set(TASK_REQ.cutter, (task && task.cutterId) || '');
+        set(TASK_REQ.diameter, num(task && task.diameter));
+        set(TASK_REQ.factQty, num(task && task.factQty));
+        set(TASK_REQ.status, normalizeStatus(task && task.status));
+        return fields;
     }
 
     function positionLabel(position) {
@@ -222,7 +332,16 @@
         formatRange: formatRange,
         autoAssignCutter: autoAssignCutter,
         rowsToPositions: rowsToPositions,
-        taskDefaultsFromPosition: taskDefaultsFromPosition
+        taskDefaultsFromPosition: taskDefaultsFromPosition,
+        aliasOf: aliasOf,
+        matchesName: matchesName,
+        tableByName: tableByName,
+        reqIdByName: reqIdByName,
+        colIndex: colIndex,
+        parseRef: parseRef,
+        taskFromRow: taskFromRow,
+        taskMainValue: taskMainValue,
+        taskReqFields: taskReqFields
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -244,28 +363,8 @@
         return node;
     }
 
-    // Значение реквизита из метаданных по имени → его числовой id (t{id}).
-    function reqIdByName(meta, name) {
-        var found = (meta && meta.reqs || []).filter(function(r) {
-            return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
-        })[0];
-        return found ? String(found.id) : null;
-    }
-
-    // Индекс колонки JSON_OBJ по имени реквизита. Колонки идут в порядке
-    // [главное значение, ...reqs по порядку метаданных].
-    function colIndex(meta, reqName) {
-        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
-        var rid = reqIdByName(meta, reqName);
-        var idx = order.indexOf(String(rid));
-        return idx >= 0 ? idx : -1;
-    }
-
-    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
-    function parseRef(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
-    }
+    // Метаданные-хелперы (reqIdByName, colIndex, parseRef) и маппинг строк
+    // задания вынесены в core (см. выше) — браузерный слой использует их оттуда.
 
     function AtexSleeveCutter(root) {
         this.root = root;
@@ -354,10 +453,10 @@
         var self = this;
         return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
+            // Таблицы ищем по имени с учётом alias (#3159): «Задание на втулки» —
+            // это alias таблицы, чьё главное значение называется «К-во план».
             function byName(name) {
-                return list.filter(function(t) {
-                    return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
-                })[0] || null;
+                return core.tableByName(list, name);
             }
             self.meta.position = byName(TABLE.position);
             self.meta.task = byName(TABLE.task);
@@ -409,25 +508,7 @@
         var self = this;
         var meta = this.meta.task;
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(positionId) + '&LIMIT=0,1000').then(function(rows) {
-            var planIdx = colIndex(meta, TASK_REQ.planQty);
-            var cutterIdx = colIndex(meta, TASK_REQ.cutter);
-            var diamIdx = colIndex(meta, TASK_REQ.diameter);
-            var factIdx = colIndex(meta, TASK_REQ.factQty);
-            var statusIdx = colIndex(meta, TASK_REQ.status);
-            self.tasks = (rows || []).map(function(rec) {
-                var r = rec.r || [];
-                var cutterRef = cutterIdx >= 0 ? parseRef(r[cutterIdx]) : { id: null };
-                return {
-                    id: String(rec.i),
-                    name: r[0] || '',
-                    planQty: planIdx >= 0 ? (r[planIdx] || '') : '',
-                    cutterId: cutterRef.id,
-                    cutterAuto: false,
-                    diameter: diamIdx >= 0 ? (r[diamIdx] || '') : '',
-                    factQty: factIdx >= 0 ? (r[factIdx] || '') : '',
-                    status: statusIdx >= 0 ? normalizeStatus(r[statusIdx]) : STATUSES[0]
-                };
-            });
+            self.tasks = (rows || []).map(function(rec) { return core.taskFromRow(meta, rec); });
         });
     };
 
@@ -435,7 +516,6 @@
         var defaults = core.taskDefaultsFromPosition(this.currentPosition);
         var task = {
             id: null,
-            name: '',
             planQty: defaults.planQty,
             cutterId: null,
             cutterAuto: false,
@@ -622,43 +702,26 @@
 
     // ── Сохранение / удаление задания ──
 
-    // Реквизиты задания в форме _m_* (t{reqId} по именам из метаданных).
-    AtexSleeveCutter.prototype.taskFields = function(task) {
-        var meta = this.meta.task;
-        var fields = {};
-        function set(reqName, value) {
-            var rid = reqIdByName(meta, reqName);
-            if (rid) fields['t' + rid] = value;
-        }
-        set(TASK_REQ.planQty, num(task.planQty));
-        set(TASK_REQ.cutter, task.cutterId || '');
-        set(TASK_REQ.diameter, num(task.diameter));
-        set(TASK_REQ.factQty, num(task.factQty));
-        set(TASK_REQ.status, core.normalizeStatus(task.status));
-        return fields;
-
-        function num(v) { return (v === '' || v == null) ? '' : core.toNumber(v); }
-    };
-
     AtexSleeveCutter.prototype.saveTask = function(task) {
         var self = this;
         if (this.busy) return;
         if (!this.currentPositionId) { this.notify('Сначала выберите позицию заказа', 'error'); return; }
         var meta = this.meta.task;
-        var fields = this.taskFields(task);
-        // Имя задания (главное значение) — порядковый номер, если не задано.
-        var name = String(task.name || '').trim() || ('Задание ' + (this.tasks.indexOf(task) + 1));
+        // Реквизиты (втулкорез, диаметр, факт, статус) и главное значение —
+        // плановое количество втулок «К-во план» (первая колонка, #3159).
+        var fields = core.taskReqFields(meta, task);
+        var planValue = core.taskMainValue(task);
 
         this.setBusy(true);
         var chain;
         if (task.id) {
-            chain = this.post('_m_save/' + task.id + '?JSON', { val: name })
+            chain = this.post('_m_save/' + task.id + '?JSON', { val: planValue })
                 .then(function() { return self.post('_m_set/' + task.id + '?JSON', fields); })
                 .then(function() { return task.id; });
         } else {
             var createParams = {};
             Object.keys(fields).forEach(function(k) { createParams[k] = fields[k]; });
-            createParams['t' + meta.id] = name;
+            createParams['t' + meta.id] = planValue;
             chain = this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(this.currentPositionId), createParams)
                 .then(function(res) {
                     var id = res && (res.obj || res.id || res.i);
