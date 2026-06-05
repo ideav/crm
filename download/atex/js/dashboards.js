@@ -258,7 +258,7 @@
 
             var positionLabel = position
                 ? [
-                    position.cutType || ('позиция #' + position.id),
+                    'позиция #' + position.id,
                     position.width ? position.width + ' мм' : '',
                     position.length ? position.length + ' м' : ''
                 ].filter(Boolean).join(' · ')
@@ -334,7 +334,7 @@
                 orders[r.order_id] = { id: r.order_id, number: r.order_no || ('#' + r.order_id), status: r.order_status, deadline: r.order_deadline || '' };
             }
             if (r.position_id && !positions[r.position_id]) {
-                positions[r.position_id] = { id: r.position_id, orderId: r.order_id || '', cutType: r.position_cut_type, width: r.position_width_mm, length: r.position_length_m, status: r.position_status };
+                positions[r.position_id] = { id: r.position_id, orderId: r.order_id || '', width: r.position_width_mm, length: r.position_length_m, status: r.position_status };
             }
             if (r.provision_id && !provisions[r.provision_id]) {
                 provisions[r.provision_id] = { id: r.provision_id, positionId: r.position_id || '', cutId: r.cut_id || '', gpId: r.gp_id || '', footage: r.provision_used_m, status: r.provision_status };

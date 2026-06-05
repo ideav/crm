@@ -41,7 +41,6 @@
     var POSITION_FIELDS = [
         { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
         { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
-        { key: 'cutType', label: 'Тип резки', names: ['Тип резки'], ref: true },
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
         { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'] },
@@ -369,18 +368,17 @@
     function renderPositions(order) {
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
-            '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
+            '<th>Кол-во</th><th>Вид сырья</th>' +
             '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Статус</th>' +
             '</tr></thead>';
         var body;
         if (!positions.length) {
-            body = '<tbody><tr><td colspan="7" class="atex-portal-empty">Позиций пока нет.</td></tr></tbody>';
+            body = '<tbody><tr><td colspan="6" class="atex-portal-empty">Позиций пока нет.</td></tr></tbody>';
         } else {
             body = '<tbody>' + positions.map(function(pos) {
                 return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
                     '<td>' + escapeHtml(pos.values.qty || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.raw || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.cutType || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +

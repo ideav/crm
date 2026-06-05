@@ -30,7 +30,6 @@ const flow = dashboards.productionFlow({
         {
             id: '1974',
             orderId: '1966',
-            cutType: 'TT-АТХ-3002-2026-05-31 57x10+40x8',
             width: '57',
             length: '1200',
             qty: '10',
@@ -39,7 +38,6 @@ const flow = dashboards.productionFlow({
         {
             id: '2101',
             orderId: '2100',
-            cutType: 'TT-3024',
             width: '40',
             length: '800',
             qty: '4',
@@ -96,7 +94,7 @@ var PR = [
   { order_id:'10', order_no:'A-1', order_status:'Новый', order_deadline:'2026-06-10',
     position_id:'', provision_id:'', cut_id:'', gp_id:'' },
   { order_id:'11', order_no:'A-2', order_status:'Выполнен', order_deadline:'2026-06-20',
-    position_id:'21', position_status:'Отгружена', position_cut_type:'TT', position_width_mm:'57', position_length_m:'10',
+    position_id:'21', position_status:'Отгружена', position_width_mm:'57', position_length_m:'10',
     provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
     cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
     gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
