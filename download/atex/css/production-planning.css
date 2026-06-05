@@ -151,6 +151,19 @@
 /* Строка времени резки (старт–финиш от начала смены) в карточке. */
 .atex-pp-cut-time { margin-top: 6px; font-size: 12px; color: var(--pp-accent); font-variant-numeric: tabular-nums; }
 
+/* Маркер уборки в конце рабочего дня (#3155): между днями очереди. */
+.atex-pp-cleanup {
+    margin: 8px 0;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--pp-muted);
+    background: var(--pp-border-soft, #eef1f5);
+    border: 1px dashed var(--pp-border, #d9dee5);
+    border-radius: 8px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). Клик по ним не
    выбирает резку (#3149) — поэтому курсор-стрелка, а не «указатель» карточки. */
 .atex-pp-cut-controls {

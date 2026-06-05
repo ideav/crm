@@ -312,19 +312,30 @@ assertEqual(planning.pickBatchFIFO(b,'Z'), null, 'pickBatchFIFO: нет сырь
 // ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([
-  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30' },
-  { position_id:'11', position_material_id:'5', position_width:'', position_qty:'' }
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200' },
+  { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, dueKey: Infinity },
-  { id:'11', materialId:'5', width:0, qty:0, dueKey: Infinity }
-], 'rowsToGenPositions: маппинг + пустые ширина/кол-во → 0, dueKey без срока → Infinity');
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, dueKey: Infinity },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, dueKey: Infinity }
+], 'rowsToGenPositions: маппинг + пустые ширина/кол-во/длина → 0, dueKey без срока → Infinity');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
 var grpDue = planning.rowsToGenPositions([
   { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_due_date:'2026-06-10' }
 ]);
 assertEqual(grpDue[0].dueKey, 20260610, 'rowsToGenPositions: position_due_date → dueKey');
+// #3155: position_length → length («Длина, м» = метраж прогона джамбо обеспечения)
+assertEqual(grpDue[0].length, 0, 'rowsToGenPositions: нет position_length → length 0');
+
+// positionLengthMap (#3155): { id позиции → Длина, м } из дескрипторов genPositions.
+assertEqual(planning.positionLengthMap([
+  { id:'10', length:1200 },
+  { id:'11', length:0 },
+  { id:'', length:999 },                 // пустой id пропускается
+  { id:'12' }                            // нет length → 0
+]), { '10':1200, '11':0, '12':0 }, 'positionLengthMap: id→длина, пустой id пропущен');
+assertEqual(planning.positionLengthMap(null), {}, 'positionLengthMap: null → {}');
 
 // ── aggregateStrips: строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} } ──
 var agg = planning.aggregateStrips([
@@ -456,6 +467,28 @@ var schedW = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut
 assertEqual(schedW[0].startMin, 482, 'buildSchedule(окно): A в первый день (482)');
 assertEqual([schedW[1].startMin, schedW[1].finishMin], [1922, 1926], 'buildSchedule(окно): B не влез до 16:30 → след. день 08:00+setup (1922–1926)');
 assertEqual(planning.SHIFT_END_MIN, 990, 'SHIFT_END_MIN = 16:30 (990)');
+
+// dayCleanups (#3155): блок уборки CLEANUP_SHIFT в конце каждого рабочего дня с резками.
+// schedW: A — день 0 (старт 482), B — день 1 (старт 1922 = 1440+482).
+assertEqual(planning.dayCleanups(schedW, { cleanupMin: 30 }), [
+    { day:0, startMin:990,  finishMin:1020, durationMin:30 },
+    { day:1, startMin:2430, finishMin:2460, durationMin:30 }
+], 'dayCleanups: по блоку уборки на каждый рабочий день (конец окна 16:30 + 30 мин)');
+// sched: обе резки в день 0 → один блок уборки
+assertEqual(planning.dayCleanups(sched, { cleanupMin: 30 }), [
+    { day:0, startMin:990, finishMin:1020, durationMin:30 }
+], 'dayCleanups: все резки в один день → один блок');
+// конец смены и длительность уборки берутся из opts
+assertEqual(planning.dayCleanups(sched, { cleanupMin: 15, shiftEndMin: 600 }), [
+    { day:0, startMin:600, finishMin:615, durationMin:15 }
+], 'dayCleanups: shiftEndMin/cleanupMin из opts');
+// дефолты: CLEANUP_SHIFT=30, SHIFT_END_MIN=990
+assertEqual(planning.dayCleanups(sched), [
+    { day:0, startMin:990, finishMin:1020, durationMin:30 }
+], 'dayCleanups: дефолты CLEANUP_SHIFT=30 / SHIFT_END_MIN=990');
+// уборка ≤ 0 → нет блоков; пустое расписание → []
+assertEqual(planning.dayCleanups(sched, { cleanupMin: 0 }), [], 'dayCleanups: cleanupMin 0 → нет уборки');
+assertEqual(planning.dayCleanups([], { cleanupMin: 30 }), [], 'dayCleanups: пустое расписание → []');
 
 // resolveTolerance: допуск вида сырья или дефолт (ideav/crm#3127 — «по умолчанию 20 мм»).
 assertEqual(planning.resolveTolerance('', 20), 20, 'resolveTolerance: пусто → дефолт 20');

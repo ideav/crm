@@ -231,7 +231,7 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 
 Отчёт-источник позиций для РМ «Планирование производства». Используется в D3b для
 генерации резок под необеспеченные позиции (`generateCutPlan`): из строк
-`rowsToGenPositions` собирает дескрипторы `{ id, materialId, width, qty }`.
+`rowsToGenPositions` собирает дескрипторы `{ id, materialId, width, qty, length, dueKey }`.
 
 | Колонка (`t100`) | Источник (`t28`) | Функция |
 |---|---|---|
@@ -242,10 +242,14 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 | `position_qty` | 1137 Кол-во | — |
 | `position_material_id` | 1138 Вид сырья | 85 (abn_ID) |
 | `position_due_date` | 8627 Срок изготовления | — (F3: дата-окно объединения, `dueKey`) |
+| `position_length` | 1075 Длина, м | — (#3155: метраж прогона джамбо, `length`) |
 
 `position_material_id` (колонка 8527) — сырьё позиции; `position_due_date` (8654, F3) —
-«Срок изготовления» для окна объединения позиций в одну резку. `rowsToGenPositions`
-собирает `{ id, materialId, width, qty, dueKey }` для ядра `cut-layout.planLayouts`.
+«Срок изготовления» для окна объединения позиций в одну резку. `position_length`
+(реквизит 1075 «Длина, м» позиции, #3155) — длина прогона джамбо: при генерации резок
+её записывают в «Метраж, м» создаваемого обеспечения, иначе `footageBySupply=0` и все
+резки показывают «0 мин» (намотка не считается). `rowsToGenPositions` собирает
+`{ id, materialId, width, qty, length, dueKey }` для ядра `cut-layout.planLayouts`.
 Запуск: `GET /ateh/report/positions_list?JSON_KV`.
 
 ## 8.2 `cut_strips` (queryId 8656, F3) — полосы (ножи) резок
