@@ -2,7 +2,9 @@
 
 **Проект:** ideav/atex (автоматизация производства термопринтерных рулонов)
 **Платформа:** Integram (ideav.ru)
-**Источник схемы:** [`docs/atex_metadata.json`](atex_metadata.json) +
+**Источник схемы:** [`docs/atex_data_schema.md`](atex_data_schema.md) (актуальная схема и
+взаимосвязи сущностей, #3163) на основе [`docs/atex_metadata_all.json`](atex_metadata_all.json);
+прежний снимок — [`docs/atex_metadata.json`](atex_metadata.json) +
 [дизайн-спека atex](https://github.com/ideav/atex/blob/main/docs/superpowers/specs/2026-05-26-atex-schema-setup-design.md)
 **Родительская задача:** [#2903](https://github.com/ideav/crm/issues/2903) —
 «Подключи рабочие места по API — создай отдельные тикеты на каждое».
