@@ -347,6 +347,60 @@
 .atex-pp-modal-close:hover { color: var(--pp-accent); }
 .atex-pp-modal .atex-pp-form { padding: 0; }
 
+/* Окно прогресса генерации резок (#3148). Крепится к document.body, поэтому
+   стили не вложены под .atex-pp (как у тостов) — иначе скоуп бы не сработал. */
+.atex-pp-progress {
+    position: fixed;
+    inset: 0;
+    z-index: 9500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 16px;
+    background: rgba(15, 23, 42, .45);
+}
+.atex-pp-progress.is-open { display: flex; }
+.atex-pp-progress-dialog {
+    width: 100%;
+    max-width: 360px;
+    background: #ffffff;
+    border: 1px solid #d9dee5;
+    border-radius: 10px;
+    padding: 20px 22px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+    color: #1f2933;
+}
+[data-theme="dark"] .atex-pp-progress-dialog {
+    background: #1f2937;
+    border-color: #374151;
+    color: #e5e7eb;
+}
+.atex-pp-progress-title {
+    font-weight: 600;
+    margin-bottom: 14px;
+}
+.atex-pp-progress-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: #e5e7eb;
+    overflow: hidden;
+}
+[data-theme="dark"] .atex-pp-progress-bar { background: #374151; }
+.atex-pp-progress-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: #134174;
+    transition: width .2s ease;
+}
+.atex-pp-progress-count {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #6b7280;
+    text-align: center;
+}
+[data-theme="dark"] .atex-pp-progress-count { color: #9ca3af; }
+
 /* Закладки очереди по станкам (#3116 п.2) */
 .atex-pp-tabs {
     display: flex;
