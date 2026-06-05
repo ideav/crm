@@ -309,9 +309,11 @@
         });
     }
 
-    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, dueKey }]
+    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
-    // position_qty → числа; пустые значения → 0/'' но объект всегда присутствует.
+    // position_qty, position_length → числа; пустые значения → 0/'' но объект всегда
+    // присутствует. length — «Длина, м» позиции (длина прогона джамбо = «Метраж, м»
+    // создаваемого обеспечения, #3155); нет колонки в отчёте → 0 (длительность намотки 0).
     // dueKey — числовой ключ «Срока изготовления» (position_due_date) через
     // batchDateKey (для оконного отбора по сроку при генерации); нет срока → Infinity.
     function rowsToGenPositions(rows) {
@@ -321,9 +323,21 @@
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
                 width: Number(row.position_width) || 0,
                 qty: Number(row.position_qty) || 0,
+                length: Number(row.position_length) || 0,
                 dueKey: batchDateKey(row.position_due_date)
             };
         });
+    }
+
+    // Карта «id позиции → Длина, м» из genPositions (#3155): «Метраж, м» создаваемого
+    // обеспечения при генерации резок = длина прогона позиции. Пустая/нулевая длина —
+    // ключ всё равно есть (значение 0): buildFields опустит пустой реквизит.
+    function positionLengthMap(genPositions) {
+        var out = {};
+        (genPositions || []).forEach(function(p) {
+            if (p && p.id != null && String(p.id) !== '') out[String(p.id)] = Number(p.length) || 0;
+        });
+        return out;
     }
 
     // Преобразование «Дата прихода» в числовой ключ для FIFO-сортировки.
@@ -368,9 +382,10 @@
     // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
     // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
     //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
-    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база).
+    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база);
+    //   CLEANUP_SHIFT — уборка в конце рабочего дня (#3155, ставится после последней резки дня).
     // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
-    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2 };
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -521,6 +536,27 @@
             t = finish;
         });
         return out;
+    }
+
+    // Уборка в конце рабочего дня (#3155, код CLEANUP_SHIFT): для каждого дня, где есть
+    // хотя бы одна резка, — блок уборки длиной cleanupMin, начинающийся в конце рабочего
+    // окна (shiftEnd, 16:30) и идущий до 17:00. Вход — расписание buildSchedule
+    // (по startMin определяем день каждой резки). opts: { cleanupMin, shiftEndMin }.
+    // cleanupMin ≤ 0 → нет уборки ([]). → [{ day, startMin, finishMin, durationMin }] по дням ↑.
+    function dayCleanups(schedule, opts){
+        opts = opts || {};
+        var cleanup = Number(opts.cleanupMin != null ? opts.cleanupMin : DEFAULT_OP_TIMES.CLEANUP_SHIFT) || 0;
+        var shiftEnd = Number(opts.shiftEndMin != null ? opts.shiftEndMin : SHIFT_END_MIN) || 0;
+        if (cleanup <= 0) return [];
+        var days = {};
+        (schedule || []).forEach(function(sc){
+            if (!sc) return;
+            days[Math.floor((Number(sc.startMin) || 0) / 1440)] = true;
+        });
+        return Object.keys(days).map(Number).sort(function(a, b){ return a - b; }).map(function(day){
+            var start = day * 1440 + shiftEnd;
+            return { day: day, startMin: round3(start), finishMin: round3(start + cleanup), durationMin: round3(cleanup) };
+        });
     }
 
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
@@ -773,6 +809,7 @@
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
         rowsToGenPositions: rowsToGenPositions,
+        positionLengthMap: positionLengthMap,
         batchDateKey: batchDateKey,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
@@ -799,6 +836,7 @@
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
         buildSchedule: buildSchedule,
+        dayCleanups: dayCleanups,
         formatClock: formatClock,
         SHIFT_START_MIN: SHIFT_START_MIN,
         SHIFT_END_MIN: SHIFT_END_MIN,
@@ -1184,7 +1222,8 @@
             self.changeTimes = {
                 MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
                 KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
-                BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS
+                BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS,
+                CLEANUP_SHIFT: raw.CLEANUP_SHIFT != null ? raw.CLEANUP_SHIFT : DEFAULT_OP_TIMES.CLEANUP_SHIFT
             };
         });
     };
@@ -1806,8 +1845,12 @@
         };
         var supplyReqIds = {
             cut: reqIdByName(supplyMeta, SUPPLY_REQ.cut),
+            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
             status: reqIdByName(supplyMeta, SUPPLY_REQ.status)
         };
+        // #3155: «Метраж, м» обеспечения = «Длина, м» покрываемой позиции (длина прогона).
+        // Без него footageBySupply=0 → windingMinutes=0 → все резки «0 мин» в расписании.
+        var posLength = positionLengthMap(this.genPositions);
 
         // Сид баланса станков из текущих резок (счётчик по slitterId).
         var loadBySlitterId = {};
@@ -1861,8 +1904,10 @@
                         var supChain = Promise.resolve();
                         (lay.positionsCovered || []).forEach(function(positionId) {
                             supChain = supChain.then(function() {
+                                var len = Number(posLength[String(positionId)]) || 0;
                                 var fields = buildFields(supplyReqIds, {
                                     cut: cutId,
+                                    footage: len > 0 ? len : '',
                                     status: SUPPLY_STATUSES[0]
                                 });
                                 return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), fields)
@@ -2184,7 +2229,8 @@
 
         // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
         // Длительность — намотка прогона (метраж обеспечений → windingMinutes), плюс
-        // переналадки между резками (реальные минуты из таблицы «Время операции»).
+        // переналадки между резками (реальные минуты из таблицы «Время операции»);
+        // в конце каждого рабочего дня — блок уборки CLEANUP_SHIFT (#3155).
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var runLenByCut = {};
         activeGroup.cuts.forEach(function(c) {
@@ -2198,8 +2244,13 @@
             runLenByCut[String(c.id)] = maxF;
         });
         var schedById = {};
-        buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut })
-            .forEach(function(sc) { schedById[sc.cutId] = sc; });
+        var schedule = buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut });
+        schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
+        var cleanupByDay = {};
+        dayCleanups(schedule, { cleanupMin: self.changeTimes && self.changeTimes.CLEANUP_SHIFT })
+            .forEach(function(cl) { cleanupByDay[cl.day] = cl; });
+        function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
 
         activeGroup.cuts.forEach(function(c, idx) {
             var active = String(self.selectedCutId) === String(c.id);
@@ -2279,6 +2330,19 @@
             cardPanel.appendChild(controls);
 
             groupEl.appendChild(cardPanel);
+
+            // Уборка в конце дня (#3155): после последней резки дня (день следующей резки
+            // отличается либо это последняя резка очереди) — строка-маркер уборки.
+            var nextSc = schedById[String((activeGroup.cuts[idx + 1] || {}).id)];
+            var thisDay = schedDay(sc);
+            if (sc && thisDay != null && (idx === activeGroup.cuts.length - 1 || schedDay(nextSc) !== thisDay)) {
+                var cl = cleanupByDay[thisDay];
+                if (cl) {
+                    groupEl.appendChild(el('div', { class: 'atex-pp-cleanup',
+                        text: '🧹 Уборка после смены · ' + formatClock(cl.startMin) + ' – ' + formatClock(cl.finishMin) +
+                              ' · ' + cl.durationMin + ' мин' }));
+                }
+            }
         });
         box.appendChild(groupEl);
     };
