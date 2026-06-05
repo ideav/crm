@@ -559,6 +559,13 @@
         return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
     }
 
+    // Подпись кнопки «Полосы» в строке резки: показывает количество полос резки
+    // (Σ qty = knifeCount). При нуле/некорректном значении — без числа (#3147).
+    function stripsButtonLabel(knifeCount) {
+        var n = Number(knifeCount);
+        return (isFinite(n) && n > 0) ? ('Полосы (' + n + ')') : 'Полосы';
+    }
+
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
         var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
@@ -799,8 +806,9 @@
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
         stripsRemainder: stripsRemainder,
-        resolveTolerance: resolveTolerance,
-        progressPercent: progressPercent
+        progressPercent: progressPercent,
+        stripsButtonLabel: stripsButtonLabel,
+        resolveTolerance: resolveTolerance
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -1457,6 +1465,12 @@
         function recalc() {
             var used = planning.stripsUsedWidth(strips);
             var knives = planning.stripsTotalKnives(strips);
+            // Живо обновить количество полос на кнопке «Полосы» этой карточки и в
+            // дескрипторе резки, чтобы метка совпадала с редактором без перезагрузки (#3147).
+            cut.knifeCount = knives;
+            var card = panel.parentNode;
+            var stripsBtn = card && card.querySelector('.atex-pp-strips');
+            if (stripsBtn) stripsBtn.textContent = stripsButtonLabel(knives);
             summaryEl.innerHTML = '';
             summaryEl.appendChild(metric('Итого ножей', knives));
             summaryEl.appendChild(metric('Занято, мм', used));
@@ -2245,7 +2259,7 @@
                 var p = moveInQueue(activeGroup.cuts, idx, 1);
                 if (p.length) self.saveSequences(p);
             });
-            var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
+            var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: stripsButtonLabel(c.knifeCount), title: 'Полосы резки (количество полос)' });
             strips.addEventListener('click', function() {
                 if (self.busy) return;
                 self.openStrips(c, cardPanel);
