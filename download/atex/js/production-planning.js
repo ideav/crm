@@ -2165,7 +2165,8 @@
             var supplies = self.supplyCount(c.id);
 
             // Карточка-панель (#3120 п.1): div-панель вместо кнопки. Внутри —
-            // информация (клик = выбор резки) и контролы (↑/↓/Полосы). Панель полос
+            // информация и контролы (↑/↓/Полосы). Клик по всей панели = выбор резки
+            // (#3149: раньше реагировала только строка .atex-pp-cut-info). Панель полос
             // (#3120 п.8) openStrips добавляет внутрь этой же карточки (контейнер —
             // cardPanel), а не внизу всей очереди — поэтому она строго одна на карточку.
             // #3120 п.4: подсветка резки, которую нечем обеспечить — нет подходящей
@@ -2192,8 +2193,16 @@
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);
-            info.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
             cardPanel.appendChild(info);
+            // Выбор резки кликом по всей карточке (#3149), а не только по .atex-pp-cut-info.
+            // Клики по контролам (↑/↓/Полосы) и панели полос не считаем выбором: их
+            // перерисовка очереди закрыла бы только что открытую панель полос.
+            cardPanel.addEventListener('click', function(e) {
+                if (e.target.closest('.atex-pp-cut-controls') ||
+                    e.target.closest('.atex-pp-strip-panel')) return;
+                self.selectedCutId = c.id;
+                self.render();
+            });
 
             // Строка времени: старт–финиш (длительность) от начала смены 08:00.
             var sc = schedById[String(c.id)];
