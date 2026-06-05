@@ -379,6 +379,14 @@ var sSrc = [{ width: 110, qty: 2 }];
 planning.stripsUsedWidth(sSrc); planning.stripsTotalKnives(sSrc); planning.stripsRemainder(910, sSrc);
 assertEqual(sSrc, [{ width: 110, qty: 2 }], 'strips-сводка: вход не мутируется');
 
+// ── Подпись кнопки «Полосы» с количеством полос резки (#3147) ──
+assertEqual(planning.stripsButtonLabel(3), 'Полосы (3)', 'stripsButtonLabel: количество полос в скобках');
+assertEqual(planning.stripsButtonLabel(0), 'Полосы', 'stripsButtonLabel: 0 → без числа');
+assertEqual(planning.stripsButtonLabel(undefined), 'Полосы', 'stripsButtonLabel: нет данных → без числа');
+assertEqual(planning.stripsButtonLabel(null), 'Полосы', 'stripsButtonLabel: null → без числа');
+assertEqual(planning.stripsButtonLabel('5'), 'Полосы (5)', 'stripsButtonLabel: строковое число → в скобках');
+assertEqual(planning.stripsButtonLabel(-2), 'Полосы', 'stripsButtonLabel: отрицательное → без числа');
+
 // ── FIFO-резерв сырья (#3120 группа C): requiredRunLengthM / reserveFifo ──
 assertEqual(planning.requiredRunLengthM([100, 450, 250]), 450, 'requiredRunLengthM: max(Метраж)');
 assertEqual(planning.requiredRunLengthM(['200', '', '500,5']), 500.5, 'requiredRunLengthM: строки/запятая, пустые → 0');
