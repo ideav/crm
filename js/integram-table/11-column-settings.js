@@ -358,7 +358,7 @@
             const uniqueKeyTitle = 'Система контролирует уникальность комбинации первой колонки и всех ключей';
 
             colEditModal.innerHTML = `
-                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
+                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(currentName) }</em></h3>
                 <div class="col-edit-section">
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
