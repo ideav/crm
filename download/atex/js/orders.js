@@ -344,11 +344,13 @@
     function findMetadataByName(all, name) {
         var wanted = normalizeFieldName(name);
         for (var i = 0; i < (all || []).length; i++) {
-            if (normalizeFieldName(all[i].val) === wanted) return all[i];
+            var meta = all[i];
+            if (normalizeFieldName(meta.val) === wanted) return meta;
+            if (meta.alias && normalizeFieldName(meta.alias) === wanted) return meta;
         }
         return null;
     }
-
+    
     function resolveTableMetadata(all, tableNames, overrides) {
         var resolved = {};
         Object.keys(tableNames || {}).forEach(function(key) {
