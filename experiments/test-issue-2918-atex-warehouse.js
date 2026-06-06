@@ -40,9 +40,9 @@ assert(!template.includes('data-provision-table="109"'), 'template does not hard
 assert(!template.includes('data-cutting-table="110"'), 'template does not hardcode the cutting table id');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
-assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
-assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/atex/js/'), 'update.conf deploys atex js');
-assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/atex/css/'), 'update.conf deploys atex css');
+assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/ateh/'), 'update.conf deploys atex templates');
+assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/ateh/js/'), 'update.conf deploys atex js');
+assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/ateh/css/'), 'update.conf deploys atex css');
 
 // --- Запуск исходника в песочнице без DOM/сети ---
 const source = fs.readFileSync(scriptPath, 'utf8');
@@ -104,12 +104,14 @@ assert.strictEqual(reqId(batchColumns, 'rolls'), '1130', 'batch rolls → req 11
 assert.strictEqual(reqId(batchColumns, 'length'), '1132', 'batch length → req 1132');
 assert.strictEqual(reqId(batchColumns, 'address'), '1134', 'batch address → req 1134');
 assert.strictEqual(reqId(batchColumns, 'status'), '1136', 'batch status → req 1136');
+assert.strictEqual(reqId(batchColumns, 'active'), null, 'batch active is optional in the old fixture metadata');
 assert.strictEqual(column(batchColumns, 'cutting').ref, true, 'batch cutting is a reference column');
 
 // Привязка реквизитов обеспечения.
 assert.strictEqual(reqId(provisionColumns, 'length'), '1082', 'provision length → req 1082');
 assert.strictEqual(reqId(provisionColumns, 'cutting'), '1084', 'provision cutting → req 1084');
 assert.strictEqual(reqId(provisionColumns, 'batch'), '1086', 'provision batch → req 1086');
+assert.strictEqual(reqId(provisionColumns, 'rolls'), null, 'provision rolls is optional in the old fixture metadata');
 assert.strictEqual(reqId(provisionColumns, 'status'), '1088', 'provision status → req 1088');
 assert.strictEqual(column(provisionColumns, 'batch').ref, true, 'provision batch is a reference column');
 
@@ -140,6 +142,26 @@ assert.strictEqual(batchBody.get('t1134'), 'A-12', 'batch create sets storage ad
 assert.strictEqual(batchBody.get('t1136'), 'Есть', 'batch create sets status');
 // Дата прихода (первая колонка) НЕ передаётся — сервер ставит now.
 assert.strictEqual(batchBody.get('t113'), null, 'batch create does not set the arrival datetime (server defaults it)');
+
+const batchColumnsWithActive = batchColumns.map(function(c) {
+    return c.key === 'active'
+        ? Object.assign({}, c, { reqId: '1999' })
+        : c;
+});
+const createActiveBatch = helpers.buildCreateBatchRequest({
+    db: 'atex',
+    tableId: '113',
+    columns: batchColumnsWithActive,
+    cuttingId: '210',
+    width: '500',
+    rolls: '4',
+    length: '1200',
+    address: 'A-12',
+    status: 'Есть',
+    active: '1',
+    xsrf: 'TOK'
+});
+assert.strictEqual(new URLSearchParams(createActiveBatch.body).get('t1999'), '1', 'batch create sets active=1 when the field exists');
 
 // --- Смена статуса партии: _m_set/{id}?JSON (статус — не первая колонка) ---
 const setStatus = helpers.buildSetStatusRequest({
@@ -179,8 +201,18 @@ const batches = helpers.normalizeObjects([
 const fifo = helpers.pickFifoBatch(batches, '210', 'Есть');
 assert(fifo, 'FIFO picks a batch');
 assert.strictEqual(fifo.id, '902', 'FIFO picks the earliest available batch for cutting 210 (902, not the shipped 903 nor the later 901)');
+const batchesWithInactive = batches.concat([{
+    id: '890',
+    values: { arrived: '2026-05-01 09:00', cutting: 'Резка №210', status: 'Есть', active: '0' },
+    refs: { cutting: '210' }
+}]);
+assert.strictEqual(helpers.pickFifoBatch(batchesWithInactive, '210', 'Есть').id, '902', 'FIFO skips inactive GP batches');
 // Резка без доступных партий → null.
 assert.strictEqual(helpers.pickFifoBatch(batches, '999', 'Есть'), null, 'FIFO returns null when no available batch matches the cutting');
+assert.strictEqual(helpers.isActiveBatch({ values: { active: '0' } }), false, 'isActiveBatch: 0 → false');
+assert.strictEqual(helpers.isActiveBatch({ values: { active: '' } }), true, 'isActiveBatch: empty active flag defaults to true');
+assert.strictEqual(helpers.batchExhaustedByProvision({ values: { rolls: '4' } }, { values: { rolls: '4' } }), true, 'batchExhaustedByProvision: equal rolls exhaust the batch');
+assert.strictEqual(helpers.batchExhaustedByProvision({ values: { rolls: '4' } }, { values: { rolls: '2' } }), false, 'batchExhaustedByProvision: partial rolls do not exhaust the batch');
 
 // --- Разбор ответа JSON_DATA (ссылки разбираются как "id:label") ---
 assert.strictEqual(batches[0].values.cutting, 'Резка №210', 'batch cutting label parsed from ref');
