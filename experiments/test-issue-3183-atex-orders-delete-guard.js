@@ -78,11 +78,25 @@ const orders = helpers.rowsToOrders([
         position_qty: '1',
         position_status: 'В работе',
         position_approved: '03.06.2026'
+    },
+    {
+        order_id: '30',
+        order_no: '30',
+        order_client: 'ООО Василек',
+        order_manager: 'Менеджер',
+        order_created: '01.06.2026',
+        order_approved: '',
+        order_status: 'Новый',
+        position_id: '301',
+        position_qty: '2',
+        position_status: 'Новая',
+        position_approved: ''
     }
 ]);
 
 assert.strictEqual(orders.length, 3, 'fixtures produce three orders');
 assert.strictEqual(orders[2].positions[0].values.approved, '03.06.2026', 'position approval date is parsed from report rows');
+assert.strictEqual(orders[2].values.approved, '', 'partially approved positions do not derive order approval');
 
 assert.strictEqual(helpers.orderDeleteBlockReason(orders[0]), '', 'unapproved order with unapproved positions is deletable');
 assert.strictEqual(helpers.canDeleteOrder(orders[0]), true, 'canDeleteOrder allows clean order');

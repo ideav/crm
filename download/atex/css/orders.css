@@ -83,6 +83,8 @@
     background: #efd7a7;
     border-color: #c6963f;
     color: #5f3d00;
+}
+
 .atex-orders-btn:disabled,
 .atex-orders-btn:disabled:hover {
     cursor: not-allowed;
