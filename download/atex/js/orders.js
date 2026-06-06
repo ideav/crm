@@ -34,7 +34,7 @@
         { key: 'created', label: 'Дата создания', names: ['Дата создания'] },
         { key: 'approved', label: 'Дата согласования', names: ['Дата согласования'] },
         { key: 'dueDate', label: 'Срок изготовления', names: ['Срок изготовления'] },
-        { key: 'status', label: 'Статус', names: ['Статус'], status: true },
+        { key: 'status', label: 'Статус', names: ['Статус заказа', 'Статус'], ref: true },
         { key: 'lead', label: 'Лидер', names: ['Лидер'] },
         { key: 'notes', label: 'Примечания', names: ['Примечания'] },
         // Счётчик подчинённых позиций (ROLLUP-колонка «Позиция заказа») — приходит
@@ -50,7 +50,7 @@
         { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
         { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'], ref: true },
         { key: 'winding', label: 'Тип намотки', names: ['Тип намотки'] },
-        { key: 'status', label: 'Статус', names: ['Статус'], status: true },
+        { key: 'status', label: 'Статус', names: ['Статус позиции', 'Статус'], ref: true },
         // Срок изготовления — только для отображения (read-only), как «Дата согласования».
         { key: 'dueDate', label: 'Срок изготовления', names: ['Срок изготовления'] }
     ];
@@ -661,9 +661,11 @@
     function renderFilter() {
         var sel = document.getElementById('atex-orders-filter');
         if (!sel) return;
-        sel.innerHTML = ['<option value="">Все статусы</option>'].concat(state.orderStatuses.map(function(status) {
-            var selected = status === state.statusFilter ? ' selected' : '';
-            return '<option value="' + escapeHtml(status) + '"' + selected + '>' + escapeHtml(status) + '</option>';
+        var statusCol = getColumn(state.orderColumns, 'status');
+        var options = (statusCol && statusCol.reqId) ? (state.refOptions[statusCol.reqId] || []) : [];
+        sel.innerHTML = ['<option value="">Все статусы</option>'].concat(options.map(function(opt) {
+            var selected = String(opt.id) === state.statusFilter ? ' selected' : '';
+            return '<option value="' + escapeHtml(opt.id) + '">' + escapeHtml(opt.text) + '</option>';
         })).join('');
     }
 
@@ -802,12 +804,14 @@
     function renderCreateForm() {
         var clientCol = getColumn(state.orderColumns, 'client');
         var clientOptions = clientCol && clientCol.reqId ? state.refOptions[clientCol.reqId] : null;
+        var statusCol = getColumn(state.orderColumns, 'status');
+        var statusOptions = statusCol && statusCol.reqId ? (state.refOptions[statusCol.reqId] || []) : [];
         var panel = document.getElementById('atex-order-create-form');
         if (!panel) return;
         panel.innerHTML =
             '<div class="atex-orders-fields">' +
             '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента', clientCol && clientCol.reqId) + '</label>' +
-            '<label>Статус' + statusSelectHtml(state.orderStatuses, state.orderStatuses[0], ' id="atex-order-status"') + '</label>' +
+            '<label>Статус' + refSelectHtml('atex-order-status', statusOptions, '', 'Выберите статус', statusCol && statusCol.reqId) + '</label>' +
             '<label>Срок изготовления<input type="date" class="atex-orders-input" id="atex-order-due-date"></label>' +
             '<label class="atex-orders-field-wide">Примечания<textarea class="atex-orders-input" id="atex-order-notes" rows="2"></textarea></label>' +
             '</div>' +
@@ -1504,7 +1508,7 @@
                         approveBtn._atexApproveTimer = setTimeout(function() {
                             approveBtn.removeAttribute('data-confirm');
                             approveBtn.classList.remove('is-confirm');
-                            approveBtn.textContent = 'Согласовано';
+                            approveBtn.textContent = 'Согласовать';
                         }, 4000);
                     }
                     return;
@@ -1572,7 +1576,7 @@
             if (btn._atexApproveTimer) clearTimeout(btn._atexApproveTimer);
             btn.removeAttribute('data-confirm');
             btn.classList.remove('is-confirm');
-            btn.textContent = 'Согласовано';
+            btn.textContent = 'Согласовать';
         });
     }
 
@@ -1623,12 +1627,16 @@
 
                 // Предзагрузка справочников для форм.
                 var clientCol = getColumn(state.orderColumns, 'client');
+                var orderStatusCol = getColumn(state.orderColumns, 'status');
                 var rawCol = getColumn(state.positionColumns, 'raw');
                 var sleeveCol = getColumn(state.positionColumns, 'sleeve');
+                var positionStatusCol = getColumn(state.positionColumns, 'status');
                 return Promise.all([
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
+                    orderStatusCol && orderStatusCol.reqId ? loadRefOptions(orderStatusCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
-                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
+                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([]),
+                    positionStatusCol && positionStatusCol.reqId ? loadRefOptions(positionStatusCol.reqId) : Promise.resolve([])
                 ]);
             })
             .then(function() {
