@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 3177 Atex Orders Fixture</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../download/atex/css/orders.css">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+<div id="atex-orders-app" class="atex-orders atex-brand" data-db="atex">
+    <div class="atex-orders-toolbar">
+        <button id="atex-orders-create" class="atex-orders-btn atex-orders-btn-primary" type="button" title="Создать заказ">
+            <i class="pi pi-plus"></i><span>Создать заказ</span>
+        </button>
+        <label class="atex-orders-filter-wrap">
+            <span>Статус:</span>
+            <select id="atex-orders-filter" class="atex-orders-input" aria-label="Фильтр по статусу">
+                <option value="">Все статусы</option>
+            </select>
+        </label>
+        <label class="atex-orders-filter-wrap"><span>С:</span>
+            <input id="atex-orders-from" type="date" class="atex-orders-input" aria-label="Дата создания с"></label>
+        <label class="atex-orders-filter-wrap"><span>По:</span>
+            <input id="atex-orders-to" type="date" class="atex-orders-input" aria-label="Дата создания по"></label>
+        <label class="atex-orders-filter-wrap atex-orders-search-wrap">
+            <i class="pi pi-search"></i>
+            <input id="atex-orders-search" type="search" class="atex-orders-input" placeholder="Поиск..." aria-label="Быстрый поиск"></label>
+        <button id="atex-orders-refresh" class="atex-orders-btn atex-orders-btn-secondary" type="button" title="Обновить список">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-orders-message" class="atex-orders-message" hidden></div>
+
+    <section id="atex-order-create" class="atex-orders-create" hidden>
+        <h2 class="atex-orders-create-title">Новый заказ</h2>
+        <form id="atex-order-create-form" class="atex-orders-create-form"></form>
+    </section>
+
+    <div id="atex-orders-list" class="atex-orders-list">
+        <div class="atex-orders-empty">Загрузка данных...</div>
+    </div>
+</div>
+
+<script>
+    window.db = 'atex';
+    window.xsrf = 'TOK';
+    window.uid = '42';
+
+    var metadata = [
+        { id: '107', val: 'Заказ', type: '3', reqs: [
+            { id: '1052', val: 'Клиент', type: '3', ref: '103', ref_id: '1053' },
+            { id: '1054', val: 'Пользователь', type: '3', ref: '18', ref_id: '1055' },
+            { id: '1056', val: 'Дата создания', type: '9' },
+            { id: '1058', val: 'Дата согласования', type: '9' },
+            { id: '1060', val: 'Статус', type: '3', ref_id: '1060' },
+            { id: '1064', val: 'Примечания', type: '12' },
+            { id: '1066', val: 'Позиция заказа', type: '13', arr_id: '108' },
+            { id: '1158', val: 'Срок изготовления', type: '9' }
+        ] },
+        { id: '108', val: 'Позиция заказа', type: '13', reqs: [
+            { id: '1067', val: 'Кол-во', type: '13' },
+            { id: '1069', val: 'Вид сырья', type: '3', ref: '100', ref_id: '1070' },
+            { id: '1073', val: 'Ширина, мм', type: '14' },
+            { id: '1075', val: 'Длина, м', type: '14' },
+            { id: '1077', val: 'Диаметр втулки', type: '3', ref: '200', ref_id: '1078' },
+            { id: '1079', val: 'Статус', type: '3', ref_id: '1079' },
+            { id: '1151', val: 'Тип намотки', type: '3' },
+            { id: '1159', val: 'Срок изготовления', type: '9' }
+        ] }
+    ];
+
+    var rows = [
+        {
+            order_id: '55',
+            order_no: '55',
+            order_client: 'ООО Ромашка',
+            order_manager: 'manager',
+            order_created: '06.06.2026',
+            order_approved: '',
+            order_due_date: '14.06.2026',
+            order_status: 'Новый',
+            position_id: '77',
+            position_qty: '10',
+            position_raw: 'MWR118',
+            position_raw_id: '1237',
+            position_width: '57',
+            position_length: '900',
+            position_sleeve: '40',
+            position_sleeve_id: '8190',
+            position_winding: 'IN',
+            position_status: 'Новая',
+            position_approved: '',
+            position_due_date: '12.06.2026'
+        }
+    ];
+
+    window.fetch = function(url) {
+        var text;
+        url = String(url);
+        if (url.indexOf('/metadata') !== -1) text = JSON.stringify(metadata);
+        else if (url.indexOf('/_ref_reqs/1052') !== -1) text = JSON.stringify([{ id: '301', text: 'ООО Ромашка' }]);
+        else if (url.indexOf('/_ref_reqs/1060') !== -1) text = JSON.stringify([{ id: '16320', text: 'Новый' }, { id: '16321', text: 'Согласован' }]);
+        else if (url.indexOf('/_ref_reqs/1069') !== -1) text = JSON.stringify([{ id: '1237', text: 'MWR118' }]);
+        else if (url.indexOf('/_ref_reqs/1077') !== -1) text = JSON.stringify([{ id: '8190', text: '40' }]);
+        else if (url.indexOf('/_ref_reqs/1079') !== -1) text = JSON.stringify([{ id: '1', text: 'Новая' }]);
+        else if (url.indexOf('/report/orders_list') !== -1) text = JSON.stringify(rows);
+        else text = JSON.stringify({ ok: true });
+        return Promise.resolve({ ok: true, status: 200, text: function() { return Promise.resolve(text); } });
+    };
+</script>
+<script src="../download/atex/js/orders.js"></script>
+</body>
+</html>

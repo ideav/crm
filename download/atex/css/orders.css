@@ -61,6 +61,17 @@
     background: var(--bg-secondary, #f1f5f9);
 }
 
+.atex-orders-btn-danger {
+    color: var(--danger, #dc2626);
+}
+
+.atex-orders-btn-danger:hover,
+.atex-orders-btn-danger.is-confirm {
+    background: var(--danger-bg, #fee2e2);
+    border-color: var(--danger, #ef4444);
+    color: var(--danger, #dc2626);
+}
+
 .atex-orders-approve.is-confirm {
     background: #f5e6c8;
     border-color: #d6ad63;
@@ -316,6 +327,14 @@
     padding: 12px 16px;
 }
 
+.atex-orders-position-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
 .atex-orders-empty {
     padding: 18px;
     text-align: center;
@@ -417,6 +436,17 @@
 
 .atex-orders-cell .atex-orders-ref-search {
     padding-right: 28px;            /* место под кнопку очистки */
+}
+
+.atex-orders-cell .atex-orders-input {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.atex-orders-cell .atex-orders-input:focus {
+    border-color: transparent;
+    outline: none;
 }
 
 /* Ref-select в ячейке не расширяет колонку; список — поверх (position:absolute). */

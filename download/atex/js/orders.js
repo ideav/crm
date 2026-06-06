@@ -24,6 +24,8 @@
 
     // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
     // Их можно переопределить data-атрибутами data-order-statuses / data-position-statuses.
+    var DEFAULT_ORDER_STATUS_ID = '16320';
+    var DEFAULT_ORDER_STATUS_LABEL = 'Новый';
     var DEFAULT_ORDER_STATUSES = ['Новый', 'Согласован', 'К выполнению', 'Выполнен', 'Отменён'];
     var DEFAULT_POSITION_STATUSES = ['Новая', 'В работе', 'Готова', 'Отгружена'];
 
@@ -70,6 +72,7 @@
         positionsByOrder: {},
         expanded: {},
         editingCell: null,          // активная ячейка поячейковой правки (DOM td) или null
+        editingOrderCell: null,     // активная ячейка правки дат заказа (DOM td) или null
         draftOrderId: null,         // заказ, под которым показана черновая строка новой позиции
         draftPos: null,             // синтетическая позиция-черновик { id:'__draft__', values, refs }
         statusFilter: '',
@@ -239,6 +242,21 @@
         m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
         return m ? Number(m[1] + m[2] + m[3]) : NaN;
     }
+
+    function dateDisplayToInputValue(value) {
+        var text = trimValue(value);
+        var dm = text.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if (dm) return dm[3] + '-' + dm[2] + '-' + dm[1];
+        var iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        return iso ? iso[1] + '-' + iso[2] + '-' + iso[3] : text;
+    }
+
+    function dateInputToDisplayValue(value) {
+        var text = trimValue(value);
+        var iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return iso ? iso[3] + '.' + iso[2] + '.' + iso[1] : text;
+    }
+
     // Сортировка заказов по o.values[key] (id — по o.id). Возвращает новый массив.
     function sortOrders(list, key, dir) {
         var sign = dir === 'desc' ? -1 : 1;
@@ -310,6 +328,14 @@
             if (String(options[i].id) === wanted) return options[i];
         }
         return null;
+    }
+
+    function ensureDefaultOrderStatusOption(options) {
+        var list = (options || []).slice();
+        if (!findRefOption(list, DEFAULT_ORDER_STATUS_ID)) {
+            list.unshift({ id: DEFAULT_ORDER_STATUS_ID, text: DEFAULT_ORDER_STATUS_LABEL });
+        }
+        return list;
     }
 
     function filterRefOptions(options, query, limit) {
@@ -505,7 +531,7 @@
         put('client', opts.clientId);
         put('manager', opts.managerId);
         put('created', opts.created);
-        put('status', opts.status);
+        put('status', trimValue(opts.status) || DEFAULT_ORDER_STATUS_ID);
         put('dueDate', opts.dueDate);
         put('notes', opts.notes);
 
@@ -553,7 +579,18 @@
         put('sleeve', values.sleeve);
         put('winding', normalizeWinding(values.winding));
         put('status', values.status);
+        put('dueDate', values.dueDate);
 
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_set/' +
+            encodeURIComponent(opts.objId) + '?JSON';
+        return { url: url, body: buildFormBody(fields, opts.xsrf) };
+    }
+
+    function buildSetFieldRequest(opts) {
+        var fields = {};
+        if (opts && opts.reqId) {
+            fields[opts.reqId] = opts.value == null ? '' : opts.value;
+        }
         var url = '/' + encodeURIComponent(opts.db) + '/_m_set/' +
             encodeURIComponent(opts.objId) + '?JSON';
         return { url: url, body: buildFormBody(fields, opts.xsrf) };
@@ -722,7 +759,7 @@
     }
 
     function renderPositions(order) {
-        var positions = state.positionsByOrder[order.id] || [];
+        var positions = state.positionsByOrder[order.id] || order.positions || [];
         var head = '<thead><tr>' +
             '<th>Кол-во</th><th>Вид сырья</th>' +
             '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th>Дата согл.</th><th>Срок изг.</th><th></th>' +
@@ -735,14 +772,21 @@
 
         return '<div class="atex-orders-positions">' +
             '<table class="atex-orders-subtable">' + head + body + '</table>' +
+            '<div class="atex-orders-position-actions">' +
             '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" ' +
             'data-add-position="' + escapeHtml(order.id) + '">' +
             '<i class="pi pi-plus"></i><span>Добавить позицию</span></button>' +
+            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-btn-danger" ' +
+            'data-del-order="' + escapeHtml(order.id) + '">' +
+            '<i class="pi pi-trash"></i><span>Удалить заказ</span></button>' +
+            '</div>' +
             '</div>';
     }
 
     // Поячейково редактируемые столбцы позиции (по data-cell соответствует key в state.positionColumns).
-    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding'];
+    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding', 'dueDate'];
+    var POSITION_ENTRY_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding'];
+    var EDITABLE_ORDER_CELLS = ['created', 'dueDate'];
 
     // Текст отображения значения ячейки позиции (для ref-полей — подпись из values).
     function positionCellText(pos, key) {
@@ -756,6 +800,16 @@
             escapeHtml(positionCellText(pos, key)) + '</td>';
     }
 
+    function orderCellText(order, key) {
+        return order.values[key] || '';
+    }
+
+    function orderDisplayCell(order, key) {
+        return '<td class="atex-orders-cell atex-orders-order-cell" data-order-cell="' + escapeHtml(key) +
+            '" data-order-id="' + escapeHtml(order.id) + '" tabindex="0">' +
+            escapeHtml(orderCellText(order, key)) + '</td>';
+    }
+
     // Строка позиции: все редактируемые ячейки кликабельны + кнопка удаления.
     // data-position-form на <tr> нужно делегированию ref-select (как раньше у формы).
     function renderPositionRow(order, pos) {
@@ -767,10 +821,10 @@
             positionDisplayCell(pos, 'sleeve') +
             positionDisplayCell(pos, 'winding') +
             (pos.values.status === 'Новая'
-                ? '<td><button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-pos="' + escapeHtml(pos.id) + '">Согласовано</button></td>'
+                ? '<td><button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-pos="' + escapeHtml(pos.id) + '">Согласовать</button></td>'
                 : '<td>' + escapeHtml(pos.values.status || '') + '</td>') +
             '<td>' + escapeHtml(pos.values.approved || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.dueDate || '') + '</td>' +
+            positionDisplayCell(pos, 'dueDate') +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--danger" title="Удалить" ' +
             'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
@@ -782,10 +836,10 @@
     // data-position-id="__draft__" — savePositionCell/activateCell распознают черновик через findPositionById.
     function renderDraftRow(order) {
         var draft = { id: '__draft__', values: {}, refs: {} };
-        var cells = EDITABLE_POSITION_CELLS.map(function(key) { return positionDisplayCell(draft, key); }).join('');
+        var cells = POSITION_ENTRY_CELLS.map(function(key) { return positionDisplayCell(draft, key); }).join('');
         return '<tr class="atex-orders-draft-row" data-draft-order="' + escapeHtml(order.id) +
             '" data-position-form="' + escapeHtml(order.id) + '">' + cells +
-            '<td></td><td></td><td></td>' +
+            '<td></td><td></td>' + positionDisplayCell(draft, 'dueDate') +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn" title="Отменить черновик" ' +
             'aria-label="Отменить черновик" data-cancel-draft="1"><i class="pi pi-times"></i></button>' +
@@ -818,11 +872,11 @@
                 '<td>' + escapeHtml(order.id) + '</td>' +
                 '<td>' + escapeHtml(order.values.client || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
-                '<td>' + escapeHtml(order.values.created || '') + '</td>' +
+                orderDisplayCell(order, 'created') +
                 '<td>' + escapeHtml(order.values.approved || '') + '</td>' +
-                '<td>' + escapeHtml(order.values.dueDate || '') + '</td>' +
+                orderDisplayCell(order, 'dueDate') +
                 '<td>' + (order.values.status === 'Новый'
-                    ? '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-order="' + escapeHtml(order.id) + '">Согласовано</button>'
+                    ? '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-order="' + escapeHtml(order.id) + '">Согласовать</button>'
                     : escapeHtml(order.values.status || '')) + '</td>' +
                 '<td class="atex-orders-count">' + positionCount + '</td>' +
                 '</tr>';
@@ -859,13 +913,13 @@
         var clientCol = getColumn(state.orderColumns, 'client');
         var clientOptions = clientCol && clientCol.reqId ? state.refOptions[clientCol.reqId] : null;
         var statusCol = getColumn(state.orderColumns, 'status');
-        var statusOptions = statusCol && statusCol.reqId ? (state.refOptions[statusCol.reqId] || []) : [];
+        var statusOptions = ensureDefaultOrderStatusOption(statusCol && statusCol.reqId ? (state.refOptions[statusCol.reqId] || []) : []);
         var panel = document.getElementById('atex-order-create-form');
         if (!panel) return;
         panel.innerHTML =
             '<div class="atex-orders-fields">' +
             '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента', clientCol && clientCol.reqId) + '</label>' +
-            '<label>Статус' + refSelectHtml('atex-order-status', statusOptions, '', 'Выберите статус', statusCol && statusCol.reqId) + '</label>' +
+            '<label>Статус' + refSelectHtml('atex-order-status', statusOptions, DEFAULT_ORDER_STATUS_ID, 'Выберите статус', statusCol && statusCol.reqId) + '</label>' +
             '<label>Срок изготовления<input type="date" class="atex-orders-input" id="atex-order-due-date"></label>' +
             '<label class="atex-orders-field-wide">Примечания<textarea class="atex-orders-input" id="atex-order-notes" rows="2"></textarea></label>' +
             '</div>' +
@@ -903,6 +957,8 @@
         if (trimValue(state.statusFilter)) params.push('FR_order_status=' + encodeURIComponent(trimValue(state.statusFilter)));
         var url = '/' + encodeURIComponent(getApiBase()) + '/report/orders_list?' + params.join('&');
         return fetchJson(url).then(function(rows) {
+            state.editingCell = null;
+            state.editingOrderCell = null;
             state.orders = rowsToOrders(rows || []);
             state.positionsByOrder = {};
             state.orders.forEach(function(o) { state.positionsByOrder[o.id] = o.positions; });
@@ -924,7 +980,7 @@
             clientId: clientSel ? clientSel.value : '',
             managerId: typeof window.uid !== 'undefined' ? window.uid : (typeof uid !== 'undefined' ? uid : ''),
             created: todayIso(),
-            status: statusSel ? statusSel.value : '',
+            status: statusSel && statusSel.value ? statusSel.value : DEFAULT_ORDER_STATUS_ID,
             dueDate: dueDateEl ? dueDateEl.value : '',
             notes: notesEl ? notesEl.value : '',
             xsrf: getXsrf()
@@ -1023,6 +1079,47 @@
         td.textContent = found ? positionCellText(found.position, key) : (td.getAttribute('data-prev') || '');
     }
 
+    function deactivateOrderCell() {
+        var td = state.editingOrderCell;
+        state.editingOrderCell = null;
+        if (!td || !td.parentNode) return;
+        var key = td.getAttribute('data-order-cell');
+        var orderId = td.getAttribute('data-order-id');
+        var order = orderId ? findOrder(orderId) : null;
+        td.classList.remove('is-editing');
+        td.textContent = order ? orderCellText(order, key) : (td.getAttribute('data-prev') || '');
+    }
+
+    function activeCellControlValue(td) {
+        if (!td) return null;
+        var input = td.querySelector('input[data-field]');
+        if (input) return input.value;
+        var select = td.querySelector('select[data-field]');
+        if (select) return select.value;
+        return null;
+    }
+
+    function saveActivePositionCell() {
+        var td = state.editingCell;
+        if (!td) return;
+        var col = getColumn(state.positionColumns, td.getAttribute('data-cell'));
+        if (col && col.ref) {
+            deactivateCell();
+            return;
+        }
+        var value = activeCellControlValue(td);
+        if (value == null) deactivateCell();
+        else savePositionCell(td, value);
+    }
+
+    function saveActiveOrderCell() {
+        var td = state.editingOrderCell;
+        if (!td) return;
+        var input = td.querySelector('input[data-order-field]');
+        if (!input) deactivateOrderCell();
+        else saveOrderCell(td, input.value);
+    }
+
     // Переводит ячейку отображения в режим правки: подставляет контрол и даёт фокус.
     function activateCell(td) {
         if (!td || state.editingCell === td) return;
@@ -1032,8 +1129,8 @@
         if (!found) return;
         // id ссылок (raw/sleeve) приходят прямо из отчёта orders_list —
         // отдельная догрузка позиций заказа больше не требуется.
-        // Прежняя активная ячейка возвращается в отображение (без сохранения).
-        if (state.editingCell && state.editingCell !== td) deactivateCell();
+        if (state.editingOrderCell) saveActiveOrderCell();
+        if (state.editingCell && state.editingCell !== td) saveActivePositionCell();
         state.editingCell = td;
         td.classList.add('is-editing');
         var pos = found.position;
@@ -1041,6 +1138,23 @@
         td.setAttribute('data-prev', prevValue);
         td.innerHTML = renderCellControl(found.orderId, pos, key);
         focusCellControl(td, key, found.orderId);
+    }
+
+    function activateOrderCell(td) {
+        if (!td || state.editingOrderCell === td) return;
+        var key = td.getAttribute('data-order-cell');
+        var orderId = td.getAttribute('data-order-id');
+        var order = orderId ? findOrder(orderId) : null;
+        var col = getColumn(state.orderColumns, key);
+        if (!order || !col || !col.reqId) return;
+        if (state.editingCell) saveActivePositionCell();
+        if (state.editingOrderCell && state.editingOrderCell !== td) saveActiveOrderCell();
+        state.editingOrderCell = td;
+        td.classList.add('is-editing');
+        var prevValue = orderCellText(order, key);
+        td.setAttribute('data-prev', prevValue);
+        td.innerHTML = renderOrderCellControl(order, key);
+        focusOrderCellControl(td);
     }
 
     // HTML контрола для ячейки по типу столбца.
@@ -1051,6 +1165,10 @@
             var step = key === 'length' ? ' step="any"' : '';
             return '<input class="atex-orders-input atex-orders-cell-input" type="number" min="0"' + step +
                 ' data-field="' + escapeHtml(key) + '" value="' + escapeHtml(pos.values[key] || '') + '">';
+        }
+        if (key === 'dueDate') {
+            return '<input class="atex-orders-input atex-orders-cell-input" type="date" ' +
+                'data-field="dueDate" value="' + escapeHtml(dateDisplayToInputValue(pos.values.dueDate || '')) + '">';
         }
         if (col && col.ref) {
             var placeholder = key === 'raw' ? 'Выберите вид сырья' : 'Выберите диаметр';
@@ -1070,6 +1188,11 @@
             ' data-field="status" class="atex-orders-status atex-orders-cell-input"');
     }
 
+    function renderOrderCellControl(order, key) {
+        return '<input class="atex-orders-input atex-orders-cell-input" type="date" ' +
+            'data-order-field="' + escapeHtml(key) + '" value="' + escapeHtml(dateDisplayToInputValue(order.values[key] || '')) + '">';
+    }
+
     // Фокус на контрол внутри активированной ячейки.
     function focusCellControl(td, key, orderId) {
         var col = getColumn(state.positionColumns, key);
@@ -1079,6 +1202,14 @@
             return;
         }
         var input = td.querySelector('[data-field]');
+        if (input) {
+            input.focus();
+            if (input.select) input.select();
+        }
+    }
+
+    function focusOrderCellControl(td) {
+        var input = td.querySelector('[data-order-field]');
         if (input) {
             input.focus();
             if (input.select) input.select();
@@ -1145,6 +1276,10 @@
         var prevCompare = isRef ? ((pos.refs && pos.refs[key]) || '') : (pos.values[key] || '');
         var nextCompare = newValue == null ? '' : String(newValue);
         if (key === 'winding') nextCompare = normalizeWinding(nextCompare);
+        if (key === 'dueDate') {
+            prevCompare = dateDisplayToInputValue(prevCompare);
+            nextCompare = dateDisplayToInputValue(nextCompare);
+        }
         if (String(prevCompare) === String(nextCompare)) {
             // Без изменений — вернуть отображение как было.
             td.textContent = positionCellText(pos, key);
@@ -1158,7 +1293,9 @@
                 state.draftPos.refs[key] = nextCompare;
                 state.draftPos.values[key] = td.getAttribute('data-display') || nextCompare;
             } else {
-                state.draftPos.values[key] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
+                state.draftPos.values[key] = key === 'dueDate'
+                    ? dateInputToDisplayValue(nextCompare)
+                    : (key === 'winding' ? normalizeWinding(nextCompare) : nextCompare);
             }
             td.textContent = positionCellText(state.draftPos, key);
             return;
@@ -1168,15 +1305,67 @@
         var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
         var body = buildFormBody(fields, getXsrf());
         setMessage('Сохранение…', 'info');
-        // Оптимистично показываем введённое, чтобы не было прыжка; уточним по loadOrders.
-        td.textContent = isRef ? (td.getAttribute('data-display') || positionCellText(pos, key)) : nextCompare;
+        var oldValue = pos.values[key] || '';
+        var oldRef = pos.refs ? (pos.refs[key] || '') : '';
+        if (isRef) {
+            pos.refs = pos.refs || {};
+            pos.refs[key] = nextCompare;
+            pos.values[key] = td.getAttribute('data-display') || nextCompare;
+        } else {
+            pos.values[key] = key === 'dueDate'
+                ? dateInputToDisplayValue(nextCompare)
+                : (key === 'winding' ? normalizeWinding(nextCompare) : nextCompare);
+        }
+        td.textContent = positionCellText(pos, key);
         postForm(url, body).then(function() {
             setMessage('Сохранено.', 'success');
-            return loadOrders();
         }).catch(function(error) {
             setMessage('Не удалось сохранить: ' + (error.message || error), 'error');
             // Откат отображения.
+            pos.values[key] = oldValue;
+            if (isRef) pos.refs[key] = oldRef;
             td.textContent = positionCellText(pos, key);
+        });
+    }
+
+    function saveOrderCell(td, newValue) {
+        if (!td) return;
+        var key = td.getAttribute('data-order-cell');
+        var orderId = td.getAttribute('data-order-id');
+        var col = getColumn(state.orderColumns, key);
+        var order = orderId ? findOrder(orderId) : null;
+        state.editingOrderCell = null;
+        td.classList.remove('is-editing');
+        if (!order || !col || !col.reqId) {
+            if (order) td.textContent = orderCellText(order, key);
+            return;
+        }
+
+        var prevCompare = dateDisplayToInputValue(order.values[key] || '');
+        var nextCompare = dateDisplayToInputValue(newValue == null ? '' : String(newValue));
+        if (String(prevCompare) === String(nextCompare)) {
+            td.textContent = orderCellText(order, key);
+            return;
+        }
+
+        var oldValue = order.values[key] || '';
+        order.values[key] = dateInputToDisplayValue(nextCompare);
+        td.textContent = orderCellText(order, key);
+
+        var req = buildSetFieldRequest({
+            db: getApiBase(),
+            objId: orderId,
+            reqId: col.reqId,
+            value: nextCompare,
+            xsrf: getXsrf()
+        });
+        setMessage('Сохранение…', 'info');
+        postForm(req.url, req.body).then(function() {
+            setMessage('Сохранено.', 'success');
+        }).catch(function(error) {
+            setMessage('Не удалось сохранить: ' + (error.message || error), 'error');
+            order.values[key] = oldValue;
+            td.textContent = orderCellText(order, key);
         });
     }
 
@@ -1186,10 +1375,30 @@
         setMessage('Удаление позиции…', 'info');
         postForm(req.url, req.body).then(function() {
             if (state.editingCell) state.editingCell = null;
+            if (state.editingOrderCell) state.editingOrderCell = null;
             setMessage('Позиция удалена.', 'success');
             return loadOrders();
         }).catch(function(error) {
             setMessage('Не удалось удалить позицию: ' + (error.message || error), 'error');
+        });
+    }
+
+    // Удаление заказа: _m_del/{orderId} → перезагрузка отчётом.
+    function deleteOrder(orderId) {
+        var req = buildDeleteRequest({ db: getApiBase(), objId: orderId, xsrf: getXsrf() });
+        setMessage('Удаление заказа…', 'info');
+        postForm(req.url, req.body).then(function() {
+            state.editingCell = null;
+            state.editingOrderCell = null;
+            if (state.draftOrderId === String(orderId)) {
+                state.draftOrderId = null;
+                state.draftPos = null;
+            }
+            delete state.expanded[String(orderId)];
+            setMessage('Заказ удалён.', 'success');
+            return loadOrders();
+        }).catch(function(error) {
+            setMessage('Не удалось удалить заказ: ' + (error.message || error), 'error');
         });
     }
 
@@ -1537,7 +1746,7 @@
                         delBtn.setAttribute('data-confirm', '1');
                         delBtn.classList.add('is-confirm');
                         delBtn.setAttribute('title', 'Нажмите ещё раз для удаления');
-                        setMessage('Нажмите 🗑 ещё раз, чтобы удалить позицию.', 'info');
+                        setMessage('Нажмите ещё раз, чтобы удалить позицию.', 'info');
                         delBtn._atexDelTimer = setTimeout(function() {
                             delBtn.removeAttribute('data-confirm');
                             delBtn.classList.remove('is-confirm');
@@ -1546,7 +1755,26 @@
                     }
                     return;
                 }
-                // Кнопки «Согласовано» (заказ/позиция). Подтверждение двойным кликом, как у удаления.
+                var delOrderBtn = event.target.closest('[data-del-order]');
+                if (delOrderBtn) {
+                    var delOrderId = delOrderBtn.getAttribute('data-del-order');
+                    if (delOrderBtn.getAttribute('data-confirm') === '1') {
+                        deleteOrder(delOrderId);
+                    } else {
+                        resetDeleteConfirm(list);
+                        delOrderBtn.setAttribute('data-confirm', '1');
+                        delOrderBtn.classList.add('is-confirm');
+                        delOrderBtn.textContent = 'Подтвердить удаление?';
+                        setMessage('Нажмите ещё раз, чтобы удалить заказ.', 'info');
+                        delOrderBtn._atexDelTimer = setTimeout(function() {
+                            delOrderBtn.removeAttribute('data-confirm');
+                            delOrderBtn.classList.remove('is-confirm');
+                            delOrderBtn.innerHTML = '<i class="pi pi-trash"></i><span>Удалить заказ</span>';
+                        }, 4000);
+                    }
+                    return;
+                }
+                // Кнопки «Согласовать» (заказ/позиция). Подтверждение двойным кликом, как у удаления.
                 var approveBtn = event.target.closest('[data-approve-order],[data-approve-pos]');
                 if (approveBtn) {
                     var isOrderApprove = approveBtn.hasAttribute('data-approve-order');
@@ -1562,7 +1790,7 @@
                         approveBtn._atexApproveTimer = setTimeout(function() {
                             approveBtn.removeAttribute('data-confirm');
                             approveBtn.classList.remove('is-confirm');
-                            approveBtn.textContent = 'Согласовано';
+                            approveBtn.textContent = 'Согласовать';
                         }, 4000);
                     }
                     return;
@@ -1570,8 +1798,14 @@
                 // Клик мимо кнопки удаления/согласования — сбросить незавершённое подтверждение.
                 resetDeleteConfirm(list);
 
+                var orderCell = event.target.closest('td.atex-orders-cell[data-order-cell]');
+                if (orderCell && orderCell !== state.editingOrderCell && !orderCell.classList.contains('is-editing')) {
+                    activateOrderCell(orderCell);
+                    return;
+                }
+
                 // Поячейковая правка: клик по ячейке-отображению переводит её в правку.
-                var cell = event.target.closest('td.atex-orders-cell');
+                var cell = event.target.closest('td.atex-orders-cell[data-cell]');
                 if (cell && cell !== state.editingCell && !cell.classList.contains('is-editing')) {
                     activateCell(cell);
                 }
@@ -1588,6 +1822,17 @@
                 setTimeout(function() {
                     if (state.editingCell !== cell) return;
                     savePositionCell(cell, input.value);
+                }, 0);
+            });
+
+            list.addEventListener('focusout', function(event) {
+                var input = event.target.closest && event.target.closest('input[data-order-field]');
+                if (!input) return;
+                var cell = input.closest('td.atex-orders-cell');
+                if (!cell || cell !== state.editingOrderCell) return;
+                setTimeout(function() {
+                    if (state.editingOrderCell !== cell) return;
+                    saveOrderCell(cell, input.value);
                 }, 0);
             });
 
@@ -1626,11 +1871,17 @@
             btn.classList.remove('is-confirm');
             btn.setAttribute('title', 'Удалить');
         });
+        scope.querySelectorAll('[data-del-order][data-confirm="1"]').forEach(function(btn) {
+            if (btn._atexDelTimer) clearTimeout(btn._atexDelTimer);
+            btn.removeAttribute('data-confirm');
+            btn.classList.remove('is-confirm');
+            btn.innerHTML = '<i class="pi pi-trash"></i><span>Удалить заказ</span>';
+        });
         scope.querySelectorAll('[data-approve-order][data-confirm="1"],[data-approve-pos][data-confirm="1"]').forEach(function(btn) {
             if (btn._atexApproveTimer) clearTimeout(btn._atexApproveTimer);
             btn.removeAttribute('data-confirm');
             btn.classList.remove('is-confirm');
-            btn.textContent = 'Согласовано';
+            btn.textContent = 'Согласовать';
         });
     }
 
@@ -1639,6 +1890,10 @@
             if (state.orders[i].id === String(orderId)) return state.orders[i];
         }
         return null;
+    }
+
+    function renderPositionsHtml(order) {
+        return renderPositions(order || { id: '', values: {}, positions: [] });
     }
 
     // ------------------------------------------------------------------
@@ -1733,12 +1988,20 @@
         buildCreateOrderRequest: buildCreateOrderRequest,
         buildCreatePositionRequest: buildCreatePositionRequest,
         buildSetPositionRequest: buildSetPositionRequest,
+        buildSetFieldRequest: buildSetFieldRequest,
         buildDeleteRequest: buildDeleteRequest,
         buildSetStatusRequest: buildSetStatusRequest,
         searchableRefSelectHtml: searchableRefSelectHtml,
+        renderPositionsHtml: renderPositionsHtml,
+        dateDisplayToInputValue: dateDisplayToInputValue,
+        dateInputToDisplayValue: dateInputToDisplayValue,
         TABLE: TABLE,
         ORDER_FIELDS: ORDER_FIELDS,
         POSITION_FIELDS: POSITION_FIELDS,
+        EDITABLE_ORDER_CELLS: EDITABLE_ORDER_CELLS,
+        EDITABLE_POSITION_CELLS: EDITABLE_POSITION_CELLS,
+        DEFAULT_ORDER_STATUS_ID: DEFAULT_ORDER_STATUS_ID,
+        DEFAULT_ORDER_STATUS_LABEL: DEFAULT_ORDER_STATUS_LABEL,
         DEFAULT_ORDER_STATUSES: DEFAULT_ORDER_STATUSES,
         DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES,
         REF_OPTIONS_LIMIT: REF_OPTIONS_LIMIT,
