@@ -776,9 +776,7 @@
             '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" ' +
             'data-add-position="' + escapeHtml(order.id) + '">' +
             '<i class="pi pi-plus"></i><span>Добавить позицию</span></button>' +
-            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-btn-danger" ' +
-            'data-del-order="' + escapeHtml(order.id) + '">' +
-            '<i class="pi pi-trash"></i><span>Удалить заказ</span></button>' +
+            deleteOrderButtonHtml(order) +
             '</div>' +
             '</div>';
     }
@@ -808,6 +806,42 @@
         return '<td class="atex-orders-cell atex-orders-order-cell" data-order-cell="' + escapeHtml(key) +
             '" data-order-id="' + escapeHtml(order.id) + '" tabindex="0">' +
             escapeHtml(orderCellText(order, key)) + '</td>';
+    }
+
+    function hasApprovalDate(record) {
+        return !!(record && record.values && trimValue(record.values.approved));
+    }
+
+    function orderPositionsForDelete(order) {
+        if (!order) return [];
+        var loaded = state.positionsByOrder[String(order.id)];
+        return loaded || order.positions || [];
+    }
+
+    function orderDeleteBlockReason(order) {
+        if (!order) return 'Заказ не найден.';
+        if (hasApprovalDate(order)) return 'Нельзя удалить заказ: заказ согласован.';
+        var positions = orderPositionsForDelete(order);
+        for (var i = 0; i < positions.length; i++) {
+            if (hasApprovalDate(positions[i])) {
+                return 'Нельзя удалить заказ: есть согласованные позиции.';
+            }
+        }
+        return '';
+    }
+
+    function canDeleteOrder(order) {
+        return !orderDeleteBlockReason(order);
+    }
+
+    function deleteOrderButtonHtml(order) {
+        var reason = orderDeleteBlockReason(order);
+        var attrs = reason
+            ? ' disabled aria-disabled="true" title="' + escapeHtml(reason) + '"'
+            : ' data-del-order="' + escapeHtml(order.id) + '" title="Удалить заказ"';
+        return '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-btn-danger"' +
+            attrs + '>' +
+            '<i class="pi pi-trash"></i><span>Удалить заказ</span></button>';
     }
 
     // Строка позиции: все редактируемые ячейки кликабельны + кнопка удаления.
@@ -1385,6 +1419,12 @@
 
     // Удаление заказа: _m_del/{orderId} → перезагрузка отчётом.
     function deleteOrder(orderId) {
+        var order = findOrder(orderId);
+        var blockReason = orderDeleteBlockReason(order);
+        if (blockReason) {
+            setMessage(blockReason, 'error');
+            return;
+        }
         var req = buildDeleteRequest({ db: getApiBase(), objId: orderId, xsrf: getXsrf() });
         setMessage('Удаление заказа…', 'info');
         postForm(req.url, req.body).then(function() {
@@ -1758,6 +1798,13 @@
                 var delOrderBtn = event.target.closest('[data-del-order]');
                 if (delOrderBtn) {
                     var delOrderId = delOrderBtn.getAttribute('data-del-order');
+                    var order = findOrder(delOrderId);
+                    var blockReason = orderDeleteBlockReason(order);
+                    if (blockReason) {
+                        resetDeleteConfirm(list);
+                        setMessage(blockReason, 'error');
+                        return;
+                    }
                     if (delOrderBtn.getAttribute('data-confirm') === '1') {
                         deleteOrder(delOrderId);
                     } else {
@@ -1991,6 +2038,8 @@
         buildSetFieldRequest: buildSetFieldRequest,
         buildDeleteRequest: buildDeleteRequest,
         buildSetStatusRequest: buildSetStatusRequest,
+        orderDeleteBlockReason: orderDeleteBlockReason,
+        canDeleteOrder: canDeleteOrder,
         searchableRefSelectHtml: searchableRefSelectHtml,
         renderPositionsHtml: renderPositionsHtml,
         dateDisplayToInputValue: dateDisplayToInputValue,

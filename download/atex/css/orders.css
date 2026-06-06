@@ -83,6 +83,16 @@
     background: #efd7a7;
     border-color: #c6963f;
     color: #5f3d00;
+.atex-orders-btn:disabled,
+.atex-orders-btn:disabled:hover {
+    cursor: not-allowed;
+    opacity: 0.58;
+}
+
+.atex-orders-btn-danger:disabled:hover {
+    background: var(--input-bg, #fff);
+    border-color: var(--input-border, #cbd5e1);
+    color: var(--danger, #dc2626);
 }
 
 .atex-orders-filter-wrap {
