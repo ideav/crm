@@ -102,6 +102,47 @@ assertEqual(planning.buildFields(
     { footage: '1200', cut: '501', status: 'Зарезервировано' }
 ), { t1082: '1200', t1084: '501' }, 'buildFields skips fields with null reqId');
 
+// ── Обеспечение ↔ Производственная резка: старая ссылка и новая подчинённость (#3180) ──
+var oldSupplyMeta = {
+    id: '109', val: 'Обеспечение', reqs: [
+        { id: '1082', val: 'Метраж, м' },
+        { id: '1084', val: 'Производственная резка', ref: '110', ref_id: '1085' },
+        { id: '1088', val: 'Статус' }
+    ]
+};
+var newSupplyMeta = {
+    id: '1077', val: 'Обеспечение', reqs: [
+        { id: '1149', val: 'Метраж, м' },
+        { id: '1154', val: 'Статус' },
+        { id: '15015', val: 'Производственная резка', arr_id: '1078' }
+    ]
+};
+var newCutMeta = { id: '1078', val: 'Производственная резка', reqs: [] };
+assertEqual(planning.supplyCutRelation(oldSupplyMeta, cutMeta), {
+    mode: 'reference',
+    reqId: '1084',
+    arrId: null
+}, 'supplyCutRelation: old metadata uses cut reference');
+assertEqual(planning.supplyCutRelation(newSupplyMeta, newCutMeta), {
+    mode: 'child',
+    reqId: null,
+    arrId: '1078'
+}, 'supplyCutRelation: #3180 metadata has cut as child of supply');
+assertEqual(planning.buildSupplyFieldsForCut(oldSupplyMeta, cutMeta, {
+    footage: '1200',
+    cutId: '501',
+    status: 'Зарезервировано'
+}), { t1082: '1200', t1084: '501', t1088: 'Зарезервировано' }, 'buildSupplyFieldsForCut: old schema writes cut reference');
+assertEqual(planning.buildSupplyFieldsForCut(newSupplyMeta, newCutMeta, {
+    footage: '1200',
+    cutId: '501',
+    status: 'Зарезервировано'
+}), { t1149: '1200', t1154: 'Зарезервировано' }, 'buildSupplyFieldsForCut: #3180 child schema stores footage/status and omits child-array field');
+assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }], false).map(function(g) { return g.map(function(p) { return p.id; }); }),
+    [['p1', 'p2']], 'layoutPositionGroups: reference schema keeps positions in one planning group');
+assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }], true).map(function(g) { return g.map(function(p) { return p.id; }); }),
+    [['p1'], ['p2']], 'layoutPositionGroups: child-cut schema plans one position per supply');
+
 // ── rowsToPlanning: плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies } ──
 // LEFT JOIN: резка 10 с двумя обеспечениями = две строки; резка 20 без обеспечения.
 var reportRows = [

@@ -21,9 +21,11 @@
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
 // `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
-// сервер сам считает автонумер), обеспечение — `_m_new/{Обеспечение}` с
-// `up={позицияId}` и ссылкой `t{Производственная резка}`, правки — `_m_set`. ID
-// таблиц и реквизитов для записи не хардкодятся: берутся по именам из
+// сервер сам считает автонумер). В старой схеме обеспечение ссылалось на резку
+// через `t{Производственная резка}`; в новой (#3180) резка подчинена обеспечению,
+// поэтому сначала создаётся `_m_new/{Обеспечение}?up={позицияId}` с «Метраж, м»,
+// затем `_m_new/{Производственная резка}?up={обеспечениеId}`. ID таблиц и
+// реквизитов для записи не хардкодятся: берутся по именам из
 // `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
 // Чистое ядро (разбор записей, группировка очереди по слиттерам, фильтрация,
@@ -73,7 +75,8 @@
         notes: 'Примечания',
         sequence: 'Очередность'
     };
-    // Реквизиты подчинённого «Обеспечения» (up = позиция заказа).
+    // Реквизиты «Обеспечения» (up = позиция заказа). В свежей схеме
+    // «Производственная резка» здесь является child-array, а не ссылочным полем.
     var SUPPLY_REQ = {
         footage: 'Метраж, м',
         cut: 'Производственная резка',
@@ -114,11 +117,50 @@
     }
 
     // Значение реквизита из метаданных по имени → его числовой id.
-    function reqIdByName(meta, name) {
-        var found = (meta && meta.reqs || []).filter(function(r) {
+    function reqByName(meta, name) {
+        return (meta && meta.reqs || []).filter(function(r) {
             return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
-        })[0];
+        })[0] || null;
+    }
+
+    function reqIdByName(meta, name) {
+        var found = reqByName(meta, name);
         return found ? String(found.id) : null;
+    }
+
+    // Как «Обеспечение» связано с «Производственной резкой» в текущей метасхеме:
+    // reference — старое поле-ссылка, child — новая подчинённая таблица (#3180).
+    function supplyCutRelation(supplyMeta, cutMeta) {
+        var req = reqByName(supplyMeta, SUPPLY_REQ.cut);
+        if (!req) return { mode: 'none', reqId: null, arrId: null };
+        var arrId = req.arr_id == null ? null : String(req.arr_id);
+        if (arrId) return { mode: 'child', reqId: null, arrId: arrId };
+        return { mode: 'reference', reqId: req.id == null ? null : String(req.id), arrId: null };
+    }
+
+    // Поля записи «Обеспечение» для привязки/создания резки. Для новой схемы
+    // child-array поле «Производственная резка» намеренно не пишется как `t...`.
+    function buildSupplyFieldsForCut(supplyMeta, cutMeta, values) {
+        var relation = supplyCutRelation(supplyMeta, cutMeta);
+        var reqIds = {
+            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage)
+        };
+        if (relation.mode === 'reference') reqIds.cut = relation.reqId;
+        reqIds.status = reqIdByName(supplyMeta, SUPPLY_REQ.status);
+        return buildFields(reqIds, {
+            footage: values && values.footage,
+            status: values && values.status,
+            cut: values && values.cutId
+        });
+    }
+
+    // В схеме «резка под обеспечением» одна резка не может быть родителем сразу
+    // нескольких обеспечений, поэтому генерация раскладок идёт по одной позиции.
+    function layoutPositionGroups(positions, cutUnderSupply) {
+        var list = (positions || []).slice();
+        if (!list.length) return [];
+        if (!cutUnderSupply) return [list];
+        return list.map(function(p) { return [p]; });
     }
 
     // Индекс колонки реквизита в строке JSON_OBJ. Колонки идут в порядке:
@@ -806,6 +848,9 @@
         filterCuts: filterCuts,
         isCutVisible: isCutVisible,
         buildFields: buildFields,
+        supplyCutRelation: supplyCutRelation,
+        buildSupplyFieldsForCut: buildSupplyFieldsForCut,
+        layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
         rowsToGenPositions: rowsToGenPositions,
@@ -895,7 +940,7 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { slitterId: '', materialBatchId: '', planDate: '', status: CUT_STATUSES[0], notes: '' };
+        return { positionId: '', footage: '', slitterId: '', materialBatchId: '', planDate: '', status: CUT_STATUSES[0], notes: '' };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -1305,8 +1350,14 @@
         var self = this;
         if (this.busy) return;
         var meta = this.meta.cut;
+        var supplyMeta = this.meta.supply;
+        var cutUnderSupply = supplyCutRelation(supplyMeta, meta).mode === 'child';
         var d = this.draft;
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
+        if (cutUnderSupply) {
+            if (!d.positionId) { this.notify('Выберите позицию заказа', 'error'); return; }
+            if (!String(d.footage == null ? '' : d.footage).trim()) { this.notify('Укажите метраж обеспечения', 'error'); return; }
+        }
 
         // Стоп-лист станка: сырьё выбранной партии не должно быть запрещено на станке.
         if (d.materialBatchId) {
@@ -1335,10 +1386,7 @@
             notes: d.notes
         });
 
-        this.setBusy(true);
-        // up=1 — корневой объект; full=1 — на случай длинных примечаний.
-        this.post('_m_new/' + meta.id + '?JSON&up=1&full=1', fields).then(function(res) {
-            var id = res && (res.obj || res.id || res.i);
+        function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
             return self.reload().then(function() {
                 self.setBusy(false);
@@ -1348,29 +1396,52 @@
                 self.notify('Производственная резка создана', 'success');
                 self.render();
             });
+        }
+
+        this.setBusy(true);
+        if (cutUnderSupply) {
+            var supplyFields = buildSupplyFieldsForCut(supplyMeta, meta, {
+                footage: d.footage,
+                status: SUPPLY_STATUSES[0]
+            });
+            this.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(d.positionId), supplyFields).then(function(res) {
+                var supplyId = res && (res.obj || res.id || res.i);
+                if (!supplyId) throw new Error('Сервер не вернул id обеспечения');
+                return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(supplyId) + '&full=1', fields);
+            }).then(function(res) {
+                return finishCreatedCut(res && (res.obj || res.id || res.i));
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Ошибка создания резки: ' + err.message, 'error');
+            });
+            return;
+        }
+
+        // up=1 — корневой объект; full=1 — на случай длинных примечаний.
+        this.post('_m_new/' + meta.id + '?JSON&up=1&full=1', fields).then(function(res) {
+            return finishCreatedCut(res && (res.obj || res.id || res.i));
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка создания резки: ' + err.message, 'error');
         });
     };
 
-    // Привязка резки к позиции заказа через «Обеспечение»
-    // (_m_new/{Обеспечение} с up={позицияId} и ссылкой на резку).
+    // Привязка резки к позиции заказа через «Обеспечение» в старой ссылочной схеме.
+    // В новой схеме (#3180) резка создаётся дочерней записью обеспечения.
     AtexProductionPlanning.prototype.createSupply = function(opts) {
         var self = this;
         if (this.busy) return;
         var meta = this.meta.supply;
+        if (supplyCutRelation(meta, this.meta.cut).mode === 'child') {
+            this.notify('В текущей схеме обеспечение создаётся вместе с новой резкой', 'error');
+            return;
+        }
         if (!opts.positionId) { this.notify('Выберите позицию заказа', 'error'); return; }
         if (!opts.cutId) { this.notify('Не выбрана резка', 'error'); return; }
 
-        var reqIds = {
-            footage: reqIdByName(meta, SUPPLY_REQ.footage),
-            cut: reqIdByName(meta, SUPPLY_REQ.cut),
-            status: reqIdByName(meta, SUPPLY_REQ.status)
-        };
-        var fields = buildFields(reqIds, {
+        var fields = buildSupplyFieldsForCut(meta, this.meta.cut, {
             footage: opts.footage,
-            cut: opts.cutId,
+            cutId: opts.cutId,
             status: opts.status || SUPPLY_STATUSES[0]
         });
 
@@ -1765,6 +1836,7 @@
             this.notify('Нет необеспеченных позиций для генерации', 'info');
             return;
         }
+        var cutUnderSupply = supplyCutRelation(this.meta.supply, this.meta.cut).mode === 'child';
         var byMaterial = {};
         var matOrder = [];
         unsup.forEach(function(p) {
@@ -1787,21 +1859,31 @@
             var skipped = [];      // [{positionId, reason}]
             matOrder.forEach(function(mat) {
                 var matPositions = byMaterial[mat];
+                if (cutUnderSupply) {
+                    matPositions = matPositions.filter(function(p) {
+                        if (Number(p.length) > 0) return true;
+                        skipped.push({ positionId: p.id, reason: 'нет метража позиции' });
+                        return false;
+                    });
+                    if (!matPositions.length) return;
+                }
                 var jw = self.jumboWidthByMaterial[mat];
                 if (!jw) {
                     matPositions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
                     return;
                 }
-                var res = layoutCore.planLayouts({
-                    jumboWidth: jw,
-                    positions: matPositions.map(function(p) {
-                        return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
-                    }),
-                    preferred: self.preferredByMaterial[mat] || [],
-                    options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
+                layoutPositionGroups(matPositions, cutUnderSupply).forEach(function(positionGroup) {
+                    var res = layoutCore.planLayouts({
+                        jumboWidth: jw,
+                        positions: positionGroup.map(function(p) {
+                            return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
+                        }),
+                        preferred: self.preferredByMaterial[mat] || [],
+                        options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
+                    });
+                    (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
+                    (res.skipped || []).forEach(function(s) { skipped.push(s); });
                 });
-                (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
-                (res.skipped || []).forEach(function(s) { skipped.push(s); });
             });
 
             if (!allLayouts.length) {
@@ -1828,8 +1910,9 @@
     };
 
     // Последовательное создание записей по подготовленным раскладкам.
-    // На каждую раскладку: Резка → её Полосы → Обеспечения (по покрытым позициям).
-    // Зависимые _m_new не запускаются параллельно (Полосе/Обеспечению нужен cutId).
+    // Старая схема: Резка → Полосы → Обеспечения. Новая #3180:
+    // Обеспечение с «Метраж, м» → дочерняя Резка → Полосы.
+    // Зависимые _m_new не запускаются параллельно.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
         var self = this;
         var cutMeta = this.meta.cut;
@@ -1846,11 +1929,7 @@
             qty: reqIdByName(stripMeta, STRIP_REQ.qty),
             purpose: reqIdByName(stripMeta, STRIP_REQ.purpose)
         };
-        var supplyReqIds = {
-            cut: reqIdByName(supplyMeta, SUPPLY_REQ.cut),
-            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
-            status: reqIdByName(supplyMeta, SUPPLY_REQ.status)
-        };
+        var cutUnderSupply = supplyCutRelation(supplyMeta, cutMeta).mode === 'child';
         // #3155: «Метраж, м» обеспечения = «Длина, м» покрываемой позиции (длина прогона).
         // Без него footageBySupply=0 → windingMinutes=0 → все резки «0 мин» в расписании.
         var posLength = positionLengthMap(this.genPositions);
@@ -1868,14 +1947,18 @@
         var doneCuts = 0;
 
         this.setBusy(true);
-        // Окно прогресса (#3148): генерация идёт последовательными запросами
-        // (Резка → Полосы → Обеспечения), может занять заметное время.
+        // Окно прогресса (#3148): генерация идёт последовательными зависимыми
+        // запросами, может занять заметное время.
         this.showProgress('Генерация резок…', nCuts);
         var chain = Promise.resolve();
         layouts.forEach(function(lay, layIdx) {
             chain = chain.then(function() {
                 self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
-                // 1) Резка (корневой объект): статус + станок (баланс) + партия (FIFO).
+                var covered = lay.positionsCovered || [];
+                if (cutUnderSupply && covered.length !== 1) {
+                    throw new Error('Новая схема требует одну позицию заказа на обеспечение');
+                }
+
                 var slitterId = pickSlitter(self.slitters, lay.mat, loadBySlitterId);
                 if (slitterId != null) loadBySlitterId[String(slitterId)] = (loadBySlitterId[String(slitterId)] || 0) + 1;
                 var batchId = pickBatchFIFO(self.genBatches, lay.mat);
@@ -1884,11 +1967,8 @@
                     slitter: slitterId,
                     materialBatch: batchId
                 });
-                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
-                    var cutId = res && (res.obj || res.id || res.i);
-                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
 
-                    // 2) Полосы резки (up = cutId), последовательно.
+                function createStrips(cutId) {
                     var stripChain = Promise.resolve();
                     (lay.strips || []).forEach(function(strip) {
                         stripChain = stripChain.then(function() {
@@ -1901,15 +1981,43 @@
                                 .then(function() { nStrips += 1; });
                         });
                     });
+                    return stripChain;
+                }
 
-                    // 3) Обеспечения (up = positionId, ссылка на резку), последовательно.
-                    return stripChain.then(function() {
+                if (cutUnderSupply) {
+                    var positionId = covered[0];
+                    var len = Number(posLength[String(positionId)]) || 0;
+                    if (!(len > 0)) throw new Error('Для позиции #' + positionId + ' не указан метраж обеспечения');
+                    var supplyFields = buildSupplyFieldsForCut(supplyMeta, cutMeta, {
+                        footage: len,
+                        status: SUPPLY_STATUSES[0]
+                    });
+                    return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), supplyFields).then(function(res) {
+                        var supplyId = res && (res.obj || res.id || res.i);
+                        if (!supplyId) throw new Error('Сервер не вернул id обеспечения');
+                        nPositions += 1;
+                        return self.post('_m_new/' + cutMeta.id + '?JSON&up=' + encodeURIComponent(supplyId) + '&full=1', cutFields);
+                    }).then(function(res) {
+                        var cutId = res && (res.obj || res.id || res.i);
+                        if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                        return createStrips(cutId);
+                    }).then(function() {
+                        doneCuts += 1;
+                        self.updateProgress(doneCuts);
+                    });
+                }
+
+                // Старая схема: 1) корневая резка, 2) полосы, 3) обеспечения с ссылкой на резку.
+                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
+                    var cutId = res && (res.obj || res.id || res.i);
+                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                    return createStrips(cutId).then(function() {
                         var supChain = Promise.resolve();
-                        (lay.positionsCovered || []).forEach(function(positionId) {
+                        covered.forEach(function(positionId) {
                             supChain = supChain.then(function() {
                                 var len = Number(posLength[String(positionId)]) || 0;
-                                var fields = buildFields(supplyReqIds, {
-                                    cut: cutId,
+                                var fields = buildSupplyFieldsForCut(supplyMeta, cutMeta, {
+                                    cutId: cutId,
                                     footage: len > 0 ? len : '',
                                     status: SUPPLY_STATUSES[0]
                                 });
@@ -2148,6 +2256,26 @@
         form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
         form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Номер присваивается автоматически при сохранении.' }));
 
+        if (supplyCutRelation(this.meta.supply, this.meta.cut).mode === 'child') {
+            var posLength = positionLengthMap(this.genPositions);
+            form.appendChild(field('Позиция заказа', this.selectRef(this.positions, d.positionId, '— выберите позицию —',
+                function(v) {
+                    d.positionId = v;
+                    if (!String(d.footage == null ? '' : d.footage).trim()) {
+                        var len = Number(posLength[String(v)]) || 0;
+                        if (len > 0) {
+                            d.footage = String(len);
+                            self.renderForm();
+                        }
+                    }
+                }, null, { cacheKey: 'positions' })));
+
+            var supplyFootage = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: 'например, 1200' });
+            supplyFootage.value = d.footage || '';
+            supplyFootage.addEventListener('input', function() { d.footage = supplyFootage.value; });
+            form.appendChild(field('Метраж обеспечения, м', supplyFootage));
+        }
+
         form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
         // Поле «Партия сырья» убрано (#3120 Фаза 2): материал/сырьё резки определяются
@@ -2378,23 +2506,29 @@
 
         box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (cut.number || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
 
-        var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
+        var cutUnderSupply = supplyCutRelation(this.meta.supply, this.meta.cut).mode === 'child';
 
-        box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
-            function(v) { draft.positionId = v; }, null, { cacheKey: 'positions' })));
+        if (!cutUnderSupply) {
+            var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
 
-        var footage = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: 'например, 1200' });
-        footage.addEventListener('input', function() { draft.footage = footage.value; });
-        box.appendChild(field('Метраж, м', footage));
+            box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
+                function(v) { draft.positionId = v; }, null, { cacheKey: 'positions' })));
 
-        box.appendChild(field('Статус обеспечения', this.selectText(SUPPLY_STATUSES, draft.status, function(v) { draft.status = v; })));
+            var footage = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: 'например, 1200' });
+            footage.addEventListener('input', function() { draft.footage = footage.value; });
+            box.appendChild(field('Метраж, м', footage));
+
+            box.appendChild(field('Статус обеспечения', this.selectText(SUPPLY_STATUSES, draft.status, function(v) { draft.status = v; })));
+        }
 
         var actions = el('div', { class: 'atex-pp-actions' });
-        var linkBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Привязать к резке' });
-        linkBtn.addEventListener('click', function() {
-            self.createSupply({ positionId: draft.positionId, cutId: cut.id, footage: draft.footage, status: draft.status });
-        });
-        actions.appendChild(linkBtn);
+        if (!cutUnderSupply) {
+            var linkBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Привязать к резке' });
+            linkBtn.addEventListener('click', function() {
+                self.createSupply({ positionId: draft.positionId, cutId: cut.id, footage: draft.footage, status: draft.status });
+            });
+            actions.appendChild(linkBtn);
+        }
 
         // FIFO-резерв сырья резки в «Расход сырья» (Фаза 1b): подобрать партии по приходу
         // под требуемый прогон и записать расход. Идемпотентно (перезапишет прежние).
@@ -2416,12 +2550,16 @@
             var posById = {};
             this.positions.forEach(function(p) { posById[p.id] = p.label; });
             linked.forEach(function(s) {
-                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
-                del.addEventListener('click', function() { self.deleteSupply(s.id); });
-                listWrap.appendChild(el('div', { class: 'atex-pp-linked-item' }, [
-                    el('span', { class: 'atex-pp-linked-label', text: posById[s.positionId] || ('позиция #' + s.positionId) }),
-                    del
-                ]));
+                var label = posById[s.positionId] || ('позиция #' + s.positionId);
+                var foot = Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0;
+                if (foot > 0) label += ' · ' + foot + ' м';
+                var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
+                if (!cutUnderSupply) {
+                    var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
+                    del.addEventListener('click', function() { self.deleteSupply(s.id); });
+                    children.push(del);
+                }
+                listWrap.appendChild(el('div', { class: 'atex-pp-linked-item' }, children));
             });
         }
         box.appendChild(listWrap);
