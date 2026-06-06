@@ -945,8 +945,11 @@
             var list = Array.isArray(all) ? all : [all];
             self._metaAll = list; // кеш полного списка метаданных (резолв таблиц по имени)
             function byName(name) {
+                const searchName = name.trim().toLowerCase();
                 return list.filter(function(t) {
-                    return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
+                    const valMatch = String(t.val).trim().toLowerCase() === searchName;
+                    const aliasMatch = t.alias && String(t.alias).trim().toLowerCase() === searchName;
+                    return valMatch || aliasMatch;
                 })[0] || null;
             }
             self.meta.cut = byName(TABLE.cut);
