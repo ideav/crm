@@ -25,6 +25,7 @@ var META = {
     { id: 1054, val: 'Пользователь', type: '3', ref: '18', ref_id: '1055' },
     { id: 1056, val: 'Дата создания', type: '9' },
     { id: 1058, val: 'Дата согласования', type: '9' },
+    { id: 1158, val: 'Срок изготовления', type: '9' },
     { id: 1060, val: 'Статус', type: '3' },
     { id: 1062, val: 'Лидер', type: '3' },
     { id: 1064, val: 'Примечания', type: '12' }
@@ -32,27 +33,29 @@ var META = {
   '108': { id: '108', val: 'Позиция заказа', type: '3', reqs: [
     { id: 1067, val: 'Кол-во', type: '13' },
     { id: 1069, val: 'Вид сырья', type: '3', ref: '100', ref_id: '1070' },
-    { id: 1071, val: 'Тип резки', type: '3', ref: '104', ref_id: '1072' },
     { id: 1073, val: 'Ширина, мм', type: '13' },
     { id: 1075, val: 'Длина, м', type: '14' },
-    { id: 1077, val: 'Диаметр втулки', type: '13' },
-    { id: 1079, val: 'Статус', type: '3' }
+    { id: 1077, val: 'Диаметр втулки', type: '3', ref: '109', ref_id: '1078' },
+    { id: 8463, val: 'Тип намотки', type: '3' },
+    { id: 1079, val: 'Статус', type: '3' },
+    { id: 8571, val: 'Дата согласования', type: '9' },
+    { id: 1159, val: 'Срок изготовления', type: '9' }
   ]}
 };
-var ORDERS = [
-  { i: 651, u: 1, o: 2, r: ['Заказ 651', '305:ООО «Ромашка»', '42:victor_g', '2026-05-28', '', 'Согласован', '', ''] },
-  { i: 650, u: 1, o: 1, r: ['Заказ 650', '306:АО «Лютик»', '42:victor_g', '2026-05-27', '', 'В производстве', '', ''] }
+var ORDER_ROWS = [
+  { order_id:'651', order_no:'651', order_client:'ООО «Ромашка»', order_manager:'victor_g', order_created:'05.06.2026', order_approved:'', order_due_date:'14.06.2026', order_status:'Новый',
+    position_id:'700', position_qty:'120', position_raw:'Бумага мелованная', position_raw_id:'200', position_width:'500', position_length:'1000', position_sleeve:'76', position_sleeve_id:'76', position_winding:'IN', position_status:'Согласована', position_approved:'04.06.2026', position_due_date:'12.06.2026' },
+  { order_id:'651', order_no:'651', order_client:'ООО «Ромашка»', order_manager:'victor_g', order_created:'05.06.2026', order_approved:'', order_due_date:'14.06.2026', order_status:'Новый',
+    position_id:'701', position_qty:'40', position_raw:'Картон', position_raw_id:'201', position_width:'320', position_length:'500', position_sleeve:'76', position_sleeve_id:'76', position_winding:'OUT', position_status:'Согласована', position_approved:'06.06.2026', position_due_date:'13.06.2026' },
+  { order_id:'650', order_no:'650', order_client:'АО «Лютик»', order_manager:'victor_g', order_created:'05.06.2026', order_approved:'', order_due_date:'16.06.2026', order_status:'Новый',
+    position_id:'702', position_qty:'25', position_raw:'Плёнка ПВХ', position_raw_id:'202', position_width:'210', position_length:'400', position_sleeve:'40', position_sleeve_id:'40', position_winding:'IN', position_status:'Новая', position_approved:'', position_due_date:'15.06.2026' }
 ];
-var POSITIONS = {
-  '651': [
-    { i: 700, u: 651, o: 1, r: ['Поз 700', '120', '200:Бумага мелованная', '7:Прямая', '500', '1000', '76', 'В работе'] },
-    { i: 701, u: 651, o: 2, r: ['Поз 701', '40', '201:Картон', '8:Косая', '320', '500', '76', 'Новая'] }
-  ]
-};
 var REFS = {
   '1052': { '305': 'ООО «Ромашка»', '306': 'АО «Лютик»', '307': 'ИП Иванов' },
   '1069': { '200': 'Бумага мелованная', '201': 'Картон', '202': 'Плёнка ПВХ' },
-  '1071': { '7': 'Прямая', '8': 'Косая' }
+  '1077': { '40': '40', '76': '76' },
+  '1060': { 'Новый': 'Новый', 'Согласован': 'Согласован' },
+  '1079': { 'Новая': 'Новая', 'Согласована': 'Согласована' }
 };
 
 window.db = 'atex';
@@ -66,13 +69,10 @@ window.fetch = function(url) {
   }
   var m = u.match(/\/metadata\/(\d+)/);
   if (m) return json(META[m[1]]);
+  if (/\/metadata(?:\?|$)/.test(u)) return json([META['107'], META['108']]);
   m = u.match(/\/_ref_reqs\/(\d+)/);
   if (m) return json(REFS[m[1]] || {});
-  if (/\/object\/108\//.test(u)) {
-    var pm = u.match(/F_U=(\d+)/);
-    return json(pm ? (POSITIONS[pm[1]] || []) : []);
-  }
-  if (/\/object\/107\//.test(u)) return json(ORDERS);
+  if (/\/report\/orders_list/.test(u)) return json(ORDER_ROWS);
   return json({});
 };
 
@@ -83,6 +83,9 @@ host.innerHTML = [
   '<div class="atex-orders-toolbar">',
   '<button id="atex-orders-create" class="atex-orders-btn atex-orders-btn-primary" type="button"><i class="pi pi-plus"></i><span>Создать заказ</span></button>',
   '<label class="atex-orders-filter-wrap"><span>Статус:</span><select id="atex-orders-filter" class="atex-orders-input"><option value="">Все статусы</option></select></label>',
+  '<label class="atex-orders-filter-wrap"><span>С:</span><input id="atex-orders-from" type="date" class="atex-orders-input"></label>',
+  '<label class="atex-orders-filter-wrap"><span>По:</span><input id="atex-orders-to" type="date" class="atex-orders-input"></label>',
+  '<label class="atex-orders-filter-wrap atex-orders-search-wrap"><i class="pi pi-search"></i><input id="atex-orders-search" type="search" class="atex-orders-input" placeholder="Поиск…"></label>',
   '<button id="atex-orders-refresh" class="atex-orders-btn atex-orders-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>',
   '</div>',
   '<div id="atex-orders-message" class="atex-orders-message" hidden></div>',

@@ -138,6 +138,53 @@
         return (s === 'IN' || s === 'OUT') ? s : '';
     }
 
+    function isPositionApproved(pos) {
+        return !!trimValue(pos && pos.values && pos.values.approved);
+    }
+
+    function latestPositionApprovedDate(positions) {
+        var best = '';
+        var bestRank = null;
+        (positions || []).forEach(function(pos) {
+            var value = trimValue(pos && pos.values && pos.values.approved);
+            if (!value) return;
+            var rank = sortKeyDate(value);
+            if (isNaN(rank)) {
+                if (bestRank === null && !best) best = value;
+                return;
+            }
+            if (bestRank === null || rank >= bestRank) {
+                bestRank = rank;
+                best = value;
+            }
+        });
+        return best;
+    }
+
+    function deriveOrderApproval(order) {
+        var values = order && order.values ? order.values : {};
+        var status = trimValue(values.status);
+        var approved = trimValue(values.approved);
+        var positions = order && Array.isArray(order.positions) ? order.positions : [];
+        var allPositionsApproved = positions.length > 0 && positions.every(isPositionApproved);
+        var positionsApproved = allPositionsApproved ? latestPositionApprovedDate(positions) : '';
+        if (positionsApproved) approved = positionsApproved;
+        if (approved && (!status || status === 'Новый')) status = 'Согласован';
+        return {
+            status: status,
+            approved: approved,
+            allPositionsApproved: allPositionsApproved
+        };
+    }
+
+    function applyDerivedOrderApproval(order) {
+        if (!order || !order.values) return order;
+        var derived = deriveOrderApproval(order);
+        order.values.status = derived.status;
+        order.values.approved = derived.approved;
+        return order;
+    }
+
     // Плоские строки отчёта orders_list (JSON_KV) → [{ id, values, positions:[{id,values}] }].
     // Заказы dedup по order_id; позиции из строк с непустым position_id; пустые поля LEFT JOIN ('').
     function rowsToOrders(rows) {
@@ -167,7 +214,7 @@
                 } });
             }
         });
-        return order.map(function(id) { return byId[id]; });
+        return order.map(function(id) { return applyDerivedOrderApproval(byId[id]); });
     }
 
     // Клиентский поиск по всем полям заказа и его позиций.
@@ -184,10 +231,13 @@
         });
     }
 
-    // Парс даты DD.MM.YYYY → сортируемое число (YYYYMMDD); иначе NaN.
+    // Парс даты DD.MM.YYYY / YYYY-MM-DD → сортируемое число (YYYYMMDD); иначе NaN.
     function sortKeyDate(v) {
-        var m = String(v == null ? '' : v).match(/^(\d{2})\.(\d{2})\.(\d{4})/);
-        return m ? Number(m[3] + m[2] + m[1]) : NaN;
+        var text = String(v == null ? '' : v);
+        var m = text.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if (m) return Number(m[3] + m[2] + m[1]);
+        m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        return m ? Number(m[1] + m[2] + m[3]) : NaN;
     }
     // Сортировка заказов по o.values[key] (id — по o.id). Возвращает новый массив.
     function sortOrders(list, key, dir) {
@@ -769,6 +819,7 @@
                 '<td>' + escapeHtml(order.values.client || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.created || '') + '</td>' +
+                '<td>' + escapeHtml(order.values.approved || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.dueDate || '') + '</td>' +
                 '<td>' + (order.values.status === 'Новый'
                     ? '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-order="' + escapeHtml(order.id) + '">Согласовано</button>'
@@ -776,7 +827,7 @@
                 '<td class="atex-orders-count">' + positionCount + '</td>' +
                 '</tr>';
             var detail = isOpen
-                ? '<tr class="atex-orders-detail-row"><td colspan="8">' + renderPositions(order) + '</td></tr>'
+                ? '<tr class="atex-orders-detail-row"><td colspan="9">' + renderPositions(order) + '</td></tr>'
                 : '';
             return main + detail;
         }).join('');
@@ -787,7 +838,8 @@
         }
         var thead = '<thead><tr><th></th>' +
             sortableTh('id', '№') + sortableTh('client', 'Клиент') + sortableTh('manager', 'Менеджер') +
-            sortableTh('created', 'Дата создания') + sortableTh('dueDate', 'Срок изготовления') + sortableTh('status', 'Статус') +
+            sortableTh('created', 'Дата создания') + sortableTh('approved', 'Дата согл.') +
+            sortableTh('dueDate', 'Срок изготовления') + sortableTh('status', 'Статус') +
             '<th>Позиций</th></tr></thead>';
         container.innerHTML = '<table class="atex-orders-table">' + thead +
             '<tbody>' + rows + '</tbody></table>';
@@ -1510,7 +1562,7 @@
                         approveBtn._atexApproveTimer = setTimeout(function() {
                             approveBtn.removeAttribute('data-confirm');
                             approveBtn.classList.remove('is-confirm');
-                            approveBtn.textContent = 'Согласовать';
+                            approveBtn.textContent = 'Согласовано';
                         }, 4000);
                     }
                     return;
@@ -1578,7 +1630,7 @@
             if (btn._atexApproveTimer) clearTimeout(btn._atexApproveTimer);
             btn.removeAttribute('data-confirm');
             btn.classList.remove('is-confirm');
-            btn.textContent = 'Согласовать';
+            btn.textContent = 'Согласовано';
         });
     }
 
@@ -1694,7 +1746,10 @@
         REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT,
         findReqIndex: findReqIndex,
         normalizeWinding: normalizeWinding,
-        WINDING_VALUES: WINDING_VALUES
+        WINDING_VALUES: WINDING_VALUES,
+        isPositionApproved: isPositionApproved,
+        latestPositionApprovedDate: latestPositionApprovedDate,
+        deriveOrderApproval: deriveOrderApproval
     };
 
     if (document.readyState === 'loading') {

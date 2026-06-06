@@ -61,6 +61,19 @@
     background: var(--bg-secondary, #f1f5f9);
 }
 
+.atex-orders-approve.is-confirm {
+    background: #f5e6c8;
+    border-color: #d6ad63;
+    color: #7a4f01;
+    box-shadow: 0 0 0 2px rgba(214, 173, 99, 0.22);
+}
+
+.atex-orders-approve.is-confirm:hover {
+    background: #efd7a7;
+    border-color: #c6963f;
+    color: #5f3d00;
+}
+
 .atex-orders-filter-wrap {
     display: inline-flex;
     align-items: center;
