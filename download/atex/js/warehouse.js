@@ -46,7 +46,8 @@
         { key: 'rolls', label: 'Кол-во рулонов', names: ['Кол-во рулонов', 'Количество рулонов'] },
         { key: 'length', label: 'Метраж, м', names: ['Метраж, м', 'Метраж'] },
         { key: 'address', label: 'Адрес хранения', names: ['Адрес хранения', 'Адрес'] },
-        { key: 'status', label: 'Статус', names: ['Статус'], status: true }
+        { key: 'status', label: 'Статус', names: ['Статус'], status: true },
+        { key: 'active', label: 'Активно', names: ['Активно', 'Активная'] }
     ];
 
     // Карта полей подчинённой таблицы «Обеспечение».
@@ -54,6 +55,7 @@
         { key: 'length', label: 'Метраж, м', names: ['Метраж, м', 'Метраж'] },
         { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
         { key: 'batch', label: 'Партия ГП', names: ['Партия ГП'], ref: true },
+        { key: 'rolls', label: 'Кол-во рулонов', names: ['Кол-во рулонов', 'Количество рулонов'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
@@ -267,6 +269,20 @@
         return wanted.indexOf(normalizeFieldName(cutting.values && cutting.values.status)) !== -1;
     }
 
+    function isActiveBatch(batch) {
+        var value = batch && batch.values ? batch.values.active : '';
+        if (value == null || trimValue(value) === '') return true;
+        var s = trimValue(value).toLowerCase();
+        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+    }
+
+    function batchExhaustedByProvision(batch, provision) {
+        var batchRolls = Number(batch && batch.values && batch.values.rolls) || 0;
+        var provisionRolls = Number(provision && provision.values && provision.values.rolls) || 0;
+        if (batchRolls <= 0 || provisionRolls <= 0) return false;
+        return provisionRolls >= batchRolls;
+    }
+
     // Список завершённых резок (FIFO-приоритет для оприходования). Если завершённых
     // нет — возвращаем все, чтобы рабочее место оставалось пригодным к работе.
     function completedCuttings(cuttings) {
@@ -280,6 +296,7 @@
         var status = availableStatus || AVAILABLE_BATCH_STATUS;
         var candidates = (batches || []).filter(function(batch) {
             if (trimValue(batch.values && batch.values.status) !== trimValue(status)) return false;
+            if (!isActiveBatch(batch)) return false;
             if (cuttingId && trimValue(batch.refs && batch.refs.cutting) !== trimValue(cuttingId)) return false;
             return true;
         });
@@ -340,6 +357,7 @@
         put('length', opts.length);
         put('address', opts.address);
         put('status', opts.status);
+        put('active', opts.active);
 
         var url = '/' + encodeURIComponent(opts.db) + '/_m_new/' +
             encodeURIComponent(opts.tableId) + '?JSON&up=1';
@@ -565,7 +583,7 @@
         var selectedValue = assigned || (fifo ? fifo.id : '');
         var refOptions = [];
         state.batches.forEach(function(batch) {
-            var available = trimValue(batch.values.status) === trimValue(AVAILABLE_BATCH_STATUS);
+            var available = trimValue(batch.values.status) === trimValue(AVAILABLE_BATCH_STATUS) && isActiveBatch(batch);
             var sameCut = !provision.refs.cutting ||
                 trimValue(batch.refs.cutting) === trimValue(provision.refs.cutting);
             var isAssigned = trimValue(batch.id) === assigned;
@@ -705,6 +723,7 @@
             length: lengthEl ? lengthEl.value : '',
             address: addressEl ? addressEl.value : '',
             status: statusSel ? statusSel.value : state.batchStatuses[0],
+            active: '1',
             xsrf: getXsrf()
         });
 
@@ -789,6 +808,19 @@
                     xsrf: getXsrf()
                 });
                 return postForm(sreq.url, sreq.body);
+            }
+        }).then(function() {
+            var activeCol = getColumn(state.batchColumns, 'active');
+            var pickedBatch = findBatch(batchId);
+            if (activeCol && activeCol.reqId && batchExhaustedByProvision(pickedBatch, prov)) {
+                var areq = buildSetStatusRequest({
+                    db: getApiBase(),
+                    objId: batchId,
+                    statusReqId: activeCol.reqId,
+                    statusValue: '0',
+                    xsrf: getXsrf()
+                });
+                return postForm(areq.url, areq.body);
             }
         }).then(function() {
             setMessage('Партия №' + batchId + ' списана в обеспечение №' + provisionId + '.', 'success');
@@ -969,6 +1001,8 @@
         normalizeObjects: normalizeObjects,
         extractNewObjectId: extractNewObjectId,
         isCompletedCutting: isCompletedCutting,
+        isActiveBatch: isActiveBatch,
+        batchExhaustedByProvision: batchExhaustedByProvision,
         completedCuttings: completedCuttings,
         pickFifoBatch: pickFifoBatch,
         arrivalKey: arrivalKey,

@@ -102,7 +102,7 @@ assertEqual(planning.buildFields(
     { footage: '1200', cut: '501', status: 'Зарезервировано' }
 ), { t1082: '1200', t1084: '501' }, 'buildFields skips fields with null reqId');
 
-// ── Обеспечение ↔ Производственная резка: старая ссылка и новая подчинённость (#3180) ──
+// ── Обеспечение ↔ Производственная резка: резка снова самостоятельная таблица (#3185) ──
 var oldSupplyMeta = {
     id: '109', val: 'Обеспечение', reqs: [
         { id: '1082', val: 'Метраж, м' },
@@ -124,24 +124,37 @@ assertEqual(planning.supplyCutRelation(oldSupplyMeta, cutMeta), {
     arrId: null
 }, 'supplyCutRelation: old metadata uses cut reference');
 assertEqual(planning.supplyCutRelation(newSupplyMeta, newCutMeta), {
-    mode: 'child',
+    mode: 'none',
     reqId: null,
     arrId: '1078'
-}, 'supplyCutRelation: #3180 metadata has cut as child of supply');
+}, 'supplyCutRelation: child-array metadata is ignored; cuts are standalone again');
 assertEqual(planning.buildSupplyFieldsForCut(oldSupplyMeta, cutMeta, {
     footage: '1200',
     cutId: '501',
+    rolls: '6',
     status: 'Зарезервировано'
-}), { t1082: '1200', t1084: '501', t1088: 'Зарезервировано' }, 'buildSupplyFieldsForCut: old schema writes cut reference');
+}), { t1082: '1200', t1084: '501', t1088: 'Зарезервировано' }, 'buildSupplyFieldsForCut: reference schema writes cut reference');
 assertEqual(planning.buildSupplyFieldsForCut(newSupplyMeta, newCutMeta, {
     footage: '1200',
     cutId: '501',
     status: 'Зарезервировано'
-}), { t1149: '1200', t1154: 'Зарезервировано' }, 'buildSupplyFieldsForCut: #3180 child schema stores footage/status and omits child-array field');
-assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }], false).map(function(g) { return g.map(function(p) { return p.id; }); }),
-    [['p1', 'p2']], 'layoutPositionGroups: reference schema keeps positions in one planning group');
-assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }], true).map(function(g) { return g.map(function(p) { return p.id; }); }),
-    [['p1'], ['p2']], 'layoutPositionGroups: child-cut schema plans one position per supply');
+}), { t1149: '1200', t1154: 'Зарезервировано' }, 'buildSupplyFieldsForCut: child-array metadata omits cut link');
+var supplyWithRollsMeta = {
+    id: '109', val: 'Обеспечение', reqs: [
+        { id: '1082', val: 'Метраж, м' },
+        { id: '1084', val: 'Производственная резка', ref: '110', ref_id: '1085' },
+        { id: '1086', val: 'Кол-во рулонов' },
+        { id: '1088', val: 'Статус' }
+    ]
+};
+assertEqual(planning.buildSupplyFieldsForCut(supplyWithRollsMeta, cutMeta, {
+    footage: '1200',
+    cutId: '501',
+    rolls: '6',
+    status: 'Зарезервировано'
+}), { t1082: '1200', t1084: '501', t1086: '6', t1088: 'Зарезервировано' }, 'buildSupplyFieldsForCut: writes roll count when metadata has it');
+assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }]).map(function(g) { return g.map(function(p) { return p.id; }); }),
+    [['p1', 'p2']], 'layoutPositionGroups: standalone cuts keep positions in one planning group');
 
 // ── rowsToPlanning: плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies } ──
 // LEFT JOIN: резка 10 с двумя обеспечениями = две строки; резка 20 без обеспечения.
@@ -349,16 +362,49 @@ assertEqual(planning.pickSlitter([{id:'10',stopMaterialIds:['M']}],'M',{}), null
 var b = [{id:'b1',materialId:'M',dateKey:20260102,remainder:100},{id:'b2',materialId:'M',dateKey:20260101,remainder:50},{id:'b3',materialId:'M',dateKey:20251231,remainder:0}];
 assertEqual(planning.pickBatchFIFO(b,'M'), 'b2', 'pickBatchFIFO: старейшая с остатком (b3 остаток 0)');
 assertEqual(planning.pickBatchFIFO(b,'Z'), null, 'pickBatchFIFO: нет сырья → null');
+assertEqual(planning.pickBatchFIFO([{id:'old',materialId:'M',dateKey:1,remainder:100,active:false},{id:'new',materialId:'M',dateKey:2,remainder:100,active:true}], 'M'),
+    'new', 'pickBatchFIFO: неактивные партии не участвуют в подборе');
+
+// #3185: признаки складской полосы и плановое количество прогонов.
+var layout3185 = {
+  positionsCovered: ['p110', 'p70'],
+  strips: [
+    { width: 110, qty: 2, purpose: 'Заказ', positionIds: ['p110'] },
+    { width: 70, qty: 1, purpose: 'Заказ', positionIds: ['p70'] },
+    { width: 55, qty: 2, toStock: 1, purpose: 'Заказ', positionIds: [] },
+    { width: 44, qty: 1, purpose: 'Склад', positionIds: [] }
+  ]
+};
+var pos3185 = {
+  p110: { id: 'p110', width: 110, qty: 5, length: 1200, sleeveDiameter: 76 },
+  p70: { id: 'p70', width: 70, qty: 2, length: 800, sleeveDiameter: 40 }
+};
+assertEqual(planning.isStockStrip({ toStock: 1, purpose: 'Заказ' }), true, 'isStockStrip: «На склад»=1');
+assertEqual(planning.isStockStrip({ toStock: 0, purpose: 'Склад' }), true, 'isStockStrip: legacy purpose «Склад»');
+assertEqual(planning.isStockStrip({ toStock: 0, purpose: 'Заказ' }), false, 'isStockStrip: заказная полоса не складская');
+assertEqual(planning.plannedRunsForLayout(layout3185, pos3185), 3, 'plannedRunsForLayout: max ceil(demand/non-stock strips)');
+assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p110, 3), 6, 'supplyRollsForPosition: runs × non-stock strips by width');
+assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p70, 3), 3, 'supplyRollsForPosition: width 70 → 3 рулона');
+assertEqual(planning.layoutRunLength(layout3185, pos3185), 1200, 'layoutRunLength: max length of covered positions');
+assertEqual(planning.finishedBatchesForLayout(layout3185, 'cut777', 1200, 3), [
+  { cutId: 'cut777', width: 55, rolls: 6, length: 1200 },
+  { cutId: 'cut777', width: 44, rolls: 3, length: 1200 }
+], 'finishedBatchesForLayout: stock strips become GP batches');
+assertEqual(planning.sleeveTasksForLayout(layout3185, pos3185, 3), [
+  { diameter: 76, qty: 6 },
+  { diameter: 40, qty: 3 }
+], 'sleeveTasksForLayout: sleeves planned from cut output for order strips');
+assertEqual(planning.sleeveMinutes(9, { SLEEVE_CUT: 2.5 }), 22.5, 'sleeveMinutes: SLEEVE_CUT × qty');
 
 // ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([
-  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200' },
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200', position_sleeve:'8188:76' },
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, dueKey: Infinity },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, dueKey: Infinity }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, sleeveDiameter:76, dueKey: Infinity },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, sleeveDiameter:0, dueKey: Infinity }
 ], 'rowsToGenPositions: маппинг + пустые ширина/кол-во/длина → 0, dueKey без срока → Infinity');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
@@ -544,12 +590,13 @@ assertEqual(planning.resolveTolerance('мусор', 20), 20, 'resolveTolerance: 
 var gbL = [
     { id:'1', materialId:'M', label:'B1', dateKey:2, remainder:1000, remainderLinear:1000 },
     { id:'2', materialId:'M', label:'B2', dateKey:1, remainder:500, remainderLinear:500 },
-    { id:'3', materialId:'X', label:'BX', dateKey:1, remainder:999, remainderLinear:999 }
+    { id:'3', materialId:'X', label:'BX', dateKey:1, remainder:999, remainderLinear:999 },
+    { id:'4', materialId:'M', label:'B0', dateKey:0, remainder:999, remainderLinear:999, active:false }
 ];
 assertEqual(planning.fifoBatchesForMaterial(gbL, { '1': 91 }, 'M', 0.91), [
     { id:'1', label:'B1', arrivalKey:2, freeLinearM:900 },
     { id:'2', label:'B2', arrivalKey:1, freeLinearM:500 }
-], 'fifoBatchesForMaterial: материал M, свободный остаток (b1: 1000−100=900)');
+], 'fifoBatchesForMaterial: материал M, свободный остаток (b1: 1000−100=900), неактивные исключены');
 assertEqual(planning.fifoBatchesForMaterial(gbL, {}, 'Z', 0.91), [], 'fifoBatchesForMaterial: нет партий материала → []');
 // связка с reserveFifo: нужно 700 пог.м → FIFO берёт b2 (приход раньше) 500 + b1 200
 var fbReserve = planning.reserveFifo(planning.fifoBatchesForMaterial(gbL, { '1': 91 }, 'M', 0.91), 700, 0.91);
