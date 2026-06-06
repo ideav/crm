@@ -396,6 +396,90 @@ assertEqual(planning.sleeveTasksForLayout(layout3185, pos3185, 3), [
 ], 'sleeveTasksForLayout: sleeves planned from cut output for order strips');
 assertEqual(planning.sleeveMinutes(9, { SLEEVE_CUT: 2.5 }), 22.5, 'sleeveMinutes: SLEEVE_CUT × qty');
 
+// #3189: новая метасхема — «Задание на втулки» снова алиас таблицы 1080,
+// таблица подчинена «Позиции заказа», а опциональные поля «Диаметр»/«Статус»
+// отсутствуют в метаданных.
+var positionMeta3189 = {
+  id: '1076',
+  val: 'Заказанное количество',
+  attrs: '{"alias":"Позиция заказа"}',
+  reqs: [
+    { id: '13671', val: 'Задача на втулки', arr_id: '1080' }
+  ]
+};
+var supplyMeta3189 = {
+  id: '1077',
+  val: 'Обеспечение',
+  reqs: [
+    { id: '1149', val: 'Метраж, м' },
+    { id: '1154', val: 'Активно' },
+    { id: '15016', val: 'Партия ГП', ref: '1081', ref_id: '1152' },
+    { id: '16424', val: 'Кол-во рулонов' },
+    { id: '16428', val: 'Производственная резка', ref: '1078', ref_id: '1150' }
+  ]
+};
+var cutMeta3189 = {
+  id: '1078',
+  val: 'Производственная резка',
+  reqs: [
+    { id: '1156', val: 'Слиттер' },
+    { id: '1162', val: 'Активно' },
+    { id: '16403', val: 'Кол-во план' },
+    { id: '15018', val: 'Партия сырья' },
+    { id: '8629', val: 'Полоса', arr_id: '1073' },
+    { id: '16422', val: 'Кол-во факт' }
+  ]
+};
+var sleeveMeta3189 = {
+  id: '1080',
+  val: 'Задача на втулки',
+  attrs: '{"alias":"Задание на втулки"}',
+  reqs: [
+    { id: '1180', val: 'Втулкорез' },
+    { id: '16399', val: 'Кол-во' },
+    { id: '1183', val: 'Кол-во факт' },
+    { id: '1184', val: 'Активно' }
+  ]
+};
+var metadata3189 = [positionMeta3189, supplyMeta3189, cutMeta3189, sleeveMeta3189];
+assertEqual(planning.tableByName(metadata3189, 'Позиция заказа').id, '1076',
+  'tableByName: находит таблицу по alias из attrs (#3189)');
+assertEqual(planning.tableByName(metadata3189, 'Задание на втулки').id, '1080',
+  'tableByName: находит «Задание на втулки» по alias при val=«Задача на втулки» (#3189)');
+assertEqual(planning.reqIdByName(sleeveMeta3189, 'Кол-во факт'), '1183',
+  'reqIdByName: поле факта втулок в новой метасхеме');
+assertEqual(planning.reqIdByName(sleeveMeta3189, 'Статус'), null,
+  'reqIdByName: отсутствующий опциональный статус втулок → null');
+assertEqual(planning.supplyCutRelation(supplyMeta3189, cutMeta3189), {
+  mode: 'reference',
+  reqId: '16428',
+  arrId: null
+}, 'supplyCutRelation: новая метасхема #3189 снова хранит ссылку на резку');
+assertEqual(planning.buildSupplyFieldsForCut(supplyMeta3189, cutMeta3189, {
+  footage: '1200',
+  cutId: '501',
+  rolls: '6',
+  status: 'Зарезервировано'
+}), { t1149: '1200', t16428: '501', t16424: '6' },
+  'buildSupplyFieldsForCut: #3189 пишет метраж, резку и рулоны, пропускает отсутствующий статус');
+assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3185, 3), [
+  { positionId: 'p110', diameter: 76, qty: 6 },
+  { positionId: 'p70', diameter: 40, qty: 3 }
+], 'positionSleeveTasksForLayout: задачи втулок создаются под позициями заказа (#3189)');
+var sleeveReqIds3189 = {
+  diameter: planning.reqIdByName(sleeveMeta3189, 'Диаметр, мм'),
+  actualQty: planning.reqIdByName(sleeveMeta3189, 'Кол-во факт'),
+  status: planning.reqIdByName(sleeveMeta3189, 'Статус')
+};
+var sleeveFields3189 = planning.buildFields(sleeveReqIds3189, {
+  diameter: 76,
+  actualQty: 0,
+  status: 'Ожидает'
+});
+sleeveFields3189['t' + sleeveMeta3189.id] = 6;
+assertEqual(sleeveFields3189, { t1183: 0, t1080: 6 },
+  'buildFields: #3189 втулки пишут факт и главное плановое количество без отсутствующих полей');
+
 // ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([

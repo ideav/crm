@@ -135,11 +135,42 @@
         return (stopMaterialIds || []).some(function(id) { return String(id).trim() === mid; });
     }
 
-    // Значение реквизита из метаданных по имени → его числовой id.
+    // alias таблицы/реквизита: берём из готового поля `alias`, иначе разбираем
+    // `attrs` (JSON со свойством alias). Часть новых таблиц atex называется через
+    // alias, а в `val` хранит техническое/главное значение (#3159, #3189).
+    function aliasOf(entry) {
+        if (!entry) return '';
+        if (entry.alias != null && entry.alias !== '') return String(entry.alias);
+        if (entry.attrs) {
+            try {
+                var attrs = typeof entry.attrs === 'string' ? JSON.parse(entry.attrs) : entry.attrs;
+                if (attrs && attrs.alias != null) return String(attrs.alias);
+            } catch (e) { /* attrs не JSON — alias нет */ }
+        }
+        return '';
+    }
+
+    // Совпадение метасущности с именем по `val` или `alias`.
+    function matchesName(entry, name) {
+        if (!entry) return false;
+        var target = String(name == null ? '' : name).trim().toLowerCase();
+        if (target === '') return false;
+        if (String(entry.val == null ? '' : entry.val).trim().toLowerCase() === target) return true;
+        return aliasOf(entry).trim().toLowerCase() === target;
+    }
+
+    // Таблица из массива метаданных по имени (val/alias); нет → null.
+    function tableByName(list, name) {
+        var arr = Array.isArray(list) ? list : (list == null ? [] : [list]);
+        for (var i = 0; i < arr.length; i++) {
+            if (matchesName(arr[i], name)) return arr[i];
+        }
+        return null;
+    }
+
+    // Значение реквизита из метаданных по имени (val/alias) → его числовой id.
     function reqByName(meta, name) {
-        return (meta && meta.reqs || []).filter(function(r) {
-            return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
-        })[0] || null;
+        return tableByName((meta && meta.reqs) || [], name);
     }
 
     function reqIdByName(meta, name) {
@@ -649,23 +680,33 @@
         return out;
     }
 
-    function sleeveTasksForLayout(layout, positions, plannedRuns) {
+    function positionSleeveTasksForLayout(layout, positions, plannedRuns) {
         var byId = positionMap(positions);
         var out = [];
-        var byDia = {};
         (layout && layout.positionsCovered || []).forEach(function(pid) {
-            var p = byId[String(pid)];
+            var positionId = String(pid);
+            var p = byId[positionId];
             if (!p) return;
             var dia = Number(p.sleeveDiameter) || 0;
             if (dia <= 0) return;
             var qty = supplyRollsForPosition(layout, p, plannedRuns);
             if (qty <= 0) return;
+            out.push({ positionId: positionId, diameter: dia, qty: qty });
+        });
+        return out;
+    }
+
+    function sleeveTasksForLayout(layout, positions, plannedRuns) {
+        var out = [];
+        var byDia = {};
+        positionSleeveTasksForLayout(layout, positions, plannedRuns).forEach(function(task) {
+            var dia = task.diameter;
             var key = String(dia);
             if (byDia[key] == null) {
                 byDia[key] = out.length;
                 out.push({ diameter: dia, qty: 0 });
             }
-            out[byDia[key]].qty = round3(out[byDia[key]].qty + qty);
+            out[byDia[key]].qty = round3(out[byDia[key]].qty + task.qty);
         });
         return out;
     }
@@ -1008,6 +1049,9 @@
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
         isMaterialBlocked: isMaterialBlocked,
+        aliasOf: aliasOf,
+        matchesName: matchesName,
+        tableByName: tableByName,
         reqIdByName: reqIdByName,
         columnIndex: columnIndex,
         mapCutRecord: mapCutRecord,
@@ -1046,6 +1090,7 @@
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
         finishedBatchesForLayout: finishedBatchesForLayout,
+        positionSleeveTasksForLayout: positionSleeveTasksForLayout,
         sleeveTasksForLayout: sleeveTasksForLayout,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
@@ -1173,12 +1218,7 @@
             var list = Array.isArray(all) ? all : [all];
             self._metaAll = list; // кеш полного списка метаданных (резолв таблиц по имени)
             function byName(name) {
-                const searchName = name.trim().toLowerCase();
-                return list.filter(function(t) {
-                    const valMatch = String(t.val).trim().toLowerCase() === searchName;
-                    const aliasMatch = t.alias && String(t.alias).trim().toLowerCase() === searchName;
-                    return valMatch || aliasMatch;
-                })[0] || null;
+                return tableByName(list, name);
             }
             self.meta.cut = byName(TABLE.cut);
             self.meta.supply = byName(TABLE.supply);
@@ -1306,9 +1346,7 @@
     AtexProductionPlanning.prototype.loadConsumption = function() {
         var self = this;
         var list = this._metaAll || [];
-        var meta = list.filter(function(t) {
-            return String(t.val).trim().toLowerCase() === 'расход сырья';
-        })[0] || null;
+        var meta = tableByName(list, 'Расход сырья');
         if (!meta) { this.consumptionByCut = {}; this.reservedM2ByBatch = {}; this.consumptionMeta = null; return Promise.resolve(); }
         this.consumptionMeta = meta;
         var batchIdx = columnIndex(meta, 'Партия сырья');
@@ -1426,9 +1464,7 @@
     AtexProductionPlanning.prototype.loadJumboWidths = function() {
         var self = this;
         var list = this._metaAll || [];
-        var meta = list.filter(function(t) {
-            return String(t.val).trim().toLowerCase() === 'вид сырья';
-        })[0] || null;
+        var meta = tableByName(list, 'Вид сырья');
         if (!meta) { this.jumboWidthByMaterial = {}; this.toleranceByMaterial = {}; return Promise.resolve(); }
         var widthIdx = columnIndex(meta, 'Ширина, мм');
         var tolIdx = columnIndex(meta, 'Допуск, мм');   // #3120: допуск по виду сырья (иначе дефолт)
@@ -1454,9 +1490,7 @@
     AtexProductionPlanning.prototype.loadOperationTimes = function() {
         var self = this;
         var list = this._metaAll || [];
-        var meta = list.filter(function(t) {
-            return String(t.val).trim().toLowerCase() === 'время операции, мин';
-        })[0] || null;
+        var meta = tableByName(list, 'Время операции, мин');
         if (!meta) { this.opTimes = {}; this.changeTimes = null; return Promise.resolve(); }
         var codeIdx = columnIndex(meta, 'Код операции');
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
@@ -2198,10 +2232,10 @@
                     return batchChain;
                 }
 
-                function createSleeveTasks(cutId) {
+                function createSleeveTasks() {
                     if (!sleeveMeta) return Promise.resolve();
                     var taskChain = Promise.resolve();
-                    sleeveTasksForLayout(lay, posById, plannedRuns).forEach(function(task) {
+                    positionSleeveTasksForLayout(lay, posById, plannedRuns).forEach(function(task) {
                         taskChain = taskChain.then(function() {
                             var fields = buildFields(sleeveReqIds, {
                                 diameter: task.diameter,
@@ -2209,7 +2243,7 @@
                                 status: SLEEVE_TASK_STATUS
                             });
                             fields['t' + sleeveMeta.id] = task.qty;
-                            return self.post('_m_new/' + sleeveMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
+                            return self.post('_m_new/' + sleeveMeta.id + '?JSON&up=' + encodeURIComponent(task.positionId), fields)
                                 .then(function() {
                                     nSleeveTasks += 1;
                                     nSleeves += Number(task.qty) || 0;
@@ -2244,7 +2278,7 @@
                     if (!cutId) throw new Error('Сервер не вернул id новой резки');
                     return createStrips(cutId)
                         .then(function() { return createFinishedBatches(cutId); })
-                        .then(function() { return createSleeveTasks(cutId); })
+                        .then(function() { return createSleeveTasks(); })
                         .then(function() { return createSupplies(cutId); });
                 }).then(function() {
                     // Резка со всеми полосами и обеспечениями готова → +1 к прогрессу.
