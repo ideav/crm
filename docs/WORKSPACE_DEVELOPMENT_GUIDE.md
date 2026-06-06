@@ -9,13 +9,16 @@
 Правила собраны из кода и закрытых тикетов
 (<https://github.com/ideav/crm/issues?q=is%3Aissue%20state%3Aclosed>). По соглашению,
 принятому в `js/integram-table.js`, каждое правило снабжено ссылкой на источник:
-номер задачи `(issue #NNN)` и/или путь к файлу с номером строки `file:line`. Это
-позволяет проверить корректность каждого утверждения и проследить его происхождение.
+номер задачи `(issue #NNN)` и/или путь к файлу с идентифицирующим фрагментом кода
+(имя функции, класса или уникальная строка). Это позволяет проверить корректность
+каждого утверждения и проследить его происхождение.
 
 > **Как читать ссылки.** `issue #NNN` — закрытый тикет ideav/crm, в котором правило
-> появилось. `file:line` — место в коде, подтверждающее правило. Номера задач вида
-> `#6451`, встречающиеся в `mcp-server/`, относятся к отдельному трекеру MCP-сервера, а
-> не к ideav/crm; в таких случаях указан путь к файлу как источник истины.
+> появилось. Путь к файлу с именем функции или идентифицирующим фрагментом — место
+> в коде, подтверждающее правило (номера строк не используются, так как они
+> постоянно меняются). Номера задач вида `#6451`, встречающиеся в `mcp-server/`,
+> относятся к отдельному трекеру MCP-сервера, а не к ideav/crm; в таких случаях
+> указан путь к файлу как источник истины.
 
 ## Где включается это правило (подсказка)
 
@@ -54,10 +57,20 @@
 
 ### 1.1. Подстановка переменных
 
+> **⚠️ Точки вставки обрабатываются во всём тексте шаблона, включая комментарии.**
+> Если в HTML-комментарии написать `надо использовать {_global_.*} для обращения`,
+> шаблонизатор попытается разрешить `{_global_.*}` как точку вставки и, скорее
+> всего, не найдёт переменную — блок будет пропущен целиком. Регулярное выражение
+> шаблонизатора, которое захватывает точки вставки (функция `Parse_block` в `index.php`):
+> `/{([A-ZА-Я0-9\.&_ \-]*?[^ ;\r\n])}/gmiu`
+> Всё, что подпадает под этот шаблон, трактуется как точка вставки — даже
+> в комментариях. **Не пишите `{_global_.*}` и похожие конструкции
+> в комментариях HTML-шаблона.**
+
 - Синтаксис подстановки: `{_global_.ИМЯ}`. **Пробелы внутри фигурных скобок
   недопустимы** — пишите `{_global_.version}`, а не `{ _global_.version }`
-  (`README.md:77`).
-- Доступные глобальные переменные (объявлены в `templates/main.html:130-139`):
+  (`README.md`, раздел «Подстановка переменных»).
+- Доступные глобальные переменные (объявлены в `templates/main.html` (блок `<script>` с `var db, xsrf, ...`)):
 
   | Переменная | Значение |
   |------------|----------|
@@ -68,7 +81,7 @@
   | `{_global_.token}` | токен сессии |
   | `{_global_.xsrf}` | XSRF-токен для POST-запросов (см. раздел 4) |
   | `{_global_.id}` | ID текущего объекта/ресурса |
-  | `{_global_.grants}` | base64-JSON прав доступа: `JSON.parse(atob('{_global_.grants}'))` (`templates/main.html:138`) |
+  | `{_global_.grants}` | base64-JSON прав доступа: `JSON.parse(atob('{_global_.grants}'))` (`templates/main.html` (строка `grants=JSON.parse(atob(...))`)) |
   | `{_global_.version}` | версия приложения для cache-busting (см. раздел 2) |
 
 - Кроме `_global_`, шаблонизатор понимает префиксы `{_request_.X}` (значение из
@@ -80,33 +93,33 @@
 ### 1.2. Блоки и встраивание рабочего места
 
 - Повторяемые и условные секции размечаются парами комментариев
-  `<!-- Begin: ИМЯ -->` … `<!-- End: ИМЯ -->` (`templates/main.html:192,198,385,387`).
+  `<!-- Begin: ИМЯ -->` … `<!-- End: ИМЯ -->` (`templates/main.html` (маркеры `<!-- Begin: ... -->` / `<!-- End: ... -->`)).
 - Условный блок проверяет инлайн-комментарий вида `<!--{_global_.z}-->`: если
-  переменная не разрешается, блок пропускается (`templates/main.html:192`).
-- Маркер `<!-- File: a -->` (`templates/main.html:379`) динамически подключает шаблон
+  переменная не разрешается, блок пропускается (`templates/main.html` (условный блок `<!--{_global_.z}-->`)).
+- Маркер `<!-- File: a -->` (`templates/main.html` (маркер `<!-- File: a -->`)) динамически подключает шаблон
   рабочего места по имени `{_global_.action}.html` (например `dict.html`,
   `forms.html`). Если файла нет — подставляется `info.html`. Так рабочее место и
   встраивается в `main.html`.
 - Имена блоков могут начинаться с `&`, например `<!-- Begin:&Uni_Report -->`
-  (`templates/report.html:1`).
+  (`templates/report.html` (блок `<!-- Begin:&Uni_Report -->`)).
 
 ---
 
 ## 2. Подключение CSS/JS и версионирование ресурсов
 
 - **Стили — только в `.css`, скрипты — только в `.js`.** Инлайн-стили и инлайн-скрипты
-  в шаблонах не используются (`README.md:78`). Исключение — короткая логика
+  в шаблонах не используются (`README.md` (правило «стили в .css, скрипты в .js»)). Исключение — короткая логика
   инициализации (например, вызов `initHints`, см. раздел 9);
   пример применения исключения — блоки `<style>` и `<script>` для логики подсказок
-  в `templates/table.html:15-260`.
+  в `templates/table.html` (блоки `<style>` и `<script>` для подсказок).
 - **URL ресурсов рекомендуется снабжать версией** для сброса кэша:
   `href="/css/file.css?{_global_.version}"`, `src="/js/file.js?{_global_.version}"`
-  (`templates/dash.html:1,73`; `README.md:79`).
+  (`templates/dash.html`, `<link>` с `?{_global_.version}`; `README.md`, раздел «Версионирование ресурсов»).
   Правило применяется в новых шаблонах (`dash.html`, `migr.html`); часть
   старых шаблонов (`table.html`, `query.html`, `info.html` и др.) версию не указывает —
   это техдолг, а не допустимое исключение.
 - Порядок подключения для рабочего места с таблицей: сначала CSS компонента, затем
-  его JS, затем `hints.js` (`templates/table.html:10-13`).
+  его JS, затем `hints.js` (`templates/table.html` (порядок `<link>`/`<script>` в `<head>`)).
 
 ---
 
@@ -121,25 +134,23 @@
 | `_m_save/{objectId}` | сохранить **первую колонку** (имя/идентификатор объекта) |
 | `_m_set/{objectId}` | задать значения **остальных реквизитов** (не первой колонки) |
 | `_m_del/{objectId}` | удалить объект (каскадно с подчинёнными) |
-| `_m_del_select` | массовое удаление выбранных записей (`templates/object.html:545`) |
+| `_m_del_select` | массовое удаление выбранных записей (`templates/object.html` (вызов `_m_del_select`)) |
 | `_m_ord/{objectId}` | установить позицию в порядке сортировки (`issue #1617`) |
-| `_m_up/{objectId}` | сдвинуть запись вверх среди равных (`templates/forms.html:2479`) |
+| `_m_up/{objectId}` | сдвинуть запись вверх среди равных (`templates/forms.html` (вызов `_m_up`)) |
 | `_m_move/{objectId}` | сменить родителя (параметр `up={newParentId}`) |
 | `_m_id/{objectId}` | переименовать ID объекта (параметр `new_id`; административная команда) |
 
 - **`_m_save` — только для первой колонки**, для всех прочих реквизитов используйте
-  `_m_set` (`issue #775`; `js/integram-table.js:5633`).
+  `_m_set` (`issue #775`; `js/integram-table.js` (функция сохранения ячейки, проверка `colIndex === 0`)).
 - Частые параметры строки запроса:
   - `JSON` — получить ответ в формате JSON;
   - `up={parentId}` — родитель создаваемого объекта; для корневого объекта `up=1`
     (`issue #1658`);
   - `t{reqId}={value}` — значение реквизита по его ID; можно несколько:
-    `&t271=...&t273=...` (`templates/upload.html:959-961`);
+    `&t271=...&t273=...` (`templates/upload.html` (функция `createSet`, вызов `_m_new` с `t{reqId}`));
   - `full=1` — **обязателен** при записи длинных/HTML-полей, иначе значение
-    обрезается до 127 символов (`index.php:49` — константа `VAL_LIM=127`,
-    `index.php:6821,7215` — проверка обрезки; комментарии в
-    `mcp-server/index.js:2122`).
-- Пример (создание + установка реквизитов из `templates/upload.html:959-961`):
+    обрезается до 127 символов (`index.php`, константа `VAL_LIM=127` и проверка обрезки в `Parse_block`; комментарии в `mcp-server/index.js`, функция `setField`).
+- Пример (создание + установка реквизитов из `templates/upload.html` (функция `createSet`, вызов `_m_new` с `t{reqId}`)):
 
   ```js
   // создать набор: тип 269, родитель up=1, реквизиты t271, t269, t273
@@ -154,21 +165,21 @@
 
 - **Каждый POST-запрос обязан содержать токен `_xsrf`.** GET-запросы токен не требуют.
 - Токен берётся из шаблонной переменной: `var xsrf = '{_global_.xsrf}'`
-  (`templates/main.html:131`).
+  (`templates/main.html` (строка `var xsrf = ...`)).
 - В рабочих местах используется хелпер `intApi(method, url, branch, vars, index)`,
-  который **сам подставляет токен** (`templates/upload.html:821-832`):
+  который **сам подставляет токен** (`templates/upload.html` (функция `intApi`)):
   - если `vars` — объект `FormData`: `vars.append('_xsrf', xsrf)`;
   - если `vars` — строка: `vars = '_xsrf=' + xsrf + '&' + vars` и заголовок
     `Content-Type: application/x-www-form-urlencoded`.
 - Для обычной HTML-формы добавляйте скрытое поле:
   `<input type="hidden" name="_xsrf" value="{_global_.xsrf}">`
-  (`templates/edit_obj.html:77`).
+  (`templates/edit_obj.html` (скрытое поле `<input name="_xsrf">`)).
 - Аналогичные хелперы используют ту же логику инжекта токена:
-  - `newApi` (с поддержкой `FormData`) — глобальный хелпер в `js/main.js:2-13`;
-  - `myApi` (только строка) — локальный хелпер в `templates/sql.html:691` и
-    `templates/form.html:217`;
+  - `newApi` (с поддержкой `FormData`) — глобальный хелпер в `js/main.js` (функция `newApi`);
+  - `myApi` (только строка) — локальный хелпер в `templates/sql.html` (функция `myApi`) и
+    `templates/form.html` (функция `myApi`);
   - `intApi` (с поддержкой `FormData`) — локальный хелпер в
-    `templates/quiz.html:952` и `templates/object.html:1526`.
+    `templates/quiz.html` (функция `intApi`) и `templates/object.html` (функция `intApi`).
 - Не дублируйте логику XSRF вручную, если хелпер уже есть.
 
 ---
@@ -176,7 +187,7 @@
 ## 5. Чтение данных из отчётов
 
 - Источник `report`: данные берутся из готового отчёта по
-  `GET /{_global_.z}/report/{id}?JSON` (`templates/query.html:4`).
+  `GET /{_global_.z}/report/{id}?JSON` (`templates/query.html` (атрибут `data-api-url` блока `data-integram-table`)).
 - Формат ответа: `{ columns: [...], data: [...], header: "..." }`, где `columns` —
   описания колонок (`id`, `type`, `format`, `name`, `granted`, `ref`), а `data` —
   колонко-ориентированный массив (компонент сам преобразует его в строки).
@@ -193,7 +204,7 @@
 
 - Источник `table`: сначала метаданные `GET /{_global_.z}/metadata/{typeId}`, затем
   данные `GET /{_global_.z}/object/{typeId}/?JSON_OBJ&F_U={parentId}&LIMIT=…`
-  (`templates/table.html:4`).
+  (`templates/table.html` (атрибут `data-api-url` блока `data-integram-table`)).
 - Формат `JSON_OBJ` — массив записей `[{ "i": …, "u": …, "o": …, "r": [...] }]`:
   - `i` — ID записи, `u` — ID родителя, `o` — порядок, `r` — массив значений колонок.
 - Метаданные содержат список реквизитов (`reqs`) и поле `granted`: значение `WRITE`
@@ -266,18 +277,18 @@
        data-instance-name="tasksTable"></div>
   ```
 
-  (`templates/query.html:1-8`, `templates/table.html:1-8`)
+  (`templates/query.html` и `templates/table.html`, блоки `<div data-integram-table>`)
 - **Программно**: `new IntegramTable('container-id', { apiUrl, dataSource, tableTypeId,
   parentId, recordId, pageSize, cookiePrefix, title, instanceName, onCellClick,
-  onDataLoad, debug })` (`templates/calendar.html:1328`).
+  onDataLoad, debug })` (`templates/calendar.html` (вызов `new IntegramTable(...)`)).
 - `parentId` берётся из опции или из URL (`parentId` / `F_U` / `up`); `recordId` —
   фильтр по записи, берётся из опции или из GET-параметра `F_I` (`issue #563`).
-- `debug: false` — включить трассировку в консоль (`js/integram-table/01-core.js:22`).
+- `debug: false` — включить трассировку в консоль (`js/integram-table/01-core.js` (опция `debug` в конструкторе)).
 
 ### 7.2. Правило сборки бандла
 
 - `js/integram-table.js` — **автогенерируемый бандл, его НЕЛЬЗЯ редактировать напрямую**
-  (`CLAUDE.md:1-7`).
+  (`CLAUDE.md` (правило «не редактировать бандл напрямую»)).
 - Исходники — модули `js/integram-table/*.js`. После правки модуля запустите
   `bash build.sh` из корня и закоммитьте оба файла: изменённый модуль и пересобранный
   `js/integram-table.js` (`build.sh`).
@@ -287,15 +298,15 @@
 ## 8. Модальные окна и запрет `alert`/`confirm`/`prompt`
 
 - **Никогда не используйте** `alert()`, `confirm()`, `prompt()`. Вместо них —
-  модальные методы (`README.md:41,73-76`):
+  модальные методы (`README.md` (правило «модальные окна вместо alert/confirm/prompt»)):
   - `showDeleteConfirmModal()` — подтверждение удаления (в `IntegramTable`, без
-    параметра — текст фиксированный; `js/integram-table/21-form-field-settings.js:893`);
+    параметра — текст фиксированный; `js/integram-table/21-form-field-settings.js` (функция `showDeleteConfirmModal`));
   - `showErrorModal(message)` — ошибки (в `MainAppController`;
-    `js/main-app.js:1607`);
+    `js/main-app.js` (метод `showErrorModal` класса `MainAppController`));
   - `showWarningModal(message, objId = null)` — предупреждения во время сохранения
-    (в `IntegramTable`; `js/integram-table/22-utils.js:430`);
+    (в `IntegramTable`; `js/integram-table/22-utils.js` (функция `showWarningModal`));
   - `showWarningsModal(message)` — информационные предупреждения **после** сохранения,
-    не блокирует операцию (в `IntegramTable`; `js/integram-table/22-utils.js:491`;
+    не блокирует операцию (в `IntegramTable`; `js/integram-table/22-utils.js` (функция `showWarningsModal`);
     `issue #610`).
 
 ---
@@ -316,5 +327,5 @@
 *Документ создан по issue #2797; ссылка на первоисточник
 ([`integram-app-workflow.md`](integram-app-workflow.md)) добавлена по issue #2808, а сам
 первоисточник заархивирован в репозиторий по issue #2810. Источники правил — код
-репозитория и закрытые тикеты ideav/crm; см. ссылки `issue #NNN` и `file:line` в каждом
-разделе.*
+репозитория и закрытые тикеты ideav/crm; см. ссылки `issue #NNN` и пути к файлам
+с идентифицирующими фрагментами кода в каждом разделе.*

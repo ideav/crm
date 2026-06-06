@@ -2172,10 +2172,6 @@
         planBtn.addEventListener('click', function() { self.runPlanning(actions); });
         actions.appendChild(planBtn);
 
-        var genBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Сгенерировать резки' });
-        genBtn.addEventListener('click', function() { self.generateCuts(actions); });
-        actions.appendChild(genBtn);
-
         form.appendChild(actions);
     };
 
@@ -2201,7 +2197,25 @@
         var groups = groupBySlitter(filtered);
 
         if (!groups.length) {
-            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
+            // Показываем вкладки всех станков, даже если резок нет (#3168).
+            if (this.slitters.length) {
+                var allKeys = this.slitters.map(function(s) { return String(s.id); });
+                if (allKeys.indexOf(self.activeSlitter) === -1) self.activeSlitter = allKeys[0];
+                var tabs = el('div', { class: 'atex-pp-tabs' });
+                this.slitters.forEach(function(s) {
+                    var key = String(s.id);
+                    var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : ''), type: 'button' }, [
+                        el('span', { class: 'atex-pp-tab-label', text: s.label }),
+                        el('span', { class: 'atex-pp-tab-count', text: '0' })
+                    ]);
+                    tab.addEventListener('click', function() { self.activeSlitter = key; self.renderQueue(); });
+                    tabs.appendChild(tab);
+                });
+                box.appendChild(tabs);
+                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
+            } else {
+                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
+            }
             return;
         }
 
@@ -2495,11 +2509,14 @@
         // Форма новой резки живёт в модалке (#3116 п.1), открывается кнопкой «+».
         this.formEl = el('section', { class: 'atex-pp-form', 'data-submit-scope': '' });
 
-        // Шапка очереди: заголовок слева + кнопка «+ Новая резка» справа вверху.
+        // Шапка очереди: заголовок слева, затем кнопка «Сгенерировать резки» и «+ Новая резка» справа вверху.
+        var genBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Сгенерировать резки' });
+        genBtn.addEventListener('click', function() { self.generateCuts(null); });
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),
+            genBtn,
             addBtn
         ]);
         var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [queueHead]);
