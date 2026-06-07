@@ -2221,8 +2221,10 @@
         this.setBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
         // запросами, может занять заметное время.
+        console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nCuts + ' резок...');
         this.showProgress('Генерация резок…', nCuts);
         var chain = Promise.resolve();
+        var startTime = Date.now();
         layouts.forEach(function(lay, layIdx) {
             chain = chain.then(function() {
                 self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
@@ -2333,15 +2335,25 @@
             });
         });
 
+        var genStartTime = Date.now();
         chain.then(function() {
+            var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
+            console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
             self.updateProgress(nCuts, 'Обновление очереди…');
             return self.reload();
         }).then(function() {
+            var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
+            console.log('[pp] 🔧 runGenerateCuts: данные загружены за ' + elapsed + 'с. рендерим...');
             self.hideProgress();
             self.setBusy(false);
+            var renderStart = Date.now();
             self.render();
+            var renderMs = Date.now() - renderStart;
+            console.log('[pp] 🔧 runGenerateCuts: render занял ' + renderMs + 'мс');
+            var totalElapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
+            console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'партийГП:', nFinishedBatches, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
             self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
                 ', партий ГП ' + nFinishedBatches + ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
@@ -2349,6 +2361,7 @@
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
+            console.error('[pp] 🔧 runGenerateCuts: ОШИБКА', err.message, err.stack);
             self.notify('Ошибка генерации резок: ' + err.message, 'error');
         });
     };
@@ -2660,6 +2673,7 @@
 
     AtexProductionPlanning.prototype.renderQueue = function() {
         var self = this;
+        var t0 = Date.now();
         var box = this.queueEl;
         box.innerHTML = '';
 
@@ -2842,6 +2856,7 @@
             }
         });
         box.appendChild(groupEl);
+        console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
     };
 
     AtexProductionPlanning.prototype.renderLink = function() {
