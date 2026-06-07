@@ -45,15 +45,24 @@
     .atex-pp-layout { grid-template-columns: 1fr; }
 }
 
-/* Шапка панели очереди: заголовок слева + «+ Новая резка» справа (#3116 п.1). */
+/* Шапка панели очереди: заголовок слева, действия справа (#3116 п.1, #3215). */
 .atex-pp-panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 10px;
+    flex-wrap: wrap;
 }
 .atex-pp-panel-head .atex-pp-form-title { margin: 0; }
+.atex-pp-panel-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-left: auto;
+    flex-wrap: wrap;
+}
 .atex-pp-add { white-space: nowrap; }
 
 .atex-pp-panel {
@@ -101,6 +110,25 @@
 .atex-pp-btn-primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
 .atex-pp-btn-primary:hover { background: var(--pp-accent-d); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
+.atex-pp-confirm-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--pp-border-soft);
+    border-radius: 6px;
+    background: var(--pp-surface);
+}
+.atex-pp-confirm-msg {
+    flex: 1 1 220px;
+    color: var(--pp-muted);
+}
+.atex-pp-panel-actions .atex-pp-confirm-bar {
+    flex-basis: 100%;
+    justify-content: flex-end;
+}
 
 /* Очередь резок по слиттерам */
 .atex-pp-filters {
