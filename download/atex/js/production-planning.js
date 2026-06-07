@@ -482,6 +482,43 @@
         return isNaN(t) ? Infinity : t;
     }
 
+    // Отображение «Номера» резки: новая модель может отдавать cut_no unix-штампом
+    // (секунды). Короткие автонумера и record id не форматируем как 1970-дату.
+    function isTimestampCutNumber(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!/^\d+$/.test(s)) return false;
+        var n = Number(s);
+        if (!isFinite(n) || n < 1000000000) return false;
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return false;
+        var year = d.getFullYear();
+        return year >= 2001 && year <= 2100;
+    }
+
+    function formatDateTimeMinute(date) {
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(date.getDate()) + '.' + pad(date.getMonth() + 1) + '.' + date.getFullYear() +
+            ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function refSearchHelper() {
+        if (typeof window !== 'undefined' && window.AtexRefSearch) return window.AtexRefSearch;
+        if (typeof globalThis !== 'undefined' && globalThis.AtexRefSearch) return globalThis.AtexRefSearch;
+        return null;
+    }
+
+    function formatCutNumber(value) {
+        if (value == null || value === '') return '';
+        var s = String(value).trim();
+        if (s === '' || !isTimestampCutNumber(s)) return s;
+        var helper = refSearchHelper();
+        if (helper && typeof helper.formatDateTime === 'function') {
+            var formatted = helper.formatDateTime(s);
+            return formatted == null || formatted === '' ? s : String(formatted);
+        }
+        return formatDateTimeMinute(new Date(Number(s) * 1000));
+    }
+
     // Строки отчёта material_batches (JSON_KV) → [{ id, label }] для дропдауна
     // «Партия сырья». Подпись обогащённая: «Номер · Вид сырья · ост. N м²»
     // (пустые части пропускаются). Дропдаун статический клиентский (см. renderForm),
@@ -1197,6 +1234,7 @@
         rowsToGenPositions: rowsToGenPositions,
         positionLengthMap: positionLengthMap,
         batchDateKey: batchDateKey,
+        formatCutNumber: formatCutNumber,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
         KNIFE_SCALE: KNIFE_SCALE,
@@ -3009,7 +3047,7 @@
             var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
 
             var info = el('div', { class: 'atex-pp-cut-info' }, [
-                el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
+                el('span', { class: 'atex-pp-cut-num', text: '№ ' + (formatCutNumber(c.number) || c.id) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
                 el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
@@ -3096,7 +3134,7 @@
             return;
         }
 
-        box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (cut.number || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
+        box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
 
         var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
 
