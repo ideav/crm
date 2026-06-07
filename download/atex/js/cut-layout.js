@@ -56,7 +56,10 @@
     var cands = (preferred || []).map(function(c){ return { width: toNumber(c.width), popularity: toNumber(c.popularity) }; });
     cands = cands.filter(function(c){ return c.width > 0 && c.width <= rem + Math.abs(tol); });
     var best = { strips: [], leftover: round3(rem), popSum: 0 };
+    var dfsCalls = 0;
+    var DFS_LIMIT = 50000;
     (function dfs(i, left, acc, popSum){
+      if (++dfsCalls > DFS_LIMIT) return;
       var leftR = round3(left);
       if (leftR < best.leftover || (leftR === best.leftover && popSum > best.popSum)) {
         best = { strips: acc.slice(), leftover: leftR, popSum: popSum };
@@ -66,6 +69,7 @@
         var c = cands[k];
         if (c.width > leftR) continue;
         var maxQ = Math.floor(leftR / c.width);
+        if (maxQ > 20) maxQ = 20;
         for (var q = maxQ; q >= 1; q--) {
           acc.push({ width: c.width, qty: q });
           dfs(k + 1, round3(leftR - c.width * q), acc, popSum + c.popularity * q);
@@ -73,6 +77,7 @@
         }
       }
     })(0, rem, [], 0);
+    if (dfsCalls > DFS_LIMIT) console.warn('[cut-layout] bestFill: DFS limit reached, rem=' + round3(rem) + ' cands=' + cands.length);
     return best;
   }
 
