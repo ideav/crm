@@ -87,14 +87,6 @@
         rolls: 'Кол-во рулонов',
         status: 'Статус'
     };
-    var FINISHED_BATCH_REQ = {
-        cut: 'Производственная резка',
-        width: 'Ширина, мм',
-        rolls: 'Кол-во рулонов',
-        length: 'Метраж, м',
-        status: 'Статус',
-        active: 'Активно'
-    };
     var SLEEVE_TASK_REQ = {
         diameter: 'Диаметр, мм',
         actualQty: 'Кол-во факт',
@@ -104,7 +96,6 @@
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
-    var FINISHED_BATCH_STATUS = 'Есть';
     var SLEEVE_TASK_STATUS = 'Ожидает';
     // Параметры раскладки cut-layout при генерации резок.
     var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
@@ -262,11 +253,22 @@
             }
             groups[key].cuts.push(c);
         });
-        // Сортировка резок внутри каждой группы по sequence (возр., null/NaN — в конец, стабильно).
+        // Сортировка резок внутри каждой группы: день плана, затем sequence
+        // (возр., null/NaN — в конец, стабильно). Sequence теперь сбрасывается
+        // на каждый день, поэтому дата нужна, чтобы одинаковые номера разных дней
+        // не перемешивались при снятом фильтре даты.
         function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
+        function cmpCutPlanDay(a, b) {
+            var ak = batchDateKey(a && a.planDate), bk = batchDateKey(b && b.planDate);
+            if (ak === Infinity && bk !== Infinity) return 1;
+            if (bk === Infinity && ak !== Infinity) return -1;
+            if (ak < bk) return -1;
+            if (ak > bk) return 1;
+            return 0;
+        }
         Object.keys(groups).forEach(function(k) {
             groups[k].cuts = groups[k].cuts.map(function(c, i) { return { c: c, i: i }; })
-                .sort(function(a, b) { return seqKey(a.c) - seqKey(b.c) || a.i - b.i; })
+                .sort(function(a, b) { return cmpCutPlanDay(a.c, b.c) || seqKey(a.c) - seqKey(b.c) || a.i - b.i; })
                 .map(function(x) { return x.c; });
         });
         return order
@@ -1044,24 +1046,41 @@
         return changed;
     }
 
-    // Сгруппировать резки по станкам, упорядочить каждую группу через orderCuts,
-    // пронумеровать 1..N. Резки без станка (slitter.id == null) пропускаются.
+    function cutPlanDayKey(c) {
+        var key = batchDateKey(c && c.planDate);
+        return key === Infinity ? '' : String(key);
+    }
+
+    function comparePlanDayKeys(a, b) {
+        if (a === '' && b !== '') return 1;
+        if (b === '' && a !== '') return -1;
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
+    }
+
+    // Сгруппировать резки по станкам и дням, упорядочить каждую группу через orderCuts,
+    // пронумеровать 1..N внутри каждого станка/дня. Резки без станка (slitter.id == null) пропускаются.
     // Возвращает плоский массив [{cutId, slitterId, sequence}].
     function planQueues(cuts, weights) {
         var groups = {};
-        var order = [];
+        var slitterOrder = [];
         (cuts || []).forEach(function(c) {
             var sid = c && c.slitter && c.slitter.id;
             if (sid == null) return; // пропускаем «без станка»
             var key = String(sid);
-            if (!groups[key]) { groups[key] = []; order.push(key); }
-            groups[key].push(c);
+            if (!groups[key]) { groups[key] = { days: {}, dayOrder: [] }; slitterOrder.push(key); }
+            var day = cutPlanDayKey(c);
+            if (!groups[key].days[day]) { groups[key].days[day] = []; groups[key].dayOrder.push(day); }
+            groups[key].days[day].push(c);
         });
         var result = [];
-        order.forEach(function(sid) {
-            var ordered = orderCuts(groups[sid], weights);
-            ordered.forEach(function(c) {
-                result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
+        slitterOrder.forEach(function(sid) {
+            groups[sid].dayOrder.slice().sort(comparePlanDayKeys).forEach(function(day) {
+                var ordered = orderCuts(groups[sid].days[day], weights);
+                ordered.forEach(function(c) {
+                    result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
+                });
             });
         });
         return result;
@@ -2203,8 +2222,9 @@
     };
 
     // Последовательное создание записей по подготовленным раскладкам:
-    // Резка → Полосы → Партии ГП для складских полос → задания на втулки →
-    // Обеспечения. Зависимые _m_new не запускаются параллельно.
+    // Резка → Полосы → задания на втулки → Обеспечения. Партии ГП не создаются
+    // на этапе планирования: выпуск появляется только после успешного завершения резки.
+    // Зависимые _m_new не запускаются параллельно.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
         var self = this;
         var cutMeta = this.meta.cut;
@@ -2224,15 +2244,6 @@
             purpose: reqIdByName(stripMeta, STRIP_REQ.purpose),
             toStock: reqIdByName(stripMeta, STRIP_REQ.toStock)
         };
-        var finishedMeta = this.meta.finishedBatch;
-        var finishedReqIds = finishedMeta ? {
-            cut: reqIdByName(finishedMeta, FINISHED_BATCH_REQ.cut),
-            width: reqIdByName(finishedMeta, FINISHED_BATCH_REQ.width),
-            rolls: reqIdByName(finishedMeta, FINISHED_BATCH_REQ.rolls),
-            length: reqIdByName(finishedMeta, FINISHED_BATCH_REQ.length),
-            status: reqIdByName(finishedMeta, FINISHED_BATCH_REQ.status),
-            active: activeReqId(finishedMeta)
-        } : {};
         var sleeveMeta = this.meta.sleeveTask;
         var sleeveReqIds = sleeveMeta ? {
             diameter: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.diameter),
@@ -2253,7 +2264,6 @@
 
         var nStrips = 0;
         var nPositions = 0;
-        var nFinishedBatches = 0;
         var nSleeveTasks = 0;
         var nSleeves = 0;
         var nCuts = layouts.length;
@@ -2301,26 +2311,6 @@
                     return stripChain;
                 }
 
-                function createFinishedBatches(cutId) {
-                    if (!finishedMeta) return Promise.resolve();
-                    var batchChain = Promise.resolve();
-                    finishedBatchesForLayout(lay, cutId, runLength, plannedRuns).forEach(function(batch) {
-                        batchChain = batchChain.then(function() {
-                            var fields = buildFields(finishedReqIds, {
-                                cut: batch.cutId,
-                                width: batch.width,
-                                rolls: batch.rolls,
-                                length: batch.length,
-                                status: FINISHED_BATCH_STATUS,
-                                active: '1'
-                            });
-                            return self.post('_m_new/' + finishedMeta.id + '?JSON&up=1', fields)
-                                .then(function() { nFinishedBatches += 1; });
-                        });
-                    });
-                    return batchChain;
-                }
-
                 function createSleeveTasks() {
                     if (!sleeveMeta) return Promise.resolve();
                     var taskChain = Promise.resolve();
@@ -2361,12 +2351,11 @@
                     return supChain;
                 }
 
-                // 1) корневая резка, 2) полосы, 3) партии ГП, 4) втулки, 5) обеспечения.
+                // 1) корневая резка, 2) полосы, 3) втулки, 4) обеспечения.
                 return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
                     if (!cutId) throw new Error('Сервер не вернул id новой резки');
                     return createStrips(cutId)
-                        .then(function() { return createFinishedBatches(cutId); })
                         .then(function() { return createSleeveTasks(); })
                         .then(function() { return createSupplies(cutId); });
                 }).then(function() {
@@ -2378,7 +2367,7 @@
         });
 
         var genStartTime = Date.now();
-        chain.then(function() {
+        return chain.then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
             self.updateProgress(nCuts, 'Обновление очереди…');
@@ -2395,9 +2384,9 @@
             var totalElapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
-            console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'партийГП:', nFinishedBatches, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
+            console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
             self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
-                ', партий ГП ' + nFinishedBatches + ', заданий на втулки ' + nSleeveTasks +
+                ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
         }).catch(function(err) {
@@ -2817,6 +2806,12 @@
         var schedById = {};
         var schedule = buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut });
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        var dayCutsByKey = {};
+        activeGroup.cuts.forEach(function(c) {
+            var key = cutPlanDayKey(c);
+            if (!dayCutsByKey[key]) dayCutsByKey[key] = [];
+            dayCutsByKey[key].push(c);
+        });
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: self.changeTimes && self.changeTimes.CLEANUP_SHIFT })
@@ -2878,16 +2873,18 @@
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
-            if (idx === 0) up.disabled = true;
-            if (idx === activeGroup.cuts.length - 1) down.disabled = true;
+            var sameDayCuts = dayCutsByKey[cutPlanDayKey(c)] || activeGroup.cuts;
+            var dayIdx = sameDayCuts.indexOf(c);
+            if (dayIdx === 0) up.disabled = true;
+            if (dayIdx === sameDayCuts.length - 1) down.disabled = true;
             up.addEventListener('click', function() {
                 if (self.busy) return;
-                var p = moveInQueue(activeGroup.cuts, idx, -1);
+                var p = moveInQueue(sameDayCuts, dayIdx, -1);
                 if (p.length) self.saveSequences(p);
             });
             down.addEventListener('click', function() {
                 if (self.busy) return;
-                var p = moveInQueue(activeGroup.cuts, idx, 1);
+                var p = moveInQueue(sameDayCuts, dayIdx, 1);
                 if (p.length) self.saveSequences(p);
             });
             var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: stripsButtonLabel(c.knifeCount), title: 'Полосы резки (количество полос)' });
@@ -3144,4 +3141,4 @@
 
  
  
-// @version 2026-06-07-recursion-guard
+// @version 2026-06-07-issue-3213
