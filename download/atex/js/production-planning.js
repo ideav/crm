@@ -76,7 +76,8 @@
         notes: 'Примечания',
         sequence: 'Очередность',
         plannedRuns: 'Кол-во план',
-        actualRuns: 'Кол-во факт'
+        actualRuns: 'Кол-во факт',
+        length: 'Метраж, м'
     };
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
@@ -293,16 +294,15 @@
     // Видимость резки в очереди диспетчера (за сегодня и позже / по выбранной дате).
     // Резка показывается, если ВСЕ условия выполнены:
     //  1) статус не «Завершён» (выполненные резки в очередь не показываем);
-    //  2) заказ резки согласован — «Дата согласования» заказа не пустая
-    //     (orderApprovalDate из отчёта cut_planning, через Позиция→Заказ);
-    //  3) «Дата план» совпадает с выбранной датой ИЛИ пустая (ещё не запланирована —
+    //  2) «Дата план» совпадает с выбранной датой ИЛИ пустая (ещё не запланирована —
     //     напр. только что сгенерированная резка). selectedDate пустая → дата не фильтрует.
+    // Согласование заказа/позиции фильтрует создание новых резок, но уже попавшие в
+    // cut_planning резки считаются рабочей очередью (#3209: очищенная новая модель).
     // Форматы дат разные («ДД.ММ.ГГГГ» из отчёта, «ГГГГ-ММ-ДД» из <input type=date>) —
     // нормализуем общим batchDateKey.
     function isCutVisible(cut, selectedDate) {
         if (!cut) return false;
         if (String(cut.status || '').trim() === 'Завершён') return false;
-        if (!String(cut.orderApprovalDate || '').trim()) return false;
         var pd = String(cut.planDate || '').trim();
         if (pd === '') return true;
         var sd = String(selectedDate == null ? '' : selectedDate).trim();
@@ -346,6 +346,15 @@
         var order = [];
         var supplies = [];
         function str(v) { return v == null ? '' : String(v); }
+        function rowValue(row, names) {
+            for (var i = 0; i < names.length; i++) {
+                if (row && row[names[i]] != null && row[names[i]] !== '') return row[names[i]];
+            }
+            return '';
+        }
+        function rowNum(row, names) {
+            return stripNum(rowValue(row, names));
+        }
         (rows || []).forEach(function(row) {
             var cutId = str(row.cut_id);
             if (cutId && !cutsById[cutId]) {
@@ -366,9 +375,10 @@
                     knifeWidths: [],
                     winding: normWinding(row.cut_winding),
                     rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
+                    length: rowNum(row, ['cut_length', 'cut_footage', 'cut_footage_m']),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
-                    orderApprovalDate: str(row.order_approval_date)
+                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
                 };
                 order.push(cutId);
             }
@@ -377,7 +387,9 @@
                 supplies.push({
                     id: supplyId,
                     positionId: row.supply_position_id ? String(row.supply_position_id) : null,
-                    cutId: cutId
+                    cutId: cutId,
+                    footage: rowNum(row, ['supply_footage', 'supply_length', 'supply_length_m']),
+                    rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
             }
         });
@@ -903,6 +915,22 @@
         return (supplyFootages || []).reduce(function(m, f){ var n = stripNum(f); return n > m ? n : m; }, 0);
     }
 
+    function supplyFootage(supply, footageBySupply){
+        var direct = stripNum(supply && supply.footage);
+        if (direct > 0) return direct;
+        return stripNum(footageBySupply && supply && footageBySupply[String(supply.id)]);
+    }
+
+    function cutRunLength(cut, supplies, footageBySupply){
+        var maxF = stripNum(cut && cut.length);
+        (supplies || []).forEach(function(s) {
+            if (String(s.cutId) !== String(cut && cut.id)) return;
+            var f = supplyFootage(s, footageBySupply);
+            if (f > maxF) maxF = f;
+        });
+        return maxF;
+    }
+
     // FIFO-резерв сырья из партий (#3120 группа C). batches — [{id, label, arrivalKey, freeLinearM}]
     // (freeLinearM — СВОБОДНЫЙ погонный остаток партии: Остаток,м − Σ чужих резервов); сортируются
     // внутри по приходу (arrivalKey ↑, тай-брейк меньший id). requiredLinearM — потребность, пог.м;
@@ -1100,6 +1128,8 @@
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
+        supplyFootage: supplyFootage,
+        cutRunLength: cutRunLength,
         reserveFifo: reserveFifo,
         fifoBatchesForMaterial: fifoBatchesForMaterial,
         materialByCut: materialByCut,
@@ -1387,11 +1417,7 @@
         var materialId = cut.materialId ? String(cut.materialId) : '';
         if (materialId === '') { this.notify('У резки не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
         var widthM = (Number(this.jumboWidthByMaterial[materialId]) || 0) / 1000;
-        var foot = [];
-        (this.supplies || []).forEach(function(s) {
-            if (String(s.cutId) === String(cut.id)) foot.push(Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0);
-        });
-        var requiredLin = requiredRunLengthM(foot);
+        var requiredLin = cutRunLength(cut, this.supplies, this.footageBySupply);
         // свободный остаток без учёта собственных прежних резервов этой резки (их перезапишем)
         var existing = (this.consumptionByCut && this.consumptionByCut[String(cut.id)]) || [];
         var reservedExcl = {};
@@ -1447,18 +1473,20 @@
 
     // Метраж обеспечений: this.footageBySupply = { supplyId: «Метраж, м» }. Нужен для
     // длины прогона резки (макс по её обеспечениям) → длительность намотки (расписание).
-    // Читаем object/ напрямую — колонка отчёта cut_planning поле подчинённой таблицы не
-    // подтянула (reverse-join), а object/ по «Обеспечение» отдаёт «Метраж, м» штатно.
+    // cut_planning может отдавать supply_footage; object/ по «Обеспечение» остаётся
+    // полным источником и мержится, потому загрузки идут параллельно.
     AtexProductionPlanning.prototype.loadSupplyFootage = function() {
         var self = this;
         var meta = this.meta.supply;
-        if (!meta) { this.footageBySupply = {}; return Promise.resolve(); }
+        if (!meta) { this.footageBySupply = this.footageBySupply || {}; return Promise.resolve(); }
         var footIdx = columnIndex(meta, SUPPLY_REQ.footage);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {};
+            var map = self.footageBySupply || {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                map[String(rec.i)] = footIdx >= 0 ? (Number(r[footIdx]) || 0) : 0;
+                var key = String(rec.i);
+                var value = footIdx >= 0 ? (Number(r[footIdx]) || 0) : 0;
+                if (value > 0 || stripNum(map[key]) <= 0) map[key] = value;
             });
             self.footageBySupply = map;
         });
@@ -1561,6 +1589,11 @@
                 cut.knifeCount = a.knifeCount || 0;
                 cut.knifeWidths = a.knifeWidths || [];
             });
+            if (!self.footageBySupply) self.footageBySupply = {};
+            p.supplies.forEach(function(supply) {
+                var f = supplyFootage(supply, null);
+                if (f > 0) self.footageBySupply[String(supply.id)] = f;
+            });
             self.cuts = p.cuts;
             self.supplies = p.supplies;
             console.log('[pp] 📅 loadPlanning: загружено резок:', p.cuts.length, ', обеспечений:', p.supplies.length);
@@ -1599,6 +1632,9 @@
         var d = this.draft;
         console.log('[pp] 🔪 createCut: начало. станок=', d.slitterId, 'план.прогонов=', d.plannedRuns, 'статус=', d.status, 'выбрано позиций:', (d.selectedPositions||[]).length);
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
+        var selectedPositions = d.selectedPositions || [];
+        var posById = positionMap(this.genPositions);
+        var runLength = layoutRunLength({ positionsCovered: selectedPositions }, posById);
 
         // Стоп-лист станка: сырьё выбранной партии не должно быть запрещено на станке.
         if (d.materialBatchId) {
@@ -1616,6 +1652,7 @@
             slitter: reqIdByName(meta, CUT_REQ.slitter),
             materialBatch: reqIdByName(meta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(meta, CUT_REQ.plannedRuns),
+            length: reqIdByName(meta, CUT_REQ.length),
             planDate: reqIdByName(meta, CUT_REQ.planDate),
             status: reqIdByName(meta, CUT_REQ.status),
             notes: reqIdByName(meta, CUT_REQ.notes)
@@ -1624,6 +1661,7 @@
             slitter: d.slitterId,
             materialBatch: d.materialBatchId,
             plannedRuns: d.plannedRuns,
+            length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
             status: d.status,
             notes: d.notes
@@ -1631,12 +1669,14 @@
 
         function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
-            var selectedPositions = d.selectedPositions || [];
             console.log('[pp] 🔪 createCut: резка #' + id + ' создана. создаём обеспечения для ' + selectedPositions.length + ' позиций:', selectedPositions);
             // Создать обеспечения для выбранных позиций (#3194)
             var supplyPromises = selectedPositions.map(function(positionId) {
+                var position = posById[String(positionId)] || {};
+                var footage = Number(position.length) || 0;
                 var supplyFields = buildSupplyFieldsForCut(self.meta.supply, self.meta.cut, {
                     cutId: String(id),
+                    footage: footage > 0 ? footage : '',
                     status: SUPPLY_STATUSES[0]
                 });
                 return self.post('_m_new/' + self.meta.supply.id + '?JSON&up=' + encodeURIComponent(positionId), supplyFields)
@@ -2175,6 +2215,7 @@
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(cutMeta, CUT_REQ.plannedRuns),
+            length: reqIdByName(cutMeta, CUT_REQ.length),
             status: reqIdByName(cutMeta, CUT_REQ.status)
         };
         var stripReqIds = {
@@ -2239,7 +2280,8 @@
                     status: CUT_STATUSES[0],
                     slitter: slitterId,
                     materialBatch: batchId,
-                    plannedRuns: plannedRuns
+                    plannedRuns: plannedRuns,
+                    length: runLength > 0 ? runLength : ''
                 });
 
                 function createStrips(cutId) {
@@ -2713,7 +2755,7 @@
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
 
-        // Базовая видимость очереди: не «Завершён», заказ согласован, дата плана = выбранной/пустая.
+        // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.
         var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
         var filtered = filterCuts(visible, this.filter);
         var groups = groupBySlitter(filtered);
@@ -2770,14 +2812,7 @@
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var runLenByCut = {};
         activeGroup.cuts.forEach(function(c) {
-            var maxF = 0;
-            (self.supplies || []).forEach(function(s) {
-                if (String(s.cutId) === String(c.id)) {
-                    var f = Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0;
-                    if (f > maxF) maxF = f;
-                }
-            });
-            runLenByCut[String(c.id)] = maxF;
+            runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply);
         });
         var schedById = {};
         var schedule = buildSchedule(activeGroup.cuts, { windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut });
@@ -2940,7 +2975,7 @@
             this.positions.forEach(function(p) { posById[p.id] = p.label; });
             linked.forEach(function(s) {
                 var label = posById[s.positionId] || ('позиция #' + s.positionId);
-                var foot = Number(self.footageBySupply && self.footageBySupply[String(s.id)]) || 0;
+                var foot = supplyFootage(s, self.footageBySupply);
                 if (foot > 0) label += ' · ' + foot + ' м';
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
