@@ -77,6 +77,7 @@
         notes: 'Примечания',
         sequence: 'Очередность',
         plannedRuns: 'Кол-во план',
+        duration: 'Длительность, минут',
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м'
     };
@@ -388,6 +389,7 @@
                         'cut_plan_count',
                         'cut_qty_plan'
                     ]),
+                    duration: rowNum(row, ['cut_duration', 'cut_duration_min', 'cut_duration_minutes']),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
@@ -862,6 +864,12 @@
         var a = p[p.length-2], b = p[p.length-1];
         var slope = (b.min - a.min) / (b.m - a.m);
         return round3(b.min + slope * (x - b.m));
+    }
+
+    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes) {
+        var runs = Number(plannedRuns) || 0;
+        if (runs <= 0) return 0;
+        return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
     }
 
     var DAY_START_MIN = 8 * 60;          // DAY_START_HOUR по умолчанию: 08:00
@@ -1355,6 +1363,7 @@
         materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
+        plannedCutDurationMinutes: plannedCutDurationMinutes,
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
@@ -1945,16 +1954,19 @@
             slitter: reqIdByName(meta, CUT_REQ.slitter),
             materialBatch: reqIdByName(meta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(meta, CUT_REQ.plannedRuns),
+            duration: reqIdByName(meta, CUT_REQ.duration),
             length: reqIdByName(meta, CUT_REQ.length),
             planDate: reqIdByName(meta, CUT_REQ.planDate),
             status: reqIdByName(meta, CUT_REQ.status),
             notes: reqIdByName(meta, CUT_REQ.notes),
             sequence: reqIdByName(meta, CUT_REQ.sequence)
         };
+        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
         var fields = buildFields(reqIds, {
             slitter: d.slitterId,
             materialBatch: d.materialBatchId,
             plannedRuns: d.plannedRuns,
+            duration: duration > 0 ? duration : '',
             length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
             status: d.status,
@@ -2514,6 +2526,7 @@
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(cutMeta, CUT_REQ.plannedRuns),
+            duration: reqIdByName(cutMeta, CUT_REQ.duration),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
@@ -2570,6 +2583,7 @@
                 var covered = lay.positionsCovered || [];
                 var plannedRuns = plannedRunsForLayout(lay, posById);
                 var runLength = layoutRunLength(lay, posById);
+                var duration = plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes);
 
                 var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
                 var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
@@ -2588,6 +2602,7 @@
                     slitter: slitterId,
                     materialBatch: batchId,
                     plannedRuns: plannedRuns,
+                    duration: duration > 0 ? duration : '',
                     length: runLength > 0 ? runLength : '',
                     sequence: sequence
                 });
