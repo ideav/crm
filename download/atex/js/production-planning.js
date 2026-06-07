@@ -2492,9 +2492,15 @@
     // ── Рендеринг ──
 
     AtexProductionPlanning.prototype.render = function() {
-        this.renderForm();
-        this.renderQueue();
-        this.renderLink();
+        if (this._rendering) { console.warn('[pp] ⚠️ render: уже выполняется, пропускаю рекурсивный вызов'); return; }
+        this._rendering = true;
+        try {
+            this.renderForm();
+            this.renderQueue();
+            this.renderLink();
+        } finally {
+            this._rendering = false;
+        }
     };
 
     // Открыть модалку формы новой резки (#3116 п.1). Содержимое уже отрисовано
@@ -2564,6 +2570,8 @@
 
     AtexProductionPlanning.prototype.renderForm = function() {
         var self = this;
+        if (this._renderingForm) { console.warn('[pp] ⚠️ renderForm: уже выполняется, пропускаю рекурсивный вызов'); return; }
+        this._renderingForm = true;
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
@@ -2669,10 +2677,13 @@
         actions.appendChild(planBtn);
 
         form.appendChild(actions);
+        this._renderingForm = false;
     };
 
     AtexProductionPlanning.prototype.renderQueue = function() {
         var self = this;
+        if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
+        this._renderingQueue = true;
         var t0 = Date.now();
         var box = this.queueEl;
         box.innerHTML = '';
@@ -2857,6 +2868,7 @@
         });
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
+        this._renderingQueue = false;
     };
 
     AtexProductionPlanning.prototype.renderLink = function() {
