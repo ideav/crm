@@ -379,6 +379,15 @@
                     winding: normWinding(row.cut_winding),
                     rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
                     length: rowNum(row, ['cut_length', 'cut_footage', 'cut_footage_m']),
+                    plannedRuns: rowNum(row, [
+                        'cut_planned_runs',
+                        'cut_plan_runs',
+                        'cut_planned_qty',
+                        'cut_plan_qty',
+                        'cut_planned_count',
+                        'cut_plan_count',
+                        'cut_qty_plan'
+                    ]),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
@@ -443,19 +452,60 @@
         return (rows || []).map(function(row) {
             // Позиция считается согласованной, если утверждён заказ (order_approval_date)
             // ИЛИ утверждена сама позиция (item_approval_date).
-            var orderApproved = !!(String(row.order_approval_date || '').trim());
-            var itemApproved = !!(String(row.item_approval_date || '').trim());
+            var orderApproved = !!(String(row.order_approval_date || row.order_approved || '').trim());
+            var itemApproved = !!(String(row.item_approval_date || row.position_approved || row.position_approval_date || '').trim());
+            var length = stripNum(row.position_length);
+            var windLengthRaw = (row.wind_length != null && String(row.wind_length).trim() !== '')
+                ? row.wind_length
+                : ((row.position_wind_length != null && String(row.position_wind_length).trim() !== '') ? row.position_wind_length : row.position_length);
             return {
                 id: row.position_id == null ? '' : String(row.position_id),
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
-                width: Number(row.position_width) || 0,
-                qty: Number(row.position_qty) || 0,
-                length: Number(row.position_length) || 0,
+                width: stripNum(row.position_width),
+                qty: stripNum(row.position_qty),
+                length: length,
+                windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
+                windLength: windLengthValue(windLengthRaw),
                 sleeveDiameter: sleeveDiameterFromRow(row),
                 dueKey: batchDateKey(row.position_due_date),
                 approved: orderApproved || itemApproved
             };
         });
+    }
+
+    function windLengthValue(value) {
+        var n = stripNum(value);
+        return n > 0 ? round3(n) : 0;
+    }
+
+    function windLengthKey(value) {
+        var n = windLengthValue(value);
+        return n > 0 ? String(n) : '';
+    }
+
+    function preferredWidthsKey(materialId, windDir, windLength) {
+        return String(materialId == null ? '' : materialId).trim() + '|' +
+            normWinding(windDir) + '|' + windLengthKey(windLength);
+    }
+
+    function groupPositionsByPlanningProfile(positions) {
+        var groups = {};
+        var order = [];
+        (positions || []).forEach(function(p) {
+            var key = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
+            if (!groups[key]) {
+                groups[key] = {
+                    key: key,
+                    materialId: p && p.materialId != null ? String(p.materialId) : '',
+                    windDir: normWinding(p && p.windDir),
+                    windLength: windLengthValue(p && p.windLength),
+                    positions: []
+                };
+                order.push(key);
+            }
+            groups[key].positions.push(p);
+        });
+        return order.map(function(key) { return groups[key]; });
     }
 
     // Карта «id позиции → Длина, м» из genPositions (#3155): «Метраж, м» создаваемого
@@ -994,11 +1044,39 @@
     // FIFO-партия: среди активных партий нужного сырья с остатком > 0 выбрать с наименьшим dateKey.
     // batches — [{id, materialId, dateKey (число), remainder, active}]. null если нет подходящей.
     function pickBatchFIFO(batches, materialId){
-        var mat = String(materialId == null ? '' : materialId);
+        var mat = String(materialId == null ? '' : materialId).trim();
         var avail = (batches || []).filter(function(b){ return batchIsActive(b) && String(b.materialId) === mat && (Number(b.remainder) || 0) > 0; });
         if (!avail.length) return null;
         avail.sort(function(a, b){ return (Number(a.dateKey) || 0) - (Number(b.dateKey) || 0) || (String(a.id) < String(b.id) ? -1 : 1); });
         return String(avail[0].id);
+    }
+
+    function pickBatchFIFOForRun(batches, materialId, requiredLinearM, remainingByBatch) {
+        var mat = String(materialId == null ? '' : materialId).trim();
+        var avail = (batches || []).filter(function(b) {
+            if (!batchIsActive(b) || String(b.materialId) !== mat || (Number(b.remainder) || 0) <= 0) return false;
+            var id = String(b.id);
+            if (remainingByBatch && remainingByBatch.hasOwnProperty(id)) {
+                return (Number(remainingByBatch[id]) || 0) > 0;
+            }
+            return true;
+        });
+        if (!avail.length) return null;
+        avail.sort(function(a, b){ return (Number(a.dateKey) || 0) - (Number(b.dateKey) || 0) || (String(a.id) < String(b.id) ? -1 : 1); });
+        var picked = avail[0];
+        var pickedId = String(picked.id);
+        if (remainingByBatch && remainingByBatch.hasOwnProperty(pickedId)) {
+            var free = Number(remainingByBatch[pickedId]) || 0;
+            var need = Number(requiredLinearM) || 0;
+            if (need > 0) remainingByBatch[pickedId] = Math.max(0, free - need);
+        }
+        return pickedId;
+    }
+
+    function slitterAffinityKey(materialId, windDir, windLength, batchId) {
+        return String(materialId == null ? '' : materialId).trim() + '|' +
+            normWinding(windDir) + '|' + windLengthKey(windLength) + '|' +
+            String(batchId == null ? '' : batchId);
     }
 
     // #3120 группа C (Фаза 1a, п.4): у резки задан материал, но нет ни одной подходящей
@@ -1232,6 +1310,8 @@
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
         rowsToGenPositions: rowsToGenPositions,
+        preferredWidthsKey: preferredWidthsKey,
+        groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
         positionLengthMap: positionLengthMap,
         batchDateKey: batchDateKey,
         formatCutNumber: formatCutNumber,
@@ -1255,6 +1335,8 @@
         nextSequenceForCuts: nextSequenceForCuts,
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
+        pickBatchFIFOForRun: pickBatchFIFOForRun,
+        slitterAffinityKey: slitterAffinityKey,
         batchIsActive: batchIsActive,
         isStockStrip: isStockStrip,
         plannedRunsForLayout: plannedRunsForLayout,
@@ -1335,7 +1417,7 @@
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
         this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
-        this.preferredByMaterial = {};  // кеш ходовых ширин по сырью: materialId → [{width, popularity}]
+        this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
@@ -1748,25 +1830,32 @@
         return resolveTolerance(raw, DEFAULT_TOLERANCE_MM);
     };
 
-    // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью).
+    // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью,
+    // направлению и длине намотки).
     // → [{ width:Number(position_width_mm), popularity:Number(position_qty_sum) }];
-    // кешируется в this.preferredByMaterial[materialId]. Ленивая загрузка по сырью
+    // кешируется в this.preferredByMaterial[materialId|windDir|windLength].
     // (Task 3/4 — генерация и панель ходовых). Возвращает Promise с массивом.
-    AtexProductionPlanning.prototype.loadPreferredWidths = function(materialId) {
+    AtexProductionPlanning.prototype.loadPreferredWidths = function(materialId, windDir, windLength) {
         var self = this;
-        var mat = String(materialId == null ? '' : materialId);
+        var mat = String(materialId == null ? '' : materialId).trim();
+        var dir = normWinding(windDir);
+        var lenKey = windLengthKey(windLength);
+        var cacheKey = preferredWidthsKey(mat, dir, lenKey);
         if (mat === '') return Promise.resolve([]);
-        if (this.preferredByMaterial[mat]) return Promise.resolve(this.preferredByMaterial[mat]);
-        console.log('[pp] 📏 loadPreferredWidths: запрос для сырья id=' + mat + '...');
-        return this.getJson('report/preferable_widths?JSON_KV&FR_position_material_id=' + encodeURIComponent(mat)).then(function(rows) {
+        if (this.preferredByMaterial[cacheKey]) return Promise.resolve(this.preferredByMaterial[cacheKey]);
+        var params = ['JSON_KV', 'FR_position_material_id=' + encodeURIComponent(mat)];
+        if (dir) params.push('FR_wind_dir=' + encodeURIComponent(dir));
+        if (lenKey) params.push('FR_wind_length=' + encodeURIComponent(lenKey));
+        console.log('[pp] 📏 loadPreferredWidths: запрос для сырья id=' + mat + ', намотка=' + dir + ', длина=' + lenKey + '...');
+        return this.getJson('report/preferable_widths?' + params.join('&')).then(function(rows) {
             var list = (rows || []).map(function(row) {
                 return {
                     width: Number(row.position_width_mm) || 0,
                     popularity: Number(row.position_qty_sum) || 0
                 };
             });
-            self.preferredByMaterial[mat] = list;
-            console.log('[pp] 📏 loadPreferredWidths: для сырья ' + mat + ' получено ширин:', list.length, list.slice(0,5));
+            self.preferredByMaterial[cacheKey] = list;
+            console.log('[pp] 📏 loadPreferredWidths: для ключа ' + cacheKey + ' получено ширин:', list.length, list.slice(0,5));
             return list;
         });
     };
@@ -2166,6 +2255,7 @@
         // Панель ходовых ширин (#3128: 3 ряда со скроллом — в CSS; скрываем те,
         // что шире текущего остатка джамбо).
         var matKey = String(cut.materialId == null ? '' : cut.materialId);
+        var prefKey = preferredWidthsKey(matKey, cut && cut.winding, cut && cut.length);
         var prefWrap = el('div', { class: 'atex-pp-strip-pref' });
         prefWrap.appendChild(el('div', { class: 'atex-pp-strip-pref-title', text: 'Ходовые ширины' }));
         var prefList = el('div', { class: 'atex-pp-strip-pref-list' });
@@ -2196,10 +2286,10 @@
             });
         }
 
-        if (matKey !== '' && this.preferredByMaterial[matKey]) {
-            prefWidths = this.preferredByMaterial[matKey]; prefLoading = false;
+        if (matKey !== '' && this.preferredByMaterial[prefKey]) {
+            prefWidths = this.preferredByMaterial[prefKey]; prefLoading = false;
         } else if (matKey !== '') {
-            this.loadPreferredWidths(matKey).then(function(list) {
+            this.loadPreferredWidths(matKey, cut && cut.winding, cut && cut.length).then(function(list) {
                 prefWidths = list || []; prefLoading = false;
                 if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred();
             }).catch(function() {
@@ -2331,7 +2421,8 @@
             return;
         }
 
-        // Необеспеченные позиции, сгруппированные по сырью.
+        // Необеспеченные позиции, сгруппированные по совместимому профилю:
+        // сырьё + направление намотки + длина намотки.
         // Только согласованные (order_approval_date или item_approval_date).
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
@@ -2339,44 +2430,44 @@
             this.notify('Нет необеспеченных позиций для генерации', 'info');
             return;
         }
-        var byMaterial = {};
-        var matOrder = [];
-        unsup.forEach(function(p) {
-            var mat = String(p.materialId == null ? '' : p.materialId);
-            if (!byMaterial[mat]) { byMaterial[mat] = []; matOrder.push(mat); }
-            byMaterial[mat].push(p);
-        });
-        console.log('[pp] ⚙️ generateCuts: сгруппировано по сырью:', matOrder.length, 'видов. мат-лы:', matOrder);
+        var profiles = groupPositionsByPlanningProfile(unsup);
+        console.log('[pp] ⚙️ generateCuts: сгруппировано по сырью/намотке/метражу:', profiles.length,
+            'профилей:', profiles.map(function(g) { return g.key; }));
 
-        // Догрузить ходовые ширины для сырья, у которого их ещё нет в кеше.
+        // Догрузить ходовые ширины для профиля, у которого их ещё нет в кеше.
         var preloads = [];
-        matOrder.forEach(function(mat) {
-            if (mat !== '' && !self.preferredByMaterial[mat]) {
-                preloads.push(self.loadPreferredWidths(mat));
+        profiles.forEach(function(group) {
+            if (group.materialId !== '' && !self.preferredByMaterial[group.key]) {
+                preloads.push(self.loadPreferredWidths(group.materialId, group.windDir, group.windLength));
             }
         });
 
         Promise.all(preloads).then(function() {
-            // Построить раскладки по каждому сырью; собрать пропуски.
+            // Построить раскладки по каждому профилю; собрать пропуски.
             var allLayouts = [];   // [{...layout, mat}]
             var skipped = [];      // [{positionId, reason}]
-            matOrder.forEach(function(mat) {
-                var matPositions = byMaterial[mat];
+            profiles.forEach(function(group) {
+                var mat = group.materialId;
                 var jw = self.jumboWidthByMaterial[mat];
                 if (!jw) {
-                    matPositions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
+                    group.positions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
                     return;
                 }
-                layoutPositionGroups(matPositions).forEach(function(positionGroup) {
+                layoutPositionGroups(group.positions).forEach(function(positionGroup) {
                     var res = layoutCore.planLayouts({
                         jumboWidth: jw,
                         positions: positionGroup.map(function(p) {
                             return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
                         }),
-                        preferred: self.preferredByMaterial[mat] || [],
+                        preferred: self.preferredByMaterial[group.key] || [],
                         options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
                     });
-                    (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
+                    (res.layouts || []).forEach(function(lay) {
+                        lay.mat = mat;
+                        lay.windDir = group.windDir;
+                        lay.windLength = group.windLength;
+                        allLayouts.push(lay);
+                    });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
                 });
             });
@@ -2451,6 +2542,13 @@
             if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
         });
         var sequenceCuts = (this.cuts || []).slice();
+        var batchRemainingById = {};
+        (this.genBatches || []).forEach(function(b) {
+            var id = b && b.id != null ? String(b.id) : '';
+            var lin = Number(b && b.remainderLinear);
+            if (id !== '' && isFinite(lin) && lin > 0) batchRemainingById[id] = lin;
+        });
+        var slitterBySetupKey = {};
 
         var nStrips = 0;
         var nPositions = 0;
@@ -2473,13 +2571,18 @@
                 var plannedRuns = plannedRunsForLayout(lay, posById);
                 var runLength = layoutRunLength(lay, posById);
 
-                var slitterId = pickSlitter(self.slitters, lay.mat, loadBySlitterId);
-                if (slitterId != null) loadBySlitterId[String(slitterId)] = (loadBySlitterId[String(slitterId)] || 0) + 1;
+                var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
+                var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
+                var slitterId = slitterBySetupKey[setupKey] || pickSlitter(self.slitters, lay.mat, loadBySlitterId);
+                if (slitterId != null) {
+                    slitterId = String(slitterId);
+                    slitterBySetupKey[setupKey] = slitterId;
+                    loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
+                }
                 var sequence = nextSequenceForCuts(sequenceCuts, slitterId, '');
                 if (sequence !== '') {
                     sequenceCuts.push({ id: 'generated-' + layIdx, slitter: { id: slitterId, label: '' }, planDate: '', sequence: sequence });
                 }
-                var batchId = pickBatchFIFO(self.genBatches, lay.mat);
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
                     slitter: slitterId,
@@ -3046,10 +3149,17 @@
             }
             var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
 
+            var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
+            var windingText = c.winding ? c.winding : '—';
+            if (Number(c.length) > 0) windingText += ' · ' + round3(c.length) + ' м';
+            var plannedRunsText = Number(c.plannedRuns) > 0 ? String(round3(c.plannedRuns)) : '—';
             var info = el('div', { class: 'atex-pp-cut-info' }, [
                 el('span', { class: 'atex-pp-cut-num', text: '№ ' + (formatCutNumber(c.number) || c.id) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
-                el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
+                el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
+                el('span', { class: 'atex-pp-cut-winding', text: 'Намотка: ' + windingText }),
+                el('span', { class: 'atex-pp-cut-runs', text: 'Проходов: ' + plannedRunsText }),
+                el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
                 el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
@@ -3347,4 +3457,4 @@
 
  
  
-// @version 2026-06-07-issue-3213
+// @version 2026-06-07-issue-3219
