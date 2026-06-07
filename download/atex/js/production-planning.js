@@ -418,6 +418,10 @@
     // batchDateKey (для оконного отбора по сроку при генерации); нет срока → Infinity.
     function rowsToGenPositions(rows) {
         return (rows || []).map(function(row) {
+            // Позиция считается согласованной, если утверждён заказ (order_approval_date)
+            // ИЛИ утверждена сама позиция (item_approval_date).
+            var orderApproved = !!(String(row.order_approval_date || '').trim());
+            var itemApproved = !!(String(row.item_approval_date || '').trim());
             return {
                 id: row.position_id == null ? '' : String(row.position_id),
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
@@ -425,7 +429,8 @@
                 qty: Number(row.position_qty) || 0,
                 length: Number(row.position_length) || 0,
                 sleeveDiameter: sleeveDiameterFromRow(row),
-                dueKey: batchDateKey(row.position_due_date)
+                dueKey: batchDateKey(row.position_due_date),
+                approved: orderApproved || itemApproved
             };
         });
     }
@@ -1296,7 +1301,8 @@
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
-            console.log('[pp] 📋 loadPositions: загружено позиций для дропдауна:', self.positions.length, ', для генерации:', self.genPositions.length);
+            var approvedCnt = self.genPositions.filter(function(p) { return p.approved; }).length;
+            console.log('[pp] 📋 loadPositions: загружено позиций для дропдауна:', self.positions.length, ', для генерации:', self.genPositions.length, ', согласованных:', approvedCnt);
         });
     };
 
@@ -2080,8 +2086,9 @@
         }
 
         // Необеспеченные позиции, сгруппированные по сырью.
-        var unsup = unsuppliedPositions(this.genPositions, this.supplies);
-        console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных:', unsup.length);
+        // Только согласованные (order_approval_date или item_approval_date).
+        var unsup = unsuppliedPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
+        console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
             this.notify('Нет необеспеченных позиций для генерации', 'info');
             return;
@@ -2560,7 +2567,8 @@
         // Выбор позиций заказа для обеспечения (#3194) — только согласованные,
         // ещё не обеспеченные позиции, сгруппированные по виду сырья и ширине.
         var unsup = unsuppliedPositions(this.genPositions, this.supplies);
-        var approvedOnly = unsup.filter(function(p) { return p.dueKey > 0; });
+        // Только согласованные: заказ (order_approval_date) или позиция (item_approval_date)
+        var approvedOnly = unsup.filter(function(p) { return p.approved; });
         // Группировка по сырью для компактного отображения
         var byMat = {};
         approvedOnly.forEach(function(p) {
