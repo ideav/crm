@@ -2297,25 +2297,27 @@ class IntegramTable{
                     break;
                 case 'DATE':
                     cellClass += ' date-cell';
-                    if (value) {
-                        const dateObj = this.parseDDMMYYYY(value);
+                    if (displayValue) {
+                        const dateDisplayValue = String(displayValue);
+                        const dateObj = this.parseDDMMYYYY(dateDisplayValue);
                         if (dateObj && !isNaN(dateObj.getTime())) {
                             displayValue = this.formatDateDisplay(dateObj);
                         } else {
                             // Fallback: show original value if parsing fails
-                            displayValue = value;
+                            displayValue = dateDisplayValue;
                         }
                     }
                     break;
                 case 'DATETIME':
                     cellClass += ' datetime-cell';
-                    if (value) {
-                        const datetimeObj = this.parseDDMMYYYYHHMMSS(value);
+                    if (displayValue) {
+                        const datetimeDisplayValue = String(displayValue);
+                        const datetimeObj = this.parseDDMMYYYYHHMMSS(datetimeDisplayValue);
                         if (datetimeObj && !isNaN(datetimeObj.getTime())) {
                             displayValue = this.formatDateTimeDisplay(datetimeObj);
                         } else {
                             // Fallback: show original value if parsing fails
-                            displayValue = value;
+                            displayValue = datetimeDisplayValue;
                         }
                     }
                     break;
