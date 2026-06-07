@@ -186,8 +186,8 @@ assertEqual(plan.cuts, [
       orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
@@ -223,8 +223,8 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
     { id: '23370', number: '1780837653', length: 700, visible: true }
 ], 'rowsToPlanning #3209: timestamp cut_no, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
-    { id: '23352', positionId: '21101', cutId: '23316', footage: 800, rolls: 6 },
-    { id: '23353', positionId: '21102', cutId: '23316', footage: 600, rolls: 3 }
+    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', footage: 600, rolls: 3 }
 ], 'rowsToPlanning #3209: carries supply footage and roll count from report rows');
 assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
     'cutRunLength #3209: cut_length is available as run-length fallback');
@@ -300,6 +300,18 @@ var rp = planning.rowsToPlanning([
 ]);
 assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
 assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
+var gpPlan = planning.rowsToPlanning([
+    { cut_id:'', supply_id:'s-gp', supply_position_id:'p-gp', supply_finished_batch_id:'fb-1' },
+    { cut_id:'c-cut', cut_no:'1', supply_id:'s-cut', supply_position_id:'p-cut', cut_sequence:'1' },
+    { cut_id:'', supply_id:'s-empty', supply_position_id:'p-empty' }
+]);
+assertEqual(gpPlan.supplies.map(function(s) {
+    return { id: s.id, positionId: s.positionId, cutId: s.cutId, finishedBatchId: s.finishedBatchId };
+}), [
+    { id:'s-gp', positionId:'p-gp', cutId:'', finishedBatchId:'fb-1' },
+    { id:'s-cut', positionId:'p-cut', cutId:'c-cut', finishedBatchId:'' },
+    { id:'s-empty', positionId:'p-empty', cutId:'', finishedBatchId:'' }
+], 'rowsToPlanning #3215: читает Партия ГП обеспечения отдельно от резки');
 
 // widthSetDistance — симметрическая разность мультимножеств ширин
 assertEqual(planning.widthSetDistance([60,60,40],[60,40,40]), 2, 'widthSetDistance: одна 60 и одна 40 расходятся');
@@ -389,6 +401,12 @@ var pday = planning.planQueues([
 ]);
 assertEqual(pday.map(function(x){ return [x.cutId, x.sequence]; }), [['d1-b', 1], ['d1-a', 2], ['d2-a', 1]],
     'planQueues: numbering restarts per machine/day and knives descend inside each day');
+assertEqual(planning.nextSequenceForCuts([
+  { id:'old-1', planDate:'2026-06-07', slitter:{id:'10'}, sequence:1 },
+  { id:'old-2', planDate:'2026-06-07', slitter:{id:'10'}, sequence:3 },
+  { id:'other-day', planDate:'2026-06-08', slitter:{id:'10'}, sequence:9 },
+  { id:'other-slitter', planDate:'2026-06-07', slitter:{id:'20'}, sequence:7 }
+], '10', '2026-06-07'), 4, 'nextSequenceForCuts #3215: следующий номер внутри станка и дня');
 
 // ── moveInQueue ──
 function qc(id,seq){ return { id:id, sequence:seq }; }
@@ -407,6 +425,17 @@ var src=[qc('a',1),qc('b',2)]; planning.moveInQueue(src,0,1); assertEqual(src[0]
 
 // unsuppliedPositions
 assertEqual(planning.unsuppliedPositions([{id:'1'},{id:'2'}], [{positionId:'1'}]).map(function(p){return p.id;}), ['2'], 'unsupplied: исключает обеспеченные');
+assertEqual(planning.uncoveredPositions(
+    [{id:'p-cut'}, {id:'p-gp'}, {id:'p-empty'}, {id:'p-none'}],
+    [
+        { positionId:'p-cut', cutId:'c1' },
+        { positionId:'p-gp', cutId:'', finishedBatchId:'fb1' },
+        { positionId:'p-empty', cutId:'', finishedBatchId:'' }
+    ]
+).map(function(p){ return p.id; }), ['p-empty', 'p-none'],
+    'uncoveredPositions #3215: складская Партия ГП и резка закрывают позицию, пустое обеспечение — нет');
+assertEqual(planning.supplyCoverageKind({ positionId:'p1', cutId:'c1', finishedBatchId:'fb1' }), 'cut',
+    'supplyCoverageKind: резка имеет приоритет над Партией ГП');
 // pickSlitter: стоп-лист E + балансировка
 var sl = [{id:'10',stopMaterialIds:['M']},{id:'20',stopMaterialIds:[]},{id:'30',stopMaterialIds:[]}];
 assertEqual(planning.pickSlitter(sl,'M',{}), '20', 'pickSlitter: 10 запрещает M, баланс → 20 (меньший id)');
@@ -479,6 +508,7 @@ var cutMeta3189 = {
     { id: '1156', val: 'Слиттер' },
     { id: '1162', val: 'Активно' },
     { id: '16403', val: 'Кол-во план' },
+    { id: '24308', val: 'Очередность' },
     { id: '15018', val: 'Партия сырья' },
     { id: '8629', val: 'Полоса', arr_id: '1073' },
     { id: '16422', val: 'Кол-во факт' }
@@ -504,6 +534,10 @@ assertEqual(planning.reqIdByName(sleeveMeta3189, 'Кол-во факт'), '1183'
   'reqIdByName: поле факта втулок в новой метасхеме');
 assertEqual(planning.reqIdByName(sleeveMeta3189, 'Статус'), null,
   'reqIdByName: отсутствующий опциональный статус втулок → null');
+assertEqual(planning.reqIdByName(cutMeta3189, 'Очередность'), '24308',
+  'reqIdByName #3215: Очередность — 24308, не Кол-во план');
+assertEqual(planning.reqIdByName(cutMeta3189, 'Кол-во план'), '16403',
+  'reqIdByName #3215: Кол-во план остаётся 16403');
 assertEqual(planning.supplyCutRelation(supplyMeta3189, cutMeta3189), {
   mode: 'reference',
   reqId: '16428',
@@ -692,6 +726,25 @@ var schedW = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut
 assertEqual(schedW[0].startMin, 482, 'buildSchedule(окно): A в первый день (482)');
 assertEqual([schedW[1].startMin, schedW[1].finishMin], [1922, 1926], 'buildSchedule(окно): B не влез до 16:30 → след. день 08:00+setup (1922–1926)');
 assertEqual(planning.SHIFT_END_MIN, 990, 'SHIFT_END_MIN = 16:30 (990)');
+assertEqual(planning.parseClockMinutes('8:00', 0), 480, 'parseClockMinutes #3215: 8:00 → 480');
+assertEqual(planning.parseClockMinutes('17', 0), 1020, 'parseClockMinutes #3215: 17 → 1020');
+assertEqual(planning.parseClockMinutes('мусор', 123), 123, 'parseClockMinutes #3215: мусор → fallback');
+var win3215 = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'17:00' }, 30);
+assertEqual(win3215, { startMin:480, endMin:1020, cutEndMin:990, cleanupMin:30 },
+    'resolveWorkingWindow #3215: резки до 16:30, уборка 30 мин до 17:00');
+var sched3215 = planning.buildSchedule(schedCuts, {
+    windPoints: pts,
+    runLengthByCut: { A:300, B:600 },
+    shiftStartMin: win3215.startMin,
+    shiftEndMin: 484
+});
+assertEqual(planning.dayCleanups(sched3215, { cleanupMin: win3215.cleanupMin, shiftEndMin: win3215.cutEndMin }), [
+    { day:0, startMin:990,  finishMin:1020, durationMin:30 },
+    { day:1, startMin:2430, finishMin:2460, durationMin:30 }
+], 'dayCleanups #3215: DAY_END_HOUR задаёт конец уборки, не конец резок');
+assertEqual(planning.resolveWorkingWindow({ DAY_START_HOUR:'9:15', DAY_END_HOUR:'18:00' }, 45),
+    { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45 },
+    'resolveWorkingWindow #3215: произвольное окно и CLEANUP_SHIFT');
 
 // dayCleanups (#3155): блок уборки CLEANUP_SHIFT в конце каждого рабочего дня с резками.
 // schedW: A — день 0 (старт 482), B — день 1 (старт 1922 = 1440+482).
@@ -771,6 +824,7 @@ function runGenerateCutsDeferredGpTest() {
             req('1156', 'Слиттер'),
             req('15018', 'Партия сырья'),
             req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
             req('24305', 'Метраж, м'),
             req('1162', 'Статус')
         ] },
@@ -828,6 +882,11 @@ function runGenerateCutsDeferredGpTest() {
     }
 
     return result.then(function() {
+        var cutPost = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })[0];
+        assertEqual(cutPost.fields.t16403, 1,
+            'runGenerateCuts #3215: t16403 пишет Кол-во план');
+        assertEqual(cutPost.fields.t24308, 1,
+            'runGenerateCuts #3215: t24308 пишет Очередность при создании');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1081') === 0; }), false,
             'runGenerateCuts: GP batches are not created during planning');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), true,
