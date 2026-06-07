@@ -178,13 +178,13 @@ assertEqual(plan.cuts, [
       materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
@@ -302,6 +302,11 @@ var rp = planning.rowsToPlanning([
 ]);
 assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
 assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
+var runsPlan = planning.rowsToPlanning([
+    { cut_id:'runs-1', cut_no:'1', cut_planned_runs:'3', supply_id:'' }
+]);
+assertEqual(runsPlan.cuts[0].plannedRuns, 3,
+    'rowsToPlanning #3219: cut_planned_runs → plannedRuns for queue card');
 var gpPlan = planning.rowsToPlanning([
     { cut_id:'', supply_id:'s-gp', supply_position_id:'p-gp', supply_finished_batch_id:'fb-1' },
     { cut_id:'c-cut', cut_no:'1', supply_id:'s-cut', supply_position_id:'p-cut', cut_sequence:'1' },
@@ -385,6 +390,7 @@ assertEqual(c.jumboRemainingM, 350, 'descriptor jumboRemainingM number');
 assertEqual(c.knifeCount, 14, 'descriptor knifeCount number');
 assertEqual(c.winding, 'OUT', 'descriptor winding normalized');
 assertEqual(c.rollerWidth, 60, 'descriptor rollerWidth number');
+assertEqual(c.plannedRuns, 0, 'descriptor plannedRuns defaults to 0');
 assertEqual(c.isFoil, true, 'descriptor isFoil по имени Фольга');
 assertEqual(c.knifeWidths, [], 'descriptor knifeWidths пусто');
 // planQueues
@@ -577,8 +583,8 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, sleeveDiameter:76, dueKey: Infinity, approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, sleeveDiameter:0, dueKey: Infinity, approved:false }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveDiameter:76, dueKey: Infinity, approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveDiameter:0, dueKey: Infinity, approved:false }
 ], 'rowsToGenPositions: маппинг + пустые ширина/кол-во/длина → 0, dueKey без срока → Infinity');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
@@ -588,6 +594,36 @@ var grpDue = planning.rowsToGenPositions([
 assertEqual(grpDue[0].dueKey, 20260610, 'rowsToGenPositions: position_due_date → dueKey');
 // #3155: position_length → length («Длина, м» = метраж прогона джамбо обеспечения)
 assertEqual(grpDue[0].length, 0, 'rowsToGenPositions: нет position_length → length 0');
+assertEqual(grpDue[0].windLength, 0, 'rowsToGenPositions: нет position_length/wind_length → windLength 0');
+
+var grp3219 = planning.rowsToGenPositions([
+  { position_id:'o-approved', position_material_id:'2086', position_width:'25', position_qty:'105', position_length:'450', position_winding:'out', order_approval_date:'2026-06-07' },
+  { position_id:'p-approved', position_material_id:'2086', position_width:'25', position_qty:'35', wind_length:'600.00', wind_dir:'IN', item_approval_date:'2026-06-07' },
+  { position_id:'not-approved', position_material_id:'2086', position_width:'25', position_qty:'35', position_winding:'OUT' }
+]);
+assertEqual(grp3219.map(function(p) {
+  return { id:p.id, windDir:p.windDir, windLength:p.windLength, approved:p.approved };
+}), [
+  { id:'o-approved', windDir:'OUT', windLength:450, approved:true },
+  { id:'p-approved', windDir:'IN', windLength:600, approved:true },
+  { id:'not-approved', windDir:'OUT', windLength:0, approved:false }
+], 'rowsToGenPositions #3219: order/position approval plus winding direction/length');
+assertEqual(planning.groupPositionsByPlanningProfile([
+  { id:'p1', materialId:'2086', windDir:'OUT', windLength:600 },
+  { id:'p2', materialId:'2086', windDir:'OUT', windLength:600 },
+  { id:'p3', materialId:'2086', windDir:'IN', windLength:600 },
+  { id:'p4', materialId:'3000', windDir:'OUT', windLength:600 },
+  { id:'p5', materialId:'2086', windDir:'OUT', windLength:450 }
+]).map(function(g) {
+  return { materialId:g.materialId, windDir:g.windDir, windLength:g.windLength, ids:g.positions.map(function(p) { return p.id; }) };
+}), [
+  { materialId:'2086', windDir:'OUT', windLength:600, ids:['p1','p2'] },
+  { materialId:'2086', windDir:'IN', windLength:600, ids:['p3'] },
+  { materialId:'3000', windDir:'OUT', windLength:600, ids:['p4'] },
+  { materialId:'2086', windDir:'OUT', windLength:450, ids:['p5'] }
+], 'groupPositionsByPlanningProfile #3219: сырьё+намотка+метраж должны совпадать');
+assertEqual(planning.preferredWidthsKey('2086', 'out', '600.00'), '2086|OUT|600',
+    'preferredWidthsKey #3219: cache key normalizes material/winding/length');
 
 // positionLengthMap (#3155): { id позиции → Длина, м } из дескрипторов genPositions.
 assertEqual(planning.positionLengthMap([
@@ -829,6 +865,31 @@ function req(id, val, extra) {
     return r;
 }
 
+function runPreferredWidthsFilterTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var paths = [];
+    controller.preferredByMaterial = {};
+    controller.getJson = function(path) {
+        paths.push(path);
+        return Promise.resolve([
+            { position_width_mm: '25.00', position_qty_sum: '105', wind_dir: 'OUT', wind_length: '600.00' }
+        ]);
+    };
+    return controller.loadPreferredWidths('2086', 'out', '600.00').then(function(list) {
+        assertEqual(paths[0],
+            'report/preferable_widths?JSON_KV&FR_position_material_id=2086&FR_wind_dir=OUT&FR_wind_length=600',
+            'loadPreferredWidths #3219: фильтрует ходовые по сырью, намотке и метражу');
+        assertEqual(list, [{ width: 25, popularity: 105 }],
+            'loadPreferredWidths #3219: маппит ширину и популярность');
+        return controller.loadPreferredWidths('2086', 'OUT', 600).then(function(cached) {
+            assertEqual(paths.length, 1,
+                'loadPreferredWidths #3219: нормализованный cache key переиспользует ответ');
+            assertEqual(cached, [{ width: 25, popularity: 105 }],
+                'loadPreferredWidths #3219: повторный вызов берёт кеш');
+        });
+    });
+}
+
 function runGenerateCutsDeferredGpTest() {
     var controller = Object.create(api.Controller.prototype);
     var posts = [];
@@ -907,7 +968,68 @@ function runGenerateCutsDeferredGpTest() {
     });
 }
 
-runGenerateCutsDeferredGpTest().then(function() {
+function runGenerateCutsSlitterAffinityTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('15018', 'Партия сырья'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('24305', 'Метраж, м'),
+            req('1162', 'Статус')
+        ] },
+        strip: { id: '1073', val: 'Полоса', reqs: [
+            req('1144', 'Ширина, мм'),
+            req('1146', 'Количество'),
+            req('1147', 'Назначение'),
+            req('1149', 'На склад')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1148', 'Метраж, м'),
+            req('15015', 'Производственная резка', { ref: '1078' }),
+            req('16420', 'Кол-во рулонов'),
+            req('1154', 'Статус')
+        ] },
+        sleeveTask: null
+    };
+    controller.genPositions = [
+        { id: 'p1', materialId: 'M', width: 25, qty: 105, length: 600, windDir: 'OUT', windLength: 600 },
+        { id: 'p2', materialId: 'M', width: 25, qty: 70, length: 600, windDir: 'OUT', windLength: 600 },
+        { id: 'p3', materialId: 'M', width: 25, qty: 35, length: 600, windDir: 'IN', windLength: 600 },
+        { id: 'p4', materialId: 'M', width: 25, qty: 35, length: 450, windDir: 'OUT', windLength: 450 }
+    ];
+    controller.genBatches = [{ id: 'b1', materialId: 'M', dateKey: 20260601, remainder: 999, remainderLinear: 5000, active: true }];
+    controller.cuts = [];
+    controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }, { id: '20', label: 'С2', stopMaterialIds: [] }];
+    controller.setBusy = function() {};
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        if (path.indexOf('_m_new/1078') === 0) return Promise.resolve({ obj: 'cut-' + posts.length });
+        return Promise.resolve({ obj: 'obj-' + posts.length });
+    };
+
+    return controller.runGenerateCuts([
+        { mat: 'M', windDir: 'OUT', windLength: 600, positionsCovered: ['p1'], strips: [{ width: 25, qty: 36, purpose: 'Заказ', positionIds: ['p1'] }] },
+        { mat: 'M', windDir: 'OUT', windLength: 600, positionsCovered: ['p2'], strips: [{ width: 25, qty: 36, purpose: 'Заказ', positionIds: ['p2'] }] },
+        { mat: 'M', windDir: 'IN', windLength: 600, positionsCovered: ['p3'], strips: [{ width: 25, qty: 36, purpose: 'Заказ', positionIds: ['p3'] }] },
+        { mat: 'M', windDir: 'OUT', windLength: 450, positionsCovered: ['p4'], strips: [{ width: 25, qty: 36, purpose: 'Заказ', positionIds: ['p4'] }] }
+    ], []).then(function() {
+        var slitters = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })
+            .map(function(p) { return p.fields.t1156; });
+        assertEqual(slitters, ['10', '10', '20', '20'],
+            'runGenerateCuts #3219: одинаковое сырьё+намотка+метраж+партия остаётся на одном станке, смена намотки выбирает заново');
+    });
+}
+
+runPreferredWidthsFilterTest().then(runGenerateCutsDeferredGpTest).then(runGenerateCutsSlitterAffinityTest).then(function() {
     console.log('\n' + passed + ' assertions passed');
 }).catch(function(err) {
     console.error(err && err.stack || err);

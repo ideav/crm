@@ -157,25 +157,58 @@
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
-    display: grid;
-    grid-template-columns: 70px 1.4fr 1fr 100px 110px 110px;
-    gap: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
     align-items: center;
 }
-.atex-pp-cut-num { font-weight: 700; }
+.atex-pp-cut-num {
+    flex: 0 0 auto;
+    font-weight: 700;
+    white-space: nowrap;
+}
 .atex-pp-cut-type { font-weight: 600; }
+.atex-pp-cut-material {
+    flex: 1 1 180px;
+    min-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.atex-pp-cut-seq,
+.atex-pp-cut-winding,
+.atex-pp-cut-runs,
+.atex-pp-cut-date {
+    flex: 0 0 auto;
+}
 .atex-pp-cut-batch,
-.atex-pp-cut-date { color: var(--pp-muted); }
+.atex-pp-cut-date {
+    color: var(--pp-muted);
+    white-space: nowrap;
+}
+.atex-pp-cut-batch {
+    flex: 1 1 160px;
+    min-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .atex-pp-cut-status {
+    flex: 0 0 auto;
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 999px;
     background: var(--pp-info-bg);
     color: var(--pp-info-text);
     text-align: center;
-    justify-self: start;
 }
-.atex-pp-cut-supplies { font-size: 12px; color: var(--pp-muted); text-align: right; }
+.atex-pp-cut-supplies {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--pp-muted);
+    text-align: right;
+    white-space: nowrap;
+}
 /* Строка времени резки (старт–финиш от начала смены) в карточке. */
 .atex-pp-cut-time { margin-top: 6px; font-size: 12px; color: var(--pp-accent); font-variant-numeric: tabular-nums; }
 
@@ -221,7 +254,7 @@
 .atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; cursor: default; }
 
 @media (max-width: 720px) {
-    .atex-pp-cut-info { grid-template-columns: 1fr 1fr; }
+    .atex-pp-cut-supplies { margin-left: 0; }
     .atex-pp-filters { grid-template-columns: 1fr; }
 }
 
