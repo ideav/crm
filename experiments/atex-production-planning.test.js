@@ -10,6 +10,8 @@
 //
 // Run with: node experiments/atex-production-planning.test.js
 
+process.env.TZ = 'UTC';
+
 var api = require('../download/atex/js/production-planning.js');
 var planning = api.planning;
 
@@ -586,6 +588,17 @@ assertEqual(planning.batchDateKey('5/1/2026'), 20260105, 'batchDateKey: D/M/Y');
 assertEqual(planning.batchDateKey('') === Infinity, true, 'batchDateKey: пусто → Infinity');
 assertEqual(planning.batchDateKey('мусор') === Infinity, true, 'batchDateKey: мусор → Infinity');
 assertEqual(planning.batchDateKey('2026-01-05') < planning.batchDateKey('2026-02-01'), true, 'batchDateKey: старше = меньше (FIFO)');
+
+// #3217: cut_no может приходить unix-штампом; в карточке очереди показываем
+// его как дату+время до минут, но обычные номера и id не превращаем в даты.
+assertEqual(planning.formatCutNumber('1780837651'), '07.06.2026 13:07',
+    'formatCutNumber: timestamp cut_no → ДД.ММ.ГГГГ ЧЧ:ММ');
+assertEqual(planning.formatCutNumber('7'), '7',
+    'formatCutNumber: обычный короткий номер не форматируется как дата');
+assertEqual(planning.formatCutNumber('23316'), '23316',
+    'formatCutNumber: numeric record id below timestamp range stays raw');
+assertEqual(planning.formatCutNumber('АТХ-7'), 'АТХ-7',
+    'formatCutNumber: non-numeric number stays raw');
 
 // ── Фильтр видимости очереди isCutVisible (статус + согласование заказа + дата плана) ──
 function vc(over){ return Object.assign({ status:'Ожидает', orderApprovalDate:'31.05.2026', planDate:'02.06.2026' }, over||{}); }
