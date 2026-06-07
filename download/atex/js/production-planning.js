@@ -2492,6 +2492,16 @@
     // ── Рендеринг ──
 
     AtexProductionPlanning.prototype.render = function() {
+        // Защита от лавины рендеров (#3202): не более 10 вызовов за 1 секунду.
+        var now = Date.now();
+        if (!this._renderWindow || now - this._renderWindow.start > 1000) {
+            this._renderWindow = { start: now, count: 0 };
+        }
+        this._renderWindow.count += 1;
+        if (this._renderWindow.count > 10) {
+            console.error('[pp] ⛔ render: лавина рендеров! ' + this._renderWindow.count + ' вызовов за ' + (now - this._renderWindow.start) + 'мс. Останавливаю.');
+            return;
+        }
         if (this._rendering) { console.warn('[pp] ⚠️ render: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._rendering = true;
         try {
@@ -2572,6 +2582,7 @@
         var self = this;
         if (this._renderingForm) { console.warn('[pp] ⚠️ renderForm: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._renderingForm = true;
+        try {
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
@@ -2677,13 +2688,16 @@
         actions.appendChild(planBtn);
 
         form.appendChild(actions);
-        this._renderingForm = false;
+        } finally {
+            this._renderingForm = false;
+        }
     };
 
     AtexProductionPlanning.prototype.renderQueue = function() {
         var self = this;
         if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._renderingQueue = true;
+        try {
         var t0 = Date.now();
         var box = this.queueEl;
         box.innerHTML = '';
@@ -2868,7 +2882,9 @@
         });
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
-        this._renderingQueue = false;
+        } finally {
+            this._renderingQueue = false;
+        }
     };
 
     AtexProductionPlanning.prototype.renderLink = function() {
