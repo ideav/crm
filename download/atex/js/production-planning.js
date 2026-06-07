@@ -1168,7 +1168,7 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { positionId: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], notes: '' };
+        return { positionId: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], notes: '', selectedPositions: [] };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -1292,9 +1292,11 @@
     // для генерации резок: использует те же строки, не нужен доп. запрос.
     AtexProductionPlanning.prototype.loadPositions = function() {
         var self = this;
+        console.log('[pp] 📋 loadPositions: запрос positions_list...');
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
+            console.log('[pp] 📋 loadPositions: загружено позиций для дропдауна:', self.positions.length, ', для генерации:', self.genPositions.length);
         });
     };
 
@@ -1525,6 +1527,7 @@
         var mat = String(materialId == null ? '' : materialId);
         if (mat === '') return Promise.resolve([]);
         if (this.preferredByMaterial[mat]) return Promise.resolve(this.preferredByMaterial[mat]);
+        console.log('[pp] 📏 loadPreferredWidths: запрос для сырья id=' + mat + '...');
         return this.getJson('report/preferable_widths?JSON_KV&FR_position_material_id=' + encodeURIComponent(mat)).then(function(rows) {
             var list = (rows || []).map(function(row) {
                 return {
@@ -1533,6 +1536,7 @@
                 };
             });
             self.preferredByMaterial[mat] = list;
+            console.log('[pp] 📏 loadPreferredWidths: для сырья ' + mat + ' получено ширин:', list.length, list.slice(0,5));
             return list;
         });
     };
@@ -1542,6 +1546,7 @@
     // knifeCount/knifeWidths из this.stripAgg (cut_strips) в каждую резку.
     AtexProductionPlanning.prototype.loadPlanning = function() {
         var self = this;
+        console.log('[pp] 📅 loadPlanning: запрос cut_planning...');
         return this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000').then(function(rows) {
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
@@ -1552,6 +1557,7 @@
             });
             self.cuts = p.cuts;
             self.supplies = p.supplies;
+            console.log('[pp] 📅 loadPlanning: загружено резок:', p.cuts.length, ', обеспечений:', p.supplies.length);
         });
     };
 
@@ -1585,6 +1591,7 @@
         if (this.busy) return;
         var meta = this.meta.cut;
         var d = this.draft;
+        console.log('[pp] 🔪 createCut: начало. станок=', d.slitterId, 'план.прогонов=', d.plannedRuns, 'статус=', d.status, 'выбрано позиций:', (d.selectedPositions||[]).length);
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
 
         // Стоп-лист станка: сырьё выбранной партии не должно быть запрещено на станке.
@@ -1618,13 +1625,35 @@
 
         function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
-            return self.reload().then(function() {
-                self.setBusy(false);
-                self.draft = self.blankDraft();
-                self.selectedCutId = String(id);
-                self.closeForm();
-                self.notify('Производственная резка создана', 'success');
-                self.render();
+            var selectedPositions = d.selectedPositions || [];
+            console.log('[pp] 🔪 createCut: резка #' + id + ' создана. создаём обеспечения для ' + selectedPositions.length + ' позиций:', selectedPositions);
+            // Создать обеспечения для выбранных позиций (#3194)
+            var supplyPromises = selectedPositions.map(function(positionId) {
+                var supplyFields = buildSupplyFieldsForCut(self.meta.supply, self.meta.cut, {
+                    cutId: String(id),
+                    status: SUPPLY_STATUSES[0]
+                });
+                return self.post('_m_new/' + self.meta.supply.id + '?JSON&up=' + encodeURIComponent(positionId), supplyFields)
+                    .then(function(res) {
+                        var sid = res && (res.obj || res.id || res.i);
+                        console.log('[pp] 🔪 createCut: обеспечение #' + sid + ' для позиции ' + positionId + ' → резка #' + id);
+                        return sid;
+                    }).catch(function(err) {
+                        console.error('[pp] 🔪 createCut: ошибка обеспечения для позиции ' + positionId + ':', err.message);
+                        return null; // не блокируем остальные
+                    });
+            });
+            return Promise.all(supplyPromises).then(function(supplyIds) {
+                var created = supplyIds.filter(Boolean);
+                console.log('[pp] 🔪 createCut: создано обеспечений: ' + created.length + ' из ' + selectedPositions.length);
+                return self.reload().then(function() {
+                    self.setBusy(false);
+                    self.draft = self.blankDraft();
+                    self.selectedCutId = String(id);
+                    self.closeForm();
+                    self.notify('Производственная резка #' + id + ' создана' + (created.length > 0 ? ' с ' + created.length + ' обеспечениями' : ''), 'success');
+                    self.render();
+                });
             });
         }
 
@@ -2036,19 +2065,23 @@
     AtexProductionPlanning.prototype.generateCuts = function(actionsEl) {
         var self = this;
         if (this.busy) return;
+        console.log('[pp] ⚙️ generateCuts: начало генерации резок...');
 
         var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
         if (!layoutCore || typeof layoutCore.planLayouts !== 'function') {
+            console.error('[pp] ⚙️ generateCuts: модуль cut-layout не загружен');
             this.notify('Модуль раскладки cut-layout не загружен', 'error');
             return;
         }
         if (!this.meta.cut || !this.meta.supply || !this.meta.strip) {
+            console.error('[pp] ⚙️ generateCuts: не найдены метаданные', {cut:!!this.meta.cut, supply:!!this.meta.supply, strip:!!this.meta.strip});
             this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Полоса)', 'error');
             return;
         }
 
         // Необеспеченные позиции, сгруппированные по сырью.
         var unsup = unsuppliedPositions(this.genPositions, this.supplies);
+        console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных:', unsup.length);
         if (!unsup.length) {
             this.notify('Нет необеспеченных позиций для генерации', 'info');
             return;
@@ -2060,6 +2093,7 @@
             if (!byMaterial[mat]) { byMaterial[mat] = []; matOrder.push(mat); }
             byMaterial[mat].push(p);
         });
+        console.log('[pp] ⚙️ generateCuts: сгруппировано по сырью:', matOrder.length, 'видов. мат-лы:', matOrder);
 
         // Догрузить ходовые ширины для сырья, у которого их ещё нет в кеше.
         var preloads = [];
@@ -2094,7 +2128,11 @@
                 });
             });
 
+            console.log('[pp] ⚙️ generateCuts: раскладок построено:', allLayouts.length, ', пропущено:', skipped.length);
+            if (skipped.length > 0) console.log('[pp] ⚙️ generateCuts: первые пропуски:', JSON.stringify(skipped.slice(0, 5)));
+
             if (!allLayouts.length) {
+                console.log('[pp] ⚙️ generateCuts: нет раскладок, выход');
                 self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
                 return;
             }
@@ -2509,6 +2547,7 @@
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
+        console.log('[pp] 📝 renderForm: отрисовка формы. позиций доступно:', this.genPositions.length);
         form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
         form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Номер присваивается автоматически при сохранении.' }));
 
@@ -2517,6 +2556,67 @@
         // Поле «Партия сырья» убрано (#3120 Фаза 2): материал/сырьё резки определяются
         // по обеспечиваемым позициям (resolveCutMaterials), а расход — записями
         // «Расход сырья» (FIFO-резерв). Прямая ссылка на партию в форме больше не нужна.
+
+        // Выбор позиций заказа для обеспечения (#3194) — только согласованные,
+        // ещё не обеспеченные позиции, сгруппированные по виду сырья и ширине.
+        var unsup = unsuppliedPositions(this.genPositions, this.supplies);
+        var approvedOnly = unsup.filter(function(p) { return p.dueKey > 0; });
+        // Группировка по сырью для компактного отображения
+        var byMat = {};
+        approvedOnly.forEach(function(p) {
+            var key = (p.materialId || '?') + '|' + (p.width || 0);
+            if (!byMat[key]) byMat[key] = [];
+            byMat[key].push(p);
+        });
+        var posOptions = Object.keys(byMat).sort().map(function(key) {
+            var items = byMat[key];
+            var first = items[0];
+            var label = 'Сырьё#' + (first.materialId || '?') + ' · ' + (first.width || '?') + ' мм · ' + items.length + ' поз. · ' + items.reduce(function(s,p){return s+(p.qty||0);},0) + ' рул.';
+            return { id: key, label: label, count: items.length, positionIds: items.map(function(p){return p.id;}) };
+        });
+        console.log('[pp] 📝 renderForm: позиций для выбора (согласованные, необеспеченные):', approvedOnly.length, ', групп:', posOptions.length);
+
+        if (posOptions.length > 0) {
+            var posContainer = el('div', { class: 'atex-pp-positions-select' });
+            posContainer.appendChild(el('label', { class: 'atex-pp-field-label', text: 'Обеспечиваемые позиции (' + approvedOnly.length + ' доступно)' }));
+            // Кнопки выбора всех / сброса
+            var toggleBar = el('div', { class: 'atex-pp-toggle-bar' });
+            var selectAllBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-sm', type: 'button', text: 'Выбрать все' });
+            selectAllBtn.addEventListener('click', function() {
+                d.selectedPositions = approvedOnly.map(function(p) { return p.id; });
+                self.renderForm();
+            });
+            toggleBar.appendChild(selectAllBtn);
+            var clearBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-sm', type: 'button', text: 'Сбросить' });
+            clearBtn.addEventListener('click', function() {
+                d.selectedPositions = [];
+                self.renderForm();
+            });
+            toggleBar.appendChild(clearBtn);
+            posContainer.appendChild(toggleBar);
+            // Группы позиций
+            var listEl = el('div', { class: 'atex-pp-positions-list' });
+            posOptions.forEach(function(opt) {
+                var allSelected = opt.positionIds.every(function(pid) { return d.selectedPositions.indexOf(pid) >= 0; });
+                var row = el('label', { class: 'atex-pp-positions-row' });
+                var cb = el('input', { type: 'checkbox' });
+                cb.checked = allSelected;
+                cb.addEventListener('change', function() {
+                    if (cb.checked) {
+                        opt.positionIds.forEach(function(pid) { if (d.selectedPositions.indexOf(pid) < 0) d.selectedPositions.push(pid); });
+                    } else {
+                        d.selectedPositions = d.selectedPositions.filter(function(pid) { return opt.positionIds.indexOf(pid) < 0; });
+                    }
+                });
+                row.appendChild(cb);
+                row.appendChild(el('span', { class: 'atex-pp-positions-label', text: opt.label }));
+                listEl.appendChild(row);
+            });
+            posContainer.appendChild(listEl);
+            form.appendChild(posContainer);
+        } else {
+            form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Нет согласованных необеспеченных позиций.' }));
+        }
 
         var plannedRunsInput = el('input', { class: 'atex-pp-input', type: 'number', min: '1', step: '1' });
         plannedRunsInput.value = d.plannedRuns || '1';
@@ -2534,6 +2634,9 @@
         notes.value = d.notes || '';
         notes.addEventListener('input', function() { d.notes = notes.value; });
         form.appendChild(field('Примечания', notes));
+
+        var selInfo = el('span', { class: 'atex-pp-selection-info', text: 'Выбрано позиций: ' + (d.selectedPositions||[]).length });
+        form.appendChild(selInfo);
 
         var actions = el('div', { class: 'atex-pp-actions' });
         var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать резку' });
@@ -2944,6 +3047,7 @@
         var root = document.getElementById('atex-production-planning');
         if (!root || root.dataset.initialized === '1') return;
         root.dataset.initialized = '1';
+        console.log('[pp] 🟢 init: запуск production-planning, db=', (root.getAttribute('data-db') || '?'));
         var controller = new AtexProductionPlanning(root);
         root._atexProductionPlanning = controller;
         controller.start();

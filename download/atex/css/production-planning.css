@@ -457,3 +457,71 @@
     text-align: center;
 }
 .atex-pp-tab.is-active .atex-pp-tab-count { background: var(--pp-accent); color: #fff; }
+
+/* Выбор позиций для обеспечения в форме новой резки (#3194) */
+.atex-pp-positions-select {
+    margin-bottom: 12px;
+    border: 1px solid var(--pp-border-soft);
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--pp-surface);
+}
+.atex-pp-positions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.atex-pp-positions-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1.3;
+}
+.atex-pp-positions-row:hover {
+    background: var(--pp-bg);
+}
+.atex-pp-positions-row input[type="checkbox"] {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+.atex-pp-positions-label {
+    color: var(--pp-text);
+}
+.atex-pp-toggle-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--pp-border-soft);
+}
+.atex-pp-btn-sm {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-text);
+    cursor: pointer;
+}
+.atex-pp-btn-sm:hover {
+    background: var(--pp-surface);
+}
+.atex-pp-selection-info {
+    display: block;
+    font-size: 12px;
+    color: var(--pp-muted);
+    margin: 4px 0;
+}
+.atex-pp-field-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--pp-muted);
+    margin-bottom: 4px;
+}
