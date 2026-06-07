@@ -10,7 +10,8 @@
 //
 // Run with: node experiments/atex-production-planning.test.js
 
-var planning = require('../download/atex/js/production-planning.js').planning;
+var api = require('../download/atex/js/production-planning.js');
+var planning = api.planning;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
@@ -285,6 +286,13 @@ var seqCuts = [
 ];
 var g = planning.groupBySlitter(seqCuts)[0];
 assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'], 'сорт по sequence (возр), равные стабильно, пустые в конец');
+var gDays = planning.groupBySlitter([
+    { id:'d2-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-08', sequence:1 },
+    { id:'d1-2', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2 },
+    { id:'d1-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:1 }
+])[0];
+assertEqual(gDays.cuts.map(function(c){return c.id;}), ['d1-1','d1-2','d2-1'],
+    'groupBySlitter: одинаковые sequence разных дней сортируются по дню плана');
 // ── rowsToPlanning читает cut_sequence → number|null ──
 var rp = planning.rowsToPlanning([
     { cut_id:'100', cut_no:'5', cut_sequence:'3', supply_id:'' },
@@ -374,6 +382,13 @@ var pcuts = [
 var pq = planning.planQueues(pcuts);
 assertEqual(pq.length, 2, 'planQueues: «без станка» исключён');
 assertEqual(pq.filter(function(x){return x.slitterId==='10';}).map(function(x){return x.sequence;}).sort(), [1,2], 'planQueues: sequence 1..N на станок');
+var pday = planning.planQueues([
+  { id:'d1-a', planDate:'2026-06-07', slitter:{id:'10',label:'С1'}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:2, knifeWidths:[], isFoil:false, rollerWidth:60 },
+  { id:'d1-b', planDate:'2026-06-07', slitter:{id:'10',label:'С1'}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:5, knifeWidths:[], isFoil:false, rollerWidth:60 },
+  { id:'d2-a', planDate:'2026-06-08', slitter:{id:'10',label:'С1'}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[], isFoil:false, rollerWidth:60 }
+]);
+assertEqual(pday.map(function(x){ return [x.cutId, x.sequence]; }), [['d1-b', 1], ['d1-a', 2], ['d2-a', 1]],
+    'planQueues: numbering restarts per machine/day and knives descend inside each day');
 
 // ── moveInQueue ──
 function qc(id,seq){ return { id:id, sequence:seq }; }
@@ -742,4 +757,87 @@ assertEqual(planning.progressPercent(20, 10), 100, 'progressPercent: done>total 
 assertEqual(planning.progressPercent(-3, 10), 0, 'progressPercent: done<0 → клампится до 0');
 assertEqual(planning.progressPercent('абв', 10), 0, 'progressPercent: нечисло → 0');
 
-console.log('\n' + passed + ' assertions passed');
+function req(id, val, extra) {
+    var r = { id: id, val: val };
+    Object.keys(extra || {}).forEach(function(k) { r[k] = extra[k]; });
+    return r;
+}
+
+function runGenerateCutsDeferredGpTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('15018', 'Партия сырья'),
+            req('16403', 'Кол-во план'),
+            req('24305', 'Метраж, м'),
+            req('1162', 'Статус')
+        ] },
+        strip: { id: '1073', val: 'Полоса', reqs: [
+            req('1144', 'Ширина, мм'),
+            req('1146', 'Количество'),
+            req('1147', 'Назначение'),
+            req('1149', 'На склад')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1148', 'Метраж, м'),
+            req('15015', 'Производственная резка', { ref: '1078' }),
+            req('16420', 'Кол-во рулонов'),
+            req('1154', 'Статус')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
+            req('16428', 'Производственная резка', { ref: '1078' }),
+            req('1184', 'Ширина, мм'),
+            req('1185', 'Кол-во рулонов'),
+            req('1186', 'Метраж, м'),
+            req('1187', 'Статус'),
+            req('409', 'Активно')
+        ] },
+        sleeveTask: null
+    };
+    controller.genPositions = [{ id: 'p1', materialId: 'M', width: 110, qty: 1, length: 1200 }];
+    controller.genBatches = [{ id: 'b1', materialId: 'M', dateKey: 20260601, remainder: 1000, active: true }];
+    controller.cuts = [];
+    controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }];
+    controller.setBusy = function() {};
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        if (path.indexOf('_m_new/1078') === 0) return Promise.resolve({ obj: 'cut-1' });
+        return Promise.resolve({ obj: 'obj-' + posts.length });
+    };
+
+    var result = controller.runGenerateCuts([{
+        mat: 'M',
+        positionsCovered: ['p1'],
+        strips: [
+            { width: 110, qty: 1, purpose: 'Заказ', positionIds: ['p1'] },
+            { width: 55, qty: 2, purpose: 'Склад', toStock: 1, positionIds: [] }
+        ]
+    }], []);
+
+    if (!result || typeof result.then !== 'function') {
+        assertEqual(typeof result, 'Promise', 'runGenerateCuts: returns a Promise for verification');
+        return Promise.resolve();
+    }
+
+    return result.then(function() {
+        assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1081') === 0; }), false,
+            'runGenerateCuts: GP batches are not created during planning');
+        assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), true,
+            'runGenerateCuts: strips are still created during planning');
+    });
+}
+
+runGenerateCutsDeferredGpTest().then(function() {
+    console.log('\n' + passed + ' assertions passed');
+}).catch(function(err) {
+    console.error(err && err.stack || err);
+    process.exitCode = 1;
+});
