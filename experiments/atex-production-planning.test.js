@@ -175,23 +175,62 @@ assertEqual(plan.cuts, [
       materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10' },
-    { id: '901', positionId: '701', cutId: '10' }
+    { id: '900', positionId: '700', cutId: '10', footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
 assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitter.label; }),
     ['Станок 1', 'Без станка'], 'groupBySlitter over rowsToPlanning cuts');
+
+// #3209: новая модель cut_planning отдаёт cut_no как штамп времени, а метраж
+// резки/обеспечения отдельными колонками. Существующая резка должна попадать в
+// пульт даже без старой order_approval_date: отчёт уже является источником очереди.
+var issue3209Rows = [
+    { cut_id: '23316', cut_no: '1780837651', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
+      cut_plan_date: '', cut_status: '', supply_id: '23352', supply_position_id: '21101',
+      cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
+      cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
+      order_approval_date: '', order_id: '17990', supply_footage: '800', supply_rolls: '6',
+      cut_length: '1200' },
+    { cut_id: '23316', cut_no: '1780837651', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
+      cut_plan_date: '', cut_status: '', supply_id: '23353', supply_position_id: '21102',
+      cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
+      cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
+      order_approval_date: '', order_id: '17990', supply_footage: '600', supply_rolls: '3',
+      cut_length: '1200' },
+    { cut_id: '23370', cut_no: '1780837653', cut_slitter: 'Станок 2', cut_slitter_id: '1279',
+      cut_plan_date: '', cut_status: '', supply_id: '', supply_position_id: '',
+      cut_sequence: '2', cut_material: 'MR194', cut_material_id: '2086',
+      order_approval_date: '', order_id: '17991', cut_length: '700' }
+];
+var issue3209Plan = planning.rowsToPlanning(issue3209Rows);
+assertEqual(issue3209Plan.cuts.map(function(cut) {
+    return { id: cut.id, number: cut.number, length: cut.length, visible: planning.isCutVisible(cut, '') };
+}), [
+    { id: '23316', number: '1780837651', length: 1200, visible: true },
+    { id: '23370', number: '1780837653', length: 700, visible: true }
+], 'rowsToPlanning #3209: timestamp cut_no, cut_length, and blank approval still produce visible cuts');
+assertEqual(issue3209Plan.supplies, [
+    { id: '23352', positionId: '21101', cutId: '23316', footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', footage: 600, rolls: 3 }
+], 'rowsToPlanning #3209: carries supply footage and roll count from report rows');
+assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
+    'cutRunLength #3209: cut_length is available as run-length fallback');
+assertEqual(planning.supplyFootage(issue3209Plan.supplies[0], { '23352': 0 }), 800,
+    'supplyFootage #3209: direct report footage wins over empty object fallback');
+assertEqual(planning.cutRunLength({ id: 'c1', length: 0 }, [{ id: 's1', cutId: 'c1', footage: 0 }], { s1: 500 }), 500,
+    'cutRunLength #3209: object footage remains fallback when report row has no footage');
 
 // ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
 var posRows = [
@@ -487,8 +526,8 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, sleeveDiameter:76, dueKey: Infinity },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, sleeveDiameter:0, dueKey: Infinity }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, sleeveDiameter:76, dueKey: Infinity, approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, sleeveDiameter:0, dueKey: Infinity, approved:false }
 ], 'rowsToGenPositions: маппинг + пустые ширина/кол-во/длина → 0, dueKey без срока → Infinity');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
@@ -537,7 +576,7 @@ assertEqual(planning.batchDateKey('2026-01-05') < planning.batchDateKey('2026-02
 function vc(over){ return Object.assign({ status:'Ожидает', orderApprovalDate:'31.05.2026', planDate:'02.06.2026' }, over||{}); }
 assertEqual(planning.isCutVisible(vc(), '2026-06-02'), true, 'isCutVisible: согласован, не завершён, дата совпадает → видна');
 assertEqual(planning.isCutVisible(vc({status:'Завершён'}), '2026-06-02'), false, 'isCutVisible: «Завершён» → скрыта');
-assertEqual(planning.isCutVisible(vc({orderApprovalDate:''}), '2026-06-02'), false, 'isCutVisible: заказ не согласован → скрыта');
+assertEqual(planning.isCutVisible(vc({orderApprovalDate:''}), '2026-06-02'), true, 'isCutVisible: пустое согласование не скрывает существующую резку');
 assertEqual(planning.isCutVisible(vc({planDate:'01.06.2026'}), '2026-06-02'), false, 'isCutVisible: дата плана ≠ выбранной → скрыта');
 assertEqual(planning.isCutVisible(vc({planDate:''}), '2026-06-02'), true, 'isCutVisible: дата плана пустая → видна (ещё не запланирована)');
 assertEqual(planning.isCutVisible(vc({planDate:'02.06.2026'}), ''), true, 'isCutVisible: дата не выбрана → по дате не фильтруем');
