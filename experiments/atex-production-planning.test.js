@@ -178,13 +178,13 @@ assertEqual(plan.cuts, [
       materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
@@ -333,6 +333,15 @@ var durationPlan = planning.rowsToPlanning([
 ]);
 assertEqual(durationPlan.cuts[0].duration, 12.5,
     'rowsToPlanning #3223: cut_duration → duration minutes for queue data');
+var timingPlan = planning.rowsToPlanning([
+    { cut_id:'timing-1', cut_no:'1', cut_timing:'Метраж прохода: 600 м\nИтого резка: 12 мин', supply_id:'' }
+]);
+assertEqual(timingPlan.cuts[0].timing, 'Метраж прохода: 600 м\nИтого резка: 12 мин',
+    'rowsToPlanning #3238: cut_timing → timing details for modal');
+assertEqual(planning.cutTimingModalText(timingPlan.cuts[0]), 'Метраж прохода: 600 м\nИтого резка: 12 мин',
+    'cutTimingModalText #3238: показывает сохранённый тайминг резки');
+assertEqual(planning.cutTimingModalText({ timing: '' }), 'Тайминг резки не заполнен',
+    'cutTimingModalText #3238: пустой cut_timing получает явный fallback');
 var missingCutPlanningSignals = planning.cutPlanningReportDiagnostics([
     { cut_id:'diag-1', cut_no:'1', supply_id:'s-diag', supply_position_id:'p-diag' }
 ]);
@@ -556,6 +565,7 @@ var cutMeta3189 = {
     { id: '15018', val: 'Партия сырья' },
     { id: '8629', val: 'Полоса', arr_id: '1073' },
     { id: '26584', val: 'Длительность, минут' },
+    { id: '26990', val: 'Тайминг' },
     { id: '16422', val: 'Кол-во факт' }
   ]
 };
@@ -585,6 +595,8 @@ assertEqual(planning.reqIdByName(cutMeta3189, 'Кол-во план'), '16403',
   'reqIdByName #3215: Кол-во план остаётся 16403');
 assertEqual(planning.reqIdByName(cutMeta3189, 'Длительность, минут'), '26584',
   'reqIdByName #3223: Длительность, минут — 26584');
+assertEqual(planning.reqIdByName(cutMeta3189, 'Тайминг'), '26990',
+  'reqIdByName #3238: Тайминг — 26990');
 var missingWriteFields = planning.cutWriteDiagnostics({
   plannedRuns: '16403',
   duration: null,
@@ -841,6 +853,9 @@ assertEqual(plannedCutDuration(600, 3, opT), 12,
     'plannedCutDurationMinutes #3223: общая длительность = проходы × намотка одного прогона');
 assertEqual(plannedCutDuration(600, 0, opT), 0,
     'plannedCutDurationMinutes #3223: без плановых проходов длительность 0');
+assertEqual(planning.cutTimingDetails(600, 3, opT),
+    'Метраж прохода: 600 м\nПлановых проходов: 3\nНамотка 1 прохода: 4 мин\nИтого резка: 4 * 3 = 12 мин\nНормы намотки: WIND_300=1.2 мин; WIND_600=4 мин; WIND_900=5 мин; WIND_1100=5.6 мин',
+    'cutTimingDetails #3238: сохраняет понятную расшифровку длительности резки');
 
 // Расписание очереди: старт/финиш от 08:00 (480 мин) + лидер 2 + намотка по метражу.
 var schedCuts = [
@@ -1013,6 +1028,7 @@ function runGenerateCutsDeferredGpTest() {
             req('24308', 'Очередность'),
             req('24305', 'Метраж, м'),
             req('26584', 'Длительность, минут'),
+            req('26990', 'Тайминг'),
             req('1162', 'Статус')
         ] },
         strip: { id: '1073', val: 'Полоса', reqs: [
@@ -1082,6 +1098,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3215: t24308 пишет Очередность при создании');
         assertEqual(cutPost.fields.t26584, 5.9,
             'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
+        assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
+            'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1081') === 0; }), false,
             'runGenerateCuts: GP batches are not created during planning');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), true,
@@ -1100,6 +1118,7 @@ function runGenerateCutsSlitterAffinityTest() {
             req('24308', 'Очередность'),
             req('24305', 'Метраж, м'),
             req('26584', 'Длительность, минут'),
+            req('26990', 'Тайминг'),
             req('1162', 'Статус')
         ] },
         strip: { id: '1073', val: 'Полоса', reqs: [
