@@ -116,6 +116,15 @@
         active: 'В работе',   // #3242: «Активно» переименовано в «В работе»
         status: 'Статус'
     };
+    // Реквизиты «Партии ГП» (#3242: состав резки, up = резка). Резолв по имени.
+    var FINISHED_BATCH_REQ = {
+        width: 'Ширина, мм',
+        rolls: 'Кол-во рулонов',
+        footage: 'Метраж, м',
+        active: 'В работе'
+    };
+    // #3242: «Кол-во план» переименовано в «Кол-во резок план» (fallback на старое имя).
+    var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
     var SLEEVE_TASK_REQ = {
         diameter: 'Диаметр, мм',
         actualQty: 'Кол-во факт',
@@ -199,6 +208,15 @@
         return found ? String(found.id) : null;
     }
 
+    // Первый найденный reqId по списку имён-синонимов (для переименованных колонок).
+    function reqIdByAnyName(meta, names) {
+        for (var i = 0; i < (names || []).length; i++) {
+            var id = reqIdByName(meta, names[i]);
+            if (id) return id;
+        }
+        return null;
+    }
+
     // Как «Обеспечение» связано с «Производственной резкой» в текущей метасхеме:
     // reference — поле-ссылка. Child-array из временной схемы #3180 не используем:
     // по #3185 резка снова самостоятельная таблица.
@@ -226,6 +244,41 @@
             active: values && values.active,
             status: values && values.status,
             cut: values && values.cutId
+        });
+    }
+
+    // #3242: поля записи «Партия ГП» (состав резки): Ширина, Кол-во рулонов, Метраж, «В работе».
+    function buildFinishedBatchFields(finishedBatchMeta, values) {
+        var reqIds = {
+            width: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.width),
+            rolls: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.rolls),
+            footage: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.footage),
+            active: activeReqId(finishedBatchMeta)
+        };
+        return buildFields(reqIds, {
+            width: values && values.width,
+            rolls: values && values.rolls,
+            footage: values && values.footage,
+            active: values && values.active
+        });
+    }
+
+    // #3242: поля записи «Обеспечение» со ссылкой на «Партию ГП» (вместо ссылки на резку):
+    // Метраж, Кол-во рулонов, «В работе», Статус, ссылка на «Партию ГП».
+    function buildSupplyFieldsForFinishedBatch(supplyMeta, values) {
+        var reqIds = {
+            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
+            rolls: reqIdByName(supplyMeta, SUPPLY_REQ.rolls),
+            active: activeReqId(supplyMeta),
+            status: reqIdByName(supplyMeta, SUPPLY_REQ.status),
+            finishedBatch: reqIdByName(supplyMeta, SUPPLY_REQ.finishedBatch)
+        };
+        return buildFields(reqIds, {
+            footage: values && values.footage,
+            rolls: values && values.rolls,
+            active: values && values.active,
+            status: values && values.status,
+            finishedBatch: values && values.finishedBatchId
         });
     }
 
@@ -1099,6 +1152,44 @@
         return out;
     }
 
+    // #3242: состав резки = «Партия ГП» по каждой РАЗЛИЧНОЙ ширине (Σ рулонов всех полос
+    // этой ширины × прогоны). Покрывает и заказ, и склад: излишек (произведено −
+    // Σ обеспечений этой ширины) остаётся складом той же Партией ГП, отдельной записи не нужно.
+    // → [{ width, rolls, length }] по порядку первого появления ширины.
+    function producedBatchesForLayout(layout, runLength, plannedRuns) {
+        var runs = Number(plannedRuns) || 0;
+        if (runs <= 0) runs = plannedRunsForLayout(layout, {});
+        var len = Number(runLength) || 0;
+        var byWidth = {};
+        var order = [];
+        (layout && layout.strips || []).forEach(function(s) {
+            var width = Number(s.width) || 0;
+            var qty = Number(s.qty) || 0;
+            if (width <= 0 || qty <= 0) return;
+            var key = stripWidthKey(width);
+            if (!(key in byWidth)) { byWidth[key] = { width: width, rolls: 0, length: len }; order.push(key); }
+            byWidth[key].rolls = round3(byWidth[key].rolls + qty * runs);
+        });
+        return order.map(function(k) { return byWidth[k]; });
+    }
+
+    // #3242: план обеспечений резки — каждая покрытая позиция ссылается на «Партию ГП»
+    // своей ширины, забирая supplyRollsForPosition рулонов и метраж позиции (posLength).
+    // → [{ positionId, width, rolls, footage }] (позиции с нулевыми рулонами пропускаются).
+    function supplyPlanForLayout(layout, positions, plannedRuns, posLength) {
+        var byId = positionMap(positions);
+        var out = [];
+        (layout && layout.positionsCovered || []).forEach(function(pid) {
+            var p = byId[String(pid)];
+            if (!p) return;
+            var rolls = supplyRollsForPosition(layout, p, plannedRuns);
+            if (!(rolls > 0)) return;
+            var len = posLength ? (Number(posLength[String(pid)]) || 0) : (Number(p.length) || 0);
+            out.push({ positionId: String(pid), width: Number(p.width) || 0, rolls: rolls, footage: len });
+        });
+        return out;
+    }
+
     function finishedBatchesForLayout(layout, cutId, runLength, plannedRuns) {
         var runs = Number(plannedRuns) || plannedRunsForLayout(layout, {});
         var len = Number(runLength) || 0;
@@ -1808,6 +1899,8 @@
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
         supplyCutRelation: supplyCutRelation,
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
+        buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
+        buildFinishedBatchFields: buildFinishedBatchFields,
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
@@ -1850,6 +1943,8 @@
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
         finishedBatchesForLayout: finishedBatchesForLayout,
+        producedBatchesForLayout: producedBatchesForLayout,
+        supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
         sleeveTasksForLayout: sleeveTasksForLayout,
         sleeveMinutes: sleeveMinutes,
@@ -2488,7 +2583,7 @@
         var reqIds = {
             slitter: reqIdByName(meta, CUT_REQ.slitter),
             materialBatch: reqIdByName(meta, CUT_REQ.materialBatch),
-            plannedRuns: reqIdByName(meta, CUT_REQ.plannedRuns),
+            plannedRuns: reqIdByAnyName(meta, CUT_PLANNED_RUNS_NAMES),   // #3242: «Кол-во резок план»
             duration: reqIdByName(meta, CUT_REQ.duration),
             timing: reqIdByName(meta, CUT_REQ.timing),
             length: reqIdByName(meta, CUT_REQ.length),
@@ -2527,39 +2622,20 @@
 
         function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
-            console.log('[pp] 🔪 createCut: резка #' + id + ' создана. создаём обеспечения для ' + selectedPositions.length + ' позиций:', selectedPositions);
-            // Создать обеспечения для выбранных позиций (#3194)
-            var supplyPromises = selectedPositions.map(function(positionId) {
-                var position = posById[String(positionId)] || {};
-                var footage = Number(position.length) || 0;
-                var supplyFields = buildSupplyFieldsForCut(self.meta.supply, self.meta.cut, {
-                    cutId: String(id),
-                    footage: footage > 0 ? footage : '',
-                    rolls: remainingRollsForPosition(position, self.supplies),
-                    active: '1',
-                    status: SUPPLY_STATUSES[0]
-                });
-                return self.post('_m_new/' + self.meta.supply.id + '?JSON&up=' + encodeURIComponent(positionId), supplyFields)
-                    .then(function(res) {
-                        var sid = res && (res.obj || res.id || res.i);
-                        console.log('[pp] 🔪 createCut: обеспечение #' + sid + ' для позиции ' + positionId + ' → резка #' + id);
-                        return sid;
-                    }).catch(function(err) {
-                        console.error('[pp] 🔪 createCut: ошибка обеспечения для позиции ' + positionId + ':', err.message);
-                        return null; // не блокируем остальные
-                    });
-            });
-            return Promise.all(supplyPromises).then(function(supplyIds) {
-                var created = supplyIds.filter(Boolean);
-                console.log('[pp] 🔪 createCut: создано обеспечений: ' + created.length + ' из ' + selectedPositions.length);
-                return self.reload().then(function() {
-                    self.setBusy(false);
-                    self.draft = self.blankDraft();
-                    self.selectedCutId = String(id);
-                    self.closeForm();
-                    self.notify('Производственная резка #' + id + ' создана' + (created.length > 0 ? ' с ' + created.length + ' обеспечениями' : ''), 'success');
-                    self.render();
-                });
+            // #3242: «Обеспечение» теперь ссылается на «Партию ГП», которой в ручном
+            // создании резки ещё нет (состав добавляется отдельно). Поэтому здесь
+            // обеспечения НЕ создаём — иначе вышли бы «сироты» без ссылки. Привязка
+            // позиций к резке идёт через генерацию/планирование (создаёт Партии ГП).
+            // Ручная привязка к позициям — отдельная доработка (#3242 PR3).
+            console.log('[pp] 🔪 createCut: резка #' + id + ' создана (без обеспечений; выбрано позиций: ' + selectedPositions.length + ')');
+            return self.reload().then(function() {
+                self.setBusy(false);
+                self.draft = self.blankDraft();
+                self.selectedCutId = String(id);
+                self.closeForm();
+                self.notify('Производственная резка #' + id + ' создана' +
+                    (selectedPositions.length ? ' (привязка позиций — через планирование)' : ''), 'success');
+                self.render();
             });
         }
 
@@ -2581,9 +2657,16 @@
         if (!opts.positionId) { this.notify('Выберите позицию заказа', 'error'); return; }
         if (!opts.cutId) { this.notify('Не выбрана резка', 'error'); return; }
 
-        var fields = buildSupplyFieldsForCut(meta, this.meta.cut, {
+        // #3242: «Обеспечение» теперь ссылается на «Партию ГП», а не на резку. Ручная
+        // привязка «позиция → резка» без выбора конкретной Партии ГП создала бы
+        // «сироту» без ссылки — поэтому временно заблокирована до доработки UI (#3242 PR3).
+        if (!opts.finishedBatchId) {
+            this.notify('Ручная привязка к резке временно недоступна: обеспечение теперь ссылается на «Партию ГП». Используйте планирование.', 'error');
+            return;
+        }
+        var fields = buildSupplyFieldsForFinishedBatch(meta, {
             footage: opts.footage,
-            cutId: opts.cutId,
+            finishedBatchId: opts.finishedBatchId,
             rolls: opts.rolls,
             active: opts.active === undefined ? '1' : (truthyFlag(opts.active) ? '1' : '0'),
             status: opts.status || SUPPLY_STATUSES[0]
@@ -2981,9 +3064,9 @@
             this.notify('Модуль раскладки cut-layout не загружен', 'error');
             return;
         }
-        if (!this.meta.cut || !this.meta.supply || !this.meta.strip) {
-            console.error('[pp] ⚙️ generateCuts: не найдены метаданные', {cut:!!this.meta.cut, supply:!!this.meta.supply, strip:!!this.meta.strip});
-            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Полоса)', 'error');
+        if (!this.meta.cut || !this.meta.supply || !this.meta.finishedBatch) {
+            console.error('[pp] ⚙️ generateCuts: не найдены метаданные', {cut:!!this.meta.cut, supply:!!this.meta.supply, finishedBatch:!!this.meta.finishedBatch});
+            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Партия ГП)', 'error');
             return;
         }
 
@@ -3076,31 +3159,25 @@
         });
     };
 
-    // Последовательное создание записей по подготовленным раскладкам:
-    // Резка → Полосы → задания на втулки → Обеспечения. Партии ГП не создаются
-    // на этапе планирования: выпуск появляется только после успешного завершения резки.
-    // Зависимые _m_new не запускаются параллельно.
+    // Последовательное создание записей по подготовленным раскладкам (#3242):
+    // Резка → Партии ГП (состав, по ширинам) → задания на втулки → Обеспечения
+    // (ссылаются на «Партию ГП» нужной ширины). Излишек рулонов сверх обеспечений —
+    // склад (та же Партия ГП без своего обеспечения). Зависимые _m_new не параллелятся.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
         var self = this;
         var cutMeta = this.meta.cut;
-        var stripMeta = this.meta.strip;
+        var finishedBatchMeta = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         var supplyMeta = this.meta.supply;
 
         var cutReqIds = {
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
-            plannedRuns: reqIdByName(cutMeta, CUT_REQ.plannedRuns),
+            plannedRuns: reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES),
             duration: reqIdByName(cutMeta, CUT_REQ.duration),
             timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
-        };
-        var stripReqIds = {
-            width: reqIdByName(stripMeta, STRIP_REQ.width),
-            qty: reqIdByName(stripMeta, STRIP_REQ.qty),
-            purpose: reqIdByName(stripMeta, STRIP_REQ.purpose),
-            toStock: reqIdByName(stripMeta, STRIP_REQ.toStock)
         };
         var sleeveMeta = this.meta.sleeveTask;
         var sleeveReqIds = sleeveMeta ? {
@@ -3155,7 +3232,6 @@
         layouts.forEach(function(lay, layIdx) {
             chain = chain.then(function() {
                 self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
-                var covered = lay.positionsCovered || [];
                 var plannedRuns = plannedRunsForLayout(lay, posById);
                 var runLength = layoutRunLength(lay, posById);
                 var duration = plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes);
@@ -3191,21 +3267,28 @@
                     throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
 
-                function createStrips(cutId) {
-                    var stripChain = Promise.resolve();
-                    (lay.strips || []).forEach(function(strip) {
-                        stripChain = stripChain.then(function() {
-                            var fields = buildFields(stripReqIds, {
-                                width: strip.width,
-                                qty: strip.qty,
-                                purpose: strip.purpose,
-                                toStock: isStockStrip(strip) ? '1' : '0'
+                // #3242: состав резки — «Партия ГП» по каждой ширине (Σ рулонов × прогоны).
+                // Запоминаем id по ширине, чтобы обеспечения сослались на нужную партию.
+                var widthToBatchId = {};
+                function createFinishedBatches(cutId) {
+                    var batchChain = Promise.resolve();
+                    producedBatchesForLayout(lay, runLength, plannedRuns).forEach(function(batch) {
+                        batchChain = batchChain.then(function() {
+                            var fields = buildFinishedBatchFields(finishedBatchMeta, {
+                                width: batch.width,
+                                rolls: batch.rolls,
+                                footage: batch.length > 0 ? batch.length : '',
+                                active: '1'
                             });
-                            return self.post('_m_new/' + stripMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
-                                .then(function() { nStrips += 1; });
+                            return self.post('_m_new/' + finishedBatchMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
+                                .then(function(res) {
+                                    var bid = res && (res.obj || res.id || res.i);
+                                    if (bid) widthToBatchId[stripWidthKey(batch.width)] = String(bid);
+                                    nStrips += 1;
+                                });
                         });
                     });
-                    return stripChain;
+                    return batchChain;
                 }
 
                 function createSleeveTasks() {
@@ -3229,33 +3312,39 @@
                     return taskChain;
                 }
 
-                function createSupplies(cutId) {
+                // #3242: обеспечение ссылается на «Партию ГП» нужной ширины (не на резку).
+                // Излишек рулонов сверх обеспечений остаётся складом той же Партией ГП.
+                function createSupplies() {
                     var supChain = Promise.resolve();
-                    covered.forEach(function(positionId) {
+                    supplyPlanForLayout(lay, posById, plannedRuns, posLength).forEach(function(plan) {
                         supChain = supChain.then(function() {
-                            var position = posById[String(positionId)] || { id: positionId, width: 0 };
-                            var len = Number(posLength[String(positionId)]) || 0;
-                            var fields = buildSupplyFieldsForCut(supplyMeta, cutMeta, {
-                                cutId: cutId,
-                                footage: len > 0 ? len : '',
-                                rolls: supplyRollsForPosition(lay, position, plannedRuns),
+                            var batchId = widthToBatchId[stripWidthKey(plan.width)];
+                            if (!batchId) {
+                                console.error('[pp] ⚙️ runGenerateCuts: нет «Партии ГП» ширины ' + plan.width +
+                                    ' для позиции ' + plan.positionId + ' — обеспечение не создаём (не сирота)');
+                                return;
+                            }
+                            var fields = buildSupplyFieldsForFinishedBatch(supplyMeta, {
+                                finishedBatchId: batchId,
+                                footage: plan.footage > 0 ? plan.footage : '',
+                                rolls: plan.rolls,
                                 active: '1',
                                 status: SUPPLY_STATUSES[0]
                             });
-                            return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), fields)
+                            return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(plan.positionId), fields)
                                 .then(function() { nPositions += 1; });
                         });
                     });
                     return supChain;
                 }
 
-                // 1) корневая резка, 2) полосы, 3) втулки, 4) обеспечения.
+                // 1) корневая резка, 2) Партии ГП (состав), 3) втулки, 4) обеспечения→Партия ГП.
                 return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
                     if (!cutId) throw new Error('Сервер не вернул id новой резки');
-                    return createStrips(cutId)
+                    return createFinishedBatches(cutId)
                         .then(function() { return createSleeveTasks(); })
-                        .then(function() { return createSupplies(cutId); });
+                        .then(function() { return createSupplies(); });
                 }).then(function() {
                     // Резка со всеми полосами и обеспечениями готова → +1 к прогрессу.
                     doneCuts += 1;
