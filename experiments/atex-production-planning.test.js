@@ -645,12 +645,12 @@ var grp3219 = planning.rowsToGenPositions([
   { position_id:'not-approved', position_material_id:'2086', position_width:'25', position_qty:'35', position_winding:'OUT' }
 ]);
 assertEqual(grp3219.map(function(p) {
-  return { id:p.id, windDir:p.windDir, windLength:p.windLength, approved:p.approved };
+  return { id:p.id, length:p.length, windDir:p.windDir, windLength:p.windLength, approved:p.approved };
 }), [
-  { id:'o-approved', windDir:'OUT', windLength:450, approved:true },
-  { id:'p-approved', windDir:'IN', windLength:600, approved:true },
-  { id:'not-approved', windDir:'OUT', windLength:0, approved:false }
-], 'rowsToGenPositions #3219: order/position approval plus winding direction/length');
+  { id:'o-approved', length:450, windDir:'OUT', windLength:450, approved:true },
+  { id:'p-approved', length:600, windDir:'IN', windLength:600, approved:true },
+  { id:'not-approved', length:0, windDir:'OUT', windLength:0, approved:false }
+], 'rowsToGenPositions #3234: wind_length fallback feeds length for generated cut payloads');
 assertEqual(planning.groupPositionsByPlanningProfile([
   { id:'p1', materialId:'2086', windDir:'OUT', windLength:600 },
   { id:'p2', materialId:'2086', windDir:'OUT', windLength:600 },
@@ -676,6 +676,23 @@ assertEqual(planning.positionLengthMap([
   { id:'12' }                            // нет length → 0
 ]), { '10':1200, '11':0, '12':0 }, 'positionLengthMap: id→длина, пустой id пропущен');
 assertEqual(planning.positionLengthMap(null), {}, 'positionLengthMap: null → {}');
+var timingOpTimes = { WIND_600:4 };
+var missingTiming = planning.cutGenerationTimingDiagnostics([
+  { positionsCovered:['p-no-length'], strips:[{ width:25, qty:1, purpose:'Заказ' }] }
+], [{ id:'p-no-length', width:25, qty:1, length:0 }], timingOpTimes);
+assertEqual(missingTiming.map(function(d) { return d.key + ':' + d.reason + ':' + d.layoutIndex; }),
+  ['length:value:0'], 'cutGenerationTimingDiagnostics #3234: ловит отсутствующий метраж до сохранения резки');
+assertEqual(missingTiming[0].message.indexOf('p-no-length') >= 0, true,
+  'cutGenerationTimingDiagnostics #3234: сообщение указывает позицию без метража');
+var missingWindTime = planning.cutGenerationTimingDiagnostics([
+  { positionsCovered:['p-no-time'], strips:[{ width:25, qty:1, purpose:'Заказ' }] }
+], [{ id:'p-no-time', width:25, qty:1, length:600 }], {});
+assertEqual(missingWindTime.map(function(d) { return d.key + ':' + d.reason + ':' + d.layoutIndex; }),
+  ['duration:value:0'], 'cutGenerationTimingDiagnostics #3234: ловит отсутствующие нормы WIND_* до сохранения резки');
+assertEqual(planning.cutGenerationTimingDiagnostics([
+  { positionsCovered:['p-ok'], strips:[{ width:25, qty:1, purpose:'Заказ' }] }
+], [{ id:'p-ok', width:25, qty:1, length:600 }], timingOpTimes), [],
+  'cutGenerationTimingDiagnostics #3234: валидная раскладка не даёт ошибок подготовки');
 
 // ── aggregateStrips: строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} } ──
 var agg = planning.aggregateStrips([
