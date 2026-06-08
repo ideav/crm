@@ -125,3 +125,14 @@
             return `${ day }.${ month }.${ year } ${ hours }:${ minutes }:${ seconds }`;
         }
 
+        // Значение «главного» поля записи для заголовка/ссылок (.integram-title-link,
+        // .integram-parent-record-link). Если первая колонка таблицы — DATETIME, API
+        // отдаёт её unix-штампом (секунды) — показываем как дату-время с секундами
+        // (issue #3247). Не-штампы (DATE «20260601», числа, текст, уже форматированные
+        // строки) остаются как есть: parseUnixTimestamp строго требует >= 1e9 и год 2001–2100.
+        formatRecordTitleValue(value) {
+            const raw = String(value == null ? '' : value);
+            const ts = this.parseUnixTimestamp(raw);
+            return ts ? this.formatDateTimeDisplay(ts) : raw;
+        }
+
