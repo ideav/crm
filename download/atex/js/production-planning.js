@@ -281,11 +281,13 @@
             }
             groups[key].cuts.push(c);
         });
-        // Сортировка резок внутри каждой группы: день плана, затем sequence
-        // (возр., null/NaN — в конец, стабильно). Sequence теперь сбрасывается
-        // на каждый день, поэтому дата нужна, чтобы одинаковые номера разных дней
-        // не перемешивались при снятом фильтре даты.
+        // Сортировка резок внутри каждой группы: день плана, затем ножи по
+        // убыванию (#3236), затем sequence (возр., null/NaN — в конец,
+        // стабильно). Sequence теперь сбрасывается на каждый день, поэтому дата
+        // нужна, чтобы одинаковые номера разных дней не перемешивались при
+        // снятом фильтре даты.
         function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
+        function knifeKey(c) { var n = Number(c && c.knifeCount); return isFinite(n) ? n : 0; }
         function cmpCutPlanDay(a, b) {
             var ak = batchDateKey(a && a.planDate), bk = batchDateKey(b && b.planDate);
             if (ak === Infinity && bk !== Infinity) return 1;
@@ -296,7 +298,12 @@
         }
         Object.keys(groups).forEach(function(k) {
             groups[k].cuts = groups[k].cuts.map(function(c, i) { return { c: c, i: i }; })
-                .sort(function(a, b) { return cmpCutPlanDay(a.c, b.c) || seqKey(a.c) - seqKey(b.c) || a.i - b.i; })
+                .sort(function(a, b) {
+                    return cmpCutPlanDay(a.c, b.c)
+                        || (knifeKey(b.c) - knifeKey(a.c))
+                        || seqKey(a.c) - seqKey(b.c)
+                        || a.i - b.i;
+                })
                 .map(function(x) { return x.c; });
         });
         return order
@@ -1260,6 +1267,23 @@
         return day > 0 ? s + ' +' + day + 'д' : s;
     }
 
+    function formatClockHHMM(min){
+        var m = Math.round(Number(min) || 0);
+        var hm = ((m % 1440) + 1440) % 1440;
+        var h = Math.floor(hm / 60), mm = hm % 60;
+        return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+    }
+
+    function formatCutStartTime(sc) {
+        return sc ? formatClockHHMM(sc.startMin) : '—';
+    }
+
+    function formatCutWindingLabel(cut) {
+        var raw = cut && cut.winding;
+        var winding = normWinding(raw) || String(raw == null ? '' : raw).trim() || '—';
+        return 'Намотка: ' + winding;
+    }
+
     function formatScheduleLine(sc, runLength, hasWindingPoints) {
         if (!sc) return '';
         var dur = stripNum(sc.durationMin);
@@ -1679,6 +1703,9 @@
         buildSchedule: buildSchedule,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
+        formatClockHHMM: formatClockHHMM,
+        formatCutStartTime: formatCutStartTime,
+        formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
         DAY_START_MIN: DAY_START_MIN,
         DAY_END_MIN: DAY_END_MIN,
@@ -3548,13 +3575,13 @@
             var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
-            var windingText = c.winding ? c.winding : '—';
-            if (Number(c.length) > 0) windingText += ' · ' + round3(c.length) + ' м';
+            var sc = schedById[String(c.id)];
+            var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
             var info = el('div', { class: 'atex-pp-cut-info' }, [
-                el('span', { class: 'atex-pp-cut-num', text: '№ ' + (formatCutNumber(c.number) || c.id) }),
+                el('span', { class: 'atex-pp-cut-num', title: cutNumberTitle, text: formatCutStartTime(sc) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
-                el('span', { class: 'atex-pp-cut-winding', text: 'Намотка: ' + windingText }),
+                el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
                 el('span', { class: 'atex-pp-cut-runs', text: formatCutRuns(c.plannedRuns, runLenByCut[String(c.id)]) }),
                 el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
                 el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
@@ -3573,7 +3600,6 @@
             });
 
             // Строка времени: старт–финиш (длительность) от начала смены 08:00.
-            var sc = schedById[String(c.id)];
             if (sc) {
                 var runLengthForCut = runLenByCut[String(c.id)];
                 var scheduleText = formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
