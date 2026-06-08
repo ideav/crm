@@ -295,7 +295,14 @@ var seqCuts = [
     { id:'4', slitter:{id:'10',label:'Станок 1'}, sequence:1 }
 ];
 var g = planning.groupBySlitter(seqCuts)[0];
-assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'], 'сорт по sequence (возр), равные стабильно, пустые в конец');
+assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'], 'сорт по sequence (возр), когда knifeCount не задан; равные стабильно, пустые в конец');
+var gKnives = planning.groupBySlitter([
+    { id:'low-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:1, knifeCount:3 },
+    { id:'high-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2, knifeCount:7 },
+    { id:'mid-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:3, knifeCount:5 }
+])[0];
+assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['high-seq','mid-seq','low-seq'],
+    'groupBySlitter #3236: внутри дня видимая очередь сортирует ножи по убыванию, даже если sequence старый');
 var gDays = planning.groupBySlitter([
     { id:'d2-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-08', sequence:1 },
     { id:'d1-2', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2 },
@@ -844,6 +851,16 @@ assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationM
     'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
 assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
 assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
+assertEqual(planning.formatCutStartTime({ startMin:482 }), '08:02',
+    'formatCutStartTime #3236: .atex-pp-cut-num показывает плановый старт ЧЧ:ММ');
+assertEqual(planning.formatCutStartTime({ startMin:1440 + 90 }), '01:30',
+    'formatCutStartTime #3236: .atex-pp-cut-num остаётся только ЧЧ:ММ без суффикса дня');
+assertEqual(planning.formatCutStartTime(null), '—',
+    'formatCutStartTime #3236: нет расписания → прочерк');
+assertEqual(planning.formatCutWindingLabel({ winding:'OUT', length:1200 }), 'Намотка: OUT',
+    'formatCutWindingLabel #3236: .atex-pp-cut-winding не показывает метраж');
+assertEqual(planning.formatCutWindingLabel({ winding:'', length:1200 }), 'Намотка: —',
+    'formatCutWindingLabel #3236: пустая намотка → прочерк без метража');
 
 // Рабочее окно 08:00–16:30: резка, не влезающая до конца окна, переносится на след. день.
 // Узкое окно для теста (484): A влезает, B (старт 485.2 > 484) → день+1, 08:00 + setup.
