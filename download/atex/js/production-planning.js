@@ -2077,23 +2077,6 @@
         });
     };
 
-    // Карта «партия сырья → вид сырья» (object/), только для проверки стоп-листа.
-    // Дропдаун партий сырья по-прежнему берётся из отчёта material_batches — не меняем.
-    AtexProductionPlanning.prototype.loadBatchMaterialMap = function() {
-        var self = this;
-        var meta = this.meta.materialBatch;
-        if (!meta) { this.batchMaterialById = {}; return Promise.resolve(); }
-        var matIdx = columnIndex(meta, 'Вид сырья');
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var map = {};
-            (rows || []).forEach(function(r) {
-                var ref = (matIdx >= 0 && r.r) ? parseRef(r.r[matIdx]) : { id: null };
-                map[String(r.i)] = ref.id ? String(ref.id) : '';
-            });
-            self.batchMaterialById = map;
-        });
-    };
-
     // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
     // подчинённая — прямое object/-чтение её не отдаёт, отчёт возвращает все.
     // Параллельно строит this.genPositions = [{ id, materialId, width, qty }]
@@ -2123,10 +2106,14 @@
     // Результат: [{ id, materialId, dateKey (число), remainder }] для pickBatchFIFO.
     // Вид сырья: parseRef(«Вид сырья»).id; Дата прихода → batchDateKey;
     // Остаток, м² → Number (ключевое поле для FIFO-выбора).
+    // Заодно строит this.batchMaterialById = { партия → вид сырья } для проверки стоп-листа
+    // станка: это подмножество тех же строк, поэтому отдельный запрос к таблице
+    // «Партия сырья» (бывш. loadBatchMaterialMap, LIMIT 1000) не нужен — экономим чтение
+    // и убираем рассинхрон лимитов (1000 vs 5000).
     AtexProductionPlanning.prototype.loadGenBatches = function() {
         var self = this;
         var meta = this.meta.materialBatch;
-        if (!meta) { this.genBatches = []; return Promise.resolve(); }
+        if (!meta) { this.genBatches = []; this.batchMaterialById = {}; return Promise.resolve(); }
         var matIdx = columnIndex(meta, 'Вид сырья');
         var dateIdx = columnIndex(meta, 'Дата прихода');
         var remIdx = columnIndex(meta, 'Остаток, м²');
@@ -2135,19 +2122,23 @@
         if (activeIdx < 0) activeIdx = columnIndex(meta, 'Активная');
         if (activeIdx < 0) activeIdx = columnIndex(meta, 'Действует');
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var matById = {};
             self.genBatches = (rows || []).map(function(rec) {
                 var r = rec.r || [];
                 var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
+                var materialId = mat.id ? String(mat.id) : '';
+                matById[String(rec.i)] = materialId;
                 return {
                     id: String(rec.i),
                     label: r[0] == null ? '' : String(r[0]),
-                    materialId: mat.id ? String(mat.id) : '',
+                    materialId: materialId,
                     dateKey: dateIdx >= 0 ? batchDateKey(r[dateIdx]) : Infinity,
                     remainder: remIdx >= 0 ? (Number(r[remIdx]) || 0) : 0,
                     remainderLinear: remLinIdx >= 0 ? (Number(r[remLinIdx]) || 0) : 0,
                     active: activeIdx >= 0 ? r[activeIdx] : ''
                 };
             });
+            self.batchMaterialById = matById;
         });
     };
 
@@ -4128,9 +4119,8 @@
                 return Promise.all([
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadMaterialBatches(),
-                    self.loadBatchMaterialMap(),
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
-                    self.loadGenBatches(), // FIFO-партии для генерации резок
+                    self.loadGenBatches(), // FIFO-партии для генерации резок + карта batchMaterialById (стоп-лист)
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
                     self.loadDaySettings(),    // DAY_START_HOUR/DAY_END_HOUR для рабочего окна
