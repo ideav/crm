@@ -178,13 +178,13 @@ assertEqual(plan.cuts, [
       materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
@@ -307,6 +307,11 @@ var runsPlan = planning.rowsToPlanning([
 ]);
 assertEqual(runsPlan.cuts[0].plannedRuns, 3,
     'rowsToPlanning #3219: cut_planned_runs → plannedRuns for queue card');
+var durationPlan = planning.rowsToPlanning([
+    { cut_id:'duration-1', cut_no:'1', cut_duration:'12,5', supply_id:'' }
+]);
+assertEqual(durationPlan.cuts[0].duration, 12.5,
+    'rowsToPlanning #3223: cut_duration → duration minutes for queue data');
 var gpPlan = planning.rowsToPlanning([
     { cut_id:'', supply_id:'s-gp', supply_position_id:'p-gp', supply_finished_batch_id:'fb-1' },
     { cut_id:'c-cut', cut_no:'1', supply_id:'s-cut', supply_position_id:'p-cut', cut_sequence:'1' },
@@ -391,6 +396,7 @@ assertEqual(c.knifeCount, 14, 'descriptor knifeCount number');
 assertEqual(c.winding, 'OUT', 'descriptor winding normalized');
 assertEqual(c.rollerWidth, 60, 'descriptor rollerWidth number');
 assertEqual(c.plannedRuns, 0, 'descriptor plannedRuns defaults to 0');
+assertEqual(c.duration, 0, 'descriptor duration defaults to 0');
 assertEqual(c.isFoil, true, 'descriptor isFoil по имени Фольга');
 assertEqual(c.knifeWidths, [], 'descriptor knifeWidths пусто');
 // planQueues
@@ -519,6 +525,7 @@ var cutMeta3189 = {
     { id: '24308', val: 'Очередность' },
     { id: '15018', val: 'Партия сырья' },
     { id: '8629', val: 'Полоса', arr_id: '1073' },
+    { id: '26584', val: 'Длительность, минут' },
     { id: '16422', val: 'Кол-во факт' }
   ]
 };
@@ -546,6 +553,8 @@ assertEqual(planning.reqIdByName(cutMeta3189, 'Очередность'), '24308'
   'reqIdByName #3215: Очередность — 24308, не Кол-во план');
 assertEqual(planning.reqIdByName(cutMeta3189, 'Кол-во план'), '16403',
   'reqIdByName #3215: Кол-во план остаётся 16403');
+assertEqual(planning.reqIdByName(cutMeta3189, 'Длительность, минут'), '26584',
+  'reqIdByName #3223: Длительность, минут — 26584');
 assertEqual(planning.supplyCutRelation(supplyMeta3189, cutMeta3189), {
   mode: 'reference',
   reqId: '16428',
@@ -757,6 +766,13 @@ assertEqual(planning.windingMinutes(150, pts), 0.6, 'windingMinutes: 150 м → 
 assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 4.5 (между 600 и 900)');
 assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
 assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
+var plannedCutDuration = typeof planning.plannedCutDurationMinutes === 'function'
+    ? planning.plannedCutDurationMinutes
+    : function() { return undefined; };
+assertEqual(plannedCutDuration(600, 3, opT), 12,
+    'plannedCutDurationMinutes #3223: общая длительность = проходы × намотка одного прогона');
+assertEqual(plannedCutDuration(600, 0, opT), 0,
+    'plannedCutDurationMinutes #3223: без плановых проходов длительность 0');
 
 // Расписание очереди: старт/финиш от 08:00 (480 мин) + лидер 2 + намотка по метражу.
 var schedCuts = [
@@ -900,6 +916,7 @@ function runGenerateCutsDeferredGpTest() {
             req('16403', 'Кол-во план'),
             req('24308', 'Очередность'),
             req('24305', 'Метраж, м'),
+            req('26584', 'Длительность, минут'),
             req('1162', 'Статус')
         ] },
         strip: { id: '1073', val: 'Полоса', reqs: [
@@ -928,6 +945,7 @@ function runGenerateCutsDeferredGpTest() {
     controller.genBatches = [{ id: 'b1', materialId: 'M', dateKey: 20260601, remainder: 1000, active: true }];
     controller.cuts = [];
     controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }];
+    controller.opTimes = opT;
     controller.setBusy = function() {};
     controller.showProgress = function() {};
     controller.updateProgress = function() {};
@@ -961,6 +979,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
             'runGenerateCuts #3215: t24308 пишет Очередность при создании');
+        assertEqual(cutPost.fields.t26584, 5.9,
+            'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1081') === 0; }), false,
             'runGenerateCuts: GP batches are not created during planning');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), true,
