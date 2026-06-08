@@ -1928,6 +1928,47 @@ function Delete($id, $root=TRUE)  # Delete Obj and its children recursively
 	if($root) # Delete the object in case it's the initially requested one
 		Exec_sql("DELETE FROM $z WHERE id=$id", "Delete obj");
 }
+# BatchDelete removes the whole child tree, so reference checks must cover it too.
+function DeleteTreeFetchRows($sql, $err_msg)
+{
+	$rows = array();
+	$data_set = Exec_sql($sql, $err_msg);
+	while($row = mysqli_fetch_array($data_set))
+		$rows[] = $row;
+	return $rows;
+}
+function DeleteTreeHasRefs($id, $fetchRows=FALSE)
+{
+	global $z;
+	$id = (int)$id;
+	if($id <= 0)
+		return FALSE;
+	if($fetchRows === FALSE)
+		$fetchRows = "DeleteTreeFetchRows";
+	$refs = call_user_func($fetchRows, "SELECT id FROM $z WHERE t=$id LIMIT 1", "Check refs in delete tree");
+	if(count($refs))
+		return TRUE;
+	$children = call_user_func($fetchRows, "SELECT id FROM $z WHERE up=$id", "Get children for delete tree ref check");
+	foreach($children as $child)
+		if(DeleteTreeHasRefs($child["id"], $fetchRows))
+			return TRUE;
+	return FALSE;
+}
+function DeleteTreeRefsCount($id, $fetchRows=FALSE)
+{
+	global $z;
+	$id = (int)$id;
+	if($id <= 0)
+		return 0;
+	if($fetchRows === FALSE)
+		$fetchRows = "DeleteTreeFetchRows";
+	$refs = call_user_func($fetchRows, "SELECT COUNT(id) cnt FROM $z WHERE t=$id", "Count refs in delete tree");
+	$count = count($refs) ? (int)$refs[0]["cnt"] : 0;
+	$children = call_user_func($fetchRows, "SELECT id FROM $z WHERE up=$id", "Get children for delete tree refs count");
+	foreach($children as $child)
+		$count += DeleteTreeRefsCount($child["id"], $fetchRows);
+	return $count;
+}
 function BatchDelete($id, $root=TRUE)  # Delete Obj and its children recursively
 {
 	global $z;
@@ -6843,9 +6884,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 										WHERE vals.t=$cur_typ AND vals.t!=vals.up $parent_cond $filter_cond AND refr.id IS NULL"
 										.($cur_typ == 18 ? " AND vals.id!=".$GLOBALS["GLOBAL_VARS"]["user_id"] : "") // The user cannot delete himself
 									, "Get filtered Objs set to delete");
-				$deleted = mysqli_num_rows($data_set);
+				$deleted = 0;
 				while($row = mysqli_fetch_array($data_set))
-					BatchDelete($row["id"]);
+					if(DeleteTreeHasRefs($row["id"]))
+						trace(" _m_del_select skip ".$row["id"]." for refs in delete tree");
+					else
+					{
+						BatchDelete($row["id"]);
+						$deleted++;
+					}
 				BatchDelete(""); // Flush batch
 				# #3260: API/новый UI зовёт _m_del_select напрямую (без выгрузки строк) —
 				# отдаём число удалённых JSON-ом вместо HTML-редиректа.
@@ -10171,6 +10218,9 @@ if(Validate_Token())
 					my_die(t9n("[RU]Нельзя удалить метаданные (реквизит $id типа [EN]You can't delete metadata (the $id type".$row["up"].")!"));
 				if($row[0] > 0)
 					my_die(t9n("[RU]Нельзя удалить объект, на который существует ссылки (всего: [EN]You can't delete an object that has links to it (total:").$row[0].")!", "409 Conflict");
+				$tree_refs = DeleteTreeRefsCount($id);
+				if($tree_refs > 0)
+					my_die(t9n("[RU]Нельзя удалить объект, на который существует ссылки (всего: [EN]You can't delete an object that has links to it (total:").$tree_refs.")!", "409 Conflict");
 				if($row["up"] > 1){ # We'll drop the Array or Reference element, so we need to adjust the order of its peers
 					if($row["tup"] === "0"){ # Array element
     					$arg = "F_U=".$row["up"];
@@ -10260,8 +10310,11 @@ if(Validate_Token())
 					$errors[(string)$rid] = t9n("[RU]Нельзя удалить себя как пользователя[EN]Can't delete yourself");
 					continue;
 				}
-				if($row["ref_cnt"] > 0){
-					$errors[(string)$rid] = t9n("[RU]Нельзя удалить объект, на который существуют ссылки (всего: [EN]Can't delete an object with incoming references (total: ").$row["ref_cnt"].")";
+				$refCnt = (int)$row["ref_cnt"];
+				if($refCnt <= 0)
+					$refCnt = DeleteTreeRefsCount($rid);
+				if($refCnt > 0){
+					$errors[(string)$rid] = t9n("[RU]Нельзя удалить объект, на который существуют ссылки (всего: [EN]Can't delete an object with incoming references (total: ").$refCnt.")";
 					continue;
 				}
 				# Adjust peer order in arrays / multiselect refs (same as case "_m_del")
