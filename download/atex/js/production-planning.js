@@ -981,6 +981,9 @@
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
+    var FATIGUE_MACHINE_WIDTH_MM = 1600;  // базовая ширина вала для оценки числа ножей (#3270)
+    var FATIGUE_FACTOR = 2.0;             // alpha: штраф последней позиции = 1 + alpha
+    var FATIGUE_START_COST_MIN = 45;      // условная стоимость старта маршрута, мин
 
     function normWinding(v){ var s = String(v == null ? '' : v).trim().toUpperCase(); return (s === 'IN' || s === 'OUT') ? s : ''; }
 
@@ -1037,6 +1040,73 @@
         if (leader > 0) parts.push({ code: 'BETWEEN_CUTS', label: 'лидер между резками', minutes: round3(leader) });
         Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
         return parts;
+    }
+
+    function fatigueOptionNumber(options, keys, fallback){
+        var opts = options || {};
+        for (var i = 0; i < keys.length; i++) {
+            var n = Number(opts[keys[i]]);
+            if (isFinite(n) && n > 0) return n;
+        }
+        return fallback;
+    }
+
+    function fatigueChangeTimes(options){
+        if (!options) return null;
+        if (options.times) return options.times;
+        if (options.changeTimes) return options.changeTimes;
+        if (options.opTimes) return options.opTimes;
+        if (options.MATERIAL_WINDING != null || options.KNIFE != null || options.BETWEEN_CUTS != null) return options;
+        return null;
+    }
+
+    function fatigueJobWidth(cut){
+        var candidates = cut ? [cut.width, cut.rollerWidth, cut.widthMm, cut.rollerWidthMm] : [];
+        for (var i = 0; i < candidates.length; i++) {
+            var n = stripNum(candidates[i]);
+            if (isFinite(n) && n > 0) return n;
+        }
+        return 0;
+    }
+
+    // Оценка сложности резки по ножам. Если strip-агрегация ещё не влита в очередь,
+    // используем приближение из задачи: N_j ≈ Wmax / W_j.
+    function estimatedKnifeCount(cut, machineWidth){
+        var explicit = Number(cut && cut.knifeCount);
+        if (isFinite(explicit) && explicit > 0) return explicit;
+        var width = fatigueJobWidth(cut);
+        if (!(width > 0)) return 999;
+        var maxWidth = Number(machineWidth);
+        if (!isFinite(maxWidth) || maxWidth <= 0) maxWidth = FATIGUE_MACHINE_WIDTH_MM;
+        return Math.max(1, Math.floor(maxWidth / width));
+    }
+
+    function fatiguePositionWeight(positionIndex, totalPositions, fatigueFactor){
+        var total = Number(totalPositions) || 0;
+        if (total <= 1) return 1;
+        var alpha = Number(fatigueFactor);
+        if (!isFinite(alpha)) alpha = FATIGUE_FACTOR;
+        var idx = Number(positionIndex) || 0;
+        if (idx < 0) idx = 0;
+        if (idx > total - 1) idx = total - 1;
+        return round3(1 + alpha * (idx / (total - 1)));
+    }
+
+    function fatigueRouteScore(route, options){
+        var list = route || [];
+        if (!list.length) return 0;
+        var opts = options || {};
+        var machineWidth = fatigueOptionNumber(opts, ['machineWidth', 'machineWidthMm', 'Wmax'], FATIGUE_MACHINE_WIDTH_MM);
+        var alpha = fatigueOptionNumber(opts, ['fatigueFactor', 'alpha'], FATIGUE_FACTOR);
+        var startCost = fatigueOptionNumber(opts, ['startCost', 'startCostMin'], FATIGUE_START_COST_MIN);
+        var times = fatigueChangeTimes(opts);
+        var total = 0;
+        for (var i = 0; i < list.length; i++) {
+            var transitionCost = i === 0 ? startCost : changeoverCost(list[i - 1], list[i], times);
+            var knifeFactor = 1 + estimatedKnifeCount(list[i], machineWidth) / 100;
+            total += transitionCost * fatiguePositionWeight(i, list.length, alpha) * knifeFactor;
+        }
+        return round3(total);
     }
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
@@ -1603,6 +1673,16 @@
         return (strips || []).reduce(function(sum, s) { return sum + stripNum(s.qty); }, 0);
     }
 
+    function stripsKnifeWidths(strips) {
+        var out = [];
+        (strips || []).forEach(function(s) {
+            var width = stripNum(s && s.width);
+            var qty = stripNum(s && s.qty);
+            for (var i = 0; i < qty; i++) out.push(width);
+        });
+        return out;
+    }
+
     // «Остаток, мм» — ширина джамбо минус занятая полосами ширина.
     function stripsRemainder(jumboWidth, strips) {
         return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
@@ -1792,6 +1872,15 @@
 
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
+
+    function fatigueComplexityKey(c, machineWidth){
+        var width = fatigueJobWidth(c);
+        return [
+            -estimatedKnifeCount(c, machineWidth),
+            width > 0 ? width : Number.MAX_VALUE
+        ];
+    }
+
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
     function greedySequence(cuts, weights){
         var pool = (cuts || []).slice();
@@ -1818,12 +1907,30 @@
             .map(function(x){ return x.c; });
     }
 
-    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы — жадно
-    // (переналадки), затем по убыванию ножей (#3130); проставить sequence; вход не мутировать.
+    // #3270: штраф усталости растёт к концу очереди. Сначала получаем устойчивую
+    // жадную базу по переналадкам, затем ставим более сложные (много ножей / узкая
+    // ширина) резки раньше и проверяем этот маршрут против обратного через weighted cost.
+    function fatigueAwareSequence(cuts, options){
+        var input = (cuts || []).slice();
+        if (input.length <= 1) return input;
+        var opts = options || {};
+        var times = fatigueChangeTimes(opts);
+        var machineWidth = fatigueOptionNumber(opts, ['machineWidth', 'machineWidthMm', 'Wmax'], FATIGUE_MACHINE_WIDTH_MM);
+        var base = greedySequence(input, times);
+        var complexFirst = base.map(function(c, i){ return { c: c, i: i, key: fatigueComplexityKey(c, machineWidth) }; })
+            .sort(function(a, b){ return cmpKey(a.key, b.key) || (a.i - b.i); })
+            .map(function(x){ return x.c; });
+        var simpleFirst = complexFirst.slice().reverse();
+        return fatigueRouteScore(complexFirst, opts) <= fatigueRouteScore(simpleFirst, opts)
+            ? complexFirst : simpleFirst;
+    }
+
+    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
+    // fatigue-aware порядок (#3270); проставить sequence; вход не мутировать.
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
-        var seq = byKnifeCountDesc(greedySequence(rest, weights)).concat(byKnifeCountDesc(greedySequence(foil, weights)));
+        var seq = fatigueAwareSequence(rest, weights).concat(fatigueAwareSequence(foil, weights));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -1952,12 +2059,19 @@
         KNIFE_SCALE: KNIFE_SCALE,
         WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
+        FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
+        FATIGUE_FACTOR: FATIGUE_FACTOR,
+        FATIGUE_START_COST_MIN: FATIGUE_START_COST_MIN,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
         setupBreakdown: setupBreakdown,
+        estimatedKnifeCount: estimatedKnifeCount,
+        fatiguePositionWeight: fatiguePositionWeight,
+        fatigueRouteScore: fatigueRouteScore,
+        fatigueAwareSequence: fatigueAwareSequence,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
         byKnifeCountDesc: byKnifeCountDesc,
@@ -3254,6 +3368,9 @@
                 loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
             }
             layoutPlans.push({
+                id: 'generated-' + layIdx,
+                materialId: lay && lay.mat,
+                winding: lay && lay.windDir,
                 plannedRuns: plannedRuns,
                 runLength: runLength,
                 duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
@@ -3262,14 +3379,16 @@
                 slitterId: slitterId,
                 cutMainValue: nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState),
                 knifeCount: stripsTotalKnives(lay && lay.strips),
+                knifeWidths: stripsKnifeWidths(lay && lay.strips),
+                rollerWidth: stripsUsedWidth(lay && lay.strips),
                 sequence: '',
                 index: layIdx
             });
         });
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
 
-        // #3263: create requests stay in layout order, but queue numbers for
-        // same-day generated cuts must follow knife count descending.
+        // #3263/#3270: create requests stay in layout order, but queue numbers for
+        // same-day generated cuts follow the fatigue-aware planner.
         var sequenceGroups = {};
         var sequenceGroupOrder = [];
         layoutPlans.forEach(function(plan) {
@@ -3285,12 +3404,10 @@
         });
         sequenceGroupOrder.forEach(function(key) {
             var group = sequenceGroups[key];
-            group.plans.slice().sort(function(a, b) {
-                return ((Number(b.knifeCount) || 0) - (Number(a.knifeCount) || 0)) || (a.index - b.index);
-            }).forEach(function(plan) {
+            fatigueAwareSequence(group.plans, self.changeTimes).forEach(function(plan) {
                 plan.sequence = nextSequenceForCuts(sequenceCuts, group.slitterId, group.planDate);
                 sequenceCuts.push({
-                    id: 'generated-' + plan.index,
+                    id: plan.id,
                     number: plan.cutMainValue,
                     slitter: { id: group.slitterId, label: '' },
                     planDate: plan.cutMainValue,

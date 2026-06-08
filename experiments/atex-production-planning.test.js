@@ -439,6 +439,33 @@ var knifeCuts = [
 assertEqual(planning.orderCuts(knifeCuts).map(function(c){ return c.knifeCount; }), [7, 5, 3], 'orderCuts: ножи убывают к концу дня (7,5,3)');
 assertEqual(planning.byKnifeCountDesc([{ knifeCount: 2, id: 'a' }, { knifeCount: 2, id: 'b' }, { knifeCount: 9, id: 'c' }]).map(function(x){ return x.id; }), ['c', 'a', 'b'], 'byKnifeCountDesc: ↓, равные стабильно');
 
+// #3270: если ножей нет в данных, сложность резки оценивается по ширине рулона
+// (1600 мм / ширина), а штраф усталости растёт к концу очереди.
+var fatiguePositionWeight = typeof planning.fatiguePositionWeight === 'function'
+    ? planning.fatiguePositionWeight : function(){ return undefined; };
+var estimatedKnifeCount = typeof planning.estimatedKnifeCount === 'function'
+    ? planning.estimatedKnifeCount : function(){ return undefined; };
+var fatigueRouteScore = typeof planning.fatigueRouteScore === 'function'
+    ? planning.fatigueRouteScore : function(){ return undefined; };
+assertEqual(fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #3270: первая позиция без штрафа');
+assertEqual(fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3270: последняя позиция = 1 + alpha');
+assertEqual(estimatedKnifeCount({ rollerWidth: 25 }, 1600), 64, 'estimatedKnifeCount #3270: Wmax / width');
+assertEqual(estimatedKnifeCount({ knifeCount: 7, rollerWidth: 25 }, 1600), 7, 'estimatedKnifeCount #3270: явное число ножей важнее оценки по ширине');
+var fatigueNarrowFirst = [
+    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
+    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: [] }
+];
+assertEqual(fatigueRouteScore(fatigueNarrowFirst, { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }) <
+            fatigueRouteScore(fatigueNarrowFirst.slice().reverse(), { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }),
+    true, 'fatigueRouteScore #3270: узкая/многоножевая резка дешевле в начале очереди');
+var fatigueWidthCuts = [
+    { id: 'wideA', materialId: 'A', winding: 'IN', batchId: 'A', rollerWidth: 200, knifeCount: 0, knifeWidths: [] },
+    { id: 'narrowA', materialId: 'A', winding: 'IN', batchId: 'A', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
+    { id: 'midB', materialId: 'B', winding: 'IN', batchId: 'B', rollerWidth: 60, knifeCount: 0, knifeWidths: [] }
+];
+assertEqual(planning.orderCuts(fatigueWidthCuts).map(function(c){ return c.id; }),
+    ['narrowA', 'midB', 'wideA'], 'orderCuts #3270: оценка ножей по ширине ставит узкие резки раньше широких');
+
 // ── rowsToPlanning строит дескриптор движка из колонок отчёта ──
 // #3242: cut_batch_id и cut_knives упразднены в cut_planning. batchId (Партия сырья) в
 // отчёте больше нет → ''; число ножей теперь из cut_strips (Партия ГП), мёрджится в
