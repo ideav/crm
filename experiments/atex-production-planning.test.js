@@ -314,6 +314,14 @@ var gKnives = planning.groupBySlitter([
 ])[0];
 assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['high-seq','mid-seq','low-seq'],
     'groupBySlitter #3236: внутри дня видимая очередь сортирует ножи по убыванию, даже если sequence старый');
+// #3258: planDate — unix-штамп DATETIME (с секундами): резки одного дня различаются
+// по моменту создания, но должны сортироваться по ножам убыв., а не по штампу.
+var gKnivesTs = planning.groupBySlitter([
+    { id:'few', slitter:{id:'20',label:'Станок 2'}, planDate:'1780919776', sequence:1, knifeCount:5 },
+    { id:'many', slitter:{id:'20',label:'Станок 2'}, planDate:'1780919777', sequence:2, knifeCount:15 }
+])[0];
+assertEqual(gKnivesTs.cuts.map(function(c){ return c.id; }), ['many','few'],
+    'groupBySlitter #3258: одинаковый день (unix-штампы с секундами) → ножи по убыванию (15 раньше 5)');
 var gDays = planning.groupBySlitter([
     { id:'d2-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-08', sequence:1 },
     { id:'d1-2', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2 },

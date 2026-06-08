@@ -345,7 +345,10 @@
         function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
         function knifeKey(c) { var n = Number(c && c.knifeCount); return isFinite(n) ? n : 0; }
         function cmpCutPlanDay(a, b) {
-            var ak = batchDateKey(a && a.planDate), bk = batchDateKey(b && b.planDate);
+            // #3258: planDate — unix-штамп DATETIME (с секундами). Сравниваем по
+            // КАЛЕНДАРНОМУ дню (planDateDayKey), иначе резки одного дня различаются по
+            // моменту создания и сортировка «ножи по убыванию» (#3130) не срабатывает.
+            var ak = planDateDayKey(a && a.planDate), bk = planDateDayKey(b && b.planDate);
             if (ak === Infinity && bk !== Infinity) return 1;
             if (bk === Infinity && ak !== Infinity) return -1;
             if (ak < bk) return -1;
