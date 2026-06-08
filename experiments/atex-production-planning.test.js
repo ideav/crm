@@ -318,6 +318,15 @@ var durationPlan = planning.rowsToPlanning([
 ]);
 assertEqual(durationPlan.cuts[0].duration, 12.5,
     'rowsToPlanning #3223: cut_duration → duration minutes for queue data');
+var missingCutPlanningSignals = planning.cutPlanningReportDiagnostics([
+    { cut_id:'diag-1', cut_no:'1', supply_id:'s-diag', supply_position_id:'p-diag' }
+]);
+assertEqual(missingCutPlanningSignals.map(function(d) { return d.key; }),
+    ['plannedRuns', 'duration', 'runLength'],
+    'cutPlanningReportDiagnostics #3229: сообщает об отсутствующих колонках проходов, длительности и метража');
+assertEqual(planning.cutPlanningReportDiagnostics([
+    { cut_id:'diag-ok', cut_no:'1', cut_planned_runs:'3', cut_duration:'12', supply_id:'s-ok', supply_footage:'450' }
+]), [], 'cutPlanningReportDiagnostics #3229: не ругается, когда нужные сигналы отчёта есть');
 var gpPlan = planning.rowsToPlanning([
     { cut_id:'', supply_id:'s-gp', supply_position_id:'p-gp', supply_finished_batch_id:'fb-1' },
     { cut_id:'c-cut', cut_no:'1', supply_id:'s-cut', supply_position_id:'p-cut', cut_sequence:'1' },
@@ -561,6 +570,16 @@ assertEqual(planning.reqIdByName(cutMeta3189, 'Кол-во план'), '16403',
   'reqIdByName #3215: Кол-во план остаётся 16403');
 assertEqual(planning.reqIdByName(cutMeta3189, 'Длительность, минут'), '26584',
   'reqIdByName #3223: Длительность, минут — 26584');
+var missingWriteFields = planning.cutWriteDiagnostics({
+  plannedRuns: '16403',
+  duration: null,
+  length: '24305'
+}, {
+  t16403: 3
+}, ['plannedRuns', 'duration', 'length']);
+assertEqual(missingWriteFields.map(function(d) { return d.key + ':' + d.reason; }),
+  ['duration:metadata', 'length:field'],
+  'cutWriteDiagnostics #3229: отличает отсутствующий реквизит от незаписанного поля');
 assertEqual(planning.supplyCutRelation(supplyMeta3189, cutMeta3189), {
   mode: 'reference',
   reqId: '16428',
@@ -798,6 +817,22 @@ var schedCuts = [
 var sched = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut: { A:300, B:600 }, shiftStartMin: 480 });
 assertEqual(sched[0], { cutId:'A', startMin:482, finishMin:483.2, setupMin:2, durationMin:1.2 }, 'buildSchedule: 1-я резка (лидер 2, намотка 300→1.2)');
 assertEqual(sched[1], { cutId:'B', startMin:485.2, finishMin:489.2, setupMin:2, durationMin:4 }, 'buildSchedule: 2-я накопительно (идентична → переналадка 0)');
+var schedPlannedRuns = planning.buildSchedule([
+  { id:'C', plannedRuns:3 }
+], { windPoints: pts, runLengthByCut: { C:600 }, shiftStartMin: 480 });
+assertEqual(schedPlannedRuns[0], { cutId:'C', startMin:482, finishMin:494, setupMin:2, durationMin:12 },
+    'buildSchedule #3229: длительность очереди учитывает Кол-во план');
+var schedStoredDuration = planning.buildSchedule([
+  { id:'D', duration:12.5 }
+], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 });
+assertEqual(schedStoredDuration[0], { cutId:'D', startMin:482, finishMin:494.5, setupMin:2, durationMin:12.5 },
+    'buildSchedule #3229: cut_duration используется как fallback, если метраж отчёта отсутствует');
+assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
+    '⏱ 08:02 – 08:15 · 12.5 мин',
+    'formatScheduleLine #3229: сохранённая длительность отображается без 0 мин');
+assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationMin:0 }, 0, true),
+    '⏱ ошибка: нет метража прохода; длительность не рассчитана',
+    'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
 assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
 assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
 
@@ -1021,6 +1056,7 @@ function runGenerateCutsSlitterAffinityTest() {
             req('16403', 'Кол-во план'),
             req('24308', 'Очередность'),
             req('24305', 'Метраж, м'),
+            req('26584', 'Длительность, минут'),
             req('1162', 'Статус')
         ] },
         strip: { id: '1073', val: 'Полоса', reqs: [
@@ -1046,6 +1082,7 @@ function runGenerateCutsSlitterAffinityTest() {
     controller.genBatches = [{ id: 'b1', materialId: 'M', dateKey: 20260601, remainder: 999, remainderLinear: 5000, active: true }];
     controller.cuts = [];
     controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }, { id: '20', label: 'С2', stopMaterialIds: [] }];
+    controller.opTimes = opT;
     controller.setBusy = function() {};
     controller.showProgress = function() {};
     controller.updateProgress = function() {};
@@ -1070,6 +1107,51 @@ function runGenerateCutsSlitterAffinityTest() {
         assertEqual(slitters, ['10', '10', '20', '20'],
             'runGenerateCuts #3219: одинаковое сырьё+намотка+метраж+партия остаётся на одном станке, смена намотки выбирает заново');
     });
+}
+
+function runCreateCutPayloadDiagnosticsTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    var notices = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('24305', 'Метраж, м'),
+            req('1162', 'Статус')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [] }
+    };
+    controller.draft = {
+        slitterId: '10',
+        materialBatchId: '',
+        plannedRuns: '2',
+        planDate: '',
+        status: 'Ожидает',
+        notes: '',
+        selectedPositions: ['p1']
+    };
+    controller.cuts = [];
+    controller.genPositions = [{ id: 'p1', length: 600 }];
+    controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }];
+    controller.opTimes = opT;
+    controller.notify = function(msg, type) { notices.push({ msg: msg, type: type }); };
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        return Promise.resolve({ obj: 'unexpected' });
+    };
+
+    controller.createCut();
+
+    assertEqual(posts.length, 0,
+        'createCut #3229: не отправляет резку с неполным payload');
+    assertEqual(notices.length, 1,
+        'createCut #3229: сообщает пользователю об ошибке payload');
+    assertEqual(notices[0].type, 'error',
+        'createCut #3229: ошибка payload приходит как error-notify');
+    assertEqual(notices[0].msg.indexOf('Длительность, минут') >= 0, true,
+        'createCut #3229: ошибка payload называет отсутствующую длительность');
 }
 
 function runCreateCutMainValueTest() {
@@ -1131,6 +1213,7 @@ function runCreateCutMainValueTest() {
 runPreferredWidthsFilterTest()
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
+    .then(runCreateCutPayloadDiagnosticsTest)
     .then(runCreateCutMainValueTest)
     .then(function() {
     console.log('\n' + passed + ' assertions passed');
