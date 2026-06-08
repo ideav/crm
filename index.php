@@ -2054,6 +2054,8 @@ function constructHeader($id, $parent=0){
 					$GLOBALS["linx"][$id] = "";
 			}
 			if($row["req_t"]){	# Do we have Reqs?
+				if($row["req_t"] == $id) // Check if this is a property of the current object, and not a reference to it from the parent
+					continue;
 				if($row["ref_t"] != $row["base_t"]){ // This is a reference Req
 				    trace("add link: ".$row["id"]." -> ".$row["req_t"]);
 					$GLOBALS["local_struct"][$id][$row["id"]] = "ref:".$row["id"].":".$row["req_t"].($row["attr"]?":".MaskDelimiters($row["attr"]):"");
@@ -6060,7 +6062,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     		            else
 					        my_die(t9n("[RU]Неверный тип родителя (autoParent)[EN]Wrong parent type (autoParent)"));
 				    }
-					$typesCount = isset($GLOBALS["local_types"][$id]) ? count($GLOBALS["local_types"][$id]) : count($GLOBALS["local_struct"][$id]);
+					if(isset($GLOBALS["local_types"][$id])){
+						$typesCount = count($GLOBALS["local_types"][$id]);
+						trace("local_types: ".print_r($GLOBALS["local_types"][$id], true));
+					}
+					else{
+						$typesCount = count($GLOBALS["local_struct"][$id]);
+						trace("local_struct: ".print_r($GLOBALS["local_struct"][$id], true));
+					}
 					if($getParent)
 					    $typesCount++;
 					$isUnique = $GLOBALS["uniq"][$id] === "1";
