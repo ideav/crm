@@ -782,6 +782,9 @@ assertEqual(planning.batchDateKey('5/1/2026'), 20260105, 'batchDateKey: D/M/Y');
 assertEqual(planning.batchDateKey('') === Infinity, true, 'batchDateKey: пусто → Infinity');
 assertEqual(planning.batchDateKey('мусор') === Infinity, true, 'batchDateKey: мусор → Infinity');
 assertEqual(planning.batchDateKey('2026-01-05') < planning.batchDateKey('2026-02-01'), true, 'batchDateKey: старше = меньше (FIFO)');
+// #3242: первая колонка «Партии сырья» (DATETIME) приходит unix-штампом (секунды) — ключ FIFO.
+assertEqual(planning.batchDateKey('1772312400'), 1772312400, 'batchDateKey #3242: unix-штамп секунд → число');
+assertEqual(planning.batchDateKey('1772312400') < planning.batchDateKey('1780088400'), true, 'batchDateKey #3242: ранний приход меньше (FIFO)');
 
 // #3217: cut_no может приходить unix-штампом; в карточке очереди показываем
 // его как дату+время до минут, но обычные номера и id не превращаем в даты.

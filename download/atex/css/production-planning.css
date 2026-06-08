@@ -320,7 +320,7 @@
 .atex-pp-strip-table { margin-bottom: 10px; }
 .atex-pp-strip-row {
     display: grid;
-    grid-template-columns: 1fr 1fr 1.2fr 40px;
+    grid-template-columns: 1fr 1fr 40px;   /* #3242: Ширина · Кол-во рулонов · удалить (без «Назначения») */
     gap: 8px;
     align-items: center;
     margin-bottom: 6px;

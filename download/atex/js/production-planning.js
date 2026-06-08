@@ -872,6 +872,9 @@
         if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
         var dmy = s.match(/^(\d{1,2})[.\\/](\d{1,2})[.\\/](\d{4})/);
         if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
+        // #3242: «Партия сырья» хранит дату прихода в первой колонке (DATETIME) —
+        // приходит unix-штампом в секундах; используем его как ключ FIFO (по возрастанию).
+        if (/^\d{9,11}$/.test(s)) return Number(s);
         var t = Date.parse(s);
         return isNaN(t) ? Infinity : t;
     }
@@ -2222,7 +2225,10 @@
         var meta = this.meta.materialBatch;
         if (!meta) { this.genBatches = []; this.batchMaterialById = {}; return Promise.resolve(); }
         var matIdx = columnIndex(meta, 'Вид сырья');
+        // #3242: отдельной «Даты прихода» у «Партии сырья» нет — дата прихода = первая
+        // колонка (DATETIME). Фоллбэк на неё, чтобы FIFO-резерв сортировался по приходу.
         var dateIdx = columnIndex(meta, 'Дата прихода');
+        var dateFromMain = dateIdx < 0;
         var remIdx = columnIndex(meta, 'Остаток, м²');
         var remLinIdx = columnIndex(meta, 'Остаток, м');   // погонный остаток — для FIFO-резерва (Фаза 1b)
         var activeIdx = columnIndex(meta, 'В работе');     // #3242: «Активно» переименовано в «В работе»
@@ -2240,7 +2246,7 @@
                     id: String(rec.i),
                     label: r[0] == null ? '' : String(r[0]),
                     materialId: materialId,
-                    dateKey: dateIdx >= 0 ? batchDateKey(r[dateIdx]) : Infinity,
+                    dateKey: dateFromMain ? batchDateKey(r[0]) : batchDateKey(r[dateIdx]),
                     remainder: remIdx >= 0 ? (Number(r[remIdx]) || 0) : 0,
                     remainderLinear: remLinIdx >= 0 ? (Number(r[remLinIdx]) || 0) : 0,
                     active: activeIdx >= 0 ? r[activeIdx] : ''
@@ -2716,23 +2722,19 @@
 
     var STRIP_PURPOSES = ['Заказ', 'Склад', 'Отходы'];
 
-    // Загрузка текущих полос резки из object/ (подчинённые: F_U = cutId).
-    // Колонки JSON_OBJ резолвятся по имени (columnIndex). → [{id, width, qty, purpose}].
+    // Загрузка состава резки из «Партии ГП» (#3242; подчинённые: F_U = cutId).
+    // Колонки JSON_OBJ резолвятся по имени. → [{id, width, qty=Кол-во рулонов}].
     AtexProductionPlanning.prototype.loadStripsForCut = function(cutId) {
-        var sm = this.meta.strip;
-        var widthIdx = columnIndex(sm, STRIP_REQ.width);
-        var qtyIdx = columnIndex(sm, STRIP_REQ.qty);
-        var purposeIdx = columnIndex(sm, STRIP_REQ.purpose);
-        var toStockIdx = columnIndex(sm, STRIP_REQ.toStock);
+        var sm = this.meta.finishedBatch;
+        var widthIdx = columnIndex(sm, FINISHED_BATCH_REQ.width);
+        var qtyIdx = columnIndex(sm, FINISHED_BATCH_REQ.rolls);
         return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
             return (rows || []).map(function(rec) {
                 var r = rec.r || [];
                 return {
                     id: String(rec.i),
                     width: (widthIdx >= 0 && r[widthIdx] != null) ? String(r[widthIdx]) : '',
-                    qty: (qtyIdx >= 0 && r[qtyIdx] != null) ? String(r[qtyIdx]) : '',
-                    purpose: (purposeIdx >= 0 && r[purposeIdx] != null) ? String(r[purposeIdx]) : '',
-                    toStock: (toStockIdx >= 0 && r[toStockIdx] != null) ? String(r[toStockIdx]) : ''
+                    qty: (qtyIdx >= 0 && r[qtyIdx] != null) ? String(r[qtyIdx]) : ''
                 };
             });
         });
@@ -2742,7 +2744,7 @@
     // Одна панель за раз: повторный клик по той же резке закрывает; по другой — переключает.
     AtexProductionPlanning.prototype.openStrips = function(cut, container) {
         var self = this;
-        if (!this.meta.strip) { this.notify('Не найдены метаданные таблицы «' + TABLE.strip + '»', 'error'); return; }
+        if (!this.meta.finishedBatch) { this.notify('Не найдены метаданные таблицы «' + TABLE.finishedBatch + '»', 'error'); return; }
 
         // Удалить существующую панель (если открыта).
         var existing = container.querySelector('.atex-pp-strip-panel');
@@ -2758,9 +2760,9 @@
         this.loadStripsForCut(cut.id).then(function(loaded) {
             // Если за время загрузки панель закрыли/переключили — ничего не рисуем.
             if (String(self.stripEditCutId) !== String(cut.id) || !panel.parentNode) return;
-            // Глубокая копия исходных полос для диффа при сохранении.
-            var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose, toStock: s.toStock }; });
-            var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose, toStock: s.toStock }; });
+            // Глубокая копия исходного состава для диффа при сохранении (#3242: Партия ГП).
+            var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
+            var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
             self.renderStripPanel(panel, cut, strips, original);
         }).catch(function(err) {
             if (panel.parentNode) {
@@ -2793,8 +2795,7 @@
         var table = el('div', { class: 'atex-pp-strip-table' });
         table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
             el('span', { text: 'Ширина, мм' }),
-            el('span', { text: 'Количество' }),
-            el('span', { text: 'Назначение' }),
+            el('span', { text: 'Кол-во рулонов' }),   // #3242: «Партия ГП» — рулоны, не «Назначение»
             el('span', { text: '' })
         ]));
         var body = el('div', { class: 'atex-pp-strip-body' });
@@ -2859,11 +2860,7 @@
                 q.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
                 row.appendChild(q);
 
-                row.appendChild(self.selectText(STRIP_PURPOSES, s.purpose, function(v) {
-                    s.purpose = v;
-                    s.toStock = stockPurpose(v) ? '1' : '0';
-                    self.persistStrip(cut.id, s);
-                }));
+                // #3242: у «Партии ГП» нет «Назначения» — колонка убрана.
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -2895,7 +2892,7 @@
         // Кнопка «+ полоса».
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-strip-add', type: 'button', text: '+ полоса' });
         addBtn.addEventListener('click', function() {
-            strips.push({ id: null, width: '', qty: '', purpose: STRIP_PURPOSES[0], toStock: '0' });
+            strips.push({ id: null, width: '', qty: '' });   // #3242: запись «Партии ГП»
             renderRows();
             recalc();
         });
@@ -2925,7 +2922,7 @@
                 var b = el('button', { class: 'atex-pp-btn atex-pp-strip-pref-item', type: 'button',
                     text: p.width + ' мм · Популярность ' + p.popularity });
                 b.addEventListener('click', function() {
-                    var ns = { id: null, width: String(p.width), qty: '1', purpose: 'Склад', toStock: '1' };
+                    var ns = { id: null, width: String(p.width), qty: '1' };   // #3242: «Партия ГП»
                     strips.push(ns);
                     renderRows();
                     recalc();
@@ -2963,15 +2960,9 @@
     // Пустую новую полосу не создаём. Ошибки — тостом.
     AtexProductionPlanning.prototype.persistStrip = function(cutId, strip) {
         var self = this;
-        var sm = this.meta.strip;
+        var sm = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         if (!sm || !strip) return Promise.resolve();
-        var reqIds = {
-            width: reqIdByName(sm, STRIP_REQ.width),
-            qty: reqIdByName(sm, STRIP_REQ.qty),
-            purpose: reqIdByName(sm, STRIP_REQ.purpose),
-            toStock: reqIdByName(sm, STRIP_REQ.toStock)
-        };
-        var fields = buildFields(reqIds, { width: strip.width, qty: strip.qty, purpose: strip.purpose, toStock: isStockStrip(strip) ? '1' : '0' });
+        var fields = buildFinishedBatchFields(sm, { width: strip.width, rolls: strip.qty, active: '1' });
         if (strip.id) {
             return self.post('_m_set/' + strip.id + '?JSON', fields).catch(function(err) {
                 self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
@@ -2990,20 +2981,14 @@
         });
     };
 
-    // Сохранить полосы резки — дифф original↔strips (зеркало cut-calc syncStrips):
-    //   нет id → _m_new (up=cutId); изменены width/qty/purpose → _m_set; удалённые id → _m_del.
-    // Реквизиты резолвятся по имени (STRIP_REQ). Возвращает Promise; setBusy/reload/notify.
+    // Сохранить состав резки — дифф original↔strips (#3242: «Партия ГП»):
+    //   нет id → _m_new (up=cutId); изменены width/qty → _m_set; удалённые id → _m_del.
+    // Поля резолвятся по имени (FINISHED_BATCH_REQ). Возвращает Promise; setBusy/reload/notify.
     AtexProductionPlanning.prototype.saveStrips = function(cutId, strips, original) {
         var self = this;
-        var sm = this.meta.strip;
-        var reqIds = {
-            width: reqIdByName(sm, STRIP_REQ.width),
-            qty: reqIdByName(sm, STRIP_REQ.qty),
-            purpose: reqIdByName(sm, STRIP_REQ.purpose),
-            toStock: reqIdByName(sm, STRIP_REQ.toStock)
-        };
+        var sm = this.meta.finishedBatch;
 
-        // Карта исходных полос по id для сравнения.
+        // Карта исходных записей по id для сравнения.
         var origById = {};
         (original || []).forEach(function(s) { if (s.id) origById[String(s.id)] = s; });
         var keepIds = {};
@@ -3011,15 +2996,13 @@
         var ops = [];
         (strips || []).forEach(function(s) {
             var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
-            var fields = buildFields(reqIds, { width: s.width, qty: s.qty, purpose: s.purpose, toStock: isStockStrip(s) ? '1' : '0' });
+            var fields = buildFinishedBatchFields(sm, { width: s.width, rolls: s.qty, active: '1' });
             if (s.id) {
                 keepIds[String(s.id)] = true;
                 var o = origById[String(s.id)];
                 var changed = !o ||
                     String(o.width).trim() !== String(s.width).trim() ||
-                    String(o.qty).trim() !== String(s.qty).trim() ||
-                    String(o.purpose).trim() !== String(s.purpose).trim() ||
-                    String(o.toStock).trim() !== String(s.toStock).trim();
+                    String(o.qty).trim() !== String(s.qty).trim();
                 if (changed) {
                     ops.push(function() { return self.post('_m_set/' + s.id + '?JSON', fields); });
                 }
@@ -3999,8 +3982,11 @@
             return positionsById[key] || genPositionsById[key] || { id: key, qty: 0, length: 0 };
         }
 
-        var draft = { positionId: '', footage: '', rolls: '', active: true, status: SUPPLY_STATUSES[0] };
+        // #3242: обеспечение ссылается на «Партию ГП» резки — её и выбираем.
+        var draft = { positionId: '', footage: '', rolls: '', active: true, status: SUPPLY_STATUSES[0], finishedBatchId: '' };
         var rollsInput;
+        var batchSelect;
+        var cutBatches = [];   // [{id, width, qty}] состав выбранной резки (Партии ГП)
         function applyPositionDefaults(positionId) {
             draft.positionId = positionId;
             var position = selectedPosition(positionId);
@@ -4008,10 +3994,37 @@
             draft.footage = length > 0 ? length : '';
             draft.rolls = remainingRollsForPosition(position, self.supplies);
             if (rollsInput) rollsInput.value = draft.rolls;
+            // Автовыбор Партии ГП по ширине позиции (если состав уже загружен).
+            var match = cutBatches.filter(function(b) { return stripWidthKey(b.width) === stripWidthKey(position.width); })[0];
+            if (match && batchSelect) { batchSelect.value = String(match.id); draft.finishedBatchId = String(match.id); }
         }
 
         box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
             function(v) { applyPositionDefaults(v); }, null, { cacheKey: 'positions' })));
+
+        // #3242: селектор «Партии ГП» резки (обеспечение ссылается на конкретную партию).
+        batchSelect = el('select', { class: 'atex-pp-select' });
+        batchSelect.appendChild(el('option', { value: '', text: 'Загрузка Партий ГП…' }));
+        batchSelect.addEventListener('change', function() { draft.finishedBatchId = batchSelect.value; });
+        box.appendChild(field('Партия ГП', batchSelect));
+        this.loadStripsForCut(cut.id).then(function(batches) {
+            if (String(self.selectedCutId) !== String(cut.id) || !batchSelect.parentNode) return;
+            cutBatches = batches || [];
+            batchSelect.innerHTML = '';
+            if (!cutBatches.length) {
+                batchSelect.appendChild(el('option', { value: '', text: 'нет Партий ГП — добавьте состав резки' }));
+                return;
+            }
+            batchSelect.appendChild(el('option', { value: '', text: '— выберите Партию ГП —' }));
+            cutBatches.forEach(function(b) {
+                batchSelect.appendChild(el('option', { value: String(b.id), text: b.width + ' мм · ' + b.qty + ' рул.' }));
+            });
+            if (draft.positionId) applyPositionDefaults(draft.positionId);   // авто-подбор по ширине
+        }).catch(function() {
+            if (!batchSelect.parentNode) return;
+            batchSelect.innerHTML = '';
+            batchSelect.appendChild(el('option', { value: '', text: 'ошибка загрузки Партий ГП' }));
+        });
 
         rollsInput = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
         rollsInput.addEventListener('input', function() { draft.rolls = rollsInput.value; });
@@ -4031,6 +4044,7 @@
             self.createSupply({
                 positionId: draft.positionId,
                 cutId: cut.id,
+                finishedBatchId: draft.finishedBatchId,   // #3242: ссылка на «Партию ГП»
                 footage: draft.footage,
                 rolls: draft.rolls,
                 active: draft.active,
