@@ -1013,12 +1013,19 @@ var schedStoredDuration = planning.buildSchedule([
 ], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 });
 assertEqual(schedStoredDuration[0], { cutId:'D', startMin:482, finishMin:494.5, setupMin:2, durationMin:12.5 },
     'buildSchedule #3229: cut_duration используется как fallback, если метраж отчёта отсутствует');
+// #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
+// длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
-    '⏱ 08:02 – 08:15 · 12.5 мин',
-    'formatScheduleLine #3229: сохранённая длительность отображается без 0 мин');
+    '⏱ 08:00 – 08:15 · 14.5 мин',
+    'formatScheduleLine #3262: окно от начала setup; длительность = setup + резка');
 assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationMin:0 }, 0, true),
     '⏱ ошибка: нет метража прохода; длительность не рассчитана',
     'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
+// #3262: пример из тикета — setup 47 мин, резка 12 мин → окно 10:34–11:33 · 59 мин
+// (совпадает с первым шагом «Тайминг окна», а не со стартом резки 11:21).
+assertEqual(planning.formatScheduleLine({ startMin:681, finishMin:693, setupMin:47, durationMin:12 }, 0, true),
+    '⏱ 10:34 – 11:33 · 59 мин',
+    'formatScheduleLine #3262: старт окна (10:34) совпадает с таймингом окна, не со стартом резки (11:21)');
 assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
 assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
 assertEqual(planning.formatCutStartTime({ startMin:482 }), '08:02',

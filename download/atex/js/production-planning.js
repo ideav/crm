@@ -1573,7 +1573,13 @@
             if (!hasWindingPoints) return '⏱ ошибка: нет норм WIND_*; длительность не рассчитана';
             return '⏱ ошибка: длительность 0 мин; проверьте проходы и нормы намотки';
         }
-        return '⏱ ' + formatClock(sc.startMin) + ' – ' + formatClock(sc.finishMin) + ' · ' + dur + ' мин';
+        // #3262: показываем всё ОКНО (setup + резка), как «Тайминг окна» в модалке —
+        // старт = начало setup (startMin − setupMin), длительность = setup + резка
+        // (диапазон совпадает с числом минут, как у блока уборки). Так начало в карточке
+        // равно первому шагу тайминга окна, а не старту самой резки.
+        var setup = stripNum(sc.setupMin);
+        var windowStart = stripNum(sc.startMin) - setup;
+        return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(sc.finishMin) + ' · ' + round3(setup + dur) + ' мин';
     }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
