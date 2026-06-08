@@ -1174,6 +1174,7 @@ function runGenerateCutsDeferredGpTest() {
             req('24305', 'Метраж, м'),
             req('26584', 'Длительность, минут'),
             req('26990', 'Тайминг'),
+            req('27172', 'Тип намотки'),
             req('1162', 'Статус')
         ] },
         // #3242: «Обеспечение» ссылается на «Партию ГП» (t15016), не на резку.
@@ -1215,6 +1216,8 @@ function runGenerateCutsDeferredGpTest() {
 
     var result = controller.runGenerateCuts([{
         mat: 'M',
+        windDir: 'OUT',
+        windLength: 1200,
         positionsCovered: ['p1'],
         strips: [
             { width: 110, qty: 1, purpose: 'Заказ', positionIds: ['p1'] },
@@ -1241,6 +1244,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
             'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
+        assertEqual(cutPost.fields.t27172, 'OUT',
+            'runGenerateCuts #3266: t27172 пишет Тип намотки Производственной резки');
         // #3242: состав резки создаётся как «Партия ГП» (по ширинам: 110 и 55), не «Полоса».
         var gpPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1081') === 0; });
         assertEqual(gpPosts.length, 2, 'runGenerateCuts #3242: создаются «Партии ГП» по каждой ширине');

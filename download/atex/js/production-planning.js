@@ -80,7 +80,8 @@
         duration: 'Длительность, минут',
         timing: 'Тайминг',
         actualRuns: 'Кол-во факт',
-        length: 'Метраж, м'
+        length: 'Метраж, м',
+        winding: 'Тип намотки'
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -105,7 +106,8 @@
         planDate: CUT_REQ.planDate,
         status: CUT_REQ.status,
         notes: CUT_REQ.notes,
-        sequence: CUT_REQ.sequence
+        sequence: CUT_REQ.sequence,
+        winding: CUT_REQ.winding
     };
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
@@ -3195,6 +3197,7 @@
             duration: reqIdByName(cutMeta, CUT_REQ.duration),
             timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
+            winding: reqIdByName(cutMeta, CUT_REQ.winding),
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
         };
@@ -3326,6 +3329,7 @@
                     duration: duration > 0 ? duration : '',
                     timing: timing,
                     length: runLength > 0 ? runLength : '',
+                    winding: normWinding(lay && lay.windDir),
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
