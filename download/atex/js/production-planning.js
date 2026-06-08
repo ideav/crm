@@ -647,7 +647,7 @@
 
     // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveDiameter, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
-    // position_qty, position_length → числа; пустые значения → 0/'' но объект всегда
+    // position_qty, position_length/wind_length → числа; пустые значения → 0/'' но объект всегда
     // присутствует. length — «Длина, м» позиции (длина прогона джамбо = «Метраж, м»
     // создаваемого обеспечения, #3155); нет колонки в отчёте → 0 (длительность намотки 0).
     // dueKey — числовой ключ «Срока изготовления» (position_due_date) через
@@ -658,10 +658,11 @@
             // ИЛИ утверждена сама позиция (item_approval_date).
             var orderApproved = !!(String(row.order_approval_date || row.order_approved || '').trim());
             var itemApproved = !!(String(row.item_approval_date || row.position_approved || row.position_approval_date || '').trim());
-            var length = stripNum(row.position_length);
+            var lengthRaw = rowFirstValue(row, ['position_length', 'position_length_m', 'position_wind_length', 'wind_length']);
+            var length = stripNum(lengthRaw);
             var windLengthRaw = (row.wind_length != null && String(row.wind_length).trim() !== '')
                 ? row.wind_length
-                : ((row.position_wind_length != null && String(row.position_wind_length).trim() !== '') ? row.position_wind_length : row.position_length);
+                : ((row.position_wind_length != null && String(row.position_wind_length).trim() !== '') ? row.position_wind_length : lengthRaw);
             return {
                 id: row.position_id == null ? '' : String(row.position_id),
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
@@ -736,6 +737,58 @@
         var out = {};
         (genPositions || []).forEach(function(p) {
             if (p && p.id != null && String(p.id) !== '') out[String(p.id)] = Number(p.length) || 0;
+        });
+        return out;
+    }
+
+    function cutGenerationTimingDiagnostics(layouts, positions, opTimes) {
+        var byId = positionMap(positions);
+        var windPoints = windingPointsFromTimes(opTimes || {});
+        var out = [];
+        (layouts || []).forEach(function(layout, index) {
+            var covered = (layout && layout.positionsCovered) || [];
+            var plannedRuns = plannedRunsForLayout(layout, byId);
+            var runLength = layoutRunLength(layout, byId);
+            var layoutNo = index + 1;
+            if (!(plannedRuns > 0)) {
+                out.push({
+                    key: 'plannedRuns',
+                    label: CUT_REQ.plannedRuns,
+                    reason: 'value',
+                    layoutIndex: index,
+                    message: 'Не рассчитано поле «' + CUT_REQ.plannedRuns + '» для резки ' + layoutNo
+                });
+                return;
+            }
+            if (!(runLength > 0)) {
+                var missingIds = covered.filter(function(positionId) {
+                    var p = byId[String(positionId)];
+                    return !(Number(p && p.length) > 0);
+                }).map(function(positionId) { return String(positionId); });
+                out.push({
+                    key: 'length',
+                    label: CUT_REQ.length,
+                    reason: 'value',
+                    layoutIndex: index,
+                    positionIds: missingIds,
+                    message: 'Не рассчитано поле «' + CUT_REQ.length + '» для резки ' + layoutNo +
+                        (missingIds.length ? ': нет длины у позиций ' + missingIds.join(', ') : ': нет длины прогона') +
+                        '. Проверьте positions_list: position_length / wind_length'
+                });
+                return;
+            }
+            if (!(plannedCutDurationMinutes(runLength, plannedRuns, opTimes) > 0)) {
+                out.push({
+                    key: 'duration',
+                    label: CUT_REQ.duration,
+                    reason: 'value',
+                    layoutIndex: index,
+                    runLength: runLength,
+                    plannedRuns: plannedRuns,
+                    message: 'Не рассчитано поле «' + CUT_REQ.duration + '» для резки ' + layoutNo +
+                        (windPoints.length ? ': длительность 0 при метраже ' + runLength + ' м и проходах ' + plannedRuns : ': нет норм WIND_* в «Время операции, мин»')
+                });
+            }
         });
         return out;
     }
@@ -1564,6 +1617,7 @@
         nextCutMainValue: nextCutMainValue,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
+        cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
         supplyCutRelation: supplyCutRelation,
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         layoutPositionGroups: layoutPositionGroups,
@@ -2793,6 +2847,16 @@
                 self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
                 return;
             }
+            var timingDiagnostics = cutGenerationTimingDiagnostics(allLayouts, self.genPositions, self.opTimes);
+            if (timingDiagnostics.length) {
+                console.error('[pp] ❌ generateCuts: ошибка подготовки полей резки — ' + cutWriteDiagnosticSummary(timingDiagnostics), {
+                    diagnostics: timingDiagnostics,
+                    layouts: allLayouts.slice(0, 5)
+                });
+                self.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+                    (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
+                return;
+            }
 
             // Счётчики для подтверждения: полос = число записей «Полоса» (как в итоговой
             // нотификации), ножей = суммарное Количество (Σ qty).
@@ -2871,6 +2935,15 @@
         var nSleeves = 0;
         var nCuts = layouts.length;
         var doneCuts = 0;
+        var timingDiagnostics = cutGenerationTimingDiagnostics(layouts, this.genPositions, this.opTimes);
+        if (timingDiagnostics.length) {
+            console.error('[pp] ❌ runGenerateCuts: ошибка подготовки полей резки — ' + cutWriteDiagnosticSummary(timingDiagnostics), {
+                diagnostics: timingDiagnostics
+            });
+            this.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+                (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
+            return Promise.resolve();
+        }
 
         this.setBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
