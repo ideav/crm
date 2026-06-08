@@ -375,7 +375,8 @@
             // If we have parent info, show breadcrumb-style title
             if (this.parentInfo) {
                 const parentTypeName = this.escapeHtml(this.parentInfo.type || '');
-                const parentVal = this.escapeHtml(this.parentInfo.val || '');
+                // #3247: первая колонка-DATETIME родителя приходит unix-штампом — форматируем.
+                const parentVal = this.escapeHtml(this.formatRecordTitleValue(this.parentInfo.val || ''));
                 const parentObjId = this.parentInfo.obj || '';
                 const parentUp = parseInt(this.parentInfo.up, 10) || 0;
                 const parentRecordId = this.options.parentId || '';

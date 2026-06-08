@@ -6847,6 +6847,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				while($row = mysqli_fetch_array($data_set))
 					BatchDelete($row["id"]);
 				BatchDelete(""); // Flush batch
+				# #3260: API/новый UI зовёт _m_del_select напрямую (без выгрузки строк) —
+				# отдаём число удалённых JSON-ом вместо HTML-редиректа.
+				if(isApi())
+					api_dump(json_encode(array("deleted"=>(int)$deleted), JSON_UNESCAPED_UNICODE), "deleted.json");
 				header("Location: /$z/object/$id/?deleted=$deleted&".$GLOBALS["FILTER"]);
 				myexit();
 			}
