@@ -339,11 +339,11 @@
             }
             groups[key].cuts.push(c);
         });
-        // Сортировка резок внутри каждой группы: день плана, затем ножи по
-        // убыванию (#3236), затем sequence (возр., null/NaN — в конец,
-        // стабильно). Sequence теперь сбрасывается на каждый день, поэтому дата
-        // нужна, чтобы одинаковые номера разных дней не перемешивались при
-        // снятом фильтре даты.
+        // Сортировка резок внутри каждой группы: день плана, затем сохранённая
+        // sequence (возр., null/NaN — в конец), затем ножи по убыванию как
+        // fallback для ещё не пронумерованных резок. Sequence теперь сбрасывается
+        // на каждый день, поэтому дата нужна, чтобы одинаковые номера разных дней
+        // не перемешивались при снятом фильтре даты.
         function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
         function knifeKey(c) { var n = Number(c && c.knifeCount); return isFinite(n) ? n : 0; }
         function cmpCutPlanDay(a, b) {
@@ -361,8 +361,8 @@
             groups[k].cuts = groups[k].cuts.map(function(c, i) { return { c: c, i: i }; })
                 .sort(function(a, b) {
                     return cmpCutPlanDay(a.c, b.c)
-                        || (knifeKey(b.c) - knifeKey(a.c))
                         || seqKey(a.c) - seqKey(b.c)
+                        || (knifeKey(b.c) - knifeKey(a.c))
                         || a.i - b.i;
                 })
                 .map(function(x) { return x.c; });
@@ -1605,6 +1605,16 @@
         return (strips || []).reduce(function(sum, s) { return sum + stripNum(s.qty); }, 0);
     }
 
+    function knifeWidthsForStrips(strips) {
+        var out = [];
+        (strips || []).forEach(function(s) {
+            var width = stripNum(s.width);
+            var qty = Math.max(0, Math.floor(stripNum(s.qty)));
+            for (var i = 0; i < qty; i++) out.push(width);
+        });
+        return out;
+    }
+
     // «Остаток, мм» — ширина джамбо минус занятая полосами ширина.
     function stripsRemainder(jumboWidth, strips) {
         return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
@@ -1820,17 +1830,71 @@
             .map(function(x){ return x.c; });
     }
 
-    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы — жадно
-    // (переналадки), затем по убыванию ножей (#3130); проставить sequence; вход не мутировать.
+    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
+    // жадно по реальным минутам переналадки (#3268). Ножи остаются tie-break в
+    // startKey/greedySequence (#3130), но не пересортировывают уже найденную
+    // setup-оптимальную цепочку. Проставить sequence; вход не мутировать.
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
-        var seq = byKnifeCountDesc(greedySequence(rest, weights)).concat(byKnifeCountDesc(greedySequence(foil, weights)));
+        var seq = greedySequence(rest, weights).concat(greedySequence(foil, weights));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
             return copy;
         });
+    }
+
+    function orderedChangeoverCost(cuts, weights) {
+        var seq = orderCuts(cuts || [], weights);
+        var total = 0;
+        for (var i = 1; i < seq.length; i++) total += changeoverCost(seq[i - 1], seq[i], weights);
+        return round3(total);
+    }
+
+    function bestExistingTransitionCost(group, cut, weights) {
+        if (!group || !group.length || !cut) return Infinity;
+        var best = Infinity;
+        group.forEach(function(prev) {
+            best = Math.min(best, changeoverCost(prev, cut, weights), changeoverCost(cut, prev, weights));
+        });
+        return best === Infinity ? Infinity : round3(best);
+    }
+
+    // Выбрать станок для новой резки по приросту минут переналадки (#3268).
+    // Пустой станок выигрывает у несовместимого занятого (delta меньше), но при
+    // равном delta предпочитаем уже занятый setup-совместимый станок, а не
+    // разбрасываем одинаковые профили только ради баланса.
+    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights) {
+        var groups = groupsBySlitterId || {};
+        var load = loadBySlitterId || {};
+        var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId); });
+        if (!allowed.length) return null;
+        function cmpNumber(a, b) {
+            if (a === b) return 0;
+            if (a === Infinity) return 1;
+            if (b === Infinity) return -1;
+            return a - b;
+        }
+        var candidates = allowed.map(function(s) {
+            var id = String(s.id);
+            var group = groups[id] || [];
+            var before = orderedChangeoverCost(group, weights);
+            var after = orderedChangeoverCost(group.concat([cut]), weights);
+            return {
+                id: id,
+                delta: round3(after - before),
+                affinity: bestExistingTransitionCost(group, cut, weights),
+                load: Number(load[id]) || 0
+            };
+        });
+        candidates.sort(function(a, b) {
+            return cmpNumber(a.delta, b.delta)
+                || cmpNumber(a.affinity, b.affinity)
+                || cmpNumber(a.load, b.load)
+                || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+        });
+        return candidates[0].id;
     }
 
     // Переставить резку в очереди станка: swap с соседом (dir -1 вверх / +1 вниз) +
@@ -1962,6 +2026,9 @@
         setupBreakdown: setupBreakdown,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
+        orderedChangeoverCost: orderedChangeoverCost,
+        bestExistingTransitionCost: bestExistingTransitionCost,
+        chooseSlitterBySetup: chooseSlitterBySetup,
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         moveInQueue: moveInQueue,
@@ -2018,6 +2085,7 @@
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
+        knifeWidthsForStrips: knifeWidthsForStrips,
         stripsRemainder: stripsRemainder,
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
@@ -3218,6 +3286,16 @@
             var sid = c && c.slitter && c.slitter.id;
             if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
         });
+        var setupGroupsByDay = {};
+        (this.cuts || []).forEach(function(c) {
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var day = cutPlanDayKey(c);
+            if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
+            var key = String(sid);
+            if (!setupGroupsByDay[day][key]) setupGroupsByDay[day][key] = [];
+            setupGroupsByDay[day][key].push(c);
+        });
         var sequenceCuts = (this.cuts || []).slice();
         var cutMainState = { last: this.lastCutMainValue };
         var batchRemainingById = {};
@@ -3226,7 +3304,6 @@
             var lin = Number(b && b.remainderLinear);
             if (id !== '' && isFinite(lin) && lin > 0) batchRemainingById[id] = lin;
         });
-        var slitterBySetupKey = {};
 
         var nStrips = 0;
         var nPositions = 0;
@@ -3249,30 +3326,53 @@
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
             var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
-            var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
-            var slitterId = slitterBySetupKey[setupKey] || pickSlitter(self.slitters, lay.mat, loadBySlitterId);
+            var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
+            var day = cutPlanDayKey({ planDate: cutMainValue });
+            if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
+            var descriptor = {
+                id: 'generated-' + layIdx,
+                materialId: lay.mat,
+                winding: lay.windDir,
+                batchId: batchId,
+                jumboRemainingM: 0,
+                knifeCount: stripsTotalKnives(lay && lay.strips),
+                knifeWidths: knifeWidthsForStrips(lay && lay.strips),
+                isFoil: !!(lay && lay.isFoil),
+                rollerWidth: 0,
+                planDate: cutMainValue
+            };
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, self.changeTimes);
             if (slitterId != null) {
                 slitterId = String(slitterId);
-                slitterBySetupKey[setupKey] = slitterId;
+                if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
+                setupGroupsByDay[day][slitterId].push(descriptor);
                 loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
             }
             layoutPlans.push({
+                id: descriptor.id,
+                materialId: descriptor.materialId,
+                winding: descriptor.winding,
+                batchId: descriptor.batchId,
+                jumboRemainingM: descriptor.jumboRemainingM,
+                knifeCount: descriptor.knifeCount,
+                knifeWidths: descriptor.knifeWidths,
+                isFoil: descriptor.isFoil,
+                rollerWidth: descriptor.rollerWidth,
+                planDate: descriptor.planDate,
                 plannedRuns: plannedRuns,
                 runLength: runLength,
                 duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
                 timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
-                batchId: batchId,
                 slitterId: slitterId,
-                cutMainValue: nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState),
-                knifeCount: stripsTotalKnives(lay && lay.strips),
+                cutMainValue: cutMainValue,
                 sequence: '',
                 index: layIdx
             });
         });
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
 
-        // #3263: create requests stay in layout order, but queue numbers for
-        // same-day generated cuts must follow knife count descending.
+        // Create requests stay in layout order, but queue numbers for same-day
+        // generated cuts follow the setup-optimized order from orderCuts().
         var sequenceGroups = {};
         var sequenceGroupOrder = [];
         layoutPlans.forEach(function(plan) {
@@ -3288,16 +3388,26 @@
         });
         sequenceGroupOrder.forEach(function(key) {
             var group = sequenceGroups[key];
-            group.plans.slice().sort(function(a, b) {
-                return ((Number(b.knifeCount) || 0) - (Number(a.knifeCount) || 0)) || (a.index - b.index);
-            }).forEach(function(plan) {
+            var byIndex = {};
+            group.plans.forEach(function(plan) { byIndex[String(plan.index)] = plan; });
+            orderCuts(group.plans, self.changeTimes).forEach(function(orderedPlan) {
+                var plan = byIndex[String(orderedPlan.index)];
+                if (!plan) return;
                 plan.sequence = nextSequenceForCuts(sequenceCuts, group.slitterId, group.planDate);
                 sequenceCuts.push({
-                    id: 'generated-' + plan.index,
+                    id: plan.id,
                     number: plan.cutMainValue,
                     slitter: { id: group.slitterId, label: '' },
                     planDate: plan.cutMainValue,
-                    sequence: plan.sequence
+                    sequence: plan.sequence,
+                    materialId: plan.materialId,
+                    winding: plan.winding,
+                    batchId: plan.batchId,
+                    jumboRemainingM: plan.jumboRemainingM,
+                    knifeCount: plan.knifeCount,
+                    knifeWidths: plan.knifeWidths,
+                    isFoil: plan.isFoil,
+                    rollerWidth: plan.rollerWidth
                 });
             });
         });
@@ -3862,7 +3972,7 @@
         // Закладки по станкам (#3116 п.2): один таб на станок, контент — резки
         // только активного станка. Активный таб в this.activeSlitter (ключ как в
         // groupBySlitter); если выбранного среди групп нет — берём первый.
-        function groupKey(g) { return g.slitter.id == null ? ' none' : String(g.slitter.id); }
+        function groupKey(g) { return g.slitter.id == null ? '\u0000none' : String(g.slitter.id); }
         var keys = groups.map(groupKey);
         if (keys.indexOf(self.activeSlitter) === -1) self.activeSlitter = keys[0];
 
