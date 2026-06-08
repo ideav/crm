@@ -113,7 +113,7 @@
         cut: 'Производственная резка',
         finishedBatch: 'Партия ГП',
         rolls: 'Кол-во рулонов',
-        active: 'Активно',
+        active: 'В работе',   // #3242: «Активно» переименовано в «В работе»
         status: 'Статус'
     };
     var SLEEVE_TASK_REQ = {
@@ -543,15 +543,21 @@
                 var seqVal = row.cut_sequence;
                 cutsById[cutId] = {
                     id: cutId,
-                    number: str(row.cut_no),
+                    // #3242: cut_no упразднён; «номер» резки = плановая дата начала
+                    // (первая колонка «Производственной резки» — DATETIME, отчёт отдаёт cut_plan_date).
+                    number: str(row.cut_plan_date),
                     slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) },
-                    materialBatch: { id: null, label: str(row.cut_material_batch) },
+                    // #3242: отдельной «партии сырья» в cut_planning больше нет (видна как
+                    // cut_material/cut_jumbo_remaining). Отчётный batch_id — это «Партия ГП»
+                    // (готовая продукция, по одной на полосу), не «партия сырья» → в batchId не кладём,
+                    // иначе сломается оценка переналадки «смена партии» (changeoverParts).
+                    materialBatch: { id: null, label: '' },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
                     sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
-                    batchId: str(row.cut_batch_id),
+                    batchId: '',
                     jumboRemainingM: (row.cut_jumbo_remaining == null || row.cut_jumbo_remaining === '') ? 0 : Number(row.cut_jumbo_remaining),
                     knifeCount: (row.cut_knives == null || row.cut_knives === '') ? 0 : Number(row.cut_knives),
                     knifeWidths: [],
@@ -817,8 +823,9 @@
         return isNaN(t) ? Infinity : t;
     }
 
-    // Отображение «Номера» резки: новая модель может отдавать cut_no unix-штампом
-    // (секунды). Короткие автонумера и record id не форматируем как 1970-дату.
+    // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
+    // приходит unix-штампом (секунды) → форматируем как дату-время. Короткие record id
+    // и не-штампы не форматируем как 1970-дату.
     function isTimestampCutNumber(value) {
         var s = String(value == null ? '' : value).trim();
         if (!/^\d+$/.test(s)) return false;
@@ -869,10 +876,14 @@
         return (rows || []).map(function(row) {
             var no = row.batch_no == null ? '' : String(row.batch_no).trim();
             var material = row.batch_material == null ? '' : String(row.batch_material).trim();
-            var rem = fmtRemainder(row.batch_remainder_m2);
+            // #3242: основной остаток — погонные метры (batch_remainder_m), которых хватит
+            // на отмотку нужной длины; кв.м. (batch_remainder_m2) — только справочно.
+            var remM = fmtRemainder(row.batch_remainder_m);
+            var remM2 = fmtRemainder(row.batch_remainder_m2);
             var parts = [];
             if (material) parts.push(material);
-            if (rem) parts.push('ост. ' + rem + ' м²');
+            if (remM) parts.push('ост. ' + remM + ' м' + (remM2 ? ' (' + remM2 + ' м²)' : ''));
+            else if (remM2) parts.push('ост. ' + remM2 + ' м²');
             return {
                 id: row.batch_id == null ? '' : String(row.batch_id),
                 label: no + (parts.length ? ' · ' + parts.join(' · ') : '')
@@ -986,7 +997,8 @@
     }
 
     function activeReqId(meta) {
-        return reqIdByName(meta, 'Активно') ||
+        return reqIdByName(meta, 'В работе') ||   // #3242: «Активно» переименовано в «В работе»
+            reqIdByName(meta, 'Активно') ||
             reqIdByName(meta, 'Активная') ||
             reqIdByName(meta, 'Действует');
     }
@@ -2004,7 +2016,8 @@
         var dateIdx = columnIndex(meta, 'Дата прихода');
         var remIdx = columnIndex(meta, 'Остаток, м²');
         var remLinIdx = columnIndex(meta, 'Остаток, м');   // погонный остаток — для FIFO-резерва (Фаза 1b)
-        var activeIdx = columnIndex(meta, 'Активно');
+        var activeIdx = columnIndex(meta, 'В работе');     // #3242: «Активно» переименовано в «В работе»
+        if (activeIdx < 0) activeIdx = columnIndex(meta, 'Активно');
         if (activeIdx < 0) activeIdx = columnIndex(meta, 'Активная');
         if (activeIdx < 0) activeIdx = columnIndex(meta, 'Действует');
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
@@ -3782,7 +3795,7 @@
         activeInput.addEventListener('change', function() { draft.active = activeInput.checked; });
         box.appendChild(el('label', { class: 'atex-pp-checkbox-field' }, [
             activeInput,
-            el('span', { text: 'Активно' })
+            el('span', { text: 'В работе' })   // #3242: «Активно» → «В работе»
         ]));
 
         var actions = el('div', { class: 'atex-pp-actions' });
