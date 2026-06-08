@@ -1072,7 +1072,7 @@ assertEqual(planning.formatScheduleLine({ startMin:681, finishMin:693, setupMin:
     '⏱ 10:34 – 11:33 · 59 мин',
     'formatScheduleLine #3262: старт окна (10:34) совпадает с таймингом окна, не со стартом резки (11:21)');
 assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
-assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
+assertEqual(planning.formatClock(1440 + 90), '01:30', 'formatClock: за сутки → только ЧЧ:ММ без +Nд (#3276)');
 assertEqual(planning.formatCutStartTime({ startMin:482 }), '08:02',
     'formatCutStartTime #3236: .atex-pp-cut-num показывает плановый старт ЧЧ:ММ');
 assertEqual(planning.formatCutStartTime({ startMin:1440 + 90 }), '01:30',

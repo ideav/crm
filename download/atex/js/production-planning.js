@@ -1646,11 +1646,9 @@
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
-        var day = Math.floor(m / 1440);
         var hm = ((m % 1440) + 1440) % 1440;
         var h = Math.floor(hm / 60), mm = hm % 60;
-        var s = (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
-        return day > 0 ? s + ' +' + day + 'д' : s;
+        return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
     }
 
     function formatClockHHMM(min){
@@ -4250,7 +4248,6 @@
                 el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
                 el('span', { class: 'atex-pp-cut-runs', text: formatCutRuns(c.plannedRuns, runLenByCut[String(c.id)]) }),
                 el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
-                el('span', { class: 'atex-pp-cut-date', text: formatCutNumber(c.planDate) || '' }),   // #3249: planDate — unix-штамп → дата
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);
@@ -4327,12 +4324,9 @@
 
             groupEl.appendChild(cardPanel);
 
-            // Уборка в конце дня (#3155): после последней резки дня (день следующей резки
-            // отличается либо это последняя резка очереди) — строка-маркер уборки.
-            var nextSc = schedById[String((activeGroup.cuts[idx + 1] || {}).id)];
-            var thisDay = schedDay(sc);
-            if (sc && thisDay != null && (idx === activeGroup.cuts.length - 1 || schedDay(nextSc) !== thisDay)) {
-                var cl = cleanupByDay[thisDay];
+            // Уборка в конце дня (#3155, #3276): один блок после последней резки очереди.
+            if (sc && idx === activeGroup.cuts.length - 1) {
+                var cl = cleanupByDay[schedDay(sc)];
                 if (cl) {
                     groupEl.appendChild(el('div', { class: 'atex-pp-cleanup',
                         text: '🧹 Уборка после смены · ' + formatClock(cl.startMin) + ' – ' + formatClock(cl.finishMin) +
