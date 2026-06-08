@@ -20,9 +20,9 @@
 // (`object/{table}?JSON_OBJ`, записей мало).
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
-// `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
-// сервер сам считает автонумер). Резка снова является самостоятельной таблицей
-// (#3185), а «Обеспечение» ссылается на неё реквизитом «Производственная резка».
+// `_m_new/{Производственная резка}` с главным значением `t{tableId}` (#3225).
+// Резка снова является самостоятельной таблицей (#3185), а «Обеспечение»
+// ссылается на неё реквизитом «Производственная резка».
 // ID таблиц и реквизитов для записи не хардкодятся: берутся по именам из
 // `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
@@ -335,6 +335,67 @@
             out['t' + id] = v;
         });
         return out;
+    }
+
+    function maxNumericCutNumber(cuts) {
+        var max = 0;
+        (cuts || []).forEach(function(cut) {
+            var raw = cut && cut.number;
+            if (raw == null || raw === '') return;
+            var n = Number(String(raw).trim());
+            if (isFinite(n) && n > max) max = n;
+        });
+        return max;
+    }
+
+    function nextCutMainValue(cuts, nowMs, state) {
+        var ms = Number(nowMs);
+        if (!isFinite(ms) || ms <= 0) ms = Date.now();
+        var byTime = Math.floor(ms / 1000);
+        var byExisting = maxNumericCutNumber(cuts) + 1;
+        var byState = state && isFinite(Number(state.last)) ? Number(state.last) + 1 : 1;
+        var value = Math.max(byTime, byExisting, byState);
+        if (state) state.last = value;
+        return value;
+    }
+
+    function addMainValueField(meta, fields, value) {
+        var out = {};
+        if (meta && meta.id != null && value !== undefined && value !== null && value !== '') {
+            out['t' + meta.id] = value;
+        }
+        Object.keys(fields || {}).forEach(function(k) { out[k] = fields[k]; });
+        return out;
+    }
+
+    function controllerNowMs(controller) {
+        if (controller && typeof controller.nowMs === 'function') return controller.nowMs();
+        return Date.now();
+    }
+
+    function traceCutCreatePayload(scope, meta, reqIds, fields, controller) {
+        var win = typeof window !== 'undefined' ? window : null;
+        var enabled = (controller && controller.traceCutPayloads) || (win && win.ATEX_PP_TRACE_PAYLOADS);
+        if (!enabled) return;
+        if (typeof console === 'undefined' || !console.log) return;
+        var mainKey = meta && meta.id != null ? 't' + meta.id : '';
+        var fieldKeys = Object.keys(fields || {}).sort();
+        var missing = [];
+        if (mainKey && !Object.prototype.hasOwnProperty.call(fields || {}, mainKey)) {
+            missing.push('main:' + mainKey);
+        }
+        Object.keys(reqIds || {}).forEach(function(key) {
+            var id = reqIds[key];
+            var fieldKey = id == null ? '' : 't' + id;
+            if (fieldKey && !Object.prototype.hasOwnProperty.call(fields || {}, fieldKey)) {
+                missing.push(key + ':' + fieldKey);
+            }
+        });
+        console.log('[pp] 🧾 ' + scope + ': _m_new/' + ((meta && meta.id) || '?') + ' поля', {
+            main: mainKey ? (mainKey + '=' + ((fields || {})[mainKey] == null ? '' : (fields || {})[mainKey])) : '',
+            fieldKeys: fieldKeys,
+            missing: missing
+        });
     }
 
     // Плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies }.
@@ -1329,6 +1390,9 @@
         filterCuts: filterCuts,
         isCutVisible: isCutVisible,
         buildFields: buildFields,
+        maxNumericCutNumber: maxNumericCutNumber,
+        nextCutMainValue: nextCutMainValue,
+        addMainValueField: addMainValueField,
         supplyCutRelation: supplyCutRelation,
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         layoutPositionGroups: layoutPositionGroups,
@@ -1448,6 +1512,7 @@
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
+        this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
         this.busy = false;
         this.progressEl = null;     // окно прогресса генерации резок (#3148)
         this.progressTotal = 0;
@@ -1945,7 +2010,7 @@
 
     // ── Запись ──
 
-    // Создание производственной резки. Номер не задаётся (unique сам считает).
+    // Создание производственной резки. Главное значение пишется как `t{tableId}` (#3225).
     AtexProductionPlanning.prototype.createCut = function() {
         var self = this;
         if (this.busy) return;
@@ -1981,6 +2046,9 @@
             sequence: reqIdByName(meta, CUT_REQ.sequence)
         };
         var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
+        var cutMainState = { last: this.lastCutMainValue };
+        var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
+        this.lastCutMainValue = cutMainState.last;
         var fields = buildFields(reqIds, {
             slitter: d.slitterId,
             materialBatch: d.materialBatchId,
@@ -1992,6 +2060,8 @@
             notes: d.notes,
             sequence: nextSequenceForCuts(this.cuts, d.slitterId, d.planDate)
         });
+        fields = addMainValueField(meta, fields, cutMainValue);
+        traceCutCreatePayload('createCut', meta, reqIds, fields, this);
 
         function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
@@ -2030,8 +2100,8 @@
         }
 
         this.setBusy(true);
-        // up=1 — корневой объект; full=1 — на случай длинных примечаний.
-        this.post('_m_new/' + meta.id + '?JSON&up=1&full=1', fields).then(function(res) {
+        // up=1 — корневой объект; `t{tableId}` выше задаёт главное значение записи.
+        this.post('_m_new/' + meta.id + '?JSON&up=1', fields).then(function(res) {
             return finishCreatedCut(res && (res.obj || res.id || res.i));
         }).catch(function(err) {
             self.setBusy(false);
@@ -2574,6 +2644,7 @@
             if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
         });
         var sequenceCuts = (this.cuts || []).slice();
+        var cutMainState = { last: this.lastCutMainValue };
         var batchRemainingById = {};
         (this.genBatches || []).forEach(function(b) {
             var id = b && b.id != null ? String(b.id) : '';
@@ -2613,8 +2684,10 @@
                     loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
                 }
                 var sequence = nextSequenceForCuts(sequenceCuts, slitterId, '');
+                var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
+                self.lastCutMainValue = cutMainState.last;
                 if (sequence !== '') {
-                    sequenceCuts.push({ id: 'generated-' + layIdx, slitter: { id: slitterId, label: '' }, planDate: '', sequence: sequence });
+                    sequenceCuts.push({ id: 'generated-' + layIdx, number: cutMainValue, slitter: { id: slitterId, label: '' }, planDate: '', sequence: sequence });
                 }
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
@@ -2625,6 +2698,8 @@
                     length: runLength > 0 ? runLength : '',
                     sequence: sequence
                 });
+                cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
+                traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self);
 
                 function createStrips(cutId) {
                     var stripChain = Promise.resolve();
@@ -2684,7 +2759,7 @@
                 }
 
                 // 1) корневая резка, 2) полосы, 3) втулки, 4) обеспечения.
-                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
+                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
                     if (!cutId) throw new Error('Сервер не вернул id новой резки');
                     return createStrips(cutId)
