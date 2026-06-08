@@ -110,6 +110,7 @@
         cut: 'Производственная резка',
         finishedBatch: 'Партия ГП',
         rolls: 'Кол-во рулонов',
+        active: 'Активно',
         status: 'Статус'
     };
     var SLEEVE_TASK_REQ = {
@@ -211,6 +212,7 @@
         var relation = supplyCutRelation(supplyMeta, cutMeta);
         var reqIds = {
             footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
+            active: activeReqId(supplyMeta),
             cut: relation.mode === 'reference' ? relation.reqId : null,
             rolls: reqIdByName(supplyMeta, SUPPLY_REQ.rolls)
         };
@@ -218,6 +220,7 @@
         return buildFields(reqIds, {
             footage: values && values.footage,
             rolls: values && values.rolls,
+            active: values && values.active,
             status: values && values.status,
             cut: values && values.cutId
         });
@@ -575,21 +578,63 @@
         return { cuts: order.map(function(id) { return cutsById[id]; }), supplies: supplies };
     }
 
-    // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
-    // привязки и плашек «Связанные позиции». Подпись: «<номер заказа>/<номер
-    // позиции> · <ширина> мм» (#3116 п.3). Номер заказа берётся из колонки
-    // `order_no` отчёта; если её нет (старый отчёт) — деградирует до «№<номер>».
-    // Ширина пропускается, если пустая.
+    function formatPositionDimensionValue(value) {
+        var n = stripNum(value);
+        return n > 0 ? String(round3(n)) : '';
+    }
+
+    function positionDimensionsLabel(width, length) {
+        var w = formatPositionDimensionValue(width);
+        var len = formatPositionDimensionValue(length);
+        if (w !== '' && len !== '') return w + 'мм * ' + len + 'м';
+        if (w !== '') return w + 'мм';
+        if (len !== '') return len + 'м';
+        return '';
+    }
+
+    // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
+    // для дропдауна привязки и плашек «Связанные позиции». Подпись:
+    // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).
+    // Номер заказа берётся из колонки `order_no` отчёта; если её нет (старый
+    // отчёт) — деградирует до «№<номер>». Габариты пропускаются, если пустые.
     function rowsToPositions(rows) {
         return (rows || []).map(function(row) {
             var id = row.position_id == null ? '' : String(row.position_id);
             var orderNo = row.order_no == null ? '' : String(row.order_no).trim();
             var no = row.position_no == null ? '' : String(row.position_no).trim();
-            var width = row.position_width == null ? '' : String(row.position_width).trim();
+            var width = stripNum(row.position_width);
+            var length = stripNum(rowFirstValue(row, ['position_length', 'position_length_m', 'position_wind_length', 'wind_length']));
+            var qty = stripNum(row.position_qty);
             var head = orderNo !== '' ? orderNo + '/' + no : '№' + no;
-            var label = head + (width !== '' ? ' · ' + width + ' мм' : '');
-            return { id: id, label: label };
+            var dims = positionDimensionsLabel(width, length);
+            var label = head + (dims !== '' ? ' · ' + dims : '');
+            return { id: id, label: label, width: width, length: length, qty: qty };
         });
+    }
+
+    function suppliedRollsForPosition(positionId, supplies) {
+        var id = String(positionId == null ? '' : positionId);
+        var total = 0;
+        var hasRolls = false;
+        var hasCoverage = false;
+        (supplies || []).forEach(function(s) {
+            if (!s || String(s.positionId == null ? '' : s.positionId) !== id) return;
+            if (s.rolls !== undefined && s.rolls !== null && String(s.rolls).trim() !== '') {
+                hasRolls = true;
+                total += stripNum(s.rolls);
+            }
+            if (supplyCoverageKind(s)) hasCoverage = true;
+        });
+        return { rolls: round3(total), hasRolls: hasRolls, hasCoverage: hasCoverage };
+    }
+
+    function remainingRollsForPosition(position, supplies) {
+        var qty = stripNum(position && position.qty);
+        if (qty <= 0) return 0;
+        var supplied = suppliedRollsForPosition(position && position.id, supplies);
+        if (!supplied.hasRolls && supplied.hasCoverage) return 0;
+        var remaining = qty - supplied.rolls;
+        return remaining > 0 ? round3(remaining) : 0;
     }
 
     function sleeveDiameterFromRow(row) {
@@ -1525,6 +1570,8 @@
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
         rowsToPositions: rowsToPositions,
+        positionDimensionsLabel: positionDimensionsLabel,
+        remainingRollsForPosition: remainingRollsForPosition,
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
         groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
@@ -2235,6 +2282,8 @@
                 var supplyFields = buildSupplyFieldsForCut(self.meta.supply, self.meta.cut, {
                     cutId: String(id),
                     footage: footage > 0 ? footage : '',
+                    rolls: remainingRollsForPosition(position, self.supplies),
+                    active: '1',
                     status: SUPPLY_STATUSES[0]
                 });
                 return self.post('_m_new/' + self.meta.supply.id + '?JSON&up=' + encodeURIComponent(positionId), supplyFields)
@@ -2283,6 +2332,7 @@
             footage: opts.footage,
             cutId: opts.cutId,
             rolls: opts.rolls,
+            active: opts.active === undefined ? '1' : (truthyFlag(opts.active) ? '1' : '0'),
             status: opts.status || SUPPLY_STATUSES[0]
         });
 
@@ -2914,6 +2964,7 @@
                                 cutId: cutId,
                                 footage: len > 0 ? len : '',
                                 rolls: supplyRollsForPosition(lay, position, plannedRuns),
+                                active: '1',
                                 status: SUPPLY_STATUSES[0]
                             });
                             return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), fields)
@@ -3529,21 +3580,50 @@
 
         box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
 
-        var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
+        var positionsById = positionMap(this.positions);
+        var genPositionsById = positionMap(this.genPositions);
+        function selectedPosition(id) {
+            var key = String(id == null ? '' : id);
+            return positionsById[key] || genPositionsById[key] || { id: key, qty: 0, length: 0 };
+        }
+
+        var draft = { positionId: '', footage: '', rolls: '', active: true, status: SUPPLY_STATUSES[0] };
+        var rollsInput;
+        function applyPositionDefaults(positionId) {
+            draft.positionId = positionId;
+            var position = selectedPosition(positionId);
+            var length = stripNum(position.length);
+            draft.footage = length > 0 ? length : '';
+            draft.rolls = remainingRollsForPosition(position, self.supplies);
+            if (rollsInput) rollsInput.value = draft.rolls;
+        }
 
         box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
-            function(v) { draft.positionId = v; }, null, { cacheKey: 'positions' })));
+            function(v) { applyPositionDefaults(v); }, null, { cacheKey: 'positions' })));
 
-        var footage = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: 'например, 1200' });
-        footage.addEventListener('input', function() { draft.footage = footage.value; });
-        box.appendChild(field('Метраж, м', footage));
+        rollsInput = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+        rollsInput.addEventListener('input', function() { draft.rolls = rollsInput.value; });
+        box.appendChild(field('Кол-во рулонов', rollsInput));
 
-        box.appendChild(field('Статус обеспечения', this.selectText(SUPPLY_STATUSES, draft.status, function(v) { draft.status = v; })));
+        var activeInput = el('input', { type: 'checkbox' });
+        activeInput.checked = draft.active;
+        activeInput.addEventListener('change', function() { draft.active = activeInput.checked; });
+        box.appendChild(el('label', { class: 'atex-pp-checkbox-field' }, [
+            activeInput,
+            el('span', { text: 'Активно' })
+        ]));
 
         var actions = el('div', { class: 'atex-pp-actions' });
         var linkBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Привязать к резке' });
         linkBtn.addEventListener('click', function() {
-            self.createSupply({ positionId: draft.positionId, cutId: cut.id, footage: draft.footage, status: draft.status });
+            self.createSupply({
+                positionId: draft.positionId,
+                cutId: cut.id,
+                footage: draft.footage,
+                rolls: draft.rolls,
+                active: draft.active,
+                status: draft.status
+            });
         });
         actions.appendChild(linkBtn);
 
@@ -3568,8 +3648,10 @@
             this.positions.forEach(function(p) { posById[p.id] = p.label; });
             linked.forEach(function(s) {
                 var label = posById[s.positionId] || ('позиция #' + s.positionId);
+                var rolls = stripNum(s.rolls);
                 var foot = supplyFootage(s, self.footageBySupply);
-                if (foot > 0) label += ' · ' + foot + ' м';
+                if (rolls > 0) label += ' · ' + round3(rolls) + ' рул.';
+                else if (foot > 0 && label.indexOf(String(round3(foot)) + 'м') < 0) label += ' · ' + foot + ' м';
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
