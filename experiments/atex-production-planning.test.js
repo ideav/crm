@@ -237,18 +237,26 @@ assertEqual(planning.cutRunLength({ id: 'c1', length: 0 }, [{ id: 's1', cutId: '
 
 // ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
 var posRows = [
-    { position_id: '8207', order_no: 'АТХ-3002', position_no: '1', position_width: '25.00', position_qty: '70' },
-    { position_id: '8300', order_no: 'АТХ-3002', position_no: '2', position_width: '110.00', position_qty: '5' }
+    { position_id: '8207', order_no: 'АТХ-3002', position_no: '1', position_width: '25.00', position_length: '450.00', position_qty: '70' },
+    { position_id: '8300', order_no: 'АТХ-3002', position_no: '2', position_width: '110.00', position_length: '600.00', position_qty: '5' }
 ];
 assertEqual(planning.rowsToPositions(posRows), [
-    { id: '8207', label: 'АТХ-3002/1 · 25.00 мм' },
-    { id: '8300', label: 'АТХ-3002/2 · 110.00 мм' }
-], 'rowsToPositions: «<№заказа>/<№позиции> · <ширина> мм» (#3116 п.3)');
+    { id: '8207', label: 'АТХ-3002/1 · 25мм * 450м', width: 25, length: 450, qty: 70 },
+    { id: '8300', label: 'АТХ-3002/2 · 110мм * 600м', width: 110, length: 600, qty: 5 }
+], 'rowsToPositions #3231: «<№заказа>/<№позиции> · <ширина>мм * <метраж>м»');
 assertEqual(planning.rowsToPositions([{ position_id: '9', order_no: 'АТХ-7', position_no: '3', position_width: '' }]),
-    [{ id: '9', label: 'АТХ-7/3' }], 'rowsToPositions: без ширины — заказ/позиция');
-assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_width: '25.00' }]),
-    [{ id: '9', label: '№3 · 25.00 мм' }], 'rowsToPositions: нет order_no (старый отчёт) — деградация до №<номер>');
+    [{ id: '9', label: 'АТХ-7/3', width: 0, length: 0, qty: 0 }], 'rowsToPositions: без габаритов — заказ/позиция');
+assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_width: '25.00', position_length: '450.00' }]),
+    [{ id: '9', label: '№3 · 25мм * 450м', width: 25, length: 450, qty: 0 }], 'rowsToPositions: нет order_no (старый отчёт) — деградация до №<номер>');
 assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой ввод → пустой список');
+assertEqual(planning.remainingRollsForPosition({ id: 'p1', qty: 10 }, [
+    { positionId: 'p1', rolls: 4 },
+    { positionId: 'p1', rolls: '2' },
+    { positionId: 'p2', rolls: 100 }
+]), 4, 'remainingRollsForPosition #3231: вычитает уже обеспеченные рулоны позиции');
+assertEqual(planning.remainingRollsForPosition({ id: 'p1', qty: 10 }, [
+    { positionId: 'p1', rolls: 15 }
+]), 0, 'remainingRollsForPosition #3231: не уходит ниже нуля');
 
 // ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──
 var batchRows = [
@@ -589,9 +597,10 @@ assertEqual(planning.buildSupplyFieldsForCut(supplyMeta3189, cutMeta3189, {
   footage: '1200',
   cutId: '501',
   rolls: '6',
+  active: '1',
   status: 'Зарезервировано'
-}), { t1149: '1200', t16428: '501', t16424: '6' },
-  'buildSupplyFieldsForCut: #3189 пишет метраж, резку и рулоны, пропускает отсутствующий статус');
+}), { t1149: '1200', t1154: '1', t16428: '501', t16424: '6' },
+  'buildSupplyFieldsForCut #3231: пишет активность, метраж, резку и рулоны, пропускает отсутствующий статус');
 assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3185, 3), [
   { positionId: 'p110', diameter: 76, qty: 6 },
   { positionId: 'p70', diameter: 40, qty: 3 }

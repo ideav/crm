@@ -96,6 +96,19 @@
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 .atex-pp-textarea { resize: vertical; min-height: 48px; }
+.atex-pp-checkbox-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.atex-pp-checkbox-field input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
 
 .atex-pp-btn {
     border: 1px solid var(--pp-border);
