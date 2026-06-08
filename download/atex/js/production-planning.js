@@ -983,6 +983,11 @@
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
+    var FATIGUE_MACHINE_WIDTH_MM = 1600;  // базовая ширина вала для оценки числа ножей (#3270/#3272)
+    var FATIGUE_FACTOR = 2.0;             // alpha: штраф последней позиции = 1 + alpha
+    var FATIGUE_START_COST_MIN = 45;      // условная стоимость старта маршрута, мин
+    var PLANNING_STRATEGY_SETUP = 'setup';
+    var PLANNING_STRATEGY_FATIGUE = 'fatigue';
 
     function normWinding(v){ var s = String(v == null ? '' : v).trim().toUpperCase(); return (s === 'IN' || s === 'OUT') ? s : ''; }
 
@@ -1039,6 +1044,104 @@
         if (leader > 0) parts.push({ code: 'BETWEEN_CUTS', label: 'лидер между резками', minutes: round3(leader) });
         Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
         return parts;
+    }
+
+    function planningStrategy(options){
+        var raw = options;
+        if (options && typeof options === 'object') {
+            raw = options.strategy || options.planningStrategy || options.queueStrategy || options.mode || '';
+        }
+        var s = String(raw == null ? '' : raw).trim().toLowerCase();
+        return s === PLANNING_STRATEGY_FATIGUE ? PLANNING_STRATEGY_FATIGUE : PLANNING_STRATEGY_SETUP;
+    }
+
+    function planningStrategyLabel(strategy){
+        return planningStrategy(strategy) === PLANNING_STRATEGY_FATIGUE ? 'сложные резки раньше' : 'минимум переналадок';
+    }
+
+    function fatigueOptionNumber(options, keys, fallback){
+        var opts = options || {};
+        for (var i = 0; i < keys.length; i++) {
+            var n = Number(opts[keys[i]]);
+            if (isFinite(n) && n > 0) return n;
+        }
+        return fallback;
+    }
+
+    function fatigueChangeTimes(options){
+        if (!options) return null;
+        if (options.times) return options.times;
+        if (options.changeTimes) return options.changeTimes;
+        if (options.opTimes) return options.opTimes;
+        if (options.MATERIAL_WINDING != null || options.KNIFE != null || options.BETWEEN_CUTS != null) return options;
+        return null;
+    }
+
+    function planningChangeTimes(options){
+        return fatigueChangeTimes(options) || options || null;
+    }
+
+    function makePlanningOptions(strategyOrOptions, times){
+        var opts = {};
+        if (strategyOrOptions && typeof strategyOrOptions === 'object') {
+            for (var k in strategyOrOptions) {
+                if (Object.prototype.hasOwnProperty.call(strategyOrOptions, k)) opts[k] = strategyOrOptions[k];
+            }
+        } else if (strategyOrOptions != null && String(strategyOrOptions).trim() !== '') {
+            opts.strategy = strategyOrOptions;
+        }
+        if (times) opts.times = times;
+        opts.strategy = planningStrategy(opts);
+        return opts;
+    }
+
+    function fatigueJobWidth(cut){
+        var candidates = cut ? [cut.width, cut.rollerWidth, cut.widthMm, cut.rollerWidthMm] : [];
+        for (var i = 0; i < candidates.length; i++) {
+            var n = stripNum(candidates[i]);
+            if (isFinite(n) && n > 0) return n;
+        }
+        return 0;
+    }
+
+    // Оценка сложности резки по ножам. Если strip-агрегация ещё не влита в очередь,
+    // используем приближение из задачи: N_j ~= Wmax / W_j.
+    function estimatedKnifeCount(cut, machineWidth){
+        var explicit = Number(cut && cut.knifeCount);
+        if (isFinite(explicit) && explicit > 0) return explicit;
+        var width = fatigueJobWidth(cut);
+        if (!(width > 0)) return 999;
+        var maxWidth = Number(machineWidth);
+        if (!isFinite(maxWidth) || maxWidth <= 0) maxWidth = FATIGUE_MACHINE_WIDTH_MM;
+        return Math.max(1, Math.floor(maxWidth / width));
+    }
+
+    function fatiguePositionWeight(positionIndex, totalPositions, fatigueFactor){
+        var total = Number(totalPositions) || 0;
+        if (total <= 1) return 1;
+        var alpha = Number(fatigueFactor);
+        if (!isFinite(alpha)) alpha = FATIGUE_FACTOR;
+        var idx = Number(positionIndex) || 0;
+        if (idx < 0) idx = 0;
+        if (idx > total - 1) idx = total - 1;
+        return round3(1 + alpha * (idx / (total - 1)));
+    }
+
+    function fatigueRouteScore(route, options){
+        var list = route || [];
+        if (!list.length) return 0;
+        var opts = options || {};
+        var machineWidth = fatigueOptionNumber(opts, ['machineWidth', 'machineWidthMm', 'Wmax'], FATIGUE_MACHINE_WIDTH_MM);
+        var alpha = fatigueOptionNumber(opts, ['fatigueFactor', 'alpha'], FATIGUE_FACTOR);
+        var startCost = fatigueOptionNumber(opts, ['startCost', 'startCostMin'], FATIGUE_START_COST_MIN);
+        var times = fatigueChangeTimes(opts);
+        var total = 0;
+        for (var i = 0; i < list.length; i++) {
+            var transitionCost = i === 0 ? startCost : changeoverCost(list[i - 1], list[i], times);
+            var knifeFactor = 1 + estimatedKnifeCount(list[i], machineWidth) / 100;
+            total += transitionCost * fatiguePositionWeight(i, list.length, alpha) * knifeFactor;
+        }
+        return round3(total);
     }
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
@@ -1804,6 +1907,15 @@
 
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
+
+    function fatigueComplexityKey(c, machineWidth){
+        var width = fatigueJobWidth(c);
+        return [
+            -estimatedKnifeCount(c, machineWidth),
+            width > 0 ? width : Number.MAX_VALUE
+        ];
+    }
+
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
     function greedySequence(cuts, weights){
         var pool = (cuts || []).slice();
@@ -1830,14 +1942,39 @@
             .map(function(x){ return x.c; });
     }
 
+    // #3272: второй вариант очереди учитывает усталость к концу дня. Жадная цепочка
+    // по переналадкам остаётся стабильной базой, но внутри неё более сложные резки
+    // (много ножей / узкая ширина) ставятся раньше, если weighted score не хуже.
+    function fatigueAwareSequence(cuts, options){
+        var input = (cuts || []).slice();
+        if (input.length <= 1) return input;
+        var opts = options || {};
+        var times = planningChangeTimes(opts);
+        var machineWidth = fatigueOptionNumber(opts, ['machineWidth', 'machineWidthMm', 'Wmax'], FATIGUE_MACHINE_WIDTH_MM);
+        var base = greedySequence(input, times);
+        var complexFirst = base.map(function(c, i){ return { c: c, i: i, key: fatigueComplexityKey(c, machineWidth) }; })
+            .sort(function(a, b){ return cmpKey(a.key, b.key) || (a.i - b.i); })
+            .map(function(x){ return x.c; });
+        var simpleFirst = complexFirst.slice().reverse();
+        return fatigueRouteScore(complexFirst, opts) <= fatigueRouteScore(simpleFirst, opts)
+            ? complexFirst : simpleFirst;
+    }
+
+    function sequenceForStrategy(cuts, options){
+        var opts = options || {};
+        if (planningStrategy(opts) === PLANNING_STRATEGY_FATIGUE) return fatigueAwareSequence(cuts, opts);
+        return greedySequence(cuts, planningChangeTimes(opts));
+    }
+
     // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
-    // жадно по реальным минутам переналадки (#3268). Ножи остаются tie-break в
-    // startKey/greedySequence (#3130), но не пересортировывают уже найденную
-    // setup-оптимальную цепочку. Проставить sequence; вход не мутировать.
+    // выбранный оператором вариант (#3272). По умолчанию — реальные минуты
+    // переналадки (#3268); fatigue-вариант ставит сложные резки раньше.
+    // Проставить sequence; вход не мутировать.
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
-        var seq = greedySequence(rest, weights).concat(greedySequence(foil, weights));
+        var opts = makePlanningOptions(weights);
+        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -1847,16 +1984,18 @@
 
     function orderedChangeoverCost(cuts, weights) {
         var seq = orderCuts(cuts || [], weights);
+        var times = planningChangeTimes(weights);
         var total = 0;
-        for (var i = 1; i < seq.length; i++) total += changeoverCost(seq[i - 1], seq[i], weights);
+        for (var i = 1; i < seq.length; i++) total += changeoverCost(seq[i - 1], seq[i], times);
         return round3(total);
     }
 
     function bestExistingTransitionCost(group, cut, weights) {
         if (!group || !group.length || !cut) return Infinity;
+        var times = planningChangeTimes(weights);
         var best = Infinity;
         group.forEach(function(prev) {
-            best = Math.min(best, changeoverCost(prev, cut, weights), changeoverCost(cut, prev, weights));
+            best = Math.min(best, changeoverCost(prev, cut, times), changeoverCost(cut, prev, times));
         });
         return best === Infinity ? Infinity : round3(best);
     }
@@ -2018,12 +2157,24 @@
         KNIFE_SCALE: KNIFE_SCALE,
         WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
+        FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
+        FATIGUE_FACTOR: FATIGUE_FACTOR,
+        FATIGUE_START_COST_MIN: FATIGUE_START_COST_MIN,
+        PLANNING_STRATEGY_SETUP: PLANNING_STRATEGY_SETUP,
+        PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
         setupBreakdown: setupBreakdown,
+        planningStrategy: planningStrategy,
+        planningStrategyLabel: planningStrategyLabel,
+        makePlanningOptions: makePlanningOptions,
+        estimatedKnifeCount: estimatedKnifeCount,
+        fatiguePositionWeight: fatiguePositionWeight,
+        fatigueRouteScore: fatigueRouteScore,
+        fatigueAwareSequence: fatigueAwareSequence,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
         orderedChangeoverCost: orderedChangeoverCost,
@@ -3240,9 +3391,14 @@
             var msg = 'Не обеспечено резками и складом позиций: ' + unsup.length +
                 '. Создать ' + nCuts + ' резок? Пропущено ' + skipped.length + '.';
 
-            self.confirmAction(msg, actionsEl, 'Да, создать', function() {
-                self.runGenerateCuts(allLayouts, skipped);
-            });
+            self.confirmAction(msg, actionsEl, [
+                { label: 'Создать: мин. переналадок', primary: true, onConfirm: function() {
+                    self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
+                } },
+                { label: 'Создать: сложные раньше', onConfirm: function() {
+                    self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_FATIGUE);
+                } }
+            ]);
         }).catch(function(err) {
             self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
         });
@@ -3252,11 +3408,12 @@
     // Резка → Партии ГП (состав, по ширинам) → задания на втулки → Обеспечения
     // (ссылаются на «Партию ГП» нужной ширины). Излишек рулонов сверх обеспечений —
     // склад (та же Партия ГП без своего обеспечения). Зависимые _m_new не параллелятся.
-    AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
+    AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped, strategy) {
         var self = this;
         var cutMeta = this.meta.cut;
         var finishedBatchMeta = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         var supplyMeta = this.meta.supply;
+        var planOptions = makePlanningOptions(strategy, this.changeTimes);
 
         var cutReqIds = {
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
@@ -3338,10 +3495,11 @@
                 knifeCount: stripsTotalKnives(lay && lay.strips),
                 knifeWidths: knifeWidthsForStrips(lay && lay.strips),
                 isFoil: !!(lay && lay.isFoil),
+                width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
                 planDate: cutMainValue
             };
-            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, self.changeTimes);
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions);
             if (slitterId != null) {
                 slitterId = String(slitterId);
                 if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
@@ -3357,6 +3515,7 @@
                 knifeCount: descriptor.knifeCount,
                 knifeWidths: descriptor.knifeWidths,
                 isFoil: descriptor.isFoil,
+                width: descriptor.width,
                 rollerWidth: descriptor.rollerWidth,
                 planDate: descriptor.planDate,
                 plannedRuns: plannedRuns,
@@ -3372,7 +3531,7 @@
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
 
         // Create requests stay in layout order, but queue numbers for same-day
-        // generated cuts follow the setup-optimized order from orderCuts().
+        // generated cuts follow the operator-selected planner (#3272).
         var sequenceGroups = {};
         var sequenceGroupOrder = [];
         layoutPlans.forEach(function(plan) {
@@ -3390,7 +3549,7 @@
             var group = sequenceGroups[key];
             var byIndex = {};
             group.plans.forEach(function(plan) { byIndex[String(plan.index)] = plan; });
-            orderCuts(group.plans, self.changeTimes).forEach(function(orderedPlan) {
+            orderCuts(group.plans, planOptions).forEach(function(orderedPlan) {
                 var plan = byIndex[String(orderedPlan.index)];
                 if (!plan) return;
                 plan.sequence = nextSequenceForCuts(sequenceCuts, group.slitterId, group.planDate);
@@ -3407,6 +3566,7 @@
                     knifeCount: plan.knifeCount,
                     knifeWidths: plan.knifeWidths,
                     isFoil: plan.isFoil,
+                    width: plan.width,
                     rollerWidth: plan.rollerWidth
                 });
             });
@@ -3554,7 +3714,7 @@
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
             console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
-            self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
+            self.notify('Создано ' + layouts.length + ' резок (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
@@ -3578,13 +3738,29 @@
         return order.map(function(r) { return r + ' ×' + counts[r]; }).join(', ');
     };
 
-    // Подтверждение без native confirm. Mirror логики runPlanning:
-    // mainAppController.showDeleteConfirmModal (Promise) либо inline-блок в actionsEl.
+    function normalizeConfirmActions(okLabel, onConfirm) {
+        if (Array.isArray(okLabel)) {
+            return okLabel.map(function(action, i) {
+                var a = action || {};
+                return {
+                    label: a.label || a.text || 'Да',
+                    primary: a.primary === true || i === 0,
+                    onConfirm: a.onConfirm || a.action || a.handler
+                };
+            }).filter(function(action) { return typeof action.onConfirm === 'function'; });
+        }
+        return [{ label: okLabel || 'Да', primary: true, onConfirm: onConfirm }];
+    }
+
+    // Подтверждение без native confirm. Single-action flow может использовать
+    // mainAppController.showDeleteConfirmModal; multi-action выбор рендерится inline.
     AtexProductionPlanning.prototype.confirmAction = function(message, actionsEl, okLabel, onConfirm) {
-        if (typeof window !== 'undefined' && window.mainAppController &&
+        var actions = normalizeConfirmActions(okLabel, onConfirm);
+        if (!actions.length) return;
+        if (actions.length === 1 && typeof window !== 'undefined' && window.mainAppController &&
             typeof window.mainAppController.showDeleteConfirmModal === 'function') {
             window.mainAppController.showDeleteConfirmModal(message).then(function(ok) {
-                if (ok) onConfirm();
+                if (ok) actions[0].onConfirm();
             });
             return;
         }
@@ -3592,17 +3768,20 @@
         if (host && host.querySelector && host.querySelector('.atex-pp-confirm-bar')) return;
         var bar = el('div', { class: 'atex-pp-confirm-bar' });
         bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: message }));
-        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: okLabel || 'Да' });
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
         function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
-        okBtn.addEventListener('click', function() { removeBar(); onConfirm(); });
+        actions.forEach(function(action) {
+            var cls = 'atex-pp-btn' + (action.primary ? ' atex-pp-btn-primary' : '');
+            var btn = el('button', { class: cls, type: 'button', text: action.label });
+            btn.addEventListener('click', function() { removeBar(); action.onConfirm(); });
+            bar.appendChild(btn);
+        });
         cancelBtn.addEventListener('click', function() { removeBar(); });
-        bar.appendChild(okBtn);
         bar.appendChild(cancelBtn);
         if (host) {
             host.appendChild(bar);
         } else {
-            onConfirm();
+            actions[0].onConfirm();
         }
     };
 
@@ -3658,14 +3837,15 @@
     // очередь. Подтверждение реализуется без native confirm(): если доступен
     // window.mainAppController.showDeleteConfirmModal — использует его (Promise);
     // иначе вставляет inline-блок подтверждения в переданный actionsEl.
-    AtexProductionPlanning.prototype.runPlanning = function(actionsEl) {
+    AtexProductionPlanning.prototype.runPlanning = function(actionsEl, strategy) {
         var self = this;
         if (this.busy) return;
 
         var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
 
-        function doRun() {
-            var plan = planQueues(self.cuts, self.changeTimes);
+        function doRun(selectedStrategy) {
+            var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
+            var plan = planQueues(self.cuts, planOptions);
 
             // Отбираем резки с изменившейся очерёдностью.
             var cutsById = {};
@@ -3682,12 +3862,19 @@
 
             self.saveSequences(changed, { silent: true }).then(function(ok) {
                 // saveSequences уже вызвал reload+render; добавляем итоговое уведомление только при успехе.
-                if (ok) self.notify('Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
+                if (ok) self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
             });
         }
 
         // Подтверждение без native confirm (общий хелпер confirmAction).
-        self.confirmAction(MSG_CONFIRM, actionsEl, 'Да, перезаписать', doRun);
+        if (strategy != null && String(strategy).trim() !== '') {
+            self.confirmAction(MSG_CONFIRM, actionsEl, 'Да, перезаписать', function() { doRun(strategy); });
+            return;
+        }
+        self.confirmAction(MSG_CONFIRM, actionsEl, [
+            { label: 'Мин. переналадок', primary: true, onConfirm: function() { doRun(PLANNING_STRATEGY_SETUP); } },
+            { label: 'Сложные раньше', onConfirm: function() { doRun(PLANNING_STRATEGY_FATIGUE); } }
+        ]);
     };
 
     // ── Рендеринг ──
