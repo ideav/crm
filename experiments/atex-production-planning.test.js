@@ -678,6 +678,16 @@ assertEqual(planning.formatCutNumber('23316'), '23316',
     'formatCutNumber: numeric record id below timestamp range stays raw');
 assertEqual(planning.formatCutNumber('АТХ-7'), 'АТХ-7',
     'formatCutNumber: non-numeric number stays raw');
+var cutMainState = { last: 0 };
+assertEqual(planning.nextCutMainValue([], 1780895994000, cutMainState), 1780895994,
+    'nextCutMainValue #3225: пустая очередь получает unix-секунду');
+assertEqual(planning.nextCutMainValue([{ number: '1780895998' }], 1780895994000, cutMainState), 1780895999,
+    'nextCutMainValue #3225: существующий больший номер инкрементируется');
+assertEqual(planning.nextCutMainValue([], 1780895994000, cutMainState), 1780896000,
+    'nextCutMainValue #3225: повтор в том же состоянии остаётся уникальным');
+assertEqual(planning.addMainValueField({ id: '1078' }, { t1156: '10' }, 1780895994),
+    { t1078: 1780895994, t1156: '10' },
+    'addMainValueField #3225: главное значение пишется как t{tableId}');
 
 // ── Фильтр видимости очереди isCutVisible (статус + согласование заказа + дата плана) ──
 function vc(over){ return Object.assign({ status:'Ожидает', orderApprovalDate:'31.05.2026', planDate:'02.06.2026' }, over||{}); }
@@ -948,6 +958,7 @@ function runGenerateCutsDeferredGpTest() {
     controller.cuts = [];
     controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }];
     controller.opTimes = opT;
+    controller.nowMs = function() { return 1780895994000; };
     controller.setBusy = function() {};
     controller.showProgress = function() {};
     controller.updateProgress = function() {};
@@ -977,6 +988,10 @@ function runGenerateCutsDeferredGpTest() {
 
     return result.then(function() {
         var cutPost = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })[0];
+        assertEqual(cutPost.path, '_m_new/1078?JSON&up=1',
+            'runGenerateCuts #3225: _m_new резки не передаёт бессмысленный full=1');
+        assertEqual(cutPost.fields.t1078, 1780895994,
+            'runGenerateCuts #3225: t1078 пишет главное значение Производственной резки');
         assertEqual(cutPost.fields.t16403, 1,
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
@@ -1051,7 +1066,67 @@ function runGenerateCutsSlitterAffinityTest() {
     });
 }
 
-runPreferredWidthsFilterTest().then(runGenerateCutsDeferredGpTest).then(runGenerateCutsSlitterAffinityTest).then(function() {
+function runCreateCutMainValueTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('24305', 'Метраж, м'),
+            req('26584', 'Длительность, минут'),
+            req('1162', 'Статус')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [] }
+    };
+    controller.draft = {
+        slitterId: '10',
+        materialBatchId: '',
+        plannedRuns: '2',
+        planDate: '',
+        status: 'Ожидает',
+        notes: '',
+        selectedPositions: []
+    };
+    controller.cuts = [];
+    controller.genPositions = [];
+    controller.slitters = [{ id: '10', label: 'С1', stopMaterialIds: [] }];
+    controller.opTimes = opT;
+    controller.nowMs = function() { return 1780895994000; };
+    controller.setBusy = function() {};
+    controller.closeForm = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        return Promise.resolve({ obj: 'cut-manual-1' });
+    };
+
+    return new Promise(function(resolve, reject) {
+        controller.notify = function(msg, type) {
+            if (type === 'error') reject(new Error(msg));
+        };
+        controller.render = function() {
+            try {
+                var cutPost = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })[0];
+                assertEqual(cutPost.path, '_m_new/1078?JSON&up=1',
+                    'createCut #3225: _m_new резки не передаёт бессмысленный full=1');
+                assertEqual(cutPost.fields.t1078, 1780895994,
+                    'createCut #3225: t1078 пишет главное значение Производственной резки');
+                resolve();
+            } catch (err) {
+                reject(err);
+            }
+        };
+        controller.createCut();
+    });
+}
+
+runPreferredWidthsFilterTest()
+    .then(runGenerateCutsDeferredGpTest)
+    .then(runGenerateCutsSlitterAffinityTest)
+    .then(runCreateCutMainValueTest)
+    .then(function() {
     console.log('\n' + passed + ' assertions passed');
 }).catch(function(err) {
     console.error(err && err.stack || err);
