@@ -312,16 +312,22 @@ var gKnives = planning.groupBySlitter([
     { id:'high-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2, knifeCount:7 },
     { id:'mid-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:3, knifeCount:5 }
 ])[0];
-assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['high-seq','mid-seq','low-seq'],
-    'groupBySlitter #3236: внутри дня видимая очередь сортирует ножи по убыванию, даже если sequence старый');
+assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['low-seq','high-seq','mid-seq'],
+    'groupBySlitter #3268: сохранённая sequence задаёт видимый порядок и расписание');
+var gKnivesFallback = planning.groupBySlitter([
+    { id:'few-no-seq', slitter:{id:'11',label:'Станок 1'}, planDate:'2026-06-07', sequence:null, knifeCount:3 },
+    { id:'many-no-seq', slitter:{id:'11',label:'Станок 1'}, planDate:'2026-06-07', sequence:null, knifeCount:7 }
+])[0];
+assertEqual(gKnivesFallback.cuts.map(function(c){ return c.id; }), ['many-no-seq','few-no-seq'],
+    'groupBySlitter #3268: без sequence остаётся fallback по ножам убыв.');
 // #3258: planDate — unix-штамп DATETIME (с секундами): резки одного дня различаются
 // по моменту создания, но должны сортироваться по ножам убыв., а не по штампу.
 var gKnivesTs = planning.groupBySlitter([
     { id:'few', slitter:{id:'20',label:'Станок 2'}, planDate:'1780919776', sequence:1, knifeCount:5 },
     { id:'many', slitter:{id:'20',label:'Станок 2'}, planDate:'1780919777', sequence:2, knifeCount:15 }
 ])[0];
-assertEqual(gKnivesTs.cuts.map(function(c){ return c.id; }), ['many','few'],
-    'groupBySlitter #3258: одинаковый день (unix-штампы с секундами) → ножи по убыванию (15 раньше 5)');
+assertEqual(gKnivesTs.cuts.map(function(c){ return c.id; }), ['few','many'],
+    'groupBySlitter #3268: unix-штампы одного дня не перебивают сохранённую sequence');
 var gDays = planning.groupBySlitter([
     { id:'d2-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-08', sequence:1 },
     { id:'d1-2', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2 },
@@ -417,6 +423,15 @@ var outMat = planning.orderCuts(inMat).map(function(c){return c.materialId;});
 // число границ смены сырья = (различных − 1) = 1
 var bnd = 0; for (var i=1;i<outMat.length;i++) if (outMat[i]!==outMat[i-1]) bnd++;
 assertEqual(bnd, 1, 'orderCuts: сырьё сгруппировано (1 граница)');
+// #3268: реальные минуты переналадки важнее механической сортировки по ножам.
+// A-high → A-low → B-mid = 30 + 45 = 75 мин; A-high → B-mid → A-low = 45 + 45 = 90 мин.
+var setupMinuteCuts = [
+    cut('A-high', { m:'A', b:'bA', k:8, kw:[60] }),
+    cut('B-mid',  { m:'B', b:'bB', k:7, kw:[60] }),
+    cut('A-low',  { m:'A', b:'bA', k:6, kw:[60] })
+];
+assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
+    'orderCuts #3268: минимизирует минуты переналадки до сортировки по ножам');
 // Фольга строго в конце
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
@@ -1319,8 +1334,8 @@ function runGenerateCutsSlitterAffinityTest() {
     ], []).then(function() {
         var slitters = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })
             .map(function(p) { return p.fields.t1156; });
-        assertEqual(slitters, ['10', '10', '20', '20'],
-            'runGenerateCuts #3219: одинаковое сырьё+намотка+метраж+партия остаётся на одном станке, смена намотки выбирает заново');
+        assertEqual(slitters, ['10', '10', '20', '10'],
+            'runGenerateCuts #3268: одинаковое сырьё+намотка остаётся на setup-совместимом станке, даже если метраж другой');
     });
 }
 
