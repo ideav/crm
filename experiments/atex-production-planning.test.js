@@ -432,6 +432,8 @@ var setupMinuteCuts = [
 ];
 assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
     'orderCuts #3268: минимизирует минуты переналадки до сортировки по ножам');
+assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
+    'orderCuts #3272: явный вариант setup сохраняет минимизацию переналадки');
 // Фольга строго в конце
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
@@ -453,6 +455,34 @@ var knifeCuts = [
 ];
 assertEqual(planning.orderCuts(knifeCuts).map(function(c){ return c.knifeCount; }), [7, 5, 3], 'orderCuts: ножи убывают к концу дня (7,5,3)');
 assertEqual(planning.byKnifeCountDesc([{ knifeCount: 2, id: 'a' }, { knifeCount: 2, id: 'b' }, { knifeCount: 9, id: 'c' }]).map(function(x){ return x.id; }), ['c', 'a', 'b'], 'byKnifeCountDesc: ↓, равные стабильно');
+
+// #3272/#3270: второй вариант планирования учитывает рост усталости к концу очереди.
+assertEqual(planning.fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #3272: первая позиция без штрафа');
+assertEqual(planning.fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3272: последняя позиция = 1 + alpha');
+assertEqual(planning.estimatedKnifeCount({ rollerWidth: 25 }, 1600), 64, 'estimatedKnifeCount #3272: Wmax / width');
+assertEqual(planning.estimatedKnifeCount({ knifeCount: 7, rollerWidth: 25 }, 1600), 7, 'estimatedKnifeCount #3272: явное число ножей важнее оценки по ширине');
+var fatigueNarrowFirst = [
+    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
+    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: [] }
+];
+assertEqual(planning.fatigueRouteScore(fatigueNarrowFirst, { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }) <
+            planning.fatigueRouteScore(fatigueNarrowFirst.slice().reverse(), { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }),
+    true, 'fatigueRouteScore #3272: узкая/многоножевая резка дешевле в начале очереди');
+var fatigueWidthCuts = [
+    { id: 'wideA', materialId: 'A', winding: 'IN', batchId: 'A', rollerWidth: 200, knifeCount: 0, knifeWidths: [] },
+    { id: 'narrowA', materialId: 'A', winding: 'IN', batchId: 'A', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
+    { id: 'midB', materialId: 'B', winding: 'IN', batchId: 'B', rollerWidth: 60, knifeCount: 0, knifeWidths: [] }
+];
+assertEqual(planning.orderCuts(fatigueWidthCuts, { strategy: planning.PLANNING_STRATEGY_FATIGUE, machineWidth: 1600, fatigueFactor: 2, startCost: 45 }).map(function(c){ return c.id; }),
+    ['narrowA', 'midB', 'wideA'], 'orderCuts #3272: fatigue-вариант ставит узкие резки раньше широких');
+assertEqual(planning.planQueues(fatigueWidthCuts.map(function(c) {
+    var copy = {}; for (var k in c) copy[k] = c[k];
+    copy.slitter = { id: '10', label: 'С1' };
+    copy.planDate = '2026-06-07';
+    return copy;
+}), { strategy: planning.PLANNING_STRATEGY_FATIGUE, machineWidth: 1600, fatigueFactor: 2, startCost: 45 }).map(function(p) {
+    return [p.cutId, p.sequence];
+}), [['narrowA', 1], ['midB', 2], ['wideA', 3]], 'planQueues #3272: strategy прокидывается в планирование очередей');
 
 // ── rowsToPlanning строит дескриптор движка из колонок отчёта ──
 // #3242: cut_batch_id и cut_knives упразднены в cut_planning. batchId (Партия сырья) в
@@ -1408,6 +1438,76 @@ function runGenerateCutsSequenceByKnivesTest() {
     });
 }
 
+function runGenerateCutsFatigueStrategyTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    var cutNo = 0;
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('15018', 'Партия сырья'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('24305', 'Метраж, м'),
+            req('26584', 'Длительность, минут'),
+            req('26990', 'Тайминг'),
+            req('1162', 'Статус')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1149', 'Метраж, м'),
+            req('1154', 'В работе'),
+            req('15016', 'Партия ГП', { ref: '1081' }),
+            req('16424', 'Кол-во рулонов')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
+            req('1186', 'Ширина, мм'),
+            req('1188', 'Кол-во рулонов'),
+            req('1189', 'Метраж, м'),
+            req('1192', 'В работе')
+        ] },
+        sleeveTask: null
+    };
+    controller.genPositions = [
+        { id: 'p-wide', materialId: 'A', width: 200, qty: 1, length: 600, windDir: 'IN', windLength: 600 },
+        { id: 'p-narrow', materialId: 'A', width: 25, qty: 1, length: 600, windDir: 'IN', windLength: 600 },
+        { id: 'p-mid', materialId: 'B', width: 60, qty: 1, length: 600, windDir: 'IN', windLength: 600 }
+    ];
+    controller.genBatches = [
+        { id: 'bA', materialId: 'A', dateKey: 20260601, remainder: 999, remainderLinear: 5000, active: true },
+        { id: 'bB', materialId: 'B', dateKey: 20260601, remainder: 999, remainderLinear: 5000, active: true }
+    ];
+    controller.cuts = [];
+    controller.slitters = [{ id: '20', label: 'Станок 2', stopMaterialIds: [] }];
+    controller.opTimes = opT;
+    controller.changeTimes = opT;
+    controller.nowMs = function() { return 1780919700000; };
+    controller.setBusy = function() {};
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        if (path.indexOf('_m_new/1078') === 0) {
+            cutNo += 1;
+            return Promise.resolve({ obj: 'cut-' + cutNo });
+        }
+        return Promise.resolve({ obj: 'obj-' + posts.length });
+    };
+
+    return controller.runGenerateCuts([
+        { mat: 'A', windDir: 'IN', windLength: 600, positionsCovered: ['p-wide'], strips: [{ width: 200, qty: 1, purpose: 'Заказ', positionIds: ['p-wide'] }] },
+        { mat: 'A', windDir: 'IN', windLength: 600, positionsCovered: ['p-narrow'], strips: [{ width: 25, qty: 1, purpose: 'Заказ', positionIds: ['p-narrow'] }] },
+        { mat: 'B', windDir: 'IN', windLength: 600, positionsCovered: ['p-mid'], strips: [{ width: 60, qty: 1, purpose: 'Заказ', positionIds: ['p-mid'] }] }
+    ], [], planning.PLANNING_STRATEGY_FATIGUE).then(function() {
+        var cutPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; });
+        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [3, 1, 2],
+            'runGenerateCuts #3272: fatigue-вариант пишет очередь «сложные раньше» при создании');
+    });
+}
+
 function runCreateCutPayloadDiagnosticsTest() {
     var controller = Object.create(api.Controller.prototype);
     var posts = [];
@@ -1513,6 +1613,7 @@ runPreferredWidthsFilterTest()
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
     .then(runGenerateCutsSequenceByKnivesTest)
+    .then(runGenerateCutsFatigueStrategyTest)
     .then(runCreateCutPayloadDiagnosticsTest)
     .then(runCreateCutMainValueTest)
     .then(function() {
