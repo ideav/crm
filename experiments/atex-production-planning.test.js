@@ -161,32 +161,34 @@ assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }]).map(func
 
 // ── rowsToPlanning: плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies } ──
 // LEFT JOIN: резка 10 с двумя обеспечениями = две строки; резка 20 без обеспечения.
+// #3242: cut_no упразднён, «номер» = плановая дата (cut_plan_date); cut_material_batch
+// упразднён (materialBatch.label = ''); отчётный batch_id — «Партия ГП», в batchId не идёт.
 var reportRows = [
-    { cut_id: '10', cut_no: '1', cut_slitter: 'Станок 1', cut_slitter_id: '101',
-      cut_type: '99мм×9', cut_material_batch: 'НК-0400', cut_plan_date: '06.05.2026',
+    { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
+      cut_plan_date: '06.05.2026', batch_id: '5001',
       cut_status: 'В работе', supply_id: '900', supply_position_id: '700' },
-    { cut_id: '10', cut_no: '1', cut_slitter: 'Станок 1', cut_slitter_id: '101',
-      cut_type: '99мм×9', cut_material_batch: 'НК-0400', cut_plan_date: '06.05.2026',
+    { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
+      cut_plan_date: '06.05.2026', batch_id: '5002',
       cut_status: 'В работе', supply_id: '901', supply_position_id: '701' },
-    { cut_id: '20', cut_no: '2', cut_slitter: '', cut_slitter_id: '',
-      cut_type: '25мм×35', cut_material_batch: 'НК-0118', cut_plan_date: '27.05.2026',
+    { cut_id: '20', cut_slitter: '', cut_slitter_id: '',
+      cut_plan_date: '27.05.2026',
       cut_status: 'Ожидает', supply_id: '', supply_position_id: '' }
 ];
 var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
-    { id: '10', number: '1', slitter: { id: '101', label: 'Станок 1' },
-      materialBatch: { id: null, label: 'НК-0400' },
+    { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
+      materialBatch: { id: null, label: '' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' },
-    { id: '20', number: '2', slitter: { id: null, label: '' },
-      materialBatch: { id: null, label: 'НК-0118' },
+    { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
+      materialBatch: { id: null, label: '' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' }
-], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
+], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
 assertEqual(plan.supplies, [
     { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 },
     { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 }
@@ -196,24 +198,24 @@ assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty in
 assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitter.label; }),
     ['Станок 1', 'Без станка'], 'groupBySlitter over rowsToPlanning cuts');
 
-// #3209: новая модель cut_planning отдаёт cut_no как штамп времени, а метраж
+// #3209/#3242: cut_plan_date приходит unix-штампом (плановая дата = «номер» резки), метраж
 // резки/обеспечения отдельными колонками. Существующая резка должна попадать в
 // пульт даже без старой order_approval_date: отчёт уже является источником очереди.
 var issue3209Rows = [
-    { cut_id: '23316', cut_no: '1780837651', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
-      cut_plan_date: '', cut_status: '', supply_id: '23352', supply_position_id: '21101',
+    { cut_id: '23316', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
+      cut_plan_date: '1780837651', cut_status: '', supply_id: '23352', supply_position_id: '21101',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
       order_approval_date: '', order_id: '17990', supply_footage: '800', supply_rolls: '6',
       cut_length: '1200' },
-    { cut_id: '23316', cut_no: '1780837651', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
-      cut_plan_date: '', cut_status: '', supply_id: '23353', supply_position_id: '21102',
+    { cut_id: '23316', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
+      cut_plan_date: '1780837651', cut_status: '', supply_id: '23353', supply_position_id: '21102',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
       order_approval_date: '', order_id: '17990', supply_footage: '600', supply_rolls: '3',
       cut_length: '1200' },
-    { cut_id: '23370', cut_no: '1780837653', cut_slitter: 'Станок 2', cut_slitter_id: '1279',
-      cut_plan_date: '', cut_status: '', supply_id: '', supply_position_id: '',
+    { cut_id: '23370', cut_slitter: 'Станок 2', cut_slitter_id: '1279',
+      cut_plan_date: '1780837653', cut_status: '', supply_id: '', supply_position_id: '',
       cut_sequence: '2', cut_material: 'MR194', cut_material_id: '2086',
       order_approval_date: '', order_id: '17991', cut_length: '700' }
 ];
@@ -223,7 +225,7 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
 }), [
     { id: '23316', number: '1780837651', length: 1200, visible: true },
     { id: '23370', number: '1780837653', length: 700, visible: true }
-], 'rowsToPlanning #3209: timestamp cut_no, cut_length, and blank approval still produce visible cuts');
+], 'rowsToPlanning #3209/#3242: timestamp cut_plan_date, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
     { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', footage: 800, rolls: 6 },
     { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', footage: 600, rolls: 3 }
@@ -271,6 +273,15 @@ assertEqual(planning.rowsToBatches(batchRows), [
 ], 'rowsToBatches: подпись «номер · вид · ост. N м²», остаток округлён без хвостовых нулей');
 assertEqual(planning.rowsToBatches([{ batch_id: '5', batch_no: 'НК-9', batch_material: '', batch_remainder_m2: '' }]),
     [{ id: '5', label: 'НК-9' }], 'rowsToBatches: пустые вид/остаток → только номер');
+// #3242: основной остаток — погонные метры (batch_remainder_m), м² справочно в скобках.
+assertEqual(planning.rowsToBatches([
+    { batch_id: '7', batch_no: 'RM-7', batch_material: 'MR194', batch_remainder_m: '13260.00', batch_remainder_m2: '11934.00' }
+]), [{ id: '7', label: 'RM-7 · MR194 · ост. 13260 м (11934 м²)' }],
+    'rowsToBatches #3242: остаток в погонных метрах, м² справочно');
+assertEqual(planning.rowsToBatches([
+    { batch_id: '8', batch_no: 'RM-8', batch_material: 'MR132', batch_remainder_m: '500', batch_remainder_m2: '' }
+]), [{ id: '8', label: 'RM-8 · MR132 · ост. 500 м' }],
+    'rowsToBatches #3242: только погонные метры, без м²');
 assertEqual(planning.rowsToBatches([]), [], 'rowsToBatches: пустой ввод → пустой список');
 
 // ── parseMultiRefIds ──
@@ -421,17 +432,20 @@ assertEqual(planning.orderCuts(knifeCuts).map(function(c){ return c.knifeCount; 
 assertEqual(planning.byKnifeCountDesc([{ knifeCount: 2, id: 'a' }, { knifeCount: 2, id: 'b' }, { knifeCount: 9, id: 'c' }]).map(function(x){ return x.id; }), ['c', 'a', 'b'], 'byKnifeCountDesc: ↓, равные стабильно');
 
 // ── rowsToPlanning строит дескриптор движка из колонок отчёта ──
+// #3242: cut_batch_id и cut_knives упразднены в cut_planning. batchId (Партия сырья) в
+// отчёте больше нет → ''; число ножей теперь из cut_strips (Партия ГП), мёрджится в
+// loadPlanning, а rowsToPlanning отдаёт 0.
 var rpd = planning.rowsToPlanning([{
-  cut_id:'9', cut_no:'1', cut_slitter_id:'10', cut_slitter:'Станок 1',
-  cut_material_id:'1241', cut_material:'Фольга 38', cut_batch_id:'700',
-  cut_jumbo_remaining:'350', cut_knives:'14', cut_winding:'out', cut_roller_width:'60',
+  cut_id:'9', cut_slitter_id:'10', cut_slitter:'Станок 1',
+  cut_material_id:'1241', cut_material:'Фольга 38',
+  cut_jumbo_remaining:'350', cut_winding:'out', cut_roller_width:'60',
   cut_sequence:'', supply_id:''
 }]);
 var c = rpd.cuts[0];
 assertEqual(c.materialId, '1241', 'descriptor materialId');
-assertEqual(c.batchId, '700', 'descriptor batchId');
+assertEqual(c.batchId, '', 'descriptor batchId #3242: Партия сырья id вне отчёта → пусто');
 assertEqual(c.jumboRemainingM, 350, 'descriptor jumboRemainingM number');
-assertEqual(c.knifeCount, 14, 'descriptor knifeCount number');
+assertEqual(c.knifeCount, 0, 'descriptor knifeCount #3242: ножи из cut_strips (Партия ГП), не из rowsToPlanning');
 assertEqual(c.winding, 'OUT', 'descriptor winding normalized');
 assertEqual(c.rollerWidth, 60, 'descriptor rollerWidth number');
 assertEqual(c.plannedRuns, 0, 'descriptor plannedRuns defaults to 0');
