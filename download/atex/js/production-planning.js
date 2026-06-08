@@ -1176,13 +1176,12 @@
         return out;
     }
 
-    // #3242: состав резки = «Партия ГП» по каждой РАЗЛИЧНОЙ ширине (Σ рулонов всех полос
-    // этой ширины × прогоны). Покрывает и заказ, и склад: излишек (произведено −
-    // Σ обеспечений этой ширины) остаётся складом той же Партией ГП, отдельной записи не нужно.
-    // → [{ width, rolls, length }] по порядку первого появления ширины.
-    function producedBatchesForLayout(layout, runLength, plannedRuns) {
-        var runs = Number(plannedRuns) || 0;
-        if (runs <= 0) runs = plannedRunsForLayout(layout, {});
+    // #3242/#3253: состав резки = «Партия ГП» по каждой РАЗЛИЧНОЙ ширине. Храним
+    // «количество ПОЛОС за один проход» (Σ полос этой ширины), БЕЗ умножения на проходы —
+    // это геометрия раскроя (Σ ширина×полос ≤ ширина джамбо). Число рулонов (полос ×
+    // проходов) — производная величина, отдельно не храним. → [{ width, strips, length }]
+    // по порядку первого появления ширины.
+    function producedBatchesForLayout(layout, runLength) {
         var len = Number(runLength) || 0;
         var byWidth = {};
         var order = [];
@@ -1191,8 +1190,8 @@
             var qty = Number(s.qty) || 0;
             if (width <= 0 || qty <= 0) return;
             var key = stripWidthKey(width);
-            if (!(key in byWidth)) { byWidth[key] = { width: width, rolls: 0, length: len }; order.push(key); }
-            byWidth[key].rolls = round3(byWidth[key].rolls + qty * runs);
+            if (!(key in byWidth)) { byWidth[key] = { width: width, strips: 0, length: len }; order.push(key); }
+            byWidth[key].strips = round3(byWidth[key].strips + qty);
         });
         return order.map(function(k) { return byWidth[k]; });
     }
@@ -2816,9 +2815,13 @@
 
         // Таблица полос.
         var table = el('div', { class: 'atex-pp-strip-table' });
+        // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
+        // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
+        var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
         table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
             el('span', { text: 'Ширина, мм' }),
-            el('span', { text: 'Кол-во рулонов' }),   // #3242: «Партия ГП» — рулоны, не «Назначение»
+            el('span', { text: 'Кол-во полос' }),
+            el('span', { text: 'Рулонов (×' + passes + ')' }),
             el('span', { text: '' })
         ]));
         var body = el('div', { class: 'atex-pp-strip-body' });
@@ -2877,13 +2880,20 @@
                 w.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
                 row.appendChild(w);
 
+                // #3253: read-only «Рулонов» = полос × проходов (справочно).
+                var rollsCell = el('span', { class: 'atex-pp-strip-rolls', text: String(round3((stripNum(s.qty) || 0) * passes)) });
+
                 var q = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: '1', placeholder: '0' });
                 q.value = s.qty;
-                q.addEventListener('input', function() { s.qty = q.value; recalc(); });
+                q.addEventListener('input', function() {
+                    s.qty = q.value;
+                    rollsCell.textContent = String(round3((stripNum(s.qty) || 0) * passes));
+                    recalc();
+                });
                 q.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
                 row.appendChild(q);
 
-                // #3242: у «Партии ГП» нет «Назначения» — колонка убрана.
+                row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -3278,11 +3288,12 @@
                 var widthToBatchId = {};
                 function createFinishedBatches(cutId) {
                     var batchChain = Promise.resolve();
-                    producedBatchesForLayout(lay, runLength, plannedRuns).forEach(function(batch) {
+                    producedBatchesForLayout(lay, runLength).forEach(function(batch) {
                         batchChain = batchChain.then(function() {
+                            // #3253: «Кол-во рулонов» «Партии ГП» = число полос за проход (без ×проходов).
                             var fields = buildFinishedBatchFields(finishedBatchMeta, {
                                 width: batch.width,
-                                rolls: batch.rolls,
+                                rolls: batch.strips,
                                 footage: batch.length > 0 ? batch.length : '',
                                 active: '1'
                             });

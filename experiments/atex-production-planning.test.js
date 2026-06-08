@@ -541,12 +541,12 @@ assertEqual(planning.finishedBatchesForLayout(layout3185, 'cut777', 1200, 3), [
   { cutId: 'cut777', width: 44, rolls: 3, length: 1200 }
 ], 'finishedBatchesForLayout: stock strips become GP batches');
 // #3242: состав резки — «Партия ГП» по КАЖДОЙ ширине (заказ+склад), Σ рулонов × прогоны.
-assertEqual(planning.producedBatchesForLayout(layout3185, 1200, 3), [
-  { width: 110, rolls: 6, length: 1200 },
-  { width: 70, rolls: 3, length: 1200 },
-  { width: 55, rolls: 6, length: 1200 },
-  { width: 44, rolls: 3, length: 1200 }
-], 'producedBatchesForLayout #3242: Партия ГП по каждой ширине (рулоны × прогоны)');
+assertEqual(planning.producedBatchesForLayout(layout3185, 1200), [
+  { width: 110, strips: 2, length: 1200 },
+  { width: 70, strips: 1, length: 1200 },
+  { width: 55, strips: 2, length: 1200 },
+  { width: 44, strips: 1, length: 1200 }
+], 'producedBatchesForLayout #3253: Партия ГП по ширине — число ПОЛОС за проход (без ×проходов)');
 // #3242: план обеспечений — позиция → Партия ГП своей ширины, рулоны и метраж позиции.
 assertEqual(planning.supplyPlanForLayout(layout3185, pos3185, 3), [
   { positionId: 'p110', width: 110, rolls: 6, footage: 1200 },
