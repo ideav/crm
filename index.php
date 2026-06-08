@@ -2360,6 +2360,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                             $GLOBALS["CONDS"][$key]["FR"] = $GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key];
     				if(!isset($GLOBALS["CONDS"][$key]["TO"]) && !$frFromRequest && isset($GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key]))
                             $GLOBALS["CONDS"][$key]["TO"] = $GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key];
+    				# #3252: одинаковые «от» и «до» (дубликат значения) не превращаем в вырожденный
+    				# диапазон — иначе для текстового/LIKE-фильтра он ничего не находит. Оставляем
+    				# одно условие (равенство/LIKE по «от»).
+    				if(isset($GLOBALS["CONDS"][$key]["FR"]) && isset($GLOBALS["CONDS"][$key]["TO"])
+    				    && $GLOBALS["CONDS"][$key]["FR"] === $GLOBALS["CONDS"][$key]["TO"])
+                            unset($GLOBALS["CONDS"][$key]["TO"]);
     			}
             $i = 0;
 			foreach($GLOBALS["STORED_REPS"][$id]["types"] as $key => $typ){
@@ -7336,8 +7342,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 							$blocks[$block]["to_val"][] = $_REQUEST["TO_$value"];
 						elseif(isset($_REQUEST["TO_$t"]) && strlen($_REQUEST["TO_$t"])) # then by its ID
 							$blocks[$block]["to_val"][] = $_REQUEST["TO_$t"];
-						elseif(isset($GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key])) # then by the report settings
-                            $blocks[$block]["to_val"][] = $GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key]; 
+						elseif(isset($GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key])) # then by the report settings (#3252: «до», не «от»)
+                            $blocks[$block]["to_val"][] = $GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key];
 						else
 							$blocks[$block]["to_val"][] = "";
 					}
