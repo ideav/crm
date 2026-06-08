@@ -540,6 +540,37 @@ assertEqual(planning.finishedBatchesForLayout(layout3185, 'cut777', 1200, 3), [
   { cutId: 'cut777', width: 55, rolls: 6, length: 1200 },
   { cutId: 'cut777', width: 44, rolls: 3, length: 1200 }
 ], 'finishedBatchesForLayout: stock strips become GP batches');
+// #3242: состав резки — «Партия ГП» по КАЖДОЙ ширине (заказ+склад), Σ рулонов × прогоны.
+assertEqual(planning.producedBatchesForLayout(layout3185, 1200, 3), [
+  { width: 110, rolls: 6, length: 1200 },
+  { width: 70, rolls: 3, length: 1200 },
+  { width: 55, rolls: 6, length: 1200 },
+  { width: 44, rolls: 3, length: 1200 }
+], 'producedBatchesForLayout #3242: Партия ГП по каждой ширине (рулоны × прогоны)');
+// #3242: план обеспечений — позиция → Партия ГП своей ширины, рулоны и метраж позиции.
+assertEqual(planning.supplyPlanForLayout(layout3185, pos3185, 3), [
+  { positionId: 'p110', width: 110, rolls: 6, footage: 1200 },
+  { positionId: 'p70', width: 70, rolls: 3, footage: 800 }
+], 'supplyPlanForLayout #3242: позиция → рулоны+метраж для обеспечения');
+assertEqual(planning.supplyPlanForLayout(layout3185, pos3185, 3, { p110: 999, p70: 111 }), [
+  { positionId: 'p110', width: 110, rolls: 6, footage: 999 },
+  { positionId: 'p70', width: 70, rolls: 3, footage: 111 }
+], 'supplyPlanForLayout #3242: метраж берётся из posLength, если передан');
+// #3242: билдеры полей «Партия ГП» и «Обеспечение»→«Партия ГП».
+var fbMeta3242 = { id: '1081', val: 'Партия ГП', reqs: [
+  { id: '1186', val: 'Ширина, мм' }, { id: '1188', val: 'Кол-во рулонов' },
+  { id: '1189', val: 'Метраж, м' }, { id: '1192', val: 'В работе' }
+] };
+assertEqual(planning.buildFinishedBatchFields(fbMeta3242, { width: 110, rolls: 6, footage: 1200, active: '1' }),
+  { t1186: 110, t1188: 6, t1189: 1200, t1192: '1' },
+  'buildFinishedBatchFields #3242: Ширина/Кол-во рулонов/Метраж/«В работе»');
+var supMeta3242 = { id: '1077', val: 'Обеспечение', reqs: [
+  { id: '1149', val: 'Метраж, м' }, { id: '1154', val: 'В работе' },
+  { id: '15016', val: 'Партия ГП', ref: '1081' }, { id: '16424', val: 'Кол-во рулонов' }
+] };
+assertEqual(planning.buildSupplyFieldsForFinishedBatch(supMeta3242, { footage: 1200, finishedBatchId: 'gp-7', rolls: 6, active: '1', status: 'Зарезервировано' }),
+  { t1149: 1200, t16424: 6, t1154: '1', t15016: 'gp-7' },
+  'buildSupplyFieldsForFinishedBatch #3242: метраж/«В работе»/ссылка на Партию ГП/рулоны (нет Статуса → пропуск)');
 assertEqual(planning.sleeveTasksForLayout(layout3185, pos3185, 3), [
   { diameter: 76, qty: 6 },
   { diameter: 40, qty: 3 }
@@ -1045,25 +1076,21 @@ function runGenerateCutsDeferredGpTest() {
             req('26990', 'Тайминг'),
             req('1162', 'Статус')
         ] },
-        strip: { id: '1073', val: 'Полоса', reqs: [
-            req('1144', 'Ширина, мм'),
-            req('1146', 'Количество'),
-            req('1147', 'Назначение'),
-            req('1149', 'На склад')
-        ] },
+        // #3242: «Обеспечение» ссылается на «Партию ГП» (t15016), не на резку.
         supply: { id: '1077', val: 'Обеспечение', reqs: [
-            req('1148', 'Метраж, м'),
-            req('15015', 'Производственная резка', { ref: '1078' }),
-            req('16420', 'Кол-во рулонов'),
-            req('1154', 'Статус')
+            req('1149', 'Метраж, м'),
+            req('1154', 'В работе'),
+            req('15016', 'Партия ГП', { ref: '1081' }),
+            req('16424', 'Кол-во рулонов')
         ] },
+        // #3242: состав резки — «Партия ГП» (подчинённая резке).
         finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
-            req('16428', 'Производственная резка', { ref: '1078' }),
-            req('1184', 'Ширина, мм'),
-            req('1185', 'Кол-во рулонов'),
-            req('1186', 'Метраж, м'),
-            req('1187', 'Статус'),
-            req('409', 'Активно')
+            req('1186', 'Ширина, мм'),
+            req('1188', 'Кол-во рулонов'),
+            req('1189', 'Метраж, м'),
+            req('1191', 'Адрес хранения'),
+            req('1192', 'В работе'),
+            req('27171', 'Штрих-код')
         ] },
         sleeveTask: null
     };
@@ -1114,10 +1141,21 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
             'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
-        assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1081') === 0; }), false,
-            'runGenerateCuts: GP batches are not created during planning');
-        assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), true,
-            'runGenerateCuts: strips are still created during planning');
+        // #3242: состав резки создаётся как «Партия ГП» (по ширинам: 110 и 55), не «Полоса».
+        var gpPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1081') === 0; });
+        assertEqual(gpPosts.length, 2, 'runGenerateCuts #3242: создаются «Партии ГП» по каждой ширине');
+        assertEqual(gpPosts[0].path, '_m_new/1081?JSON&up=cut-1', 'runGenerateCuts #3242: Партия ГП подчинена резке (up=cut)');
+        assertEqual({ t1186: gpPosts[0].fields.t1186, t1188: gpPosts[0].fields.t1188, t1189: gpPosts[0].fields.t1189, t1192: gpPosts[0].fields.t1192 },
+            { t1186: 110, t1188: 1, t1189: 1200, t1192: '1' },
+            'runGenerateCuts #3242: Партия ГП пишет Ширину/Кол-во рулонов/Метраж/«В работе»');
+        assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), false,
+            'runGenerateCuts #3242: «Полоса» больше не создаётся');
+        // #3242: обеспечение ссылается на «Партию ГП» ширины позиции (110 → obj-2), не на резку.
+        var supPost = posts.filter(function(p) { return p.path.indexOf('_m_new/1077') === 0; })[0];
+        assertEqual(supPost.path, '_m_new/1077?JSON&up=p1', 'runGenerateCuts #3242: обеспечение подчинено позиции заказа');
+        assertEqual({ t15016: supPost.fields.t15016, t16424: supPost.fields.t16424, t1149: supPost.fields.t1149, t1154: supPost.fields.t1154 },
+            { t15016: 'obj-2', t16424: 1, t1149: 1200, t1154: '1' },
+            'runGenerateCuts #3242: обеспечение пишет ссылку на Партию ГП, рулоны, метраж, «В работе»');
     });
 }
 
@@ -1135,17 +1173,18 @@ function runGenerateCutsSlitterAffinityTest() {
             req('26990', 'Тайминг'),
             req('1162', 'Статус')
         ] },
-        strip: { id: '1073', val: 'Полоса', reqs: [
-            req('1144', 'Ширина, мм'),
-            req('1146', 'Количество'),
-            req('1147', 'Назначение'),
-            req('1149', 'На склад')
-        ] },
+        // #3242: обеспечение → «Партия ГП»; состав резки — «Партия ГП».
         supply: { id: '1077', val: 'Обеспечение', reqs: [
-            req('1148', 'Метраж, м'),
-            req('15015', 'Производственная резка', { ref: '1078' }),
-            req('16420', 'Кол-во рулонов'),
-            req('1154', 'Статус')
+            req('1149', 'Метраж, м'),
+            req('1154', 'В работе'),
+            req('15016', 'Партия ГП', { ref: '1081' }),
+            req('16424', 'Кол-во рулонов')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
+            req('1186', 'Ширина, мм'),
+            req('1188', 'Кол-во рулонов'),
+            req('1189', 'Метраж, м'),
+            req('1192', 'В работе')
         ] },
         sleeveTask: null
     };
