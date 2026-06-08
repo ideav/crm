@@ -78,6 +78,7 @@
         sequence: 'Очередность',
         plannedRuns: 'Кол-во план',
         duration: 'Длительность, минут',
+        timing: 'Тайминг',
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м'
     };
@@ -91,6 +92,7 @@
         'cut_qty_plan'
     ];
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
+    var CUT_TIMING_COLUMNS = ['cut_timing'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
     var CUT_WRITE_LABELS = {
@@ -98,6 +100,7 @@
         materialBatch: CUT_REQ.materialBatch,
         plannedRuns: CUT_REQ.plannedRuns,
         duration: CUT_REQ.duration,
+        timing: CUT_REQ.timing,
         length: CUT_REQ.length,
         planDate: CUT_REQ.planDate,
         status: CUT_REQ.status,
@@ -557,6 +560,7 @@
                     length: rowNum(row, CUT_RUN_LENGTH_COLUMNS),
                     plannedRuns: rowNum(row, CUT_PLANNED_RUN_COLUMNS),
                     duration: rowNum(row, CUT_DURATION_COLUMNS),
+                    timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
@@ -1151,6 +1155,35 @@
         return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
     }
 
+    function formatTimingNumber(value) {
+        return String(round3(Number(value) || 0));
+    }
+
+    function cutTimingDetails(runMeters, plannedRuns, opTimes) {
+        var length = stripNum(runMeters);
+        var runs = stripNum(plannedRuns);
+        if (!(length > 0) || !(runs > 0)) return '';
+        var points = windingPointsFromTimes(opTimes || {});
+        if (!points.length) return '';
+        var oneRun = windingMinutes(length, points);
+        var total = round3(oneRun * runs);
+        if (!(oneRun > 0) || !(total > 0)) return '';
+        return [
+            'Метраж прохода: ' + formatTimingNumber(length) + ' м',
+            'Плановых проходов: ' + formatTimingNumber(runs),
+            'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин',
+            'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
+            'Нормы намотки: ' + points.map(function(p) {
+                return 'WIND_' + formatTimingNumber(p.m) + '=' + formatTimingNumber(p.min) + ' мин';
+            }).join('; ')
+        ].join('\n');
+    }
+
+    function cutTimingModalText(cut) {
+        var text = String(cut && cut.timing != null ? cut.timing : '').trim();
+        return text || 'Тайминг резки не заполнен';
+    }
+
     function scheduleDurationMinutes(cut, runMeters, windPoints) {
         var oneRun = windingMinutes(runMeters, windPoints || []);
         var runs = stripNum(cut && cut.plannedRuns);
@@ -1697,6 +1730,8 @@
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
         plannedCutDurationMinutes: plannedCutDurationMinutes,
+        cutTimingDetails: cutTimingDetails,
+        cutTimingModalText: cutTimingModalText,
         scheduleDurationMinutes: scheduleDurationMinutes,
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
@@ -1774,6 +1809,9 @@
         this.busy = false;
         this.progressEl = null;     // окно прогресса генерации резок (#3148)
         this.progressTotal = 0;
+        this.timingModalEl = null;
+        this.timingModalTitleEl = null;
+        this.timingModalBodyEl = null;
         this.daySettings = {};      // DAY_START_HOUR/DAY_END_HOUR из таблицы «Настройка»
         this._lastCutPlanningDiagnosticKey = '';
     }
@@ -2321,6 +2359,7 @@
             materialBatch: reqIdByName(meta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(meta, CUT_REQ.plannedRuns),
             duration: reqIdByName(meta, CUT_REQ.duration),
+            timing: reqIdByName(meta, CUT_REQ.timing),
             length: reqIdByName(meta, CUT_REQ.length),
             planDate: reqIdByName(meta, CUT_REQ.planDate),
             status: reqIdByName(meta, CUT_REQ.status),
@@ -2328,6 +2367,7 @@
             sequence: reqIdByName(meta, CUT_REQ.sequence)
         };
         var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
+        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes);
         var cutMainState = { last: this.lastCutMainValue };
         var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
         this.lastCutMainValue = cutMainState.last;
@@ -2336,6 +2376,7 @@
             materialBatch: d.materialBatchId,
             plannedRuns: d.plannedRuns,
             duration: duration > 0 ? duration : '',
+            timing: timing,
             length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
             status: d.status,
@@ -2345,7 +2386,7 @@
         fields = addMainValueField(meta, fields, cutMainValue);
         var requiredWriteKeys = ['plannedRuns'];
         if (selectedPositions.length) {
-            requiredWriteKeys = requiredWriteKeys.concat(['duration', 'length']);
+            requiredWriteKeys = requiredWriteKeys.concat(['duration', 'timing', 'length']);
         }
         var payloadDiagnostics = traceCutCreatePayload('createCut', meta, reqIds, fields, this, requiredWriteKeys);
         if (payloadDiagnostics.length) {
@@ -2919,6 +2960,7 @@
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
             plannedRuns: reqIdByName(cutMeta, CUT_REQ.plannedRuns),
             duration: reqIdByName(cutMeta, CUT_REQ.duration),
+            timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
@@ -2986,6 +3028,7 @@
                 var plannedRuns = plannedRunsForLayout(lay, posById);
                 var runLength = layoutRunLength(lay, posById);
                 var duration = plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes);
+                var timing = cutTimingDetails(runLength, plannedRuns, self.opTimes);
 
                 var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
                 var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
@@ -3007,11 +3050,12 @@
                     materialBatch: batchId,
                     plannedRuns: plannedRuns,
                     duration: duration > 0 ? duration : '',
+                    timing: timing,
                     length: runLength > 0 ? runLength : '',
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
-                var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'length']);
+                var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'timing', 'length']);
                 if (payloadDiagnostics.length) {
                     throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
@@ -3277,6 +3321,19 @@
 
     AtexProductionPlanning.prototype.closeForm = function() {
         if (this.modalEl) this.modalEl.classList.remove('is-open');
+    };
+
+    AtexProductionPlanning.prototype.openCutTiming = function(cut) {
+        if (this.timingModalTitleEl) {
+            var no = formatCutNumber(cut && cut.number) || (cut && cut.id ? ('#' + cut.id) : '');
+            this.timingModalTitleEl.textContent = 'Тайминг резки' + (no ? ' ' + no : '');
+        }
+        if (this.timingModalBodyEl) this.timingModalBodyEl.textContent = cutTimingModalText(cut);
+        if (this.timingModalEl) this.timingModalEl.classList.add('is-open');
+    };
+
+    AtexProductionPlanning.prototype.closeCutTiming = function() {
+        if (this.timingModalEl) this.timingModalEl.classList.remove('is-open');
     };
 
     function field(label, control) {
@@ -3612,8 +3669,24 @@
                         windPoints: windPoints
                     });
                 }
-                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-time',
-                    text: scheduleText }));
+                var timeEl = el('div', {
+                    class: 'atex-pp-cut-time',
+                    role: 'button',
+                    tabindex: '0',
+                    title: 'Показать тайминг резки',
+                    text: scheduleText
+                });
+                timeEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self.openCutTiming(c);
+                });
+                timeEl.addEventListener('keydown', function(e) {
+                    if (e.key !== 'Enter' && e.key !== ' ' && e.keyCode !== 13 && e.keyCode !== 32) return;
+                    if (e.preventDefault) e.preventDefault();
+                    e.stopPropagation();
+                    self.openCutTiming(c);
+                });
+                cardPanel.appendChild(timeEl);
             }
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
@@ -3875,9 +3948,28 @@
         this.modalEl = el('div', { class: 'atex-pp-modal' }, [dialog]);
         this.modalEl.addEventListener('click', function(e) { if (e.target === self.modalEl) self.closeForm(); });
         this.root.appendChild(this.modalEl);
+
+        var timingTitle = el('h2', { class: 'atex-pp-form-title', text: 'Тайминг резки' });
+        var timingBody = el('pre', { class: 'atex-pp-timing-body', text: '' });
+        var timingDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-timing-dialog' });
+        var timingClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        timingClose.addEventListener('click', function() { self.closeCutTiming(); });
+        timingDialog.appendChild(timingClose);
+        timingDialog.appendChild(timingTitle);
+        timingDialog.appendChild(timingBody);
+        this.timingModalTitleEl = timingTitle;
+        this.timingModalBodyEl = timingBody;
+        this.timingModalEl = el('div', { class: 'atex-pp-modal atex-pp-timing-modal' }, [timingDialog]);
+        this.timingModalEl.addEventListener('click', function(e) { if (e.target === self.timingModalEl) self.closeCutTiming(); });
+        this.root.appendChild(this.timingModalEl);
         if (typeof document !== 'undefined') {
             document.addEventListener('keydown', function(e) {
-                if ((e.key === 'Escape' || e.keyCode === 27) && self.modalEl && self.modalEl.classList.contains('is-open')) self.closeForm();
+                if (e.key !== 'Escape' && e.keyCode !== 27) return;
+                if (self.timingModalEl && self.timingModalEl.classList.contains('is-open')) {
+                    self.closeCutTiming();
+                    return;
+                }
+                if (self.modalEl && self.modalEl.classList.contains('is-open')) self.closeForm();
             });
         }
         this.toastHost = this.root;
