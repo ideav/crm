@@ -490,6 +490,23 @@
             normWinding(windDir) + '|' + windLengthKey(windLength);
     }
 
+    function rowFirstValue(row, names) {
+        for (var i = 0; i < names.length; i++) {
+            if (row && row[names[i]] != null && String(row[names[i]]).trim() !== '') return row[names[i]];
+        }
+        return '';
+    }
+
+    function preferredWidthMatchesProfile(row, windDir, windLength) {
+        if (windDir && normWinding(rowFirstValue(row, ['wind_dir', 'position_wind_dir', 'position_winding'])) !== windDir) {
+            return false;
+        }
+        if (windLength && windLengthKey(rowFirstValue(row, ['wind_length', 'position_wind_length', 'position_length'])) !== windLength) {
+            return false;
+        }
+        return true;
+    }
+
     function groupPositionsByPlanningProfile(positions) {
         var groups = {};
         var order = [];
@@ -1857,7 +1874,9 @@
         if (lenKey) params.push('FR_wind_length=' + encodeURIComponent(lenKey));
         console.log('[pp] 📏 loadPreferredWidths: запрос для сырья id=' + mat + ', намотка=' + dir + ', длина=' + lenKey + '...');
         return this.getJson('report/preferable_widths?' + params.join('&')).then(function(rows) {
-            var list = (rows || []).map(function(row) {
+            var list = (rows || []).filter(function(row) {
+                return preferredWidthMatchesProfile(row, dir, lenKey);
+            }).map(function(row) {
                 return {
                     width: Number(row.position_width_mm) || 0,
                     popularity: Number(row.position_qty_sum) || 0

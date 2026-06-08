@@ -169,18 +169,21 @@ ID компактнее символьных значений и удобнее 
 
 Отчёт для РМ «Расчёт резки» (ideav/atex#52, подзадача B): какие ширины ролика и в
 каком суммарном количестве заказывают по каждому виду сырья — чтобы добирать остаток
-джамбо «ходовыми» ширинами. Над «Позиция заказа», группировка по ширине, `SUM(Кол-во)`
-по убыванию, внешний фильтр по виду сырья.
+джамбо «ходовыми» ширинами. Над «Позиция заказа», группировка по ширине, сырью,
+типу намотки и длине, `SUM(Кол-во)` по убыванию, внешние фильтры по виду сырья,
+типу намотки и длине.
 
 | Колонка (`t100`) | Источник (`t28`, реквизит Позиции заказа) | Функция (`t104`) | Сортировка (`t109`) |
 |---|---|---|---|
 | `position_width_mm` | 1141 Ширина, мм | — (ключ группировки, для показа) | — |
 | `position_width_id` | 1141 Ширина, мм | 85 (abn_ID) | — |
 | `position_material_id` | 1138 Вид сырья | 85 (abn_ID) | — (внешний фильтр `FR_`) |
+| `wind_dir` | 8463 Тип намотки | — | — (внешний фильтр `FR_`) |
+| `wind_length` | 1143 Длина, м | — | — (внешний фильтр `FR_`) |
 | `position_qty_sum` | 1137 Кол-во | 73 (SUM) | −1 (по убыванию) |
 
-Имена — latin `snake_case`, поэтому `FR_position_material_id` в URL не требует
-кодирования кириллицы.
+Имена — latin `snake_case`, поэтому `FR_position_material_id`, `FR_wind_dir` и
+`FR_wind_length` в URL не требуют кодирования кириллицы.
 
 Создание (проверенная последовательность, `DB=https://ideav.ru/ateh`):
 ```bash
@@ -189,12 +192,17 @@ XSRF=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/xsrf
 QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_new/22?JSON&up=1" \
   --data-urlencode t22=preferable_widths --data-urlencode token=$TOKEN --data-urlencode _xsrf=$XSRF | jq -r '.id // .obj')
 # Колонки (тип 28), up=QID: t28=реквизит, t100=имя
-#   position_width_mm←1141, position_width_id←1141, position_material_id←1138, position_qty_sum←1137
+#   position_width_mm←1141, position_width_id←1141, position_material_id←1138,
+#   wind_dir←8463, wind_length←1143, position_qty_sum←1137
 # Функции/сортировка через _m_set: t104=85 (abn_ID) для *_id; t104=73 (SUM) + t109=-1 для position_qty_sum
 ```
-Запуск: `GET /ateh/report/preferable_widths?JSON_KV&FR_position_material_id={видСырьяID}`.
-`{видСырьяID}` — ID записи «Вид сырья» (= `position_material_id`/abn_ID из ответа).
-Незаданный фильтр → все сырьё. Создано и проверено 2026-06-01 (queryId 8421).
+Запуск:
+`GET /ateh/report/preferable_widths?JSON_KV&FR_position_material_id={видСырьяID}&FR_wind_dir={IN|OUT}&FR_wind_length={длина}`.
+`{видСырьяID}` — ID записи «Вид сырья» (= `position_material_id`/abn_ID из ответа),
+`{длина}` — требуемая длина позиции в метрах. Незаданный фильтр расширяет выборку.
+Клиент `production-planning.js` дополнительно отбрасывает строки с другим `wind_dir`
+или `wind_length`, чтобы не использовать ходовые другого профиля. Создано и проверено
+2026-06-01; профильные колонки добавлены для #3219/#3221 (queryId 8421).
 
 ## 8. `cut_planning` (queryId 8384) — очередь резок с сигналами движка
 
@@ -242,14 +250,18 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 | `position_qty` | 1137 Кол-во | — |
 | `position_material_id` | 1138 Вид сырья | 85 (abn_ID) |
 | `position_due_date` | 8627 Срок изготовления | — (F3: дата-окно объединения, `dueKey`) |
-| `position_length` | 1075 Длина, м | — (#3155: метраж прогона джамбо, `length`) |
+| `position_length` | 1143 Длина, м | — (#3155: метраж прогона джамбо, `length`) |
+| `position_winding` | 8463 Тип намотки | — (`windDir`) |
 
 `position_material_id` (колонка 8527) — сырьё позиции; `position_due_date` (8654, F3) —
 «Срок изготовления» для окна объединения позиций в одну резку. `position_length`
-(реквизит 1075 «Длина, м» позиции, #3155) — длина прогона джамбо: при генерации резок
+(реквизит 1143 «Длина, м» позиции, #3155) — длина прогона джамбо: при генерации резок
 её записывают в «Метраж, м» создаваемого обеспечения, иначе `footageBySupply=0` и все
-резки показывают «0 мин» (намотка не считается). `rowsToGenPositions` собирает
-`{ id, materialId, width, qty, length, dueKey }` для ядра `cut-layout.planLayouts`.
+резки показывают «0 мин» (намотка не считается). `position_winding` вместе с
+`position_length` образует профиль планирования для группировки и запроса
+`preferable_widths`. `rowsToGenPositions` собирает
+`{ id, materialId, width, qty, length, windDir, windLength, dueKey }` для ядра
+`cut-layout.planLayouts`.
 Запуск: `GET /ateh/report/positions_list?JSON_KV`.
 
 ## 8.2 `cut_strips` (queryId 8656, F3) — полосы (ножи) резок

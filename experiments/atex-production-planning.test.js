@@ -888,7 +888,9 @@ function runPreferredWidthsFilterTest() {
     controller.getJson = function(path) {
         paths.push(path);
         return Promise.resolve([
-            { position_width_mm: '25.00', position_qty_sum: '105', wind_dir: 'OUT', wind_length: '600.00' }
+            { position_width_mm: '25.00', position_qty_sum: '105', wind_dir: 'OUT', wind_length: '600.00' },
+            { position_width_mm: '30.00', position_qty_sum: '70', wind_dir: 'OUT', wind_length: '450.00' },
+            { position_width_mm: '40.00', position_qty_sum: '35', wind_dir: 'IN', wind_length: '600.00' }
         ]);
     };
     return controller.loadPreferredWidths('2086', 'out', '600.00').then(function(list) {
@@ -896,7 +898,7 @@ function runPreferredWidthsFilterTest() {
             'report/preferable_widths?JSON_KV&FR_position_material_id=2086&FR_wind_dir=OUT&FR_wind_length=600',
             'loadPreferredWidths #3219: фильтрует ходовые по сырью, намотке и метражу');
         assertEqual(list, [{ width: 25, popularity: 105 }],
-            'loadPreferredWidths #3219: маппит ширину и популярность');
+            'loadPreferredWidths #3221: отбрасывает ходовые с другой намоткой или метражом');
         return controller.loadPreferredWidths('2086', 'OUT', 600).then(function(cached) {
             assertEqual(paths.length, 1,
                 'loadPreferredWidths #3219: нормализованный cache key переиспользует ответ');
