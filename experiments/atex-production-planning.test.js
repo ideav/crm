@@ -1324,6 +1324,70 @@ function runGenerateCutsSlitterAffinityTest() {
     });
 }
 
+function runGenerateCutsSequenceByKnivesTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    var cutNo = 0;
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('15018', 'Партия сырья'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('24305', 'Метраж, м'),
+            req('26584', 'Длительность, минут'),
+            req('26990', 'Тайминг'),
+            req('1162', 'Статус')
+        ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1149', 'Метраж, м'),
+            req('1154', 'В работе'),
+            req('15016', 'Партия ГП', { ref: '1081' }),
+            req('16424', 'Кол-во рулонов')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
+            req('1186', 'Ширина, мм'),
+            req('1188', 'Кол-во рулонов'),
+            req('1189', 'Метраж, м'),
+            req('1192', 'В работе')
+        ] },
+        sleeveTask: null
+    };
+    controller.genPositions = [
+        { id: 'p-few', materialId: 'M', width: 60, qty: 5, length: 600, windDir: 'IN', windLength: 600 },
+        { id: 'p-many', materialId: 'M', width: 40, qty: 15, length: 600, windDir: 'IN', windLength: 600 }
+    ];
+    controller.genBatches = [{ id: 'b1', materialId: 'M', dateKey: 20260601, remainder: 999, remainderLinear: 5000, active: true }];
+    controller.cuts = [];
+    controller.slitters = [{ id: '20', label: 'Станок 2', stopMaterialIds: [] }];
+    controller.opTimes = opT;
+    controller.nowMs = function() { return 1780919700000; };
+    controller.setBusy = function() {};
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        if (path.indexOf('_m_new/1078') === 0) {
+            cutNo += 1;
+            return Promise.resolve({ obj: 'cut-' + cutNo });
+        }
+        return Promise.resolve({ obj: 'obj-' + posts.length });
+    };
+
+    return controller.runGenerateCuts([
+        { mat: 'M', windDir: 'IN', windLength: 600, positionsCovered: ['p-few'], strips: [{ width: 60, qty: 5, purpose: 'Заказ', positionIds: ['p-few'] }] },
+        { mat: 'M', windDir: 'IN', windLength: 600, positionsCovered: ['p-many'], strips: [{ width: 40, qty: 15, purpose: 'Заказ', positionIds: ['p-many'] }] }
+    ], []).then(function() {
+        var cutPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; });
+        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [2, 1],
+            'runGenerateCuts #3263: новые резки одного станка получают очередь по ножам убыв. (15 раньше 5)');
+    });
+}
+
 function runCreateCutPayloadDiagnosticsTest() {
     var controller = Object.create(api.Controller.prototype);
     var posts = [];
@@ -1428,6 +1492,7 @@ function runCreateCutMainValueTest() {
 runPreferredWidthsFilterTest()
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
+    .then(runGenerateCutsSequenceByKnivesTest)
     .then(runCreateCutPayloadDiagnosticsTest)
     .then(runCreateCutMainValueTest)
     .then(function() {

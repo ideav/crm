@@ -3241,6 +3241,64 @@
             return Promise.resolve();
         }
 
+        var layoutPlans = [];
+        layouts.forEach(function(lay, layIdx) {
+            var plannedRuns = plannedRunsForLayout(lay, posById);
+            var runLength = layoutRunLength(lay, posById);
+            var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
+            var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
+            var slitterId = slitterBySetupKey[setupKey] || pickSlitter(self.slitters, lay.mat, loadBySlitterId);
+            if (slitterId != null) {
+                slitterId = String(slitterId);
+                slitterBySetupKey[setupKey] = slitterId;
+                loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
+            }
+            layoutPlans.push({
+                plannedRuns: plannedRuns,
+                runLength: runLength,
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                batchId: batchId,
+                slitterId: slitterId,
+                cutMainValue: nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState),
+                knifeCount: stripsTotalKnives(lay && lay.strips),
+                sequence: '',
+                index: layIdx
+            });
+        });
+        if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
+
+        // #3263: create requests stay in layout order, but queue numbers for
+        // same-day generated cuts must follow knife count descending.
+        var sequenceGroups = {};
+        var sequenceGroupOrder = [];
+        layoutPlans.forEach(function(plan) {
+            var slitterId = String(plan.slitterId == null ? '' : plan.slitterId);
+            if (slitterId === '') return;
+            var day = cutPlanDayKey({ planDate: plan.cutMainValue });
+            var key = slitterId + '\u0000' + day;
+            if (!sequenceGroups[key]) {
+                sequenceGroups[key] = { slitterId: slitterId, planDate: plan.cutMainValue, plans: [] };
+                sequenceGroupOrder.push(key);
+            }
+            sequenceGroups[key].plans.push(plan);
+        });
+        sequenceGroupOrder.forEach(function(key) {
+            var group = sequenceGroups[key];
+            group.plans.slice().sort(function(a, b) {
+                return ((Number(b.knifeCount) || 0) - (Number(a.knifeCount) || 0)) || (a.index - b.index);
+            }).forEach(function(plan) {
+                plan.sequence = nextSequenceForCuts(sequenceCuts, group.slitterId, group.planDate);
+                sequenceCuts.push({
+                    id: 'generated-' + plan.index,
+                    number: plan.cutMainValue,
+                    slitter: { id: group.slitterId, label: '' },
+                    planDate: plan.cutMainValue,
+                    sequence: plan.sequence
+                });
+            });
+        });
+
         this.setBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
         // запросами, может занять заметное время.
@@ -3251,25 +3309,15 @@
         layouts.forEach(function(lay, layIdx) {
             chain = chain.then(function() {
                 self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
-                var plannedRuns = plannedRunsForLayout(lay, posById);
-                var runLength = layoutRunLength(lay, posById);
-                var duration = plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes);
-                var timing = cutTimingDetails(runLength, plannedRuns, self.opTimes);
-
-                var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
-                var setupKey = slitterAffinityKey(lay.mat, lay.windDir, lay.windLength, batchId);
-                var slitterId = slitterBySetupKey[setupKey] || pickSlitter(self.slitters, lay.mat, loadBySlitterId);
-                if (slitterId != null) {
-                    slitterId = String(slitterId);
-                    slitterBySetupKey[setupKey] = slitterId;
-                    loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
-                }
-                var sequence = nextSequenceForCuts(sequenceCuts, slitterId, '');
-                var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
-                self.lastCutMainValue = cutMainState.last;
-                if (sequence !== '') {
-                    sequenceCuts.push({ id: 'generated-' + layIdx, number: cutMainValue, slitter: { id: slitterId, label: '' }, planDate: '', sequence: sequence });
-                }
+                var layoutPlan = layoutPlans[layIdx];
+                var plannedRuns = layoutPlan.plannedRuns;
+                var runLength = layoutPlan.runLength;
+                var duration = layoutPlan.duration;
+                var timing = layoutPlan.timing;
+                var batchId = layoutPlan.batchId;
+                var slitterId = layoutPlan.slitterId;
+                var sequence = layoutPlan.sequence;
+                var cutMainValue = layoutPlan.cutMainValue;
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
                     slitter: slitterId,
