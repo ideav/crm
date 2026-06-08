@@ -303,10 +303,16 @@ var rp = planning.rowsToPlanning([
 assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
 assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
 var runsPlan = planning.rowsToPlanning([
-    { cut_id:'runs-1', cut_no:'1', cut_planned_runs:'3', supply_id:'' }
+    { cut_id:'runs-1', cut_no:'1', cut_planned_runs:'3', cut_length:'450', supply_id:'' }
 ]);
 assertEqual(runsPlan.cuts[0].plannedRuns, 3,
     'rowsToPlanning #3219: cut_planned_runs → plannedRuns for queue card');
+assertEqual(runsPlan.cuts[0].length, 450,
+    'rowsToPlanning #3226: cut_length → run length for queue card');
+assertEqual(planning.formatCutRuns(runsPlan.cuts[0].plannedRuns, runsPlan.cuts[0].length), 'Проходов: 3 * 450м',
+    'formatCutRuns #3226: queue card includes planned runs and run length');
+assertEqual(planning.formatCutRuns(3, 0), 'Проходов: 3',
+    'formatCutRuns #3226: keeps existing label when run length is missing');
 var durationPlan = planning.rowsToPlanning([
     { cut_id:'duration-1', cut_no:'1', cut_duration:'12,5', supply_id:'' }
 ]);

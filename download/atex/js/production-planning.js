@@ -1089,6 +1089,14 @@
         return (isFinite(n) && n > 0) ? ('Полосы (' + n + ')') : 'Полосы';
     }
 
+    function formatCutRuns(plannedRuns, runLength) {
+        var runs = stripNum(plannedRuns);
+        var text = 'Проходов: ' + (runs > 0 ? String(round3(runs)) : '—');
+        var length = stripNum(runLength);
+        if (length > 0) text += ' * ' + round3(length) + 'м';
+        return text;
+    }
+
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
         var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
@@ -1460,6 +1468,7 @@
         stripsRemainder: stripsRemainder,
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
+        formatCutRuns: formatCutRuns,
         resolveTolerance: resolveTolerance
     };
 
@@ -3261,13 +3270,12 @@
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var windingText = c.winding ? c.winding : '—';
             if (Number(c.length) > 0) windingText += ' · ' + round3(c.length) + ' м';
-            var plannedRunsText = Number(c.plannedRuns) > 0 ? String(round3(c.plannedRuns)) : '—';
             var info = el('div', { class: 'atex-pp-cut-info' }, [
                 el('span', { class: 'atex-pp-cut-num', text: '№ ' + (formatCutNumber(c.number) || c.id) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
                 el('span', { class: 'atex-pp-cut-winding', text: 'Намотка: ' + windingText }),
-                el('span', { class: 'atex-pp-cut-runs', text: 'Проходов: ' + plannedRunsText }),
+                el('span', { class: 'atex-pp-cut-runs', text: formatCutRuns(c.plannedRuns, runLenByCut[String(c.id)]) }),
                 el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
                 el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
