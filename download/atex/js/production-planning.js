@@ -393,6 +393,25 @@
     // cut_planning резки считаются рабочей очередью (#3209: очищенная новая модель).
     // Форматы дат разные («ДД.ММ.ГГГГ» из отчёта, «ГГГГ-ММ-ДД» из <input type=date>) —
     // нормализуем общим batchDateKey.
+    // Календарный день плановой даты как YYYYMMDD (#3249). «Дата план» — первая колонка
+    // «Производственной резки» (DATETIME) и приходит unix-штампом (секунды/мс), а фильтр
+    // <input type=date> даёт «ГГГГ-ММ-ДД». batchDateKey сводит дату-строку к YYYYMMDD, но
+    // unix-штамп (≈1.7e9) к нему несравним — приводим штамп к календарному дню той же шкалы.
+    function planDateDayKey(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (s === '') return Infinity;
+        if (/^\d{9,13}$/.test(s)) {
+            var num = Number(s);
+            var ms = num >= 1e12 ? num : num * 1000;
+            var d = new Date(ms);
+            var year = d.getFullYear();
+            if (!isNaN(d.getTime()) && year >= 2001 && year <= 2100) {
+                return year * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+            }
+        }
+        return batchDateKey(s);
+    }
+
     function isCutVisible(cut, selectedDate) {
         if (!cut) return false;
         if (String(cut.status || '').trim() === 'Завершён') return false;
@@ -400,7 +419,9 @@
         if (pd === '') return true;
         var sd = String(selectedDate == null ? '' : selectedDate).trim();
         if (sd === '') return true;
-        return batchDateKey(pd) === batchDateKey(sd);
+        // #3249: сравниваем по календарному дню (planDate — unix-штамп DATETIME,
+        // selectedDate — «ГГГГ-ММ-ДД»); раньше batchDateKey давал несравнимые шкалы.
+        return planDateDayKey(pd) === planDateDayKey(sd);
     }
 
     // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
@@ -1816,7 +1837,8 @@
     }
 
     function cutPlanDayKey(c) {
-        var key = batchDateKey(c && c.planDate);
+        // #3249: planDate приходит unix-штампом (DATETIME) — группируем по календарному дню.
+        var key = planDateDayKey(c && c.planDate);
         return key === Infinity ? '' : String(key);
     }
 
@@ -1894,6 +1916,7 @@
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
         isCutVisible: isCutVisible,
+        planDateDayKey: planDateDayKey,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
@@ -3864,7 +3887,7 @@
                 el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
                 el('span', { class: 'atex-pp-cut-runs', text: formatCutRuns(c.plannedRuns, runLenByCut[String(c.id)]) }),
                 el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
-                el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
+                el('span', { class: 'atex-pp-cut-date', text: formatCutNumber(c.planDate) || '' }),   // #3249: planDate — unix-штамп → дата
                 el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);

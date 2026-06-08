@@ -817,6 +817,20 @@ assertEqual(planning.isCutVisible(vc({planDate:''}), '2026-06-02'), true, 'isCut
 assertEqual(planning.isCutVisible(vc({planDate:'02.06.2026'}), ''), true, 'isCutVisible: дата не выбрана → по дате не фильтруем');
 assertEqual(planning.isCutVisible(vc({planDate:''}), ''), true, 'isCutVisible: обе пусты → видна');
 assertEqual(planning.isCutVisible(null, '2026-06-02'), false, 'isCutVisible: null → false');
+// #3249: «Дата план» приходит unix-штампом (DATETIME) — фильтр по дню должен совпасть.
+var ts3249 = 1780919776;
+var dt3249 = new Date(ts3249 * 1000);
+var pad3249 = function(n){ return String(n).length < 2 ? '0' + n : String(n); };
+var sameDayIso3249 = dt3249.getFullYear() + '-' + pad3249(dt3249.getMonth() + 1) + '-' + pad3249(dt3249.getDate());
+var dayKey3249 = dt3249.getFullYear() * 10000 + (dt3249.getMonth() + 1) * 100 + dt3249.getDate();
+assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), sameDayIso3249), true,
+    'isCutVisible #3249: unix-штамп planDate совпадает с днём фильтра → видна');
+assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), '2000-01-02'), false,
+    'isCutVisible #3249: unix-штамп planDate ≠ день фильтра → скрыта');
+assertEqual(planning.planDateDayKey('2026-06-08'), 20260608, 'planDateDayKey: ISO-дата → YYYYMMDD');
+assertEqual(planning.planDateDayKey(String(ts3249)), dayKey3249, 'planDateDayKey #3249: unix-штамп → календарный день YYYYMMDD');
+assertEqual(planning.planDateDayKey('') === Infinity, true, 'planDateDayKey: пусто → Infinity');
+assertEqual(planning.planDateDayKey('01.06.2026'), 20260601, 'planDateDayKey: ДД.ММ.ГГГГ → YYYYMMDD');
 
 // ── Сводка по полосам редактора (stripsUsedWidth/stripsTotalKnives/stripsRemainder) ──
 // Полосы [{width:110,qty:2},{width:70,qty:1}] при джамбо 910:
