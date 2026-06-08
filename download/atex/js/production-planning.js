@@ -81,6 +81,29 @@
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м'
     };
+    var CUT_PLANNED_RUN_COLUMNS = [
+        'cut_planned_runs',
+        'cut_plan_runs',
+        'cut_planned_qty',
+        'cut_plan_qty',
+        'cut_planned_count',
+        'cut_plan_count',
+        'cut_qty_plan'
+    ];
+    var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
+    var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
+    var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
+    var CUT_WRITE_LABELS = {
+        slitter: CUT_REQ.slitter,
+        materialBatch: CUT_REQ.materialBatch,
+        plannedRuns: CUT_REQ.plannedRuns,
+        duration: CUT_REQ.duration,
+        length: CUT_REQ.length,
+        planDate: CUT_REQ.planDate,
+        status: CUT_REQ.status,
+        notes: CUT_REQ.notes,
+        sequence: CUT_REQ.sequence
+    };
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
         footage: 'Метраж, м',
@@ -337,6 +360,76 @@
         return out;
     }
 
+    function hasOwn(obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj || {}, key);
+    }
+
+    function rowsHaveAnyColumn(rows, names) {
+        var list = rows || [];
+        for (var i = 0; i < list.length; i++) {
+            for (var j = 0; j < names.length; j++) {
+                if (hasOwn(list[i], names[j])) return true;
+            }
+        }
+        return false;
+    }
+
+    function cutPlanningReportDiagnostics(rows) {
+        var list = rows || [];
+        var hasCutRows = list.some(function(row) {
+            return row && row.cut_id != null && String(row.cut_id).trim() !== '';
+        });
+        if (!hasCutRows) return [];
+        var specs = [
+            { key: 'plannedRuns', label: CUT_REQ.plannedRuns, columns: CUT_PLANNED_RUN_COLUMNS },
+            { key: 'duration', label: CUT_REQ.duration, columns: CUT_DURATION_COLUMNS },
+            { key: 'runLength', label: CUT_REQ.length + ' / ' + SUPPLY_REQ.footage, columns: CUT_RUN_LENGTH_COLUMNS.concat(SUPPLY_FOOTAGE_COLUMNS) }
+        ];
+        return specs.filter(function(spec) {
+            return !rowsHaveAnyColumn(list, spec.columns);
+        }).map(function(spec) {
+            return {
+                key: spec.key,
+                label: spec.label,
+                columns: spec.columns.slice(),
+                reason: 'report-column',
+                message: 'В отчёте cut_planning нет колонки для «' + spec.label + '» (' + spec.columns.join(' | ') + ')'
+            };
+        });
+    }
+
+    function cutWriteDiagnostics(reqIds, fields, requiredKeys, labels) {
+        var out = [];
+        (requiredKeys || []).forEach(function(key) {
+            var id = reqIds && reqIds[key] != null ? String(reqIds[key]) : '';
+            var label = (labels && labels[key]) || key;
+            if (id === '') {
+                out.push({
+                    key: key,
+                    label: label,
+                    reason: 'metadata',
+                    message: 'Не найден реквизит «' + label + '» в метаданных'
+                });
+                return;
+            }
+            var fieldKey = 't' + id;
+            if (!hasOwn(fields, fieldKey)) {
+                out.push({
+                    key: key,
+                    label: label,
+                    reason: 'field',
+                    field: fieldKey,
+                    message: 'Не записано поле «' + label + '» (' + fieldKey + ')'
+                });
+            }
+        });
+        return out;
+    }
+
+    function cutWriteDiagnosticSummary(diagnostics) {
+        return (diagnostics || []).map(function(d) { return d.message; }).join('; ');
+    }
+
     function maxNumericCutNumber(cuts) {
         var max = 0;
         (cuts || []).forEach(function(cut) {
@@ -373,29 +466,40 @@
         return Date.now();
     }
 
-    function traceCutCreatePayload(scope, meta, reqIds, fields, controller) {
+    function traceCutCreatePayload(scope, meta, reqIds, fields, controller, requiredKeys) {
         var win = typeof window !== 'undefined' ? window : null;
+        var diagnostics = cutWriteDiagnostics(reqIds, fields, requiredKeys || [], CUT_WRITE_LABELS);
+        if (diagnostics.length && typeof console !== 'undefined' && console.error) {
+            console.error('[pp] ❌ ' + scope + ': неполный payload резки — ' + cutWriteDiagnosticSummary(diagnostics), {
+                diagnostics: diagnostics,
+                fields: fields || {},
+                reqIds: reqIds || {}
+            });
+        }
         var enabled = (controller && controller.traceCutPayloads) || (win && win.ATEX_PP_TRACE_PAYLOADS);
-        if (!enabled) return;
-        if (typeof console === 'undefined' || !console.log) return;
+        if (!enabled) return diagnostics;
+        if (typeof console === 'undefined' || !console.log) return diagnostics;
         var mainKey = meta && meta.id != null ? 't' + meta.id : '';
         var fieldKeys = Object.keys(fields || {}).sort();
         var missing = [];
-        if (mainKey && !Object.prototype.hasOwnProperty.call(fields || {}, mainKey)) {
+        if (mainKey && !hasOwn(fields, mainKey)) {
             missing.push('main:' + mainKey);
         }
         Object.keys(reqIds || {}).forEach(function(key) {
             var id = reqIds[key];
             var fieldKey = id == null ? '' : 't' + id;
-            if (fieldKey && !Object.prototype.hasOwnProperty.call(fields || {}, fieldKey)) {
+            if (fieldKey && !hasOwn(fields, fieldKey)) {
                 missing.push(key + ':' + fieldKey);
             }
+            if (!fieldKey) missing.push(key + ':metadata');
         });
         console.log('[pp] 🧾 ' + scope + ': _m_new/' + ((meta && meta.id) || '?') + ' поля', {
             main: mainKey ? (mainKey + '=' + ((fields || {})[mainKey] == null ? '' : (fields || {})[mainKey])) : '',
             fieldKeys: fieldKeys,
-            missing: missing
+            missing: missing,
+            diagnostics: diagnostics
         });
+        return diagnostics;
     }
 
     // Плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies }.
@@ -440,17 +544,9 @@
                     knifeWidths: [],
                     winding: normWinding(row.cut_winding),
                     rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
-                    length: rowNum(row, ['cut_length', 'cut_footage', 'cut_footage_m']),
-                    plannedRuns: rowNum(row, [
-                        'cut_planned_runs',
-                        'cut_plan_runs',
-                        'cut_planned_qty',
-                        'cut_plan_qty',
-                        'cut_planned_count',
-                        'cut_plan_count',
-                        'cut_qty_plan'
-                    ]),
-                    duration: rowNum(row, ['cut_duration', 'cut_duration_min', 'cut_duration_minutes']),
+                    length: rowNum(row, CUT_RUN_LENGTH_COLUMNS),
+                    plannedRuns: rowNum(row, CUT_PLANNED_RUN_COLUMNS),
+                    duration: rowNum(row, CUT_DURATION_COLUMNS),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
@@ -471,7 +567,7 @@
                     positionId: row.supply_position_id ? String(row.supply_position_id) : null,
                     cutId: cutId,
                     finishedBatchId: finishedBatchId,
-                    footage: rowNum(row, ['supply_footage', 'supply_length', 'supply_length_m']),
+                    footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
                     rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
             }
@@ -950,6 +1046,15 @@
         return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
     }
 
+    function scheduleDurationMinutes(cut, runMeters, windPoints) {
+        var oneRun = windingMinutes(runMeters, windPoints || []);
+        var runs = stripNum(cut && cut.plannedRuns);
+        var computed = runs > 0 ? round3(oneRun * runs) : oneRun;
+        if (computed > 0) return computed;
+        var stored = stripNum(cut && cut.duration);
+        return stored > 0 ? round3(stored) : 0;
+    }
+
     var DAY_START_MIN = 8 * 60;          // DAY_START_HOUR по умолчанию: 08:00
     var DAY_END_MIN = 17 * 60;           // DAY_END_HOUR по умолчанию: 17:00
     var SHIFT_START_MIN = DAY_START_MIN; // старый экспорт: начало окна резок
@@ -992,9 +1097,10 @@
     // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
     // полуночи дня 0 (через сутки — следующий рабочий день). setup перед резкой = лидер
     // (BETWEEN_CUTS) + переналадка с предыдущей (changeoverCost, мин); длительность =
-    // намотка прогона (windingMinutes по метражу). Рабочее окно дня — [shiftStartMin,
-    // shiftEndMin] (08:00–16:30); резка, не влезающая до конца окна, переносится на
-    // 08:00 следующего дня. opts: { windPoints, times, shiftStartMin, shiftEndMin,
+    // намотка прогона × «Кол-во план» либо сохранённая «Длительность, минут» как
+    // fallback. Рабочее окно дня — [shiftStartMin, shiftEndMin] (08:00–16:30);
+    // резка, не влезающая до конца окна, переносится на 08:00 следующего дня.
+    // opts: { windPoints, times, shiftStartMin, shiftEndMin,
     // runLengthByCut:{cutId:метры} }. Вход не мутирует.
     function buildSchedule(cuts, opts){
         opts = opts || {};
@@ -1009,7 +1115,7 @@
         var out = [];
         (cuts || []).forEach(function(c, i){
             var setup = leader + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
-            var dur = windingMinutes(Number(runLen[String(c.id)]) || 0, wind);
+            var dur = scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             var start = t + setup;
             var day = Math.floor(start / 1440);
             if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
@@ -1054,6 +1160,17 @@
         var h = Math.floor(hm / 60), mm = hm % 60;
         var s = (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
         return day > 0 ? s + ' +' + day + 'д' : s;
+    }
+
+    function formatScheduleLine(sc, runLength, hasWindingPoints) {
+        if (!sc) return '';
+        var dur = stripNum(sc.durationMin);
+        if (dur <= 0) {
+            if (stripNum(runLength) <= 0) return '⏱ ошибка: нет метража прохода; длительность не рассчитана';
+            if (!hasWindingPoints) return '⏱ ошибка: нет норм WIND_*; длительность не рассчитана';
+            return '⏱ ошибка: длительность 0 мин; проверьте проходы и нормы намотки';
+        }
+        return '⏱ ' + formatClock(sc.startMin) + ' – ' + formatClock(sc.finishMin) + ' · ' + dur + ' мин';
     }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
@@ -1401,10 +1518,12 @@
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
         addMainValueField: addMainValueField,
+        cutWriteDiagnostics: cutWriteDiagnostics,
         supplyCutRelation: supplyCutRelation,
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
+        cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
         rowsToPositions: rowsToPositions,
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
@@ -1453,11 +1572,13 @@
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
         plannedCutDurationMinutes: plannedCutDurationMinutes,
+        scheduleDurationMinutes: scheduleDurationMinutes,
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
+        formatScheduleLine: formatScheduleLine,
         DAY_START_MIN: DAY_START_MIN,
         DAY_END_MIN: DAY_END_MIN,
         SHIFT_START_MIN: SHIFT_START_MIN,
@@ -1526,6 +1647,7 @@
         this.progressEl = null;     // окно прогресса генерации резок (#3148)
         this.progressTotal = 0;
         this.daySettings = {};      // DAY_START_HOUR/DAY_END_HOUR из таблицы «Настройка»
+        this._lastCutPlanningDiagnosticKey = '';
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
@@ -1962,6 +2084,28 @@
         });
     };
 
+    AtexProductionPlanning.prototype.reportCutPlanningDiagnostics = function(rows) {
+        var diagnostics = cutPlanningReportDiagnostics(rows);
+        if (!diagnostics.length) {
+            this._lastCutPlanningDiagnosticKey = '';
+            return;
+        }
+        var columns = rows && rows[0] ? Object.keys(rows[0]).sort() : [];
+        var key = diagnostics.map(function(d) { return d.key; }).join('|');
+        if (typeof console !== 'undefined' && console.error) {
+            console.error('[pp] ❌ cut_planning: не хватает данных отчёта — ' + cutWriteDiagnosticSummary(diagnostics), {
+                diagnostics: diagnostics,
+                columns: columns
+            });
+        }
+        if (key !== this._lastCutPlanningDiagnosticKey) {
+            this._lastCutPlanningDiagnosticKey = key;
+            this.notify('Ошибка отчёта cut_planning: ' + diagnostics.map(function(d) {
+                return d.label;
+            }).join(', '), 'error');
+        }
+    };
+
     // Очередь резок и их обеспечение одним отчётом cut_planning (JSON_KV).
     // Заполняет this.cuts и this.supplies из плоских строк отчёта; вливает
     // knifeCount/knifeWidths из this.stripAgg (cut_strips) в каждую резку.
@@ -1974,6 +2118,7 @@
         ]).then(function(results) {
             var rows = results[0];
             var sequenceByCut = results[1] || {};
+            self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
             p.cuts.forEach(function(cut) {
@@ -2070,7 +2215,15 @@
             sequence: nextSequenceForCuts(this.cuts, d.slitterId, d.planDate)
         });
         fields = addMainValueField(meta, fields, cutMainValue);
-        traceCutCreatePayload('createCut', meta, reqIds, fields, this);
+        var requiredWriteKeys = ['plannedRuns'];
+        if (selectedPositions.length) {
+            requiredWriteKeys = requiredWriteKeys.concat(['duration', 'length']);
+        }
+        var payloadDiagnostics = traceCutCreatePayload('createCut', meta, reqIds, fields, this, requiredWriteKeys);
+        if (payloadDiagnostics.length) {
+            this.notify('Не могу создать резку: ' + cutWriteDiagnosticSummary(payloadDiagnostics), 'error');
+            return;
+        }
 
         function finishCreatedCut(id) {
             if (!id) throw new Error('Сервер не вернул id новой резки');
@@ -2708,7 +2861,10 @@
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
-                traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self);
+                var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'length']);
+                if (payloadDiagnostics.length) {
+                    throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
+                }
 
                 function createStrips(cutId) {
                     var stripChain = Promise.resolve();
@@ -3295,9 +3451,19 @@
             // Строка времени: старт–финиш (длительность) от начала смены 08:00.
             var sc = schedById[String(c.id)];
             if (sc) {
+                var runLengthForCut = runLenByCut[String(c.id)];
+                var scheduleText = formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
+                if (stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
+                    console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
+                        cutId: String(c.id),
+                        plannedRuns: c.plannedRuns,
+                        runLength: runLengthForCut,
+                        storedDuration: c.duration,
+                        windPoints: windPoints
+                    });
+                }
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-time',
-                    text: '⏱ ' + formatClock(sc.startMin) + ' – ' + formatClock(sc.finishMin) +
-                          ' · ' + sc.durationMin + ' мин' }));
+                    text: scheduleText }));
             }
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
