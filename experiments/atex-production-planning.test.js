@@ -854,8 +854,76 @@ assertEqual(plannedCutDuration(600, 3, opT), 12,
 assertEqual(plannedCutDuration(600, 0, opT), 0,
     'plannedCutDurationMinutes #3223: без плановых проходов длительность 0');
 assertEqual(planning.cutTimingDetails(600, 3, opT),
-    'Метраж прохода: 600 м\nПлановых проходов: 3\nНамотка 1 прохода: 4 мин\nИтого резка: 4 * 3 = 12 мин\nНормы намотки: WIND_300=1.2 мин; WIND_600=4 мин; WIND_900=5 мин; WIND_1100=5.6 мин',
-    'cutTimingDetails #3238: сохраняет понятную расшифровку длительности резки');
+    'Метраж прохода: 600 м\nПлановых проходов: 3\nНамотка 1 прохода: 4 мин\nИтого резка: 4 * 3 = 12 мин\nНорма намотки: WIND_600=4 мин',
+    'cutTimingDetails #3240: расшифровка длительности с релевантной нормой (точное совпадение метража)');
+assertEqual(planning.cutTimingDetails(750, 1, opT),
+    'Метраж прохода: 750 м\nПлановых проходов: 1\nНамотка 1 прохода: 4.5 мин\nИтого резка: 4.5 * 1 = 4.5 мин\nНормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)',
+    'cutTimingDetails #3240: интерполяция показывает обе окружающие нормы');
+
+// #3240: relevantWindingNorms — какие WIND_* реально применяются для метража.
+assertEqual(planning.relevantWindingNorms(600, pts), [{m:600,min:4}], 'relevantWindingNorms: точное совпадение → одна точка');
+assertEqual(planning.relevantWindingNorms(750, pts), [{m:600,min:4},{m:900,min:5}], 'relevantWindingNorms: между точками → нижняя+верхняя');
+assertEqual(planning.relevantWindingNorms(150, pts), [{m:300,min:1.2}], 'relevantWindingNorms: ниже первой → первая (пропорция от 0)');
+assertEqual(planning.relevantWindingNorms(1200, pts), [{m:900,min:5},{m:1100,min:5.6}], 'relevantWindingNorms: выше последней → последний отрезок (экстраполяция)');
+assertEqual(planning.relevantWindingNorms(0, pts), [], 'relevantWindingNorms: 0 м → []');
+assertEqual(planning.formatWindingNorms([{m:600,min:4}]), 'Норма намотки: WIND_600=4 мин', 'formatWindingNorms: одна норма');
+assertEqual(planning.formatWindingNorms([{m:600,min:4},{m:900,min:5}]), 'Нормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)', 'formatWindingNorms: две нормы — пометка интерполяции');
+assertEqual(planning.formatWindingNorms([]), '', 'formatWindingNorms: пусто → пустая строка');
+
+// #3240: changeoverParts/setupBreakdown — расшифровка переналадки и полного setup.
+var toBase = { materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60 };
+function toClone(extra){ var o = {}; Object.keys(toBase).forEach(function(k){ o[k] = toBase[k]; }); if (extra) Object.keys(extra).forEach(function(k){ o[k] = extra[k]; }); return o; }
+assertEqual(planning.changeoverParts(toBase, toClone(), null), [], 'changeoverParts: идентичные → нет операций');
+assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2'}), null),
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    'changeoverParts: смена сырья → MATERIAL_WINDING 15');
+assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2', knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null),
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}, {code:'KNIFE', label:'смена ножей / сужение ролика', minutes:30}],
+    'changeoverParts: сырьё+ножи → две операции (15+30)');
+assertEqual(planning.changeoverParts(null, toBase, null), [], 'changeoverParts: нет предыдущей → []');
+assertEqual(planning.setupBreakdown(null, toBase, null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}],
+    'setupBreakdown: первая резка → только лидер');
+assertEqual(planning.setupBreakdown(toBase, toClone({materialId:'2'}), null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}, {code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    'setupBreakdown: лидер + смена сырья');
+// Σ minutes setupBreakdown == setupMin расписания (лидер 2 + переналадка 15 = 17).
+var sbSched = planning.buildSchedule([toBase, toClone({materialId:'2'})], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 });
+assertEqual(sbSched[1].setupMin, planning.setupBreakdown(toBase, toClone({materialId:'2'}), null).reduce(function(s,p){return s+p.minutes;},0),
+    'setupBreakdown #3240: Σ minutes == setupMin расписания');
+
+// #3240: заголовок модалки не показывает авто-номер (timestamp), а показывает сырьё/намотку.
+assertEqual(planning.cutTimingModalTitle({ number:'1749375420', materialName:'MW308', winding:'IN' }),
+    'Тайминг резки · MW308 · намотка IN',
+    'cutTimingModalTitle #3240: timestamp-номер скрыт, показаны сырьё и намотка');
+assertEqual(planning.cutTimingModalTitle({ number:'42', materialName:'MW308', winding:'OUT' }),
+    'Тайминг резки · № 42 · MW308 · намотка OUT',
+    'cutTimingModalTitle #3240: человекочитаемый номер сохраняется');
+assertEqual(planning.cutTimingModalTitle({ materialId:5 }),
+    'Тайминг резки · #5',
+    'cutTimingModalTitle #3240: без номера/намотки — fallback на материал');
+
+// #3240: buildCutTimingCtx + cutTimingTimelineLines — хронология окна с setup и жирным итогом.
+var tlPrev = { materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60 };
+var tlCut = { id:'X', materialId:'2', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60, plannedRuns:1 };
+var tlSched = planning.buildSchedule([tlPrev, tlCut], { windPoints: pts, runLengthByCut: { X:600 }, shiftStartMin: 480 });
+var tlSc = tlSched[1];   // вторая резка: setup = лидер 2 + смена сырья 15 = 17
+var tlCtx = planning.buildCutTimingCtx(tlCut, tlPrev, tlSc, 600, pts, null);
+assertEqual([tlCtx.length, tlCtx.runs, tlCtx.oneRun, tlCtx.total], [600, 1, 4, 4], 'buildCutTimingCtx: метраж/проходы/намотка/итого');
+assertEqual(tlCtx.setupParts.length, 2, 'buildCutTimingCtx: setup = лидер + смена сырья');
+assertEqual(tlCtx.norms, [{m:600,min:4}], 'buildCutTimingCtx: релевантная норма 600');
+var tlLines = planning.cutTimingTimelineLines(tlCtx);
+var tlBold = tlLines.filter(function(l){ return l.bold; });
+assertEqual(tlBold.length, 1, 'cutTimingTimelineLines: ровно одна жирная строка');
+assertEqual(/^.*Итого резка: 4 \* 1 = 4 мин$/.test(tlBold[0].text), true, 'cutTimingTimelineLines: жирная строка — «Итого резка»');
+var tlStart = planning.formatClock(tlSc.startMin);
+var tlSetupStart = planning.formatClock(tlSc.startMin - 17);
+assertEqual(tlBold[0].text.indexOf(tlStart + ' · ') === 0, true, 'cutTimingTimelineLines: «Итого резка» начинается со старта резки');
+var tlText = tlLines.map(function(l){ return l.text; }).join('\n');
+assertEqual(tlText.indexOf(tlSetupStart + ' · лидер между резками — 2 мин') >= 0, true, 'cutTimingTimelineLines: setup начинается от старта окна');
+assertEqual(tlText.indexOf('смена сырья / намотки / партии — 15 мин') >= 0, true, 'cutTimingTimelineLines: показано время смены сырья');
+assertEqual(/Норма намотки: WIND_600=4 мин/.test(tlText), true, 'cutTimingTimelineLines: только релевантная норма');
+assertEqual(tlLines[tlLines.length-1].text, planning.formatClock(tlSc.finishMin) + ' · готово', 'cutTimingTimelineLines: финальная строка — готово');
 
 // Расписание очереди: старт/финиш от 08:00 (480 мин) + лидер 2 + намотка по метражу.
 var schedCuts = [

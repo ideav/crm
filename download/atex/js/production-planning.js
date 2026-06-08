@@ -906,25 +906,46 @@
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
-    // Стоимость перехода prev→next в МИНУТАХ переналадки (times по кодам, иначе дефолт):
+    // Компоненты переналадки prev→next (МИНУТЫ, БЕЗ лидера BETWEEN_CUTS) — те операции,
+    // что реально применились, для расшифровки тайминга (#3240):
     //   смена сырья ИЛИ намотки ИЛИ партии → MATERIAL_WINDING (одна операция «смена
     //   сырья/намотки»; неудобный остаток — её же частный случай, отдельно не считаем);
-    //   смена набора ножей ИЛИ сужение ролика → KNIFE. Минуты суммируются (две операции —
-    //   обе вычитают время смены). Бинарно (изменилось/нет), без нормировок.
-    function changeoverCost(prev, next, times){
+    //   смена набора ножей ИЛИ сужение ролика → KNIFE. Бинарно (изменилось/нет), без
+    //   нормировок. prev/next отсутствует → [] (первой резке переналадка не нужна).
+    //   → [{ code, label, minutes }] (только применившиеся, с minutes > 0).
+    function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
         var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
-        var cost = 0;
+        var parts = [];
+        if (!prev || !next) return parts;
         var matWindChange = String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
             || String(prev.batchId) !== String(next.batchId);
-        if (matWindChange) cost += matWind;
+        if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
         var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
             || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
             || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
-        if (knifeChange) cost += knife;
-        return cost;
+        if (knifeChange && knife > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knife) });
+        return parts;
+    }
+
+    // Стоимость перехода prev→next в МИНУТАХ переналадки (Σ компонентов changeoverParts;
+    // две операции — обе вычитают время смены).
+    function changeoverCost(prev, next, times){
+        return round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
+    }
+
+    // Полный setup перед резкой (#3240): лидер между резками (BETWEEN_CUTS, база) +
+    // переналадка с предыдущей (changeoverParts). prev=null (первая резка очереди/дня) →
+    // только лидер. Σ minutes == setupMin расписания buildSchedule. → [{ code, label, minutes }].
+    function setupBreakdown(prev, next, times){
+        var t = times || DEFAULT_OP_TIMES;
+        var leader = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        var parts = [];
+        if (leader > 0) parts.push({ code: 'BETWEEN_CUTS', label: 'лидер между резками', minutes: round3(leader) });
+        Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
+        return parts;
     }
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
@@ -1155,6 +1176,30 @@
         return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
     }
 
+    // Норма(ы) намотки, реально применённые для метража runMeters (зеркало windingMinutes,
+    // #3240 «привести только ту, которая здесь подходит»):
+    //   точное совпадение точки → [та точка]; ниже первой → [первая] (пропорция от 0);
+    //   между точками → [нижняя, верхняя] (интерполяция); выше последней → [предпоследняя,
+    //   последняя] (экстраполяция). Нет точек / runMeters≤0 → []. → подмножество points.
+    function relevantWindingNorms(runMeters, points){
+        var x = Number(runMeters) || 0;
+        var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
+        if (!p.length || x <= 0) return [];
+        for (var k = 0; k < p.length; k++){ if (p[k].m === x) return [p[k]]; }
+        if (x <= p[0].m) return [p[0]];
+        for (var i = 1; i < p.length; i++){ if (x <= p[i].m) return [p[i-1], p[i]]; }
+        return p.length >= 2 ? [p[p.length-2], p[p.length-1]] : [p[p.length-1]];
+    }
+
+    // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
+    // WIND_600=4 мин; WIND_900=5 мин (интерполяция)» (две). Пусто → ''.
+    function formatWindingNorms(norms){
+        var items = (norms || []).map(function(n){ return 'WIND_' + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
+        if (!items.length) return '';
+        if (items.length === 1) return 'Норма намотки: ' + items[0];
+        return 'Нормы намотки: ' + items.join('; ') + ' (интерполяция)';
+    }
+
     function formatTimingNumber(value) {
         return String(round3(Number(value) || 0));
     }
@@ -1173,15 +1218,89 @@
             'Плановых проходов: ' + formatTimingNumber(runs),
             'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин',
             'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
-            'Нормы намотки: ' + points.map(function(p) {
-                return 'WIND_' + formatTimingNumber(p.m) + '=' + formatTimingNumber(p.min) + ' мин';
-            }).join('; ')
+            formatWindingNorms(relevantWindingNorms(length, points))
         ].join('\n');
     }
 
     function cutTimingModalText(cut) {
         var text = String(cut && cut.timing != null ? cut.timing : '').trim();
         return text || 'Тайминг резки не заполнен';
+    }
+
+    // Заголовок модалки тайминга (#3240). Авто-номер резки = метка времени создания
+    // («08.06.2026 11:37») — для пользователя это шум, поэтому такой номер не показываем;
+    // вместо него — сырьё и намотка для опознания резки. Человекочитаемый номер (не
+    // timestamp) оставляем. → «Тайминг резки · MW308 · намотка IN».
+    function cutTimingModalTitle(cut) {
+        var rawNo = cut && cut.number;
+        var s = rawNo == null ? '' : String(rawNo).trim();
+        var no = (s !== '' && !isTimestampCutNumber(s)) ? formatCutNumber(rawNo) : '';
+        var material = (cut && (cut.materialName || (cut.materialId ? '#' + cut.materialId : ''))) || '';
+        var winding = normWinding(cut && cut.winding);
+        var parts = ['Тайминг резки'];
+        if (no) parts.push('№ ' + no);
+        if (material) parts.push(material);
+        if (winding) parts.push('намотка ' + winding);
+        return parts.join(' · ');
+    }
+
+    // Строки тайминга окна резки для модалки (#3240, DOM-независимо — рендер в openCutTiming).
+    // Включает время на смену сырья/типа/ножи и лидер (setupParts) хронологически от старта
+    // окна, «Итого резка» выделяется жирным (bold). ctx: { length, runs, oneRun, total,
+    // setupParts:[{label,minutes}], norms:[{m,min}], startMin, finishMin }. → [{ text, bold }].
+    function cutTimingTimelineLines(ctx) {
+        ctx = ctx || {};
+        var length = stripNum(ctx.length);
+        var runs = stripNum(ctx.runs);
+        var oneRun = round3(Number(ctx.oneRun) || 0);
+        var total = round3(Number(ctx.total) || 0);
+        var setupParts = ctx.setupParts || [];
+        var lines = [];
+        lines.push({ text: 'Метраж прохода: ' + formatTimingNumber(length) + ' м' });
+        lines.push({ text: 'Плановых проходов: ' + formatTimingNumber(runs) });
+        lines.push({ text: 'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин' });
+        var normLine = formatWindingNorms(ctx.norms);
+        if (normLine) lines.push({ text: normLine });
+        lines.push({ text: '' });
+        lines.push({ text: 'Тайминг окна:' });
+        var setupTotal = setupParts.reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0);
+        var hasStart = ctx.startMin != null && isFinite(Number(ctx.startMin));
+        var clock = hasStart ? round3(Number(ctx.startMin) - setupTotal) : null;
+        setupParts.forEach(function(p){
+            var mins = round3(Number(p.minutes) || 0);
+            var prefix = clock != null ? (formatClock(clock) + ' · ') : '';
+            lines.push({ text: prefix + p.label + ' — ' + formatTimingNumber(mins) + ' мин' });
+            if (clock != null) clock += mins;
+        });
+        var cutPrefix = hasStart ? (formatClock(ctx.startMin) + ' · ') : '';
+        lines.push({
+            text: cutPrefix + 'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
+            bold: true
+        });
+        if (ctx.finishMin != null && isFinite(Number(ctx.finishMin))) {
+            lines.push({ text: formatClock(ctx.finishMin) + ' · готово' });
+        }
+        return lines;
+    }
+
+    // Контекст тайминга одной резки для модалки (#3240): метраж/проходы/намотка, разбивка
+    // setup (prevCut — предыдущая резка очереди или null для первой), релевантные нормы и
+    // старт/финиш из расписания sc. → объект для cutTimingTimelineLines.
+    function buildCutTimingCtx(cut, prevCut, sc, runMeters, windPoints, times) {
+        var length = stripNum(runMeters);
+        var runs = stripNum(cut && cut.plannedRuns);
+        var oneRun = windingMinutes(length, windPoints || []);
+        var total = runs > 0 ? round3(oneRun * runs) : oneRun;
+        return {
+            length: length,
+            runs: runs,
+            oneRun: round3(oneRun),
+            total: round3(total),
+            setupParts: setupBreakdown(prevCut, cut, times),
+            norms: relevantWindingNorms(length, windPoints || []),
+            startMin: sc ? sc.startMin : null,
+            finishMin: sc ? sc.finishMin : null
+        };
     }
 
     function scheduleDurationMinutes(cut, runMeters, windPoints) {
@@ -1697,7 +1816,9 @@
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
         awkwardRemainder: awkwardRemainder,
+        changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
+        setupBreakdown: setupBreakdown,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
         byKnifeCountDesc: byKnifeCountDesc,
@@ -1729,9 +1850,14 @@
         materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
+        relevantWindingNorms: relevantWindingNorms,
+        formatWindingNorms: formatWindingNorms,
         plannedCutDurationMinutes: plannedCutDurationMinutes,
         cutTimingDetails: cutTimingDetails,
         cutTimingModalText: cutTimingModalText,
+        cutTimingModalTitle: cutTimingModalTitle,
+        cutTimingTimelineLines: cutTimingTimelineLines,
+        buildCutTimingCtx: buildCutTimingCtx,
         scheduleDurationMinutes: scheduleDurationMinutes,
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
@@ -1812,6 +1938,7 @@
         this.timingModalEl = null;
         this.timingModalTitleEl = null;
         this.timingModalBodyEl = null;
+        this._timingByCut = {};     // #3240: контекст тайминга на резку (setup+нормы+старт) для модалки
         this.daySettings = {};      // DAY_START_HOUR/DAY_END_HOUR из таблицы «Настройка»
         this._lastCutPlanningDiagnosticKey = '';
     }
@@ -3325,10 +3452,24 @@
 
     AtexProductionPlanning.prototype.openCutTiming = function(cut) {
         if (this.timingModalTitleEl) {
-            var no = formatCutNumber(cut && cut.number) || (cut && cut.id ? ('#' + cut.id) : '');
-            this.timingModalTitleEl.textContent = 'Тайминг резки' + (no ? ' ' + no : '');
+            this.timingModalTitleEl.textContent = cutTimingModalTitle(cut);
         }
-        if (this.timingModalBodyEl) this.timingModalBodyEl.textContent = cutTimingModalText(cut);
+        if (this.timingModalBodyEl) {
+            var body = this.timingModalBodyEl;
+            while (body.firstChild) body.removeChild(body.firstChild);
+            // #3240: тайминг окна с разбивкой setup и жирным «Итого резка». Контекст
+            // (старт/setup/нормы) собран в renderQueue; нет контекста → сохранённый текст.
+            var ctx = this._timingByCut && this._timingByCut[String(cut && cut.id)];
+            if (ctx) {
+                cutTimingTimelineLines(ctx).forEach(function(ln, i) {
+                    if (i > 0) body.appendChild(document.createTextNode('\n'));
+                    if (ln.bold) body.appendChild(el('strong', { text: ln.text }));
+                    else body.appendChild(document.createTextNode(ln.text));
+                });
+            } else {
+                body.textContent = cutTimingModalText(cut);
+            }
+        }
         if (this.timingModalEl) this.timingModalEl.classList.add('is-open');
     };
 
@@ -3594,6 +3735,7 @@
             shiftEndMin: dayWindow.cutEndMin
         });
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         var dayCutsByKey = {};
         activeGroup.cuts.forEach(function(c) {
             var key = cutPlanDayKey(c);
@@ -3633,6 +3775,11 @@
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
+            // #3240: контекст тайминга резки для модалки (setup с предыдущей + нормы + старт).
+            self._timingByCut[String(c.id)] = buildCutTimingCtx(
+                c, idx > 0 ? activeGroup.cuts[idx - 1] : null, sc,
+                runLenByCut[String(c.id)], windPoints, self.changeTimes
+            );
             var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
             var info = el('div', { class: 'atex-pp-cut-info' }, [
                 el('span', { class: 'atex-pp-cut-num', title: cutNumberTitle, text: formatCutStartTime(sc) }),
