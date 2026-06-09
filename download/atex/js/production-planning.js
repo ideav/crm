@@ -1755,6 +1755,43 @@
         return out;
     }
 
+    // Ближайшее свободное окно станка для НОВОЙ резки. Повторяет расписание очереди
+    // (buildSchedule по порядку), добавляя проспект-резку в КОНЕЦ очереди станка, и
+    // возвращает окно последнего сегмента — то же время, что покажет очередь после
+    // создания (резка станет последней в своём дне). Вход не мутирует.
+    //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
+    //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
+    //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin }.
+    // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day } | null.
+    function freeSlotForQueue(stationCuts, prospect, opts){
+        opts = opts || {};
+        if (!prospect) return null;
+        var runLen = {};
+        var src = opts.runLengthByCut || {};
+        Object.keys(src).forEach(function(k){ runLen[k] = src[k]; });
+        runLen[String(prospect.id)] = Number(prospect.runLength) || Number(runLen[String(prospect.id)]) || 0;
+        var queue = (stationCuts || []).concat([prospect]);
+        var sched = buildSchedule(queue, {
+            windPoints: opts.windPoints || [],
+            times: opts.times,
+            runLengthByCut: runLen,
+            shiftStartMin: opts.shiftStartMin,
+            shiftEndMin: opts.shiftEndMin
+        });
+        var sc = sched.length ? sched[sched.length - 1] : null;
+        if (!sc) return null;
+        var setup = stripNum(sc.setupMin);
+        var startMin = stripNum(sc.startMin);
+        return {
+            windowStartMin: round3(startMin - setup),
+            startMin: round3(startMin),
+            finishMin: round3(stripNum(sc.finishMin)),
+            durationMin: round3(stripNum(sc.durationMin)),
+            setupMin: round3(setup),
+            day: Math.floor(startMin / 1440)
+        };
+    }
+
     // #3280: номер календарного дня плановой даты (для смежности «продолжений»). null — нет даты.
     function planDayNumber(c){
         var s = String(c && c.planDate != null && c.planDate !== '' ? c.planDate : (c && c.number)).trim();
@@ -2501,6 +2538,7 @@
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
+        freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
         formatClockHHMM: formatClockHHMM,
@@ -2586,7 +2624,7 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { positionId: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], notes: '', selectedPositions: [] };
+        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], notes: '', selectedPositions: [], plan: null };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -3181,6 +3219,217 @@
         // up=1 — корневой объект; `t{tableId}` выше задаёт главное значение записи.
         this.post('_m_new/' + meta.id + '?JSON&up=1', fields).then(function(res) {
             return finishCreatedCut(res && (res.obj || res.id || res.i));
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка создания резки: ' + err.message, 'error');
+        });
+    };
+
+    // ── Резка под одну позицию заказа (форма «Новая производственная резка») ──
+    // Строит план резки под выбранную позицию и ручное кол-во рулонов (≤ необеспеченного):
+    // раскладка через cut-layout (как при планировании), Партии ГП по ширинам, обеспечение
+    // на qty (излишек той же ширины → склад), ближайшее свободное окно станка.
+    // → Promise<plan | { error }>. plan.forKey = positionId|qty|slitterId (для проверки актуальности).
+    AtexProductionPlanning.prototype.computeCutPlan = function(positionId, qtyRaw, slitterId) {
+        var self = this;
+        var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
+        if (!layoutCore) return Promise.resolve({ error: 'Модуль раскладки (cut-layout) не загружен' });
+        var posById = positionMap(this.genPositions);
+        var position = posById[String(positionId)];
+        if (!position) return Promise.resolve({ error: 'Выберите позицию заказа' });
+        if (!slitterId) return Promise.resolve({ error: 'Выберите станок' });
+        var remaining = remainingRollsForPosition(position, this.supplies);
+        var qty = Math.floor(Number(qtyRaw) || 0);
+        if (!(qty > 0)) return Promise.resolve({ error: 'Укажите количество рулонов больше 0' });
+        if (qty > remaining) return Promise.resolve({ error: 'Количество больше необеспеченного остатка (' + remaining + ' рул.)' });
+        var mat = String(position.materialId == null ? '' : position.materialId);
+        var jw = this.jumboWidthByMaterial[mat];
+        if (!jw) return Promise.resolve({ error: 'Не задана ширина джамбо для сырья позиции' });
+        var slit = this.slitters.filter(function(s) { return String(s.id) === String(slitterId); })[0];
+        if (slit && isMaterialBlocked(slit.stopMaterialIds || [], mat)) {
+            return Promise.resolve({ error: 'Сырьё позиции запрещено на выбранном станке' });
+        }
+        var profile = groupPositionsByPlanningProfile([position])[0] ||
+            { key: '', windDir: position.windDir, windLength: position.windLength };
+        return this.loadPreferredWidths(mat, profile.windDir, profile.windLength).then(function(preferred) {
+            var res = layoutCore.planLayouts({
+                jumboWidth: jw,
+                positions: [{ id: position.id, width: position.width, qty: qty, dueKey: position.dueKey }],
+                preferred: preferred || self.preferredByMaterial[profile.key] || [],
+                options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
+            });
+            var layouts = (res && res.layouts) || [];
+            if (!layouts.length) return { error: 'Не удалось построить раскладку для позиции' };
+            var lay = layouts[0];
+            lay.mat = mat; lay.windDir = profile.windDir; lay.windLength = profile.windLength;
+            // posForCalc — единственная позиция с УРЕЗАННЫМ до qty кол-вом (для проходов/обеспечения).
+            var posForCalc = [{ id: position.id, width: position.width, qty: qty, length: position.length,
+                sleeveDiameter: position.sleeveDiameter, dueKey: position.dueKey }];
+            var runLength = layoutRunLength(lay, posForCalc);
+            var plannedRuns = plannedRunsForLayout(lay, posForCalc);
+            var batches = producedBatchesForLayout(lay, runLength);
+            var posWidthKey = stripWidthKey(position.width);
+            var posBatch = batches.filter(function(b) { return stripWidthKey(b.width) === posWidthKey; })[0] || null;
+            var stripsPerPass = posBatch ? (Number(posBatch.strips) || 0) : 0;
+            var producedPosRolls = round3(stripsPerPass * plannedRuns);
+            var sleeveTasks = positionSleeveTasksForLayout(lay, posForCalc, plannedRuns);
+            // Ножи проспекта (для оценки переналадки в расписании) — ширины полос ×их количество.
+            var knifeWidths = [];
+            (lay.strips || []).forEach(function(s) {
+                var w = Number(s.width) || 0, q = Math.round(Number(s.qty) || 0);
+                for (var i = 0; i < q; i++) knifeWidths.push(w);
+            });
+            var prospect = { id: '__new__', plannedRuns: plannedRuns, materialId: mat,
+                winding: profile.windDir, knifeWidths: knifeWidths, runLength: runLength };
+            return {
+                forKey: String(positionId) + '|' + qty + '|' + String(slitterId),
+                positionId: String(position.id), position: position, qty: qty, slitterId: String(slitterId),
+                materialId: mat, layout: lay, plannedRuns: plannedRuns, runLength: runLength,
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                batches: batches, posWidth: position.width, stripsPerPass: stripsPerPass,
+                producedPosRolls: producedPosRolls, supplyRolls: qty,
+                stockRolls: round3(Math.max(0, producedPosRolls - qty)),
+                sleeveTasks: sleeveTasks, multiLayout: layouts.length > 1,
+                slot: self.freeSlotForCut(slitterId, prospect)
+            };
+        });
+    };
+
+    // Ближайшее свободное окно станка для проспект-резки (повтор расписания очереди).
+    // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day, startTs, planBaseMidnightMs } | null.
+    AtexProductionPlanning.prototype.freeSlotForCut = function(slitterId, prospect) {
+        var self = this;
+        var windPoints = windingPointsFromTimes(this.opTimes || {});
+        var dayWindow = this.workingWindow();
+        var grp = groupBySlitter(this.cuts).filter(function(g) { return String(g.slitter.id) === String(slitterId); })[0];
+        var stationCuts = grp ? grp.cuts : [];
+        var runLenByCut = {};
+        stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
+        var slot = freeSlotForQueue(stationCuts, prospect, {
+            windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
+            shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin
+        });
+        if (!slot) return null;
+        var nowD = new Date(controllerNowMs(this));
+        var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+        slot.startTs = scheduleStartTimestamp(planBaseMidnightMs, slot.windowStartMin);
+        slot.planBaseMidnightMs = planBaseMidnightMs;
+        return slot;
+    };
+
+    // «Рассчитать» в форме: считает план, кладёт в draft.plan, перерисовывает форму.
+    AtexProductionPlanning.prototype.requestCutPlan = function() {
+        var self = this, d = this.draft;
+        if (this.busy) return;
+        this.setBusy(true);
+        this.computeCutPlan(d.positionId, d.qty, d.slitterId).then(function(plan) {
+            self.setBusy(false);
+            if (!plan || plan.error) { d.plan = null; self.notify((plan && plan.error) || 'Не удалось рассчитать план', 'error'); self.renderForm(); return; }
+            d.plan = plan;
+            self.renderForm();
+        }).catch(function(err) {
+            self.setBusy(false); d.plan = null;
+            self.notify('Ошибка расчёта: ' + err.message, 'error');
+            self.renderForm();
+        });
+    };
+
+    // «Создать резку»: по рассчитанному плану создаёт резку → Партии ГП → втулки → обеспечение
+    // (на qty рулонов; излишек той же ширины и прочие полосы — склад). Время старта = свободное окно.
+    AtexProductionPlanning.prototype.createCutForPosition = function() {
+        var self = this, d = this.draft;
+        if (this.busy) return;
+        var plan = d.plan;
+        var curKey = String(d.positionId) + '|' + Math.floor(Number(d.qty) || 0) + '|' + String(d.slitterId);
+        if (!plan || plan.error) { this.notify('Сначала нажмите «Рассчитать»', 'error'); return; }
+        if (plan.forKey !== curKey) { this.notify('Параметры изменились — пересчитайте план', 'error'); return; }
+        var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supplyMeta = this.meta.supply;
+        if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц резки/Партии ГП/Обеспечения', 'error'); return; }
+        var slot = plan.slot;
+        var planDayTs = slot && slot.startTs > 0 ? String(slot.startTs) : '';
+        var cutReqIds = {
+            slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
+            plannedRuns: reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES),
+            duration: reqIdByName(cutMeta, CUT_REQ.duration),
+            timing: reqIdByName(cutMeta, CUT_REQ.timing),
+            length: reqIdByName(cutMeta, CUT_REQ.length),
+            winding: reqIdByName(cutMeta, CUT_REQ.winding),
+            status: reqIdByName(cutMeta, CUT_REQ.status),
+            notes: reqIdByName(cutMeta, CUT_REQ.notes),
+            sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
+        };
+        var cutMainState = { last: this.lastCutMainValue };
+        var cutMainValue = (slot && slot.startTs > 0) ? slot.startTs : nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
+        this.lastCutMainValue = cutMainState.last;
+        var fields = buildFields(cutReqIds, {
+            slitter: d.slitterId,
+            plannedRuns: plan.plannedRuns,
+            duration: plan.duration > 0 ? plan.duration : '',
+            timing: plan.timing,
+            length: plan.runLength > 0 ? plan.runLength : '',
+            winding: normWinding(plan.layout && plan.layout.windDir),
+            status: d.status || CUT_STATUSES[0],
+            notes: d.notes,
+            sequence: nextSequenceForCuts(this.cuts, d.slitterId, planDayTs)
+        });
+        fields = addMainValueField(cutMeta, fields, cutMainValue);
+
+        var sleeveMeta = this.meta.sleeveTask;
+        var sleeveReqIds = sleeveMeta ? {
+            diameter: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.diameter),
+            actualQty: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.actualQty),
+            status: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.status)
+        } : null;
+
+        this.setBusy(true);
+        this.post('_m_new/' + cutMeta.id + '?JSON&up=1', fields).then(function(res) {
+            var cutId = res && (res.obj || res.id || res.i);
+            if (!cutId) throw new Error('Сервер не вернул id новой резки');
+            var widthToBatchId = {};
+            var chain = Promise.resolve();
+            // 1) Партии ГП по ширинам (состав резки).
+            plan.batches.forEach(function(b) {
+                chain = chain.then(function() {
+                    var f = buildFinishedBatchFields(fbMeta, { width: b.width, rolls: b.strips,
+                        footage: b.length > 0 ? b.length : '', active: '1' });
+                    return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(cutId), f).then(function(r) {
+                        var bid = r && (r.obj || r.id || r.i);
+                        if (bid) widthToBatchId[stripWidthKey(b.width)] = String(bid);
+                    });
+                });
+            });
+            // 2) Задания на втулки (если таблица есть).
+            if (sleeveMeta && sleeveReqIds) {
+                plan.sleeveTasks.forEach(function(task) {
+                    chain = chain.then(function() {
+                        var f = buildFields(sleeveReqIds, { diameter: task.diameter, actualQty: 0, status: SLEEVE_TASK_STATUS });
+                        f['t' + sleeveMeta.id] = task.qty;
+                        return self.post('_m_new/' + sleeveMeta.id + '?JSON&up=' + encodeURIComponent(task.positionId), f);
+                    });
+                });
+            }
+            // 3) Обеспечение позиции на qty рулонов (ссылается на Партию ГП ширины позиции).
+            chain = chain.then(function() {
+                var batchId = widthToBatchId[stripWidthKey(plan.posWidth)];
+                if (!batchId) throw new Error('Не создана «Партия ГП» ширины позиции — обеспечение пропущено');
+                var f = buildSupplyFieldsForFinishedBatch(supplyMeta, {
+                    finishedBatchId: batchId, rolls: plan.qty,
+                    footage: plan.position.length > 0 ? plan.position.length : '',
+                    active: '1', status: SUPPLY_STATUSES[0]
+                });
+                return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(plan.positionId), f);
+            });
+            return chain.then(function() { return cutId; });
+        }).then(function(cutId) {
+            return self.reload().then(function() {
+                self.setBusy(false);
+                self.draft = self.blankDraft();
+                self.selectedCutId = String(cutId);
+                self.closeForm();
+                self.notify('Резка #' + cutId + ' создана, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
+                self.render();
+            });
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка создания резки: ' + err.message, 'error');
@@ -4555,87 +4804,56 @@
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
-        console.log('[pp] 📝 renderForm: отрисовка формы. позиций доступно:', this.genPositions.length);
         form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
-        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Номер присваивается автоматически при сохранении.' }));
+        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка под одну позицию заказа: выберите позицию, кол-во рулонов (≤ необеспеченного) и станок, затем «Рассчитать».' }));
 
-        form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
-            function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
-        // Поле «Партия сырья» убрано (#3120 Фаза 2): материал/сырьё резки определяются
-        // по обеспечиваемым позициям (resolveCutMaterials), а расход — записями
-        // «Расход сырья» (FIFO-резерв). Прямая ссылка на партию в форме больше не нужна.
+        // Только согласованные, ещё не обеспеченные позиции с ненулевым остатком.
+        var posLabelById = {};
+        (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+        var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
+        var options = unsup.map(function(p) {
+            var remaining = remainingRollsForPosition(p, self.supplies);
+            var base = posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + (p.width || '?') + ' мм');
+            return { id: String(p.id), remaining: remaining, width: p.width,
+                label: base + ' · ост. ' + round3(remaining) + ' рул.' };
+        }).filter(function(o) { return o.remaining > 0; });
 
-        // Выбор позиций заказа для обеспечения (#3194) — только согласованные,
-        // ещё не обеспеченные позиции, сгруппированные по виду сырья и ширине.
-        var unsup = uncoveredPositions(this.genPositions, this.supplies);
-        // Только согласованные: заказ (order_approval_date) или позиция (item_approval_date)
-        var approvedOnly = unsup.filter(function(p) { return p.approved; });
-        // Группировка по сырью для компактного отображения
-        var byMat = {};
-        approvedOnly.forEach(function(p) {
-            var key = (p.materialId || '?') + '|' + (p.width || 0);
-            if (!byMat[key]) byMat[key] = [];
-            byMat[key].push(p);
-        });
-        var posOptions = Object.keys(byMat).sort().map(function(key) {
-            var items = byMat[key];
-            var first = items[0];
-            var label = 'Сырьё#' + (first.materialId || '?') + ' · ' + (first.width || '?') + ' мм · ' + items.length + ' поз. · ' + items.reduce(function(s,p){return s+(p.qty||0);},0) + ' рул.';
-            return { id: key, label: label, count: items.length, positionIds: items.map(function(p){return p.id;}) };
-        });
-        console.log('[pp] 📝 renderForm: позиций для выбора (согласованные, необеспеченные):', approvedOnly.length, ', групп:', posOptions.length);
-
-        if (posOptions.length > 0) {
-            var posContainer = el('div', { class: 'atex-pp-positions-select' });
-            posContainer.appendChild(el('label', { class: 'atex-pp-field-label', text: 'Обеспечиваемые позиции (' + approvedOnly.length + ' доступно)' }));
-            // Кнопки выбора всех / сброса
-            var toggleBar = el('div', { class: 'atex-pp-toggle-bar' });
-            var selectAllBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-sm', type: 'button', text: 'Выбрать все' });
-            selectAllBtn.addEventListener('click', function() {
-                d.selectedPositions = approvedOnly.map(function(p) { return p.id; });
-                self.renderForm();
-            });
-            toggleBar.appendChild(selectAllBtn);
-            var clearBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-sm', type: 'button', text: 'Сбросить' });
-            clearBtn.addEventListener('click', function() {
-                d.selectedPositions = [];
-                self.renderForm();
-            });
-            toggleBar.appendChild(clearBtn);
-            posContainer.appendChild(toggleBar);
-            // Группы позиций
-            var listEl = el('div', { class: 'atex-pp-positions-list' });
-            posOptions.forEach(function(opt) {
-                var allSelected = opt.positionIds.every(function(pid) { return d.selectedPositions.indexOf(pid) >= 0; });
-                var row = el('label', { class: 'atex-pp-positions-row' });
-                var cb = el('input', { type: 'checkbox' });
-                cb.checked = allSelected;
-                cb.addEventListener('change', function() {
-                    if (cb.checked) {
-                        opt.positionIds.forEach(function(pid) { if (d.selectedPositions.indexOf(pid) < 0) d.selectedPositions.push(pid); });
-                    } else {
-                        d.selectedPositions = d.selectedPositions.filter(function(pid) { return opt.positionIds.indexOf(pid) < 0; });
-                    }
-                });
-                row.appendChild(cb);
-                row.appendChild(el('span', { class: 'atex-pp-positions-label', text: opt.label }));
-                listEl.appendChild(row);
-            });
-            posContainer.appendChild(listEl);
-            form.appendChild(posContainer);
-        } else {
+        if (!options.length) {
             form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Нет согласованных необеспеченных позиций.' }));
+            this._renderingForm = false;
+            return;
         }
 
-        var plannedRunsInput = el('input', { class: 'atex-pp-input', type: 'number', min: '1', step: '1' });
-        plannedRunsInput.value = d.plannedRuns || '1';
-        plannedRunsInput.addEventListener('input', function() { d.plannedRuns = plannedRunsInput.value; });
-        form.appendChild(field('Кол-во план', plannedRunsInput));
+        // Позиция заказа (один выбор).
+        var posSelect = el('select', { class: 'atex-pp-input' });
+        posSelect.appendChild(el('option', { value: '', text: '— выберите позицию —' }));
+        options.forEach(function(o) {
+            var op = el('option', { value: o.id, text: o.label });
+            if (String(d.positionId) === o.id) op.selected = true;
+            posSelect.appendChild(op);
+        });
+        posSelect.addEventListener('change', function() {
+            d.positionId = posSelect.value;
+            d.plan = null;
+            var sel = options.filter(function(o) { return o.id === d.positionId; })[0];
+            d.qty = sel ? String(sel.remaining) : '';
+            self.renderForm();
+        });
+        form.appendChild(field('Позиция заказа', posSelect));
 
-        var dateInput = el('input', { class: 'atex-pp-input', type: 'date' });
-        dateInput.value = d.planDate || '';
-        dateInput.addEventListener('input', function() { d.planDate = dateInput.value; });
-        form.appendChild(field('Дата плана', dateInput));
+        var selOpt = options.filter(function(o) { return o.id === String(d.positionId); })[0];
+        var maxQty = selOpt ? selOpt.remaining : 0;
+
+        // Кол-во рулонов (≤ необеспеченного остатка).
+        var qtyInput = el('input', { class: 'atex-pp-input', type: 'number', min: '1', step: '1' });
+        if (selOpt) qtyInput.max = String(maxQty);
+        qtyInput.value = d.qty || '';
+        qtyInput.disabled = !selOpt;
+        form.appendChild(field('Кол-во рулонов' + (selOpt ? ' (≤ ' + round3(maxQty) + ')' : ''), qtyInput));
+
+        // Станок (с поиском по справочнику).
+        form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
+            function(v) { d.slitterId = v; d.plan = null; self.renderForm(); }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
 
         form.appendChild(field('Статус', this.selectText(CUT_STATUSES, d.status, function(v) { d.status = v; })));
 
@@ -4644,19 +4862,47 @@
         notes.addEventListener('input', function() { d.notes = notes.value; });
         form.appendChild(field('Примечания', notes));
 
-        var selInfo = el('span', { class: 'atex-pp-selection-info', text: 'Выбрано позиций: ' + (d.selectedPositions||[]).length });
-        form.appendChild(selInfo);
+        // Превью плана (свободное окно, проходы, полосы, обеспечение/склад, длительность).
+        var planValid = !!(d.plan && !d.plan.error &&
+            d.plan.forKey === (String(d.positionId) + '|' + Math.floor(Number(d.qty) || 0) + '|' + String(d.slitterId)));
+        var previewBox = el('div', { class: 'atex-pp-cut-preview' });
+        form.appendChild(previewBox);
 
         var actions = el('div', { class: 'atex-pp-actions' });
-        var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать резку' });
-        createBtn.addEventListener('click', function() { self.createCut(); });
+        var calcBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Рассчитать' });
+        calcBtn.addEventListener('click', function() { self.requestCutPlan(); });
+        actions.appendChild(calcBtn);
+        var createBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Создать резку' });
+        createBtn.addEventListener('click', function() { self.createCutForPosition(); });
         actions.appendChild(createBtn);
-
-        var planBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Запланировать' });
-        planBtn.addEventListener('click', function() { self.runPlanning(actions); });
-        actions.appendChild(planBtn);
-
         form.appendChild(actions);
+
+        function drawPreview() {
+            previewBox.innerHTML = '';
+            createBtn.disabled = !planValid;
+            if (!planValid) {
+                previewBox.appendChild(el('div', { class: 'atex-pp-hint', text: 'Заполните поля и нажмите «Рассчитать».' }));
+                return;
+            }
+            var pl = d.plan, slot = pl.slot;
+            var when = slot ? (formatCutNumber(slot.startTs) + ' (' + formatClock(slot.windowStartMin) + '–' + formatClock(slot.finishMin) + ')') : '— нет данных расписания —';
+            var lines = [
+                'Свободное окно: ' + when,
+                'Проходов: ' + round3(pl.plannedRuns) + ' · полос/проход (ширина ' + round3(pl.posWidth) + ' мм): ' + round3(pl.stripsPerPass),
+                'Произведём этой ширины: ' + round3(pl.producedPosRolls) + ' рул. · обеспечим: ' + round3(pl.supplyRolls) + ' · склад: ' + round3(pl.stockRolls),
+                'Длительность резки: ~' + round3(pl.duration) + ' мин'
+            ];
+            if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько резок — создаётся первая.');
+            lines.forEach(function(txt) { previewBox.appendChild(el('div', { class: 'atex-pp-cut-preview-line', text: txt })); });
+        }
+        // Ввод кол-ва не перерисовывает форму (сохраняем фокус): чистим план и превью на месте.
+        qtyInput.addEventListener('input', function() {
+            d.qty = qtyInput.value;
+            d.plan = null;
+            planValid = false;
+            drawPreview();
+        });
+        drawPreview();
         } finally {
             this._renderingForm = false;
         }
