@@ -558,21 +558,6 @@
         return Date.now();
     }
 
-    // #3278: начало текущего рабочего дня (08:00) в миллисекундах для «первого времени
-    // в Тайминг окна» — используется как основа номера резки вместо текущего времени.
-    function planningDayStartMs(controller) {
-        var ms;
-        if (controller && typeof controller.nowMs === 'function') {
-            ms = controller.nowMs();
-        } else {
-            ms = Date.now();
-        }
-        var d = new Date(ms);
-        var startHour = Math.floor(DAY_START_MIN / 60);
-        var startMinute = DAY_START_MIN % 60;
-        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), startHour, startMinute, 0, 0).getTime();
-    }
-
     function traceCutCreatePayload(scope, meta, reqIds, fields, controller, requiredKeys) {
         var win = typeof window !== 'undefined' ? window : null;
         var diagnostics = cutWriteDiagnostics(reqIds, fields, requiredKeys || [], CUT_WRITE_LABELS);
@@ -783,7 +768,7 @@
                 windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
                 windLength: windLengthValue(windLengthRaw),
                 sleeveDiameter: sleeveDiameterFromRow(row),
-                dueKey: batchDateKey(row.position_due_date || row.order_due_date || row.order_deadline),
+                dueKey: batchDateKey(row.position_due_date),
                 approved: orderApproved || itemApproved
             };
         });
@@ -1982,32 +1967,12 @@
     // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
     // выбранный оператором вариант (#3272). По умолчанию — реальные минуты
     // переналадки (#3268); fatigue-вариант ставит сложные резки раньше.
-    // #3278: группировка по сроку (dueKey) — первоочерёдные резки с ближайшим сроком,
-    // внутри группы — выбранная стратегия. Срок позиции; нет срока → Infinity.
     // Проставить sequence; вход не мутировать.
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
         var opts = makePlanningOptions(weights);
-
-        function orderGroup(group) {
-            // #3278: группируем по сроку, внутри группы — стратегия оптимизации переналадок
-            var byDue = {};
-            var dueOrder = [];
-            group.forEach(function(c) {
-                var dk = isFinite(c.dueKey) ? Number(c.dueKey) : Infinity;
-                if (!byDue[dk]) { byDue[dk] = []; dueOrder.push(dk); }
-                byDue[dk].push(c);
-            });
-            dueOrder.sort(function(a, b) { return a - b; });
-            var result = [];
-            dueOrder.forEach(function(dk) {
-                result = result.concat(sequenceForStrategy(byDue[dk], opts));
-            });
-            return result;
-        }
-
-        var seq = orderGroup(rest).concat(orderGroup(foil));
+        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -2114,7 +2079,6 @@
     // Сгруппировать резки по станкам и дням, упорядочить каждую группу через orderCuts,
     // пронумеровать 1..N внутри каждого станка/дня. Резки без станка (slitter.id == null) пропускаются.
     // Возвращает плоский массив [{cutId, slitterId, sequence}].
-    // #3278: cuts that don't fit in the current working day are excluded from planning.
     function planQueues(cuts, weights) {
         var groups = {};
         var slitterOrder = [];
@@ -2128,32 +2092,9 @@
             groups[key].days[day].push(c);
         });
         var result = [];
-        // #3278: рабочий день в минутах для фильтрации по вместимости
-        var times = planningChangeTimes(weights);
-        var opts = makePlanningOptions(weights);
-        var dayMinutes = (opts.dayEndMin != null && opts.dayStartMin != null)
-            ? (Number(opts.dayEndMin) - Number(opts.dayStartMin)) : 0;
         slitterOrder.forEach(function(sid) {
             groups[sid].dayOrder.slice().sort(comparePlanDayKeys).forEach(function(day) {
                 var ordered = orderCuts(groups[sid].days[day], weights);
-                // #3278: фильтр — только резки, вмещающиеся в текущий рабочий день.
-                // Если dayMinutes не задан — план без ограничения (совместимость).
-                if (dayMinutes > 0 && ordered.length > 1) {
-                    var leader = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
-                    var clock = 0;  // минуты от начала смены
-                    var fitting = [];
-                    ordered.forEach(function(c, i) {
-                        var setup = leader + (i > 0 ? changeoverCost(ordered[i - 1], c, times) : 0);
-                        var dur = parseFloat(c && c.duration) || 0;
-                        if (!(dur > 0)) dur = 0;
-                        if (clock + setup + dur <= dayMinutes) {
-                            clock += setup + dur;
-                            fitting.push(c);
-                        }
-                        // иначе — не влезает, останавливаем планирование этого станка на день
-                    });
-                    ordered = fitting;
-                }
                 ordered.forEach(function(c) {
                     result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
                 });
@@ -2190,7 +2131,6 @@
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
-        planningDayStartMs: planningDayStartMs,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
@@ -2911,7 +2851,7 @@
         var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
         var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes);
         var cutMainState = { last: this.lastCutMainValue };
-        var cutMainValue = nextCutMainValue(this.cuts, planningDayStartMs(this), cutMainState);
+        var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
         this.lastCutMainValue = cutMainState.last;
         var fields = buildFields(reqIds, {
             slitter: d.slitterId,
@@ -3106,18 +3046,10 @@
         // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
         // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
         var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
-        // #3278: набор ID «Партий ГП», на которые есть ссылки из Обеспечения → «Заказ», иначе «Склад»
-        var supplyBatchIds = {};
-        (self.supplies || []).forEach(function(s) {
-            var fbid = s.finishedBatchId;
-            if (fbid != null && String(fbid) !== '') supplyBatchIds[String(fbid)] = true;
-            if (s.finishedBatch && s.finishedBatch.id != null) supplyBatchIds[String(s.finishedBatch.id)] = true;
-        });
         table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
             el('span', { text: 'Ширина, мм' }),
             el('span', { text: 'Кол-во полос' }),
             el('span', { text: 'Рулонов (×' + passes + ')' }),
-            el('span', { text: 'Назначение' }),
             el('span', { text: '' })
         ]));
         var body = el('div', { class: 'atex-pp-strip-body' });
@@ -3190,10 +3122,6 @@
                 row.appendChild(q);
 
                 row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
-
-                // #3278: «Назначение» — Заказ (есть Обеспечение) или Склад (нет ссылки)
-                var purpose = (s.id && supplyBatchIds[String(s.id)]) ? 'Заказ' : 'Склад';
-                row.appendChild(el('span', { class: 'atex-pp-strip-purpose', text: purpose }));
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -3553,7 +3481,7 @@
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
             var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
-            var cutMainValue = nextCutMainValue(sequenceCuts, planningDayStartMs(self), cutMainState);
+            var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
             var day = cutPlanDayKey({ planDate: cutMainValue });
             if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
             var descriptor = {
@@ -3567,8 +3495,7 @@
                 isFoil: !!(lay && lay.isFoil),
                 width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
-                planDate: cutMainValue,
-                dueKey: lay && lay.dueKey != null ? lay.dueKey : Infinity   // #3278: срок для приоритета
+                planDate: cutMainValue
             };
             var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions);
             if (slitterId != null) {
@@ -3596,8 +3523,7 @@
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
                 sequence: '',
-                index: layIdx,
-                dueKey: lay && lay.dueKey != null ? lay.dueKey : Infinity   // #3278: срок позиции для приоритета
+                index: layIdx
             });
         });
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
@@ -3639,8 +3565,7 @@
                     knifeWidths: plan.knifeWidths,
                     isFoil: plan.isFoil,
                     width: plan.width,
-                    rollerWidth: plan.rollerWidth,
-                    dueKey: plan.dueKey   // #3278: срок для приоритета в очереди
+                    rollerWidth: plan.rollerWidth
                 });
             });
         });
@@ -3918,28 +3843,6 @@
 
         function doRun(selectedStrategy) {
             var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
-            // #3278: передаём границы рабочего дня для фильтрации по вместимости
-            var dayWindow = self.workingWindow();
-            planOptions.dayStartMin = dayWindow.startMin;
-            planOptions.dayEndMin = dayWindow.cutEndMin;
-            // #3278: вычисляем dueKey для каждой резки из её позиций (мин. срок среди позиций)
-            var posDue = {};
-            (self.genPositions || []).forEach(function(p) {
-                if (p.id != null && p.dueKey != null && isFinite(p.dueKey)) posDue[String(p.id)] = p.dueKey;
-            });
-            var cutDue = {};
-            (self.supplies || []).forEach(function(s) {
-                var cid = s.cutId;
-                var pid = s.positionId;
-                var dk = posDue[String(pid)];
-                if (cid != null && dk != null && isFinite(dk) && dk < (cutDue[String(cid)] || Infinity)) {
-                    cutDue[String(cid)] = dk;
-                }
-            });
-            self.cuts.forEach(function(c) {
-                var dk = cutDue[String(c.id)];
-                if (dk != null) c.dueKey = dk;
-            });
             var plan = planQueues(self.cuts, planOptions);
 
             // Отбираем резки с изменившейся очерёдностью.
