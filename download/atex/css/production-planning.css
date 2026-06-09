@@ -625,6 +625,20 @@
     color: var(--pp-muted);
     margin: 4px 0;
 }
+/* Превью плана резки под позицию (свободное окно / проходы / обеспечение·склад). */
+.atex-pp-cut-preview {
+    margin: 8px 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--pp-border-soft);
+    border-radius: 8px;
+    background: var(--pp-surface);
+    font-size: 13px;
+}
+.atex-pp-cut-preview .atex-pp-hint { margin: 0; }
+.atex-pp-cut-preview-line { margin: 3px 0; color: var(--pp-info-text); }
+.atex-pp-cut-preview-line:first-child { font-weight: 600; color: var(--pp-accent); }
+.atex-pp-btn:disabled,
+.atex-pp-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 .atex-pp-field-label {
     display: block;
     font-size: 12px;
