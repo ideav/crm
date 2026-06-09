@@ -4165,14 +4165,24 @@
         var chain = Promise.resolve();
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
+        // ⚠️ Первая колонка (плановое время старта) пишется ТОЛЬКО через _m_save (GUIDE
+        // issue #775: _m_set первую колонку НЕ задаёт). Остальные реквизиты — _m_set.
         (ops.updates || []).forEach(function(u) {
             chain = chain.then(function() {
-                var fields = {};
-                if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
                 var ts = Number(u.planStartTs);
-                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
-                if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
-                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+                // DATETIME первая колонка: _m_save с t{tableId} (проверено на live: _m_set→403,
+                // _m_save{val} не пишет datetime, _m_save{t1078}=штамп — работает).
+                var mainFields = {}; if (mainKey) mainFields[mainKey] = String(ts);
+                var saveMain = (mainKey && isFinite(ts) && ts > 0)
+                    ? self.post('_m_save/' + u.cutId + '?JSON', mainFields)
+                    : Promise.resolve();
+                return saveMain.then(function() {
+                    var fields = {};
+                    if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
+                    if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
+                    if (!Object.keys(fields).length) return;
+                    return self.post('_m_set/' + u.cutId + '?JSON', fields);
+                });
             });
         });
 
@@ -4216,7 +4226,13 @@
                             var bId = res && (res.obj || res.id || res.i);
                             if (!bId) throw new Error('Сервер не вернул id продолжения резки');
                             var stripMap = {};
-                            var bChain = Promise.resolve();
+                            // Главное значение B (плановое время старта) — _m_save с t{tableId}.
+                            var bChain = Promise.resolve().then(function() {
+                                var ts2 = Number(cr.planStartTs);
+                                if (!mainKey || !(isFinite(ts2) && ts2 > 0)) return;
+                                var mf = {}; mf[mainKey] = String(ts2);
+                                return self.post('_m_save/' + bId + '?JSON', mf);
+                            });
                             (parentStrips || []).forEach(function(st) {
                                 bChain = bChain.then(function() {
                                     var f = buildFinishedBatchFields(fbMeta, { width: st.width, rolls: st.qty, active: '1' });
@@ -4792,9 +4808,16 @@
 
             groupEl.appendChild(cardPanel);
 
-            // Уборка в конце дня (#3155, #3276): один блок после последней резки очереди.
-            if (sc && idx === activeGroup.cuts.length - 1) {
-                var cl = cleanupByDay[schedDay(sc)];
+            // Уборка в конце КАЖДОГО рабочего дня (#3155, #3280) — служит разделителем дня.
+            // Резки, не влезшие в день, buildSchedule переносит на день+1 → они рендерятся
+            // ПОСЛЕ блока уборки текущего дня, т.е. визуально в следующем дне, а не в этом.
+            var myDay = sc ? schedDay(sc) : null;
+            var nextCut = activeGroup.cuts[idx + 1];
+            var nextSc = nextCut ? schedById[String(nextCut.id)] : null;
+            var nextDay = nextSc ? schedDay(nextSc) : null;
+            var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
+            if (lastOfDay) {
+                var cl = cleanupByDay[myDay];
                 if (cl) {
                     groupEl.appendChild(el('div', { class: 'atex-pp-cleanup',
                         text: '🧹 Уборка после смены · ' + formatClock(cl.startMin) + ' – ' + formatClock(cl.finishMin) +
