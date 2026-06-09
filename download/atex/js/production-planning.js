@@ -4915,103 +4915,12 @@
         box.innerHTML = '';
         var cut = this.cuts.filter(function(c) { return String(c.id) === String(this.selectedCutId); }, this)[0];
 
-        box.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Обеспечение позиций заказа' }));
         if (!cut) {
-            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите резку в очереди, чтобы привязать её к позиции заказа.' }));
+            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите резку в очереди, чтобы увидеть связанные позиции.' }));
             return;
         }
 
-        box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
-
-        var positionsById = positionMap(this.positions);
-        var genPositionsById = positionMap(this.genPositions);
-        function selectedPosition(id) {
-            var key = String(id == null ? '' : id);
-            return positionsById[key] || genPositionsById[key] || { id: key, qty: 0, length: 0 };
-        }
-
-        // #3242: обеспечение ссылается на «Партию ГП» резки — её и выбираем.
-        var draft = { positionId: '', footage: '', rolls: '', active: true, status: SUPPLY_STATUSES[0], finishedBatchId: '' };
-        var rollsInput;
-        var batchSelect;
-        var cutBatches = [];   // [{id, width, qty}] состав выбранной резки (Партии ГП)
-        function applyPositionDefaults(positionId) {
-            draft.positionId = positionId;
-            var position = selectedPosition(positionId);
-            var length = stripNum(position.length);
-            draft.footage = length > 0 ? length : '';
-            draft.rolls = remainingRollsForPosition(position, self.supplies);
-            if (rollsInput) rollsInput.value = draft.rolls;
-            // Автовыбор Партии ГП по ширине позиции (если состав уже загружен).
-            var match = cutBatches.filter(function(b) { return stripWidthKey(b.width) === stripWidthKey(position.width); })[0];
-            if (match && batchSelect) { batchSelect.value = String(match.id); draft.finishedBatchId = String(match.id); }
-        }
-
-        box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
-            function(v) { applyPositionDefaults(v); }, null, { cacheKey: 'positions' })));
-
-        // #3242: селектор «Партии ГП» резки (обеспечение ссылается на конкретную партию).
-        batchSelect = el('select', { class: 'atex-pp-select' });
-        batchSelect.appendChild(el('option', { value: '', text: 'Загрузка Партий ГП…' }));
-        batchSelect.addEventListener('change', function() { draft.finishedBatchId = batchSelect.value; });
-        box.appendChild(field('Партия ГП', batchSelect));
-        this.loadStripsForCut(cut.id).then(function(batches) {
-            if (String(self.selectedCutId) !== String(cut.id) || !batchSelect.parentNode) return;
-            cutBatches = batches || [];
-            batchSelect.innerHTML = '';
-            if (!cutBatches.length) {
-                batchSelect.appendChild(el('option', { value: '', text: 'нет Партий ГП — добавьте состав резки' }));
-                return;
-            }
-            batchSelect.appendChild(el('option', { value: '', text: '— выберите Партию ГП —' }));
-            cutBatches.forEach(function(b) {
-                batchSelect.appendChild(el('option', { value: String(b.id), text: b.width + ' мм · ' + b.qty + ' рул.' }));
-            });
-            if (draft.positionId) applyPositionDefaults(draft.positionId);   // авто-подбор по ширине
-        }).catch(function() {
-            if (!batchSelect.parentNode) return;
-            batchSelect.innerHTML = '';
-            batchSelect.appendChild(el('option', { value: '', text: 'ошибка загрузки Партий ГП' }));
-        });
-
-        rollsInput = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
-        rollsInput.addEventListener('input', function() { draft.rolls = rollsInput.value; });
-        box.appendChild(field('Кол-во рулонов', rollsInput));
-
-        var activeInput = el('input', { type: 'checkbox' });
-        activeInput.checked = draft.active;
-        activeInput.addEventListener('change', function() { draft.active = activeInput.checked; });
-        box.appendChild(el('label', { class: 'atex-pp-checkbox-field' }, [
-            activeInput,
-            el('span', { text: 'В работе' })   // #3242: «Активно» → «В работе»
-        ]));
-
-        var actions = el('div', { class: 'atex-pp-actions' });
-        var linkBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Привязать к резке' });
-        linkBtn.addEventListener('click', function() {
-            self.createSupply({
-                positionId: draft.positionId,
-                cutId: cut.id,
-                finishedBatchId: draft.finishedBatchId,   // #3242: ссылка на «Партию ГП»
-                footage: draft.footage,
-                rolls: draft.rolls,
-                active: draft.active,
-                status: draft.status
-            });
-        });
-        actions.appendChild(linkBtn);
-
-        // FIFO-резерв сырья резки в «Расход сырья» (Фаза 1b): подобрать партии по приходу
-        // под требуемый прогон и записать расход. Идемпотентно (перезапишет прежние).
-        var reserveBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Зарезервировать сырьё' });
-        reserveBtn.addEventListener('click', function() {
-            if (self.busy) return;
-            self.reserveCutMaterial(cut);
-        });
-        actions.appendChild(reserveBtn);
-        box.appendChild(actions);
-
-        // Уже привязанные позиции.
+        // Связанные позиции резки (только список; добавление/резерв — вне этой панели).
         var linked = this.supplies.filter(function(s) { return String(s.cutId) === String(cut.id); });
         var listWrap = el('div', { class: 'atex-pp-linked' });
         listWrap.appendChild(el('h3', { class: 'atex-pp-linked-title', text: 'Связанные позиции (' + linked.length + ')' }));
