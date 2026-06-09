@@ -1865,6 +1865,46 @@
         return { updates: updates, creates: creates, deletes: merged.deletes };
     }
 
+    // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
+    // ПРОПОРЦИОНАЛЬНО проходам. Рулоны — целые, сумма долей = исходным рулонам
+    // (остаток по наибольшей дробной части). Метраж — дробно, последняя доля = остаток.
+    //   rolls, footage — исходные; runs — массив проходов по сегментам (сегмент 0 = «сегодня»).
+    // → [{ rolls, footage }] длиной runs.length. runs пуст/сумма 0 → всё в сегмент 0.
+    function splitSupplyShares(rolls, footage, runs){
+        var r = (runs || []).map(function(x){ return Number(x) || 0; });
+        var n = r.length;
+        var R = Math.round(Number(rolls) || 0);
+        var F = Number(footage) || 0;
+        if (n === 0) return [];
+        var total = r.reduce(function(s, x){ return s + x; }, 0);
+        var out = [];
+        if (!(total > 0)) {
+            for (var z = 0; z < n; z++) out.push({ rolls: z === 0 ? R : 0, footage: z === 0 ? round3(F) : 0 });
+            return out;
+        }
+        // Рулоны: floor + раздача остатка по наибольшей дробной части.
+        var base = [], rem = [], used = 0;
+        for (var i = 0; i < n; i++) {
+            var exact = R * r[i] / total;
+            var fl = Math.floor(exact);
+            base.push(fl); rem.push({ idx: i, frac: exact - fl }); used += fl;
+        }
+        var left = R - used;
+        rem.sort(function(a, b){ return b.frac - a.frac; });
+        for (var k = 0; k < left; k++) base[rem[k % n].idx] += 1;
+        // Метраж: пропорционально, последняя ненулевая доля добирает остаток (точная сумма).
+        var fAcc = 0, lastIdx = -1;
+        for (var j = 0; j < n; j++) if (r[j] > 0) lastIdx = j;
+        for (var m2 = 0; m2 < n; m2++) {
+            var fv;
+            if (r[m2] <= 0) fv = 0;
+            else if (m2 === lastIdx) fv = round3(F - fAcc);
+            else { fv = round3(F * r[m2] / total); fAcc += fv; }
+            out.push({ rolls: base[m2], footage: fv });
+        }
+        return out;
+    }
+
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
@@ -2370,6 +2410,7 @@
         continuationSignature: continuationSignature,
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
+        splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
@@ -4092,6 +4133,135 @@
         });
     };
 
+    // #3280: применить план разбиения резок по дням (planCutOperations):
+    //   updates → _m_set (очередность + t1078 + плановые проходы сегодня);
+    //   creates → _m_new запись-продолжение B (на след. день) + копия Полос (тот же
+    //     per-pass раскрой) + Обеспечение долей сегмента (splitSupplyShares, пропорц. проходам);
+    //   deletes → _m_del записей-продолжений прежних цепочек (mergeContinuationChains).
+    // Обеспечение «сегодня» (A) уменьшается до своей доли. Последовательно (не грузим сервер).
+    AtexProductionPlanning.prototype.applySplitPlan = function(ops) {
+        var self = this;
+        var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
+        if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
+        var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
+        var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
+        var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
+        var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var cutReqIds = {
+            slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
+            materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
+            plannedRuns: runsReqId,
+            status: reqIdByName(cutMeta, CUT_REQ.status),
+            sequence: seqReqId,
+            winding: reqIdByName(cutMeta, CUT_REQ.winding)
+        };
+        // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
+        var createsByParent = {};
+        (ops.creates || []).forEach(function(cr) { (createsByParent[cr.parentCutId] = createsByParent[cr.parentCutId] || []).push(cr); });
+        var updateByCut = {};
+        (ops.updates || []).forEach(function(u) { updateByCut[u.cutId] = u; });
+
+        this.setBusy(true);
+        var chain = Promise.resolve();
+
+        // 1) Обновить существующие записи (первый сегмент каждой логической резки).
+        (ops.updates || []).forEach(function(u) {
+            chain = chain.then(function() {
+                var fields = {};
+                if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
+                var ts = Number(u.planStartTs);
+                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
+                if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
+                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+            });
+        });
+
+        // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
+        Object.keys(createsByParent).forEach(function(parentId) {
+            var parentCut = cutsById[parentId];
+            var crs = createsByParent[parentId];
+            var upd = updateByCut[parentId];
+            var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
+            var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
+            chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
+                var parentSupplies = (self.supplies || []).filter(function(s) { return String(s.cutId) === String(parentId); });
+                var shareBySupply = parentSupplies.map(function(s) { return { s: s, shares: splitSupplyShares(s.rolls, s.footage, segRuns) }; });
+                var cChain = Promise.resolve();
+                // 2a) уменьшить Обеспечение A до доли сегмента 0.
+                shareBySupply.forEach(function(item) {
+                    cChain = cChain.then(function() {
+                        var sh = item.shares[0] || { rolls: 0, footage: 0 };
+                        var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                            finishedBatchId: item.s.finishedBatchId,
+                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                            active: '1', status: SUPPLY_STATUSES[0]
+                        });
+                        return self.post('_m_set/' + item.s.id + '?JSON', f);
+                    });
+                });
+                // 2b) каждое продолжение B (сегменты 1..N).
+                crs.forEach(function(cr, ci) {
+                    var segIdx = ci + 1;
+                    cChain = cChain.then(function() {
+                        var cutFields = buildFields(cutReqIds, {
+                            status: (parentCut && parentCut.status) || CUT_STATUSES[0],
+                            slitter: parentCut && parentCut.slitter && parentCut.slitter.id,
+                            materialBatch: parentCut && parentCut.batchId,
+                            plannedRuns: cr.plannedRuns,
+                            sequence: cr.sequence,
+                            winding: normWinding(parentCut && parentCut.winding)
+                        });
+                        cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
+                        return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
+                            var bId = res && (res.obj || res.id || res.i);
+                            if (!bId) throw new Error('Сервер не вернул id продолжения резки');
+                            var stripMap = {};
+                            var bChain = Promise.resolve();
+                            (parentStrips || []).forEach(function(st) {
+                                bChain = bChain.then(function() {
+                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, rolls: st.qty, active: '1' });
+                                    return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
+                                        var nid = r2 && (r2.obj || r2.id || r2.i);
+                                        if (nid) stripMap[String(st.id)] = String(nid);
+                                    });
+                                });
+                            });
+                            shareBySupply.forEach(function(item) {
+                                bChain = bChain.then(function() {
+                                    var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
+                                    if (!(sh.rolls > 0) && !(sh.footage > 0)) return;
+                                    if (item.s.positionId == null) return;
+                                    var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
+                                    var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                        finishedBatchId: fb,
+                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                                        active: '1', status: SUPPLY_STATUSES[0]
+                                    });
+                                    return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
+                                });
+                            });
+                            return bChain;
+                        });
+                    });
+                });
+                return cChain;
+            });
+        });
+
+        // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
+        (ops.deletes || []).forEach(function(id) {
+            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); });
+        });
+
+        return chain.then(function() { return self.reload(); }).then(function() {
+            self.setBusy(false); self.render(); return true;
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка разбиения резок: ' + err.message, 'error');
+            return false;
+        });
+    };
+
     // Авто-планирование: запускает planQueues на текущих резках, сохраняет
     // изменившиеся значения «Очередности» через saveSequences, затем перезагружает
     // очередь. Подтверждение реализуется без native confirm(): если доступен
@@ -4105,47 +4275,55 @@
 
         function doRun(selectedStrategy) {
             var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
-            var plan = planQueues(self.cuts, planOptions);
 
-            // #3280: плановое время старта каждой резки → t1078 («записать потом»).
+            // #3280: план разбиения по дням + плановое время старта (t1078).
             var dayWindow = self.workingWindow();
             var nowD = new Date(controllerNowMs(self));
             var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
-            var runLenByCut = {};
-            self.cuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
-            var startTsByCut = planStartTimestamps(self.cuts, {
+            var windPoints = windingPointsFromTimes(self.opTimes || {});
+            var perPassByCut = {};
+            self.cuts.forEach(function(c) {
+                perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
+            });
+            var ops = planCutOperations(self.cuts, {
                 weights: planOptions,
-                windPoints: windingPointsFromTimes(self.opTimes || {}),
                 times: self.changeTimes,
                 dayStartMin: dayWindow.startMin,
                 dayEndMin: dayWindow.cutEndMin,
-                runLengthByCut: runLenByCut,
+                perPassByCut: perPassByCut,
                 planBaseMidnightMs: planBaseMidnightMs
             });
 
-            // Отбираем резки с изменившейся очерёдностью ИЛИ плановым временем старта (t1078).
+            // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
+            var createParents = {};
+            (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
             var cutsById = {};
             self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-            var changed = plan.map(function(p) {
-                return { cutId: p.cutId, slitterId: p.slitterId, sequence: p.sequence, planStartTs: startTsByCut[String(p.cutId)] };
-            }).filter(function(p) {
-                var cut = cutsById[String(p.cutId)];
+            // Обновляем только то, что реально изменилось (очередность / время старта / проходы).
+            var changedUpdates = (ops.updates || []).filter(function(u) {
+                if (createParents[String(u.cutId)]) return true;
+                var cut = cutsById[String(u.cutId)];
                 if (!cut) return false;
-                var seqChanged = Number(cut.sequence) !== p.sequence;
-                var tsNew = Number(p.planStartTs);
+                var seqChanged = Number(cut.sequence) !== u.sequence;
+                var tsNew = Number(u.planStartTs);
                 var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
                 var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
-                return seqChanged || tsChanged;
+                var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
+                return seqChanged || tsChanged || runsChanged;
             });
 
-            if (!changed.length) {
+            if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
                 self.notify('Очередь уже оптимальна, изменений нет', 'info');
                 return;
             }
 
-            self.saveSequences(changed, { silent: true }).then(function(ok) {
-                // saveSequences уже вызвал reload+render; добавляем итоговое уведомление только при успехе.
-                if (ok) self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
+            self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes }).then(function(ok) {
+                if (!ok) return;   // applySplitPlan уже сделал reload+render и (при ошибке) уведомил
+                var total = (ops.updates || []).length + (ops.creates || []).length;
+                var extra = [];
+                if ((ops.creates || []).length) extra.push('перенесено на след. день: ' + ops.creates.length);
+                if ((ops.deletes || []).length) extra.push('слито продолжений: ' + ops.deletes.length);
+                self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + total + ' резок' + (extra.length ? ' (' + extra.join('; ') + ')' : ''), 'success');
             });
         }
 

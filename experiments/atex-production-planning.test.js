@@ -1640,6 +1640,55 @@ function runSaveSequencesT1078Test() {
     });
 }
 
+// #3280: applySplitPlan — update A + create продолжения B (копия Полос + доля Обеспечения) + delete.
+function runApplySplitPlanTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'), req('24308', 'Очередность'), req('1162', 'Статус'),
+            req('16403', 'Кол-во резок план'), req('8463', 'Тип намотки'), req('1140', 'Партия сырья')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1114', 'Кол-во рулонов') ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1149', 'Метраж, м'), req('16424', 'Кол-во рулонов'), req('15016', 'Партия ГП'), req('1154', 'В работе')
+        ] }
+    };
+    controller.cuts = [{ id: 'A', slitter: { id: 'm1' }, status: 'Запланирована', winding: 'OUT', batchId: '', plannedRuns: 15, number: '999' }];
+    controller.supplies = [{ id: 'sup1', cutId: 'A', positionId: 'pos1', finishedBatchId: 'strip1', footage: 1500, rolls: 15 }];
+    controller.loadStripsForCut = function() { return Promise.resolve([{ id: 'strip1', width: '100', qty: '2' }]); };
+    controller.setBusy = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.render = function() {};
+    controller.notify = function() {};
+    controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({ obj: 'newB' }); };
+    var ops = {
+        updates: [{ cutId: 'A', sequence: 1, planStartTs: 1000, plannedRuns: 10 }],
+        creates: [{ parentCutId: 'A', sequence: 2, planStartTs: 2000, plannedRuns: 5 }],
+        deletes: ['old1']
+    };
+    function one(p) { return posts.filter(function(x) { return x.path === p; })[0]; }
+    return controller.applySplitPlan(ops).then(function(ok) {
+        assertEqual(ok, true, 'applySplitPlan → true');
+        var setA = one('_m_set/A?JSON');
+        assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность');
+        assertEqual(setA && setA.fields.t1078, '1000', 'applySplitPlan: A — t1078 (время старта сегодня)');
+        assertEqual(setA && setA.fields.t16403, '10', 'applySplitPlan: A — проходы сегодня (10)');
+        var setSup = one('_m_set/sup1?JSON');
+        assertEqual(setSup && setSup.fields.t16424, 10, 'applySplitPlan: Обеспечение A уменьшено до 10 рулонов (доля сегодня)');
+        var newB = one('_m_new/1078?JSON&up=1');
+        assertEqual(newB && newB.fields.t1078, 2000, 'applySplitPlan: B — t1078 (старт след. дня)');
+        assertEqual(newB && newB.fields.t16403, 5, 'applySplitPlan: B — остаток проходов (5)');
+        var newStrip = one('_m_new/1081?JSON&up=newB');
+        assertEqual(newStrip && newStrip.fields.t1112, '100', 'applySplitPlan: B — копия Полосы (ширина 100)');
+        assertEqual(newStrip && newStrip.fields.t1114, '2', 'applySplitPlan: B — копия Полосы (qty за проход 2)');
+        var newSup = one('_m_new/1077?JSON&up=pos1');
+        assertEqual(newSup && newSup.fields.t16424, 5, 'applySplitPlan: B — Обеспечение 5 рулонов (доля остатка)');
+        assertEqual(newSup && newSup.fields.t15016, 'newB', 'applySplitPlan: B — Обеспечение ссылается на скопированную Полосу B');
+        assertEqual(posts.filter(function(x) { return x.path.indexOf('_m_del/old1') === 0; }).length, 1, 'applySplitPlan: удалена прежняя запись-продолжение');
+    });
+}
+
 // ── #3280: splitMachineQueue — разбиение очереди станка по дням на уровне проходов ──
 var splitTimes = { BETWEEN_CUTS: 0 };
 // 1) Резка целиком влезает в день — один сегмент, без переналадки.
@@ -1753,7 +1802,14 @@ assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, p
 assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
 assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
 
+// ── #3280: splitSupplyShares — деление Обеспечения по проходам (рулоны целые) ──
+assertEqual(planning.splitSupplyShares(15, 1500, [10, 5]), [{ rolls: 10, footage: 1000 }, { rolls: 5, footage: 500 }], 'splitSupplyShares: 15 рулонов / 1500 м по 10:5 → 10/1000 и 5/500');
+assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage: 30 }, { rolls: 3, footage: 30 }, { rolls: 3, footage: 30 }], 'splitSupplyShares: остаток рулона по наибольшей дробной части; сумма = 10');
+assertEqual(planning.splitSupplyShares(7, 700, []), [], 'splitSupplyShares: нет сегментов → []');
+assertEqual(planning.splitSupplyShares(7, 700, [0, 0]), [{ rolls: 7, footage: 700 }, { rolls: 0, footage: 0 }], 'splitSupplyShares: нулевые проходы → всё в сегмент 0');
+
 runSaveSequencesT1078Test()
+    .then(runApplySplitPlanTest)
     .then(runPreferredWidthsFilterTest)
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
