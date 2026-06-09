@@ -78,4 +78,9 @@ assertEqual({ produced: producedPosRolls, supply: 5, stock: producedPosRolls - 5
     { produced: 6, supply: 5, stock: 1 },
     'обеспечение = qty (5), излишек 330 мм → склад (1)');
 
+// 5) formatFreeSlot: «<дата ЧЧ:ММ> (старт–финиш)» — парентеза по startMin/finishMin.
+var slotLabel = planning.formatFreeSlot({ startTs: 0, startMin: 747, finishMin: 894 });
+assertEqual(slotLabel.indexOf('(12:27–14:54)') >= 0, true, 'formatFreeSlot: парентеза (старт–финиш) = (12:27–14:54)');
+assertEqual(planning.formatFreeSlot(null), 'нет данных', 'formatFreeSlot: null → «нет данных»');
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
