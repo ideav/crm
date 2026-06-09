@@ -2624,7 +2624,7 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], notes: '', selectedPositions: [], plan: null };
+        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], plan: null };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -3355,7 +3355,7 @@
             timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
-            status: reqIdByName(cutMeta, CUT_REQ.status),
+            active: activeReqId(cutMeta),
             notes: reqIdByName(cutMeta, CUT_REQ.notes),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
         };
@@ -3369,7 +3369,7 @@
             timing: plan.timing,
             length: plan.runLength > 0 ? plan.runLength : '',
             winding: normWinding(plan.layout && plan.layout.windDir),
-            status: d.status || CUT_STATUSES[0],
+            active: (d.active === false) ? '0' : '1',
             notes: d.notes,
             sequence: nextSequenceForCuts(this.cuts, d.slitterId, planDayTs)
         });
@@ -4855,7 +4855,14 @@
         form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
             function(v) { d.slitterId = v; d.plan = null; self.renderForm(); }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
 
-        form.appendChild(field('Статус', this.selectText(CUT_STATUSES, d.status, function(v) { d.status = v; })));
+        // У «Производственной резки» нет колонки «Статус» — есть флаг «В работе» (по умолчанию вкл).
+        var activeInput = el('input', { type: 'checkbox' });
+        activeInput.checked = d.active !== false;
+        activeInput.addEventListener('change', function() { d.active = activeInput.checked; });
+        form.appendChild(el('label', { class: 'atex-pp-checkbox-field' }, [
+            activeInput,
+            el('span', { text: 'В работе' })
+        ]));
 
         var notes = el('textarea', { class: 'atex-pp-input atex-pp-textarea', rows: '2' });
         notes.value = d.notes || '';
