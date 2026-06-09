@@ -1279,8 +1279,8 @@ function runGenerateCutsDeferredGpTest() {
         var cutPost = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })[0];
         assertEqual(cutPost.path, '_m_new/1078?JSON&up=1',
             'runGenerateCuts #3225: _m_new резки не передаёт бессмысленный full=1');
-        assertEqual(cutPost.fields.t1078, 1780895994,
-            'runGenerateCuts #3225: t1078 пишет главное значение Производственной резки');
+        assertEqual(cutPost.fields.t1078, 1780905600,
+            'runGenerateCuts #3280: t1078 = плановое время старта (08:00 дня), а не время создания');
         assertEqual(cutPost.fields.t16403, 1,
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
