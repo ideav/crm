@@ -1609,6 +1609,37 @@ function runCreateCutMainValueTest() {
     });
 }
 
+// #3280: saveSequences пишет очередность И плановое время старта (t1078) одним _m_set.
+function runSaveSequencesT1078Test() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('24308', 'Очередность'),
+            req('1162', 'Статус')
+        ] }
+    };
+    controller.setBusy = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.render = function() {};
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        return Promise.resolve({ obj: 'ok' });
+    };
+    return controller.saveSequences(
+        [{ cutId: 'c1', sequence: 3, planStartTs: 1780992000 }],
+        { silent: true }
+    ).then(function(ok) {
+        assertEqual(ok, true, 'saveSequences: успешное сохранение → true');
+        assertEqual(posts.length, 1, 'saveSequences: один _m_set на резку');
+        assertEqual(posts[0].path, '_m_set/c1?JSON', 'saveSequences: _m_set по cutId');
+        assertEqual(posts[0].fields.t24308, '3', 'saveSequences: пишет очередность t{reqId}');
+        assertEqual(posts[0].fields.t1078, '1780992000', 'saveSequences #3280: пишет время старта в t1078 (главное значение)');
+    });
+}
+
 // ── #3280: splitMachineQueue — разбиение очереди станка по дням на уровне проходов ──
 var splitTimes = { BETWEEN_CUTS: 0 };
 // 1) Резка целиком влезает в день — один сегмент, без переналадки.
@@ -1675,7 +1706,31 @@ assertEqual(planning.scheduleStartTimestamp(1780963200000, 480), 1780992000, 'sc
 assertEqual(planning.scheduleStartTimestamp(1780963200000, 1440), 1781049600, 'scheduleStartTimestamp: +1 сутки');
 assertEqual(planning.scheduleStartTimestamp('x', 480), 0, 'scheduleStartTimestamp: мусор → 0');
 
-runPreferredWidthsFilterTest()
+// ── #3280: planStartTimestamps — плановое время старта резки → штамп для t1078 ──
+// windPoints WIND_100=1 мин/проход; c1 10 проходов → старт = начало смены (08:00).
+// База: 2026-06-09 00:00 UTC = 1780963200000; 08:00 = +480 мин = 1780992000.
+assertEqual(
+    planning.planStartTimestamps(
+        [{ id: 'c1', slitter: { id: 'm1' }, plannedRuns: 10 }],
+        { windPoints: [{ m: 100, min: 1 }], times: { BETWEEN_CUTS: 0 }, dayStartMin: 480, dayEndMin: 990,
+          runLengthByCut: { c1: 100 }, planBaseMidnightMs: 1780963200000 }
+    ),
+    { c1: 1780992000 },
+    'planStartTimestamps: первая резка станка стартует в 08:00 → t1078-штамп'
+);
+var twoTs = planning.planStartTimestamps(
+    [
+        { id: 'c1', slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50], plannedRuns: 10 },
+        { id: 'c2', slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50], plannedRuns: 5 }
+    ],
+    { windPoints: [{ m: 100, min: 1 }], times: { BETWEEN_CUTS: 0 }, dayStartMin: 480, dayEndMin: 990,
+      runLengthByCut: { c1: 100, c2: 100 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(twoTs.c1, 1780992000, 'planStartTimestamps: c1 в 08:00');
+assertEqual(twoTs.c2 > twoTs.c1, true, 'planStartTimestamps: c2 стартует позже c1 (последовательно)');
+
+runSaveSequencesT1078Test()
+    .then(runPreferredWidthsFilterTest)
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
     .then(runGenerateCutsSequenceByKnivesTest)

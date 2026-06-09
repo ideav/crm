@@ -1719,6 +1719,42 @@
         return Math.floor((base + min * 60000) / 1000);
     }
 
+    // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
+    // главное значение «Производственной резки»). Группируем по станку, упорядочиваем
+    // очередь (orderCuts), строим расписание (buildSchedule) и берём начало окна
+    // (startMin − setupMin) — то же время, что в .atex-pp-cut-num / .atex-pp-cut-time.
+    //   opts: { weights, windPoints, times, dayStartMin, dayEndMin, runLengthByCut,
+    //           planBaseMidnightMs }. → { cutId: штамп(сек) }. Вход не мутирует.
+    function planStartTimestamps(cuts, opts){
+        opts = opts || {};
+        var base = Number(opts.planBaseMidnightMs);
+        var byMachine = {};
+        var order = [];
+        (cuts || []).forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var key = String(sid);
+            if (!byMachine[key]) { byMachine[key] = []; order.push(key); }
+            byMachine[key].push(c);
+        });
+        var out = {};
+        order.forEach(function(key){
+            var ordered = orderCuts(byMachine[key], opts.weights);
+            var sched = buildSchedule(ordered, {
+                windPoints: opts.windPoints || [],
+                times: opts.times || DEFAULT_OP_TIMES,
+                runLengthByCut: opts.runLengthByCut || {},
+                shiftStartMin: opts.dayStartMin,
+                shiftEndMin: opts.dayEndMin
+            });
+            sched.forEach(function(sc){
+                var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
+                out[String(sc.cutId)] = scheduleStartTimestamp(base, windowStart);
+            });
+        });
+        return out;
+    }
+
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
@@ -2220,6 +2256,7 @@
         nextCutMainValue: nextCutMainValue,
         splitMachineQueue: splitMachineQueue,
         scheduleStartTimestamp: scheduleStartTimestamp,
+        planStartTimestamps: planStartTimestamps,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
@@ -3911,11 +3948,17 @@
 
         // Последовательное сохранение (чтобы не перегружать сервер).
         var fieldKey = 't' + seqReqId;
+        // #3280: t1078 = главное значение «Производственной резки» (плановое время старта).
+        // Пишется тем же _m_set (docs/kb/crud.md: _m_set задаёт любую колонку, включая первую).
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         var chain = Promise.resolve();
         pairs.forEach(function(p) {
             chain = chain.then(function() {
                 var fields = {};
-                fields[fieldKey] = String(p.sequence);
+                if (p.sequence != null && p.sequence !== '') fields[fieldKey] = String(p.sequence);
+                // #3280: плановое время старта (Unix-штамп) → t1078, если задано и валидно.
+                var ts = Number(p.planStartTs);
+                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
                 return self.post('_m_set/' + p.cutId + '?JSON', fields);
             });
         });
@@ -3951,12 +3994,35 @@
             var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
             var plan = planQueues(self.cuts, planOptions);
 
-            // Отбираем резки с изменившейся очерёдностью.
+            // #3280: плановое время старта каждой резки → t1078 («записать потом»).
+            var dayWindow = self.workingWindow();
+            var nowD = new Date(controllerNowMs(self));
+            var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+            var runLenByCut = {};
+            self.cuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
+            var startTsByCut = planStartTimestamps(self.cuts, {
+                weights: planOptions,
+                windPoints: windingPointsFromTimes(self.opTimes || {}),
+                times: self.changeTimes,
+                dayStartMin: dayWindow.startMin,
+                dayEndMin: dayWindow.cutEndMin,
+                runLengthByCut: runLenByCut,
+                planBaseMidnightMs: planBaseMidnightMs
+            });
+
+            // Отбираем резки с изменившейся очерёдностью ИЛИ плановым временем старта (t1078).
             var cutsById = {};
             self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-            var changed = plan.filter(function(p) {
+            var changed = plan.map(function(p) {
+                return { cutId: p.cutId, slitterId: p.slitterId, sequence: p.sequence, planStartTs: startTsByCut[String(p.cutId)] };
+            }).filter(function(p) {
                 var cut = cutsById[String(p.cutId)];
-                return cut && Number(cut.sequence) !== p.sequence;
+                if (!cut) return false;
+                var seqChanged = Number(cut.sequence) !== p.sequence;
+                var tsNew = Number(p.planStartTs);
+                var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
+                var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
+                return seqChanged || tsChanged;
             });
 
             if (!changed.length) {
