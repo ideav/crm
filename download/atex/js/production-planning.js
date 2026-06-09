@@ -3867,11 +3867,14 @@
             });
         });
 
-        // #3280: главное значение резки (t1078) = ПЛАНОВОЕ ВРЕМЯ СТАРТА, а не время
-        // создания. По каждому станку строим расписание (buildSchedule в порядке
-        // очерёдности) и берём начало окна (startMin − setupMin) как Unix-штамп.
-        // buildSchedule сам переносит не влезающие резки на след. день → их штамп
-        // попадает на следующий день, и они отображаются в следующем дне.
+        // #3280: дробление резок по дням НА УРОВНЕ ПРОХОДОВ + плановое время старта в
+        // t1078. По каждому станку в порядке очерёдности раскладываем проходы по дням
+        // (splitMachineQueue): резка, не влезающая до конца дня, режется — что успеваем
+        // сегодня (запись-сегмент), остаток продолжается с 08:00 след. дня (ещё запись).
+        // Каждый сегмент = отдельная запись «Производственной резки»: t1078 = начало окна,
+        // «Кол-во план» = проходы сегмента; Полосы копируются (тот же раскрой за проход),
+        // Обеспечение делится по проходам (splitSupplyShares). → segmentsByLayout[layIdx].
+        var segmentsByLayout = {};
         (function() {
             var windPoints = windingPointsFromTimes(self.opTimes || {});
             var dayWindow = self.workingWindow();
@@ -3883,45 +3886,78 @@
                 if (s === '') return;
                 (bySlitter[s] = bySlitter[s] || []).push(plan);
             });
+            var allSegs = [];
             Object.keys(bySlitter).forEach(function(s) {
                 var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
-                var runLenByCut = {};
-                plans.forEach(function(p) { runLenByCut[String(p.id)] = p.runLength; });
-                var sched = buildSchedule(plans, {
-                    windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut,
-                    shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin
-                });
-                var scById = {};
-                sched.forEach(function(sc) { scById[sc.cutId] = sc; });
+                var perPassByCut = {}, runsByCut = {};
                 plans.forEach(function(p) {
-                    var sc = scById[String(p.id)];
-                    if (!sc) return;
-                    var ws = stripNum(sc.startMin) - stripNum(sc.setupMin);
-                    var ts = scheduleStartTimestamp(planBaseMidnightMs, ws);
-                    if (ts > 0) p.cutMainValue = ts;
+                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPoints);
+                    runsByCut[String(p.id)] = p.plannedRuns;
                 });
+                var segs = splitMachineQueue(plans, {
+                    dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
+                    times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut
+                });
+                var byPlanId = {};
+                segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
+                plans.forEach(function(p) {
+                    var ps = byPlanId[String(p.id)];
+                    if (!ps || !ps.length) ps = [{ runs: p.plannedRuns, windowStartMin: dayWindow.startMin }];
+                    var segRunsAll = ps.map(function(x) { return x.runs; });
+                    var perPass = perPassByCut[String(p.id)] || 0;
+                    segmentsByLayout[p.index] = ps.map(function(sg, si) {
+                        var ts = scheduleStartTimestamp(planBaseMidnightMs, sg.windowStartMin);
+                        var unit = {
+                            plannedRuns: sg.runs,
+                            cutMainValue: ts > 0 ? ts : p.cutMainValue,
+                            runLength: p.runLength,
+                            duration: round3(perPass * sg.runs),
+                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes),
+                            batchId: p.batchId,
+                            slitterId: p.slitterId,
+                            fullPlannedRuns: p.plannedRuns,
+                            segIndex: si,
+                            segRunsAll: segRunsAll,
+                            sequence: ''
+                        };
+                        allSegs.push({ slitterId: String(p.slitterId), dayKey: cutPlanDayKey({ planDate: unit.cutMainValue }), ts: unit.cutMainValue, unit: unit });
+                        return unit;
+                    });
+                });
+            });
+            // Очерёдность 1..N в пределах (станок, день) по времени старта.
+            var seqGroups = {};
+            allSegs.forEach(function(a) { var k = a.slitterId + ' ' + a.dayKey; (seqGroups[k] = seqGroups[k] || []).push(a); });
+            Object.keys(seqGroups).forEach(function(k) {
+                seqGroups[k].sort(function(a, b) { return Number(a.ts) - Number(b.ts); })
+                    .forEach(function(a, i) { a.unit.sequence = i + 1; });
             });
         })();
 
         this.setBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
         // запросами, может занять заметное время.
-        console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nCuts + ' резок...');
-        this.showProgress('Генерация резок…', nCuts);
+        // #3280: записей-сегментов может быть больше, чем раскладок (резки длиннее дня дробятся).
+        var nRecords = 0;
+        Object.keys(segmentsByLayout).forEach(function(k) { nRecords += segmentsByLayout[k].length; });
+        if (!nRecords) nRecords = nCuts;
+        console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nRecords + ' записей (' + nCuts + ' раскладок)...');
+        this.showProgress('Генерация резок…', nRecords);
         var chain = Promise.resolve();
         var startTime = Date.now();
         layouts.forEach(function(lay, layIdx) {
+          var units = segmentsByLayout[layIdx] || [];
+          units.forEach(function(unit) {
             chain = chain.then(function() {
-                self.updateProgress(doneCuts, 'Создаётся резка ' + (layIdx + 1) + ' из ' + nCuts + '…');
-                var layoutPlan = layoutPlans[layIdx];
-                var plannedRuns = layoutPlan.plannedRuns;
-                var runLength = layoutPlan.runLength;
-                var duration = layoutPlan.duration;
-                var timing = layoutPlan.timing;
-                var batchId = layoutPlan.batchId;
-                var slitterId = layoutPlan.slitterId;
-                var sequence = layoutPlan.sequence;
-                var cutMainValue = layoutPlan.cutMainValue;
+                self.updateProgress(doneCuts, 'Создаётся резка ' + (doneCuts + 1) + ' из ' + nRecords + '…');
+                var plannedRuns = unit.plannedRuns;
+                var runLength = unit.runLength;
+                var duration = unit.duration;
+                var timing = unit.timing;
+                var batchId = unit.batchId;
+                var slitterId = unit.slitterId;
+                var sequence = unit.sequence;
+                var cutMainValue = unit.cutMainValue;
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
                     slitter: slitterId,
@@ -3989,7 +4025,11 @@
                 // Излишек рулонов сверх обеспечений остаётся складом той же Партией ГП.
                 function createSupplies() {
                     var supChain = Promise.resolve();
-                    supplyPlanForLayout(lay, posById, plannedRuns, posLength).forEach(function(plan) {
+                    // #3280: Обеспечение позиции считаем на ПОЛНОЕ кол-во проходов резки,
+                    // затем делим по сегментам-дням (splitSupplyShares) — берём долю этого сегмента.
+                    supplyPlanForLayout(lay, posById, unit.fullPlannedRuns, posLength).forEach(function(plan) {
+                        var share = splitSupplyShares(plan.rolls, plan.footage, unit.segRunsAll)[unit.segIndex] || { rolls: 0, footage: 0 };
+                        if (!(share.rolls > 0) && !(share.footage > 0)) return;
                         supChain = supChain.then(function() {
                             var batchId = widthToBatchId[stripWidthKey(plan.width)];
                             if (!batchId) {
@@ -3999,8 +4039,8 @@
                             }
                             var fields = buildSupplyFieldsForFinishedBatch(supplyMeta, {
                                 finishedBatchId: batchId,
-                                footage: plan.footage > 0 ? plan.footage : '',
-                                rolls: plan.rolls,
+                                footage: share.footage > 0 ? share.footage : '',
+                                rolls: share.rolls,
                                 active: '1',
                                 status: SUPPLY_STATUSES[0]
                             });
@@ -4024,13 +4064,14 @@
                     self.updateProgress(doneCuts);
                 });
             });
+          });   // #3280: конец units.forEach (сегменты резки по дням)
         });
 
         var genStartTime = Date.now();
         return chain.then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
-            self.updateProgress(nCuts, 'Обновление очереди…');
+            self.updateProgress(nRecords, 'Обновление очереди…');
             return self.reload();
         }).then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
@@ -4045,7 +4086,7 @@
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
             console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
-            self.notify('Создано ' + layouts.length + ' резок (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
+            self.notify('Создано ' + nRecords + ' резок (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
