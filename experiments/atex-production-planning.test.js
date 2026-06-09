@@ -1729,6 +1729,30 @@ var twoTs = planning.planStartTimestamps(
 assertEqual(twoTs.c1, 1780992000, 'planStartTimestamps: c1 в 08:00');
 assertEqual(twoTs.c2 > twoTs.c1, true, 'planStartTimestamps: c2 стартует позже c1 (последовательно)');
 
+// ── #3280: mergeContinuationChains — слияние записей-продолжений (без маркера) ──
+var sigBase = { slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50] };
+function withSig(id, planDate, runs) {
+    return { id: id, slitter: sigBase.slitter, materialId: sigBase.materialId, winding: sigBase.winding, knifeWidths: sigBase.knifeWidths, plannedRuns: runs, planDate: planDate };
+}
+// Смежные дни (06-09 и 06-10) + одна сигнатура → одна логическая резка, продолжение в deletes.
+var mc = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781049600', 5)]);
+assertEqual(mc.cuts.length, 1, 'mergeContinuationChains: смежные дни → одна логическая резка');
+assertEqual({ id: mc.cuts[0].id, runs: mc.cuts[0].plannedRuns }, { id: 'c1', runs: 15 }, 'mergeContinuationChains: выживает ранняя, проходы суммируются');
+assertEqual(mc.deletes, ['c2'], 'mergeContinuationChains: продолжение → в deletes');
+// Несмежные дни (06-09 и 06-12) → НЕ сливаем.
+var mc2 = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781222400', 5)]);
+assertEqual(mc2.cuts.length, 2, 'mergeContinuationChains: несмежные дни → не сливаем');
+assertEqual(mc2.deletes, [], 'mergeContinuationChains: несмежные → нет удалений');
+
+// ── #3280: planCutOperations — overflow-резка → update первого сегмента + create продолжения ──
+var ops = planning.planCutOperations(
+    [withSig('c1', '1780963200', 15)],
+    { perPassByCut: { c1: 10 }, dayStartMin: 0, dayEndMin: 100, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 }], 'planCutOperations: первый сегмент → update существующей записи (10 проходов сегодня)');
+assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
+assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
+
 runSaveSequencesT1078Test()
     .then(runPreferredWidthsFilterTest)
     .then(runGenerateCutsDeferredGpTest)

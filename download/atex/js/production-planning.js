@@ -1755,6 +1755,116 @@
         return out;
     }
 
+    // #3280: номер календарного дня плановой даты (для смежности «продолжений»). null — нет даты.
+    function planDayNumber(c){
+        var s = String(c && c.planDate != null && c.planDate !== '' ? c.planDate : (c && c.number)).trim();
+        if (!/^\d{9,13}$/.test(s)) return null;
+        var num = Number(s);
+        var ms = num >= 1e12 ? num : num * 1000;
+        return Math.floor(ms / 86400000);
+    }
+
+    // #3280: сигнатура «той же резки на станке» — станок|сырьё|намотка|набор ножей.
+    // По ней распознаём цепочки записей-продолжений (без схемного маркера).
+    function continuationSignature(c){
+        var ks = ((c && c.knifeWidths) || []).slice().map(Number).sort(function(a, b){ return a - b; });
+        return [
+            (c && c.slitter && c.slitter.id) == null ? '' : String(c.slitter.id),
+            (c && c.materialId) == null ? '' : String(c.materialId),
+            normWinding(c && c.winding),
+            ks.join(',')
+        ].join('|');
+    }
+
+    // #3280: слить записи-продолжения обратно в логические резки перед пере-разбиением.
+    // Эвристика (без маркера): одинаковая сигнатура continuationSignature + смежные
+    // календарные дни (разница 1) → одна цепочка; выживает самая ранняя запись (её id),
+    // её «Кол-во план» = сумма проходов цепочки; остальные записи — в deletes.
+    // → { cuts:[логические резки], deletes:[id записей-продолжений], chainByLogical:{logicalId:[id…]} }.
+    // Вход не мутирует.
+    function mergeContinuationChains(cuts){
+        var groups = {}, order = [];
+        (cuts || []).forEach(function(c){
+            var s = continuationSignature(c);
+            if (!groups[s]) { groups[s] = []; order.push(s); }
+            groups[s].push(c);
+        });
+        var logical = [], deletes = [], chainByLogical = {};
+        order.forEach(function(s){
+            var arr = groups[s].slice().sort(function(a, b){
+                var da = planDayNumber(a), db = planDayNumber(b);
+                if (da == null && db == null) return 0;
+                if (da == null) return 1;
+                if (db == null) return -1;
+                return da - db;
+            });
+            var i = 0;
+            while (i < arr.length) {
+                var chain = [arr[i]];
+                var j = i + 1;
+                while (j < arr.length) {
+                    var prevDay = planDayNumber(arr[j - 1]);
+                    var curDay = planDayNumber(arr[j]);
+                    if (prevDay == null || curDay == null || (curDay - prevDay) !== 1) break;
+                    chain.push(arr[j]);
+                    j++;
+                }
+                var head = chain[0];
+                var lg = {};
+                for (var k in head) { if (Object.prototype.hasOwnProperty.call(head, k)) lg[k] = head[k]; }
+                lg.plannedRuns = chain.reduce(function(sum, c){ return sum + (Number(c.plannedRuns) || 0); }, 0);
+                logical.push(lg);
+                chainByLogical[String(head.id)] = chain.map(function(c){ return String(c.id); });
+                for (var m = 1; m < chain.length; m++) deletes.push(String(chain[m].id));
+                i = j;
+            }
+        });
+        return { cuts: logical, deletes: deletes, chainByLogical: chainByLogical };
+    }
+
+    // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
+    // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
+    // раскладывает по дням на уровне проходов (splitMachineQueue). →
+    //   { updates:[{cutId, sequence, planStartTs, plannedRuns}],            // первый сегмент → существующая запись
+    //     creates:[{parentCutId, sequence, planStartTs, plannedRuns}],       // продолжения → новые записи
+    //     deletes:[cutId…] }                                                 // записи-продолжения прежних цепочек
+    // Деление Обеспечения и копию Полос на продолжения выполняет аппликатор (нужны id новых
+    // записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
+    function planCutOperations(cuts, opts){
+        opts = opts || {};
+        var base = Number(opts.planBaseMidnightMs);
+        var merged = mergeContinuationChains(cuts);
+        var perPass = opts.perPassByCut || {};
+        var byMachine = {}, mOrder = [];
+        merged.cuts.forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var key = String(sid);
+            if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
+            byMachine[key].push(c);
+        });
+        var updates = [], creates = [];
+        mOrder.forEach(function(key){
+            var ordered = orderCuts(byMachine[key], opts.weights);
+            var runsByCut = {};
+            ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
+            var segs = splitMachineQueue(ordered, {
+                dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
+                leader: opts.leader, times: opts.times,
+                perPassByCut: perPass, runsByCut: runsByCut
+            });
+            segs.forEach(function(seg, idx){
+                var ts = scheduleStartTimestamp(base, seg.windowStartMin);
+                if (!seg.isContinuation) {
+                    updates.push({ cutId: String(seg.cutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                } else {
+                    creates.push({ parentCutId: String(seg.parentCutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                }
+            });
+        });
+        return { updates: updates, creates: creates, deletes: merged.deletes };
+    }
+
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
@@ -2257,6 +2367,9 @@
         splitMachineQueue: splitMachineQueue,
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
+        continuationSignature: continuationSignature,
+        mergeContinuationChains: mergeContinuationChains,
+        planCutOperations: planCutOperations,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
