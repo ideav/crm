@@ -1670,9 +1670,11 @@ function runApplySplitPlanTest() {
     function one(p) { return posts.filter(function(x) { return x.path === p; })[0]; }
     return controller.applySplitPlan(ops).then(function(ok) {
         assertEqual(ok, true, 'applySplitPlan → true');
+        var saveA = one('_m_save/A?JSON');
+        assertEqual(saveA && saveA.fields.val, '1000', 'applySplitPlan: A — время старта пишется через _m_save (первая колонка)');
         var setA = one('_m_set/A?JSON');
-        assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность');
-        assertEqual(setA && setA.fields.t1078, '1000', 'applySplitPlan: A — t1078 (время старта сегодня)');
+        assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность через _m_set');
+        assertEqual(setA && setA.fields.t1078, undefined, 'applySplitPlan: A — t1078 НЕ через _m_set (игнорируется сервером)');
         assertEqual(setA && setA.fields.t16403, '10', 'applySplitPlan: A — проходы сегодня (10)');
         var setSup = one('_m_set/sup1?JSON');
         assertEqual(setSup && setSup.fields.t16424, 10, 'applySplitPlan: Обеспечение A уменьшено до 10 рулонов (доля сегодня)');
