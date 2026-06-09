@@ -1609,6 +1609,72 @@ function runCreateCutMainValueTest() {
     });
 }
 
+// ── #3280: splitMachineQueue — разбиение очереди станка по дням на уровне проходов ──
+var splitTimes = { BETWEEN_CUTS: 0 };
+// 1) Резка целиком влезает в день — один сегмент, без переналадки.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 10 }],
+        { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [{ cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null }],
+    'splitMachineQueue: резка целиком в одном дне → один сегмент'
+);
+// 2) Резка не влезает — обрезается по проходам, остаток продолжается на след. день без setup.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 15 }],
+        { dayStartMin: 0, dayEndMin: 100, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [
+        { cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null },
+        { cutId: 'c1', dayOffset: 1, runs: 5, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 50, isContinuation: true, parentCutId: 'c1' }
+    ],
+    'splitMachineQueue: перелив дня → продолжение на след. день, setup=0 (ножи остаются)'
+);
+// 3) Лидер съедает часть окна; хвост растягивается на 3 дня.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 20 }],
+        { dayStartMin: 0, dayEndMin: 100, leader: 5, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [
+        { cutId: 'c1', dayOffset: 0, runs: 9, windowStartMin: 0, startMin: 5, setupMin: 5, durationMin: 90, isContinuation: false, parentCutId: null },
+        { cutId: 'c1', dayOffset: 1, runs: 10, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 100, isContinuation: true, parentCutId: 'c1' },
+        { cutId: 'c1', dayOffset: 2, runs: 1, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 10, isContinuation: true, parentCutId: 'c1' }
+    ],
+    'splitMachineQueue: лидер + многодневный хвост; продолжения без setup'
+);
+// 4) Две одинаковые резки: первая заполняет день, вторая (НЕ продолжение) уходит на день 1.
+var splitTwo = planning.splitMachineQueue(
+    [
+        { id: 'a', materialId: 'm1', winding: 'OUT', knifeWidths: [100], plannedRuns: 10 },
+        { id: 'b', materialId: 'm1', winding: 'OUT', knifeWidths: [100], plannedRuns: 5 }
+    ],
+    { dayStartMin: 0, dayEndMin: 100, times: splitTimes, perPassByCut: { a: 10, b: 10 } }
+);
+assertEqual(splitTwo.length, 2, 'splitMachineQueue: 2 резки → 2 сегмента');
+assertEqual(
+    { cutId: splitTwo[1].cutId, dayOffset: splitTwo[1].dayOffset, isContinuation: splitTwo[1].isContinuation, parentCutId: splitTwo[1].parentCutId, windowStartMin: splitTwo[1].windowStartMin },
+    { cutId: 'b', dayOffset: 1, isContinuation: false, parentCutId: null, windowStartMin: 1440 },
+    'splitMachineQueue: вторая резка — новая (не продолжение), стартует в день 1 в 08:00-эквиваленте'
+);
+// 5) Резка без проходов/длительности — один сегмент, без раскладки.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'z', plannedRuns: 0 }],
+        { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: {} }
+    ),
+    [{ cutId: 'z', dayOffset: 0, runs: 0, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 0, isContinuation: false, parentCutId: null }],
+    'splitMachineQueue: нулевые проходы → один сегмент без разбиения'
+);
+
+// ── #3280: scheduleStartTimestamp — минуты расписания → Unix-штамп (секунды) ──
+// Полночь 2026-06-09 UTC = 1780963200; 08:00 (+480 мин) = 1780963200 + 480*60 = 1780992000.
+assertEqual(planning.scheduleStartTimestamp(1780963200000, 480), 1780992000, 'scheduleStartTimestamp: полночь + 480 мин = 08:00');
+assertEqual(planning.scheduleStartTimestamp(1780963200000, 1440), 1781049600, 'scheduleStartTimestamp: +1 сутки');
+assertEqual(planning.scheduleStartTimestamp('x', 480), 0, 'scheduleStartTimestamp: мусор → 0');
+
 runPreferredWidthsFilterTest()
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)

@@ -1643,6 +1643,82 @@
         });
     }
 
+    // #3280: разбиение очереди ОДНОГО станка по рабочим дням на уровне проходов.
+    // Длительность резки линейна по проходам (windingMinutes × «Кол-во план»), поэтому
+    // резку, упирающуюся в конец рабочего окна, обрезаем по числу влезающих проходов;
+    // остаток проходов — продолжение с 08:00 следующего дня ТОЙ ЖЕ резки без переналадки
+    // (ножи остаются на станке → setup продолжения = 0).
+    //   orderedCuts — уже упорядоченная очередь станка (как из orderCuts).
+    //   opts: { dayStartMin, dayEndMin, leader, times, perPassByCut:{cutId:мин/проход},
+    //           runsByCut:{cutId:проходов} } (perPass/runs можно не задавать — берём из резки).
+    // → массив сегментов [{ cutId, dayOffset, runs, windowStartMin, startMin, setupMin,
+    //    durationMin, isContinuation, parentCutId }] (windowStartMin = первый шаг окна =
+    //    startMin − setupMin; именно его выводим в .atex-pp-cut-num и пишем в t1078).
+    // Вход не мутирует.
+    function splitMachineQueue(orderedCuts, opts){
+        opts = opts || {};
+        var dayStart = Number(opts.dayStartMin != null ? opts.dayStartMin : SHIFT_START_MIN) || 0;
+        var dayEnd = Number(opts.dayEndMin != null ? opts.dayEndMin : SHIFT_END_MIN) || 0;
+        var times = opts.times || DEFAULT_OP_TIMES;
+        var leader = Number(opts.leader != null ? opts.leader : (times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS)) || 0;
+        var perPassByCut = opts.perPassByCut || {};
+        var runsByCut = opts.runsByCut || {};
+        var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
+        var hasWindow = capacity > 0;
+        var segments = [];
+        var day = 0, clock = 0;                      // clock — минут занято в текущем дне (от dayStart)
+        var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
+        (orderedCuts || []).forEach(function(c){
+            var cid = c && c.id;
+            var runs = Math.round(Number(runsByCut[String(cid)] != null ? runsByCut[String(cid)] : c && c.plannedRuns) || 0);
+            var perPass = Number(perPassByCut[String(cid)] != null ? perPassByCut[String(cid)] : 0) || 0;
+            var remaining = runs;
+            var isCont = false;
+            // Резка без проходов/длительности — один сегментик без раскладки по проходам.
+            if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
+                var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
+                var ws0 = day * 1440 + dayStart + clock;
+                segments.push({ cutId: String(cid), dayOffset: day, runs: runs, windowStartMin: round3(ws0),
+                    startMin: round3(ws0 + setup0), setupMin: round3(setup0),
+                    durationMin: round3((runs > 0 && perPass > 0) ? runs * perPass : 0),
+                    isContinuation: false, parentCutId: null });
+                clock += setup0 + ((runs > 0 && perPass > 0) ? runs * perPass : 0);
+                prevPhysical = c;
+                return;
+            }
+            while (remaining > 0) {
+                var setup = isCont ? 0 : (leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0));
+                var avail = capacity - clock;
+                var maxPasses = Math.floor((avail - setup) / perPass);
+                if (maxPasses < 1) {
+                    if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
+                    maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
+                }
+                var passesNow = Math.min(remaining, maxPasses);
+                var windowStart = day * 1440 + dayStart + clock;
+                var segDur = passesNow * perPass;
+                segments.push({ cutId: String(cid), dayOffset: day, runs: passesNow,
+                    windowStartMin: round3(windowStart), startMin: round3(windowStart + setup),
+                    setupMin: round3(setup), durationMin: round3(segDur),
+                    isContinuation: isCont, parentCutId: isCont ? String(cid) : null });
+                clock += setup + segDur;
+                remaining -= passesNow;
+                prevPhysical = c;
+                isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
+            }
+        });
+        return segments;
+    }
+
+    // #3280: минуты расписания (от полуночи дня планирования) → Unix-штамп (секунды).
+    // dayMidnightMs — полночь дня планирования (мс); windowStartMin — минуты окна резки.
+    function scheduleStartTimestamp(dayMidnightMs, windowStartMin){
+        var base = Number(dayMidnightMs);
+        var min = Number(windowStartMin);
+        if (!isFinite(base) || !isFinite(min)) return 0;
+        return Math.floor((base + min * 60000) / 1000);
+    }
+
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
@@ -1658,8 +1734,19 @@
         return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
     }
 
+    // #3280: на карточке (.atex-pp-cut-num) показываем то же время, что и начало
+    // окна в .atex-pp-cut-time — первый шаг тайминга (startMin − setupMin), ЧЧ:ММ.
+    function cutStartWindowMin(sc) {
+        return stripNum(sc && sc.startMin) - stripNum(sc && sc.setupMin);
+    }
     function formatCutStartTime(sc) {
-        return sc ? formatClockHHMM(sc.startMin) : '—';
+        return sc ? formatClock(cutStartWindowMin(sc)) : '—';
+    }
+    // #3280: title карточки — плановая дата+время старта до минут. baseMidnightMs —
+    // полночь дня планирования (день 0 расписания); сегмент сдвинут на windowStartMin.
+    function formatCutStartTitle(sc, baseMidnightMs) {
+        if (!sc) return '';
+        return formatCutNumber(scheduleStartTimestamp(baseMidnightMs, cutStartWindowMin(sc)));
     }
 
     function formatCutWindingLabel(cut) {
@@ -2131,6 +2218,8 @@
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
+        splitMachineQueue: splitMachineQueue,
+        scheduleStartTimestamp: scheduleStartTimestamp,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
@@ -2225,6 +2314,8 @@
         formatClock: formatClock,
         formatClockHHMM: formatClockHHMM,
         formatCutStartTime: formatCutStartTime,
+        formatCutStartTitle: formatCutStartTitle,
+        cutStartWindowMin: cutStartWindowMin,
         formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
         DAY_START_MIN: DAY_START_MIN,
@@ -3046,10 +3137,18 @@
         // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
         // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
         var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
+        // #3280: «Назначение» полосы — Заказ (на эту Партию ГП есть ссылка из Обеспечения)
+        // или Склад (ссылки нет). Набор id Партий ГП, на которые ссылается Обеспечение.
+        var orderedBatchIds = {};
+        (self.supplies || []).forEach(function(s) {
+            var b = s && s.finishedBatchId;
+            if (b != null && String(b) !== '') orderedBatchIds[String(b)] = true;
+        });
         table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
             el('span', { text: 'Ширина, мм' }),
             el('span', { text: 'Кол-во полос' }),
             el('span', { text: 'Рулонов (×' + passes + ')' }),
+            el('span', { text: 'Назначение' }),
             el('span', { text: '' })
         ]));
         var body = el('div', { class: 'atex-pp-strip-body' });
@@ -3122,6 +3221,13 @@
                 row.appendChild(q);
 
                 row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
+
+                // #3280: «Назначение» — Заказ (на эту Партию ГП есть ссылка из Обеспечения) / Склад.
+                var purpose = (s.id != null && orderedBatchIds[String(s.id)]) ? 'Заказ' : 'Склад';
+                row.appendChild(el('span', {
+                    class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + (purpose === 'Заказ' ? 'order' : 'stock'),
+                    text: purpose
+                }));
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -4187,6 +4293,9 @@
         });
         var schedById = {};
         var dayWindow = self.workingWindow();
+        // #3280: полночь дня планирования (день 0 расписания) — для title даты+времени старта.
+        var nowD = new Date(controllerNowMs(self));
+        var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
         var schedule = buildSchedule(activeGroup.cuts, {
             windPoints: windPoints,
             times: self.changeTimes,
@@ -4241,8 +4350,10 @@
                 runLenByCut[String(c.id)], windPoints, self.changeTimes
             );
             var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
+            // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.
+            var cutNumTitle = formatCutStartTitle(sc, planBaseMidnightMs) || cutNumberTitle;
             var info = el('div', { class: 'atex-pp-cut-info' }, [
-                el('span', { class: 'atex-pp-cut-num', title: cutNumberTitle, text: formatCutStartTime(sc) }),
+                el('span', { class: 'atex-pp-cut-num', title: cutNumTitle, text: formatCutStartTime(sc) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
                 el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
