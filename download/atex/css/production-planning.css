@@ -320,7 +320,8 @@
 .atex-pp-strip-table { margin-bottom: 10px; }
 .atex-pp-strip-row {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 40px;   /* #3253: Ширина · Кол-во полос · Рулонов(read-only) · удалить */
+    /* #3280: Ширина · Кол-во полос · Рулонов(read-only) · Назначение · удалить */
+    grid-template-columns: 1fr 1fr 1fr 84px 40px;
     gap: 8px;
     align-items: center;
     margin-bottom: 6px;
@@ -328,6 +329,10 @@
 .atex-pp-strip-head { font-size: 12px; color: var(--pp-muted); font-weight: 600; }
 /* #3253: read-only вычисляемое поле «Рулонов» (полос × проходов) — справочно. */
 .atex-pp-strip-rolls { color: var(--pp-muted); text-align: center; font-variant-numeric: tabular-nums; }
+/* #3280: «Назначение» полосы — Заказ (есть ссылка из Обеспечения) / Склад. */
+.atex-pp-strip-purpose { text-align: center; font-size: 12px; font-weight: 600; }
+.atex-pp-strip-purpose--order { color: var(--pp-ok); }
+.atex-pp-strip-purpose--stock { color: var(--pp-muted); }
 .atex-pp-strip-del { padding: 6px 0; text-align: center; }
 .atex-pp-strip-add { margin-bottom: 12px; }
 

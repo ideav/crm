@@ -1609,7 +1609,208 @@ function runCreateCutMainValueTest() {
     });
 }
 
-runPreferredWidthsFilterTest()
+// #3280: saveSequences пишет очередность И плановое время старта (t1078) одним _m_set.
+function runSaveSequencesT1078Test() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('24308', 'Очередность'),
+            req('1162', 'Статус')
+        ] }
+    };
+    controller.setBusy = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.render = function() {};
+    controller.notify = function() {};
+    controller.post = function(path, fields) {
+        posts.push({ path: path, fields: fields || {} });
+        return Promise.resolve({ obj: 'ok' });
+    };
+    return controller.saveSequences(
+        [{ cutId: 'c1', sequence: 3, planStartTs: 1780992000 }],
+        { silent: true }
+    ).then(function(ok) {
+        assertEqual(ok, true, 'saveSequences: успешное сохранение → true');
+        assertEqual(posts.length, 1, 'saveSequences: один _m_set на резку');
+        assertEqual(posts[0].path, '_m_set/c1?JSON', 'saveSequences: _m_set по cutId');
+        assertEqual(posts[0].fields.t24308, '3', 'saveSequences: пишет очередность t{reqId}');
+        assertEqual(posts[0].fields.t1078, '1780992000', 'saveSequences #3280: пишет время старта в t1078 (главное значение)');
+    });
+}
+
+// #3280: applySplitPlan — update A + create продолжения B (копия Полос + доля Обеспечения) + delete.
+function runApplySplitPlanTest() {
+    var controller = Object.create(api.Controller.prototype);
+    var posts = [];
+    controller.meta = {
+        cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'), req('24308', 'Очередность'), req('1162', 'Статус'),
+            req('16403', 'Кол-во резок план'), req('8463', 'Тип намотки'), req('1140', 'Партия сырья')
+        ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1114', 'Кол-во рулонов') ] },
+        supply: { id: '1077', val: 'Обеспечение', reqs: [
+            req('1149', 'Метраж, м'), req('16424', 'Кол-во рулонов'), req('15016', 'Партия ГП'), req('1154', 'В работе')
+        ] }
+    };
+    controller.cuts = [{ id: 'A', slitter: { id: 'm1' }, status: 'Запланирована', winding: 'OUT', batchId: '', plannedRuns: 15, number: '999' }];
+    controller.supplies = [{ id: 'sup1', cutId: 'A', positionId: 'pos1', finishedBatchId: 'strip1', footage: 1500, rolls: 15 }];
+    controller.loadStripsForCut = function() { return Promise.resolve([{ id: 'strip1', width: '100', qty: '2' }]); };
+    controller.setBusy = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    controller.render = function() {};
+    controller.notify = function() {};
+    controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({ obj: 'newB' }); };
+    var ops = {
+        updates: [{ cutId: 'A', sequence: 1, planStartTs: 1000, plannedRuns: 10 }],
+        creates: [{ parentCutId: 'A', sequence: 2, planStartTs: 2000, plannedRuns: 5 }],
+        deletes: ['old1']
+    };
+    function one(p) { return posts.filter(function(x) { return x.path === p; })[0]; }
+    return controller.applySplitPlan(ops).then(function(ok) {
+        assertEqual(ok, true, 'applySplitPlan → true');
+        var setA = one('_m_set/A?JSON');
+        assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность');
+        assertEqual(setA && setA.fields.t1078, '1000', 'applySplitPlan: A — t1078 (время старта сегодня)');
+        assertEqual(setA && setA.fields.t16403, '10', 'applySplitPlan: A — проходы сегодня (10)');
+        var setSup = one('_m_set/sup1?JSON');
+        assertEqual(setSup && setSup.fields.t16424, 10, 'applySplitPlan: Обеспечение A уменьшено до 10 рулонов (доля сегодня)');
+        var newB = one('_m_new/1078?JSON&up=1');
+        assertEqual(newB && newB.fields.t1078, 2000, 'applySplitPlan: B — t1078 (старт след. дня)');
+        assertEqual(newB && newB.fields.t16403, 5, 'applySplitPlan: B — остаток проходов (5)');
+        var newStrip = one('_m_new/1081?JSON&up=newB');
+        assertEqual(newStrip && newStrip.fields.t1112, '100', 'applySplitPlan: B — копия Полосы (ширина 100)');
+        assertEqual(newStrip && newStrip.fields.t1114, '2', 'applySplitPlan: B — копия Полосы (qty за проход 2)');
+        var newSup = one('_m_new/1077?JSON&up=pos1');
+        assertEqual(newSup && newSup.fields.t16424, 5, 'applySplitPlan: B — Обеспечение 5 рулонов (доля остатка)');
+        assertEqual(newSup && newSup.fields.t15016, 'newB', 'applySplitPlan: B — Обеспечение ссылается на скопированную Полосу B');
+        assertEqual(posts.filter(function(x) { return x.path.indexOf('_m_del/old1') === 0; }).length, 1, 'applySplitPlan: удалена прежняя запись-продолжение');
+    });
+}
+
+// ── #3280: splitMachineQueue — разбиение очереди станка по дням на уровне проходов ──
+var splitTimes = { BETWEEN_CUTS: 0 };
+// 1) Резка целиком влезает в день — один сегмент, без переналадки.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 10 }],
+        { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [{ cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null }],
+    'splitMachineQueue: резка целиком в одном дне → один сегмент'
+);
+// 2) Резка не влезает — обрезается по проходам, остаток продолжается на след. день без setup.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 15 }],
+        { dayStartMin: 0, dayEndMin: 100, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [
+        { cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null },
+        { cutId: 'c1', dayOffset: 1, runs: 5, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 50, isContinuation: true, parentCutId: 'c1' }
+    ],
+    'splitMachineQueue: перелив дня → продолжение на след. день, setup=0 (ножи остаются)'
+);
+// 3) Лидер съедает часть окна; хвост растягивается на 3 дня.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'c1', plannedRuns: 20 }],
+        { dayStartMin: 0, dayEndMin: 100, leader: 5, times: splitTimes, perPassByCut: { c1: 10 } }
+    ),
+    [
+        { cutId: 'c1', dayOffset: 0, runs: 9, windowStartMin: 0, startMin: 5, setupMin: 5, durationMin: 90, isContinuation: false, parentCutId: null },
+        { cutId: 'c1', dayOffset: 1, runs: 10, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 100, isContinuation: true, parentCutId: 'c1' },
+        { cutId: 'c1', dayOffset: 2, runs: 1, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 10, isContinuation: true, parentCutId: 'c1' }
+    ],
+    'splitMachineQueue: лидер + многодневный хвост; продолжения без setup'
+);
+// 4) Две одинаковые резки: первая заполняет день, вторая (НЕ продолжение) уходит на день 1.
+var splitTwo = planning.splitMachineQueue(
+    [
+        { id: 'a', materialId: 'm1', winding: 'OUT', knifeWidths: [100], plannedRuns: 10 },
+        { id: 'b', materialId: 'm1', winding: 'OUT', knifeWidths: [100], plannedRuns: 5 }
+    ],
+    { dayStartMin: 0, dayEndMin: 100, times: splitTimes, perPassByCut: { a: 10, b: 10 } }
+);
+assertEqual(splitTwo.length, 2, 'splitMachineQueue: 2 резки → 2 сегмента');
+assertEqual(
+    { cutId: splitTwo[1].cutId, dayOffset: splitTwo[1].dayOffset, isContinuation: splitTwo[1].isContinuation, parentCutId: splitTwo[1].parentCutId, windowStartMin: splitTwo[1].windowStartMin },
+    { cutId: 'b', dayOffset: 1, isContinuation: false, parentCutId: null, windowStartMin: 1440 },
+    'splitMachineQueue: вторая резка — новая (не продолжение), стартует в день 1 в 08:00-эквиваленте'
+);
+// 5) Резка без проходов/длительности — один сегмент, без раскладки.
+assertEqual(
+    planning.splitMachineQueue(
+        [{ id: 'z', plannedRuns: 0 }],
+        { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: {} }
+    ),
+    [{ cutId: 'z', dayOffset: 0, runs: 0, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 0, isContinuation: false, parentCutId: null }],
+    'splitMachineQueue: нулевые проходы → один сегмент без разбиения'
+);
+
+// ── #3280: scheduleStartTimestamp — минуты расписания → Unix-штамп (секунды) ──
+// Полночь 2026-06-09 UTC = 1780963200; 08:00 (+480 мин) = 1780963200 + 480*60 = 1780992000.
+assertEqual(planning.scheduleStartTimestamp(1780963200000, 480), 1780992000, 'scheduleStartTimestamp: полночь + 480 мин = 08:00');
+assertEqual(planning.scheduleStartTimestamp(1780963200000, 1440), 1781049600, 'scheduleStartTimestamp: +1 сутки');
+assertEqual(planning.scheduleStartTimestamp('x', 480), 0, 'scheduleStartTimestamp: мусор → 0');
+
+// ── #3280: planStartTimestamps — плановое время старта резки → штамп для t1078 ──
+// windPoints WIND_100=1 мин/проход; c1 10 проходов → старт = начало смены (08:00).
+// База: 2026-06-09 00:00 UTC = 1780963200000; 08:00 = +480 мин = 1780992000.
+assertEqual(
+    planning.planStartTimestamps(
+        [{ id: 'c1', slitter: { id: 'm1' }, plannedRuns: 10 }],
+        { windPoints: [{ m: 100, min: 1 }], times: { BETWEEN_CUTS: 0 }, dayStartMin: 480, dayEndMin: 990,
+          runLengthByCut: { c1: 100 }, planBaseMidnightMs: 1780963200000 }
+    ),
+    { c1: 1780992000 },
+    'planStartTimestamps: первая резка станка стартует в 08:00 → t1078-штамп'
+);
+var twoTs = planning.planStartTimestamps(
+    [
+        { id: 'c1', slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50], plannedRuns: 10 },
+        { id: 'c2', slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50], plannedRuns: 5 }
+    ],
+    { windPoints: [{ m: 100, min: 1 }], times: { BETWEEN_CUTS: 0 }, dayStartMin: 480, dayEndMin: 990,
+      runLengthByCut: { c1: 100, c2: 100 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(twoTs.c1, 1780992000, 'planStartTimestamps: c1 в 08:00');
+assertEqual(twoTs.c2 > twoTs.c1, true, 'planStartTimestamps: c2 стартует позже c1 (последовательно)');
+
+// ── #3280: mergeContinuationChains — слияние записей-продолжений (без маркера) ──
+var sigBase = { slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50] };
+function withSig(id, planDate, runs) {
+    return { id: id, slitter: sigBase.slitter, materialId: sigBase.materialId, winding: sigBase.winding, knifeWidths: sigBase.knifeWidths, plannedRuns: runs, planDate: planDate };
+}
+// Смежные дни (06-09 и 06-10) + одна сигнатура → одна логическая резка, продолжение в deletes.
+var mc = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781049600', 5)]);
+assertEqual(mc.cuts.length, 1, 'mergeContinuationChains: смежные дни → одна логическая резка');
+assertEqual({ id: mc.cuts[0].id, runs: mc.cuts[0].plannedRuns }, { id: 'c1', runs: 15 }, 'mergeContinuationChains: выживает ранняя, проходы суммируются');
+assertEqual(mc.deletes, ['c2'], 'mergeContinuationChains: продолжение → в deletes');
+// Несмежные дни (06-09 и 06-12) → НЕ сливаем.
+var mc2 = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781222400', 5)]);
+assertEqual(mc2.cuts.length, 2, 'mergeContinuationChains: несмежные дни → не сливаем');
+assertEqual(mc2.deletes, [], 'mergeContinuationChains: несмежные → нет удалений');
+
+// ── #3280: planCutOperations — overflow-резка → update первого сегмента + create продолжения ──
+var ops = planning.planCutOperations(
+    [withSig('c1', '1780963200', 15)],
+    { perPassByCut: { c1: 10 }, dayStartMin: 0, dayEndMin: 100, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 }], 'planCutOperations: первый сегмент → update существующей записи (10 проходов сегодня)');
+assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
+assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
+
+// ── #3280: splitSupplyShares — деление Обеспечения по проходам (рулоны целые) ──
+assertEqual(planning.splitSupplyShares(15, 1500, [10, 5]), [{ rolls: 10, footage: 1000 }, { rolls: 5, footage: 500 }], 'splitSupplyShares: 15 рулонов / 1500 м по 10:5 → 10/1000 и 5/500');
+assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage: 30 }, { rolls: 3, footage: 30 }, { rolls: 3, footage: 30 }], 'splitSupplyShares: остаток рулона по наибольшей дробной части; сумма = 10');
+assertEqual(planning.splitSupplyShares(7, 700, []), [], 'splitSupplyShares: нет сегментов → []');
+assertEqual(planning.splitSupplyShares(7, 700, [0, 0]), [{ rolls: 7, footage: 700 }, { rolls: 0, footage: 0 }], 'splitSupplyShares: нулевые проходы → всё в сегмент 0');
+
+runSaveSequencesT1078Test()
+    .then(runApplySplitPlanTest)
+    .then(runPreferredWidthsFilterTest)
     .then(runGenerateCutsDeferredGpTest)
     .then(runGenerateCutsSlitterAffinityTest)
     .then(runGenerateCutsSequenceByKnivesTest)

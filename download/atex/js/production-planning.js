@@ -1643,6 +1643,268 @@
         });
     }
 
+    // #3280: разбиение очереди ОДНОГО станка по рабочим дням на уровне проходов.
+    // Длительность резки линейна по проходам (windingMinutes × «Кол-во план»), поэтому
+    // резку, упирающуюся в конец рабочего окна, обрезаем по числу влезающих проходов;
+    // остаток проходов — продолжение с 08:00 следующего дня ТОЙ ЖЕ резки без переналадки
+    // (ножи остаются на станке → setup продолжения = 0).
+    //   orderedCuts — уже упорядоченная очередь станка (как из orderCuts).
+    //   opts: { dayStartMin, dayEndMin, leader, times, perPassByCut:{cutId:мин/проход},
+    //           runsByCut:{cutId:проходов} } (perPass/runs можно не задавать — берём из резки).
+    // → массив сегментов [{ cutId, dayOffset, runs, windowStartMin, startMin, setupMin,
+    //    durationMin, isContinuation, parentCutId }] (windowStartMin = первый шаг окна =
+    //    startMin − setupMin; именно его выводим в .atex-pp-cut-num и пишем в t1078).
+    // Вход не мутирует.
+    function splitMachineQueue(orderedCuts, opts){
+        opts = opts || {};
+        var dayStart = Number(opts.dayStartMin != null ? opts.dayStartMin : SHIFT_START_MIN) || 0;
+        var dayEnd = Number(opts.dayEndMin != null ? opts.dayEndMin : SHIFT_END_MIN) || 0;
+        var times = opts.times || DEFAULT_OP_TIMES;
+        var leader = Number(opts.leader != null ? opts.leader : (times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS)) || 0;
+        var perPassByCut = opts.perPassByCut || {};
+        var runsByCut = opts.runsByCut || {};
+        var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
+        var hasWindow = capacity > 0;
+        var segments = [];
+        var day = 0, clock = 0;                      // clock — минут занято в текущем дне (от dayStart)
+        var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
+        (orderedCuts || []).forEach(function(c){
+            var cid = c && c.id;
+            var runs = Math.round(Number(runsByCut[String(cid)] != null ? runsByCut[String(cid)] : c && c.plannedRuns) || 0);
+            var perPass = Number(perPassByCut[String(cid)] != null ? perPassByCut[String(cid)] : 0) || 0;
+            var remaining = runs;
+            var isCont = false;
+            // Резка без проходов/длительности — один сегментик без раскладки по проходам.
+            if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
+                var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
+                var ws0 = day * 1440 + dayStart + clock;
+                segments.push({ cutId: String(cid), dayOffset: day, runs: runs, windowStartMin: round3(ws0),
+                    startMin: round3(ws0 + setup0), setupMin: round3(setup0),
+                    durationMin: round3((runs > 0 && perPass > 0) ? runs * perPass : 0),
+                    isContinuation: false, parentCutId: null });
+                clock += setup0 + ((runs > 0 && perPass > 0) ? runs * perPass : 0);
+                prevPhysical = c;
+                return;
+            }
+            while (remaining > 0) {
+                var setup = isCont ? 0 : (leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0));
+                var avail = capacity - clock;
+                var maxPasses = Math.floor((avail - setup) / perPass);
+                if (maxPasses < 1) {
+                    if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
+                    maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
+                }
+                var passesNow = Math.min(remaining, maxPasses);
+                var windowStart = day * 1440 + dayStart + clock;
+                var segDur = passesNow * perPass;
+                segments.push({ cutId: String(cid), dayOffset: day, runs: passesNow,
+                    windowStartMin: round3(windowStart), startMin: round3(windowStart + setup),
+                    setupMin: round3(setup), durationMin: round3(segDur),
+                    isContinuation: isCont, parentCutId: isCont ? String(cid) : null });
+                clock += setup + segDur;
+                remaining -= passesNow;
+                prevPhysical = c;
+                isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
+            }
+        });
+        return segments;
+    }
+
+    // #3280: минуты расписания (от полуночи дня планирования) → Unix-штамп (секунды).
+    // dayMidnightMs — полночь дня планирования (мс); windowStartMin — минуты окна резки.
+    function scheduleStartTimestamp(dayMidnightMs, windowStartMin){
+        var base = Number(dayMidnightMs);
+        var min = Number(windowStartMin);
+        if (!isFinite(base) || !isFinite(min)) return 0;
+        return Math.floor((base + min * 60000) / 1000);
+    }
+
+    // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
+    // главное значение «Производственной резки»). Группируем по станку, упорядочиваем
+    // очередь (orderCuts), строим расписание (buildSchedule) и берём начало окна
+    // (startMin − setupMin) — то же время, что в .atex-pp-cut-num / .atex-pp-cut-time.
+    //   opts: { weights, windPoints, times, dayStartMin, dayEndMin, runLengthByCut,
+    //           planBaseMidnightMs }. → { cutId: штамп(сек) }. Вход не мутирует.
+    function planStartTimestamps(cuts, opts){
+        opts = opts || {};
+        var base = Number(opts.planBaseMidnightMs);
+        var byMachine = {};
+        var order = [];
+        (cuts || []).forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var key = String(sid);
+            if (!byMachine[key]) { byMachine[key] = []; order.push(key); }
+            byMachine[key].push(c);
+        });
+        var out = {};
+        order.forEach(function(key){
+            var ordered = orderCuts(byMachine[key], opts.weights);
+            var sched = buildSchedule(ordered, {
+                windPoints: opts.windPoints || [],
+                times: opts.times || DEFAULT_OP_TIMES,
+                runLengthByCut: opts.runLengthByCut || {},
+                shiftStartMin: opts.dayStartMin,
+                shiftEndMin: opts.dayEndMin
+            });
+            sched.forEach(function(sc){
+                var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
+                out[String(sc.cutId)] = scheduleStartTimestamp(base, windowStart);
+            });
+        });
+        return out;
+    }
+
+    // #3280: номер календарного дня плановой даты (для смежности «продолжений»). null — нет даты.
+    function planDayNumber(c){
+        var s = String(c && c.planDate != null && c.planDate !== '' ? c.planDate : (c && c.number)).trim();
+        if (!/^\d{9,13}$/.test(s)) return null;
+        var num = Number(s);
+        var ms = num >= 1e12 ? num : num * 1000;
+        return Math.floor(ms / 86400000);
+    }
+
+    // #3280: сигнатура «той же резки на станке» — станок|сырьё|намотка|набор ножей.
+    // По ней распознаём цепочки записей-продолжений (без схемного маркера).
+    function continuationSignature(c){
+        var ks = ((c && c.knifeWidths) || []).slice().map(Number).sort(function(a, b){ return a - b; });
+        return [
+            (c && c.slitter && c.slitter.id) == null ? '' : String(c.slitter.id),
+            (c && c.materialId) == null ? '' : String(c.materialId),
+            normWinding(c && c.winding),
+            ks.join(',')
+        ].join('|');
+    }
+
+    // #3280: слить записи-продолжения обратно в логические резки перед пере-разбиением.
+    // Эвристика (без маркера): одинаковая сигнатура continuationSignature + смежные
+    // календарные дни (разница 1) → одна цепочка; выживает самая ранняя запись (её id),
+    // её «Кол-во план» = сумма проходов цепочки; остальные записи — в deletes.
+    // → { cuts:[логические резки], deletes:[id записей-продолжений], chainByLogical:{logicalId:[id…]} }.
+    // Вход не мутирует.
+    function mergeContinuationChains(cuts){
+        var groups = {}, order = [];
+        (cuts || []).forEach(function(c){
+            var s = continuationSignature(c);
+            if (!groups[s]) { groups[s] = []; order.push(s); }
+            groups[s].push(c);
+        });
+        var logical = [], deletes = [], chainByLogical = {};
+        order.forEach(function(s){
+            var arr = groups[s].slice().sort(function(a, b){
+                var da = planDayNumber(a), db = planDayNumber(b);
+                if (da == null && db == null) return 0;
+                if (da == null) return 1;
+                if (db == null) return -1;
+                return da - db;
+            });
+            var i = 0;
+            while (i < arr.length) {
+                var chain = [arr[i]];
+                var j = i + 1;
+                while (j < arr.length) {
+                    var prevDay = planDayNumber(arr[j - 1]);
+                    var curDay = planDayNumber(arr[j]);
+                    if (prevDay == null || curDay == null || (curDay - prevDay) !== 1) break;
+                    chain.push(arr[j]);
+                    j++;
+                }
+                var head = chain[0];
+                var lg = {};
+                for (var k in head) { if (Object.prototype.hasOwnProperty.call(head, k)) lg[k] = head[k]; }
+                lg.plannedRuns = chain.reduce(function(sum, c){ return sum + (Number(c.plannedRuns) || 0); }, 0);
+                logical.push(lg);
+                chainByLogical[String(head.id)] = chain.map(function(c){ return String(c.id); });
+                for (var m = 1; m < chain.length; m++) deletes.push(String(chain[m].id));
+                i = j;
+            }
+        });
+        return { cuts: logical, deletes: deletes, chainByLogical: chainByLogical };
+    }
+
+    // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
+    // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
+    // раскладывает по дням на уровне проходов (splitMachineQueue). →
+    //   { updates:[{cutId, sequence, planStartTs, plannedRuns}],            // первый сегмент → существующая запись
+    //     creates:[{parentCutId, sequence, planStartTs, plannedRuns}],       // продолжения → новые записи
+    //     deletes:[cutId…] }                                                 // записи-продолжения прежних цепочек
+    // Деление Обеспечения и копию Полос на продолжения выполняет аппликатор (нужны id новых
+    // записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
+    function planCutOperations(cuts, opts){
+        opts = opts || {};
+        var base = Number(opts.planBaseMidnightMs);
+        var merged = mergeContinuationChains(cuts);
+        var perPass = opts.perPassByCut || {};
+        var byMachine = {}, mOrder = [];
+        merged.cuts.forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var key = String(sid);
+            if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
+            byMachine[key].push(c);
+        });
+        var updates = [], creates = [];
+        mOrder.forEach(function(key){
+            var ordered = orderCuts(byMachine[key], opts.weights);
+            var runsByCut = {};
+            ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
+            var segs = splitMachineQueue(ordered, {
+                dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
+                leader: opts.leader, times: opts.times,
+                perPassByCut: perPass, runsByCut: runsByCut
+            });
+            segs.forEach(function(seg, idx){
+                var ts = scheduleStartTimestamp(base, seg.windowStartMin);
+                if (!seg.isContinuation) {
+                    updates.push({ cutId: String(seg.cutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                } else {
+                    creates.push({ parentCutId: String(seg.parentCutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                }
+            });
+        });
+        return { updates: updates, creates: creates, deletes: merged.deletes };
+    }
+
+    // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
+    // ПРОПОРЦИОНАЛЬНО проходам. Рулоны — целые, сумма долей = исходным рулонам
+    // (остаток по наибольшей дробной части). Метраж — дробно, последняя доля = остаток.
+    //   rolls, footage — исходные; runs — массив проходов по сегментам (сегмент 0 = «сегодня»).
+    // → [{ rolls, footage }] длиной runs.length. runs пуст/сумма 0 → всё в сегмент 0.
+    function splitSupplyShares(rolls, footage, runs){
+        var r = (runs || []).map(function(x){ return Number(x) || 0; });
+        var n = r.length;
+        var R = Math.round(Number(rolls) || 0);
+        var F = Number(footage) || 0;
+        if (n === 0) return [];
+        var total = r.reduce(function(s, x){ return s + x; }, 0);
+        var out = [];
+        if (!(total > 0)) {
+            for (var z = 0; z < n; z++) out.push({ rolls: z === 0 ? R : 0, footage: z === 0 ? round3(F) : 0 });
+            return out;
+        }
+        // Рулоны: floor + раздача остатка по наибольшей дробной части.
+        var base = [], rem = [], used = 0;
+        for (var i = 0; i < n; i++) {
+            var exact = R * r[i] / total;
+            var fl = Math.floor(exact);
+            base.push(fl); rem.push({ idx: i, frac: exact - fl }); used += fl;
+        }
+        var left = R - used;
+        rem.sort(function(a, b){ return b.frac - a.frac; });
+        for (var k = 0; k < left; k++) base[rem[k % n].idx] += 1;
+        // Метраж: пропорционально, последняя ненулевая доля добирает остаток (точная сумма).
+        var fAcc = 0, lastIdx = -1;
+        for (var j = 0; j < n; j++) if (r[j] > 0) lastIdx = j;
+        for (var m2 = 0; m2 < n; m2++) {
+            var fv;
+            if (r[m2] <= 0) fv = 0;
+            else if (m2 === lastIdx) fv = round3(F - fAcc);
+            else { fv = round3(F * r[m2] / total); fAcc += fv; }
+            out.push({ rolls: base[m2], footage: fv });
+        }
+        return out;
+    }
+
     // Минуты от полуночи → «ЧЧ:ММ» (с «+Nд», если перевалило за сутки). Терпимо к числам.
     function formatClock(min){
         var m = Math.round(Number(min) || 0);
@@ -1658,8 +1920,19 @@
         return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
     }
 
+    // #3280: на карточке (.atex-pp-cut-num) показываем то же время, что и начало
+    // окна в .atex-pp-cut-time — первый шаг тайминга (startMin − setupMin), ЧЧ:ММ.
+    function cutStartWindowMin(sc) {
+        return stripNum(sc && sc.startMin) - stripNum(sc && sc.setupMin);
+    }
     function formatCutStartTime(sc) {
-        return sc ? formatClockHHMM(sc.startMin) : '—';
+        return sc ? formatClock(cutStartWindowMin(sc)) : '—';
+    }
+    // #3280: title карточки — плановая дата+время старта до минут. baseMidnightMs —
+    // полночь дня планирования (день 0 расписания); сегмент сдвинут на windowStartMin.
+    function formatCutStartTitle(sc, baseMidnightMs) {
+        if (!sc) return '';
+        return formatCutNumber(scheduleStartTimestamp(baseMidnightMs, cutStartWindowMin(sc)));
     }
 
     function formatCutWindingLabel(cut) {
@@ -2131,6 +2404,13 @@
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
+        splitMachineQueue: splitMachineQueue,
+        scheduleStartTimestamp: scheduleStartTimestamp,
+        planStartTimestamps: planStartTimestamps,
+        continuationSignature: continuationSignature,
+        mergeContinuationChains: mergeContinuationChains,
+        planCutOperations: planCutOperations,
+        splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
@@ -2225,6 +2505,8 @@
         formatClock: formatClock,
         formatClockHHMM: formatClockHHMM,
         formatCutStartTime: formatCutStartTime,
+        formatCutStartTitle: formatCutStartTitle,
+        cutStartWindowMin: cutStartWindowMin,
         formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
         DAY_START_MIN: DAY_START_MIN,
@@ -3046,10 +3328,18 @@
         // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
         // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
         var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
+        // #3280: «Назначение» полосы — Заказ (на эту Партию ГП есть ссылка из Обеспечения)
+        // или Склад (ссылки нет). Набор id Партий ГП, на которые ссылается Обеспечение.
+        var orderedBatchIds = {};
+        (self.supplies || []).forEach(function(s) {
+            var b = s && s.finishedBatchId;
+            if (b != null && String(b) !== '') orderedBatchIds[String(b)] = true;
+        });
         table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
             el('span', { text: 'Ширина, мм' }),
             el('span', { text: 'Кол-во полос' }),
             el('span', { text: 'Рулонов (×' + passes + ')' }),
+            el('span', { text: 'Назначение' }),
             el('span', { text: '' })
         ]));
         var body = el('div', { class: 'atex-pp-strip-body' });
@@ -3122,6 +3412,13 @@
                 row.appendChild(q);
 
                 row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
+
+                // #3280: «Назначение» — Заказ (на эту Партию ГП есть ссылка из Обеспечения) / Склад.
+                var purpose = (s.id != null && orderedBatchIds[String(s.id)]) ? 'Заказ' : 'Склад';
+                row.appendChild(el('span', {
+                    class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + (purpose === 'Заказ' ? 'order' : 'stock'),
+                    text: purpose
+                }));
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -3805,11 +4102,17 @@
 
         // Последовательное сохранение (чтобы не перегружать сервер).
         var fieldKey = 't' + seqReqId;
+        // #3280: t1078 = главное значение «Производственной резки» (плановое время старта).
+        // Пишется тем же _m_set (docs/kb/crud.md: _m_set задаёт любую колонку, включая первую).
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         var chain = Promise.resolve();
         pairs.forEach(function(p) {
             chain = chain.then(function() {
                 var fields = {};
-                fields[fieldKey] = String(p.sequence);
+                if (p.sequence != null && p.sequence !== '') fields[fieldKey] = String(p.sequence);
+                // #3280: плановое время старта (Unix-штамп) → t1078, если задано и валидно.
+                var ts = Number(p.planStartTs);
+                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
                 return self.post('_m_set/' + p.cutId + '?JSON', fields);
             });
         });
@@ -3830,6 +4133,135 @@
         });
     };
 
+    // #3280: применить план разбиения резок по дням (planCutOperations):
+    //   updates → _m_set (очередность + t1078 + плановые проходы сегодня);
+    //   creates → _m_new запись-продолжение B (на след. день) + копия Полос (тот же
+    //     per-pass раскрой) + Обеспечение долей сегмента (splitSupplyShares, пропорц. проходам);
+    //   deletes → _m_del записей-продолжений прежних цепочек (mergeContinuationChains).
+    // Обеспечение «сегодня» (A) уменьшается до своей доли. Последовательно (не грузим сервер).
+    AtexProductionPlanning.prototype.applySplitPlan = function(ops) {
+        var self = this;
+        var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
+        if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
+        var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
+        var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
+        var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
+        var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var cutReqIds = {
+            slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
+            materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
+            plannedRuns: runsReqId,
+            status: reqIdByName(cutMeta, CUT_REQ.status),
+            sequence: seqReqId,
+            winding: reqIdByName(cutMeta, CUT_REQ.winding)
+        };
+        // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
+        var createsByParent = {};
+        (ops.creates || []).forEach(function(cr) { (createsByParent[cr.parentCutId] = createsByParent[cr.parentCutId] || []).push(cr); });
+        var updateByCut = {};
+        (ops.updates || []).forEach(function(u) { updateByCut[u.cutId] = u; });
+
+        this.setBusy(true);
+        var chain = Promise.resolve();
+
+        // 1) Обновить существующие записи (первый сегмент каждой логической резки).
+        (ops.updates || []).forEach(function(u) {
+            chain = chain.then(function() {
+                var fields = {};
+                if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
+                var ts = Number(u.planStartTs);
+                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
+                if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
+                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+            });
+        });
+
+        // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
+        Object.keys(createsByParent).forEach(function(parentId) {
+            var parentCut = cutsById[parentId];
+            var crs = createsByParent[parentId];
+            var upd = updateByCut[parentId];
+            var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
+            var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
+            chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
+                var parentSupplies = (self.supplies || []).filter(function(s) { return String(s.cutId) === String(parentId); });
+                var shareBySupply = parentSupplies.map(function(s) { return { s: s, shares: splitSupplyShares(s.rolls, s.footage, segRuns) }; });
+                var cChain = Promise.resolve();
+                // 2a) уменьшить Обеспечение A до доли сегмента 0.
+                shareBySupply.forEach(function(item) {
+                    cChain = cChain.then(function() {
+                        var sh = item.shares[0] || { rolls: 0, footage: 0 };
+                        var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                            finishedBatchId: item.s.finishedBatchId,
+                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                            active: '1', status: SUPPLY_STATUSES[0]
+                        });
+                        return self.post('_m_set/' + item.s.id + '?JSON', f);
+                    });
+                });
+                // 2b) каждое продолжение B (сегменты 1..N).
+                crs.forEach(function(cr, ci) {
+                    var segIdx = ci + 1;
+                    cChain = cChain.then(function() {
+                        var cutFields = buildFields(cutReqIds, {
+                            status: (parentCut && parentCut.status) || CUT_STATUSES[0],
+                            slitter: parentCut && parentCut.slitter && parentCut.slitter.id,
+                            materialBatch: parentCut && parentCut.batchId,
+                            plannedRuns: cr.plannedRuns,
+                            sequence: cr.sequence,
+                            winding: normWinding(parentCut && parentCut.winding)
+                        });
+                        cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
+                        return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
+                            var bId = res && (res.obj || res.id || res.i);
+                            if (!bId) throw new Error('Сервер не вернул id продолжения резки');
+                            var stripMap = {};
+                            var bChain = Promise.resolve();
+                            (parentStrips || []).forEach(function(st) {
+                                bChain = bChain.then(function() {
+                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, rolls: st.qty, active: '1' });
+                                    return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
+                                        var nid = r2 && (r2.obj || r2.id || r2.i);
+                                        if (nid) stripMap[String(st.id)] = String(nid);
+                                    });
+                                });
+                            });
+                            shareBySupply.forEach(function(item) {
+                                bChain = bChain.then(function() {
+                                    var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
+                                    if (!(sh.rolls > 0) && !(sh.footage > 0)) return;
+                                    if (item.s.positionId == null) return;
+                                    var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
+                                    var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                        finishedBatchId: fb,
+                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                                        active: '1', status: SUPPLY_STATUSES[0]
+                                    });
+                                    return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
+                                });
+                            });
+                            return bChain;
+                        });
+                    });
+                });
+                return cChain;
+            });
+        });
+
+        // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
+        (ops.deletes || []).forEach(function(id) {
+            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); });
+        });
+
+        return chain.then(function() { return self.reload(); }).then(function() {
+            self.setBusy(false); self.render(); return true;
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка разбиения резок: ' + err.message, 'error');
+            return false;
+        });
+    };
+
     // Авто-планирование: запускает planQueues на текущих резках, сохраняет
     // изменившиеся значения «Очередности» через saveSequences, затем перезагружает
     // очередь. Подтверждение реализуется без native confirm(): если доступен
@@ -3843,24 +4275,55 @@
 
         function doRun(selectedStrategy) {
             var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
-            var plan = planQueues(self.cuts, planOptions);
 
-            // Отбираем резки с изменившейся очерёдностью.
-            var cutsById = {};
-            self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-            var changed = plan.filter(function(p) {
-                var cut = cutsById[String(p.cutId)];
-                return cut && Number(cut.sequence) !== p.sequence;
+            // #3280: план разбиения по дням + плановое время старта (t1078).
+            var dayWindow = self.workingWindow();
+            var nowD = new Date(controllerNowMs(self));
+            var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+            var windPoints = windingPointsFromTimes(self.opTimes || {});
+            var perPassByCut = {};
+            self.cuts.forEach(function(c) {
+                perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
+            });
+            var ops = planCutOperations(self.cuts, {
+                weights: planOptions,
+                times: self.changeTimes,
+                dayStartMin: dayWindow.startMin,
+                dayEndMin: dayWindow.cutEndMin,
+                perPassByCut: perPassByCut,
+                planBaseMidnightMs: planBaseMidnightMs
             });
 
-            if (!changed.length) {
+            // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
+            var createParents = {};
+            (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
+            var cutsById = {};
+            self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
+            // Обновляем только то, что реально изменилось (очередность / время старта / проходы).
+            var changedUpdates = (ops.updates || []).filter(function(u) {
+                if (createParents[String(u.cutId)]) return true;
+                var cut = cutsById[String(u.cutId)];
+                if (!cut) return false;
+                var seqChanged = Number(cut.sequence) !== u.sequence;
+                var tsNew = Number(u.planStartTs);
+                var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
+                var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
+                var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
+                return seqChanged || tsChanged || runsChanged;
+            });
+
+            if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
                 self.notify('Очередь уже оптимальна, изменений нет', 'info');
                 return;
             }
 
-            self.saveSequences(changed, { silent: true }).then(function(ok) {
-                // saveSequences уже вызвал reload+render; добавляем итоговое уведомление только при успехе.
-                if (ok) self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
+            self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes }).then(function(ok) {
+                if (!ok) return;   // applySplitPlan уже сделал reload+render и (при ошибке) уведомил
+                var total = (ops.updates || []).length + (ops.creates || []).length;
+                var extra = [];
+                if ((ops.creates || []).length) extra.push('перенесено на след. день: ' + ops.creates.length);
+                if ((ops.deletes || []).length) extra.push('слито продолжений: ' + ops.deletes.length);
+                self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + total + ' резок' + (extra.length ? ' (' + extra.join('; ') + ')' : ''), 'success');
             });
         }
 
@@ -4187,6 +4650,9 @@
         });
         var schedById = {};
         var dayWindow = self.workingWindow();
+        // #3280: полночь дня планирования (день 0 расписания) — для title даты+времени старта.
+        var nowD = new Date(controllerNowMs(self));
+        var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
         var schedule = buildSchedule(activeGroup.cuts, {
             windPoints: windPoints,
             times: self.changeTimes,
@@ -4241,8 +4707,10 @@
                 runLenByCut[String(c.id)], windPoints, self.changeTimes
             );
             var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
+            // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.
+            var cutNumTitle = formatCutStartTitle(sc, planBaseMidnightMs) || cutNumberTitle;
             var info = el('div', { class: 'atex-pp-cut-info' }, [
-                el('span', { class: 'atex-pp-cut-num', title: cutNumberTitle, text: formatCutStartTime(sc) }),
+                el('span', { class: 'atex-pp-cut-num', title: cutNumTitle, text: formatCutStartTime(sc) }),
                 el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                 el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
                 el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
