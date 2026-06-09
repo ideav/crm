@@ -3867,6 +3867,42 @@
             });
         });
 
+        // #3280: главное значение резки (t1078) = ПЛАНОВОЕ ВРЕМЯ СТАРТА, а не время
+        // создания. По каждому станку строим расписание (buildSchedule в порядке
+        // очерёдности) и берём начало окна (startMin − setupMin) как Unix-штамп.
+        // buildSchedule сам переносит не влезающие резки на след. день → их штамп
+        // попадает на следующий день, и они отображаются в следующем дне.
+        (function() {
+            var windPoints = windingPointsFromTimes(self.opTimes || {});
+            var dayWindow = self.workingWindow();
+            var nowD = new Date(controllerNowMs(self));
+            var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+            var bySlitter = {};
+            layoutPlans.forEach(function(plan) {
+                var s = String(plan.slitterId == null ? '' : plan.slitterId);
+                if (s === '') return;
+                (bySlitter[s] = bySlitter[s] || []).push(plan);
+            });
+            Object.keys(bySlitter).forEach(function(s) {
+                var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
+                var runLenByCut = {};
+                plans.forEach(function(p) { runLenByCut[String(p.id)] = p.runLength; });
+                var sched = buildSchedule(plans, {
+                    windPoints: windPoints, times: self.changeTimes, runLengthByCut: runLenByCut,
+                    shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin
+                });
+                var scById = {};
+                sched.forEach(function(sc) { scById[sc.cutId] = sc; });
+                plans.forEach(function(p) {
+                    var sc = scById[String(p.id)];
+                    if (!sc) return;
+                    var ws = stripNum(sc.startMin) - stripNum(sc.setupMin);
+                    var ts = scheduleStartTimestamp(planBaseMidnightMs, ws);
+                    if (ts > 0) p.cutMainValue = ts;
+                });
+            });
+        })();
+
         this.setBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
         // запросами, может занять заметное время.
