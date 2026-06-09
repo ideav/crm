@@ -1671,7 +1671,7 @@ function runApplySplitPlanTest() {
     return controller.applySplitPlan(ops).then(function(ok) {
         assertEqual(ok, true, 'applySplitPlan → true');
         var saveA = one('_m_save/A?JSON');
-        assertEqual(saveA && saveA.fields.val, '1000', 'applySplitPlan: A — время старта пишется через _m_save (первая колонка)');
+        assertEqual(saveA && saveA.fields.t1078, '1000', 'applySplitPlan: A — время старта через _m_save t1078 (DATETIME первая колонка)');
         var setA = one('_m_set/A?JSON');
         assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность через _m_set');
         assertEqual(setA && setA.fields.t1078, undefined, 'applySplitPlan: A — t1078 НЕ через _m_set (игнорируется сервером)');

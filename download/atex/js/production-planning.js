@@ -4170,8 +4170,11 @@
         (ops.updates || []).forEach(function(u) {
             chain = chain.then(function() {
                 var ts = Number(u.planStartTs);
-                var saveMain = (isFinite(ts) && ts > 0)
-                    ? self.post('_m_save/' + u.cutId + '?JSON', { val: String(ts) })
+                // DATETIME первая колонка: _m_save с t{tableId} (проверено на live: _m_set→403,
+                // _m_save{val} не пишет datetime, _m_save{t1078}=штамп — работает).
+                var mainFields = {}; if (mainKey) mainFields[mainKey] = String(ts);
+                var saveMain = (mainKey && isFinite(ts) && ts > 0)
+                    ? self.post('_m_save/' + u.cutId + '?JSON', mainFields)
                     : Promise.resolve();
                 return saveMain.then(function() {
                     var fields = {};
@@ -4223,10 +4226,12 @@
                             var bId = res && (res.obj || res.id || res.i);
                             if (!bId) throw new Error('Сервер не вернул id продолжения резки');
                             var stripMap = {};
-                            // Главное значение B (плановое время старта) — закрепляем через _m_save.
+                            // Главное значение B (плановое время старта) — _m_save с t{tableId}.
                             var bChain = Promise.resolve().then(function() {
                                 var ts2 = Number(cr.planStartTs);
-                                if (isFinite(ts2) && ts2 > 0) return self.post('_m_save/' + bId + '?JSON', { val: String(ts2) });
+                                if (!mainKey || !(isFinite(ts2) && ts2 > 0)) return;
+                                var mf = {}; mf[mainKey] = String(ts2);
+                                return self.post('_m_save/' + bId + '?JSON', mf);
                             });
                             (parentStrips || []).forEach(function(st) {
                                 bChain = bChain.then(function() {
