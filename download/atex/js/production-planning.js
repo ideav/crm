@@ -5197,8 +5197,10 @@
                     title: 'Показать тайминг резки',
                     text: scheduleText
                 });
-                timeEl.addEventListener('click', function(e) {
-                    e.stopPropagation();
+                // Клик по строке времени открывает тайминг И выбирает резку: событие
+                // всплывает к обработчику карточки (selectedCutId → renderLink покажет
+                // «Связанные позиции»). Поэтому здесь НЕ останавливаем всплытие.
+                timeEl.addEventListener('click', function() {
                     self.openCutTiming(c);
                 });
                 timeEl.addEventListener('keydown', function(e) {
