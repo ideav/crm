@@ -697,6 +697,10 @@ function doImport(count){
     }
 }
 function doSaveFormula(){
+    if($('#fields').val()===''||$('#fields').val()===null){
+        showNotification('Сначала выберите поле для формулы', 'error');
+        return;
+    }
     formulas[$('#fields').val()]=$('#set-formula').val();
     if($('#set-formula').val()!==''){
         $('.ui-state-default[id="'+$('#fields').val()+'"').addClass('has-formula');
@@ -1038,7 +1042,7 @@ function guessBase(str){
     return "SHORT";
 }
 function gatherSet(){
-    var i=0,h='<option class="text-light" value="">-- '+'выберите'+' --</option>';
+    var i=0,prevField=$('#fields').val(),h='<option class="text-light" value="">-- '+'выберите'+' --</option>';
     $('.ui-state-default').each(function(){
         if(this.id==='')
             sourceMap[i]={};
@@ -1054,7 +1058,9 @@ function gatherSet(){
         i++;
     });
     $('#fields').html(h);
-    $('#set-formula').val('');
+    if(prevField&&$('#fields option[value="'+prevField+'"]').length)
+        $('#fields').val(prevField);
+    $('#set-formula').val(formulas[$('#fields').val()]||'');
     $('#upload').hide();
     $('#refresh').show();
 }
