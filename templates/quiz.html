@@ -870,6 +870,11 @@ function prevPage(){
     renderFormPage();
 }
 
+function urlVal(fld){
+    if(!fld) return undefined;
+    var k='t'+fld.id;
+    return search[k]!==undefined?search[k]:search[fld.label||fld.name];
+}
 function renderFormPage(){
     var h='', totalPages = iquiz.totalPages;
     // Рендеринг только полей текущей страницы
@@ -880,7 +885,7 @@ function renderFormPage(){
         // Скрытые поля выводятся на всех страницах
         if(fld.hidden){
             h+='<div order="'+i+'"><input id="t'+fld.id+'" type="hidden" class="iq-fld"'
-                +' value="'+(fld.default||search[fld.label||fld.name]||'')+'"></div>';
+                +' value="'+(urlVal(fld)||fld.default||'')+'"></div>';
         }
         // Показать поле только если оно на текущей странице и не page break
         else if(fieldPage === iquiz.currentPage && !fld.isPageBreak){
@@ -890,7 +895,7 @@ function renderFormPage(){
                 +'    </label>'
                 +     inputBox[fld.view].replace(/:t:/g,fld.id)
                                 .replace(':reforig:',fld.ref_type)
-                        .replace(':value:',(iquiz.userValues&&iquiz.userValues[fld.id]!==undefined)?iquiz.userValues[fld.id]:(search[fld.label||fld.name]||(fld.default?defaults(fld.default):'')))
+                        .replace(':value:',(iquiz.userValues&&iquiz.userValues[fld.id]!==undefined)?iquiz.userValues[fld.id]:(urlVal(fld)||(fld.default?defaults(fld.default):'')))
                         .replace(':placeholder:',fld.placeholder||'Введите значение '+fld.name)
                 +'</div>';
             if(fld.view==='DDL')
@@ -1115,7 +1120,7 @@ function intApi(m,u,b,vars,index){
                 break;
 
             case 'ddl':
-                var blank=false,j=(iquiz.userValues&&iquiz.userValues[index.i]!==undefined)?iquiz.userValues[index.i]:iquiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
+                var blank=false,fld=iquiz.form[$('#'+index.i).attr('order')],j=(iquiz.userValues&&iquiz.userValues[index.i]!==undefined)?iquiz.userValues[index.i]:(urlVal(fld)!==undefined?urlVal(fld):(fld&&fld.default)),template=inputBox[index.view+'-OPTION']
                     ,t=$('#t'+index.i).closest('[reforig]').attr(('reforig'));
                 for(i in json.object){
                     if(json.object[i].val.trim()==='')
