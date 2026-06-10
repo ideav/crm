@@ -4713,8 +4713,9 @@
 
             // #3280: план разбиения по дням + плановое время старта (t1078).
             var dayWindow = self.workingWindow();
-            var nowD = new Date(controllerNowMs(self));
-            var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+            // #(replan-from-date): ре-планирование строим от даты, выбранной в
+            // фильтре (.atex-pp-input), даже если в прошлом; без даты — от сегодня.
+            var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
             var windPoints = windingPointsFromTimes(self.opTimes || {});
             var perPassByCut = {};
             self.cuts.forEach(function(c) {
