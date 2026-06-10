@@ -4496,6 +4496,76 @@ function build_post_fields($data){
     trace("dataArray ".print_r($dataArray, true));
     return $dataArray;
 }
+# Issue #3308: проверка, что хост ссылки указывает на публичный адрес (защита от SSRF).
+# Резолвим имя в IP и отбраковываем приватные/служебные/loopback/link-local адреса,
+# чтобы через прокси нельзя было ходить во внутреннюю сеть сервера.
+function fetchUrlHostIsPublic($host){
+    if(!is_string($host) || $host === "")
+        return false;
+    if(filter_var($host, FILTER_VALIDATE_IP))
+        $ips = array($host);
+    else{
+        $ips = @gethostbynamel($host);
+        if($ips === false || count($ips) === 0)
+            return false;
+    }
+    foreach($ips as $ip)
+        if(!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE))
+            return false; # приватный/служебный адрес — запрещаем
+    return true;
+}
+# Issue #3308: безопасное серверное скачивание файла по ссылке для рабочего места
+# templates/upload.html (обход CORS). Только http(s); каждый редирект проверяется
+# повторно на SSRF; ограничение размера и таймаут. Возвращает строку-содержимое
+# или false при ошибке.
+function fetchUrlSafe($url, $maxBytes = 10485760, $timeout = 15){
+    $redirects = 0;
+    while(true){
+        if(!is_string($url) || !preg_match('#^https?://#i', $url))
+            return false;
+        $host = parse_url($url, PHP_URL_HOST);
+        if(!fetchUrlHostIsPublic($host))
+            return false;
+        if(!function_exists("curl_init")){
+            # Запасной путь без curl: редиректы выключены (их некому перепроверить).
+            $ctx = stream_context_create(array("http" => array(
+                "timeout" => $timeout, "follow_location" => 0, "user_agent" => "Integram",
+            )));
+            $data = @file_get_contents($url, false, $ctx, 0, $maxBytes + 1);
+            if($data === false)
+                return false;
+            return strlen($data) > $maxBytes ? false : $data;
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,   # редиректы ведём вручную с повторной проверкой хоста
+            CURLOPT_CONNECTTIMEOUT => $timeout,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_USERAGENT      => "Integram",
+            CURLOPT_HEADER         => false,
+            CURLOPT_NOPROGRESS     => false,
+            CURLOPT_BUFFERSIZE     => 16384,
+            CURLOPT_PROGRESSFUNCTION => function($ch, $dlTotal, $dlNow, $ulTotal, $ulNow) use ($maxBytes){
+                return ($dlTotal > $maxBytes || $dlNow > $maxBytes) ? 1 : 0; # прерываем при превышении размера
+            },
+        ));
+        $data = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $redir = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+        curl_close($ch);
+        if($data === false)
+            return false;
+        if($code >= 300 && $code < 400 && $redir){
+            if(++$redirects > 5)
+                return false;
+            $url = $redir;
+            continue; # повторно проверяем новый адрес на SSRF
+        }
+        return strlen($data) > $maxBytes ? false : $data;
+    }
+}
 function getJsonVal($jsonKey, $val){
     $seek=TRUE;
     if((strlen($jsonKey) > 0) && (mb_strpos(strtoupper($val), strtoupper($jsonKey)) !== FALSE)){
@@ -9615,6 +9685,23 @@ if(Validate_Token())
         case "ai":
             handleAiChatRequest($com);
             break;
+
+		# Issue #3308: серверный прокси для загрузки файла по ссылке в рабочем месте
+		# templates/upload.html. Качает URL на сервере (обход CORS) и отдаёт содержимое
+		# в base64. XSRF уже проверен выше (префикс _m_ → check()).
+		case "_m_fetchurl":
+			$fetchUrl = isset($_REQUEST["url"]) ? trim($_REQUEST["url"]) : "";
+			if($fetchUrl === "" || !preg_match('#^https?://#i', $fetchUrl)){
+				api_dump(json_encode(array("status" => "error", "error" => "Допустимы только http(s) ссылки.")), "fetchurl.json");
+				break;
+			}
+			$fetchData = fetchUrlSafe($fetchUrl);
+			if($fetchData === false){
+				api_dump(json_encode(array("status" => "error", "error" => "Не удалось загрузить файл по ссылке (недоступный адрес, превышен размер 10 МБ или таймаут).")), "fetchurl.json");
+				break;
+			}
+			api_dump(json_encode(array("status" => "ok", "content" => base64_encode($fetchData), "length" => strlen($fetchData))), "fetchurl.json");
+			break;
 
 		case "_m_up":
 			Check_Grant($id);
