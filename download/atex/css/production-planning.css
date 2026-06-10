@@ -646,4 +646,25 @@
     color: var(--pp-muted);
     margin-bottom: 4px;
 }
-/* @version 2026-06-07 */
+/* Крутилка генерации — слева от кнопки «Сгенерировать резки» (видна на обеих темах) */
+.atex-pp-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    opacity: 0.6;
+    vertical-align: middle;
+    animation: atex-pp-spin 0.7s linear infinite;
+}
+@keyframes atex-pp-spin { to { transform: rotate(360deg); } }
+/* Ссылка «Пропущено N» в баре подтверждения генерации */
+.atex-pp-skipped-link {
+    color: var(--pp-accent, #1283da);
+    text-decoration: underline;
+    cursor: pointer;
+}
+.atex-pp-skipped-link:hover { text-decoration: none; }
+/* @version 2026-06-10 */
