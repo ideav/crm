@@ -758,6 +758,13 @@ function doSaveSet(){
         else
             showNotification('Недопустимый символ " в имени настройки!', 'error');
 }
+// Восстанавливает галку «Создавать родителя, если его нет» из выбранной настройки.
+// Без выбранной настройки — снимает (chosenSet===undefined). Вызывается рано в
+// case 'type' (вместе с header/trim), чтобы состояние не терялось, если на
+// промежуточных шагах рендера произойдёт ошибка до позднего восстановления.
+function setCreateParentFromSet(){
+    $('#createParent').prop('checked',!!(chosenSet!==undefined&&uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
+}
 function applySet(v){
     chosenSet=v;
     $('#chosenType').val(uploadSets[v].type);
@@ -893,6 +900,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('#delim').val(uploadSets[chosenSet].delimiter);
                     $('#caret').val(uploadSets[chosenSet].newline);
                 }
+                setCreateParentFromSet();
                 h+='<div class="pl-2 pt-1 h3" title="'+'Добавить пропуск — пустое поле'+'" onclick="$(addSortable(\'\',\'\',\'--\',\'--\')).insertBefore(this)"><a>+</a></div>';
                 $('#sortable').html(h);
                 j=getParent(chosenType);
@@ -915,7 +923,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('.auto-parent').val(uploadSets[chosenSet].autoParent);
                     setAutoParent(uploadSets[chosenSet].autoParent);
                 }
-                $('#createParent').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
+                setCreateParentFromSet();
                 if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
                     selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
                 break;
