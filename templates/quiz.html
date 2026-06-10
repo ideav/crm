@@ -396,7 +396,7 @@ if(parseInt(id) > 0){
         <div id="submitResult" class=" m-1 m-sm-3"></div>
         <center>
             <p class="text-muted"><a href="mailto:support@ideav.online">Сообщить о нарушении</a></p>
-            <p class="text-muted">Сделано в <a href="https://integram.io?from=iquiz">Интеграм</a></p>
+            <p class="text-muted">Сделано в <a href="https://ideav.ru?from=iquiz">Интеграм</a></p>
         </center>
     </div>
 </center>
@@ -904,7 +904,7 @@ function renderFormPage(){
     }
 
     // Добавить кнопки навигации
-    h += '<div class="page-navigation mt-4">';
+    h += '<div class="page-navigation mt-4" style="text-align: center;">';
     if(iquiz.currentPage > 1)
         h += '<button class="btn btn-secondary mr-2" onclick="prevPage()">← Назад</button>';
     h += '<button class="btn btn-primary" id="runFormSubmit" onclick="nextPage()">' + (iquiz.currentPage === totalPages ? (iquiz.submit||'Отправить') : 'Далее →') + '</button>';
