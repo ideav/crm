@@ -577,6 +577,8 @@ function shownAndHidden(i,fld,f){
                         .replace('type="password"','type="text"')
                         .replace(':value:',fld.placeholder||'')
                         .replace(':reforig:',fld.ref_type||'')
+                        .replace(':acceptAttr:',acceptAttr(fld.accept))
+                        .replace(':exts:',escapeHtml(fld.accept||''))
                         .replace(':placeholder:','Введите подсказку к вопросу')
         +'</div>';
     f.hiddens+=hidBadge.replace(':t:',fld.id)
@@ -875,6 +877,17 @@ function urlVal(fld){
     var k='t'+fld.id;
     return search[k]!==undefined?search[k]:search[fld.label||fld.name];
 }
+function parseExts(s){
+    if(!s) return [];
+    return String(s).toLowerCase().split(/[\s,;]+/).map(function(x){return x.replace(/^\.+/,'');}).filter(function(x){return x.length>0;});
+}
+function acceptAttr(s){
+    return parseExts(s).map(function(x){return '.'+x;}).join(',');
+}
+function fileExt(name){
+    var m=String(name).toLowerCase().match(/\.([a-z0-9]+)$/);
+    return m?m[1]:'';
+}
 function renderFormPage(){
     var h='', totalPages = iquiz.totalPages;
     // Рендеринг только полей текущей страницы
@@ -896,6 +909,8 @@ function renderFormPage(){
                 +     inputBox[fld.view].replace(/:t:/g,fld.id)
                                 .replace(':reforig:',fld.ref_type)
                         .replace(':value:',(iquiz.userValues&&iquiz.userValues[fld.id]!==undefined)?iquiz.userValues[fld.id]:(urlVal(fld)||(fld.default?defaults(fld.default):'')))
+                        .replace(':acceptAttr:',acceptAttr(fld.accept))
+                        .replace(':exts:','')
                         .replace(':placeholder:',fld.placeholder||'Введите значение '+fld.name)
                 +'</div>';
             if(fld.view==='DDL')
@@ -924,8 +939,15 @@ function submitForm(){
         if(fld.isPageBreak) continue;
         el=document.getElementById('t'+fld.id);
         if(fld.base==='FILE'){
-            if(el&&el.files[0])
-                vars.append('t'+fld.id,el.files[0]);
+            if(el&&el.files[0]){
+                var allowed=parseExts(fld.accept);
+                if(allowed.length&&allowed.indexOf(fileExt(el.files[0].name))===-1){
+                    e+='Недопустимый тип файла «'+(fld.label||fld.name)+'». Разрешено: '+acceptAttr(fld.accept)+'<br />';
+                    $(el).css('border','2px solid red');
+                }
+                else
+                    vars.append('t'+fld.id,el.files[0]);
+            }
         }
         else if(fld.base==='BOOLEAN'){
             if(!fld.hidden&&fld.required){
@@ -1286,6 +1308,9 @@ var ddlAdd='<div class="input-group pt-2 set:t:" style="display:none;" title="З
             +'    <input type="text" class="form-control form-control-sm" placeholder="Добавить значение в список" onkeyup="if(event.keyCode===13)addItem(:t:)">'
             +'    <div class="input-group-append"><button class="btn btn-primary btn-sm" onclick="addItem(:t:)">Сохранить</button></div>'
             +'</div>'
+    ,fileSet='<div class="input-group pt-2 set:t:" style="display:none;" title="Разрешённые типы файлов">'
+            +'    <input type="text" name="accept" value=":exts:" class="form-control form-control-sm iq-save iq-fld" placeholder="Разрешённые расширения через запятую: jpg, png, pdf (пусто — любые)">'
+            +'</div>'
     ,inputBox={
     'SHORT':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
     'SIGNED':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
@@ -1304,7 +1329,7 @@ var ddlAdd='<div class="input-group pt-2 set:t:" style="display:none;" title="З
     'HTML':'<textarea name="placeholder" id="t:t:" class="form-control iq-save iq-fld" placeholder=":placeholder:">:value:</textarea>',
     'MEMO':'<textarea name="placeholder" id="t:t:" class="form-control iq-save iq-fld" placeholder=":placeholder:">:value:</textarea>',
     'CHARS':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
-    'FILE':'<input type="file" id="t:t:" value=":value:" class="form-control iq-save iq-fld">',
+    'FILE':'<input type="file" id="t:t:" accept=":acceptAttr:" class="form-control iq-save iq-fld">'+fileSet,
     'BOOLEAN':'<div style="width:40px"><input type="checkbox" name="default" id="t:t:" value="1" class="form-control iq-save iq-fld"></div>',
     'PWD':'<input type="password" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
     'CALCULATABLE':'<span>:value:</span>',
