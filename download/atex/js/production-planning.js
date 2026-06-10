@@ -437,6 +437,15 @@
         return d.getFullYear() + '-' + m + '-' + day;
     }
 
+    // Полночь (мс) базовой даты планирования: дата из фильтра «.atex-pp-input»
+    // («ГГГГ-ММ-ДД»), даже если в прошлом; без выбранной даты — сегодня (nowMs).
+    function planBaseMidnightFrom(dateStr, nowMs) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+        var d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0)
+                  : new Date(Number(nowMs) || Date.now());
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    }
+
     // Сборка полей `t{reqId}` для записи. reqIds — { ключ: числовойId },
     // values — { ключ: значение }. Пустые значения (''/null/undefined) опускаются,
     // чтобы не перетирать данные и не плодить пустые реквизиты.
@@ -4158,8 +4167,9 @@
         (function() {
             var windPoints = windingPointsFromTimes(self.opTimes || {});
             var dayWindow = self.workingWindow();
-            var nowD = new Date(controllerNowMs(self));
-            var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+            // #(gen-from-date): план строим от даты, выбранной в фильтре
+            // (.atex-pp-input), даже если она в прошлом; без даты — от сегодня.
+            var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
             var bySlitter = {};
             layoutPlans.forEach(function(plan) {
                 var s = String(plan.slitterId == null ? '' : plan.slitterId);
