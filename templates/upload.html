@@ -236,7 +236,7 @@ input[type="checkbox"] {
                 <table>
                     <tr>
                         <td><input type="number" name="ap" class="form-control auto-parent" onchange="setAutoParent(this.value)" min="0" autocomplete="off" placeholder="N" />
-                        <td class="pl-3 pt-2"><label><input id="createParent" type="checkbox">&nbsp;Создавать родителя, если его нет</label>
+                        <td class="pl-3 pt-2"><label><input id="createParent" type="checkbox" onchange="localStorage.setItem('uploadCreateParent',this.checked?'1':'0')">&nbsp;Создавать родителя, если его нет</label>
                     </tr>
                 </table>
             </p>
@@ -915,8 +915,10 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('.auto-parent').val(uploadSets[chosenSet].autoParent);
                     setAutoParent(uploadSets[chosenSet].autoParent);
                 }
-                if(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent)
-                    $('#createParent').prop('checked',true);
+                if(uploadSets[chosenSet])
+                    $('#createParent').prop('checked',!!uploadSets[chosenSet].createParent);
+                else
+                    $('#createParent').prop('checked',localStorage.getItem('uploadCreateParent')==='1');
                 if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
                     selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
                 break;
