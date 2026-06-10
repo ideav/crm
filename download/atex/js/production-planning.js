@@ -3876,6 +3876,13 @@
         if (this.busy) return;
         console.log('[pp] ⚙️ generateCuts: начало генерации резок...');
 
+        // #(no-srok-when-on-time): срок учитываем (дробим позиции по окну) только если
+        // есть просроченные относительно даты планирования. Если все позиции укладываются
+        // в свой срок (dueKey ≥ planDateKey), окно не нужно — объединяем в один кластер.
+        var planBaseMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var pbmD = new Date(planBaseMs);
+        var planDateKey = pbmD.getFullYear() * 10000 + (pbmD.getMonth() + 1) * 100 + pbmD.getDate();
+
         var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
         if (!layoutCore || typeof layoutCore.planLayouts !== 'function') {
             console.error('[pp] ⚙️ generateCuts: модуль cut-layout не загружен');
@@ -3921,13 +3928,18 @@
                     return;
                 }
                 layoutPositionGroups(group.positions).forEach(function(positionGroup) {
+                    // Нет просроченных позиций (всё в рамках срока) → окно срока не нужно,
+                    // объединяем все позиции сырья (windowDays=Infinity); иначе дробим по WINDOW_DAYS.
+                    var hasOverdue = positionGroup.some(function(p) {
+                        return isFinite(p.dueKey) && p.dueKey < planDateKey;
+                    });
                     var res = layoutCore.planLayouts({
                         jumboWidth: jw,
                         positions: positionGroup.map(function(p) {
                             return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
                         }),
                         preferred: self.preferredByMaterial[group.key] || [],
-                        options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
+                        options: { windowDays: hasOverdue ? WINDOW_DAYS : Infinity, tolerance: self.resolveToleranceMm(mat) }
                     });
                     (res.layouts || []).forEach(function(lay) {
                         lay.mat = mat;
