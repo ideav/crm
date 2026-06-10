@@ -330,9 +330,19 @@
 /* #3253: read-only вычисляемое поле «Рулонов» (полос × проходов) — справочно. */
 .atex-pp-strip-rolls { color: var(--pp-muted); text-align: center; font-variant-numeric: tabular-nums; }
 /* #3280: «Назначение» полосы — Заказ (есть ссылка из Обеспечения) / Склад. */
+.atex-pp-strip-purpose-cell { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; }
 .atex-pp-strip-purpose { text-align: center; font-size: 12px; font-weight: 600; }
 .atex-pp-strip-purpose--order { color: var(--pp-ok); }
 .atex-pp-strip-purpose--stock { color: var(--pp-muted); }
+/* #3320: значок «обеспечить» правее «Склад» — открыть выбор позиции заказа. */
+.atex-pp-strip-supply {
+    flex: 0 0 auto;
+    width: 20px; height: 20px; line-height: 1;
+    border: none; border-radius: 50%;
+    background: transparent;
+    font-size: 12px; cursor: pointer; padding: 0;
+}
+.atex-pp-strip-supply:hover { background: var(--pp-border-soft); }
 .atex-pp-strip-del { padding: 6px 0; text-align: center; }
 /* #3318: полоса «в заказ» — кнопка удаления неактивна (но кликабельна для tooltip-подсказки). */
 .atex-pp-strip-del.is-disabled { opacity: .4; cursor: not-allowed; }
@@ -457,6 +467,25 @@
 }
 .atex-pp-modal-close:hover { color: var(--pp-accent); }
 .atex-pp-modal .atex-pp-form { padding: 0; }
+/* #3320: модалка «Обеспечить полосу» — список позиций + подтверждение. */
+.atex-pp-supply-dialog { max-width: 520px; }
+.atex-pp-supply-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 320px; overflow-y: auto; }
+.atex-pp-supply-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    width: 100%; text-align: left;
+    padding: 9px 12px;
+    border: 1px solid var(--pp-border-soft); border-radius: 6px;
+    background: var(--pp-surface); color: inherit;
+    cursor: pointer;
+}
+.atex-pp-supply-item:hover { border-color: var(--pp-accent); }
+.atex-pp-supply-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atex-pp-supply-item-meta { flex: 0 0 auto; font-size: 12px; color: var(--pp-muted); font-variant-numeric: tabular-nums; }
+.atex-pp-supply-confirm { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+.atex-pp-supply-confirm-row { display: flex; justify-content: space-between; gap: 12px; }
+.atex-pp-supply-confirm-label { color: var(--pp-muted); }
+.atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
+.atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;
