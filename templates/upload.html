@@ -915,8 +915,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('.auto-parent').val(uploadSets[chosenSet].autoParent);
                     setAutoParent(uploadSets[chosenSet].autoParent);
                 }
-                if(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent)
-                    $('#createParent').prop('checked',true);
+                $('#createParent').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
                 if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
                     selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
                 break;
@@ -952,13 +951,11 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
             
             case 'check-set':
                 saveSet={type:chosenType,name:chosenTypeName,header:($('#header').prop('checked')?1:0),trim:($('#trim').prop('checked')?1:0)
-                        ,delimiter:$('#delim').val(),newline:$('#caret').val(),importMap:importMap,formulas:formulas};
+                        ,delimiter:$('#delim').val(),newline:$('#caret').val(),importMap:importMap,formulas:formulas,createParent:($('#createParent').prop('checked')?1:0)};
                 if(autoParent)
                     saveSet['autoParent']=autoParent;
                 if($('#searchParent').val().length>0)
                     saveSet['searchParent']=$('#searchParent').attr('up-id');
-                if($('#createParent').prop('checked'))
-                    saveSet['createParent']=true;
                 if(json.object)
                     intApi('POST','_m_set/'+json.object[0].id+'?JSON&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
                 else
