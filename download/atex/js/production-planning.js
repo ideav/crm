@@ -3322,8 +3322,9 @@
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin
         });
         if (!slot) return null;
-        var nowD = new Date(controllerNowMs(this));
-        var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+        // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
+        // без даты — сегодня. Как в генерации (#3311), ре-планировании (#3312), очереди (#3316).
+        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         slot.startTs = scheduleStartTimestamp(planBaseMidnightMs, slot.windowStartMin);
         slot.planBaseMidnightMs = planBaseMidnightMs;
         return slot;
