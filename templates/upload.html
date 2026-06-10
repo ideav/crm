@@ -1082,23 +1082,23 @@ function chooseBase(i,v){
     return h+'</select>';
 }
 function importParse(){
-    if($('#input').val().length>0)
+    if(($('#input').val()||'').length>0)
         parseUploadText($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
             ,LocalChunkSize:1048024
             ,RemoteChunkSize:1048024
             ,chunk: (results, parser) =>{importDoParse(results);}
         });
     else{
-    	var file,files = document.getElementById('selectFiles').files;
-    	if(files.length <= 0)
-    	    if($('#selectLink').val().length>0){
+    	var selectFiles=document.getElementById('selectFiles'),file,files=selectFiles?selectFiles.files:null;
+    	if(!files||files.length <= 0)
+    	    if(($('#selectLink').val()||'').length>0){
     	        fetch($('#selectLink').val(),{mode:'no-cors'}).then(res=>file=new File([res.blob()],'filename'));
     	        console.log(file);
     	        var dt=new DataTransfer();
                 dt.items.add(file);
-                var files=dt.files;
+                files=dt.files;
     	    }
-    	if(files.length <= 0)
+    	if(!files||files.length <= 0)
     		return false;
 	    var fr = new FileReader();
 	    fr.onload = function(e){

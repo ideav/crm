@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<!--
+  Browser fixture for issue #3306 / #3304.
+  Reproduces the saved-set restore chain (case 'type' onload):
+      setAutoParent(autoParent)  ->  importParse()  ->  $('#selectLink').val().length
+  with #selectLink commented out (as in templates/upload.html). Before the fix
+  importParse() throws, the handler aborts, and #createParent is never restored.
+  After the fix the chain completes and #createParent is checked.
+
+  The importParse() / setAutoParent() bodies below are copied verbatim from
+  templates/upload.html so this fixture exercises the real (fixed) code.
+-->
+<html>
+<head><meta charset="utf-8"><script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script></head>
+<body>
+  <!-- DOM mirrors templates/upload.html: #selectLink stays commented out -->
+  <div id="input-area">
+    <textarea id="input"></textarea>
+    <input type="file" id="selectFiles" style="display:none" />
+    <!-- <input id="selectLink" /> -->
+    <input type="number" class="auto-parent" />
+    <label><input id="createParent" type="checkbox"> Создавать родителя</label>
+    <button id="refresh" style="display:none"></button>
+  </div>
+  <pre id="result"></pre>
+<script>
+var autoParent;
+function gatherSet(){}                 // stubbed (not under test)
+function parseUploadText(){}           // stubbed (only used when #input has text)
+
+// ── verbatim from templates/upload.html ──
+function setAutoParent(par){
+    autoParent=par===''?undefined:par;
+    if(autoParent){
+        $('#searchParent').val('');
+        $('#do-upload').attr('disabled',false);
+    }
+    else
+        $('.auto-parent').val('');
+    gatherSet();
+    importParse();
+}
+function importParse(){
+    if(($('#input').val()||'').length>0)
+        parseUploadText($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
+            ,LocalChunkSize:1048024
+            ,RemoteChunkSize:1048024
+            ,chunk: (results, parser) =>{importDoParse(results);}
+        });
+    else{
+    	var selectFiles=document.getElementById('selectFiles'),file,files=selectFiles?selectFiles.files:null;
+    	if(!files||files.length <= 0)
+    	    if(($('#selectLink').val()||'').length>0){
+    	        fetch($('#selectLink').val(),{mode:'no-cors'}).then(res=>file=new File([res.blob()],'filename'));
+    	        console.log(file);
+    	        var dt=new DataTransfer();
+                dt.items.add(file);
+                files=dt.files;
+    	    }
+    	if(!files||files.length <= 0)
+    		return false;
+	    var fr = new FileReader();
+	    fr.readAsText(files.item(0),$('#encoding').val());
+	    }
+    $('#refresh').hide();
+}
+
+// ── replicate the case 'type' restore snippet (lines 914-918) ──
+var uploadSets={mySet:{autoParent:1,createParent:1}}, chosenSet='mySet';
+var error=null;
+try{
+    if(uploadSets[chosenSet]&&uploadSets[chosenSet].autoParent){
+        $('.auto-parent').val(uploadSets[chosenSet].autoParent);
+        setAutoParent(uploadSets[chosenSet].autoParent);
+    }
+    $('#createParent').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
+}catch(e){ error=e&&e.message; }
+
+document.getElementById('result').textContent = JSON.stringify({
+    error: error,
+    createParentRestored: $('#createParent').prop('checked')
+});
+</script>
+</body>
+</html>
