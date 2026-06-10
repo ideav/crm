@@ -5122,9 +5122,10 @@
         });
         var schedById = {};
         var dayWindow = self.workingWindow();
-        // #3280: полночь дня планирования (день 0 расписания) — для title даты+времени старта.
-        var nowD = new Date(controllerNowMs(self));
-        var planBaseMidnightMs = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate(), 0, 0, 0, 0).getTime();
+        // Полночь дня планирования (день 0 расписания) — для title даты+времени старта.
+        // День 0 = дата фильтра (.atex-pp-input), на которую отфильтрована очередь, а не
+        // «сегодня»; иначе title показывал текущую дату вместо плановой (напр. 10.06 вместо 01.06).
+        var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
         var schedule = buildSchedule(activeGroup.cuts, {
             windPoints: windPoints,
             times: self.changeTimes,
