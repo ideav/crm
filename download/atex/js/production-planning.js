@@ -3512,11 +3512,26 @@
                 self.setBusy(false);
                 self.notify('Связь с позицией удалена', 'info');
                 self.render();
+                // #3318 п.2: если открыт редактор полос — переоткрыть, чтобы «Назначение»
+                // полосы обновилось (Заказ→Склад) и удаление снова стало доступным.
+                self.reopenStripsIfOpen();
             });
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка удаления связи: ' + err.message, 'error');
         });
+    };
+
+    // #3318: после изменения связей переоткрыть панель полос (если была открыта) для
+    // той же резки — render() пересобирает очередь и панель теряется; открываем заново
+    // с обновлёнными данными (orderedBatchIds → «Назначение» полосы и доступность удаления).
+    AtexProductionPlanning.prototype.reopenStripsIfOpen = function() {
+        var editId = this.stripEditCutId;
+        if (editId == null) return;
+        var cut = (this.cuts || []).filter(function(c) { return String(c.id) === String(editId); })[0];
+        var cardPanel = this.queueEl && this.queueEl.querySelector('.atex-pp-cut[data-cut-id="' + editId + '"]');
+        this.stripEditCutId = null;   // сбросить, чтобы openStrips открыл, а не закрыл (toggle)
+        if (cut && cardPanel) this.openStrips(cut, cardPanel);
     };
 
     AtexProductionPlanning.prototype.reload = function() {
@@ -3698,9 +3713,23 @@
                     text: purpose
                 }));
 
-                var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
-                del.addEventListener('click', function() {
-                    if (self.busy) return;
+                var isOrdered = purpose === 'Заказ';
+                var del = el('button', {
+                    class: 'atex-pp-btn atex-pp-strip-del' + (isOrdered ? ' is-disabled' : ''),
+                    type: 'button',
+                    title: isOrdered
+                        ? 'Полоса зарезервирована в заказ. Чтобы удалить, отвяжите позиции на форме «Связанные позиции» справа — тогда полоса станет складской и её можно будет удалить.'
+                        : 'Удалить полосу',
+                    text: '×'
+                });
+                del.addEventListener('click', function(e) {
+                    // #3318 п.1: не всплывать к обработчику карточки — иначе renderRows()
+                    // отцепляет кнопку, closest('.atex-pp-strip-panel') возвращает null и
+                    // self.render() закрывает панель полос.
+                    e.stopPropagation();
+                    // #3318 п.2: полосу «в заказ» (есть связи-обеспечения) удалить нельзя —
+                    // кнопка неактивна; удаление — через отвязку позиций справа.
+                    if (self.busy || isOrdered) return;
                     var removed = strips.splice(idx, 1)[0];
                     renderRows();
                     recalc();

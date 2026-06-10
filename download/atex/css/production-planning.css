@@ -334,6 +334,8 @@
 .atex-pp-strip-purpose--order { color: var(--pp-ok); }
 .atex-pp-strip-purpose--stock { color: var(--pp-muted); }
 .atex-pp-strip-del { padding: 6px 0; text-align: center; }
+/* #3318: полоса «в заказ» — кнопка удаления неактивна (но кликабельна для tooltip-подсказки). */
+.atex-pp-strip-del.is-disabled { opacity: .4; cursor: not-allowed; }
 .atex-pp-strip-add { margin-bottom: 12px; }
 
 .atex-pp-strip-summary {
