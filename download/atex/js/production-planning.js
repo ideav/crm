@@ -3949,14 +3949,28 @@
 
             // #3253: в подтверждении не считаем полосы/ножи — только число резок.
             var nCuts = allLayouts.length;
-            var msg = 'Не обеспечено резками и складом позиций: ' + unsup.length +
-                '. Создать ' + nCuts + ' резок? Пропущено ' + skipped.length + '.';
+            var msg = el('span', { class: 'atex-pp-confirm-msg' });
+            msg.appendChild(document.createTextNode(
+                'Не обеспечено резками и складом позиций: ' + unsup.length +
+                '. Создать ' + nCuts + ' резок? '));
+            if (skipped.length) {
+                var skipLink = el('a', { class: 'atex-pp-skipped-link', href: '#',
+                    text: 'Пропущено ' + skipped.length,
+                    title: 'Открыть список пропущенных позиций в новой вкладке' });
+                skipLink.addEventListener('click', function(ev) {
+                    ev.preventDefault();
+                    self.openSkippedReport(skipped);
+                });
+                msg.appendChild(skipLink);
+                msg.appendChild(document.createTextNode('.'));
+            } else {
+                msg.appendChild(document.createTextNode('Пропущено 0.'));
+            }
 
+            // Единая кнопка генерации (стратегия «сложные раньше»). inline:true —
+            // оставляем именованную inline-кнопку, не уходя в модалку подтверждения.
             self.confirmAction(msg, actionsEl, [
-                { label: 'Создать: мин. переналадок', primary: true, onConfirm: function() {
-                    self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
-                } },
-                { label: 'Создать: сложные раньше', onConfirm: function() {
+                { label: 'Сгенерировать', primary: true, inline: true, onConfirm: function() {
                     self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_FATIGUE);
                 } }
             ]);
@@ -4201,6 +4215,7 @@
         })();
 
         this.setBusy(true);
+        this.setGenBusy(true);
         // Окно прогресса (#3148): генерация идёт последовательными зависимыми
         // запросами, может занять заметное время.
         // #3280: записей-сегментов может быть больше, чем раскладок (резки длиннее дня дробятся).
@@ -4344,6 +4359,7 @@
             console.log('[pp] 🔧 runGenerateCuts: данные загружены за ' + elapsed + 'с. рендерим...');
             self.hideProgress();
             self.setBusy(false);
+            self.setGenBusy(false);
             var renderStart = Date.now();
             self.render();
             var renderMs = Date.now() - renderStart;
@@ -4359,6 +4375,7 @@
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
+            self.setGenBusy(false);
             console.error('[pp] 🔧 runGenerateCuts: ОШИБКА', err.message, err.stack);
             self.notify('Ошибка генерации резок: ' + err.message, 'error');
         });
@@ -4376,6 +4393,54 @@
         return order.map(function(r) { return r + ' ×' + counts[r]; }).join(', ');
     };
 
+    // Открывает в новой вкладке отчёт по пропущенным позициям (для которых генератор
+    // не смог построить раскладку). Данные считаются на клиенте при генерации.
+    AtexProductionPlanning.prototype.openSkippedReport = function(skipped) {
+        var posById = positionMap(this.genPositions);
+        var rows = (skipped || []).map(function(s) {
+            var p = posById[String(s.positionId)] || {};
+            return {
+                id: s.positionId == null ? '' : s.positionId,
+                width: p.width || '',
+                qty: p.qty || '',
+                length: p.length || '',
+                reason: (s && s.reason) || 'без причины'
+            };
+        });
+        function esc(v) {
+            return String(v == null ? '' : v).replace(/[&<>"]/g, function(c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+        var base = '/' + encodeURIComponent(this.db) + '/object/';
+        var trs = rows.map(function(r, i) {
+            return '<tr><td>' + (i + 1) + '</td>' +
+                '<td><a href="' + base + esc(r.id) + '" target="_blank" rel="noopener">' + esc(r.id) + '</a></td>' +
+                '<td>' + esc(r.width) + '</td>' +
+                '<td>' + esc(r.qty) + '</td>' +
+                '<td>' + esc(r.length) + '</td>' +
+                '<td>' + esc(r.reason) + '</td></tr>';
+        }).join('');
+        var html = '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+            '<title>Пропущенные позиции (' + rows.length + ')</title>' +
+            '<style>body{font:14px/1.45 system-ui,Arial,sans-serif;margin:24px;color:#1a1a1a}' +
+            'h1{font-size:18px;margin:0 0 4px}p{color:#666;margin:0 0 16px;max-width:760px}' +
+            'table{border-collapse:collapse;width:100%;max-width:900px}' +
+            'th,td{border:1px solid #ddd;padding:6px 10px;text-align:left}' +
+            'th{background:#f4f6fa}tr:nth-child(even) td{background:#fafbfc}' +
+            'a{color:#1283da}</style></head><body>' +
+            '<h1>Пропущенные позиции — ' + rows.length + '</h1>' +
+            '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку резки и не создал резки. ' +
+            'Проверьте параметры (ширина джамбо, сырьё) и повторите генерацию.</p>' +
+            '<table><thead><tr><th>№</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
+            '<tbody>' + (trs || '<tr><td colspan="6">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
+        var w = window.open('', '_blank');
+        if (!w) { this.notify('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.', 'error'); return; }
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+    };
+
     function normalizeConfirmActions(okLabel, onConfirm) {
         if (Array.isArray(okLabel)) {
             return okLabel.map(function(action, i) {
@@ -4383,6 +4448,7 @@
                 return {
                     label: a.label || a.text || 'Да',
                     primary: a.primary === true || i === 0,
+                    inline: a.inline === true,
                     onConfirm: a.onConfirm || a.action || a.handler
                 };
             }).filter(function(action) { return typeof action.onConfirm === 'function'; });
@@ -4395,7 +4461,7 @@
     AtexProductionPlanning.prototype.confirmAction = function(message, actionsEl, okLabel, onConfirm) {
         var actions = normalizeConfirmActions(okLabel, onConfirm);
         if (!actions.length) return;
-        if (actions.length === 1 && typeof window !== 'undefined' && window.mainAppController &&
+        if (actions.length === 1 && !actions[0].inline && typeof window !== 'undefined' && window.mainAppController &&
             typeof window.mainAppController.showDeleteConfirmModal === 'function') {
             window.mainAppController.showDeleteConfirmModal(message).then(function(ok) {
                 if (ok) actions[0].onConfirm();
@@ -4405,7 +4471,7 @@
         var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions')) || this.root;
         if (host && host.querySelector && host.querySelector('.atex-pp-confirm-bar')) return;
         var bar = el('div', { class: 'atex-pp-confirm-bar' });
-        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: message }));
+        bar.appendChild((message && message.nodeType) ? message : el('span', { class: 'atex-pp-confirm-msg', text: message }));
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
         function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
         actions.forEach(function(action) {
@@ -5240,6 +5306,13 @@
         if (this.root) this.root.classList.toggle('is-busy', !!on);
     };
 
+    // Деактивирует кнопку «Сгенерировать резки» и показывает крутилку слева от неё
+    // на время генерации (runGenerateCuts). По завершении/ошибке — возвращает.
+    AtexProductionPlanning.prototype.setGenBusy = function(on) {
+        if (this.genBtn) this.genBtn.disabled = !!on;
+        if (this.genSpinner) this.genSpinner.style.display = on ? '' : 'none';
+    };
+
     // Уведомления без alert/confirm/prompt (раздел 8 гайда): встроенный тост,
     // либо общий MainAppController, если он доступен в main.html.
     AtexProductionPlanning.prototype.notify = function(message, kind) {
@@ -5320,10 +5393,15 @@
 
         // Шапка очереди: заголовок слева, затем кнопка «Сгенерировать резки» и «+ Новая резка» справа вверху.
         var queueActions = el('div', { class: 'atex-pp-panel-actions' });
-        var genBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Сгенерировать резки' });
+        var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация резок…' });
+        genSpinner.style.display = 'none';
+        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-gen-btn', type: 'button', text: 'Сгенерировать резки' });
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
+        this.genBtn = genBtn;
+        this.genSpinner = genSpinner;
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
         addBtn.addEventListener('click', function() { self.openForm(); });
+        queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
