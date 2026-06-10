@@ -158,10 +158,10 @@ input[type="checkbox"] {
         <label class="btn btn-outline-secondary upload-file-label mb-2"><i class="pi pi-upload"></i> Выберите файл<input type="file" id="selectFiles" style="display:none" /></label>
         <span id="selectedFileName" style="margin-left: 0.5rem; color: var(--text-secondary);"></span>
 		</div>
-        <!--
-        можно загрузить этот файл по ссылке:
-        <input class="form-control" type="text" id="selectLink" /><br />
-        -->
+        <div class="mt-2">
+            <label for="selectLink" class="mb-1" style="color: var(--text-secondary);">…или укажите ссылку на файл:</label>
+            <input class="form-control" type="text" id="selectLink" placeholder="https://example.com/data.csv" />
+        </div>
 		<br />
         <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary">Проверить</button></div>
         <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary">Настроить</button></div>
@@ -996,6 +996,31 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     if(parseInt(lastS)&&index===undefined)
                         intApi('GET',searchUrl+'@'+parseInt(lastS),'searchDb',undefined,'by ID');
                 $('.search-results').html(h).show();
+                break;
+
+            // Issue #3308: ответ серверного прокси загрузки файла по ссылке.
+            // content приходит в base64, декодируем байты и читаем выбранной кодировкой
+            // (как FileReader.readAsText для выбранного файла), затем парсим как обычно.
+            case 'fetchLink':
+                if(json&&json.status==='ok'){
+                    var text;
+                    try{
+                        var bin=atob(json.content||''),bytes=new Uint8Array(bin.length);
+                        for(var bi=0;bi<bin.length;bi++)bytes[bi]=bin.charCodeAt(bi);
+                        text=new TextDecoder($('#encoding').val()||'utf-8').decode(bytes);
+                    }catch(err){
+                        $('#errors').html(escape('Не удалось прочитать содержимое по ссылке.')).show();
+                        break;
+                    }
+                    parseUploadText(text,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
+                        ,LocalChunkSize:1048024
+                        ,RemoteChunkSize:1048024
+                        ,chunk:(results,parser)=>{importDoParse(results);}
+                    });
+                }
+                else
+                    $('#errors').html(escape((json&&json.error)?json.error:'Не удалось загрузить файл по ссылке.')).show();
+                break;
         }
     }
     obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
@@ -1089,17 +1114,20 @@ function importParse(){
             ,chunk: (results, parser) =>{importDoParse(results);}
         });
     else{
-    	var selectFiles=document.getElementById('selectFiles'),file,files=selectFiles?selectFiles.files:null;
-    	if(!files||files.length <= 0)
-    	    if(($('#selectLink').val()||'').length>0){
-    	        fetch($('#selectLink').val(),{mode:'no-cors'}).then(res=>file=new File([res.blob()],'filename'));
-    	        console.log(file);
-    	        var dt=new DataTransfer();
-                dt.items.add(file);
-                files=dt.files;
+    	var selectFiles=document.getElementById('selectFiles'),files=selectFiles?selectFiles.files:null;
+    	if(!files||files.length <= 0){
+    	    var link=($('#selectLink').val()||'').trim();
+    	    if(link.length>0){
+    	        // Issue #3308: скачиваем файл по ссылке через серверный прокси (_m_fetchurl),
+    	        // т.к. fetch из браузера блокирует CORS для чужих доменов. Парсинг — в ветке
+    	        // 'fetchLink' колбэка intApi, когда придёт ответ.
+    	        $('#errors').hide();
+    	        intApi('POST','_m_fetchurl/?JSON','fetchLink','url='+encodeURIComponent(link));
+    	        $('#refresh').hide();
+    	        return false;
     	    }
-    	if(!files||files.length <= 0)
-    		return false;
+    	    return false;
+    	}
 	    var fr = new FileReader();
 	    fr.onload = function(e){
 	        parseUploadText(e.target.result,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
