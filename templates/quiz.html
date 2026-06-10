@@ -209,7 +209,7 @@ if(parseInt(id) > 0){
                   <div class="card">
                     <div class="card-header" id="headingOne">
                       <h5 class="mb-0">
-                        <button class="btn btn-link" data-toggle="collapse" data-target="#collapseOne" aria-expanded="true" aria-controls="collapseOne" onclick="if(grants===undefined)checkUser();">
+                        <button class="btn btn-link" data-toggle="collapse" data-target="#collapseOne" aria-expanded="true" aria-controls="collapseOne" onclick="if(qGrants===undefined)checkUser();">
                           Права на заполнение формы, ссылки
                         </button>
                       </h5>
@@ -231,7 +231,7 @@ if(parseInt(id) > 0){
                                 <li>Дать права на запись в таблицу<span id="grantTable"></span></li>
                                 <li>Дать права на чтение настроек формы <span id="grantForm"></span></li>
                             </ol>
-                            <p class="font-weight-bold" id="grants" style="display:none;">Дайте пользователю <a class="user-form-url" target="_form">эту ссылку</a>
+                            <p class="font-weight-bold" id="qGrants" style="display:none;">Дайте пользователю <a class="user-form-url" target="_form">эту ссылку</a>
                                 <a onclick="copyLink($('.user-form-url').attr('href'))" title="Скопировать ссылку">
                                     <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
                                         <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
@@ -728,7 +728,7 @@ function deselectTable(){
     $('.selected-type,.edit-panel,#form,#addfields').hide(50);
     $('#fields').html('');
 }
-var iquiz={ form:[] },iquizId,dataList=$('#sources').html(),savedIquiz={},dataItems,dataTypes,edited,grants,addRefItems='',view;
+var iquiz={ form:[] },iquizId,dataList=$('#sources').html(),savedIquiz={},dataItems,dataTypes,edited,qGrants,addRefItems='',view;
 function parseFieldAttrs(attrs){
     var result={alias:null};
     if(!attrs) return result;
@@ -772,8 +772,8 @@ function randomSecret(){
     return (Math.random().toString(36)+Math.random().toString(36)+Math.random().toString(36)).replace(/\./g,'').substr(1,8);
 }
 function checkUser(){
-    grants={};
-    $('#grants').hide();
+    qGrants={};
+    $('#qGrants').hide();
     intApi('GET','object/18?JSON&F_18=iquiz','checkUser');
 }
 function createUser(){
@@ -785,10 +785,10 @@ function dropObj(i){
     $('#grantTable,#grantForm').html('');
 }
 function grantTable(){
-    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116='+iquiz.type+'&t136=54&t49=!%','grant','','grantTable');
+    intApi('POST','_m_new/116?JSON&up='+qGrants.roleId+'&t116='+iquiz.type+'&t136=54&t49=!%','grant','','grantTable');
 }
 function grantForm(mode){
-    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116=269&t136=53&t49='+(mode||''),'grant','','grantForm');
+    intApi('POST','_m_new/116?JSON&up='+qGrants.roleId+'&t116=269&t136=53&t49='+(mode||''),'grant','','grantForm');
 }
 function validateCurrentPage(){
     var e='', valid=true;
@@ -984,11 +984,11 @@ function intApi(m,u,b,vars,index){
                 if(json.object===undefined)
                     $('#createUser').html('&nbsp;&mdash; <a class="grant-step" onclick="createUser()">нажмите здесь</a>');
                 else{
-                    grants.userId=json.object[0].id;
-                    grants.roleId=json.reqs[grants.userId].ref_115.split(':').pop();
-                    grants.secret=json.reqs[grants.userId][130];
-                    $('#createUser').html(resultText('Готово','success','edit_obj/'+grants.userId)+grantAction('Удалить',grants.userId));
-                    intApi('GET','object/116?JSON&F_U='+grants.roleId,'checkRole');
+                    qGrants.userId=json.object[0].id;
+                    qGrants.roleId=json.reqs[qGrants.userId].ref_115.split(':').pop();
+                    qGrants.secret=json.reqs[qGrants.userId][130];
+                    $('#createUser').html(resultText('Готово','success','edit_obj/'+qGrants.userId)+grantAction('Удалить',qGrants.userId));
+                    intApi('GET','object/116?JSON&F_U='+qGrants.roleId,'checkRole');
                 }
                 break;
 
@@ -996,16 +996,16 @@ function intApi(m,u,b,vars,index){
                 if(json.reqs)
                     for(i in json.object)
                         if(json.object[i].ref===iquiz.type&&json.reqs[json.object[i].id][136]==='WRITE')
-                            $('#grantTable').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
+                            $('#grantTable').html(resultText('Готово','success','object/116/?F_U='+qGrants.roleId)+grantAction('Удалить',json.object[i].id));
                         else if(json.object[i].ref==='269'&&json.reqs[json.object[i].id][136]==='READ')
-                            $('#grantForm').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
+                            $('#grantForm').html(resultText('Готово','success','object/116/?F_U='+qGrants.roleId)+grantAction('Удалить',json.object[i].id));
                 if($('#grantTable').html().length==0)
                     return $('#grantTable').html('&nbsp;&mdash; <a class="grant-step" onclick="grantTable()">нажмите здесь</a>');
                 if($('#grantForm').html().length==0)
                     return $('#grantForm').html('&nbsp;&mdash; <a class="grant-step" onclick="grantForm()">нажмите здесь</a>');
-                if(grants.secret){
-                    $('.user-form-url').attr('href',document.location.protocol+'//'+document.location.host+'/{_global_.z}/{_global_.action}/'+iquizId+'?secret='+grants.secret).show();
-                    $('#grants').show();
+                if(qGrants.secret){
+                    $('.user-form-url').attr('href',document.location.protocol+'//'+document.location.host+'/{_global_.z}/{_global_.action}/'+iquizId+'?secret='+qGrants.secret).show();
+                    $('#qGrants').show();
                 }
                 break;
 
