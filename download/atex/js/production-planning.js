@@ -3634,7 +3634,9 @@
             var stripsBtn = card && card.querySelector('.atex-pp-strips');
             if (stripsBtn) stripsBtn.textContent = stripsButtonLabel(knives);
             summaryEl.innerHTML = '';
-            summaryEl.appendChild(metric('Итого ножей', knives));
+            // «Итого ножей» = число полос + 1 (крайний нож): N полос режутся N+1 ножом.
+            // knives здесь — число полос (Σ qty), оно же метка кнопки «Полосы (N)».
+            summaryEl.appendChild(metric('Итого ножей', knives > 0 ? knives + 1 : 0));
             summaryEl.appendChild(metric('Занято, мм', used));
             // Ширина джамбо неизвестна (нет вида сырья / ширины) → остаток посчитать
             // нельзя. Не показываем ложный отрицательный «вне допуска» (#3116 п.5),
