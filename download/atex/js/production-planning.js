@@ -2450,7 +2450,19 @@
         return p;
     }
 
+    // #3323: клик по любому месту карточки резки .atex-pp-cut выбирает её (→ боковая
+    // панель «Связанные позиции»). Исключение — клики по самим кнопкам ↑/↓/Полосы и
+    // по панели полос: их перерисовка очереди закрыла бы только что открытую панель
+    // полос. Пустые зоны .atex-pp-cut-controls (отступы и промежутки между кнопками)
+    // теперь тоже считаются кликом по карточке. Чистая (принимает цель клика с
+    // .closest) → проверяется модульным тестом без DOM-движка.
+    function cutClickSelectsCut(target) {
+        if (!target || typeof target.closest !== 'function') return true;
+        return !(target.closest('button') || target.closest('.atex-pp-strip-panel'));
+    }
+
     var planning = {
+        cutClickSelectsCut: cutClickSelectsCut,
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
         isMaterialBlocked: isMaterialBlocked,
@@ -5380,12 +5392,11 @@
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);
             cardPanel.appendChild(info);
-            // Выбор резки кликом по всей карточке (#3149), а не только по .atex-pp-cut-info.
-            // Клики по контролам (↑/↓/Полосы) и панели полос не считаем выбором: их
-            // перерисовка очереди закрыла бы только что открытую панель полос.
+            // Выбор резки кликом по всей карточке (#3149, #3323), а не только по
+            // .atex-pp-cut-info. Логика «считать ли клик выбором» вынесена в чистую
+            // cutClickSelectsCut (см. её комментарий и модульный тест #3323).
             cardPanel.addEventListener('click', function(e) {
-                if (e.target.closest('.atex-pp-cut-controls') ||
-                    e.target.closest('.atex-pp-strip-panel')) return;
+                if (!cutClickSelectsCut(e.target)) return;
                 self.selectedCutId = c.id;
                 self.render();
             });
