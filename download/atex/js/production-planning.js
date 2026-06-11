@@ -645,6 +645,8 @@
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
                     sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    startDate: str(row.cut_start_date),
+                    endDate: str(row.cut_end_date),
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
                     batchId: '',
@@ -1464,6 +1466,295 @@
         var diff = isoDateDiffDays(prevSleeveIso, prevPlanIso);
         if (diff == null) diff = -1;
         return shiftIsoDate(planIso, diff);
+    }
+
+    var CALENDAR_DAY_MS = 86400000;
+    var CALENDAR_MODES = [
+        { id: 'day', label: 'День', days: 1 },
+        { id: 'three', label: '3 дня', days: 3 },
+        { id: 'week', label: 'Неделя', days: 7 },
+        { id: 'month', label: 'Месяц', days: 0 }
+    ];
+
+    function normalizeCalendarMode(mode) {
+        var s = String(mode == null ? '' : mode).trim().toLowerCase();
+        if (s === '3' || s === '3d' || s === '3days' || s === 'three-days') return 'three';
+        for (var i = 0; i < CALENDAR_MODES.length; i++) {
+            if (CALENDAR_MODES[i].id === s) return s;
+        }
+        return 'week';
+    }
+
+    function localDateMs(year, month, day, hour, minute, second) {
+        var d = new Date(Number(year), Number(month) - 1, Number(day),
+            Number(hour) || 0, Number(minute) || 0, Number(second) || 0, 0);
+        if (isNaN(d.getTime())) return null;
+        if (d.getFullYear() !== Number(year) || d.getMonth() !== Number(month) - 1 || d.getDate() !== Number(day)) return null;
+        return d.getTime();
+    }
+
+    function parseCalendarDateTimeMs(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (s === '') return null;
+        if (/^\d{9,13}$/.test(s)) {
+            var num = Number(s);
+            var ms = num >= 1e12 ? num : num * 1000;
+            var stamp = new Date(ms);
+            var year = stamp.getFullYear();
+            if (!isNaN(stamp.getTime()) && year >= 2001 && year <= 2100) return ms;
+        }
+        var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (iso) return localDateMs(iso[1], iso[2], iso[3], iso[4], iso[5], iso[6]);
+        var dmy = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (dmy) return localDateMs(dmy[3], dmy[2], dmy[1], dmy[4], dmy[5], dmy[6]);
+        var parsed = Date.parse(s);
+        return isNaN(parsed) ? null : parsed;
+    }
+
+    function localIsoDateFromMs(ms) {
+        var d = new Date(ms);
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function startOfLocalDayMs(ms) {
+        var d = new Date(ms);
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    }
+
+    function formatCalendarDateShort(ms) {
+        var d = new Date(ms);
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(d.getDate()) + '.' + pad(d.getMonth() + 1);
+    }
+
+    function formatCalendarDateFull(ms) {
+        var d = new Date(ms);
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+    }
+
+    function formatCalendarTime(ms) {
+        var d = new Date(ms);
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function calendarRangeLabel(startMs, endMs) {
+        var lastMs = endMs - 1;
+        if (localIsoDateFromMs(startMs) === localIsoDateFromMs(lastMs)) return formatCalendarDateFull(startMs);
+        return formatCalendarDateFull(startMs) + ' - ' + formatCalendarDateFull(lastMs);
+    }
+
+    function calendarRange(anchorIso, mode) {
+        var normalized = normalizeCalendarMode(mode);
+        var anchorMs = parseCalendarDateTimeMs(anchorIso);
+        if (anchorMs == null) anchorMs = startOfLocalDayMs(Date.now());
+        var anchorDay = startOfLocalDayMs(anchorMs);
+        var startMs, endMs;
+        if (normalized === 'week') {
+            var wd = new Date(anchorDay).getDay();
+            var mondayOffset = (wd + 6) % 7;
+            startMs = anchorDay - mondayOffset * CALENDAR_DAY_MS;
+            endMs = startMs + 7 * CALENDAR_DAY_MS;
+        } else if (normalized === 'month') {
+            var m = new Date(anchorDay);
+            startMs = new Date(m.getFullYear(), m.getMonth(), 1, 0, 0, 0, 0).getTime();
+            endMs = new Date(m.getFullYear(), m.getMonth() + 1, 1, 0, 0, 0, 0).getTime();
+        } else {
+            var days = normalized === 'three' ? 3 : 1;
+            startMs = anchorDay;
+            endMs = startMs + days * CALENDAR_DAY_MS;
+        }
+        var outDays = [];
+        for (var t = startMs; t < endMs; t += CALENDAR_DAY_MS) {
+            outDays.push({
+                iso: localIsoDateFromMs(t),
+                label: formatCalendarDateShort(t),
+                leftPct: round3(((t - startMs) / (endMs - startMs)) * 100)
+            });
+        }
+        return {
+            mode: normalized,
+            startMs: startMs,
+            endMs: endMs,
+            startIso: localIsoDateFromMs(startMs),
+            endIso: localIsoDateFromMs(endMs),
+            label: calendarRangeLabel(startMs, endMs),
+            days: outDays
+        };
+    }
+
+    function shiftCalendarAnchor(anchorIso, mode, direction) {
+        var range = calendarRange(anchorIso, mode);
+        var dir = Number(direction) || 0;
+        var normalized = range.mode;
+        if (normalized === 'month') {
+            var d = new Date(range.startMs);
+            return localIsoDateFromMs(new Date(d.getFullYear(), d.getMonth() + dir, 1, 0, 0, 0, 0).getTime());
+        }
+        var step = normalized === 'week' ? 7 : (normalized === 'three' ? 3 : 1);
+        return shiftIsoDate(range.startIso, dir * step);
+    }
+
+    function cutCalendarDeadlineMs(cut) {
+        var planMs = parseCalendarDateTimeMs(cut && cut.planDate);
+        var duration = stripNum(cut && cut.duration);
+        if (planMs == null || !(duration > 0)) return null;
+        return planMs + duration * 60000;
+    }
+
+    function cutCalendarStatus(cut, nowMs) {
+        var now = Number(nowMs);
+        if (!isFinite(now)) now = Date.now();
+        var planMs = parseCalendarDateTimeMs(cut && cut.planDate);
+        var startMs = parseCalendarDateTimeMs(cut && cut.startDate);
+        var endMs = parseCalendarDateTimeMs(cut && cut.endDate);
+        var deadlineMs = cutCalendarDeadlineMs(cut);
+        var unfinished = truthyFlag(cut && cut.status);
+        if (endMs != null) {
+            if (deadlineMs != null && endMs > deadlineMs) return { key: 'late', label: 'С опозданием' };
+            return deadlineMs != null ? { key: 'on-time', label: 'В срок' } : { key: 'done', label: 'Завершено' };
+        }
+        if (deadlineMs != null && now > deadlineMs) return { key: 'late', label: 'С опозданием' };
+        if (unfinished) return { key: 'unfinished', label: 'Не завершено' };
+        if (startMs != null) return { key: 'running', label: 'В работе' };
+        if (planMs != null && now > planMs) return { key: 'late-start', label: 'Старт просрочен' };
+        if (planMs != null) return { key: 'planned', label: 'Запланировано' };
+        return { key: 'unknown', label: 'Без даты' };
+    }
+
+    function cutCalendarTimeRange(cut) {
+        var planMs = parseCalendarDateTimeMs(cut && cut.planDate);
+        var startMs = parseCalendarDateTimeMs(cut && cut.startDate);
+        var endMs = parseCalendarDateTimeMs(cut && cut.endDate);
+        var visualStartMs = startMs != null ? startMs : planMs;
+        if (visualStartMs == null) return null;
+        var deadlineMs = cutCalendarDeadlineMs(cut);
+        var visualEndMs = endMs != null ? endMs : (deadlineMs != null ? deadlineMs : visualStartMs + 30 * 60000);
+        if (!(visualEndMs > visualStartMs)) visualEndMs = visualStartMs + 30 * 60000;
+        return {
+            startMs: visualStartMs,
+            endMs: visualEndMs,
+            planMs: planMs,
+            actualStartMs: startMs,
+            actualEndMs: endMs,
+            deadlineMs: deadlineMs
+        };
+    }
+
+    function cutCalendarItemLabel(cut, range) {
+        var name = formatCutNumber(cut && cut.number) || String((cut && cut.id) || '');
+        var material = String((cut && cut.materialName) || '').trim();
+        var text = formatCalendarTime(range.startMs) + '-' + formatCalendarTime(range.endMs);
+        if (name) text += ' · ' + name;
+        if (material) text += ' · ' + material;
+        return text;
+    }
+
+    function cutCalendarItemTitle(cut, range, status) {
+        var lines = [];
+        lines.push('Резка ' + (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || ''))));
+        var slitter = cut && cut.slitter && cut.slitter.label;
+        if (slitter) lines.push('Станок: ' + slitter);
+        if (range.planMs != null) lines.push('План: ' + formatDateTimeMinute(new Date(range.planMs)));
+        if (range.actualStartMs != null) lines.push('Старт факт: ' + formatDateTimeMinute(new Date(range.actualStartMs)));
+        if (range.actualEndMs != null) lines.push('Финиш факт: ' + formatDateTimeMinute(new Date(range.actualEndMs)));
+        if (range.deadlineMs != null) lines.push('Дедлайн: ' + formatDateTimeMinute(new Date(range.deadlineMs)));
+        lines.push('Статус: ' + status.label);
+        return lines.join('\n');
+    }
+
+    function cutCalendarItem(cut, range, nowMs) {
+        if (!cut || !range || !(range.endMs > range.startMs)) return null;
+        var timeRange = cutCalendarTimeRange(cut);
+        if (!timeRange) return null;
+        if (timeRange.endMs <= range.startMs || timeRange.startMs >= range.endMs) return null;
+        var clippedStartMs = Math.max(timeRange.startMs, range.startMs);
+        var clippedEndMs = Math.min(timeRange.endMs, range.endMs);
+        var spanMs = range.endMs - range.startMs;
+        var status = cutCalendarStatus(cut, nowMs);
+        return {
+            cut: cut,
+            cutId: String(cut.id == null ? '' : cut.id),
+            startMs: timeRange.startMs,
+            endMs: timeRange.endMs,
+            clippedStartMs: clippedStartMs,
+            clippedEndMs: clippedEndMs,
+            leftPct: round3(((clippedStartMs - range.startMs) / spanMs) * 100),
+            widthPct: round3(Math.max(((clippedEndMs - clippedStartMs) / spanMs) * 100, 0.4)),
+            lane: 0,
+            status: status,
+            label: cutCalendarItemLabel(cut, timeRange),
+            title: cutCalendarItemTitle(cut, timeRange, status)
+        };
+    }
+
+    function assignCalendarLanes(items) {
+        var laneEnds = [];
+        return (items || []).slice().sort(function(a, b) {
+            return (a.startMs - b.startMs) || (a.endMs - b.endMs) || String(a.cutId).localeCompare(String(b.cutId));
+        }).map(function(item) {
+            var lane = 0;
+            while (lane < laneEnds.length && item.startMs < laneEnds[lane]) lane++;
+            laneEnds[lane] = item.endMs;
+            var copy = {};
+            Object.keys(item).forEach(function(k) { copy[k] = item[k]; });
+            copy.lane = lane;
+            return copy;
+        });
+    }
+
+    function calendarItemsForRange(cuts, range, nowMs) {
+        var items = [];
+        (cuts || []).forEach(function(cut) {
+            var item = cutCalendarItem(cut, range, nowMs);
+            if (item) items.push(item);
+        });
+        return assignCalendarLanes(items);
+    }
+
+    function machineCalendarGroups(cuts, slitters, range, nowMs, filters) {
+        var f = filters || {};
+        var status = String(f.status == null ? '' : f.status).trim();
+        var slitterFilter = String(f.slitter == null ? '' : f.slitter).trim();
+        var groups = {};
+        var order = [];
+        function ensure(slitter) {
+            var s = slitter || { id: null, label: '' };
+            var key = s.id == null || String(s.id) === '' ? '\u0000none' : String(s.id);
+            if (!groups[key]) {
+                groups[key] = {
+                    key: key,
+                    slitter: { id: s.id == null || String(s.id) === '' ? null : String(s.id), label: s.label || (s.id == null || String(s.id) === '' ? 'Без станка' : '#' + s.id) },
+                    cuts: [],
+                    items: [],
+                    laneCount: 0
+                };
+                order.push(key);
+            }
+            return groups[key];
+        }
+        (slitters || []).forEach(function(s) {
+            if (slitterFilter && String(s && s.id) !== slitterFilter) return;
+            ensure(s);
+        });
+        (cuts || []).forEach(function(cut) {
+            if (status && String(cut && cut.status || '').trim() !== status) return;
+            var s = cut && cut.slitter || { id: null, label: '' };
+            if (slitterFilter && String(s.id == null ? '' : s.id) !== slitterFilter) return;
+            ensure(s).cuts.push(cut);
+        });
+        order.forEach(function(key) {
+            var group = groups[key];
+            group.items = calendarItemsForRange(group.cuts, range, nowMs);
+            group.laneCount = group.items.reduce(function(max, item) { return Math.max(max, item.lane + 1); }, 0);
+        });
+        return order.map(function(key) { return groups[key]; }).sort(function(a, b) {
+            if (a.slitter.id == null) return 1;
+            if (b.slitter.id == null) return -1;
+            return String(a.slitter.label).localeCompare(String(b.slitter.label), 'ru');
+        });
     }
 
     // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
@@ -2634,6 +2925,17 @@
         sleeveDiameterIdFromRow: sleeveDiameterIdFromRow,
         sleeveDiameterIsReady: sleeveDiameterIsReady,
         shiftIsoDate: shiftIsoDate,
+        CALENDAR_MODES: CALENDAR_MODES,
+        normalizeCalendarMode: normalizeCalendarMode,
+        parseCalendarDateTimeMs: parseCalendarDateTimeMs,
+        calendarRange: calendarRange,
+        shiftCalendarAnchor: shiftCalendarAnchor,
+        cutCalendarStatus: cutCalendarStatus,
+        cutCalendarTimeRange: cutCalendarTimeRange,
+        cutCalendarItem: cutCalendarItem,
+        calendarItemsForRange: calendarItemsForRange,
+        assignCalendarLanes: assignCalendarLanes,
+        machineCalendarGroups: machineCalendarGroups,
         isoDateDiffDays: isoDateDiffDays,
         sleeveCutDateForPlan: sleeveCutDateForPlan,
         formatSleeveTaskLine: formatSleeveTaskLine,
@@ -2734,7 +3036,15 @@
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.draft = this.blankDraft();
         // дата плана по умолчанию — сегодня; «Нарезка втулок» (#3321) — на день раньше плана
-        this.filter = { slitter: '', status: '', date: todayISO(), sleeveDate: shiftIsoDate(todayISO(), -1) };
+        var initialPlanDate = todayISO();
+        this.filter = {
+            slitter: '',
+            status: '',
+            date: initialPlanDate,
+            sleeveDate: shiftIsoDate(initialPlanDate, -1),
+            calendarMode: 'week',
+            calendarDate: initialPlanDate
+        };
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
@@ -5409,6 +5719,150 @@
         }
     };
 
+    AtexProductionPlanning.prototype.renderMachineCalendar = function() {
+        var self = this;
+        var f = this.filter || {};
+        var mode = normalizeCalendarMode(f.calendarMode || 'week');
+        var range = calendarRange(f.calendarDate || f.date || todayISO(), mode);
+        this.filter.calendarMode = mode;
+        if (!this.filter.calendarDate) this.filter.calendarDate = range.startIso;
+
+        var calendar = el('section', { class: 'atex-pp-calendar' });
+        var prevBtn = el('button', { class: 'atex-pp-cal-arrow', type: 'button', text: '‹', title: 'Предыдущий период' });
+        var nextBtn = el('button', { class: 'atex-pp-cal-arrow', type: 'button', text: '›', title: 'Следующий период' });
+        prevBtn.addEventListener('click', function() {
+            self.filter.calendarDate = shiftCalendarAnchor(self.filter.calendarDate || range.startIso, self.filter.calendarMode, -1);
+            self.renderQueue();
+        });
+        nextBtn.addEventListener('click', function() {
+            self.filter.calendarDate = shiftCalendarAnchor(self.filter.calendarDate || range.startIso, self.filter.calendarMode, 1);
+            self.renderQueue();
+        });
+
+        var modeWrap = el('div', { class: 'atex-pp-cal-modes', role: 'group', 'aria-label': 'Период календаря' });
+        CALENDAR_MODES.forEach(function(m) {
+            var btn = el('button', {
+                class: 'atex-pp-cal-mode' + (m.id === mode ? ' is-active' : ''),
+                type: 'button',
+                text: m.label,
+                title: m.label
+            });
+            btn.addEventListener('click', function() {
+                self.filter.calendarMode = m.id;
+                self.renderQueue();
+            });
+            modeWrap.appendChild(btn);
+        });
+
+        var dateInput = el('input', {
+            class: 'atex-pp-input atex-pp-cal-date',
+            type: 'date',
+            value: this.filter.calendarDate || range.startIso,
+            title: 'Дата периода'
+        });
+        dateInput.addEventListener('change', function() {
+            if (!dateInput.value) return;
+            self.filter.calendarDate = dateInput.value;
+            self.renderQueue();
+        });
+
+        var head = el('div', { class: 'atex-pp-cal-head' }, [
+            el('div', { class: 'atex-pp-cal-title', text: 'Календарь занятости станков' }),
+            el('div', { class: 'atex-pp-cal-period' }, [
+                prevBtn,
+                el('span', { class: 'atex-pp-cal-range', text: range.label }),
+                nextBtn
+            ]),
+            modeWrap,
+            dateInput
+        ]);
+        calendar.appendChild(head);
+
+        var groups = machineCalendarGroups(this.cuts || [], this.slitters || [], range, controllerNowMs(this), {
+            status: this.filter.status,
+            slitter: this.filter.slitter
+        });
+        var totalItems = groups.reduce(function(total, group) { return total + group.items.length; }, 0);
+
+        var legend = el('div', { class: 'atex-pp-cal-legend' }, [
+            el('span', { class: 'atex-pp-cal-legend-item is-planned', text: 'Запланировано' }),
+            el('span', { class: 'atex-pp-cal-legend-item is-unfinished', text: 'Не завершено' }),
+            el('span', { class: 'atex-pp-cal-legend-item is-on-time', text: 'В срок' }),
+            el('span', { class: 'atex-pp-cal-legend-item is-late', text: 'С опозданием' })
+        ]);
+        calendar.appendChild(legend);
+
+        function appendTicks(track, scale) {
+            range.days.forEach(function(day, idx) {
+                var tick = el('span', { class: 'atex-pp-cal-tick' + (scale ? ' is-scale' : '') });
+                tick.style.left = day.leftPct + '%';
+                if (scale) {
+                    var label = el('span', { class: 'atex-pp-cal-tick-label', text: day.label });
+                    if (range.mode === 'month' && idx % 2 !== 0) label.className += ' is-minor';
+                    tick.appendChild(label);
+                }
+                track.appendChild(tick);
+            });
+            var endTick = el('span', { class: 'atex-pp-cal-tick is-end' + (scale ? ' is-scale' : '') });
+            endTick.style.left = '100%';
+            track.appendChild(endTick);
+        }
+
+        var scroll = el('div', { class: 'atex-pp-cal-scroll' });
+        var body = el('div', { class: 'atex-pp-cal-body atex-pp-cal-body--' + range.mode });
+        var scaleRow = el('div', { class: 'atex-pp-cal-row atex-pp-cal-scale-row' });
+        scaleRow.appendChild(el('div', { class: 'atex-pp-cal-machine atex-pp-cal-machine--scale', text: 'Станок' }));
+        var scaleTrack = el('div', { class: 'atex-pp-cal-track atex-pp-cal-scale' });
+        appendTicks(scaleTrack, true);
+        scaleRow.appendChild(scaleTrack);
+        body.appendChild(scaleRow);
+
+        if (!groups.length) {
+            body.appendChild(el('div', { class: 'atex-pp-cal-empty', text: 'Нет станков для календаря' }));
+        } else {
+            groups.forEach(function(group) {
+                var row = el('div', { class: 'atex-pp-cal-row' });
+                row.appendChild(el('div', { class: 'atex-pp-cal-machine', text: group.slitter.label }));
+                var track = el('div', { class: 'atex-pp-cal-track' });
+                var laneCount = Math.max(group.laneCount, group.items.length ? 1 : 0);
+                track.style.minHeight = Math.max(38, laneCount * 30 + 10) + 'px';
+                appendTicks(track, false);
+                if (!group.items.length) {
+                    track.appendChild(el('span', { class: 'atex-pp-cal-row-empty', text: 'Нет резок' }));
+                }
+                group.items.forEach(function(item) {
+                    var active = String(self.selectedCutId) === String(item.cutId);
+                    var statusKey = item.status && item.status.key || 'unknown';
+                    var btn = el('button', {
+                        class: 'atex-pp-cal-item is-' + statusKey + (active ? ' is-active' : ''),
+                        type: 'button',
+                        title: item.title,
+                        dataset: { cutId: item.cutId }
+                    }, [
+                        el('span', { class: 'atex-pp-cal-item-main', text: item.label }),
+                        el('span', { class: 'atex-pp-cal-item-status', text: item.status.label })
+                    ]);
+                    btn.style.left = item.leftPct + '%';
+                    btn.style.width = item.widthPct + '%';
+                    btn.style.top = (item.lane * 30 + 5) + 'px';
+                    btn.addEventListener('click', function() {
+                        self.selectedCutId = item.cutId;
+                        self.render();
+                    });
+                    track.appendChild(btn);
+                });
+                row.appendChild(track);
+                body.appendChild(row);
+            });
+        }
+        scroll.appendChild(body);
+        calendar.appendChild(scroll);
+        if (!totalItems) {
+            calendar.appendChild(el('div', { class: 'atex-pp-cal-note', text: 'На выбранном интервале резок нет' }));
+        }
+        return calendar;
+    };
+
     AtexProductionPlanning.prototype.renderQueue = function() {
         var self = this;
         if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
@@ -5417,6 +5871,7 @@
         var t0 = Date.now();
         var box = this.queueEl;
         box.innerHTML = '';
+        box.appendChild(this.renderMachineCalendar());
 
         // Панель фильтров. Фильтр по станку заменён закладками (#3116 п.2).
         var filters = el('div', { class: 'atex-pp-filters' });
@@ -5927,4 +6382,4 @@
 
  
  
-// @version 2026-06-11-issue-3332
+// @version 2026-06-11-issue-3334
