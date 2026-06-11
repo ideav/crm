@@ -111,4 +111,57 @@ assertEqual(core.defectM2(-3, 910), 0, 'defectM2: отрицательные м�
 assertEqual(core.photoFieldKey('1118'), 't1118', 'photoFieldKey: t + reqId');
 assertEqual(core.photoFieldKey(null), '', 'photoFieldKey: нет reqId → пусто');
 
+// ── очередь слиттера: сначала выбор станка/даты, завершённые скрыты по умолчанию ──
+var queueCuts = [
+    { id: 'done-prev', slitterId: 's1', planDate: '2026-06-10', status: 'Завершён', sequence: 1, startedAt: '2026-06-10 08:00:00' },
+    { id: 'wait-today', slitterId: 's1', planDate: '2026-06-11', status: 'Ожидает', sequence: 2, startedAt: '' },
+    { id: 'run-today', slitterId: 's1', planDate: '2026-06-11', status: 'В работе', sequence: 3, startedAt: '2026-06-11 09:00:00' },
+    { id: 'done-today', slitterId: 's1', planDate: '2026-06-11', status: 'Завершён', sequence: 1, startedAt: '2026-06-11 07:00:00' },
+    { id: 'other-slitter', slitterId: 's2', planDate: '2026-06-11', status: 'Ожидает', sequence: 1, startedAt: '' }
+];
+var hiddenDoneQueue = core.prepareCutQueue(queueCuts, { slitterId: 's1', date: '2026-06-11', includeDone: false });
+assertEqual(hiddenDoneQueue.cuts.map(function(c) { return c.id; }), ['wait-today', 'run-today'],
+    'prepareCutQueue filters by slitter/date and hides completed by default');
+assertEqual(hiddenDoneQueue.firstOpenCutId, 'wait-today',
+    'prepareCutQueue selects the first unstarted waiting cut');
+assertEqual(core.prepareCutQueue(queueCuts, { slitterId: 's1', date: '2026-06-11', includeDone: true }).cuts.map(function(c) { return c.id; }),
+    ['wait-today', 'run-today', 'done-today'], 'prepareCutQueue shows completed when requested');
+
+// ── открытая смена: последняя отметка пользователя за день должна быть началом, не концом ──
+assertEqual(core.hasOpenShift([
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '701' },
+    { when: '2026-06-11 10:00:00', type: 'Обед', userId: '701' }
+], '701', '2026-06-11'), true, 'hasOpenShift true after user opened shift today');
+assertEqual(core.hasOpenShift([
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '701' },
+    { when: '2026-06-11 16:30:00', type: 'Конец смены', userId: '701' }
+], '701', '2026-06-11'), false, 'hasOpenShift false after user closed shift today');
+assertEqual(core.hasOpenShift([
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '702' }
+], '701', '2026-06-11'), false, 'hasOpenShift ignores another operator');
+
+// ── партии сырья: FIFO, только В работе, остатка хватает минимум на один проход ──
+var rawBatches = [
+    { id: 'new', date: '2026-06-05', remainderM: 950, materialId: 'm1', active: '1', barcode: 'NEW' },
+    { id: 'old', date: '2026-06-01', remainderM: 700, materialId: 'm1', active: '1', barcode: 'OLD' },
+    { id: 'short', date: '2026-05-20', remainderM: 399, materialId: 'm1', active: '1', barcode: 'SHORT' },
+    { id: 'inactive', date: '2026-05-01', remainderM: 1200, materialId: 'm1', active: '0', barcode: 'OFF' },
+    { id: 'wrong-material', date: '2026-04-01', remainderM: 2000, materialId: 'm2', active: '1', barcode: 'M2' }
+];
+var cutForCoverage = { materialId: 'm1', runLength: 400, plannedRuns: 4 };
+assertEqual(core.availableBatchesForCut(rawBatches, cutForCoverage).map(function(b) { return b.id; }),
+    ['old', 'new'], 'availableBatchesForCut keeps active matching batches with at least one pass, FIFO');
+assertEqual(core.batchCoverage(rawBatches, ['old', 'new'], cutForCoverage), {
+    runLength: 400,
+    neededRuns: 4,
+    neededMeters: 1600,
+    coveredRuns: 3,
+    coveredMeters: 1200,
+    complete: false,
+    batches: [
+        { id: 'old', passes: 1, meters: 400 },
+        { id: 'new', passes: 2, meters: 800 }
+    ]
+}, 'batchCoverage counts whole passes and sums selected batches');
+
 console.log('\n' + passed + ' assertions passed');

@@ -10,8 +10,8 @@
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
 // (#2903): статус/счётчики/погонаж/брак — `_m_set/{резкаId}`; расход —
 // `_m_new/{Расход сырья}` с `up={резкаId}` (и `_m_set` остатка партии); событие —
-// `_m_new/{Событие смены}`; список «мои резки» — `object/{Производственная резка}/`
-// с фильтром по слиттеру/статусу. ID таблиц и реквизитов не хардкодятся: они
+// `_m_new/{Событие смены}`; список резок строится из `object/{Производственная резка}/`
+// с фильтром по выбранным слиттеру/дате. ID таблиц и реквизитов не хардкодятся: они
 // берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
 // разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
 // в объём этой задачи не входит.
@@ -46,7 +46,8 @@
         consumption: 'Расход сырья',
         event: 'Событие смены',
         batch: 'Партия сырья',
-        material: 'Вид сырья'
+        material: 'Вид сырья',
+        slitter: 'Слиттер'
     };
     var CUT_REQ = {
         slitter: 'Слиттер',
@@ -59,17 +60,34 @@
         defect: 'Брак, м²',
         defectM: 'Брак, м',
         defectPhoto: 'Фото брака',
+        sequence: 'Очередность',
+        plannedRuns: 'Кол-во план',
+        runLength: 'Метраж, м',
+        startedAt: 'Начато',
         notes: 'Примечания'
     };
+    var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
+    var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
+    var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
     var EVENT_REQ = { type: 'Тип события', cut: 'Производственная резка', user: 'Пользователь', value: 'Значение', notes: 'Примечания' };
-    var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²', remainderM: 'Остаток, м' };
+    var BATCH_REQ = {
+        kind: 'Вид сырья',
+        date: 'Дата прихода',
+        received: 'Получено, м²',
+        remainder: 'Остаток, м²',
+        remainderM: 'Остаток, м',
+        active: 'В работе',
+        barcode: 'Штрих-код'
+    };
     var MATERIAL_REQ = { width: 'Ширина, мм' };
 
     // Статусы резки по дизайн-спеке atex (§3.5): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'Наладка', 'В работе', 'Завершён'];
+    var DONE_STATUSES = ['Завершён', 'Завершена', 'Готова'];
+    var WAIT_STATUSES = ['Ожидает', 'Запланирована', 'В очереди'];
     // Типы событий смены (дизайн-спека atex, «Событие смены»).
-    var EVENT_TYPES = ['Начало смены', 'Запуск резки', 'Обед', 'Переналадка', 'Счётчик', 'Брак', 'Конец смены'];
+    var EVENT_TYPES = ['Начало смены', 'Запуск резки', 'Пауза', 'Обед', 'Переналадка', 'Счётчик', 'Брак', 'Завершение резки', 'Конец смены'];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -108,7 +126,7 @@
 
     // Резка завершена?
     function isDone(status) {
-        return normalizeStatus(status) === STATUSES[STATUSES.length - 1];
+        return statusIn(status, DONE_STATUSES);
     }
 
     // Погонаж из показаний счётчика: кон. − нач., не меньше нуля (счётчик не
@@ -171,6 +189,223 @@
         return reqId ? ('t' + reqId) : '';
     }
 
+    function statusIn(status, list) {
+        var s = normalizeStatus(status).toLowerCase();
+        return (list || []).some(function(item) { return String(item).toLowerCase() === s; });
+    }
+
+    function isWaitingStatus(status) {
+        return statusIn(status, WAIT_STATUSES);
+    }
+
+    function isPauseStatus(status) {
+        var s = normalizeStatus(status).toLowerCase();
+        return s === 'пауза' || s === 'на паузе';
+    }
+
+    function truthyFlag(value) {
+        if (value === true) return true;
+        if (value === false || value == null) return false;
+        if (typeof value === 'number') return isFinite(value) && value !== 0;
+        var s = String(value).trim().toLowerCase();
+        if (!s) return false;
+        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+    }
+
+    function isActiveBatch(batch) {
+        if (!batch || batch.active === undefined || batch.active === null || String(batch.active).trim() === '') return true;
+        return truthyFlag(batch.active);
+    }
+
+    function pad2(n) {
+        return (n < 10 ? '0' : '') + n;
+    }
+
+    function todayISO(date) {
+        var d = date instanceof Date ? date : new Date();
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+
+    // Календарный ключ YYYYMMDD: ISO, ДД.ММ.ГГГГ/ДД/ММ/ГГГГ, unix seconds/ms.
+    function dateKey(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!s) return Infinity;
+        var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
+        var dmy = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
+        if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
+        if (/^\d{9,13}$/.test(s)) {
+            var num = Number(s);
+            var ms = num >= 1e12 ? num : num * 1000;
+            var d = new Date(ms);
+            if (!isNaN(d.getTime()) && d.getFullYear() >= 2001 && d.getFullYear() <= 2100) {
+                return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+            }
+        }
+        var parsed = Date.parse(s);
+        if (!isNaN(parsed)) {
+            var dt = new Date(parsed);
+            return dt.getFullYear() * 10000 + (dt.getMonth() + 1) * 100 + dt.getDate();
+        }
+        return Infinity;
+    }
+
+    function cutSlitterId(cut) {
+        if (!cut) return '';
+        if (cut.slitterId != null) return String(cut.slitterId);
+        if (cut.slitter && cut.slitter.id != null) return String(cut.slitter.id);
+        return '';
+    }
+
+    function cutStartedValue(cut) {
+        if (!cut) return '';
+        return String(cut.startedAt || cut.started || cut.actualStart || '').trim();
+    }
+
+    function sequenceKey(cut) {
+        var n = Number(cut && cut.sequence);
+        return isFinite(n) ? n : Infinity;
+    }
+
+    function compareCutsForQueue(a, b) {
+        var ad = isDone(a && a.status), bd = isDone(b && b.status);
+        if (ad !== bd) return ad ? 1 : -1;
+        var aw = isWaitingStatus(a && a.status) && !cutStartedValue(a);
+        var bw = isWaitingStatus(b && b.status) && !cutStartedValue(b);
+        if (aw !== bw) return aw ? -1 : 1;
+        var as = sequenceKey(a), bs = sequenceKey(b);
+        if (as !== bs) return as - bs;
+        var ak = dateKey(a && a.planDate), bk = dateKey(b && b.planDate);
+        if (ak !== bk) return ak - bk;
+        return String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
+    }
+
+    function prepareCutQueue(cuts, opts) {
+        var o = opts || {};
+        var selectedSlitterId = o.slitterId == null ? '' : String(o.slitterId);
+        var selectedDateKey = o.date ? dateKey(o.date) : Infinity;
+        var list = (cuts || []).filter(function(cut) {
+            if (selectedSlitterId && cutSlitterId(cut) !== selectedSlitterId) return false;
+            if (selectedDateKey !== Infinity && dateKey(cut && cut.planDate) !== selectedDateKey) return false;
+            if (!o.includeDone && isDone(cut && cut.status)) return false;
+            return true;
+        }).map(function(cut, i) { return { cut: cut, i: i }; }).sort(function(a, b) {
+            return compareCutsForQueue(a.cut, b.cut) || a.i - b.i;
+        }).map(function(x) { return x.cut; });
+
+        var firstOpen = null;
+        for (var i = 0; i < list.length; i++) {
+            if (!isDone(list[i].status) && isWaitingStatus(list[i].status) && !cutStartedValue(list[i])) {
+                firstOpen = list[i];
+                break;
+            }
+        }
+        if (!firstOpen) {
+            for (var j = 0; j < list.length; j++) {
+                if (!isDone(list[j].status)) { firstOpen = list[j]; break; }
+            }
+        }
+        return { cuts: list, firstOpenCutId: firstOpen ? String(firstOpen.id) : null };
+    }
+
+    function eventUserId(event) {
+        if (!event) return '';
+        if (event.userId != null) return String(event.userId);
+        if (event.user && event.user.id != null) return String(event.user.id);
+        if (event.operatorId != null) return String(event.operatorId);
+        if (event.userRef) return parseRef(event.userRef).id || '';
+        return '';
+    }
+
+    function isShiftStartType(type) {
+        var s = String(type == null ? '' : type).trim().toLowerCase();
+        return s === 'начало смены' || s === 'открытие смены';
+    }
+
+    function isShiftEndType(type) {
+        var s = String(type == null ? '' : type).trim().toLowerCase();
+        return s === 'конец смены' || s === 'закрытие смены' || s === 'завершение смены';
+    }
+
+    function eventMatchesUser(event, userId) {
+        var uid = String(userId == null ? '' : userId).trim();
+        if (!uid) return true;
+        return eventUserId(event) === uid;
+    }
+
+    function hasOpenShift(events, userId, date) {
+        var targetDay = dateKey(date || todayISO());
+        var last = null;
+        (events || []).forEach(function(event, i) {
+            if (!eventMatchesUser(event, userId)) return;
+            if (dateKey(event.when) !== targetDay) return;
+            if (!isShiftStartType(event.type) && !isShiftEndType(event.type)) return;
+            var order = String(event.when || '') + '#' + i;
+            if (!last || order > last.order) last = { event: event, order: order };
+        });
+        return !!(last && isShiftStartType(last.event.type));
+    }
+
+    function runLengthForCut(cut) {
+        return coreToNumber(cut && (cut.runLength || cut.length || cut.plannedRunLength));
+    }
+
+    function plannedRunsForCut(cut) {
+        var runs = coreToNumber(cut && (cut.plannedRuns || cut.runCount || cut.runs));
+        return runs > 0 ? Math.ceil(runs) : 1;
+    }
+
+    // Internal alias to avoid function-hoisting surprises in minifiers and keep
+    // these helpers readable before `core` is assembled.
+    function coreToNumber(value) {
+        return toNumber(value);
+    }
+
+    function batchMatchesCut(batch, cut) {
+        var cutMat = String((cut && cut.materialId) || '').trim();
+        if (!cutMat) return true;
+        return String((batch && batch.materialId) || '').trim() === cutMat;
+    }
+
+    function batchPasses(batch, cut) {
+        var runLength = runLengthForCut(cut);
+        if (!(runLength > 0)) return 0;
+        return Math.floor(coreToNumber(batch && batch.remainderM) / runLength);
+    }
+
+    function availableBatchesForCut(batches, cut) {
+        var runLength = runLengthForCut(cut);
+        return sortFifo((batches || []).filter(function(batch) {
+            if (!isActiveBatch(batch)) return false;
+            if (!batchMatchesCut(batch, cut)) return false;
+            if (!(runLength > 0)) return coreToNumber(batch && (batch.remainderM || batch.remainder)) > 0;
+            return batchPasses(batch, cut) >= 1;
+        }));
+    }
+
+    function batchCoverage(batches, selectedIds, cut) {
+        var ids = {};
+        (selectedIds || []).forEach(function(id) { ids[String(id)] = true; });
+        var runLength = runLengthForCut(cut);
+        var neededRuns = plannedRunsForCut(cut);
+        var selected = availableBatchesForCut(batches, cut).filter(function(batch) { return ids[String(batch.id)]; });
+        var coveredRuns = 0;
+        var details = selected.map(function(batch) {
+            var passes = batchPasses(batch, cut);
+            coveredRuns += passes;
+            return { id: String(batch.id), passes: passes, meters: round3(passes * runLength) };
+        });
+        return {
+            runLength: round3(runLength),
+            neededRuns: neededRuns,
+            neededMeters: round3(neededRuns * runLength),
+            coveredRuns: coveredRuns,
+            coveredMeters: round3(coveredRuns * runLength),
+            complete: coveredRuns >= neededRuns,
+            batches: details
+        };
+    }
+
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
@@ -196,7 +431,19 @@
         restoreConsumption: restoreConsumption,
         formatDateTime: formatDateTime,
         defectM2: defectM2,
-        photoFieldKey: photoFieldKey
+        photoFieldKey: photoFieldKey,
+        isWaitingStatus: isWaitingStatus,
+        isPauseStatus: isPauseStatus,
+        isActiveBatch: isActiveBatch,
+        todayISO: todayISO,
+        dateKey: dateKey,
+        prepareCutQueue: prepareCutQueue,
+        hasOpenShift: hasOpenShift,
+        runLengthForCut: runLengthForCut,
+        plannedRunsForCut: plannedRunsForCut,
+        batchPasses: batchPasses,
+        availableBatchesForCut: availableBatchesForCut,
+        batchCoverage: batchCoverage
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -226,6 +473,14 @@
         return found ? String(found.id) : null;
     }
 
+    function reqIdByAnyName(meta, names) {
+        for (var i = 0; i < (names || []).length; i++) {
+            var rid = reqIdByName(meta, names[i]);
+            if (rid) return rid;
+        }
+        return null;
+    }
+
     // Индекс колонки JSON_OBJ по имени реквизита. Колонки идут в порядке
     // [главное значение, ...reqs по порядку метаданных].
     function colIndex(meta, reqName) {
@@ -235,26 +490,42 @@
         return idx >= 0 ? idx : -1;
     }
 
+    function colIndexAny(meta, reqNames) {
+        for (var i = 0; i < (reqNames || []).length; i++) {
+            var idx = colIndex(meta, reqNames[i]);
+            if (idx >= 0) return idx;
+        }
+        return -1;
+    }
+
     // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
     function parseRef(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
+        var s = String(raw == null ? '' : raw);
+        var m = s.match(/^(\d+):([\s\S]*)$/);
+        if (m) return { id: m[1], label: m[2] };
+        if (/^\d+$/.test(s)) return { id: s, label: s };
+        return { id: null, label: s };
     }
 
     function AtexSlitter(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
-        this.meta = { cut: null, consumption: null, event: null, batch: null };
+        this.meta = { cut: null, consumption: null, event: null, batch: null, material: null, slitter: null };
+        this.slitters = [];
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder, materialId }]
         this.materialWidths = {}; // { materialId: widthMm }
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
+        this.selectedSlitterId = '';
+        this.selectedDate = core.todayISO();
+        this.includeDone = false;
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
         this.consumptions = [];   // расход сырья выбранной резки
         this.events = [];         // события смены выбранной резки
-        this.hideDone = false;    // фильтр «скрыть завершённые»
+        this.shiftEvents = [];    // события смены оператора за выбранную дату
+        this.selectedBatchIds = [];
         this.busy = false;
     }
 
@@ -359,8 +630,21 @@
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
             self.meta.material = byName(TABLE.material);
+            self.meta.slitter = byName(TABLE.slitter);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
+        });
+    };
+
+    AtexSlitter.prototype.loadSlitters = function() {
+        var self = this;
+        var meta = this.meta.slitter;
+        if (!meta) { this.slitters = []; return Promise.resolve(); }
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            self.slitters = (rows || []).map(function(r) {
+                var row = r.r || [];
+                return { id: String(r.i), label: row[0] || ('Слиттер #' + r.i) };
+            });
         });
     };
 
@@ -373,15 +657,21 @@
             var remIdx = colIndex(meta, BATCH_REQ.remainder);
             var remMIdx = colIndex(meta, BATCH_REQ.remainderM);
             var kindIdx = colIndex(meta, BATCH_REQ.kind);
+            var activeIdx = colIndexAny(meta, [BATCH_REQ.active, 'Активно', 'Активная', 'Действует']);
+            var barcodeIdx = colIndex(meta, BATCH_REQ.barcode);
             self.batches = (rows || []).map(function(r) {
                 var row = r.r || [];
+                var matRef = kindIdx >= 0 ? parseRef(row[kindIdx]) : { id: null, label: '' };
                 return {
                     id: String(r.i),
                     label: row[0] || ('Партия #' + r.i),
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
                     remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
                     remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0,
-                    materialId: kindIdx >= 0 ? parseRef(row[kindIdx]).id : null
+                    materialId: matRef.id,
+                    materialLabel: matRef.label,
+                    active: activeIdx >= 0 ? row[activeIdx] : '',
+                    barcode: barcodeIdx >= 0 ? (row[barcodeIdx] || '') : ''
                 };
             });
         });
@@ -411,7 +701,8 @@
         if (!cut) return;
         var batch = cut.batchId ? this.findBatch(cut.batchId) : null;
         var matId = batch ? batch.materialId : null;
-        cut.materialWidthMm = matId ? (this.materialWidths[String(matId)] || 0) : 0;
+        cut.materialId = matId || cut.materialId || '';
+        cut.materialWidthMm = cut.materialId ? (this.materialWidths[String(cut.materialId)] || 0) : 0;
     };
 
     AtexSlitter.prototype.loadCuts = function() {
@@ -421,14 +712,28 @@
             var statusIdx = colIndex(meta, CUT_REQ.status);
             var slitterIdx = colIndex(meta, CUT_REQ.slitter);
             var batchIdx = colIndex(meta, CUT_REQ.batch);
+            var planDateIdx = colIndex(meta, CUT_REQ.planDate);
+            var sequenceIdx = colIndex(meta, CUT_REQ.sequence);
+            var plannedRunsIdx = colIndexAny(meta, CUT_PLANNED_RUNS_NAMES);
+            var runLengthIdx = colIndexAny(meta, CUT_RUN_LENGTH_NAMES);
+            var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
             self.cuts = (rows || []).map(function(r) {
                 var row = r.r || [];
+                var slitterRef = slitterIdx >= 0 ? parseRef(row[slitterIdx]) : { id: null, label: '' };
+                var batchRef = batchIdx >= 0 ? parseRef(row[batchIdx]) : { id: null, label: '' };
                 return {
                     id: String(r.i),
                     label: 'Резка №' + (row[0] || r.i),
                     status: statusIdx >= 0 ? core.normalizeStatus(row[statusIdx]) : STATUSES[0],
-                    slitter: slitterIdx >= 0 ? parseRef(row[slitterIdx]).label : '',
-                    batch: batchIdx >= 0 ? parseRef(row[batchIdx]).label : ''
+                    slitterId: slitterRef.id,
+                    slitter: slitterRef.label,
+                    batchId: batchRef.id,
+                    batch: batchRef.label,
+                    planDate: planDateIdx >= 0 ? (row[planDateIdx] || '') : '',
+                    sequence: sequenceIdx >= 0 ? row[sequenceIdx] : '',
+                    plannedRuns: plannedRunsIdx >= 0 ? row[plannedRunsIdx] : '',
+                    runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
+                    startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : ''
                 };
             });
         });
@@ -443,13 +748,17 @@
             if (!rec) throw new Error('Резка не найдена');
             var row = rec.r || [];
             function val(name) { var i = colIndex(meta, name); return i >= 0 ? (row[i] || '') : ''; }
+            function valAny(names) { var i = colIndexAny(meta, names); return i >= 0 ? (row[i] || '') : ''; }
+            var slitterRef = parseRef(val(CUT_REQ.slitter));
+            var batchRef = parseRef(val(CUT_REQ.batch));
             self.currentCut = {
                 id: String(rec.i),
                 number: row[0] || '',
                 label: 'Резка №' + (row[0] || rec.i),
-                slitter: parseRef(val(CUT_REQ.slitter)).label,
-                batch: parseRef(val(CUT_REQ.batch)).label,
-                batchId: parseRef(val(CUT_REQ.batch)).id,
+                slitterId: slitterRef.id,
+                slitter: slitterRef.label,
+                batch: batchRef.label,
+                batchId: batchRef.id,
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 planDate: val(CUT_REQ.planDate),
                 status: core.normalizeStatus(val(CUT_REQ.status)),
@@ -459,6 +768,10 @@
                 defect: val(CUT_REQ.defect),
                 defectM: val(CUT_REQ.defectM),
                 defectPhoto: val(CUT_REQ.defectPhoto),
+                sequence: val(CUT_REQ.sequence),
+                plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
+                runLength: valAny(CUT_RUN_LENGTH_NAMES),
+                startedAt: valAny(CUT_STARTED_NAMES),
                 notes: val(CUT_REQ.notes)
             };
         });
@@ -488,49 +801,152 @@
     };
 
     AtexSlitter.prototype.blankConsumption = function() {
-        var fifo = core.pickFifoBatch(this.batches);
+        var fifo = core.availableBatchesForCut(this.batches, this.currentCut)[0] || core.pickFifoBatch(this.batches);
         return { id: null, name: '', batchId: fifo ? fifo.id : null, amount: '', savedAmount: 0 };
     };
 
-    // ── Чтение событий смены (самостоятельная таблица, фильтр по ссылке клиентски) ──
+    // ── Чтение событий смены. В старой схеме событие ссылалось на резку, в
+    // новой может быть подчинено ей; поэтому `cutId` берём либо из реквизита,
+    // либо из родителя записи.
+
+    AtexSlitter.prototype.parseEventRows = function(rows) {
+        var meta = this.meta.event;
+        if (!meta) return [];
+        var typeIdx = colIndex(meta, EVENT_REQ.type);
+        var cutIdx = colIndex(meta, EVENT_REQ.cut);
+        var userIdx = colIndex(meta, EVENT_REQ.user);
+        var valIdx = colIndex(meta, EVENT_REQ.value);
+        var notesIdx = colIndex(meta, EVENT_REQ.notes);
+        return (rows || []).map(function(rec) {
+            var r = rec.r || [];
+            var cutId = cutIdx >= 0 ? parseRef(r[cutIdx]).id : null;
+            if (!cutId && rec.u && String(rec.u) !== '1') cutId = String(rec.u);
+            var userRef = userIdx >= 0 ? parseRef(r[userIdx]) : { id: null, label: '' };
+            return {
+                id: String(rec.i),
+                when: r[0] || '',
+                type: typeIdx >= 0 ? (r[typeIdx] || '') : '',
+                cutId: cutId || null,
+                userId: userRef.id,
+                user: userRef.label,
+                value: valIdx >= 0 ? (r[valIdx] || '') : '',
+                notes: notesIdx >= 0 ? (r[notesIdx] || '') : ''
+            };
+        }).sort(function(a, b) {
+            return String(b.when).localeCompare(String(a.when)); // новые сверху
+        });
+    };
+
+    AtexSlitter.prototype.filterShiftEvents = function(events) {
+        var self = this;
+        var targetDay = core.dateKey(this.selectedDate);
+        return (events || []).filter(function(ev) {
+            if (self.userId && String(ev.userId || '') !== String(self.userId)) return false;
+            return core.dateKey(ev.when) === targetDay;
+        });
+    };
+
+    AtexSlitter.prototype.loadShiftEvents = function() {
+        var self = this;
+        var meta = this.meta.event;
+        if (!meta) { this.shiftEvents = []; this.events = []; return Promise.resolve(); }
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            var all = self.parseEventRows(rows);
+            self.shiftEvents = self.filterShiftEvents(all);
+            self.events = self.currentCutId
+                ? self.shiftEvents.filter(function(ev) { return String(ev.cutId || '') === String(self.currentCutId); })
+                : [];
+        });
+    };
 
     AtexSlitter.prototype.loadEvents = function(cutId) {
         var self = this;
-        var meta = this.meta.event;
-        if (!meta) { this.events = []; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var typeIdx = colIndex(meta, EVENT_REQ.type);
-            var cutIdx = colIndex(meta, EVENT_REQ.cut);
-            var valIdx = colIndex(meta, EVENT_REQ.value);
-            var notesIdx = colIndex(meta, EVENT_REQ.notes);
-            self.events = (rows || []).map(function(rec) {
-                var r = rec.r || [];
-                return {
-                    id: String(rec.i),
-                    when: r[0] || '',
-                    type: typeIdx >= 0 ? (r[typeIdx] || '') : '',
-                    cutId: cutIdx >= 0 ? parseRef(r[cutIdx]).id : null,
-                    value: valIdx >= 0 ? (r[valIdx] || '') : '',
-                    notes: notesIdx >= 0 ? (r[notesIdx] || '') : ''
-                };
-            }).filter(function(ev) {
-                return String(ev.cutId) === String(cutId);
-            }).sort(function(a, b) {
-                return String(b.when).localeCompare(String(a.when)); // новые сверху
+        this.currentCutId = cutId ? String(cutId) : this.currentCutId;
+        return this.loadShiftEvents().then(function() {
+            self.events = self.shiftEvents.filter(function(ev) {
+                return String(ev.cutId || '') === String(cutId);
             });
         });
+    };
+
+    AtexSlitter.prototype.isShiftOpen = function() {
+        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate);
+    };
+
+    AtexSlitter.prototype.eventDateTime = function() {
+        var now = new Date();
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        var day = this.selectedDate || core.todayISO(now);
+        return day + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
     };
 
     // ── Рендеринг ──
 
     AtexSlitter.prototype.render = function() {
+        this.renderToolbar();
         this.renderCuts();
         this.renderMain();
     };
 
+    AtexSlitter.prototype.slitterOptions = function() {
+        if (this.slitters.length) return this.slitters;
+        var map = {};
+        this.cuts.forEach(function(cut) {
+            if (cut.slitterId) map[String(cut.slitterId)] = cut.slitter || ('Слиттер #' + cut.slitterId);
+        });
+        return Object.keys(map).map(function(id) { return { id: id, label: map[id] }; });
+    };
+
+    AtexSlitter.prototype.selectedSlitterLabel = function() {
+        var id = String(this.selectedSlitterId || '');
+        return (this.slitterOptions().filter(function(item) { return String(item.id) === id; })[0] || {}).label || '';
+    };
+
+    AtexSlitter.prototype.currentQueue = function() {
+        return core.prepareCutQueue(this.cuts, {
+            slitterId: this.selectedSlitterId,
+            date: this.selectedDate,
+            includeDone: this.includeDone
+        });
+    };
+
     AtexSlitter.prototype.visibleCuts = function() {
+        return this.currentQueue().cuts;
+    };
+
+    AtexSlitter.prototype.renderToolbar = function() {
         var self = this;
-        return this.cuts.filter(function(c) { return !self.hideDone || !core.isDone(c.status); });
+        var box = this.toolbarEl;
+        if (!box) return;
+        box.innerHTML = '';
+
+        var dateInp = el('input', { class: 'atex-sl-input', type: 'date' });
+        dateInp.value = this.selectedDate || core.todayISO();
+        dateInp.addEventListener('change', function() {
+            self.selectedDate = dateInp.value || core.todayISO();
+            self.currentCutId = null;
+            self.currentCut = null;
+            self.selectedBatchIds = [];
+            self.loadShiftEvents().then(function() { self.render(); });
+        });
+
+        var select = el('select', { class: 'atex-sl-input atex-sl-select' });
+        select.appendChild(el('option', { value: '', text: 'Выберите станок' }));
+        this.slitterOptions().forEach(function(item) {
+            var opt = el('option', { value: item.id, text: item.label });
+            if (String(item.id) === String(self.selectedSlitterId)) opt.selected = true;
+            select.appendChild(opt);
+        });
+        select.addEventListener('change', function() {
+            self.selectedSlitterId = select.value;
+            self.currentCutId = null;
+            self.currentCut = null;
+            self.selectedBatchIds = [];
+            self.loadShiftEvents().then(function() { self.render(); });
+        });
+
+        box.appendChild(field('Дата', dateInp));
+        box.appendChild(field('Станок', select));
     };
 
     AtexSlitter.prototype.renderCuts = function() {
@@ -538,20 +954,33 @@
         var box = this.cutsEl;
         if (!box) return;
         box.innerHTML = '';
+        if (!this.selectedSlitterId) {
+            box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Сначала выберите станок.' }));
+            return;
+        }
+        if (!this.isShiftOpen()) {
+            box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Откройте смену, чтобы выбрать резку.' }));
+            return;
+        }
         var list = this.visibleCuts();
         if (!list.length) {
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Резок пока нет' }));
             return;
         }
+        var firstOpenId = this.currentQueue().firstOpenCutId;
         list.forEach(function(cut) {
             var active = String(self.currentCutId) === String(cut.id);
+            var next = firstOpenId && String(firstOpenId) === String(cut.id);
             var item = el('button', {
-                class: 'atex-sl-cut-item' + (active ? ' is-active' : ''),
+                class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (next ? ' is-next' : ''),
                 type: 'button'
             }, [
                 el('div', { class: 'atex-sl-cut-main' }, [
                     el('span', { class: 'atex-sl-cut-label', text: cut.label }),
-                    el('span', { class: 'atex-sl-cut-sub', text: [cut.slitter, cut.batch].filter(Boolean).join(' · ') })
+                    el('span', { class: 'atex-sl-cut-sub', text: [
+                        cut.batch,
+                        cut.startedAt ? ('Начато: ' + cut.startedAt) : 'Начато: —'
+                    ].filter(Boolean).join(' · ') })
                 ]),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]);
@@ -563,6 +992,7 @@
     function badgeClass(status) {
         if (core.isDone(status)) return 'atex-sl-badge-done';
         if (core.normalizeStatus(status) === 'В работе') return 'atex-sl-badge-run';
+        if (core.isPauseStatus(status)) return 'atex-sl-badge-setup';
         if (core.normalizeStatus(status) === 'Наладка') return 'atex-sl-badge-setup';
         return 'atex-sl-badge-wait';
     }
@@ -572,16 +1002,39 @@
         if (!host) return;
         host.innerHTML = '';
 
+        if (!this.selectedSlitterId) {
+            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Выберите станок и дату.' }));
+            return;
+        }
+
+        if (!this.isShiftOpen()) {
+            host.appendChild(this.renderShiftGate());
+            return;
+        }
+
         if (!this.currentCutId || !this.currentCut) {
-            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Выберите производственную резку слева, чтобы вести её на пульте.' }));
+            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Выберите производственную резку слева.' }));
             return;
         }
 
         host.appendChild(this.renderHead());
         host.appendChild(this.renderStatusBar());
+        host.appendChild(this.renderBatchSelection());
         host.appendChild(this.renderReadings());
         host.appendChild(this.renderConsumption());
         host.appendChild(this.renderEvents());
+    };
+
+    AtexSlitter.prototype.renderShiftGate = function() {
+        var self = this;
+        var section = el('section', { class: 'atex-sl-section atex-sl-shift-gate' }, [
+            el('h3', { class: 'atex-sl-section-title', text: 'Смена не открыта' }),
+            el('div', { class: 'atex-sl-muted', text: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ') })
+        ]);
+        var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Открыть смену' });
+        btn.addEventListener('click', function() { self.openShift(); });
+        section.appendChild(el('div', { class: 'atex-sl-section-actions' }, [btn]));
+        return section;
     };
 
     AtexSlitter.prototype.renderHead = function() {
@@ -620,17 +1073,93 @@
         });
         bar.appendChild(steps);
 
-        var actions = el('div', { class: 'atex-sl-section-actions' });
+        var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
         if (!core.isDone(cut.status)) {
-            var next = core.nextStatus(cut.status);
-            var advance = el('button', { class: 'atex-sl-btn atex-sl-btn-advance', type: 'button', text: '→ ' + next });
-            advance.addEventListener('click', function() { self.setStatus(next); });
-            actions.appendChild(advance);
+            if (core.normalizeStatus(cut.status) === 'В работе') {
+                var pause = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пауза' });
+                pause.addEventListener('click', function() { self.setStatus('Пауза', 'Пауза'); });
+                actions.appendChild(pause);
+            } else {
+                var startText = core.isPauseStatus(cut.status) ? 'Возобновить' : 'Начать';
+                var start = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: startText });
+                start.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
+                actions.appendChild(start);
+            }
+            var done = el('button', { class: 'atex-sl-btn atex-sl-btn-advance', type: 'button', text: 'Завершить' });
+            done.addEventListener('click', function() { self.setStatus('Завершён', 'Завершение резки'); });
+            actions.appendChild(done);
         } else {
             actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка завершена' }));
         }
         bar.appendChild(actions);
         return bar;
+    };
+
+    AtexSlitter.prototype.syncInitialBatchSelection = function() {
+        var cut = this.currentCut;
+        if (!cut) return;
+        var available = core.availableBatchesForCut(this.batches, cut);
+        if (!available.length) { this.selectedBatchIds = []; return; }
+        var preferred = cut.batchId && available.filter(function(batch) {
+            return String(batch.id) === String(cut.batchId);
+        })[0];
+        var first = preferred || available[0];
+        if (!this.selectedBatchIds.length) this.selectedBatchIds = [String(first.id)];
+        if (!cut.batchId) {
+            cut.batchId = String(first.id);
+            cut.batch = first.label || cut.batch;
+            cut.materialId = first.materialId || cut.materialId;
+        }
+        if (!cut.counterStart && first.remainderM > 0) cut.counterStart = String(core.round3(first.remainderM));
+    };
+
+    AtexSlitter.prototype.renderBatchSelection = function() {
+        var self = this;
+        var cut = this.currentCut;
+        var section = el('section', { class: 'atex-sl-section' }, [
+            el('h3', { class: 'atex-sl-section-title', text: 'Партии сырья' })
+        ]);
+        var available = core.availableBatchesForCut(this.batches, cut);
+        var coverage = core.batchCoverage(this.batches, this.selectedBatchIds, cut);
+        var summary = 'Покрыто: ' + coverage.coveredMeters + ' м';
+        if (coverage.neededMeters > 0) summary += ' из ' + coverage.neededMeters + ' м';
+        summary += ' · проходов: ' + coverage.coveredRuns + '/' + coverage.neededRuns;
+        section.appendChild(el('div', {
+            class: 'atex-sl-coverage' + (coverage.complete ? ' is-complete' : ''),
+            text: summary
+        }));
+
+        if (!available.length) {
+            section.appendChild(el('div', { class: 'atex-sl-empty', text: 'Нет партий в работе с остатком минимум на один проход.' }));
+            return section;
+        }
+
+        var selected = {};
+        this.selectedBatchIds.forEach(function(id) { selected[String(id)] = true; });
+        var grid = el('div', { class: 'atex-sl-batch-grid' });
+        available.forEach(function(batch) {
+            var passes = core.batchPasses(batch, cut);
+            var cls = 'atex-sl-batch-card' + (selected[String(batch.id)] ? ' is-selected' : '');
+            var card = el('button', { class: cls, type: 'button' }, [
+                el('span', { class: 'atex-sl-batch-title', text: batch.label }),
+                el('span', { class: 'atex-sl-batch-meta', text: 'Приход: ' + (batch.date || '—') }),
+                el('span', { class: 'atex-sl-batch-metric', text: 'Остаток, м: ' + core.round3(batch.remainderM || 0) }),
+                el('span', { class: 'atex-sl-batch-meta', text: 'Штрих-код: ' + (batch.barcode || '—') }),
+                el('span', { class: 'atex-sl-batch-meta', text: 'Проходов: ' + passes })
+            ]);
+            card.addEventListener('click', function() {
+                var id = String(batch.id);
+                var idx = self.selectedBatchIds.indexOf(id);
+                if (idx >= 0) self.selectedBatchIds.splice(idx, 1);
+                else self.selectedBatchIds.push(id);
+                if (!cut.counterStart && batch.remainderM > 0) cut.counterStart = String(core.round3(batch.remainderM));
+                if (!cut.batchId) cut.batchId = id;
+                self.renderMain();
+            });
+            grid.appendChild(card);
+        });
+        section.appendChild(grid);
+        return section;
     };
 
     // Показания счётчика, погонаж, брак, примечания + сохранение в резку.
@@ -772,33 +1301,35 @@
         ]);
 
         var form = el('div', { class: 'atex-sl-event-form' });
-        var typeSel = el('select', { class: 'atex-sl-input' });
-        core.EVENT_TYPES.forEach(function(t) { typeSel.appendChild(el('option', { value: t, text: t })); });
-        form.appendChild(field('Тип события', typeSel));
-
         var valueInp = numInput('', '0');
         form.appendChild(field('Значение', valueInp));
 
         var noteInp = el('input', { class: 'atex-sl-input', type: 'text', placeholder: 'Примечания' });
         form.appendChild(field('Примечания', noteInp));
 
-        var addBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Зафиксировать' });
-        addBtn.addEventListener('click', function() {
-            self.addEvent({ type: typeSel.value, value: valueInp.value, notes: noteInp.value });
+        var buttons = el('div', { class: 'atex-sl-event-buttons' });
+        ['Обед', 'Переналадка', 'Счётчик', 'Брак'].forEach(function(type) {
+            var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: type });
+            btn.addEventListener('click', function() {
+                self.addEvent({ type: type, value: valueInp.value, notes: noteInp.value });
+            });
+            buttons.appendChild(btn);
         });
-        var addWrap = el('div', { class: 'atex-sl-event-add' }, [addBtn]);
-        form.appendChild(addWrap);
+        var closeBtn = el('button', { class: 'atex-sl-btn', type: 'button', text: 'Закрыть смену' });
+        closeBtn.addEventListener('click', function() { self.closeShift(); });
+        buttons.appendChild(closeBtn);
+        form.appendChild(buttons);
         section.appendChild(form);
 
         var list = el('div', { class: 'atex-sl-events' });
-        if (!this.events.length) {
+        if (!this.shiftEvents.length) {
             list.appendChild(el('div', { class: 'atex-sl-empty', text: 'Событий смены ещё нет.' }));
         } else {
-            this.events.slice(0, 12).forEach(function(ev) {
+            this.shiftEvents.slice(0, 16).forEach(function(ev) {
                 list.appendChild(el('div', { class: 'atex-sl-event' }, [
                     el('span', { class: 'atex-sl-event-when', text: ev.when }),
                     el('span', { class: 'atex-sl-event-type', text: ev.type }),
-                    el('span', { class: 'atex-sl-event-val', text: ev.value !== '' ? String(ev.value) : '' }),
+                    el('span', { class: 'atex-sl-event-val', text: ev.value !== '' ? String(ev.value) : (ev.cutId ? ('Резка ' + ev.cutId) : '') }),
                     el('span', { class: 'atex-sl-event-note', text: ev.notes || '' })
                 ]));
             });
@@ -829,18 +1360,38 @@
         return fields;
     };
 
-    AtexSlitter.prototype.setStatus = function(status) {
+    AtexSlitter.prototype.setStatus = function(status, eventType) {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         cut.status = core.normalizeStatus(status);
         this.setBusy(true);
         var rid = reqIdByName(this.meta.cut, CUT_REQ.status);
+        if (!rid) {
+            this.setBusy(false);
+            this.notify('Реквизит «Статус» не найден', 'error');
+            return;
+        }
         var fields = {};
         fields['t' + rid] = cut.status;
+        var startedReq = reqIdByAnyName(this.meta.cut, CUT_STARTED_NAMES);
+        if (startedReq && cut.status === 'В работе' && !cut.startedAt) {
+            cut.startedAt = this.eventDateTime();
+            fields['t' + startedReq] = cut.startedAt;
+        }
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
             // Обновим статус и в списке слева.
-            self.cuts.forEach(function(c) { if (String(c.id) === String(cut.id)) c.status = cut.status; });
+            self.cuts.forEach(function(c) {
+                if (String(c.id) === String(cut.id)) {
+                    c.status = cut.status;
+                    if (cut.startedAt) c.startedAt = cut.startedAt;
+                }
+            });
+            if (eventType) return self.createEvent({ type: eventType }, cut.id);
+            return null;
+        }).then(function() {
+            return self.loadEvents(cut.id);
+        }).then(function() {
             self.setBusy(false);
             self.notify('Статус: ' + cut.status, 'success');
             self.render();
@@ -1008,16 +1559,13 @@
         return this.batches.filter(function(b) { return String(b.id) === String(batchId); })[0] || null;
     };
 
-    // Событие смены: пишется самостоятельной записью с датой/временем (главное
-    // значение), типом, ссылкой на резку и оператора — критерий приёмки §3.5.
-    AtexSlitter.prototype.addEvent = function(data) {
-        var self = this;
-        if (this.busy) return;
-        if (!this.currentCutId) { this.notify('Сначала выберите резку', 'error'); return; }
+    // Событие смены: пишется с датой/временем (главное значение), типом,
+    // оператором и, если применимо, ссылкой/родителем резки.
+    AtexSlitter.prototype.createEvent = function(data, cutId) {
         var meta = this.meta.event;
-        if (!meta) { this.notify('Таблица «' + TABLE.event + '» не найдена', 'error'); return; }
+        if (!meta) return Promise.reject(new Error('Таблица «' + TABLE.event + '» не найдена'));
 
-        var when = core.formatDateTime(new Date());
+        var when = this.eventDateTime();
         var params = {};
         params['t' + meta.id] = when; // главное значение — дата/время (хронология)
         var typeReq = reqIdByName(meta, EVENT_REQ.type);
@@ -1026,13 +1574,20 @@
         var valReq = reqIdByName(meta, EVENT_REQ.value);
         var notesReq = reqIdByName(meta, EVENT_REQ.notes);
         if (typeReq && data.type) params['t' + typeReq] = data.type;
-        if (cutReq) params['t' + cutReq] = this.currentCutId;
+        if (cutReq && cutId) params['t' + cutReq] = cutId;
         if (userReq && this.userId) params['t' + userReq] = this.userId;
         if (valReq && data.value !== '' && data.value != null) params['t' + valReq] = core.toNumber(data.value);
         if (notesReq && data.notes) params['t' + notesReq] = data.notes;
+        return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(cutId || 1), params);
+    };
+
+    AtexSlitter.prototype.addEvent = function(data) {
+        var self = this;
+        if (this.busy) return;
+        if (!this.currentCutId) { this.notify('Сначала выберите резку', 'error'); return; }
 
         this.setBusy(true);
-        this.post('_m_new/' + meta.id + '?JSON&up=1', params).then(function() {
+        this.createEvent(data, this.currentCutId).then(function() {
             return self.loadEvents(self.currentCutId);
         }).then(function() {
             self.setBusy(false);
@@ -1044,6 +1599,48 @@
         });
     };
 
+    AtexSlitter.prototype.openShift = function() {
+        var self = this;
+        if (this.busy) return;
+        if (!this.selectedSlitterId) { this.notify('Выберите станок', 'error'); return; }
+        this.setBusy(true);
+        this.createEvent({
+            type: 'Начало смены',
+            notes: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ')
+        }, null).then(function() {
+            return self.loadShiftEvents();
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Смена открыта', 'success');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Не удалось открыть смену: ' + err.message, 'error');
+        });
+    };
+
+    AtexSlitter.prototype.closeShift = function() {
+        var self = this;
+        if (this.busy) return;
+        this.setBusy(true);
+        this.createEvent({
+            type: 'Конец смены',
+            notes: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ')
+        }, null).then(function() {
+            self.currentCutId = null;
+            self.currentCut = null;
+            self.selectedBatchIds = [];
+            return self.loadShiftEvents();
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Смена закрыта', 'success');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Не удалось закрыть смену: ' + err.message, 'error');
+        });
+    };
+
     AtexSlitter.prototype.openCut = function(cutId) {
         var self = this;
         this.setBusy(true);
@@ -1051,6 +1648,8 @@
         this.loadCut(cutId)
             .then(function() {
                 self.resolveCutWidth();
+                self.selectedBatchIds = [];
+                self.syncInitialBatchSelection();
                 return Promise.all([
                     self.loadConsumptions(cutId),
                     self.loadEvents(cutId)
@@ -1094,15 +1693,17 @@
     AtexSlitter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
+        this.toolbarEl = el('div', { class: 'atex-sl-toolbar' });
+        this.root.appendChild(this.toolbarEl);
         var layout = el('div', { class: 'atex-sl-layout' });
 
         var aside = el('aside', { class: 'atex-sl-sidebar' });
-        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ el('h2', { text: 'Мои резки' }) ]);
+        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ el('h2', { text: 'Резки станка' }) ]);
         var filter = el('label', { class: 'atex-sl-filter' });
         var cb = el('input', { type: 'checkbox' });
-        cb.addEventListener('change', function() { self.hideDone = cb.checked; self.renderCuts(); });
+        cb.addEventListener('change', function() { self.includeDone = cb.checked; self.renderCuts(); });
         filter.appendChild(cb);
-        filter.appendChild(el('span', { text: 'Скрыть завершённые' }));
+        filter.appendChild(el('span', { text: 'Отобразить завершённые' }));
         head.appendChild(filter);
         aside.appendChild(head);
         this.cutsEl = el('div', { class: 'atex-sl-cuts' });
@@ -1118,7 +1719,8 @@
         this.mainEl.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
+            .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
+            .then(function() { return self.loadShiftEvents(); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

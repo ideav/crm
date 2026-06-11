@@ -6,7 +6,7 @@
 <head>
 <meta charset="utf-8">
 <title>atex · Пульт слиттера — стенд</title>
-<link rel="stylesheet" href="../css/atex-slitter.css">
+<link rel="stylesheet" href="../download/atex/css/slitter.css">
 <style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
 </head>
 <body>
@@ -17,11 +17,20 @@
 <script>
 // ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
 var META = [
+    { id: 105, val: 'Вид сырья', reqs: [
+        { id: 1040, val: 'Ширина, мм' }
+    ]},
     { id: 106, val: 'Партия сырья', reqs: [
         { id: 1044, val: 'Вид сырья' },
         { id: 1046, val: 'Дата прихода' },
         { id: 1048, val: 'Получено, м²' },
-        { id: 1050, val: 'Остаток, м²' }
+        { id: 1050, val: 'Остаток, м²' },
+        { id: 1052, val: 'Остаток, м' },
+        { id: 1054, val: 'В работе' },
+        { id: 1056, val: 'Штрих-код' }
+    ]},
+    { id: 107, val: 'Слиттер', reqs: [
+        { id: 1072, val: 'Статус' }
     ]},
     { id: 110, val: 'Производственная резка', reqs: [
         { id: 1090, val: 'Слиттер' },
@@ -33,7 +42,13 @@ var META = [
         { id: 1102, val: 'Счётчик кон.' },
         { id: 1104, val: 'Погонаж факт, м' },
         { id: 1106, val: 'Брак, м²' },
-        { id: 1108, val: 'Примечания' }
+        { id: 1107, val: 'Брак, м' },
+        { id: 1108, val: 'Фото брака' },
+        { id: 1110, val: 'Очередность' },
+        { id: 1111, val: 'Кол-во план' },
+        { id: 1113, val: 'Метраж, м' },
+        { id: 1115, val: 'Начато' },
+        { id: 1116, val: 'Примечания' }
     ]},
     { id: 111, val: 'Расход сырья', reqs: [
         { id: 1112, val: 'Израсходовано, м²' },
@@ -49,25 +64,33 @@ var META = [
 ];
 
 // Хранилище-заглушка. r = [главное значение, ...reqs по порядку метаданных].
+var TODAY = new Date().toISOString().slice(0, 10);
 var DB = {
+    materials: [
+        { i: 5, r: ['БОПП', '910'] },
+        { i: 6, r: ['ПЭТ', '880'] }
+    ],
     batches: [
-        { i: 601, r: ['Партия А-100 (БОПП)', '5:БОПП', '2026-05-10', '5000', '1200'] },
-        { i: 602, r: ['Партия Б-205 (ПЭТ)', '6:ПЭТ', '2026-05-18', '8000', '8000'] }
+        { i: 601, r: ['Партия А-100 (БОПП)', '5:БОПП', '2026-05-10', '5000', '1200', '900', '1', 'BOPP-A100'] },
+        { i: 603, r: ['Партия А-098 (БОПП)', '5:БОПП', '2026-05-02', '4000', '900', '650', '1', 'BOPP-A098'] },
+        { i: 602, r: ['Партия Б-205 (ПЭТ)', '6:ПЭТ', '2026-05-18', '8000', '8000', '1200', '1', 'PET-B205'] }
+    ],
+    slitters: [
+        { i: 1, r: ['Слиттер-1', 'В работе'] },
+        { i: 2, r: ['Слиттер-2', 'В работе'] }
     ],
     cuts: [
-        { i: 301, r: ['1', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', '2026-05-30', 'В работе', '1000', '1850', '850', '12', 'Идёт резка'] },
-        { i: 302, r: ['2', '2:Слиттер-2', '12:55мм ПЭТ', '602:Партия Б-205', '2026-05-31', 'Ожидает', '', '', '', '', ''] },
-        { i: 303, r: ['3', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', '2026-05-29', 'Завершён', '500', '2200', '1700', '8', ''] }
+        { i: 301, r: ['1', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', TODAY, 'Ожидает', '', '', '', '', '', '', '1', '4', '400', '', ''] },
+        { i: 302, r: ['2', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', TODAY, 'В работе', '1000', '1400', '400', '', '', '', '2', '4', '400', TODAY + ' 09:00:00', 'Идёт резка'] },
+        { i: 303, r: ['3', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', TODAY, 'Завершён', '500', '2200', '1700', '', '', '', '3', '4', '400', TODAY + ' 07:00:00', ''] },
+        { i: 304, r: ['4', '2:Слиттер-2', '12:55мм ПЭТ', '602:Партия Б-205', TODAY, 'Ожидает', '', '', '', '', '', '', '1', '2', '450', '', ''] }
     ],
     consumptions: {
         301: [ { i: 401, r: ['Расход 1', '300', '601:Партия А-100'] } ],
         302: [],
         303: []
     },
-    events: [
-        { i: 501, r: ['2026-05-30 08:00:00', 'Начало смены', '301:1', '701:operator', '', 'Смена А'] },
-        { i: 502, r: ['2026-05-30 08:15:00', 'Запуск резки', '301:1', '701:operator', '1000', ''] }
-    ],
+    events: [],
     nextId: 900
 };
 
@@ -89,7 +112,9 @@ window.fetch = function(url, opts) {
         var tid = mObj[1];
         var fi = u.match(/F_I=(\d+)/);
         var fu = u.match(/F_U=(\d+)/);
+        if (tid === '105') return json(DB.materials);
         if (tid === '106') return json(DB.batches);
+        if (tid === '107') return json(DB.slitters);
         if (tid === '110') {
             if (fi) return json(DB.cuts.filter(function(c){ return String(c.i) === fi[1]; }));
             return json(DB.cuts);
@@ -99,6 +124,15 @@ window.fetch = function(url, opts) {
     }
     if (/\/_m_new\//.test(u)) {
         var id = DB.nextId++;
+        var table = (u.match(/\/_m_new\/(\d+)/) || [])[1];
+        var up = (u.match(/[?&]up=([^&]+)/) || [])[1] || '1';
+        var body = new URLSearchParams((opts && opts.body) || '');
+        var meta = META.filter(function(m){ return String(m.id) === String(table); })[0];
+        if (meta && String(table) === '114') {
+            var eventRow = [body.get('t' + meta.id) || ''];
+            meta.reqs.forEach(function(req){ eventRow.push(body.get('t' + req.id) || ''); });
+            DB.events.unshift({ i: id, u: decodeURIComponent(up), r: eventRow });
+        }
         console.log('[mock] _m_new', u, opts && opts.body);
         return json({ obj: id, i: id });
     }
@@ -109,6 +143,6 @@ window.fetch = function(url, opts) {
     return realFetch(url, opts);
 };
 </script>
-<script src="../js/atex-slitter.js"></script>
+<script src="../download/atex/js/slitter.js"></script>
 </body>
 </html>
