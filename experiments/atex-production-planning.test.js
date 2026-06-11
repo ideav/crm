@@ -642,10 +642,6 @@ var supMeta3242 = { id: '1077', val: 'Обеспечение', reqs: [
 assertEqual(planning.buildSupplyFieldsForFinishedBatch(supMeta3242, { footage: 1200, finishedBatchId: 'gp-7', rolls: 6, active: '1', status: 'Зарезервировано' }),
   { t1149: 1200, t16424: 6, t1154: '1', t15016: 'gp-7' },
   'buildSupplyFieldsForFinishedBatch #3242: метраж/«В работе»/ссылка на Партию ГП/рулоны (нет Статуса → пропуск)');
-assertEqual(planning.sleeveTasksForLayout(layout3185, pos3185, 3), [
-  { diameter: 76, qty: 6 },
-  { diameter: 40, qty: 3 }
-], 'sleeveTasksForLayout: sleeves planned from cut output for order strips');
 assertEqual(planning.sleeveMinutes(9, { SLEEVE_CUT: 2.5 }), 22.5, 'sleeveMinutes: SLEEVE_CUT × qty');
 
 // #3189: новая метасхема — «Задание на втулки» снова алиас таблицы 1080,
@@ -690,10 +686,10 @@ var sleeveMeta3189 = {
   val: 'Задача на втулки',
   attrs: '{"alias":"Задание на втулки"}',
   reqs: [
-    { id: '1180', val: 'Втулкорез' },
+    { id: '1180', val: 'Втулкорез', ref: '1071' },
     { id: '16399', val: 'Кол-во' },
     { id: '1183', val: 'Кол-во факт' },
-    { id: '1184', val: 'Активно' }
+    { id: '52654', val: 'Партия сырья', ref: '1074' }
   ]
 };
 var metadata3189 = [positionMeta3189, supplyMeta3189, cutMeta3189, sleeveMeta3189];
@@ -736,103 +732,50 @@ assertEqual(planning.buildSupplyFieldsForCut(supplyMeta3189, cutMeta3189, {
   status: 'Зарезервировано'
 }), { t1149: '1200', t1154: '1', t16428: '501', t16424: '6' },
   'buildSupplyFieldsForCut #3231: пишет активность, метраж, резку и рулоны, пропускает отсутствующий статус');
-assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3185, 3), [
-  { positionId: 'p110', diameter: 76, qty: 6, diameterId: '' },
-  { positionId: 'p70', diameter: 40, qty: 3, diameterId: '' }
-], 'positionSleeveTasksForLayout: задачи втулок создаются под позициями заказа (#3189)');
-var sleeveReqIds3189 = {
-  diameter: planning.reqIdByName(sleeveMeta3189, 'Диаметр, мм'),
-  actualQty: planning.reqIdByName(sleeveMeta3189, 'Кол-во факт'),
-  status: planning.reqIdByName(sleeveMeta3189, 'Статус')
+// #3340: задание на втулки создаётся под позициями с типом втулки (sleeveId) и не «готовых».
+var posSleeve3340 = {
+  p110: { id: 'p110', width: 110, qty: 5, length: 1200, sleeveId: '35561', sleeveReady: false },
+  p70:  { id: 'p70',  width: 70,  qty: 2, length: 800,  sleeveId: '8192',  sleeveReady: false }
 };
-var sleeveFields3189 = planning.buildFields(sleeveReqIds3189, {
-  diameter: 76,
-  actualQty: 0,
-  status: 'Ожидает'
-});
-sleeveFields3189['t' + sleeveMeta3189.id] = 6;
-assertEqual(sleeveFields3189, { t1183: 0, t1080: 6 },
-  'buildFields: #3189 втулки пишут факт и главное плановое количество без отсутствующих полей');
-
-// ── #3321: задание на втулки только для «сырых» (не «готовых») диаметров ──
-// sleeveDiameterIdFromRow: id записи «Диаметр втулки» из position_sleeve «id:Подпись».
-assertEqual(planning.sleeveDiameterIdFromRow({ position_sleeve: '8188:76' }), '8188',
-  'sleeveDiameterIdFromRow: «id:Подпись» → id');
-assertEqual(planning.sleeveDiameterIdFromRow({ position_sleeve: '0.5 * 57мм' }), '',
-  'sleeveDiameterIdFromRow: без «id:» → пусто');
-assertEqual(planning.sleeveDiameterIdFromRow({}), '',
-  'sleeveDiameterIdFromRow: нет ссылки → пусто');
-// sleeveDiameterIsReady: множество готовых id (Set/массив/карта).
-assertEqual(planning.sleeveDiameterIsReady({ '8189': true, '35561': true }, '8189'), true,
-  'sleeveDiameterIsReady: карта-объект → готов');
-assertEqual(planning.sleeveDiameterIsReady(['8189', '35561'], '35561'), true,
-  'sleeveDiameterIsReady: массив id → готов');
-assertEqual(planning.sleeveDiameterIsReady({ '8189': true }, '8192'), false,
-  'sleeveDiameterIsReady: «сырой» диаметр → не готов');
-assertEqual(planning.sleeveDiameterIsReady({ '8189': true }, ''), false,
-  'sleeveDiameterIsReady: нет id → не готов');
-assertEqual(planning.sleeveDiameterIsReady(null, '8189'), false,
-  'sleeveDiameterIsReady: нет карты готовых → не готов');
-// positionSleeveTasksForLayout пропускает «готовые» диаметры (#3321).
-var pos3321 = {
-  p110: { id: 'p110', width: 110, qty: 5, length: 1200, sleeveDiameter: 76, sleeveDiameterId: '8192' },
-  p70:  { id: 'p70',  width: 70,  qty: 2, length: 800,  sleeveDiameter: 57, sleeveDiameterId: '8189' }
+assertEqual(planning.positionSleeveTasksForLayout(layout3185, posSleeve3340, 3), [
+  { positionId: 'p110', sleeveId: '35561', qty: 6 },
+  { positionId: 'p70', sleeveId: '8192', qty: 3 }
+], 'positionSleeveTasksForLayout #3340: задачи втулок под позициями (sleeveId + кол-во рулонов)');
+// «Готовый» тип втулки (sleeveReady) пропускается; позиция без втулки — тоже.
+var posSleeve3340b = {
+  p110: { id: 'p110', width: 110, qty: 5, length: 1200, sleeveId: '35561', sleeveReady: true },
+  p70:  { id: 'p70',  width: 70,  qty: 2, length: 800,  sleeveId: '', sleeveReady: false }
 };
-assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3321, 3, { '8189': true }), [
-  { positionId: 'p110', diameter: 76, qty: 6, diameterId: '8192' }
-], 'positionSleeveTasksForLayout #3321: «готовый» диаметр 8189 пропущен, «сырой» 8192 остаётся');
-assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3321, 3, { '8189': true, '8192': true }), [],
-  'positionSleeveTasksForLayout #3321: все диаметры готовы → заданий нет');
-assertEqual(planning.positionSleeveTasksForLayout(layout3185, pos3321, 3).length, 2,
-  'positionSleeveTasksForLayout #3321: без карты готовых — обратная совместимость (оба задания)');
+assertEqual(planning.positionSleeveTasksForLayout(layout3185, posSleeve3340b, 3), [],
+  'positionSleeveTasksForLayout #3340: готовый тип и позиция без втулки → заданий нет');
 
-// ── #3321: дата «Нарезка втулок» ──
-assertEqual(planning.shiftIsoDate('2026-06-11', -1), '2026-06-10',
-  'shiftIsoDate: −1 день');
-assertEqual(planning.shiftIsoDate('2026-03-01', -1), '2026-02-28',
-  'shiftIsoDate: переход через границу месяца');
-assertEqual(planning.shiftIsoDate('2026-06-11', 3), '2026-06-14',
-  'shiftIsoDate: +3 дня');
-assertEqual(planning.shiftIsoDate('', -1), '',
-  'shiftIsoDate: пустая дата → пусто');
-assertEqual(planning.isoDateDiffDays('2026-06-11', '2026-06-10'), 1,
-  'isoDateDiffDays: разница 1 день');
-assertEqual(planning.isoDateDiffDays('2026-06-10', '2026-06-12'), -2,
-  'isoDateDiffDays: отрицательная разница');
-assertEqual(planning.isoDateDiffDays('', '2026-06-10'), null,
-  'isoDateDiffDays: невалидная дата → null');
-// По умолчанию «Нарезка втулок» = план − 1 день.
-assertEqual(planning.sleeveCutDateForPlan('2026-06-11', '', ''), '2026-06-10',
-  'sleeveCutDateForPlan: дефолт — план минус один день');
-// Ручной сдвиг сохраняется при смене плана.
-assertEqual(planning.sleeveCutDateForPlan('2026-06-20', '2026-06-11', '2026-06-08'), '2026-06-17',
-  'sleeveCutDateForPlan: при смене плана сохраняется ручной сдвиг (−3 дня)');
-assertEqual(planning.sleeveCutDateForPlan('', '2026-06-11', '2026-06-10'), '2026-06-10',
-  'sleeveCutDateForPlan: невалидный план → прежняя дата нарезки');
-
-// ── #3321: строка задания на втулки для .atex-pp-link ──
-assertEqual(planning.formatSleeveTaskLine({ diameter: '76', qty: '6', status: 'Ожидает', cutDate: '2026-06-10', cutter: 'Иванов' }),
-  'Ø76 · 6 шт · нарезка 2026-06-10 · Ожидает · Иванов',
-  'formatSleeveTaskLine: полная строка задания');
-assertEqual(planning.formatSleeveTaskLine({ diameter: '40', qty: '3' }),
-  'Ø40 · 3 шт',
-  'formatSleeveTaskLine: пустые поля пропускаются');
-assertEqual(planning.formatSleeveTaskLine({ diameter: '40', qty: '3', actualQty: '0' }),
-  'Ø40 · 3 шт',
-  'formatSleeveTaskLine: нулевой факт не показывается');
-assertEqual(planning.formatSleeveTaskLine(null), '',
-  'formatSleeveTaskLine: нет задания → пустая строка');
-
+// ── #3340: FIFO-партия втулок из отчёта sleeve_batches_active ──
+var sleeveBatches3340 = [
+  { id: 'b1', diameterId: '35561', dateKey: 1772485200, active: true },
+  { id: 'b2', diameterId: '35561', dateKey: 1772312400, active: true },   // раньше → FIFO
+  { id: 'b3', diameterId: '35561', dateKey: 1772100000, active: false },  // не «в работе»
+  { id: 'b4', diameterId: '8192',  dateKey: 1772312400, active: true }
+];
+assertEqual(planning.pickSleeveBatchId(sleeveBatches3340, '35561'), 'b2',
+  'pickSleeveBatchId: самая ранняя активная партия совпадающего диаметра (FIFO)');
+assertEqual(planning.pickSleeveBatchId(sleeveBatches3340, '8192'), 'b4',
+  'pickSleeveBatchId: партия другого диаметра');
+assertEqual(planning.pickSleeveBatchId(sleeveBatches3340, '99999'), '',
+  'pickSleeveBatchId: нет партии нужного диаметра → пусто');
+assertEqual(planning.pickSleeveBatchId(sleeveBatches3340, ''), '',
+  'pickSleeveBatchId: нет sleeveId → пусто');
+assertEqual(planning.pickSleeveBatchId([{ id: 'x', diameterId: '35561', dateKey: 1, active: false }], '35561'), '',
+  'pickSleeveBatchId: только неактивные партии → пусто');
 // ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([
-  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200', position_sleeve:'8188:76' },
-  { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'' }
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200', sleeve_id:'35561', sleeve_ready:'' },
+  { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'', sleeve_id:'8192', sleeve_ready:'X' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveDiameter:76, sleeveDiameterId:'8188', dueKey: Infinity, approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveDiameter:0, sleeveDiameterId:'', dueKey: Infinity, approved:false }
-], 'rowsToGenPositions: маппинг + пустые ширина/кол-во/длина → 0, dueKey без срока → Infinity');
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveId:'35561', sleeveReady:false, dueKey: Infinity, approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveId:'8192', sleeveReady:true, dueKey: Infinity, approved:false }
+], 'rowsToGenPositions #3340: sleeve_id/sleeve_ready из отчёта; пустые ширина/кол-во/длина → 0');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
 var grpDue = planning.rowsToGenPositions([
