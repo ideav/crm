@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!-- Визуальный harness для «Календаря занятости станков» (#3339).
+     Мокает fetch (report/cut_planning + object/{slitter}) тестовыми данными
+     и монтирует РМ. Запуск: открыть в браузере/Playwright. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>atex · Календарь занятости станков — harness</title>
+<style>
+  :root { --text-primary:#1f2933; --bg-secondary:#f8fafc; --input-bg:#fff;
+          --input-border:#d9dee5; --border-color:#eef1f5; --text-secondary:#6b7280;
+          --atex-navy:#134174; --color-error:#b91c1c; --color-success:#15803d; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background:#eef2f7; }
+  .harness-bar { height:64px; display:flex; align-items:center; gap:16px; padding:0 16px;
+                 background:var(--atex-navy); color:#fff; font-weight:600; }
+  .harness-bar button { height:30px; border:0; border-radius:6px; padding:0 12px;
+                        background:#fff; color:var(--atex-navy); cursor:pointer; font:inherit; }
+</style>
+<link rel="stylesheet" href="../download/atex/css/machine-calendar.css">
+</head>
+<body>
+<div class="harness-bar">
+  <span>Harness · /atex/machine-calendar</span>
+  <button id="toggle-theme" type="button">Тема</button>
+</div>
+<div id="atex-machine-calendar" class="atex-mc" data-db="ateh" data-slitter-table="1070">
+  <div class="atex-mc-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Тестовые данные вокруг «сегодня», чтобы видеть недельный режим по умолчанию ──
+(function () {
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function at(dayOffset, h, m) {
+    var d = new Date();
+    d.setDate(d.getDate() + dayOffset);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(h) + ':' + pad(m);
+  }
+  var planning = [
+    // Станок 1 — завершено в срок
+    { cut_id: '1', cut_slitter: 'Станок 1', cut_slitter_id: '101', cut_material: 'MR194',
+      cut_plan_date: at(0, 8, 0), cut_start_date: at(0, 8, 5), cut_end_date: at(0, 9, 0),
+      cut_duration: '60', cut_status: '' },
+    // Станок 1 — с опозданием
+    { cut_id: '2', cut_slitter: 'Станок 1', cut_slitter_id: '101', cut_material: 'BOPP',
+      cut_plan_date: at(0, 10, 0), cut_start_date: at(0, 10, 30), cut_end_date: at(0, 12, 0),
+      cut_duration: '60', cut_status: '' },
+    // Станок 2 — в работе (не завершено)
+    { cut_id: '3', cut_slitter: 'Станок 2', cut_slitter_id: '102', cut_material: 'Фольга 12',
+      cut_plan_date: at(1, 9, 0), cut_start_date: at(1, 9, 10), cut_end_date: '',
+      cut_duration: '90', cut_status: '1' },
+    // Станок 2 — запланировано (будущее)
+    { cut_id: '4', cut_slitter: 'Станок 2', cut_slitter_id: '102', cut_material: 'MR194',
+      cut_plan_date: at(2, 13, 0), cut_start_date: '', cut_end_date: '',
+      cut_duration: '45', cut_status: '' },
+    // Станок 3 — две параллельные резки (проверка дорожек)
+    { cut_id: '5', cut_slitter: 'Станок 3', cut_slitter_id: '103', cut_material: 'PET',
+      cut_plan_date: at(0, 14, 0), cut_start_date: at(0, 14, 0), cut_end_date: at(0, 16, 0),
+      cut_duration: '120', cut_status: '' },
+    { cut_id: '6', cut_slitter: 'Станок 3', cut_slitter_id: '103', cut_material: 'PVC',
+      cut_plan_date: at(0, 15, 0), cut_start_date: at(0, 15, 0), cut_end_date: at(0, 17, 0),
+      cut_duration: '120', cut_status: '' }
+  ];
+  var slitters = [
+    { i: 101, r: ['Станок 1'] },
+    { i: 102, r: ['Станок 2'] },
+    { i: 103, r: ['Станок 3'] },
+    { i: 104, r: ['Станок 4'] } // простаивающий — должен показаться пустой строкой
+  ];
+  window.fetch = function (url) {
+    var body = '[]';
+    if (/report\/cut_planning/.test(url)) body = JSON.stringify(planning);
+    else if (/object\//.test(url)) body = JSON.stringify(slitters);
+    return Promise.resolve({ text: function () { return Promise.resolve(body); } });
+  };
+})();
+document.getElementById('toggle-theme').addEventListener('click', function () {
+  var cur = document.documentElement.getAttribute('data-theme');
+  document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  document.body.style.background = cur === 'dark' ? '#eef2f7' : '#0f172a';
+});
+</script>
+<script src="../download/atex/js/machine-calendar.js"></script>
+</body>
+</html>
