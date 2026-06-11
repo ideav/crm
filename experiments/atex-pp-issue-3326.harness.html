@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<!-- Стенд проверки #3326: панель полос .atex-pp-strip-panel НЕ должна сворачиваться
+     при кликах внутри неё (по любым контролам) — закрытие только по .atex-pp-strip-close.
+     Карточка резки .atex-pp-cut на клик делает render() и теряет панель; её обработчик
+     пропускал клики по panel через e.target.closest('.atex-pp-strip-panel'), но контролы
+     (удалить полосу, ходовая ширина) в своём обработчике вызывают renderRows()/
+     renderPreferred() и отцепляют нажатый узел — closest на нём = null, и панель всё
+     равно сворачивалась (#3318 чинил так лишь кнопку удаления). Фикс — stopPropagation на
+     самой панели. Использует РЕАЛЬНЫЕ css/js рабочего места. Автопроверка кладёт результат
+     в window.__TEST_RESULT (зелёный/красный баннер). -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · #3326 — клики внутри панели полос не сворачивают её</title>
+<link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5;padding:16px}
+#banner{padding:10px 14px;border-radius:8px;font-weight:700;margin-bottom:12px}
+.ok{background:#dcfce7;color:#166534;border:1px solid #16a34a}
+.fail{background:#fee2e2;color:#991b1b;border:1px solid #dc2626}</style>
+</head>
+<body>
+<div id="banner">Выполняется…</div>
+<!-- data-initialized=1: глушим штатный init() (он бы ушёл в сетевой start()),
+     рендерим стенд вручную ниже. -->
+<div id="atex-production-planning" class="atex-pp atex-brand" data-db="atex" data-xsrf="test" data-initialized="1"></div>
+
+<script src="../download/atex/js/production-planning.js"></script>
+<script>
+(function () {
+  var api = window.AtexProductionPlanning;
+  var Controller = api.Controller;
+  var root = document.getElementById('atex-production-planning');
+  var ctrl = new Controller(root);
+
+  // Минимальный каркас (как в start(), но без сетевой загрузки): только очередь.
+  root.innerHTML = '';
+  var layout = document.createElement('div'); layout.className = 'atex-pp-layout';
+  var qWrap = document.createElement('section'); qWrap.className = 'atex-pp-panel atex-pp-queue-panel';
+  ctrl.queueEl = document.createElement('div'); ctrl.queueEl.className = 'atex-pp-queue';
+  qWrap.appendChild(ctrl.queueEl);
+  ctrl.linkEl = document.createElement('section'); ctrl.linkEl.className = 'atex-pp-panel atex-pp-link';
+  layout.appendChild(qWrap); layout.appendChild(ctrl.linkEl);
+  root.appendChild(layout);
+
+  // render() без модалки формы: только очередь + панель обеспечения.
+  ctrl.render = function () { this.renderQueue(); this.renderLink(); };
+
+  // ── Заглушки сети/зависимостей панели полос (без реальных запросов). ──
+  ctrl.meta.finishedBatch = { id: 'fb', val: 'Партия ГП', reqs: [] };
+  ctrl.notify = function () {};
+  ctrl.resolveToleranceMm = function () { return 20; };
+  ctrl.persistStrip = function () { return Promise.resolve(); };
+  ctrl.post = function () { return Promise.resolve({}); };
+  ctrl.openStripSupplyPicker = function () {};
+  // Полосы резки: две «складские» (есть id, нет ссылки из Обеспечения → удаляемы).
+  ctrl.loadStripsForCut = function () {
+    return Promise.resolve([{ id: 'b1', width: 100, qty: 2 }, { id: 'b2', width: 80, qty: 1 }]);
+  };
+  // Ходовые ширины — отрисуют кнопки .atex-pp-strip-pref-item (детачатся при клике).
+  ctrl.loadPreferredWidths = function () {
+    return Promise.resolve([{ width: 120, popularity: 5 }, { width: 90, popularity: 3 }]);
+  };
+
+  // Данные: одна видимая резка со складскими полосами; джамбо известен.
+  ctrl.filter = { slitter: '', status: '', date: '' };
+  ctrl.positions = [];
+  ctrl.supplies = [];                       // нет ссылок Обеспечения → полосы «Склад»
+  ctrl.jumboWidthByMaterial = { m1: 1000 }; // ширина джамбо для остатка/ходовых
+  ctrl.cuts = [{
+    id: '901', number: '7', sequence: 1,
+    slitter: { id: '201', label: 'Слиттер №1' },
+    materialBatch: { id: 'mb1', label: 'Партия A-2026' },
+    planDate: '', status: 'В очереди',
+    materialId: 'm1', plannedRuns: '1', orderApprovalDate: '2026-06-01'
+  }];
+
+  ctrl.render();
+
+  var results = [];
+  function check(name, cond) { results.push({ name: name, ok: !!cond }); }
+  function flush() { return new Promise(function (r) { setTimeout(r, 0); }); }
+  function click(elm) { elm.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+  function panel() { return ctrl.queueEl.querySelector('.atex-pp-strip-panel'); }
+
+  function finish() {
+    var allOk = results.every(function (r) { return r.ok; });
+    window.__TEST_RESULT = { ok: allOk, results: results };
+    var banner = document.getElementById('banner');
+    banner.className = allOk ? 'ok' : 'fail';
+    banner.textContent = (allOk ? '✓ ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ' : '✗ ЕСТЬ ПАДЕНИЯ') + ' — ' +
+      results.map(function (r) { return (r.ok ? '✓ ' : '✗ ') + r.name; }).join('  ·  ');
+  }
+
+  // Открываем панель полос для резки и прогоняем клики по её контролам.
+  var card = ctrl.queueEl.querySelector('.atex-pp-cut');
+  check('карточка .atex-pp-cut отрисована', card);
+  ctrl.openStrips(ctrl.cuts[0], card);
+
+  // Ждём loadStripsForCut → renderStripPanel, затем loadPreferredWidths → renderPreferred.
+  flush().then(flush).then(function () {
+    check('панель полос открыта', panel());
+    check('редактируется именно эта резка', String(ctrl.stripEditCutId) === '901');
+
+    // 1) Клик по заголовку панели (обычный элемент) — панель остаётся, резка не выбрана.
+    ctrl.selectedCutId = null;
+    var header = panel().querySelector('.atex-pp-strip-header-text') || panel().querySelector('.atex-pp-strip-header');
+    click(header);
+    check('клик по заголовку не сворачивает панель', !!panel());
+    check('клик по заголовку не выбирает резку', ctrl.selectedCutId == null);
+
+    // 2) Клик по «+ полоса» (renderRows перерисовывает тело) — панель остаётся.
+    ctrl.selectedCutId = null;
+    click(panel().querySelector('.atex-pp-strip-add'));
+    check('клик по «+ полоса» не сворачивает панель', !!panel());
+
+    // 3) Клик по кнопке ходовой ширины (renderPreferred ОТЦЕПЛЯЕТ нажатый узел) —
+    //    раньше всплывал к карточке и сворачивал панель; #3318 это НЕ покрывал.
+    ctrl.selectedCutId = null;
+    var pref = panel().querySelector('.atex-pp-strip-pref-item');
+    check('кнопка ходовой ширины отрисована', !!pref);
+    if (pref) click(pref);
+    check('клик по ходовой ширине не сворачивает панель', !!panel());
+    check('клик по ходовой ширине не выбирает резку', ctrl.selectedCutId == null);
+  }).then(flush).then(function () {
+    // 4) Клик по «удалить полосу» (Склад) — renderRows отцепляет кнопку (случай #3318).
+    ctrl.selectedCutId = null;
+    var del = panel() && panel().querySelector('.atex-pp-strip-del:not(.is-disabled)');
+    check('кнопка удаления полосы отрисована', !!del);
+    if (del) click(del);
+    check('клик по «удалить полосу» не сворачивает панель', !!panel());
+    check('клик по «удалить полосу» не выбирает резку', ctrl.selectedCutId == null);
+  }).then(flush).then(function () {
+    // 5) Клик по .atex-pp-strip-close — панель ДОЛЖНА закрыться (штатное закрытие).
+    var closeBtn = panel() && panel().querySelector('.atex-pp-strip-close');
+    check('кнопка закрытия панели отрисована', !!closeBtn);
+    if (closeBtn) click(closeBtn);
+    check('клик по .atex-pp-strip-close закрывает панель', !panel());
+    check('после закрытия редактор полос сброшен', ctrl.stripEditCutId == null);
+    finish();
+  }).catch(function (err) {
+    check('исключение во время прогона: ' + (err && err.message), false);
+    finish();
+  });
+})();
+</script>
+</body>
+</html>

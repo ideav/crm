@@ -2525,7 +2525,19 @@
         return p;
     }
 
+    // #3323: клик по любому месту карточки резки .atex-pp-cut выбирает её (→ боковая
+    // панель «Связанные позиции»). Исключение — клики по самим кнопкам ↑/↓/Полосы и
+    // по панели полос: их перерисовка очереди закрыла бы только что открытую панель
+    // полос. Пустые зоны .atex-pp-cut-controls (отступы и промежутки между кнопками)
+    // теперь тоже считаются кликом по карточке. Чистая (принимает цель клика с
+    // .closest) → проверяется модульным тестом без DOM-движка.
+    function cutClickSelectsCut(target) {
+        if (!target || typeof target.closest !== 'function') return true;
+        return !(target.closest('button') || target.closest('.atex-pp-strip-panel'));
+    }
+
     var planning = {
+        cutClickSelectsCut: cutClickSelectsCut,
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
         isMaterialBlocked: isMaterialBlocked,
@@ -3862,6 +3874,16 @@
         this.stripEditCutId = String(cut.id);
 
         var panel = el('div', { class: 'atex-pp-strip-panel', dataset: { cutId: String(cut.id) } });
+        // #3326: любой клик внутри панели полос не должен её сворачивать — закрытие
+        // только по .atex-pp-strip-close. Карточка резки (.atex-pp-cut) на клик делает
+        // render() и пересобирает очередь, теряя панель; её обработчик пропускает клики,
+        // чьё e.target.closest('.atex-pp-strip-panel') == panel. Но внутренние контролы
+        // (удалить полосу, ходовая ширина, …) в своём обработчике вызывают renderRows()/
+        // renderPreferred() и отцепляют нажатый узел — closest на нём даёт null, и клик
+        // всё равно сворачивал панель (#3318 чинил так лишь кнопку удаления). Панель —
+        // предок всех контролов в пути всплытия, поэтому stopPropagation здесь надёжно
+        // гасит клик до карточки независимо от того, отцепился ли e.target.
+        panel.addEventListener('click', function(e) { e.stopPropagation(); });
         panel.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка полос…' }));
         container.appendChild(panel);
 
@@ -5543,12 +5565,11 @@
                 el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
             ]);
             cardPanel.appendChild(info);
-            // Выбор резки кликом по всей карточке (#3149), а не только по .atex-pp-cut-info.
-            // Клики по контролам (↑/↓/Полосы) и панели полос не считаем выбором: их
-            // перерисовка очереди закрыла бы только что открытую панель полос.
+            // Выбор резки кликом по всей карточке (#3149, #3323), а не только по
+            // .atex-pp-cut-info. Логика «считать ли клик выбором» вынесена в чистую
+            // cutClickSelectsCut (см. её комментарий и модульный тест #3323).
             cardPanel.addEventListener('click', function(e) {
-                if (e.target.closest('.atex-pp-cut-controls') ||
-                    e.target.closest('.atex-pp-strip-panel')) return;
+                if (!cutClickSelectsCut(e.target)) return;
                 self.selectedCutId = c.id;
                 self.render();
             });

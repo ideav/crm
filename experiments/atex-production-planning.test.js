@@ -1261,6 +1261,61 @@ assertEqual(planning.progressPercent(20, 10), 100, 'progressPercent: done>total 
 assertEqual(planning.progressPercent(-3, 10), 0, 'progressPercent: done<0 → клампится до 0');
 assertEqual(planning.progressPercent('абв', 10), 0, 'progressPercent: нечисло → 0');
 
+// ── cutClickSelectsCut (#3323) ──
+// Клик в любом месте карточки .atex-pp-cut должен выбирать резку (→ «Связанные
+// позиции»), КРОМЕ кликов по самим кнопкам ↑/↓/Полосы и по панели полос. Раньше
+// возврат был по всему контейнеру .atex-pp-cut-controls, поэтому клик по его пустым
+// зонам (отступы/промежутки между кнопками) резку не выбирал. Строим минимальное
+// дерево карточки с .closest, как у реального renderQueue, и проверяем решение.
+(function() {
+    function dom(tag, className) {
+        return {
+            tag: String(tag).toUpperCase(),
+            className: className || '',
+            parent: null,
+            child: function(tagName, cls) {
+                var c = dom(tagName, cls);
+                c.parent = this;
+                return c;
+            },
+            matches: function(sel) {
+                if (sel === 'button') return this.tag === 'BUTTON';
+                if (sel.charAt(0) === '.') {
+                    return (' ' + this.className + ' ').indexOf(' ' + sel.slice(1) + ' ') >= 0;
+                }
+                return false;
+            },
+            closest: function(sel) {
+                var n = this;
+                while (n) { if (n.matches(sel)) return n; n = n.parent; }
+                return null;
+            }
+        };
+    }
+    // Структура карточки как в renderQueue: card > info(spans), time(div role=button),
+    // controls(div > buttons ↑/↓/Полосы), strip-panel(div > input/button).
+    var card = dom('div', 'atex-pp-cut is-active');
+    var info = card.child('div', 'atex-pp-cut-info');
+    var numSpan = info.child('span', 'atex-pp-cut-num');
+    var timeEl = card.child('div', 'atex-pp-cut-time'); // role=button, но это div
+    var controls = card.child('div', 'atex-pp-cut-controls');
+    var upBtn = controls.child('button', 'atex-pp-move');
+    var stripsBtn = controls.child('button', 'atex-pp-strips');
+    var stripPanel = card.child('div', 'atex-pp-strip-panel');
+    var stripInput = stripPanel.child('input', 'atex-pp-strip-width');
+
+    assertEqual(planning.cutClickSelectsCut(card), true, 'cutClickSelectsCut: клик по телу карточки выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(info), true, 'cutClickSelectsCut: клик по .atex-pp-cut-info выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(numSpan), true, 'cutClickSelectsCut: клик по span внутри info выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(timeEl), true, 'cutClickSelectsCut: клик по строке времени выбирает резку (#3309)');
+    assertEqual(planning.cutClickSelectsCut(controls), true, 'cutClickSelectsCut: клик по пустой зоне .atex-pp-cut-controls выбирает резку (#3323)');
+    assertEqual(planning.cutClickSelectsCut(upBtn), false, 'cutClickSelectsCut: клик по кнопке ↑ НЕ выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(stripsBtn), false, 'cutClickSelectsCut: клик по кнопке «Полосы» НЕ выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(stripPanel), false, 'cutClickSelectsCut: клик по панели полос НЕ выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(stripInput), false, 'cutClickSelectsCut: клик по полю внутри панели полос НЕ выбирает резку');
+    assertEqual(planning.cutClickSelectsCut(null), true, 'cutClickSelectsCut: пустая цель → по умолчанию выбирает');
+})();
+
 function req(id, val, extra) {
     var r = { id: id, val: val };
     Object.keys(extra || {}).forEach(function(k) { r[k] = extra[k]; });
