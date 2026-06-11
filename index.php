@@ -8324,7 +8324,7 @@ function Parse_block($block)
 		}
 # Accept only fully filled portions of Block content
 #		if(!preg_match("/\{([A-Za-z0-9\.&_\*\(\)\'\,\+\-\/]+?)}/", $cur_content) || isset($_REQUEST["debug"]))
-		if(!preg_match("/\{([A-ZА-Я0-9\.&_ \-]*?[^ ;\r\n])}/ui", $cur_content) || isset($_REQUEST["debug"]))
+		if(!preg_match("/\{([A-ZА-Я0-9\.&_ \-]+?[^ ;\r\n])}/ui", $cur_content) || isset($_REQUEST["debug"]))
 			$content .= $cur_content;
 	}
 	if(($block == "&main") || ($block == ""))  # Replace "{" only returning the complete result (not a sub-block)
