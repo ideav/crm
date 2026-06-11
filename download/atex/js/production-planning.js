@@ -59,7 +59,6 @@
         strip: 'Полоса',
         finishedBatch: 'Партия ГП',
         sleeveTask: 'Задание на втулки',
-        sleeveDiameter: 'Диаметр втулки', // #3321: справочник диаметров втулок («Готовые»)
         settings: 'Настройка'
     };
     // Реквизиты подчинённой «Полосы» (up = резка). Резолв по имени.
@@ -128,17 +127,18 @@
     };
     // #3242: «Кол-во план» переименовано в «Кол-во резок план» (fallback на старое имя).
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
+    // #3340: реальная схема «Задача на втулки» (1080, up=позиция). Главное значение
+    // (t1080) = запланированный старт (Unix, как у «Производственной резки»). Тип
+    // втулки определяется родительской позицией («Диаметр втулки»), в задании его нет.
     var SLEEVE_TASK_REQ = {
-        diameter: 'Диаметр, мм',
-        actualQty: 'Кол-во факт',
-        cutter: 'Втулкорез',
-        status: 'Статус',
-        cutDate: 'Нарезка втулок' // #3321: дата нарезки втулок (тип 9, ISO «YYYY-MM-DD»)
+        cutter: 'Втулкорез',     // ref → «Втулкорез»; по диаметру подходит только TC-20
+        qty: 'Кол-во',           // плановое кол-во втулок (= кол-во рулонов позиции)
+        batch: 'Партия сырья'    // FIFO-партия втулок (ref → «Партия сырья»)
     };
+    var SLEEVE_CUTTER_NAME = 'TC-20'; // #3340: единственный подходящий втулкорез
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
-    var SLEEVE_TASK_STATUS = 'Ожидает';
     // Параметры раскладки cut-layout при генерации резок.
     var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
     var DEFAULT_TOLERANCE_MM = 20; // допуск остатка джамбо по умолчанию (мм), если у «Вида сырья» «Допуск, мм» не задан
@@ -755,23 +755,7 @@
         return round3(base < cap ? base : cap);
     }
 
-    function sleeveDiameterFromRow(row) {
-        var raw = row && row.position_sleeve != null ? row.position_sleeve : '';
-        var ref = parseRef(raw);
-        var label = ref.label || raw;
-        var n = stripNum(label);
-        return n > 0 ? n : 0;
-    }
-
-    // #3321: id записи «Диаметр втулки» из ссылки позиции (position_sleeve = «id:Подпись»).
-    // Нужен для проверки «Готовые» — нарезать втулки требуется только для «сырых» диаметров.
-    function sleeveDiameterIdFromRow(row) {
-        var raw = row && row.position_sleeve != null ? row.position_sleeve : '';
-        var ref = parseRef(raw);
-        return ref.id == null ? '' : String(ref.id);
-    }
-
-    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveDiameter, dueKey }]
+    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveId, sleeveReady, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty, position_length/wind_length → числа; пустые значения → 0/'' но объект всегда
     // присутствует. length — «Длина, м» позиции (длина прогона джамбо = «Метраж, м»
@@ -797,8 +781,10 @@
                 length: length,
                 windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
                 windLength: windLengthValue(windLengthRaw),
-                sleeveDiameter: sleeveDiameterFromRow(row),
-                sleeveDiameterId: sleeveDiameterIdFromRow(row),
+                // #3340: тип втулки и готовность приходят прямо из positions_list:
+                // sleeve_id — id записи «Диаметр втулки»; sleeve_ready (непустое) — уже нарезано.
+                sleeveId: row.sleeve_id == null ? '' : String(row.sleeve_id).trim(),
+                sleeveReady: String(row.sleeve_ready == null ? '' : row.sleeve_ready).trim() !== '',
                 dueKey: batchDateKey(row.position_due_date),
                 approved: orderApproved || itemApproved
             };
@@ -1366,104 +1352,45 @@
         return out;
     }
 
-    // #3321: «Готовые» втулки (диаметр уже нарезан) задание на втулки не требуют.
-    // readyDiameterIds — множество id записей «Диаметр втулки» с непустым «Готовые».
-    // Принимает Set, массив или объект-карту; пусто/нет id → не «готовый».
-    function sleeveDiameterIsReady(readyDiameterIds, diameterId) {
-        var id = diameterId == null ? '' : String(diameterId);
-        if (!id || !readyDiameterIds) return false;
-        if (typeof readyDiameterIds.has === 'function') return !!readyDiameterIds.has(id);
-        if (Array.isArray(readyDiameterIds)) return readyDiameterIds.indexOf(id) !== -1;
-        return !!readyDiameterIds[id];
-    }
-
-    function positionSleeveTasksForLayout(layout, positions, plannedRuns, readyDiameterIds) {
+    // #3340: задание на втулки нужно позициям, у которых есть тип втулки (sleeveId)
+    // и он НЕ «готов» (sleeveReady пуст). qty = кол-во рулонов покрытия позиции.
+    // → [{ positionId, sleeveId, qty }].
+    function positionSleeveTasksForLayout(layout, positions, plannedRuns) {
         var byId = positionMap(positions);
         var out = [];
         (layout && layout.positionsCovered || []).forEach(function(pid) {
             var positionId = String(pid);
             var p = byId[positionId];
             if (!p) return;
-            var dia = Number(p.sleeveDiameter) || 0;
-            if (dia <= 0) return;
-            // #3321: пропускаем «готовые» диаметры — нарезать втулки не нужно.
-            if (sleeveDiameterIsReady(readyDiameterIds, p.sleeveDiameterId)) return;
+            var sleeveId = p.sleeveId == null ? '' : String(p.sleeveId).trim();
+            if (!sleeveId) return;        // у позиции нет втулки
+            if (p.sleeveReady) return;    // тип втулки уже нарезан — задание не нужно
             var qty = supplyRollsForPosition(layout, p, plannedRuns);
             if (qty <= 0) return;
-            out.push({ positionId: positionId, diameter: dia, qty: qty, diameterId: p.sleeveDiameterId || '' });
+            out.push({ positionId: positionId, sleeveId: sleeveId, qty: qty });
         });
         return out;
     }
 
-    function sleeveTasksForLayout(layout, positions, plannedRuns, readyDiameterIds) {
-        var out = [];
-        var byDia = {};
-        positionSleeveTasksForLayout(layout, positions, plannedRuns, readyDiameterIds).forEach(function(task) {
-            var dia = task.diameter;
-            var key = String(dia);
-            if (byDia[key] == null) {
-                byDia[key] = out.length;
-                out.push({ diameter: dia, qty: 0 });
-            }
-            out[byDia[key]].qty = round3(out[byDia[key]].qty + task.qty);
+    // #3340: FIFO-партия втулок для типа sleeveId из отчёта sleeve_batches_active.
+    // Отбираем партии «в работе» с совпадающим «Диаметр втулки», берём самую раннюю
+    // по дате (dateKey, Unix). batches: [{ id, diameterId, dateKey, active }].
+    // → id партии (строка) или '' если подходящей нет.
+    function pickSleeveBatchId(batches, sleeveId) {
+        var sid = sleeveId == null ? '' : String(sleeveId).trim();
+        if (!sid) return '';
+        var best = null;
+        (batches || []).forEach(function(b) {
+            if (!b || !b.active) return;
+            if (String(b.diameterId == null ? '' : b.diameterId).trim() !== sid) return;
+            if (best == null || (Number(b.dateKey) || 0) < (Number(best.dateKey) || 0)) best = b;
         });
-        return out;
+        return best ? String(best.id) : '';
     }
 
     function sleeveMinutes(qty, opTimes) {
         var one = Number(opTimes && opTimes.SLEEVE_CUT) || 0;
         return round3((Number(qty) || 0) * one);
-    }
-
-    // #3321: строка задания на втулки для панели «Связанные позиции» (.atex-pp-link).
-    // Собираем непустые поля подчинённой «Задание на втулки»: диаметр, кол-во,
-    // факт, дата нарезки, статус, втулкорез. Пустые поля пропускаем.
-    function formatSleeveTaskLine(task) {
-        if (!task) return '';
-        function s(v) { return String(v == null ? '' : v).trim(); }
-        var parts = [];
-        if (s(task.diameter)) parts.push('Ø' + s(task.diameter));
-        if (s(task.qty)) parts.push(s(task.qty) + ' шт');
-        if (s(task.actualQty) && s(task.actualQty) !== '0') parts.push('факт ' + s(task.actualQty));
-        if (s(task.cutDate)) parts.push('нарезка ' + s(task.cutDate));
-        if (s(task.status)) parts.push(s(task.status));
-        if (s(task.cutter)) parts.push(s(task.cutter));
-        return parts.join(' · ');
-    }
-
-    // #3321: дата «Нарезка втулок». Хранится как ISO «YYYY-MM-DD» (тип 9, как в orders.js).
-    var ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-    function isoToUtcMs(iso) {
-        var m = ISO_DATE_RE.exec(String(iso == null ? '' : iso).trim());
-        if (!m) return null;
-        return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    }
-    function msToIsoDate(ms) {
-        var d = new Date(ms);
-        function pad(n) { return (n < 10 ? '0' : '') + n; }
-        return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
-    }
-    // Сдвиг ISO-даты на deltaDays суток. Невалидная дата → '' (без сдвига).
-    function shiftIsoDate(iso, deltaDays) {
-        var ms = isoToUtcMs(iso);
-        if (ms == null) return '';
-        return msToIsoDate(ms + (Number(deltaDays) || 0) * 86400000);
-    }
-    // Разница (a − b) в целых сутках; любая невалидная дата → null.
-    function isoDateDiffDays(a, b) {
-        var ma = isoToUtcMs(a), mb = isoToUtcMs(b);
-        if (ma == null || mb == null) return null;
-        return Math.round((ma - mb) / 86400000);
-    }
-    // Дата «Нарезка втулок» при изменении «Даты плана».
-    // По умолчанию — на день раньше плана. При смене плана сохраняем ручной сдвиг
-    // (разницу прежней «Нарезки» и прежнего плана) и применяем к новому плану.
-    // prevPlanIso/prevSleeveIso пусты → по умолчанию план − 1 день.
-    function sleeveCutDateForPlan(planIso, prevPlanIso, prevSleeveIso) {
-        if (isoToUtcMs(planIso) == null) return prevSleeveIso || '';
-        var diff = isoDateDiffDays(prevSleeveIso, prevPlanIso);
-        if (diff == null) diff = -1;
-        return shiftIsoDate(planIso, diff);
     }
 
     // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
@@ -2629,14 +2556,7 @@
         producedBatchesForLayout: producedBatchesForLayout,
         supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
-        sleeveTasksForLayout: sleeveTasksForLayout,
-        sleeveDiameterFromRow: sleeveDiameterFromRow,
-        sleeveDiameterIdFromRow: sleeveDiameterIdFromRow,
-        sleeveDiameterIsReady: sleeveDiameterIsReady,
-        shiftIsoDate: shiftIsoDate,
-        isoDateDiffDays: isoDateDiffDays,
-        sleeveCutDateForPlan: sleeveCutDateForPlan,
-        formatSleeveTaskLine: formatSleeveTaskLine,
+        pickSleeveBatchId: pickSleeveBatchId,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
@@ -2714,11 +2634,10 @@
             strip: null,
             finishedBatch: null,
             sleeveTask: null,
-            sleeveDiameter: null,
             settings: null
         };
-        this.sleeveReadyDiameterIds = {}; // #3321: id «Диаметр втулки» с непустым «Готовые»
-        this.sleeveTasksByPosition = {};  // #3321: positionId → [задания на втулки]
+        this.sleeveBatches = [];   // #3340: партии втулок «в работе» (отчёт sleeve_batches_active) для FIFO
+        this.sleeveCutterId = '';  // #3340: id втулкореза TC-20 (резолв по имени)
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
         this.materialBatches = []; // справочник [{ id, label }]
         this.batchMaterialById = {}; // карта batch_id → вид_сырья_id (для стоп-листа)
@@ -2733,8 +2652,7 @@
         this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.draft = this.blankDraft();
-        // дата плана по умолчанию — сегодня; «Нарезка втулок» (#3321) — на день раньше плана
-        this.filter = { slitter: '', status: '', date: todayISO(), sleeveDate: shiftIsoDate(todayISO(), -1) };
+        this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
@@ -2809,7 +2727,6 @@
             self.meta.strip = byName(TABLE.strip); // подчинённая «Производственной резки» (Task 3)
             self.meta.finishedBatch = byName(TABLE.finishedBatch);
             self.meta.sleeveTask = byName(TABLE.sleeveTask);
-            self.meta.sleeveDiameter = byName(TABLE.sleeveDiameter);
             self.meta.settings = byName(TABLE.settings);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
@@ -3114,59 +3031,65 @@
         });
     };
 
-    // #3321: карта «готовых» диаметров втулок. Таблица «Диаметр втулки» с реквизитом
-    // «Готовые» (тип 11): непустое значение → втулки уже нарезаны, задание не требуется.
-    // → this.sleeveReadyDiameterIds = { recordId: true }. Нет таблицы/колонки → пусто.
-    AtexProductionPlanning.prototype.loadSleeveDiameters = function() {
+    // #3340: партии втулок «в работе» из отчёта sleeve_batches_active (для FIFO-подбора
+    // «Партии сырья» при создании «Задачи на втулки») + резолв id втулкореза TC-20.
+    // → this.sleeveBatches = [{ id, diameterId, dateKey, remaining, active }].
+    AtexProductionPlanning.prototype.loadSleeveBatches = function() {
         var self = this;
-        var meta = this.meta.sleeveDiameter;
-        if (!meta) { this.sleeveReadyDiameterIds = {}; return Promise.resolve(); }
-        var readyIdx = columnIndex(meta, 'Готовые');
-        if (readyIdx < 0) { this.sleeveReadyDiameterIds = {}; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var ready = {};
-            (rows || []).forEach(function(rec) {
-                var r = rec.r || [];
-                var raw = r[readyIdx];
-                // тип 11 (галочка) приходит как непустая строка при включённом флаге.
-                if (raw != null && String(raw).trim() !== '') ready[String(rec.i)] = true;
+        var batches = this.getJson('report/sleeve_batches_active?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            self.sleeveBatches = (rows || []).map(function(row) {
+                return {
+                    id: row.batch_id == null ? '' : String(row.batch_id),
+                    diameterId: row.sleeve_diameter_id == null ? '' : String(row.sleeve_diameter_id).trim(),
+                    dateKey: Number(row.batch_date) || 0,
+                    remaining: stripNum(row.remaining_m),
+                    active: String(row.active == null ? '' : row.active).trim() !== ''
+                };
             });
-            self.sleeveReadyDiameterIds = ready;
-        });
+        }).catch(function() { self.sleeveBatches = []; });
+        return Promise.all([batches, this.resolveSleeveCutterId()]);
     };
 
-    // #3321: задания на втулки, сгруппированные по позиции заказа (up = позиция).
-    // → this.sleeveTasksByPosition = { positionId: [{ id, qty, diameter, actualQty,
-    //   cutter, status, cutDate }] } для секции «Связанные позиции» в .atex-pp-link.
-    AtexProductionPlanning.prototype.loadSleeveTasks = function() {
+    // #3340: id втулкореза TC-20 — резолв по имени из ref-таблицы реквизита «Втулкорез»
+    // задания (схемоустойчиво при пересборке БД). Не найден → '' (поле пропускается).
+    AtexProductionPlanning.prototype.resolveSleeveCutterId = function() {
         var self = this;
+        self.sleeveCutterId = '';
         var meta = this.meta.sleeveTask;
-        if (!meta) { this.sleeveTasksByPosition = {}; return Promise.resolve(); }
-        var diaIdx = columnIndex(meta, SLEEVE_TASK_REQ.diameter);
-        var actualIdx = columnIndex(meta, SLEEVE_TASK_REQ.actualQty);
-        var cutterIdx = columnIndex(meta, SLEEVE_TASK_REQ.cutter);
-        var statusIdx = columnIndex(meta, SLEEVE_TASK_REQ.status);
-        var cutDateIdx = columnIndex(meta, SLEEVE_TASK_REQ.cutDate);
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var byPos = {};
+        if (!meta) return Promise.resolve();
+        var cutterReq = reqByName(meta, SLEEVE_TASK_REQ.cutter);
+        var refTable = cutterReq && cutterReq.ref;
+        if (!refTable) return Promise.resolve();
+        return this.getJson('object/' + refTable + '/?JSON_DATA&LIMIT=0,200').then(function(rows) {
             (rows || []).forEach(function(rec) {
-                var r = rec.r || [];
-                var positionId = String(rec.u);   // up = позиция заказа
-                function cell(idx) { return idx >= 0 && r[idx] != null ? String(r[idx]) : ''; }
-                var task = {
-                    id: String(rec.i),
-                    qty: r[0] == null ? '' : String(r[0]),   // главное значение = кол-во втулок (план)
-                    diameter: cell(diaIdx),
-                    actualQty: cell(actualIdx),
-                    cutter: parseRef(cell(cutterIdx)).label,
-                    status: cell(statusIdx),
-                    cutDate: cell(cutDateIdx)
-                };
-                if (!byPos[positionId]) byPos[positionId] = [];
-                byPos[positionId].push(task);
+                var name = String(((rec.r || [])[0]) == null ? '' : (rec.r || [])[0]).trim();
+                if (name === SLEEVE_CUTTER_NAME) self.sleeveCutterId = String(rec.i);
             });
-            self.sleeveTasksByPosition = byPos;
-        });
+        }).catch(function() {});
+    };
+
+    // #3340: поля создаваемой «Задачи на втулки» (1080). Главное значение t1080 =
+    // запланированный старт (Unix, как у резки); «Кол-во» = qty; «Втулкорез» = TC-20;
+    // «Партия сырья» = FIFO-партия втулок по типу. Отсутствующие реквизиты/значения — пропуск.
+    AtexProductionPlanning.prototype.buildSleeveTaskFields = function(reqIds, task, plannedStart) {
+        var meta = this.meta.sleeveTask;
+        var fields = {};
+        if (reqIds.qty && task.qty) fields['t' + reqIds.qty] = task.qty;
+        if (reqIds.cutter && this.sleeveCutterId) fields['t' + reqIds.cutter] = this.sleeveCutterId;
+        var batchId = pickSleeveBatchId(this.sleeveBatches, task.sleeveId);
+        if (reqIds.batch && batchId) fields['t' + reqIds.batch] = batchId;
+        return addMainValueField(meta, fields, plannedStart);  // t1080 = запланированный старт
+    };
+
+    // #3340: id реквизитов задания на втулки (по именам реальной схемы). Нет таблицы → null.
+    AtexProductionPlanning.prototype.sleeveTaskReqIds = function() {
+        var meta = this.meta.sleeveTask;
+        if (!meta) return null;
+        return {
+            cutter: reqIdByName(meta, SLEEVE_TASK_REQ.cutter),
+            qty: reqIdByName(meta, SLEEVE_TASK_REQ.qty),
+            batch: reqIdByName(meta, SLEEVE_TASK_REQ.batch)
+        };
     };
 
     // Времена операций из таблицы «Время операции, мин» (13588) по кодам (колонка
@@ -3441,7 +3364,7 @@
             lay.mat = mat; lay.windDir = profile.windDir; lay.windLength = profile.windLength;
             // posForCalc — единственная позиция с УРЕЗАННЫМ до qty кол-вом (для проходов/обеспечения).
             var posForCalc = [{ id: position.id, width: position.width, qty: qty, length: position.length,
-                sleeveDiameter: position.sleeveDiameter, sleeveDiameterId: position.sleeveDiameterId, dueKey: position.dueKey }];
+                sleeveId: position.sleeveId, sleeveReady: position.sleeveReady, dueKey: position.dueKey }];
             var runLength = layoutRunLength(lay, posForCalc);
             var plannedRuns = plannedRunsForLayout(lay, posForCalc);
             var batches = producedBatchesForLayout(lay, runLength);
@@ -3449,7 +3372,7 @@
             var posBatch = batches.filter(function(b) { return stripWidthKey(b.width) === posWidthKey; })[0] || null;
             var stripsPerPass = posBatch ? (Number(posBatch.strips) || 0) : 0;
             var producedPosRolls = round3(stripsPerPass * plannedRuns);
-            var sleeveTasks = positionSleeveTasksForLayout(lay, posForCalc, plannedRuns, self.sleeveReadyDiameterIds);
+            var sleeveTasks = positionSleeveTasksForLayout(lay, posForCalc, plannedRuns);
             // Ножи проспекта (для оценки переналадки в расписании) — ширины полос ×их количество.
             var knifeWidths = [];
             (lay.strips || []).forEach(function(s) {
@@ -3569,13 +3492,7 @@
             fields = addMainValueField(cutMeta, fields, cutMainValue);
 
             var sleeveMeta = self.meta.sleeveTask;
-            var sleeveReqIds = sleeveMeta ? {
-                diameter: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.diameter),
-                actualQty: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.actualQty),
-                status: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.status),
-                cutDate: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.cutDate)
-            } : null;
-            var sleeveCutDate = (self.filter && self.filter.sleeveDate) || '';
+            var sleeveReqIds = self.sleeveTaskReqIds();
 
             return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', fields).then(function(res) {
                 var cutId = res && (res.obj || res.id || res.i);
@@ -3593,14 +3510,12 @@
                         });
                     });
                 });
-                // 2) Задания на втулки (если таблица есть).
+                // 2) Задания на втулки (#3340: если таблица есть). Запланированный старт
+                //    задания = плановое время старта резки (cutMainValue).
                 if (sleeveMeta && sleeveReqIds) {
                     plan.sleeveTasks.forEach(function(task) {
                         chain = chain.then(function() {
-                            var f = buildFields(sleeveReqIds, { diameter: task.diameter, actualQty: 0, status: SLEEVE_TASK_STATUS });
-                            f['t' + sleeveMeta.id] = task.qty;
-                            // #3321: дата «Нарезка втулок» (если реквизит есть в таблице).
-                            if (sleeveReqIds.cutDate && sleeveCutDate) f['t' + sleeveReqIds.cutDate] = sleeveCutDate;
+                            var f = self.buildSleeveTaskFields(sleeveReqIds, task, cutMainValue);
                             return self.post('_m_new/' + sleeveMeta.id + '?JSON&up=' + encodeURIComponent(task.positionId), f);
                         });
                     });
@@ -3834,7 +3749,7 @@
         var self = this;
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
         return this.loadCutStrips().then(function() { return self.loadPlanning(); })
-            .then(function() { return self.loadSleeveTasks(); }) // #3321: обновляем задания на втулки
+            .then(function() { return self.loadSleeveBatches(); }) // #3340: обновляем партии втулок (FIFO)
             .then(function() { self.resolveCutMaterials(); });
     };
 
@@ -4388,14 +4303,7 @@
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
         };
         var sleeveMeta = this.meta.sleeveTask;
-        var sleeveReqIds = sleeveMeta ? {
-            diameter: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.diameter),
-            actualQty: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.actualQty),
-            status: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.status),
-            cutDate: reqIdByName(sleeveMeta, SLEEVE_TASK_REQ.cutDate)
-        } : {};
-        var sleeveReadyIds = this.sleeveReadyDiameterIds || {};   // #3321: «готовые» диаметры
-        var sleeveCutDate = (this.filter && this.filter.sleeveDate) || ''; // #3321: дата нарезки втулок
+        var sleeveReqIds = this.sleeveTaskReqIds();
         // #3155: «Метраж, м» обеспечения = «Длина, м» покрываемой позиции (длина прогона).
         // Без него footageBySupply=0 → windingMinutes=0 → все резки «0 мин» в расписании.
         var posLength = positionLengthMap(this.genPositions);
@@ -4672,18 +4580,12 @@
                 }
 
                 function createSleeveTasks() {
-                    if (!sleeveMeta) return Promise.resolve();
+                    if (!sleeveMeta || !sleeveReqIds) return Promise.resolve();
                     var taskChain = Promise.resolve();
-                    positionSleeveTasksForLayout(lay, posById, plannedRuns, sleeveReadyIds).forEach(function(task) {
+                    // #3340: запланированный старт задания = плановое время старта резки.
+                    positionSleeveTasksForLayout(lay, posById, plannedRuns).forEach(function(task) {
                         taskChain = taskChain.then(function() {
-                            var fields = buildFields(sleeveReqIds, {
-                                diameter: task.diameter,
-                                actualQty: 0,
-                                status: SLEEVE_TASK_STATUS
-                            });
-                            fields['t' + sleeveMeta.id] = task.qty;
-                            // #3321: дата «Нарезка втулок» (если реквизит есть в таблице).
-                            if (sleeveReqIds.cutDate && sleeveCutDate) fields['t' + sleeveReqIds.cutDate] = sleeveCutDate;
+                            var fields = self.buildSleeveTaskFields(sleeveReqIds, task, cutMainValue);
                             return self.post('_m_new/' + sleeveMeta.id + '?JSON&up=' + encodeURIComponent(task.positionId), fields)
                                 .then(function() {
                                     nSleeveTasks += 1;
@@ -5424,19 +5326,11 @@
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
         var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
-        // #3321: «Нарезка втулок» — дата нарезки втулок для создаваемых заданий.
-        var sleeveDateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.sleeveDate || '' });
         dateFilter.addEventListener('change', function() {
-            var prevPlan = self.filter.date;
             self.filter.date = dateFilter.value;
-            // По умолчанию «Нарезка втулок» = план − 1 день; ручной сдвиг сохраняем.
-            self.filter.sleeveDate = sleeveCutDateForPlan(self.filter.date, prevPlan, self.filter.sleeveDate);
-            sleeveDateFilter.value = self.filter.sleeveDate || '';
             self.renderQueue();
         });
-        sleeveDateFilter.addEventListener('change', function() { self.filter.sleeveDate = sleeveDateFilter.value; });
         filters.appendChild(field('Дата плана', dateFilter));
-        filters.appendChild(field('Нарезка втулок', sleeveDateFilter));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
 
@@ -5703,35 +5597,6 @@
             });
         }
         box.appendChild(listWrap);
-
-        // #3321: задания на втулки связанных позиций (подчинённая «Задание на втулки»).
-        var sleeveByPos = this.sleeveTasksByPosition || {};
-        var linkedPosIds = [];
-        linked.forEach(function(s) {
-            var pid = String(s.positionId);
-            if (linkedPosIds.indexOf(pid) === -1) linkedPosIds.push(pid);
-        });
-        var totalTasks = 0;
-        linkedPosIds.forEach(function(pid) { totalTasks += (sleeveByPos[pid] || []).length; });
-        var sleeveWrap = el('div', { class: 'atex-pp-sleeve-tasks' });
-        sleeveWrap.appendChild(el('h3', { class: 'atex-pp-linked-title', text: 'Задания на втулки (' + totalTasks + ')' }));
-        if (!totalTasks) {
-            sleeveWrap.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет заданий на втулки.' }));
-        } else {
-            var posLabelById = {};
-            this.positions.forEach(function(p) { posLabelById[p.id] = p.label; });
-            linkedPosIds.forEach(function(pid) {
-                var tasks = sleeveByPos[pid] || [];
-                if (!tasks.length) return;
-                sleeveWrap.appendChild(el('div', { class: 'atex-pp-sleeve-pos',
-                    text: posLabelById[pid] || ('позиция #' + pid) }));
-                tasks.forEach(function(task) {
-                    sleeveWrap.appendChild(el('div', { class: 'atex-pp-sleeve-item',
-                        text: formatSleeveTaskLine(task) }));
-                });
-            });
-        }
-        box.appendChild(sleeveWrap);
     };
 
     // ── Служебное ──
@@ -5901,8 +5766,7 @@
                     self.loadDaySettings(),    // DAY_START_HOUR/DAY_END_HOUR для рабочего окна
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
-                    self.loadSleeveDiameters(),// #3321: «готовые» диаметры (задание не требуется)
-                    self.loadSleeveTasks(),    // #3321: задания на втулки по позициям (.atex-pp-link)
+                    self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);

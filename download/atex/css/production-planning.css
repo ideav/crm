@@ -407,18 +407,6 @@
 }
 .atex-pp-linked-del:hover { background: var(--pp-warn); color: #fff; }
 
-/* #3321: задания на втулки связанных позиций. */
-.atex-pp-sleeve-tasks { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
-.atex-pp-sleeve-pos { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--pp-muted); }
-.atex-pp-sleeve-item {
-    padding: 6px 10px;
-    border: 1px solid var(--pp-border-soft);
-    border-radius: 6px;
-    margin-bottom: 6px;
-    background: var(--pp-surface);
-    font-size: 13px;
-}
-
 .atex-pp-empty { padding: 14px; color: var(--pp-muted); }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
