@@ -1590,6 +1590,13 @@
         return n <= 24 ? Math.round(n * 60) : Math.round(n);
     }
 
+    // #3342: длительность обеда из настройки LUNCH_DURATION — целое число минут
+    // (например «40»). Пусто/некорректно/≤0 → 0 (обед выключен).
+    function parseDurationMinutes(value) {
+        var n = Number(String(value == null ? '' : value).replace(',', '.').trim());
+        return isFinite(n) && n > 0 ? Math.round(n) : 0;
+    }
+
     function resolveWorkingWindow(settings, cleanupMin) {
         var cfg = settings || {};
         var start = parseClockMinutes(cfg.DAY_START_HOUR, DAY_START_MIN);
@@ -1599,11 +1606,18 @@
         if (!isFinite(cleanup) || cleanup < 0) cleanup = DEFAULT_OP_TIMES.CLEANUP_SHIFT;
         var cutEnd = end - cleanup;
         if (cutEnd < start) cutEnd = start;
+        // #3342: плавающий обед. LUNCH_START задан (HH:MM) → minutes, иначе null (обед выкл).
+        var lunchDur = parseDurationMinutes(cfg.LUNCH_DURATION);
+        var lunchStart = (cfg.LUNCH_START != null && String(cfg.LUNCH_START).trim() !== '' && lunchDur > 0)
+            ? parseClockMinutes(cfg.LUNCH_START, NaN) : NaN;
+        var hasLunch = isFinite(lunchStart) && lunchDur > 0;
         return {
             startMin: round3(start),
             endMin: round3(end),
             cutEndMin: round3(cutEnd),
-            cleanupMin: round3(cleanup)
+            cleanupMin: round3(cleanup),
+            lunchStartMin: hasLunch ? round3(lunchStart) : null,  // #3342: начало окна обеда (мин от полуночи)
+            lunchDurationMin: hasLunch ? round3(lunchDur) : 0     // #3342: длительность обеда (мин)
         };
     }
 
@@ -1624,6 +1638,10 @@
         var shiftStart = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
         var shiftEnd = Number(opts.shiftEndMin != null ? opts.shiftEndMin : SHIFT_END_MIN) || 0;
         var hasWindow = shiftEnd > shiftStart;
+        // #3342: плавающий обед. Пока обед дня не вставлен, в конце окна резервируем
+        // lunchDur (день закончится раньше, если обед не удалось встроить между резками).
+        var lunch = lunchParams(opts, shiftStart, shiftEnd);
+        var lunchDone = {};
         var t = shiftStart;   // день 0, начало смены
         var out = [];
         (cuts || []).forEach(function(c, i){
@@ -1632,16 +1650,37 @@
             var start = t + setup;
             var day = Math.floor(start / 1440);
             if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
-            // не влезает до конца рабочего окна (16:30) → переносим на 08:00 след. дня
-            if (hasWindow && start + dur > day * 1440 + shiftEnd) {
+            // #3342: резка стартует в/после LUNCH_START и обед ещё не был → пауза перед ней.
+            if (lunch && !lunchDone[day] && (start - day * 1440) >= lunch.startMin) {
+                start += lunch.durationMin;
+                lunchDone[day] = true;
+            }
+            // не влезает до конца окна (резерв обеда, если не вставлен) → 08:00 след. дня
+            var fitEnd = day * 1440 + shiftEnd - ((lunch && !lunchDone[day]) ? lunch.durationMin : 0);
+            if (hasWindow && start + dur > fitEnd) {
                 day += 1;
                 start = day * 1440 + shiftStart + setup;
+                if (lunch && !lunchDone[day] && (start - day * 1440) >= lunch.startMin) {
+                    start += lunch.durationMin;
+                    lunchDone[day] = true;
+                }
             }
             var finish = start + dur;
             out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur });
             t = finish;
         });
         return out;
+    }
+
+    // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
+    // в рабочее окно и помещается в нём. → { startMin, durationMin } | null.
+    function lunchParams(opts, shiftStart, shiftEnd) {
+        var ls = Number(opts && opts.lunchStartMin);
+        var ld = Number(opts && opts.lunchDurationMin) || 0;
+        if (!isFinite(ls) || ld <= 0) return null;
+        if (!(shiftEnd > shiftStart) || (shiftEnd - shiftStart) <= ld) return null;
+        if (ls < shiftStart || ls >= shiftEnd) return null;
+        return { startMin: ls, durationMin: ld };
     }
 
     // Уборка в конце рабочего дня (#3155, код CLEANUP_SHIFT): для каждого дня, где есть
@@ -1687,15 +1726,30 @@
         var runsByCut = opts.runsByCut || {};
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
+        // #3342: плавающий обед. lunch.startMin — минуты от полуночи; durationMin — длина.
+        var lunch = lunchParams(opts, dayStart, dayEnd);
+        var lunchDone = {};
+        // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
+        // если обед не получится поставить паузой между резками, день закончится раньше.
+        function effCapacity(d) { return (lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity; }
         var segments = [];
         var day = 0, clock = 0;                      // clock — минут занято в текущем дне (от dayStart)
         var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
+        // Обед как пауза перед НОВОЙ резкой: если в этот день он ещё не был и время дня
+        // (dayStart+clock) дошло до LUNCH_START — вставляем паузу (clock += длительность).
+        function insertLunchBefore() {
+            if (lunch && !lunchDone[day] && clock > 0 && (dayStart + clock) >= lunch.startMin) {
+                clock += lunch.durationMin;
+                lunchDone[day] = true;
+            }
+        }
         (orderedCuts || []).forEach(function(c){
             var cid = c && c.id;
             var runs = Math.round(Number(runsByCut[String(cid)] != null ? runsByCut[String(cid)] : c && c.plannedRuns) || 0);
             var perPass = Number(perPassByCut[String(cid)] != null ? perPassByCut[String(cid)] : 0) || 0;
             var remaining = runs;
             var isCont = false;
+            insertLunchBefore();  // #3342: обед перед началом этой резки
             // Резка без проходов/длительности — один сегментик без раскладки по проходам.
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
                 var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
@@ -1710,7 +1764,7 @@
             }
             while (remaining > 0) {
                 var setup = isCont ? 0 : (leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0));
-                var avail = capacity - clock;
+                var avail = effCapacity(day) - clock;
                 var maxPasses = Math.floor((avail - setup) / perPass);
                 if (maxPasses < 1) {
                     if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
@@ -1767,7 +1821,9 @@
                 times: opts.times || DEFAULT_OP_TIMES,
                 runLengthByCut: opts.runLengthByCut || {},
                 shiftStartMin: opts.dayStartMin,
-                shiftEndMin: opts.dayEndMin
+                shiftEndMin: opts.dayEndMin,
+                lunchStartMin: opts.lunchStartMin,
+                lunchDurationMin: opts.lunchDurationMin
             });
             sched.forEach(function(sc){
                 var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
@@ -1798,7 +1854,9 @@
             times: opts.times,
             runLengthByCut: runLen,
             shiftStartMin: opts.shiftStartMin,
-            shiftEndMin: opts.shiftEndMin
+            shiftEndMin: opts.shiftEndMin,
+            lunchStartMin: opts.lunchStartMin,
+            lunchDurationMin: opts.lunchDurationMin
         });
         var sc = sched.length ? sched[sched.length - 1] : null;
         if (!sc) return null;
@@ -1910,7 +1968,8 @@
             var segs = splitMachineQueue(ordered, {
                 dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
                 leader: opts.leader, times: opts.times,
-                perPassByCut: perPass, runsByCut: runsByCut
+                perPassByCut: perPass, runsByCut: runsByCut,
+                lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin
             });
             segs.forEach(function(seg, idx){
                 var ts = scheduleStartTimestamp(base, seg.windowStartMin);
@@ -2744,7 +2803,9 @@
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
-                if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR') return;
+                // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
+                if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
+                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION') return;
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -3408,7 +3469,8 @@
         stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
         var slot = freeSlotForQueue(stationCuts, prospect, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
-            shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin
+            shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
+            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin
         });
         if (!slot) return null;
         // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
@@ -4474,7 +4536,8 @@
                 });
                 var segs = splitMachineQueue(plans, {
                     dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
-                    times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut
+                    times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut,
+                    lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin
                 });
                 var byPlanId = {};
                 segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
@@ -5011,7 +5074,9 @@
                 dayStartMin: dayWindow.startMin,
                 dayEndMin: dayWindow.cutEndMin,
                 perPassByCut: perPassByCut,
-                planBaseMidnightMs: planBaseMidnightMs
+                planBaseMidnightMs: planBaseMidnightMs,
+                lunchStartMin: dayWindow.lunchStartMin,
+                lunchDurationMin: dayWindow.lunchDurationMin
             });
 
             // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
@@ -5404,7 +5469,9 @@
             times: self.changeTimes,
             runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin,
-            shiftEndMin: dayWindow.cutEndMin
+            shiftEndMin: dayWindow.cutEndMin,
+            lunchStartMin: dayWindow.lunchStartMin,
+            lunchDurationMin: dayWindow.lunchDurationMin
         });
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка

@@ -1124,7 +1124,7 @@ assertEqual(planning.parseClockMinutes('8:00', 0), 480, 'parseClockMinutes #3215
 assertEqual(planning.parseClockMinutes('17', 0), 1020, 'parseClockMinutes #3215: 17 → 1020');
 assertEqual(planning.parseClockMinutes('мусор', 123), 123, 'parseClockMinutes #3215: мусор → fallback');
 var win3215 = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'17:00' }, 30);
-assertEqual(win3215, { startMin:480, endMin:1020, cutEndMin:990, cleanupMin:30 },
+assertEqual(win3215, { startMin:480, endMin:1020, cutEndMin:990, cleanupMin:30, lunchStartMin:null, lunchDurationMin:0 },
     'resolveWorkingWindow #3215: резки до 16:30, уборка 30 мин до 17:00');
 var sched3215 = planning.buildSchedule(schedCuts, {
     windPoints: pts,
@@ -1137,8 +1137,44 @@ assertEqual(planning.dayCleanups(sched3215, { cleanupMin: win3215.cleanupMin, sh
     { day:1, startMin:2430, finishMin:2460, durationMin:30 }
 ], 'dayCleanups #3215: DAY_END_HOUR задаёт конец уборки, не конец резок');
 assertEqual(planning.resolveWorkingWindow({ DAY_START_HOUR:'9:15', DAY_END_HOUR:'18:00' }, 45),
-    { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45 },
+    { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45, lunchStartMin:null, lunchDurationMin:0 },
     'resolveWorkingWindow #3215: произвольное окно и CLEANUP_SHIFT');
+
+// ── #3342: плавающий обед (LUNCH_START / LUNCH_DURATION) ──
+var wwLunch = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'16:40', LUNCH_START:'12:20', LUNCH_DURATION:'40' }, 30);
+assertEqual({ s:wwLunch.startMin, e:wwLunch.cutEndMin, ls:wwLunch.lunchStartMin, ld:wwLunch.lunchDurationMin },
+    { s:480, e:970, ls:740, ld:40 }, 'resolveWorkingWindow #3342: LUNCH_START→740, LUNCH_DURATION→40');
+assertEqual({ ls:wwLunch.lunchStartMin }, { ls:740 }, 'resolveWorkingWindow #3342: 12:20 → 740 мин');
+var wwNoDur = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'16:40', LUNCH_START:'12:20' }, 30);
+assertEqual({ ls:wwNoDur.lunchStartMin, ld:wwNoDur.lunchDurationMin }, { ls:null, ld:0 },
+    'resolveWorkingWindow #3342: без LUNCH_DURATION обед выключен');
+
+// splitMachineQueue: обед-пауза перед резкой, стартующей в/после LUNCH_START; смещает следующие.
+var lunchOpts3342 = { dayStartMin:480, dayEndMin:970, leader:0, times:{ BETWEEN_CUTS:0 }, lunchStartMin:740, lunchDurationMin:40 };
+var segLunch3342 = planning.splitMachineQueue([{ id:'A' }, { id:'B' }],
+    Object.assign({ perPassByCut:{ A:60, B:60 }, runsByCut:{ A:5, B:3 } }, lunchOpts3342));
+assertEqual(segLunch3342.map(function(s){ return { c:s.cutId, ws:s.windowStartMin, runs:s.runs, cont:s.isContinuation }; }), [
+    { c:'A', ws:480, runs:5, cont:false },   // 08:00–13:00
+    { c:'B', ws:820, runs:2, cont:false },   // обед 13:00–13:40 → B с 13:40
+    { c:'B', ws:1920, runs:1, cont:true }    // хвост B на след. день 08:00
+], 'splitMachineQueue #3342: обед-пауза перед B (13:00→13:40), хвост на след. день');
+// Без обеда B стартует сразу после A (13:00 = 780).
+var segNoLunch3342 = planning.splitMachineQueue([{ id:'A' }, { id:'B' }],
+    { dayStartMin:480, dayEndMin:970, leader:0, times:{ BETWEEN_CUTS:0 }, perPassByCut:{ A:60, B:60 }, runsByCut:{ A:5, B:3 } });
+assertEqual(segNoLunch3342[1].windowStartMin, 780, 'splitMachineQueue #3342: без обеда B сразу после A (13:00)');
+// Непрерывная резка через обед: день завершается раньше (резерв обеда), остаток — на след. день.
+var segCont3342 = planning.splitMachineQueue([{ id:'C' }],
+    Object.assign({ perPassByCut:{ C:60 }, runsByCut:{ C:10 } }, lunchOpts3342));
+assertEqual(segCont3342.map(function(s){ return { c:s.cutId, runs:s.runs, day:s.dayOffset }; }), [
+    { c:'C', runs:7, day:0 },   // резерв обеда: 7 проходов (вместо 8) → день кончается раньше
+    { c:'C', runs:3, day:1 }
+], 'splitMachineQueue #3342: непрерывная резка через обед — день кончается раньше, остаток на след. день');
+
+// buildSchedule: тот же плавающий обед сдвигает старт резки после LUNCH_START.
+var bsLunch3342 = planning.buildSchedule([{ id:'A', duration:300 }, { id:'B', duration:100 }],
+    { windPoints:[], times:{ BETWEEN_CUTS:0 }, runLengthByCut:{}, shiftStartMin:480, shiftEndMin:970, lunchStartMin:740, lunchDurationMin:40 });
+assertEqual([bsLunch3342[0].startMin, bsLunch3342[0].finishMin], [480, 780], 'buildSchedule #3342: A 08:00–13:00');
+assertEqual([bsLunch3342[1].startMin, bsLunch3342[1].finishMin], [820, 920], 'buildSchedule #3342: обед 13:00–13:40 → B 13:40–15:20');
 
 // dayCleanups (#3155): блок уборки CLEANUP_SHIFT в конце каждого рабочего дня с резками.
 // schedW: A — день 0 (старт 482), B — день 1 (старт 1922 = 1440+482).
