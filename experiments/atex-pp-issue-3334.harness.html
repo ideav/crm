@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<!-- Стенд проверки #3334: календарь занятости станков строится по cut_planning
+     и показывает интервалы день/3 дня/неделя/месяц с цветами по фактическому
+     старту, плану, флагу незавершённости, фактическому финишу и длительности. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · #3334 — календарь занятости станков</title>
+<link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5;padding:16px}
+#banner{padding:10px 14px;border-radius:8px;font-weight:700;margin-bottom:12px}
+.ok{background:#dcfce7;color:#166534;border:1px solid #16a34a}
+.fail{background:#fee2e2;color:#991b1b;border:1px solid #dc2626}
+</style>
+</head>
+<body>
+<div id="banner">Выполняется…</div>
+<div id="atex-production-planning" class="atex-pp atex-brand" data-db="atex" data-xsrf="test" data-initialized="1"></div>
+
+<script src="../download/atex/js/production-planning.js"></script>
+<script>
+(function () {
+  var api = window.AtexProductionPlanning;
+  var Controller = api.Controller;
+  var root = document.getElementById('atex-production-planning');
+  var ctrl = new Controller(root);
+
+  root.innerHTML = '';
+  var layout = document.createElement('div'); layout.className = 'atex-pp-layout';
+  var queueWrap = document.createElement('section'); queueWrap.className = 'atex-pp-panel atex-pp-queue-panel';
+  var queueHead = document.createElement('div'); queueHead.className = 'atex-pp-panel-head';
+  var title = document.createElement('h2'); title.className = 'atex-pp-form-title'; title.textContent = 'Очередь резок по станкам';
+  queueHead.appendChild(title);
+  ctrl.queueEl = document.createElement('div'); ctrl.queueEl.className = 'atex-pp-queue';
+  queueWrap.appendChild(queueHead);
+  queueWrap.appendChild(ctrl.queueEl);
+  ctrl.linkEl = document.createElement('section'); ctrl.linkEl.className = 'atex-pp-panel atex-pp-link';
+  layout.appendChild(queueWrap); layout.appendChild(ctrl.linkEl);
+  root.appendChild(layout);
+
+  ctrl.render = function () { this.renderQueue(); this.renderLink(); };
+  ctrl.notify = function () {};
+  ctrl.nowMs = function () { return Date.parse('2026-06-11T10:30:00Z'); };
+  ctrl.filter = {
+    slitter: '',
+    status: '',
+    date: '2026-06-11',
+    sleeveDate: '2026-06-10',
+    calendarMode: 'day',
+    calendarDate: '2026-06-11'
+  };
+  ctrl.slitters = [
+    { id: '101', label: 'Станок 1' },
+    { id: '102', label: 'Станок 2' },
+    { id: '103', label: 'Станок 3' }
+  ];
+  ctrl.positions = [];
+  ctrl.supplies = [];
+  ctrl.genBatches = [
+    { id: 'b1', materialId: 'm1', remainder: 1000, active: true },
+    { id: 'b2', materialId: 'm2', remainder: 1000, active: true },
+    { id: 'b3', materialId: 'm3', remainder: 1000, active: true },
+    { id: 'b4', materialId: 'm4', remainder: 1000, active: true }
+  ];
+  ctrl.consumptionByCut = {
+    'cal-1': [{ m2: 2000 }],
+    'cal-2': [{ m2: 2000 }],
+    'cal-3': [{ m2: 2000 }],
+    'cal-4': [{ m2: 2000 }]
+  };
+  ctrl.jumboWidthByMaterial = { m1: 1000, m2: 1000, m3: 1000, m4: 1000 };
+  ctrl.footageBySupply = {};
+  ctrl.opTimes = {};
+  ctrl.changeTimes = null;
+  ctrl.daySettings = {};
+  ctrl.cuts = [
+    {
+      id: 'cal-1', number: '2026-06-11 08:00', sequence: 1,
+      slitter: { id: '101', label: 'Станок 1' },
+      materialBatch: { id: null, label: '' },
+      planDate: '2026-06-11 08:00', startDate: '2026-06-11 08:02',
+      endDate: '2026-06-11 08:50', duration: 60, status: '',
+      materialId: 'm1', materialName: 'MR194', plannedRuns: 2, length: 1200
+    },
+    {
+      id: 'cal-2', number: '2026-06-11 09:30', sequence: 2,
+      slitter: { id: '101', label: 'Станок 1' },
+      materialBatch: { id: null, label: '' },
+      planDate: '2026-06-11 09:30', startDate: '2026-06-11 09:40',
+      endDate: '', duration: 90, status: '1',
+      materialId: 'm2', materialName: 'MR132', plannedRuns: 3, length: 900
+    },
+    {
+      id: 'cal-3', number: '2026-06-11 11:00', sequence: 1,
+      slitter: { id: '102', label: 'Станок 2' },
+      materialBatch: { id: null, label: '' },
+      planDate: '2026-06-11 11:00', startDate: '2026-06-11 11:10',
+      endDate: '2026-06-11 12:40', duration: 60, status: '',
+      materialId: 'm3', materialName: 'Фольга 38', plannedRuns: 1, length: 600
+    },
+    {
+      id: 'cal-4', number: '2026-06-11 14:00', sequence: 1,
+      slitter: { id: '103', label: 'Станок 3' },
+      materialBatch: { id: null, label: '' },
+      planDate: '2026-06-11 14:00', startDate: '',
+      endDate: '', duration: 120, status: '',
+      materialId: 'm4', materialName: 'MR131', plannedRuns: 2, length: 1000
+    }
+  ];
+
+  ctrl.render();
+
+  function finish() {
+    var items = root.querySelectorAll('.atex-pp-cal-item');
+    var ok = items.length === 4 &&
+      root.querySelector('.atex-pp-cal-item.is-on-time') &&
+      root.querySelector('.atex-pp-cal-item.is-unfinished') &&
+      root.querySelector('.atex-pp-cal-item.is-late') &&
+      root.querySelector('.atex-pp-cal-item.is-planned');
+    window.__TEST_RESULT = { ok: !!ok, itemCount: items.length };
+    var banner = document.getElementById('banner');
+    banner.className = ok ? 'ok' : 'fail';
+    banner.textContent = ok ? '✓ Календарь #3334 отрисован' : '✗ Ошибка отрисовки календаря #3334';
+  }
+  setTimeout(finish, 0);
+})();
+</script>
+</body>
+</html>
