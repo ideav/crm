@@ -1937,6 +1937,18 @@ function DeleteTreeFetchRows($sql, $err_msg)
 		$rows[] = $row;
 	return $rows;
 }
+# #3329: children that are records of a subordinate table (array members) of $id.
+# References only ever point at such records, never at plain requisites, so the
+# delete-tree ref check walks them alone instead of every child row.
+function DeleteTreeChildrenSql($id)
+{
+	global $z;
+	$id = (int)$id;
+	return "SELECT child.id FROM $z child"
+		." JOIN $z par ON par.id=child.up"
+		." JOIN $z arr ON arr.up=par.t AND arr.t=child.t AND arr.t!=arr.up"
+		." WHERE child.up=$id";
+}
 function DeleteTreeHasRefs($id, $fetchRows=FALSE)
 {
 	global $z;
@@ -1948,7 +1960,11 @@ function DeleteTreeHasRefs($id, $fetchRows=FALSE)
 	$refs = call_user_func($fetchRows, "SELECT id FROM $z WHERE t=$id LIMIT 1", "Check refs in delete tree");
 	if(count($refs))
 		return TRUE;
-	$children = call_user_func($fetchRows, "SELECT id FROM $z WHERE up=$id", "Get children for delete tree ref check");
+	# #3329: only descend into subordinate-table records (array members). Plain requisites
+	# never carry incoming references, so checking them is wasted work. A child is a
+	# subordinate record when its type is an array defined on the parent's type
+	# (arr.up=par.t AND arr.t=child.t AND arr.t!=arr.up) — the same test Check_Grant uses.
+	$children = call_user_func($fetchRows, DeleteTreeChildrenSql($id), "Get subordinate-table records for delete tree ref check");
 	foreach($children as $child)
 		if(DeleteTreeHasRefs($child["id"], $fetchRows))
 			return TRUE;
@@ -1964,7 +1980,8 @@ function DeleteTreeRefsCount($id, $fetchRows=FALSE)
 		$fetchRows = "DeleteTreeFetchRows";
 	$refs = call_user_func($fetchRows, "SELECT COUNT(id) cnt FROM $z WHERE t=$id", "Count refs in delete tree");
 	$count = count($refs) ? (int)$refs[0]["cnt"] : 0;
-	$children = call_user_func($fetchRows, "SELECT id FROM $z WHERE up=$id", "Get children for delete tree refs count");
+	# #3329: only subordinate-table records (array members) can be referenced — see DeleteTreeHasRefs.
+	$children = call_user_func($fetchRows, DeleteTreeChildrenSql($id), "Get subordinate-table records for delete tree refs count");
 	foreach($children as $child)
 		$count += DeleteTreeRefsCount($child["id"], $fetchRows);
 	return $count;
