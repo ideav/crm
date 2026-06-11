@@ -3727,6 +3727,16 @@
         this.stripEditCutId = String(cut.id);
 
         var panel = el('div', { class: 'atex-pp-strip-panel', dataset: { cutId: String(cut.id) } });
+        // #3326: любой клик внутри панели полос не должен её сворачивать — закрытие
+        // только по .atex-pp-strip-close. Карточка резки (.atex-pp-cut) на клик делает
+        // render() и пересобирает очередь, теряя панель; её обработчик пропускает клики,
+        // чьё e.target.closest('.atex-pp-strip-panel') == panel. Но внутренние контролы
+        // (удалить полосу, ходовая ширина, …) в своём обработчике вызывают renderRows()/
+        // renderPreferred() и отцепляют нажатый узел — closest на нём даёт null, и клик
+        // всё равно сворачивал панель (#3318 чинил так лишь кнопку удаления). Панель —
+        // предок всех контролов в пути всплытия, поэтому stopPropagation здесь надёжно
+        // гасит клик до карточки независимо от того, отцепился ли e.target.
+        panel.addEventListener('click', function(e) { e.stopPropagation(); });
         panel.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка полос…' }));
         container.appendChild(panel);
 
