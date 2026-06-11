@@ -4272,7 +4272,13 @@
             }
         });
 
+        // На время запросов preferable_widths (preloads) деактивируем кнопку и
+        // показываем крутилку (#3332), иначе клик «глохнет» без видимой реакции.
+        self.setGenBusy(true);
         Promise.all(preloads).then(function() {
+            // Запросы завершены — крутилку убираем; далее идёт синхронная раскладка
+            // и (при наличии) модалка подтверждения / runGenerateCuts со своим busy.
+            self.setGenBusy(false);
             // Построить раскладки по каждому профилю; собрать пропуски.
             var allLayouts = [];   // [{...layout, mat}]
             var skipped = [];      // [{positionId, reason}]
@@ -4354,6 +4360,7 @@
                 } }
             ]);
         }).catch(function(err) {
+            self.setGenBusy(false);
             self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
         });
     };
@@ -5735,7 +5742,8 @@
     };
 
     // Деактивирует кнопку «Сгенерировать резки» и показывает крутилку слева от неё
-    // на время генерации (runGenerateCuts). По завершении/ошибке — возвращает.
+    // на время запросов preferable_widths (generateCuts, #3332) и самой генерации
+    // (runGenerateCuts). По завершении/ошибке — возвращает кнопку и прячет крутилку.
     AtexProductionPlanning.prototype.setGenBusy = function(on) {
         if (this.genBtn) this.genBtn.disabled = !!on;
         if (this.genSpinner) this.genSpinner.style.display = on ? '' : 'none';
@@ -5919,4 +5927,4 @@
 
  
  
-// @version 2026-06-07-issue-3219
+// @version 2026-06-11-issue-3332
