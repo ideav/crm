@@ -260,6 +260,24 @@ assertEqual(planning.remainingRollsForPosition({ id: 'p1', qty: 10 }, [
     { positionId: 'p1', rolls: 15 }
 ]), 0, 'remainingRollsForPosition #3231: не уходит ниже нуля');
 
+// ── stripSupplyRolls (#3320): рулоны обеспечения полосы = min(рулоны полосы, 110% остатка) ──
+assertEqual(planning.stripSupplyRolls(8, 20), 8,
+    'stripSupplyRolls #3320: рулоны полосы ≤ 110% остатка → берём рулоны полосы');
+assertEqual(planning.stripSupplyRolls(20, 10), 11,
+    'stripSupplyRolls #3320: рулоны полосы > 110% остатка → ограничиваем 110% остатка');
+assertEqual(planning.stripSupplyRolls(11, 10), 11,
+    'stripSupplyRolls #3320: ровно на границе 110% остатка');
+assertEqual(planning.stripSupplyRolls(12, 10), 11,
+    'stripSupplyRolls #3320: чуть выше границы → 110% остатка');
+assertEqual(planning.stripSupplyRolls(5, 0), 0,
+    'stripSupplyRolls #3320: нет остатка → 0');
+assertEqual(planning.stripSupplyRolls(0, 10), 0,
+    'stripSupplyRolls #3320: нет рулонов полосы → 0');
+assertEqual(planning.stripSupplyRolls(-3, 10), 0,
+    'stripSupplyRolls #3320: отрицательные рулоны полосы → 0');
+assertEqual(planning.stripSupplyRolls('9', '20'), 9,
+    'stripSupplyRolls #3320: строковые входы парсятся как числа');
+
 // ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──
 var batchRows = [
     { batch_id: '1946', batch_no: 'RM-АТХ-3002-2026-05-31', batch_material: 'MWR118', batch_remainder_m2: '2440.00' },

@@ -742,6 +742,17 @@
         return remaining > 0 ? round3(remaining) : 0;
     }
 
+    // #3320: кол-во рулонов обеспечения для привязки полосы к позиции заказа.
+    // База — рулоны полосы (Кол-во полос × проходов), но не больше 110% от
+    // необеспеченного остатка позиции. Отрицательные/нулевые входы → 0.
+    function stripSupplyRolls(stripRolls, remaining) {
+        var base = stripNum(stripRolls);
+        var rem = stripNum(remaining);
+        if (base <= 0 || rem <= 0) return 0;
+        var cap = rem * 1.1;
+        return round3(base < cap ? base : cap);
+    }
+
     function sleeveDiameterFromRow(row) {
         var raw = row && row.position_sleeve != null ? row.position_sleeve : '';
         var ref = parseRef(raw);
@@ -2476,6 +2487,7 @@
         rowsToPositions: rowsToPositions,
         positionDimensionsLabel: positionDimensionsLabel,
         remainingRollsForPosition: remainingRollsForPosition,
+        stripSupplyRolls: stripSupplyRolls,
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
         groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
@@ -3534,6 +3546,132 @@
         if (cut && cardPanel) this.openStrips(cut, cardPanel);
     };
 
+    // #3320: модалка «Обеспечить полосу». Перечисляет все необеспеченные позиции заказа
+    // (в т.ч. частично обеспеченные — остаток > 0) для привязки к складской полосе через
+    // «Обеспечение». Кол-во рулонов = рулоны полосы (Кол-во полос × проходов), но не больше
+    // 110% от необеспеченного остатка позиции. Перед созданием — небольшое подтверждение.
+    AtexProductionPlanning.prototype.openStripSupplyPicker = function(cut, strip, passes) {
+        var self = this;
+        if (!this.meta.supply) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return; }
+        if (strip.id == null) { this.notify('Сначала сохраните полосу (нужна «Партия ГП»)', 'error'); return; }
+
+        var stripRolls = round3((stripNum(strip.qty) || 0) * (stripNum(passes) > 0 ? stripNum(passes) : 1));
+        var stripWidth = String(strip.width || '').trim() || '—';
+
+        var posLabelById = {};
+        (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+        var candidates = (this.genPositions || []).map(function(p) {
+            var remaining = remainingRollsForPosition(p, self.supplies);
+            return {
+                id: String(p.id), position: p, remaining: remaining,
+                rolls: stripSupplyRolls(stripRolls, remaining),
+                label: posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + (p.width || '?') + ' мм')
+            };
+        }).filter(function(c) { return c.remaining > 0 && c.rolls > 0; });
+        candidates.sort(function(a, b) { return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-supply-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-supply-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+        var content = el('div', { class: 'atex-pp-supply-content' });
+        dialog.appendChild(content);
+
+        function confirmRow(label, value) {
+            return el('div', { class: 'atex-pp-supply-confirm-row' }, [
+                el('span', { class: 'atex-pp-supply-confirm-label', text: label }),
+                el('span', { class: 'atex-pp-supply-confirm-value', text: String(value) })
+            ]);
+        }
+
+        function renderList() {
+            content.innerHTML = '';
+            content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Обеспечить полосу' }));
+            content.appendChild(el('p', { class: 'atex-pp-hint',
+                text: 'Полоса ' + stripWidth + ' мм · ' + round3(stripRolls) + ' рул. Выберите необеспеченную позицию заказа для привязки через «Обеспечение».' }));
+            if (!candidates.length) {
+                content.appendChild(el('p', { class: 'atex-pp-hint', text: 'Нет необеспеченных позиций заказа.' }));
+                return;
+            }
+            var list = el('div', { class: 'atex-pp-supply-list' });
+            candidates.forEach(function(c) {
+                var item = el('button', { class: 'atex-pp-supply-item', type: 'button' }, [
+                    el('span', { class: 'atex-pp-supply-item-label', text: c.label }),
+                    el('span', { class: 'atex-pp-supply-item-meta',
+                        text: 'ост. ' + round3(c.remaining) + ' рул. → ' + round3(c.rolls) + ' рул.' })
+                ]);
+                item.addEventListener('click', function() { renderConfirm(c); });
+                list.appendChild(item);
+            });
+            content.appendChild(list);
+        }
+
+        function renderConfirm(c) {
+            content.innerHTML = '';
+            content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Создать обеспечение?' }));
+            var capped = round3(c.rolls) < round3(stripRolls);
+            content.appendChild(el('div', { class: 'atex-pp-supply-confirm' }, [
+                confirmRow('Позиция', c.label),
+                confirmRow('Полоса', stripWidth + ' мм'),
+                confirmRow('Рулонов полосы', round3(stripRolls)),
+                confirmRow('Необеспеченный остаток', round3(c.remaining) + ' рул.'),
+                confirmRow('Будет создано', round3(c.rolls) + ' рул.' + (capped ? ' (ограничено 110% остатка)' : ''))
+            ]));
+            var actions = el('div', { class: 'atex-pp-supply-actions' });
+            var back = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Назад' });
+            back.addEventListener('click', renderList);
+            var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать обеспечение' });
+            ok.addEventListener('click', function() {
+                close();
+                self.createStripSupply(strip, c, round3(c.rolls));
+            });
+            actions.appendChild(back);
+            actions.appendChild(ok);
+            content.appendChild(actions);
+        }
+
+        this.root.appendChild(overlay);
+        renderList();
+    };
+
+    // #3320: создать запись «Обеспечения», привязав позицию заказа к складской полосе
+    // (Партии ГП). После записи перечитывает план и переоткрывает редактор полос, чтобы
+    // «Назначение» полосы обновилось (Склад → Заказ).
+    AtexProductionPlanning.prototype.createStripSupply = function(strip, candidate, rolls) {
+        var self = this;
+        if (this.busy) return Promise.resolve();
+        var meta = this.meta.supply;
+        if (!meta) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return Promise.resolve(); }
+        if (!strip || strip.id == null) { this.notify('Полоса не сохранена (нет «Партии ГП»)', 'error'); return Promise.resolve(); }
+        if (!candidate || !candidate.id) { this.notify('Не выбрана позиция заказа', 'error'); return Promise.resolve(); }
+        if (!(stripNum(rolls) > 0)) { this.notify('Нечего обеспечивать (0 рулонов)', 'error'); return Promise.resolve(); }
+        var pos = candidate.position || {};
+        var fields = buildSupplyFieldsForFinishedBatch(meta, {
+            finishedBatchId: strip.id,
+            rolls: rolls,
+            footage: stripNum(pos.length) > 0 ? pos.length : '',
+            active: '1',
+            status: SUPPLY_STATUSES[0]
+        });
+        this.setBusy(true);
+        return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(candidate.id), fields).then(function(res) {
+            var id = res && (res.obj || res.id || res.i);
+            if (!id) throw new Error('Сервер не вернул id обеспечения');
+            return self.loadPlanning();
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Обеспечение создано: позиция привязана к полосе (' + round3(rolls) + ' рул.)', 'success');
+            self.render();
+            self.reopenStripsIfOpen();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка создания обеспечения: ' + err.message, 'error');
+        });
+    };
+
     AtexProductionPlanning.prototype.reload = function() {
         var self = this;
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
@@ -3708,12 +3846,31 @@
 
                 // #3280: «Назначение» — Заказ (на эту Партию ГП есть ссылка из Обеспечения) / Склад.
                 var purpose = (s.id != null && orderedBatchIds[String(s.id)]) ? 'Заказ' : 'Склад';
-                row.appendChild(el('span', {
-                    class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + (purpose === 'Заказ' ? 'order' : 'stock'),
-                    text: purpose
-                }));
-
                 var isOrdered = purpose === 'Заказ';
+                var purposeCell = el('div', { class: 'atex-pp-strip-purpose-cell' }, [
+                    el('span', {
+                        class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + (isOrdered ? 'order' : 'stock'),
+                        text: purpose
+                    })
+                ]);
+                // #3320: правее «Склад» — значок «обеспечить»: привязать необеспеченную
+                // позицию заказа к этой (уже сохранённой) полосе через «Обеспечение».
+                if (!isOrdered && s.id != null) {
+                    var supplyIcon = el('button', {
+                        class: 'atex-pp-strip-supply',
+                        type: 'button',
+                        title: 'Обеспечить позицию заказа этой полосой',
+                        text: '🔗'
+                    });
+                    supplyIcon.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        if (self.busy) return;
+                        self.openStripSupplyPicker(cut, s, passes);
+                    });
+                    purposeCell.appendChild(supplyIcon);
+                }
+                row.appendChild(purposeCell);
+
                 var del = el('button', {
                     class: 'atex-pp-btn atex-pp-strip-del' + (isOrdered ? ' is-disabled' : ''),
                     type: 'button',
