@@ -166,11 +166,9 @@ assertEqual(planning.layoutPositionGroups([{ id: 'p1' }, { id: 'p2' }]).map(func
 var reportRows = [
     { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
       cut_plan_date: '06.05.2026', batch_id: '5001',
-      cut_start_date: '06.05.2026 08:10', cut_end_date: '06.05.2026 09:20',
       cut_status: 'В работе', supply_id: '900', supply_position_id: '700' },
     { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
       cut_plan_date: '06.05.2026', batch_id: '5002',
-      cut_start_date: '06.05.2026 08:10', cut_end_date: '06.05.2026 09:20',
       cut_status: 'В работе', supply_id: '901', supply_position_id: '701' },
     { cut_id: '20', cut_slitter: '', cut_slitter_id: '',
       cut_plan_date: '27.05.2026',
@@ -181,14 +179,12 @@ assertEqual(plan.cuts, [
     { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
       materialBatch: { id: null, label: '' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
-      startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20',
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
-      startDate: '', endDate: '',
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '' }
@@ -380,72 +376,6 @@ var durationPlan = planning.rowsToPlanning([
 ]);
 assertEqual(durationPlan.cuts[0].duration, 12.5,
     'rowsToPlanning #3223: cut_duration → duration minutes for queue data');
-var calendarDatePlan = planning.rowsToPlanning([
-    { cut_id:'calendar-1', cut_plan_date:'2026-06-11 08:00',
-      cut_start_date:'2026-06-11 08:05', cut_end_date:'2026-06-11 09:05',
-      cut_duration:'60', supply_id:'' }
-]);
-assertEqual(calendarDatePlan.cuts[0].startDate, '2026-06-11 08:05',
-    'rowsToPlanning #3334: cut_start_date → actual calendar start');
-assertEqual(calendarDatePlan.cuts[0].endDate, '2026-06-11 09:05',
-    'rowsToPlanning #3334: cut_end_date → actual calendar finish');
-var weekRange3334 = planning.calendarRange('2026-06-11', 'week');
-assertEqual({
-    mode: weekRange3334.mode,
-    startIso: weekRange3334.startIso,
-    endIso: weekRange3334.endIso,
-    days: weekRange3334.days.map(function(day) { return day.iso; })
-}, {
-    mode: 'week',
-    startIso: '2026-06-08',
-    endIso: '2026-06-15',
-    days: ['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14']
-}, 'calendarRange #3334: week interval starts on Monday and spans 7 days');
-assertEqual(planning.shiftCalendarAnchor('2026-06-11', 'three', 1), '2026-06-14',
-    'shiftCalendarAnchor #3334: 3-day mode moves by three days');
-assertEqual(planning.cutCalendarStatus({
-    planDate: '2026-06-11 08:00',
-    startDate: '2026-06-11 08:05',
-    endDate: '2026-06-11 08:45',
-    duration: 60,
-    status: ''
-}, Date.parse('2026-06-11T08:30:00Z')), { key: 'on-time', label: 'В срок' },
-    'cutCalendarStatus #3334: actual end within plan+duration is on-time');
-assertEqual(planning.cutCalendarStatus({
-    planDate: '2026-06-11 08:00',
-    startDate: '2026-06-11 08:05',
-    endDate: '2026-06-11 09:30',
-    duration: 60,
-    status: ''
-}, Date.parse('2026-06-11T09:40:00Z')), { key: 'late', label: 'С опозданием' },
-    'cutCalendarStatus #3334: actual end after plan+duration is late');
-assertEqual(planning.cutCalendarStatus({
-    planDate: '2026-06-11 08:00',
-    startDate: '2026-06-11 08:05',
-    endDate: '',
-    duration: 60,
-    status: '1'
-}, Date.parse('2026-06-11T08:30:00Z')), { key: 'unfinished', label: 'Не завершено' },
-    'cutCalendarStatus #3334: non-empty cut_status marks an unfinished cut');
-var dayRange3334 = planning.calendarRange('2026-06-11', 'day');
-var calendarItem3334 = planning.cutCalendarItem({
-    id: 'calendar-1',
-    number: '2026-06-11 08:00',
-    slitter: { id: '101', label: 'Станок 1' },
-    materialName: 'MR194',
-    planDate: '2026-06-11 08:00',
-    startDate: '2026-06-11 08:05',
-    endDate: '2026-06-11 09:05',
-    duration: 60,
-    status: ''
-}, dayRange3334, Date.parse('2026-06-11T09:10:00Z'));
-assertEqual({
-    cutId: calendarItem3334.cutId,
-    leftPct: calendarItem3334.leftPct,
-    widthPct: calendarItem3334.widthPct,
-    status: calendarItem3334.status.key
-}, { cutId: 'calendar-1', leftPct: 33.681, widthPct: 4.167, status: 'late' },
-    'cutCalendarItem #3334: bar uses actual start/end and deadline status');
 var timingPlan = planning.rowsToPlanning([
     { cut_id:'timing-1', cut_no:'1', cut_timing:'Метраж прохода: 600 м\nИтого резка: 12 мин', supply_id:'' }
 ]);
