@@ -50,6 +50,17 @@
 .atex-sl-placeholder { padding: 28px; color: var(--sl-muted); }
 .atex-sl-muted { color: var(--sl-muted); font-size: 13px; }
 
+.atex-sl-toolbar {
+    display: grid;
+    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px);
+    gap: 12px;
+    padding: 16px 16px 0;
+    align-items: end;
+}
+@media (max-width: 640px) {
+    .atex-sl-toolbar { grid-template-columns: 1fr; }
+}
+
 .atex-sl-layout {
     display: grid;
     grid-template-columns: 300px 1fr;
@@ -92,6 +103,7 @@
 }
 .atex-sl-cut-item:hover { background: var(--sl-surface); }
 .atex-sl-cut-item.is-active { background: var(--sl-active-bg); }
+.atex-sl-cut-item.is-next { box-shadow: inset 4px 0 0 var(--sl-accent); }
 .atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .atex-sl-cut-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-sub { font-size: 12px; color: var(--sl-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -134,6 +146,7 @@
 }
 .atex-sl-section-title { margin: 0 0 12px; font-size: 15px; }
 .atex-sl-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.atex-sl-shift-gate { max-width: 520px; }
 
 /* Степпер статусов */
 .atex-sl-steps { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -185,6 +198,49 @@
     text-decoration: underline dotted;
 }
 
+/* Партии сырья */
+.atex-sl-coverage {
+    margin-bottom: 10px;
+    padding: 9px 11px;
+    border: 1px solid var(--sl-border-soft);
+    border-radius: 6px;
+    background: var(--sl-surface);
+    color: var(--sl-muted);
+    font-size: 13px;
+}
+.atex-sl-coverage.is-complete {
+    border-color: var(--sl-success-border);
+    background: var(--sl-success-bg);
+    color: var(--sl-ok);
+}
+.atex-sl-batch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 10px;
+}
+.atex-sl-batch-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 134px;
+    padding: 12px;
+    border: 1px solid var(--sl-border);
+    border-radius: 8px;
+    background: var(--sl-bg);
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+.atex-sl-batch-card:hover { background: var(--sl-surface); }
+.atex-sl-batch-card.is-selected {
+    border-color: var(--sl-accent);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .12);
+}
+.atex-sl-batch-title { font-weight: 700; }
+.atex-sl-batch-meta { color: var(--sl-muted); font-size: 12px; }
+.atex-sl-batch-metric { font-weight: 700; color: var(--sl-accent-d); }
+
 /* Строки расхода сырья */
 .atex-sl-rows { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
 .atex-sl-row {
@@ -205,7 +261,7 @@
 /* События смены */
 .atex-sl-event-form {
     display: grid;
-    grid-template-columns: 1.4fr .8fr 1.6fr auto;
+    grid-template-columns: minmax(120px, .7fr) minmax(180px, 1fr) auto;
     gap: 12px;
     align-items: end;
     margin-bottom: 12px;
@@ -214,6 +270,7 @@
     .atex-sl-event-form { grid-template-columns: 1fr; }
 }
 .atex-sl-event-add { display: flex; align-items: end; }
+.atex-sl-event-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .atex-sl-events { display: flex; flex-direction: column; gap: 4px; }
 .atex-sl-event {
     display: grid;
