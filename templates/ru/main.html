@@ -31,8 +31,12 @@
             var cookieName = 'sidebarWidth_' + dbName;
             var isCollapsed = localStorage.getItem(storageKey) === 'true';
             var savedWidth = null;
-            var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-            if (match) savedWidth = decodeURIComponent(match[1]);
+            try { savedWidth = localStorage.getItem(cookieName); } catch (e) { /* ignore */ }
+            if (savedWidth === null) {
+                // Fall back to a legacy cookie (pre-localStorage); main-app.js migrates it.
+                var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                if (match) savedWidth = decodeURIComponent(match[1]);
+            }
             // Apply sidebar state via CSS before the DOM renders to prevent flash/jump
             var cssRules = '.app-sidebar{transition:none!important;}';
             if (isCollapsed) {

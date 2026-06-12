@@ -279,14 +279,31 @@ class MainAppController {
         });
     }
 
+    // Sidebar width and menu-expanded state are kept in localStorage, not cookies,
+    // so they are not sent to the server on every request. A legacy cookie of the
+    // same name is migrated on first read and then deleted.
     getCookie(name) {
+        let legacy = null;
         const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-        return match ? decodeURIComponent(match[1]) : null;
+        if (match) legacy = decodeURIComponent(match[1]);
+        try {
+            if (legacy !== null) {
+                if (localStorage.getItem(name) === null && legacy !== '') localStorage.setItem(name, legacy);
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+            return localStorage.getItem(name);
+        } catch (e) {
+            return legacy;
+        }
     }
 
-    setCookie(name, value, days) {
-        const expires = new Date(Date.now() + days * 864e5).toUTCString();
-        document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
+    setCookie(name, value) {
+        try {
+            localStorage.setItem(name, value);
+            if (document.cookie.indexOf(name + '=') !== -1) document.cookie = name + '=; path=/; max-age=0';
+        } catch (e) {
+            document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
+        }
     }
 
     getExpandedCookieName() {
