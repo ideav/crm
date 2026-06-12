@@ -9443,11 +9443,11 @@ class IntegramTable{
         }
 
         resetSettings() {
-            // Delete settings cookie
-            document.cookie = `${ this.options.cookiePrefix }-settings=; path=/; max-age=0`;
+            // Clear saved settings
+            itStorageRemove(`${ this.options.cookiePrefix }-settings`);
 
-            // Delete state cookie (column order, visibility, widths)
-            document.cookie = `${ this.options.cookiePrefix }-state=; path=/; max-age=0`;
+            // Clear saved column state (order, visibility, widths)
+            itStorageRemove(`${ this.options.cookiePrefix }-state`);
 
             // Reset to defaults
             this.settings = {
@@ -10674,7 +10674,7 @@ class IntegramTable{
         }
 
         saveColumnState() {
-            // Skip saving to cookies if config was loaded from URL (issue #514)
+            // Skip saving if config was loaded from URL (issue #514)
             // User can still copy current config as a shareable URL
             if (this.configFromUrl) {
                 return;
@@ -10685,16 +10685,14 @@ class IntegramTable{
                 visible: this.visibleColumns,
                 widths: this.columnWidths
             };
-            document.cookie = `${ this.options.cookiePrefix }-state=${ JSON.stringify(state) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-state`, JSON.stringify(state));
         }
 
         loadColumnState() {
-            const cookies = document.cookie.split(';');
-            const stateCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-state=`));
-
-            if (stateCookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-state`);
+            if (raw) {
                 try {
-                    const state = JSON.parse(stateCookie.split('=')[1]);
+                    const state = JSON.parse(raw);
                     this.columnOrder = state.order || [];
                     this.visibleColumns = state.visible || [];
                     this.columnWidths = state.widths || {};
@@ -10714,22 +10712,21 @@ class IntegramTable{
                 hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
                 showReferences: this.settings.showReferences,
             };
-            document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-settings`, JSON.stringify(settings));
 
             // Save global compact setting if "For All" is checked
             if (this.settings.compactForAll) {
                 const globalSettings = { compact: this.settings.compact };
-                document.cookie = `integram-table-global-settings=${ JSON.stringify(globalSettings) }; path=/; max-age=31536000`;
+                itStorageSet('integram-table-global-settings', JSON.stringify(globalSettings));
             }
         }
 
         loadSettings() {
-            const cookies = document.cookie.split(';');
-            const settingsCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-settings=`));
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-settings`);
 
-            if (settingsCookie) {
+            if (raw) {
                 try {
-                    const settings = JSON.parse(settingsCookie.split('=')[1]);
+                    const settings = JSON.parse(raw);
                     this.settings.compact = settings.compact !== undefined ? settings.compact : false;
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
@@ -10745,10 +10742,10 @@ class IntegramTable{
                 }
             } else {
                 // No table-specific settings found, try to load global compact setting
-                const globalSettingsCookie = cookies.find(c => c.trim().startsWith('integram-table-global-settings='));
-                if (globalSettingsCookie) {
+                const globalRaw = itStorageGet('integram-table-global-settings');
+                if (globalRaw) {
                     try {
-                        const globalSettings = JSON.parse(globalSettingsCookie.split('=')[1]);
+                        const globalSettings = JSON.parse(globalRaw);
                         if (globalSettings.compact !== undefined) {
                             this.settings.compact = globalSettings.compact;
                         }
@@ -15958,19 +15955,14 @@ class IntegramTable{
         }
 
         saveFormFieldVisibility(typeId, visibility) {
-            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
-            document.cookie = `${ cookieName }=${ JSON.stringify(visibility) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-fields-${ typeId }`, JSON.stringify(visibility));
         }
 
         loadFormFieldVisibility(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const fieldsCookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-
-            if (fieldsCookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-fields-${ typeId }`);
+            if (raw) {
                 try {
-                    const visibility = JSON.parse(fieldsCookie.split('=')[1]);
-                    return visibility;
+                    return JSON.parse(raw);
                 } catch (error) {
                     console.error('Error parsing form field visibility settings:', error);
                     return {};
@@ -15981,17 +15973,14 @@ class IntegramTable{
         }
 
         saveFormFieldOrder(typeId, order) {
-            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
-            document.cookie = `${ cookieName }=${ JSON.stringify(order) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-order-${ typeId }`, JSON.stringify(order));
         }
 
         loadFormFieldOrder(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-            if (cookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-order-${ typeId }`);
+            if (raw) {
                 try {
-                    return JSON.parse(cookie.split('=')[1]);
+                    return JSON.parse(raw);
                 } catch (e) {
                     return [];
                 }
@@ -16743,16 +16732,13 @@ class IntegramTable{
         }
 
         saveFormShowDelete(typeId, show) {
-            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
-            document.cookie = `${ cookieName }=${ show ? '1' : '0' }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-show-delete-${ typeId }`, show ? '1' : '0');
         }
 
         loadFormShowDelete(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-            if (cookie) {
-                return cookie.split('=')[1].trim() === '1';
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-show-delete-${ typeId }`);
+            if (raw !== null) {
+                return raw.trim() === '1';
             }
             return false; // Hidden by default
         }
@@ -18519,6 +18505,99 @@ class IntegramTable{
 if (typeof window !== 'undefined') {
     window._integramTableInstances = window._integramTableInstances || [];
 }
+
+// ── UI-settings persistence ──────────────────────────────────────────────
+// View preferences (column order/visibility/width, table settings, form-field
+// visibility/order, card layout) live in localStorage, not cookies. As cookies
+// they were attached to every request to the whole ideav.ru origin and grew
+// without bound — one entry per table and per database ever opened — until the
+// combined Cookie header passed Apache's LimitRequestFieldSize and the server
+// answered HTTP 400 ("Size of a request header field exceeds server limit") to
+// every page on the domain. localStorage is never sent to the server.
+//
+// On first read of a key, any pre-existing cookie of the same name is copied
+// into localStorage and then deleted, so saved preferences carry over and the
+// bloated cookies clear themselves as the user navigates.
+
+function itStorageGet(name) {
+    let legacy = null;
+    if (typeof document !== 'undefined' && document.cookie) {
+        const parts = document.cookie.split(';');
+        for (let i = 0; i < parts.length; i++) {
+            const p = parts[i].trim();
+            if (p.indexOf(name + '=') === 0) { legacy = p.slice(name.length + 1); break; }
+        }
+    }
+    try {
+        if (legacy !== null) {
+            if (localStorage.getItem(name) === null && legacy !== '') {
+                localStorage.setItem(name, legacy);
+            }
+            // Drop the legacy cookie to free request-header space.
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+        return localStorage.getItem(name);
+    } catch (e) {
+        // localStorage unavailable (private mode/quota) — fall back to the cookie value.
+        return legacy;
+    }
+}
+
+function itStorageSet(name, value) {
+    try {
+        localStorage.setItem(name, value);
+        // Remove any stale cookie of the same name so it stops inflating headers.
+        if (typeof document !== 'undefined' && document.cookie.indexOf(name + '=') !== -1) {
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+    } catch (e) {
+        // localStorage unavailable — last-resort cookie so the setting still persists.
+        try { document.cookie = name + '=' + value + '; path=/; max-age=31536000'; } catch (e2) { /* ignore */ }
+    }
+}
+
+function itStorageRemove(name) {
+    try { localStorage.removeItem(name); } catch (e) { /* ignore */ }
+    try { document.cookie = name + '=; path=/; max-age=0'; } catch (e) { /* ignore */ }
+}
+
+// One-time sweep on script load: move every legacy UI-settings cookie into
+// localStorage and delete it, so the Cookie header shrinks on the next page
+// load even for tables the user does not reopen this session. Only names that
+// match the component's own patterns are touched; integram-table-font-settings
+// is shared with main.html (read there as a cookie) and is left in place.
+function itMigrateLegacyUiCookies() {
+    if (typeof document === 'undefined' || !document.cookie) return;
+    if (typeof window !== 'undefined') {
+        if (window.__itUiCookiesMigrated) return;
+        window.__itUiCookiesMigrated = true;
+    }
+    const isUiKey = function(name) {
+        if (name === 'integram-table-font-settings') return false;
+        return /-state$/.test(name)
+            || /-settings$/.test(name)
+            || /-form-fields-/.test(name)
+            || /-form-order-/.test(name)
+            || /-form-show-delete-/.test(name);
+    };
+    const parts = document.cookie.split(';');
+    for (let i = 0; i < parts.length; i++) {
+        const p = parts[i].trim();
+        const eq = p.indexOf('=');
+        if (eq <= 0) continue;
+        const name = p.slice(0, eq);
+        if (!isUiKey(name)) continue;
+        const value = p.slice(eq + 1);
+        try {
+            if (localStorage.getItem(name) === null && value !== '') {
+                localStorage.setItem(name, value);
+            }
+        } catch (e) { /* ignore */ }
+        document.cookie = name + '=; path=/; max-age=0';
+    }
+}
+
+itMigrateLegacyUiCookies();
 
 function parseIntegramAttrs(attrs) {
     const result = {
@@ -20850,21 +20929,17 @@ class IntegramCreateFormHelper {
      * Save form field visibility settings (issue #837).
      */
     saveFormFieldVisibilityStandalone(typeId, visibility) {
-        const cookieName = `integram-table-form-fields-${typeId}`;
-        document.cookie = `${cookieName}=${JSON.stringify(visibility)}; path=/; max-age=31536000`;
+        itStorageSet(`integram-table-form-fields-${typeId}`, JSON.stringify(visibility));
     }
 
     /**
      * Load form field visibility settings (issue #837).
      */
     loadFormFieldVisibilityStandalone(typeId) {
-        const cookieName = `integram-table-form-fields-${typeId}`;
-        const cookies = document.cookie.split(';');
-        const fieldsCookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
-
-        if (fieldsCookie) {
+        const raw = itStorageGet(`integram-table-form-fields-${typeId}`);
+        if (raw) {
             try {
-                return JSON.parse(fieldsCookie.split('=')[1]);
+                return JSON.parse(raw);
             } catch (error) {
                 console.error('Error parsing form field visibility settings:', error);
                 return {};
@@ -20878,20 +20953,17 @@ class IntegramCreateFormHelper {
      * Save form field order settings (issue #837).
      */
     saveFormFieldOrderStandalone(typeId, order) {
-        const cookieName = `integram-table-form-order-${typeId}`;
-        document.cookie = `${cookieName}=${JSON.stringify(order)}; path=/; max-age=31536000`;
+        itStorageSet(`integram-table-form-order-${typeId}`, JSON.stringify(order));
     }
 
     /**
      * Load form field order settings (issue #837).
      */
     loadFormFieldOrderStandalone(typeId) {
-        const cookieName = `integram-table-form-order-${typeId}`;
-        const cookies = document.cookie.split(';');
-        const cookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
-        if (cookie) {
+        const raw = itStorageGet(`integram-table-form-order-${typeId}`);
+        if (raw) {
             try {
-                return JSON.parse(cookie.split('=')[1]);
+                return JSON.parse(raw);
             } catch (e) {
                 return [];
             }

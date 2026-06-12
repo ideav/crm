@@ -165,19 +165,14 @@
         }
 
         saveFormFieldVisibility(typeId, visibility) {
-            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
-            document.cookie = `${ cookieName }=${ JSON.stringify(visibility) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-fields-${ typeId }`, JSON.stringify(visibility));
         }
 
         loadFormFieldVisibility(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const fieldsCookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-
-            if (fieldsCookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-fields-${ typeId }`);
+            if (raw) {
                 try {
-                    const visibility = JSON.parse(fieldsCookie.split('=')[1]);
-                    return visibility;
+                    return JSON.parse(raw);
                 } catch (error) {
                     console.error('Error parsing form field visibility settings:', error);
                     return {};
@@ -188,17 +183,14 @@
         }
 
         saveFormFieldOrder(typeId, order) {
-            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
-            document.cookie = `${ cookieName }=${ JSON.stringify(order) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-order-${ typeId }`, JSON.stringify(order));
         }
 
         loadFormFieldOrder(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-            if (cookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-order-${ typeId }`);
+            if (raw) {
                 try {
-                    return JSON.parse(cookie.split('=')[1]);
+                    return JSON.parse(raw);
                 } catch (e) {
                     return [];
                 }
@@ -950,16 +942,13 @@
         }
 
         saveFormShowDelete(typeId, show) {
-            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
-            document.cookie = `${ cookieName }=${ show ? '1' : '0' }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-form-show-delete-${ typeId }`, show ? '1' : '0');
         }
 
         loadFormShowDelete(typeId) {
-            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
-            const cookies = document.cookie.split(';');
-            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
-            if (cookie) {
-                return cookie.split('=')[1].trim() === '1';
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-form-show-delete-${ typeId }`);
+            if (raw !== null) {
+                return raw.trim() === '1';
             }
             return false; // Hidden by default
         }
