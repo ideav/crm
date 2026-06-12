@@ -20,26 +20,35 @@
 (function() {
     'use strict';
 
+    // Hints state (hints_mode, hints_seen_workspaces) is kept in localStorage,
+    // not cookies, so it is not sent to the server on every request. A legacy
+    // cookie of the same name is migrated on first read and then deleted.
     function getCookie(name) {
+        var legacy = null;
         var prefix = name + '=';
-        var parts = document.cookie.split(';');
+        var parts = document.cookie ? document.cookie.split(';') : [];
         for (var i = 0; i < parts.length; i++) {
             var part = parts[i].trim();
-            if (part.indexOf(prefix) === 0) {
-                return decodeURIComponent(part.substring(prefix.length));
-            }
+            if (part.indexOf(prefix) === 0) { legacy = decodeURIComponent(part.substring(prefix.length)); break; }
         }
-        return null;
+        try {
+            if (legacy !== null) {
+                if (localStorage.getItem(name) === null && legacy !== '') localStorage.setItem(name, legacy);
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+            return localStorage.getItem(name);
+        } catch (e) {
+            return legacy;
+        }
     }
 
-    function setCookie(name, value, days) {
-        var expires = '';
-        if (days) {
-            var d = new Date();
-            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
-            expires = '; expires=' + d.toUTCString();
+    function setCookie(name, value) {
+        try {
+            localStorage.setItem(name, value);
+            if (document.cookie.indexOf(name + '=') !== -1) document.cookie = name + '=; path=/; max-age=0';
+        } catch (e) {
+            document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
         }
-        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
     }
 
     /**

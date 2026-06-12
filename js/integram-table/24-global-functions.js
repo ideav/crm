@@ -4,6 +4,99 @@ if (typeof window !== 'undefined') {
     window._integramTableInstances = window._integramTableInstances || [];
 }
 
+// ── UI-settings persistence ──────────────────────────────────────────────
+// View preferences (column order/visibility/width, table settings, form-field
+// visibility/order, card layout) live in localStorage, not cookies. As cookies
+// they were attached to every request to the whole ideav.ru origin and grew
+// without bound — one entry per table and per database ever opened — until the
+// combined Cookie header passed Apache's LimitRequestFieldSize and the server
+// answered HTTP 400 ("Size of a request header field exceeds server limit") to
+// every page on the domain. localStorage is never sent to the server.
+//
+// On first read of a key, any pre-existing cookie of the same name is copied
+// into localStorage and then deleted, so saved preferences carry over and the
+// bloated cookies clear themselves as the user navigates.
+
+function itStorageGet(name) {
+    let legacy = null;
+    if (typeof document !== 'undefined' && document.cookie) {
+        const parts = document.cookie.split(';');
+        for (let i = 0; i < parts.length; i++) {
+            const p = parts[i].trim();
+            if (p.indexOf(name + '=') === 0) { legacy = p.slice(name.length + 1); break; }
+        }
+    }
+    try {
+        if (legacy !== null) {
+            if (localStorage.getItem(name) === null && legacy !== '') {
+                localStorage.setItem(name, legacy);
+            }
+            // Drop the legacy cookie to free request-header space.
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+        return localStorage.getItem(name);
+    } catch (e) {
+        // localStorage unavailable (private mode/quota) — fall back to the cookie value.
+        return legacy;
+    }
+}
+
+function itStorageSet(name, value) {
+    try {
+        localStorage.setItem(name, value);
+        // Remove any stale cookie of the same name so it stops inflating headers.
+        if (typeof document !== 'undefined' && document.cookie.indexOf(name + '=') !== -1) {
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+    } catch (e) {
+        // localStorage unavailable — last-resort cookie so the setting still persists.
+        try { document.cookie = name + '=' + value + '; path=/; max-age=31536000'; } catch (e2) { /* ignore */ }
+    }
+}
+
+function itStorageRemove(name) {
+    try { localStorage.removeItem(name); } catch (e) { /* ignore */ }
+    try { document.cookie = name + '=; path=/; max-age=0'; } catch (e) { /* ignore */ }
+}
+
+// One-time sweep on script load: move every legacy UI-settings cookie into
+// localStorage and delete it, so the Cookie header shrinks on the next page
+// load even for tables the user does not reopen this session. Only names that
+// match the component's own patterns are touched; integram-table-font-settings
+// is shared with main.html (read there as a cookie) and is left in place.
+function itMigrateLegacyUiCookies() {
+    if (typeof document === 'undefined' || !document.cookie) return;
+    if (typeof window !== 'undefined') {
+        if (window.__itUiCookiesMigrated) return;
+        window.__itUiCookiesMigrated = true;
+    }
+    const isUiKey = function(name) {
+        if (name === 'integram-table-font-settings') return false;
+        return /-state$/.test(name)
+            || /-settings$/.test(name)
+            || /-form-fields-/.test(name)
+            || /-form-order-/.test(name)
+            || /-form-show-delete-/.test(name);
+    };
+    const parts = document.cookie.split(';');
+    for (let i = 0; i < parts.length; i++) {
+        const p = parts[i].trim();
+        const eq = p.indexOf('=');
+        if (eq <= 0) continue;
+        const name = p.slice(0, eq);
+        if (!isUiKey(name)) continue;
+        const value = p.slice(eq + 1);
+        try {
+            if (localStorage.getItem(name) === null && value !== '') {
+                localStorage.setItem(name, value);
+            }
+        } catch (e) { /* ignore */ }
+        document.cookie = name + '=; path=/; max-age=0';
+    }
+}
+
+itMigrateLegacyUiCookies();
+
 function parseIntegramAttrs(attrs) {
     const result = {
         required: false,

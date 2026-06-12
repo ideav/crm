@@ -14,36 +14,53 @@
 
     // ── Cookie helpers ──────────────────────────────────────────────────────
 
-    function setCookie(name, value, days) {
-        var expires = '';
-        if (days) {
-            var d = new Date();
-            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
-            expires = '; expires=' + d.toUTCString();
+    // Info-page state (info_active_tab, info_forms_desc_hidden) and hints state
+    // (hints_mode, hints_seen_workspaces) are kept in localStorage, not cookies,
+    // so they are not sent to the server on every request. A legacy cookie of the
+    // same name is migrated on first read and then deleted.
+    function setCookie(name, value) {
+        try {
+            localStorage.setItem(name, value);
+            if (document.cookie.indexOf(name + '=') !== -1) document.cookie = name + '=; path=/; max-age=0';
+        } catch (e) {
+            document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
         }
-        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
     }
 
     function getCookie(name) {
+        var legacy = null;
         var prefix = name + '=';
-        var parts = document.cookie.split(';');
+        var parts = document.cookie ? document.cookie.split(';') : [];
         for (var i = 0; i < parts.length; i++) {
             var part = parts[i].trim();
-            if (part.indexOf(prefix) === 0) {
-                return decodeURIComponent(part.substring(prefix.length));
-            }
+            if (part.indexOf(prefix) === 0) { legacy = decodeURIComponent(part.substring(prefix.length)); break; }
         }
-        return null;
+        try {
+            if (legacy !== null) {
+                if (localStorage.getItem(name) === null && legacy !== '') localStorage.setItem(name, legacy);
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+            return localStorage.getItem(name);
+        } catch (e) {
+            return legacy;
+        }
     }
 
+    // Clear keys matching prefix…suffix from both localStorage and any legacy cookies.
     function deleteCookiesByMask(prefix, suffix) {
-        var parts = document.cookie.split(';');
+        var parts = document.cookie ? document.cookie.split(';') : [];
         parts.forEach(function(part) {
             var name = part.trim().split('=')[0];
             if (name.indexOf(prefix) === 0 && name.slice(-suffix.length) === suffix) {
                 document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
             }
         });
+        try {
+            for (var i = localStorage.length - 1; i >= 0; i--) {
+                var k = localStorage.key(i);
+                if (k && k.indexOf(prefix) === 0 && k.slice(-suffix.length) === suffix) localStorage.removeItem(k);
+            }
+        } catch (e) { /* ignore */ }
     }
 
     // ── Owner check ──────────────────────────────────────────────────────────

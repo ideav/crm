@@ -8,7 +8,7 @@
         }
 
         saveColumnState() {
-            // Skip saving to cookies if config was loaded from URL (issue #514)
+            // Skip saving if config was loaded from URL (issue #514)
             // User can still copy current config as a shareable URL
             if (this.configFromUrl) {
                 return;
@@ -19,16 +19,14 @@
                 visible: this.visibleColumns,
                 widths: this.columnWidths
             };
-            document.cookie = `${ this.options.cookiePrefix }-state=${ JSON.stringify(state) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-state`, JSON.stringify(state));
         }
 
         loadColumnState() {
-            const cookies = document.cookie.split(';');
-            const stateCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-state=`));
-
-            if (stateCookie) {
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-state`);
+            if (raw) {
                 try {
-                    const state = JSON.parse(stateCookie.split('=')[1]);
+                    const state = JSON.parse(raw);
                     this.columnOrder = state.order || [];
                     this.visibleColumns = state.visible || [];
                     this.columnWidths = state.widths || {};
@@ -48,22 +46,21 @@
                 hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
                 showReferences: this.settings.showReferences,
             };
-            document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
+            itStorageSet(`${ this.options.cookiePrefix }-settings`, JSON.stringify(settings));
 
             // Save global compact setting if "For All" is checked
             if (this.settings.compactForAll) {
                 const globalSettings = { compact: this.settings.compact };
-                document.cookie = `integram-table-global-settings=${ JSON.stringify(globalSettings) }; path=/; max-age=31536000`;
+                itStorageSet('integram-table-global-settings', JSON.stringify(globalSettings));
             }
         }
 
         loadSettings() {
-            const cookies = document.cookie.split(';');
-            const settingsCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-settings=`));
+            const raw = itStorageGet(`${ this.options.cookiePrefix }-settings`);
 
-            if (settingsCookie) {
+            if (raw) {
                 try {
-                    const settings = JSON.parse(settingsCookie.split('=')[1]);
+                    const settings = JSON.parse(raw);
                     this.settings.compact = settings.compact !== undefined ? settings.compact : false;
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
@@ -79,10 +76,10 @@
                 }
             } else {
                 // No table-specific settings found, try to load global compact setting
-                const globalSettingsCookie = cookies.find(c => c.trim().startsWith('integram-table-global-settings='));
-                if (globalSettingsCookie) {
+                const globalRaw = itStorageGet('integram-table-global-settings');
+                if (globalRaw) {
                     try {
-                        const globalSettings = JSON.parse(globalSettingsCookie.split('=')[1]);
+                        const globalSettings = JSON.parse(globalRaw);
                         if (globalSettings.compact !== undefined) {
                             this.settings.compact = globalSettings.compact;
                         }

@@ -2078,21 +2078,17 @@ class IntegramCreateFormHelper {
      * Save form field visibility settings (issue #837).
      */
     saveFormFieldVisibilityStandalone(typeId, visibility) {
-        const cookieName = `integram-table-form-fields-${typeId}`;
-        document.cookie = `${cookieName}=${JSON.stringify(visibility)}; path=/; max-age=31536000`;
+        itStorageSet(`integram-table-form-fields-${typeId}`, JSON.stringify(visibility));
     }
 
     /**
      * Load form field visibility settings (issue #837).
      */
     loadFormFieldVisibilityStandalone(typeId) {
-        const cookieName = `integram-table-form-fields-${typeId}`;
-        const cookies = document.cookie.split(';');
-        const fieldsCookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
-
-        if (fieldsCookie) {
+        const raw = itStorageGet(`integram-table-form-fields-${typeId}`);
+        if (raw) {
             try {
-                return JSON.parse(fieldsCookie.split('=')[1]);
+                return JSON.parse(raw);
             } catch (error) {
                 console.error('Error parsing form field visibility settings:', error);
                 return {};
@@ -2106,20 +2102,17 @@ class IntegramCreateFormHelper {
      * Save form field order settings (issue #837).
      */
     saveFormFieldOrderStandalone(typeId, order) {
-        const cookieName = `integram-table-form-order-${typeId}`;
-        document.cookie = `${cookieName}=${JSON.stringify(order)}; path=/; max-age=31536000`;
+        itStorageSet(`integram-table-form-order-${typeId}`, JSON.stringify(order));
     }
 
     /**
      * Load form field order settings (issue #837).
      */
     loadFormFieldOrderStandalone(typeId) {
-        const cookieName = `integram-table-form-order-${typeId}`;
-        const cookies = document.cookie.split(';');
-        const cookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
-        if (cookie) {
+        const raw = itStorageGet(`integram-table-form-order-${typeId}`);
+        if (raw) {
             try {
-                return JSON.parse(cookie.split('=')[1]);
+                return JSON.parse(raw);
             } catch (e) {
                 return [];
             }

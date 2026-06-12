@@ -3629,22 +3629,44 @@ function dashIsResizableChartViz(vizType) {
     return !!vizType && vizType !== 'table' && vizType !== 'pivot';
 }
 
+// Dashboard view state (tile display mode, chart/table sizes) is kept in
+// localStorage, not cookies, so it is not sent to the server on every request.
+// A legacy cookie of the same name is migrated to localStorage on first read
+// and then deleted. (Function names keep the "Cookie" suffix for call sites.)
 function dashCookieGet(name) {
-    var escaped, match;
-    if (typeof document === 'undefined' || !document.cookie) return '';
-    escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
-    return match ? decodeURIComponent(match[1]) : '';
+    if (typeof document === 'undefined') return '';
+    var legacy = null, escaped, match;
+    if (document.cookie) {
+        escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+        if (match) legacy = decodeURIComponent(match[1]);
+    }
+    try {
+        if (legacy !== null) {
+            if (localStorage.getItem(name) === null && legacy !== '') localStorage.setItem(name, legacy);
+            document.cookie = String(name) + '=; path=/; max-age=0';
+        }
+        var v = localStorage.getItem(name);
+        return v === null ? '' : v;
+    } catch (e) {
+        return legacy === null ? '' : legacy;
+    }
 }
 
 function dashCookieSet(name, value, maxAge) {
     if (typeof document === 'undefined') return;
-    document.cookie = String(name) + '=' + encodeURIComponent(String(value))
-        + '; path=/; max-age=' + String(maxAge || DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    try {
+        localStorage.setItem(String(name), String(value));
+        if (document.cookie.indexOf(String(name) + '=') !== -1) document.cookie = String(name) + '=; path=/; max-age=0';
+    } catch (e) {
+        document.cookie = String(name) + '=' + encodeURIComponent(String(value))
+            + '; path=/; max-age=' + String(maxAge || DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    }
 }
 
 function dashCookieRemove(name) {
     if (typeof document === 'undefined') return;
+    try { localStorage.removeItem(String(name)); } catch (e) { /* ignore */ }
     document.cookie = String(name) + '=; path=/; max-age=0';
 }
 

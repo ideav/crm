@@ -662,24 +662,49 @@
         return d.innerHTML;
     }
 
-    function getCookie(name) {
-        var c = document.cookie.split(';');
+    // Card layout settings are kept in localStorage, not cookies. As a cookie the
+    // settings JSON was sent to the server on every request to the whole origin
+    // and accumulated one entry per card table ever opened, helping push the
+    // Cookie header past Apache's LimitRequestFieldSize (HTTP 400 for the domain).
+    // A pre-existing cookie of the same name is migrated to localStorage on first
+    // read and then deleted, so saved layouts carry over and the cookie clears.
+    function getStoredSetting(name) {
+        var legacy = null;
+        var c = document.cookie ? document.cookie.split(';') : [];
         for (var i = 0; i < c.length; i++) {
             var p = c[i].trim();
-            if (p.startsWith(name + '=')) {
-                try { return JSON.parse(p.slice(name.length + 1)); } catch(e) { return p.slice(name.length + 1); }
-            }
+            if (p.indexOf(name + '=') === 0) { legacy = p.slice(name.length + 1); break; }
         }
-        return null;
+        var raw;
+        try {
+            if (legacy !== null) {
+                if (localStorage.getItem(name) === null && legacy !== '') {
+                    localStorage.setItem(name, legacy);
+                }
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+            raw = localStorage.getItem(name);
+        } catch (e) {
+            raw = legacy;
+        }
+        if (raw === null || raw === undefined) return null;
+        try { return JSON.parse(raw); } catch (e) { return raw; }
     }
 
-    function setCookie(name, value, days) {
-        var maxAge = days * 86400;
-        document.cookie = name + '=' + JSON.stringify(value) + '; path=/; max-age=' + maxAge;
+    function setStoredSetting(name, value) {
+        try {
+            localStorage.setItem(name, JSON.stringify(value));
+            if (document.cookie.indexOf(name + '=') !== -1) {
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+        } catch (e) {
+            try { document.cookie = name + '=' + JSON.stringify(value) + '; path=/; max-age=31536000'; } catch (e2) { /* ignore */ }
+        }
     }
 
-    function deleteCookie(name) {
-        document.cookie = name + '=; path=/; max-age=0';
+    function removeStoredSetting(name) {
+        try { localStorage.removeItem(name); } catch (e) { /* ignore */ }
+        try { document.cookie = name + '=; path=/; max-age=0'; } catch (e) { /* ignore */ }
     }
 
     // ─── Type helpers (mirrors integram-table.js logic) ──────────────────────
@@ -1923,7 +1948,7 @@
 
     CardsView.prototype._loadSettings = function() {
         var key = this.options.cookiePrefix + '-settings';
-        var saved = getCookie(key);
+        var saved = getStoredSetting(key);
         if (saved && typeof saved === 'object') {
             this.settings = Object.assign(this.settings, saved);
         }
@@ -1968,7 +1993,7 @@
         // Always save to cookie as local backup
         var toSave = Object.assign({}, this.settings);
         delete toSave._remoteId;
-        setCookie(key, toSave, 365);
+        setStoredSetting(key, toSave);
 
         // Save to table 269 if mode === 'global'
         if (mode === 'global' && srcId) {
@@ -2174,7 +2199,7 @@
         modal.querySelector('#cards-s-reset').addEventListener('click', function() {
             // Reset to defaults
             var key = self.options.cookiePrefix + '-settings';
-            deleteCookie(key);
+            removeStoredSetting(key);
             self.settings = {
                 cardFieldSettings: null,
                 filterFields: null,

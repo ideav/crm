@@ -192,11 +192,11 @@
         }
 
         resetSettings() {
-            // Delete settings cookie
-            document.cookie = `${ this.options.cookiePrefix }-settings=; path=/; max-age=0`;
+            // Clear saved settings
+            itStorageRemove(`${ this.options.cookiePrefix }-settings`);
 
-            // Delete state cookie (column order, visibility, widths)
-            document.cookie = `${ this.options.cookiePrefix }-state=; path=/; max-age=0`;
+            // Clear saved column state (order, visibility, widths)
+            itStorageRemove(`${ this.options.cookiePrefix }-state`);
 
             // Reset to defaults
             this.settings = {
