@@ -5393,7 +5393,9 @@
         var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
         dateFilter.addEventListener('change', function() {
             self.filter.date = dateFilter.value;
+            self.selectedCutId = null;   // #3349: очищать панель «Связанные позиции»
             self.renderQueue();
+            self.renderLink();
         });
         filters.appendChild(field('Дата плана', dateFilter));
         filters.appendChild(field('Статус', statusFilter));
