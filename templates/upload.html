@@ -880,11 +880,13 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     }
                     j=0;
                     for(i in m){
+                        // Заполняем пропуски колонок заглушками так, чтобы визуальная позиция
+                        // каждого поля совпадала с его входной колонкой (importMap=индекс).
+                        // Колонку-родителя отдельной «дыркой» не выкусываем: она читается из
+                        // data[autoParent-1] и в выход идёт первой — здесь это обычный пропуск
+                        // (issue #3356, согласовано с importMap в gatherSet).
                         while(j<i)
-                            if(uploadSets[chosenSet].autoParent&&uploadSets[chosenSet].autoParent==j)
-                                j++;
-                            else
-                                m[j++]=addSortable('','','---','---');
+                            m[j++]=addSortable('','','---','---');
                         j++;
                     }
                     h=m.join('');
@@ -1075,7 +1077,12 @@ function gatherSet(){
                             ,link:$('#l'+this.id).hasClass('is-link')?($('#l'+this.id).hasClass('multiselect')?2:1):0};
             else
                 sourceMap[i]={id:this.id,base:$('#t'+this.id).val(),name:$('#n'+this.id).val(),skip:0};
-            importMap[this.id]=autoParent<=i+1?i+1:i;
+            // importMap — это ВХОДНАЯ колонка данных, на которую пользователь выровнял
+            // поле перетаскиванием; она не зависит от autoParent. Родитель читается
+            // отдельно из data[autoParent-1], а в выходной файл уходит первой колонкой
+            // (jMap=origMap+1). Прежний сдвиг +1 здесь дублировал учёт родителя и при
+            // включении autoParent уводил крайнее поле за пределы данных (issue #3356).
+            importMap[this.id]=i;
         }
         i++;
     });
