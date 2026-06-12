@@ -825,7 +825,7 @@
             return {
                 id: String(rec.i),
                 when: r[0] || '',
-                type: typeIdx >= 0 ? (r[typeIdx] || '') : '',
+                type: typeIdx >= 0 ? (parseRef(r[typeIdx]).label || '') : '',  // #3348: тип — ссылка «id:Начало смены»
                 cutId: cutId || null,
                 userId: userRef.id,
                 user: userRef.label,

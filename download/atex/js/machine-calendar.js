@@ -631,7 +631,22 @@
             el('span', { class: 'atex-pp-cal-legend-item is-late', text: 'С опозданием' })
         ]));
 
-        // ── Сетка станков ──
+        // ── Тело: компактная сетка недель (day/three → тайминг; week/month → сетка) ──
+        // #3347: режимы week и month показывают компактную сетку дней по неделям;
+        // режим day — подробный тайминг. Клик по ячейке дня переключает в day-режим.
+        var scroll = el('div', { class: 'atex-pp-cal-scroll atex-mc-scroll' });
+        if (st.mode === 'day' || st.mode === 'three') {
+            scroll.appendChild(this._buildTimelineBody(range, nowMs));
+        } else {
+            scroll.appendChild(this._buildWeekGrid(range, nowMs));
+        }
+        this.root.appendChild(scroll);
+    };
+
+    // Горизонтальный тайминг (day / three): станки строками, время по горизонтали.
+    AtexMachineCalendar.prototype._buildTimelineBody = function(range, nowMs) {
+        var self = this;
+        var st = this.state;
         var groups = machineCalendarGroups(this.cuts, this.slitters, range, nowMs, {
             status: st.status, slitter: st.slitter
         });
@@ -653,7 +668,6 @@
             track.appendChild(endTick);
         }
 
-        var scroll = el('div', { class: 'atex-pp-cal-scroll atex-mc-scroll' });
         var body = el('div', { class: 'atex-pp-cal-body atex-pp-cal-body--' + range.mode });
         var scaleRow = el('div', { class: 'atex-pp-cal-row atex-pp-cal-scale-row' });
         scaleRow.appendChild(el('div', { class: 'atex-pp-cal-machine atex-pp-cal-machine--scale', text: 'Станок' }));
@@ -698,12 +712,92 @@
                 body.appendChild(row);
             });
         }
-        scroll.appendChild(body);
-        this.root.appendChild(scroll);
 
         if (!totalItems) {
-            this.root.appendChild(el('div', { class: 'atex-pp-cal-note', text: 'На выбранном интервале резок нет' }));
+            body.appendChild(el('div', { class: 'atex-pp-cal-note', text: 'На выбранном интервале резок нет' }));
         }
+        return body;
+    };
+
+    // #3347: Компактная сетка недель: строки = недели, ячейки = дни.
+    // Все станки в одной ячейке; резки — цветные блоки без подписей (подпись в title).
+    // Клик по дню → переключение в day-режим с тайм-линией для этого дня.
+    AtexMachineCalendar.prototype._buildWeekGrid = function(range, nowMs) {
+        var self = this;
+        var st = this.state;
+        var todayIso = todayISO();
+
+        // Все группы без фильтра статуса, с фильтром станка если выбран.
+        var groups = machineCalendarGroups(this.cuts, this.slitters, range, nowMs, { slitter: st.slitter });
+
+        // Карта: isoDay → [{cut, slitter}] — все резки, захватывающие данный день.
+        var dayCutsMap = {};
+        groups.forEach(function(group) {
+            group.cuts.forEach(function(cut) {
+                var tr = cutCalendarTimeRange(cut);
+                if (!tr) return;
+                range.days.forEach(function(day) {
+                    var dayMs = parseCalendarDateTimeMs(day.iso);
+                    if (dayMs == null) return;
+                    if (tr.endMs > dayMs && tr.startMs < dayMs + CALENDAR_DAY_MS) {
+                        if (!dayCutsMap[day.iso]) dayCutsMap[day.iso] = [];
+                        dayCutsMap[day.iso].push({ cut: cut, slitter: group.slitter });
+                    }
+                });
+            });
+        });
+
+        // Разбить дни на недели ≤7.
+        var days = range.days;
+        var weeks = [];
+        for (var i = 0; i < days.length; i += 7) {
+            weeks.push(days.slice(i, Math.min(i + 7, days.length)));
+        }
+
+        var grid = el('div', { class: 'atex-mc-grid' });
+
+        // Заголовок дней недели — только если показываем полные недели.
+        if (range.mode === 'week' || range.mode === 'month') {
+            var DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+            var labelsRow = el('div', { class: 'atex-mc-week-labels' });
+            DOW.forEach(function(d) { labelsRow.appendChild(el('div', { class: 'atex-mc-day-label', text: d })); });
+            grid.appendChild(labelsRow);
+        }
+
+        weeks.forEach(function(week) {
+            var weekEl = el('div', { class: 'atex-mc-week' });
+            week.forEach(function(day) {
+                var entries = dayCutsMap[day.iso] || [];
+                var cls = 'atex-mc-day';
+                if (day.iso === todayIso) cls += ' is-today';
+                if (entries.length) cls += ' has-cuts';
+                var dayEl = el('div', { class: cls });
+                dayEl.appendChild(el('div', { class: 'atex-mc-day-num', text: day.label }));
+                if (entries.length) {
+                    var cutsEl = el('div', { class: 'atex-mc-day-cuts' });
+                    entries.forEach(function(entry) {
+                        var tr = cutCalendarTimeRange(entry.cut);
+                        var status = cutCalendarStatus(entry.cut, nowMs);
+                        var titleText = entry.slitter.label + '\n' + cutCalendarItemTitle(entry.cut, tr || {}, status);
+                        cutsEl.appendChild(el('span', { class: 'atex-mc-cut-block is-' + status.key, title: titleText }));
+                    });
+                    dayEl.appendChild(cutsEl);
+                }
+                dayEl.addEventListener('click', function() {
+                    self.state.anchor = day.iso;
+                    self.state.mode = 'day';
+                    self.render();
+                });
+                weekEl.appendChild(dayEl);
+            });
+            // Добиваем неполные недели до 7 пустыми ячейками.
+            for (var p = week.length; p < 7; p++) {
+                weekEl.appendChild(el('div', { class: 'atex-mc-day atex-mc-day--empty' }));
+            }
+            grid.appendChild(weekEl);
+        });
+
+        return grid;
     };
 
     AtexMachineCalendar.prototype.setBusy = function(on) {
@@ -752,4 +846,4 @@
 
 //
 //
-// @version 2026-06-11-issue-3339
+// @version 2026-06-12-issue-3347
