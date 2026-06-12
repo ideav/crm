@@ -729,7 +729,10 @@
                     slitter: slitterRef.label,
                     batchId: batchRef.id,
                     batch: batchRef.label,
-                    planDate: planDateIdx >= 0 ? (row[planDateIdx] || '') : '',
+                    // #3352: главное значение резки (row[0]) = «Дата план»;
+                    // если colIndex не нашёл реквизит — берём row[0], иначе
+                    // prepareCutQueue отфильтрует все резки по пустой дате.
+                    planDate: (planDateIdx >= 0 ? row[planDateIdx] : null) || row[0] || '',
                     sequence: sequenceIdx >= 0 ? row[sequenceIdx] : '',
                     plannedRuns: plannedRunsIdx >= 0 ? row[plannedRunsIdx] : '',
                     runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
