@@ -875,8 +875,15 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     for(i in uploadSets[chosenSet].importMap){
                         if(json.req_type[i])
                             m[uploadSets[chosenSet].importMap[i]]=addSortable(i,json.req_type[i],json.req_base[i],json.req_base_id[i]);
-                        else
+                        else if(i==json.type.id)
                             m[uploadSets[chosenSet].importMap[i]]=addSortable(json.type.id,json.type.val,json.type.base,json.base.id);
+                        else
+                            // Поле из сохранённого набора больше не реквизит типа (колонку
+                            // удалили/изменили) и не является главным значением — ставим
+                            // пропуск-заглушку, а не дубль главного значения. Иначе «Заказанное
+                            // количество» появлялось дважды, а в gatherSet importMap[type.id]
+                            // затирался индексом орфана (issue #3358).
+                            m[uploadSets[chosenSet].importMap[i]]=addSortable('','','---','---');
                     }
                     j=0;
                     for(i in m){
