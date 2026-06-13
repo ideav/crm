@@ -132,6 +132,16 @@ input[type="checkbox"] {
 [data-theme="dark"] #tune input[type="number"]::placeholder {
     color: var(--text-secondary, #adb5bd);
 }
+/* Excel-импорт: сетка выбора диапазона (issue #3362) */
+.xlsx-grid-wrap { max-height: 340px; overflow: auto; border: 1px solid var(--border-color, #dee2e6); border-radius: 4px; }
+table.xlsx-grid { border-collapse: collapse; font-size: .8rem; white-space: nowrap; }
+table.xlsx-grid th { position: sticky; top: 0; background: var(--bg-secondary, #f1f5f9); color: var(--text-secondary, #6c757d); font-weight: 600; padding: 2px 6px; border: 1px solid var(--border-color, #dee2e6); z-index: 1; }
+table.xlsx-grid tbody th { left: 0; z-index: 2; }
+table.xlsx-grid td { padding: 2px 6px; border: 1px solid var(--border-color, #dee2e6); cursor: pointer; max-width: 180px; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary, #212529); }
+table.xlsx-grid td.xr { background: rgba(13, 110, 253, .14); }
+table.xlsx-grid td.xs { outline: 2px solid var(--color-primary, #0d6efd); outline-offset: -2px; font-weight: 600; }
+table.xlsx-grid td.xe { box-shadow: inset 0 0 0 2px var(--color-success, #28a745); }
+table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
@@ -152,7 +162,7 @@ input[type="checkbox"] {
     <div class="mb-5 p-1 p-sm-2 shadow">
         <div>Вставьте текст из файла в это поле или выберите файл для загрузки:
         <textarea rows="5" class="form-control mb-2 mt-1" id="input"></textarea>
-        JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).
+        JSON или любой текстовый файл (CSV, TXT и т.п.), а также Excel (XLSX/XLS) — для Excel при выборе файла откроется выбор листа и стартовой ячейки.
 		</div>
 		<div>
         <label class="btn btn-outline-secondary upload-file-label mb-2"><i class="pi pi-upload"></i> Выберите файл<input type="file" id="selectFiles" style="display:none" /></label>
@@ -215,6 +225,16 @@ input[type="checkbox"] {
         </div>
     </div>
     <div id="log" class="upload-log-bg overflow-auto small shadow-sm p-2 mb-2" style="max-height: 100px; display:none"></div>
+    <div id="xlsx-area" class="mb-4 p-2 p-sm-3 shadow" style="display:none">
+        <div class="mb-2"><b>Excel-файл.</b> Выберите лист и кликните <b>стартовую ячейку</b> — будут взяты данные правее и ниже неё. <b>Shift+клик</b> по другой ячейке — задать правую/нижнюю границу.</div>
+        <div class="mb-2 d-flex align-items-center" style="gap:.75rem;flex-wrap:wrap">
+            <label class="mb-0">Лист:&nbsp;<select id="xlsx-sheet" class="form-control d-inline-block" style="width:auto;min-width:140px"></select></label>
+            <span id="xlsx-info" class="small" style="color:var(--text-secondary)"></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="xlsxClearLimits()">Сбросить границы</button>
+        </div>
+        <div id="xlsx-grid" class="xlsx-grid-wrap"></div>
+        <div class="mt-2"><button type="button" class="btn btn-primary" onclick="applyXlsxRange()">Применить диапазон</button></div>
+    </div>
     <div id="progress" class="upload-progress-bg shadow p-2" style="display:none"></div>
     <div id="errors" class="upload-errors-bg p-2 mt-1" style="display:none"></div>
     <div class="pb-3" id="refresh" style="display:none"><button onclick="importParse();" class="btn btn-outline-secondary">Обновить</button></div>
@@ -1142,6 +1162,12 @@ function importParse(){
     	    }
     	    return false;
     	}
+	    // Excel (.xlsx/.xls) — отдельный путь: выбор листа и диапазона (issue #3362).
+	    // Если книга уже разобрана — применяем текущий диапазон (не сбрасываем выбор).
+	    if(isExcelFile(files.item(0).name)){
+	        if(xlsxWorkbook && xlsxRows.length) applyXlsxRange(); else handleExcelFile(files.item(0));
+	        $('#refresh').hide(); return false;
+	    }
 	    var fr = new FileReader();
 	    fr.onload = function(e){
 	        parseUploadText(e.target.result,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
@@ -1374,6 +1400,117 @@ function escape(htmlStr){
          .replace(/"/g,"&quot;")
          .replace(/'/g,"&#39;");
 }
+
+// ─── Excel (xlsx) импорт ─── (issue #3362)
+// SheetJS подгружается лениво (только при выборе .xlsx/.xls). Пользователь выбирает лист и
+// диапазон (стартовая ячейка + опц. ограничения справа/снизу), срез кормится в importDoParse
+// — дальше тот же пайплайн, что и для текста (маппинг, формулы, превью, autoParent).
+var xlsxWorkbook=null, xlsxRows=[], xlsxSel={r0:0,c0:0,r1:null,c1:null};
+var XLSX_GRID_MAX_R=60, XLSX_GRID_MAX_C=40;
+
+function isExcelFile(name){ return /\.(xlsx|xlsm|xlsb|xls)$/i.test(name||''); }
+
+function ensureXlsx(){
+    return new Promise(function(resolve,reject){
+        if(window.XLSX) return resolve(window.XLSX);
+        var s=document.createElement('script');
+        s.src='/js/xlsx0.18.5.full.min.js';   // self-hosted SheetJS (update.conf: js/* → /js/), без зависимости от CDN
+        s.onload=function(){ window.XLSX?resolve(window.XLSX):reject(new Error('Парсер Excel не загрузился')); };
+        s.onerror=function(){ reject(new Error('Не удалось загрузить парсер Excel')); };
+        document.head.appendChild(s);
+    });
+}
+
+function xlsxShowError(msg){ $('#errors').html(escape(msg)).show(); }
+
+function handleExcelFile(file){
+    $('#errors').hide();
+    $('#xlsx-area').show();
+    $('#xlsx-grid').html('<div style="color:var(--text-secondary)">Чтение Excel…</div>');
+    ensureXlsx().then(function(XLSX){
+        var fr=new FileReader();
+        fr.onload=function(e){
+            try{ xlsxWorkbook=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true}); }
+            catch(err){ $('#xlsx-area').hide(); xlsxShowError('Не удалось прочитать Excel: '+err.message); return; }
+            if(!xlsxWorkbook.SheetNames.length){ $('#xlsx-area').hide(); xlsxShowError('В файле нет листов'); return; }
+            $('#xlsx-sheet').html(xlsxWorkbook.SheetNames.map(function(n){ return '<option>'+escape(n)+'</option>'; }).join(''));
+            renderXlsxSheet(xlsxWorkbook.SheetNames[0]);
+        };
+        fr.onerror=function(){ $('#xlsx-area').hide(); xlsxShowError('Ошибка чтения файла'); };
+        fr.readAsArrayBuffer(file);
+    }).catch(function(err){ $('#xlsx-area').hide(); xlsxShowError(err.message); });
+}
+
+function renderXlsxSheet(name){
+    var ws=xlsxWorkbook.Sheets[name];
+    var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+    var maxC=0; rows.forEach(function(r){ if(r.length>maxC) maxC=r.length; });
+    rows.forEach(function(r){ while(r.length<maxC) r.push(''); });
+    xlsxRows=rows;
+    var det=xlsxAutoDetectStart(rows);
+    xlsxSel={r0:det.r, c0:det.c, r1:null, c1:null};
+    drawXlsxGrid();
+}
+
+// Стартовая ячейка по умолчанию: первая непустая (слева-направо, сверху-вниз) в строке,
+// за которой идёт строка с тем же числом непустых ячеек; иначе — первая непустая вообще.
+function xlsxAutoDetectStart(rows){
+    function cnt(r){ var n=0; for(var k=0;k<r.length;k++) if(String(r[k]).trim()!=='') n++; return n; }
+    function firstNE(r){ for(var k=0;k<r.length;k++) if(String(r[k]).trim()!=='') return k; return -1; }
+    for(var i=0;i<rows.length-1;i++){ var c=cnt(rows[i]); if(c>0 && cnt(rows[i+1])===c){ var fc=firstNE(rows[i]); if(fc>=0) return {r:i,c:fc}; } }
+    for(var i2=0;i2<rows.length;i2++){ var fc2=firstNE(rows[i2]); if(fc2>=0) return {r:i2,c:fc2}; }
+    return {r:0,c:0};
+}
+
+function xlsxColName(n){ var s=''; n++; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
+function xlsxEndR(){ return xlsxSel.r1==null?xlsxRows.length-1:xlsxSel.r1; }
+function xlsxEndC(){ return xlsxSel.c1==null?((xlsxRows[0]?xlsxRows[0].length:1)-1):xlsxSel.c1; }
+
+function drawXlsxGrid(){
+    var rows=xlsxRows, nR=Math.min(rows.length,XLSX_GRID_MAX_R), nC=Math.min(rows[0]?rows[0].length:0,XLSX_GRID_MAX_C);
+    var eR=xlsxEndR(), eC=xlsxEndC();
+    var h='<table class="xlsx-grid"><thead><tr><th></th>';
+    for(var c=0;c<nC;c++) h+='<th>'+xlsxColName(c)+'</th>';
+    h+='</tr></thead><tbody>';
+    for(var r=0;r<nR;r++){
+        h+='<tr><th>'+(r+1)+'</th>';
+        for(var c2=0;c2<nC;c2++){
+            var inR = r>=xlsxSel.r0 && c2>=xlsxSel.c0 && r<=eR && c2<=eC;
+            var isS = r===xlsxSel.r0 && c2===xlsxSel.c0;
+            var isE = r===eR && c2===eC && (xlsxSel.r1!=null||xlsxSel.c1!=null);
+            h+='<td class="'+(inR?'xr ':'')+(isS?'xs ':'')+(isE?'xe':'')+'" data-r="'+r+'" data-c="'+c2+'">'+escape(String(rows[r][c2]))+'</td>';
+        }
+        h+='</tr>';
+    }
+    h+='</tbody></table>';
+    var trunc=(rows.length>XLSX_GRID_MAX_R||(rows[0]&&rows[0].length>XLSX_GRID_MAX_C))
+        ? '<div class="small mt-1" style="color:var(--text-secondary)">Показаны первые '+nR+'×'+nC+' ячеек; диапазон применяется ко всему листу.</div>' : '';
+    $('#xlsx-grid').html(h+trunc);
+    $('#xlsx-info').html('Старт: <b>'+xlsxColName(xlsxSel.c0)+(xlsxSel.r0+1)+'</b> · справа до: <b>'
+        +(xlsxSel.c1==null?'края':xlsxColName(xlsxSel.c1))+'</b> · снизу до: <b>'+(xlsxSel.r1==null?'края':(xlsxSel.r1+1))+'</b>');
+}
+
+function xlsxClearLimits(){ xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
+
+function applyXlsxRange(){
+    if(!xlsxRows.length){ xlsxShowError('Лист пуст'); return; }
+    var eR=xlsxEndR(), eC=xlsxEndC(), out=[];
+    for(var r=xlsxSel.r0;r<=eR;r++){
+        var row=[];
+        for(var c=xlsxSel.c0;c<=eC;c++) row.push(xlsxRows[r]&&xlsxRows[r][c]!==undefined?xlsxRows[r][c]:'');
+        if(row.some(function(v){ return String(v).trim()!==''; })) out.push(row);
+    }
+    if(!out.length){ xlsxShowError('В выбранном диапазоне нет данных'); return; }
+    importDoParse({data: out});
+}
+
+$(document).on('click','#xlsx-grid td[data-r]',function(e){
+    var r=+this.getAttribute('data-r'), c=+this.getAttribute('data-c');
+    if(e.shiftKey){ if(r>=xlsxSel.r0 && c>=xlsxSel.c0){ xlsxSel.r1=r; xlsxSel.c1=c; drawXlsxGrid(); } }
+    else { xlsxSel.r0=r; xlsxSel.c0=c; xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
+});
+$(document).on('change','#xlsx-sheet',function(){ renderXlsxSheet(this.value); });
+
 $(function(){
     $("#sortable").sortable({update:function(){gatherSet();importParse();}});
     $("#sortable").disableSelection();
@@ -1491,6 +1628,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     selectedFileName.textContent = '';
                 }
             }
+            // Excel — сразу открыть выбор листа/диапазона; иначе скрыть панель (issue #3362)
+            if (this.files.length > 0 && isExcelFile(this.files[0].name)) handleExcelFile(this.files[0]);
+            else $('#xlsx-area').hide();
         });
     }
 
