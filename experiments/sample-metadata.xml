@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edmx:Edmx xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx" Version="1.0">
+  <edmx:DataServices xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" m:DataServiceVersion="3.0">
+    <Schema xmlns="http://schemas.microsoft.com/ado/2009/11/edm" Namespace="StandardODATA">
+      <EntityType Name="Catalog_Номенклатура">
+        <Key><PropertyRef Name="Ref_Key"/></Key>
+        <Property Name="Ref_Key" Type="Edm.Guid" Nullable="false"/>
+        <Property Name="Description" Type="Edm.String" Nullable="false" MaxLength="150"/>
+        <Property Name="Code" Type="Edm.String" Nullable="false" MaxLength="11"/>
+        <Property Name="Артикул" Type="Edm.String" MaxLength="25"/>
+        <Property Name="Комментарий" Type="Edm.String"/>
+        <Property Name="Вес" Type="Edm.Double"/>
+        <Property Name="ВестиУчётПоСериям" Type="Edm.Boolean"/>
+        <Property Name="DeletionMark" Type="Edm.Boolean"/>
+        <NavigationProperty Name="ЕдиницаИзмерения" Relationship="StandardODATA.Catalog_ЕдиницыИзмерения" ToRole="Catalog_ЕдиницыИзмерения"/>
+      </EntityType>
+      <EntityType Name="Catalog_Контрагенты">
+        <Key><PropertyRef Name="Ref_Key"/></Key>
+        <Property Name="Ref_Key" Type="Edm.Guid" Nullable="false"/>
+        <Property Name="Description" Type="Edm.String" Nullable="false" MaxLength="150"/>
+        <Property Name="ИНН" Type="Edm.String" MaxLength="12"/>
+        <Property Name="КПП" Type="Edm.String" MaxLength="9"/>
+        <Property Name="ЮрФизЛицо" Type="Edm.String" MaxLength="20"/>
+      </EntityType>
+      <EntityType Name="Document_ЗаказКлиента">
+        <Key><PropertyRef Name="Ref_Key"/></Key>
+        <Property Name="Ref_Key" Type="Edm.Guid" Nullable="false"/>
+        <Property Name="Number" Type="Edm.String" Nullable="false" MaxLength="11"/>
+        <Property Name="Date" Type="Edm.DateTimeOffset" Nullable="false"/>
+        <Property Name="СуммаДокумента" Type="Edm.Decimal"/>
+        <Property Name="Проведён" Type="Edm.Boolean"/>
+      </EntityType>
+      <EntityType Name="InformationRegister_КурсыВалют">
+        <Property Name="Period" Type="Edm.DateTimeOffset"/>
+        <Property Name="Курс" Type="Edm.Decimal"/>
+        <Property Name="Кратность" Type="Edm.Int32"/>
+      </EntityType>
+      <EntityType Name="StandardODATA_Service">
+        <Property Name="Ignore" Type="Edm.String"/>
+      </EntityType>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>

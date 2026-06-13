@@ -85,6 +85,7 @@ issue (`issue #NNN`) and/or code location (`file:line`).
 ## Related Documentation
 
 - [docs/WORKSPACE_DEVELOPMENT_GUIDE.md](docs/WORKSPACE_DEVELOPMENT_GUIDE.md) — Rules for building workspaces (templating, `_m_*` API + XSRF, tables/reports, IntegramTable, modals, hints)
+- [docs/connector-1c.md](docs/connector-1c.md) — Universal 1C connector workplace (OData `$metadata` → structure/data JSON for AI mapping)
 - [docs/integram-minimal-full-cycle-project.md](docs/integram-minimal-full-cycle-project.md) — Minimal end-to-end Integram project example from user Excel files to working screens
 - [TABLE_COMPONENT_README.md](TABLE_COMPONENT_README.md) — IntegramTable component reference
 - [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) — Asset deployment guide

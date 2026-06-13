@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>connector-1c harness</title>
+<style>
+:root {
+  --bg-primary: #ffffff; --bg-secondary: #f1f5f9;
+  --text-primary: #1e293b; --text-secondary: #64748b;
+  --border-color: #e2e8f0; --color-primary: #1283da;
+  --input-bg: #ffffff; --card-bg: #ffffff;
+}
+body { margin: 0; background: var(--bg-secondary); font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+.pi { font-style: normal; }
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<script>
+// Mock the global `db` the template reads for its localStorage key.
+var db = 'demo';
+
+// Sample $metadata served to the connector (matches experiments/sample-metadata.xml).
+var SAMPLE_META = null;
+var SAMPLE_DATA = {
+  'Catalog_Номенклатура': [
+    { Ref_Key: 'a1', Description: 'Гайка М6', Code: '0001', Вес: 0.02, DeletionMark: false },
+    { Ref_Key: 'a2', Description: 'Болт М6×40', Code: '0002', Вес: 0.05, DeletionMark: false }
+  ],
+  'Catalog_Контрагенты': [
+    { Ref_Key: 'b1', Description: 'ООО Ромашка', ИНН: '7701234567' }
+  ]
+};
+
+// Intercept fetch so the harness runs fully offline.
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+  if (/\$metadata$/.test(url)) {
+    return Promise.resolve(new Response(SAMPLE_META, { status: 200, headers: { 'Content-Type': 'application/xml' } }));
+  }
+  var m = url.match(/standard\.odata\/([^?]+)/);
+  if (m) {
+    var name = decodeURIComponent(m[1]);
+    return Promise.resolve(new Response(JSON.stringify({ value: SAMPLE_DATA[name] || [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  return realFetch(url, opts);
+};
+
+(async function() {
+  SAMPLE_META = await (await realFetch('/experiments/sample-metadata.xml')).text();
+  var frag = await (await realFetch('/templates/connector-1c.html')).text();
+  // Inject styles + markup, then run the script.
+  var holder = document.createElement('div');
+  holder.innerHTML = frag;
+  var scripts = holder.querySelectorAll('script');
+  scripts.forEach(function(s) { s.parentNode.removeChild(s); });
+  document.getElementById('mount').appendChild(holder);
+  scripts.forEach(function(s) {
+    var n = document.createElement('script');
+    n.textContent = s.textContent;
+    document.body.appendChild(n);
+  });
+})();
+</script>
+</body>
+</html>
