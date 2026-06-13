@@ -1250,6 +1250,76 @@
         return String(round3(Number(width) || 0));
     }
 
+    // ── #3372: фактическая ширина резки ──────────────────────────────────────
+    // Справочник «Фактическая ширина резки» (table 66190) задаёт пары
+    // номинал («Ширина в заказе») → факт (главное значение записи) с условием в
+    // поле «Код»: '' (пусто) — безусловно; 'j=910'/'j>1000' — по ширине джамбо
+    // вида сырья; 's=0.5'/'s=1' — по диаметру втулки в дюймах (8188 «Дюймы»).
+    // Поддержаны операторы = > < >= <=. ⚠️ Жёсткий фильтр (#3372): факт. ширина
+    // применяется ТОЛЬКО при выполнении условия, иначе берётся номинал заказа.
+    function parseActualWidthCode(code) {
+        var c = String(code == null ? '' : code).trim().toLowerCase().replace(/\s+/g, '');
+        if (!c) return { key: '', op: '', val: 0 };           // безусловно
+        var m = c.match(/^([js])(>=|<=|=|>|<)(\d+(?:\.\d+)?)$/);
+        if (!m) return { key: '?', op: '', val: 0 };          // нераспознан → не применяем
+        return { key: m[1], op: m[2], val: Number(m[3]) };
+    }
+
+    // ctx: { jumbo, inches } (любое поле может быть null/undefined). key 'j' →
+    // сверяем с jumbo (ширина джамбо), 's' → с inches (дюймы втулки).
+    // '' → всегда true; '?' → всегда false (жёсткий фильтр).
+    function actualWidthCodeMatches(parsed, ctx) {
+        if (!parsed || parsed.key === '') return true;
+        if (parsed.key === '?') return false;
+        var v = parsed.key === 'j' ? (ctx && ctx.jumbo) : (ctx && ctx.inches);
+        if (v == null || v === '' || !isFinite(Number(v))) return false;
+        v = Number(v);
+        switch (parsed.op) {
+            case '=':  return Math.abs(v - parsed.val) < 1e-6;
+            case '>':  return v > parsed.val + 1e-9;
+            case '<':  return v < parsed.val - 1e-9;
+            case '>=': return v >= parsed.val - 1e-9;
+            case '<=': return v <= parsed.val + 1e-9;
+        }
+        return false;
+    }
+
+    // rows: [{ actual, order, code }] из справочника → индекс
+    // { stripWidthKey(order): [{ actual, parsed }] }. Условные строки идут раньше
+    // безусловных — приоритет более специфичного правила при совпадении номинала.
+    function buildActualWidthIndex(rows) {
+        var index = {};
+        (rows || []).forEach(function(row) {
+            var order = Number(row && row.order);
+            var actual = Number(row && row.actual);
+            if (!isFinite(order) || order <= 0 || !isFinite(actual) || actual <= 0) return;
+            var key = stripWidthKey(order);
+            (index[key] || (index[key] = [])).push({ actual: actual, parsed: parseActualWidthCode(row.code) });
+        });
+        Object.keys(index).forEach(function(key) {
+            index[key].sort(function(a, b) {
+                return (b.parsed.key !== '' ? 1 : 0) - (a.parsed.key !== '' ? 1 : 0);
+            });
+        });
+        return index;
+    }
+
+    // Фактическая ширина резки для номинальной ширины заказа с учётом контекста
+    // позиции (ширина джамбо вида сырья, диаметр втулки в дюймах). Нет правила или
+    // ни одно условие не выполнено → возвращаем номинал как есть (жёсткий фильтр).
+    function resolveCutWidth(nominalWidth, ctx, index) {
+        var n = Number(nominalWidth);
+        if (!isFinite(n) || n <= 0) return nominalWidth;
+        var rows = (index && index[stripWidthKey(n)]) || [];
+        for (var i = 0; i < rows.length; i++) {
+            if (actualWidthCodeMatches(rows[i].parsed, ctx)) {
+                var w = Number(rows[i].actual);
+                return isFinite(w) && w > 0 ? w : n;
+            }
+        }
+        return n;
+    }
+
     function nonStockStripQtyForWidth(layout, width) {
         var key = stripWidthKey(width);
         return (layout && layout.strips || []).reduce(function(sum, s) {
@@ -2532,6 +2602,10 @@
         tableByName: tableByName,
         reqIdByName: reqIdByName,
         columnIndex: columnIndex,
+        parseActualWidthCode: parseActualWidthCode,      // #3372
+        actualWidthCodeMatches: actualWidthCodeMatches,  // #3372
+        buildActualWidthIndex: buildActualWidthIndex,    // #3372
+        resolveCutWidth: resolveCutWidth,                // #3372
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
@@ -3089,6 +3163,70 @@
             self.jumboWidthByMaterial = map;
             self.toleranceByMaterial = tol;
             self.materialNameById = names;
+        });
+    };
+
+    // #3372: справочник «Фактическая ширина резки» → this.actualWidthIndex.
+    // Таблица/колонки резолвятся по имени из _metaAll (схемоустойчиво при пересборке
+    // БД). Главное значение записи (r[0]) — фактическая ширина; «Ширина в заказе» —
+    // номинал; «Код» — условие применения. Нет таблицы/доступа → пустой индекс
+    // (фича тихо деградирует к номиналу).
+    AtexProductionPlanning.prototype.loadActualWidths = function() {
+        var self = this;
+        this.actualWidthIndex = {};
+        var meta = tableByName(this._metaAll || [], 'Фактическая ширина резки');
+        if (!meta) return Promise.resolve();
+        var orderIdx = columnIndex(meta, 'Ширина в заказе');
+        var codeIdx = columnIndex(meta, 'Код');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var list = (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                return {
+                    actual: r[0],
+                    order: orderIdx >= 0 ? r[orderIdx] : null,
+                    code: codeIdx >= 0 ? r[codeIdx] : ''
+                };
+            });
+            self.actualWidthIndex = buildActualWidthIndex(list);
+        }).catch(function() { self.actualWidthIndex = {}; });
+    };
+
+    // #3372: диаметр втулки в дюймах по id записи «Диаметр втулки» (8188 «Дюймы»)
+    // → this.sleeveInchesById = { sleeveId: дюймы }. Контекст для условия 's=…'
+    // фактической ширины. Нет колонки/доступа → пустая карта.
+    AtexProductionPlanning.prototype.loadSleeveInches = function() {
+        var self = this;
+        this.sleeveInchesById = {};
+        var meta = tableByName(this._metaAll || [], 'Диаметр втулки');
+        if (!meta) return Promise.resolve();
+        var inchIdx = columnIndex(meta, 'Дюймы');
+        if (inchIdx < 0) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var raw = (rec.r || [])[inchIdx];
+                if (raw == null || String(raw).trim() === '') return;
+                var n = Number(raw);
+                if (isFinite(n)) map[String(rec.i)] = n;
+            });
+            self.sleeveInchesById = map;
+        }).catch(function() { self.sleeveInchesById = {}; });
+    };
+
+    // #3372: проставить позициям фактическую ширину резки. Номинал заказа
+    // сохраняется в orderWidth (для отображения), а width становится фактической —
+    // её используют раскладка, полосы, Партии ГП и обеспечение (вся геометрия
+    // раскроя). Идемпотентно: резолв всегда от orderWidth. Вызывается после загрузки
+    // позиций, ширин джамбо и справочников 66190/8188.
+    AtexProductionPlanning.prototype.annotatePositionsCutWidth = function() {
+        var self = this;
+        (this.genPositions || []).forEach(function(p) {
+            if (p.orderWidth == null) p.orderWidth = p.width;   // номинал из заказа
+            var ctx = {
+                jumbo: self.jumboWidthByMaterial ? self.jumboWidthByMaterial[String(p.materialId)] : null,
+                inches: self.sleeveInchesById ? self.sleeveInchesById[String(p.sleeveId)] : null
+            };
+            p.width = resolveCutWidth(p.orderWidth, ctx, self.actualWidthIndex);
         });
     };
 
@@ -3700,7 +3838,7 @@
             return {
                 id: String(p.id), position: p, remaining: remaining,
                 rolls: stripSupplyRolls(stripRolls, remaining),
-                label: posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + (p.width || '?') + ' мм')
+                label: posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + ((p.orderWidth != null ? p.orderWidth : p.width) || '?') + ' мм')
             };
         }).filter(function(c) { return c.remaining > 0 && c.rolls > 0; });
         candidates.sort(function(a, b) { return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
@@ -4758,7 +4896,7 @@
             var p = posById[String(s.positionId)] || {};
             return {
                 id: s.positionId == null ? '' : s.positionId,
-                width: p.width || '',
+                width: (p.orderWidth != null ? p.orderWidth : p.width) || '',  // #3372: заказанная ширина (не фактическая)
                 qty: p.qty || '',
                 length: p.length || '',
                 reason: (s && s.reason) || 'без причины'
@@ -5256,8 +5394,8 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         var options = unsup.map(function(p) {
             var remaining = remainingRollsForPosition(p, self.supplies);
-            var base = posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + (p.width || '?') + ' мм');
-            return { id: String(p.id), remaining: remaining, width: p.width,
+            var base = posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + ((p.orderWidth != null ? p.orderWidth : p.width) || '?') + ' мм');
+            return { id: String(p.id), remaining: remaining, width: (p.orderWidth != null ? p.orderWidth : p.width),  // #3372: заказанная ширина
                 label: base + ' · ост. ' + round3(remaining) + ' рул.' };
         }).filter(function(o) { return o.remaining > 0; });
 
@@ -5836,11 +5974,14 @@
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
+                    self.loadActualWidths(),   // #3372: справочник фактической ширины резки (66190)
+                    self.loadSleeveInches(),   // #3372: дюймы втулки по записи 8188 (контекст условия)
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
             })
-            .then(function() { self.resolveCutMaterials(); self.render(); })
+            // #3372: фактическая ширина резки — после загрузки позиций/ширин джамбо/справочников.
+            .then(function() { self.annotatePositionsCutWidth(); self.resolveCutMaterials(); self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
