@@ -1414,11 +1414,9 @@ function ensureXlsx(){
     return new Promise(function(resolve,reject){
         if(window.XLSX) return resolve(window.XLSX);
         var s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-        s.integrity='sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==';
-        s.crossOrigin='anonymous'; s.referrerPolicy='no-referrer';
+        s.src='/js/xlsx0.18.5.full.min.js';   // self-hosted SheetJS (update.conf: js/* → /js/), без зависимости от CDN
         s.onload=function(){ window.XLSX?resolve(window.XLSX):reject(new Error('Парсер Excel не загрузился')); };
-        s.onerror=function(){ reject(new Error('Не удалось загрузить парсер Excel (проверьте сеть)')); };
+        s.onerror=function(){ reject(new Error('Не удалось загрузить парсер Excel')); };
         document.head.appendChild(s);
     });
 }
