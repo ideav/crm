@@ -1501,7 +1501,15 @@ function applyXlsxRange(){
         if(row.some(function(v){ return String(v).trim()!==''; })) out.push(row);
     }
     if(!out.length){ xlsxShowError('В выбранном диапазоне нет данных'); return; }
-    importDoParse({data: out});
+    // issue #3374: распознанные строки кладём в #input как текст (CSV), чтобы их
+    // можно было отредактировать перед загрузкой; дальше идёт обычный текстовый путь
+    // (Papa.parse → importDoParse). Так Excel и текстовый импорт ведут себя одинаково:
+    // содержимое всегда видно и редактируемо в поле ввода.
+    $('#errors').hide();
+    $('#input').val(Papa.unparse(out.map(function(row){
+        return row.map(function(v){ return serializeUploadCellValue(v); });
+    }),{delimiter:$('#delim').val()||','}));
+    importParse();
 }
 
 $(document).on('click','#xlsx-grid td[data-r]',function(e){
