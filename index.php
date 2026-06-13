@@ -1646,7 +1646,7 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 	        header("HTTP/1.0 401 Unauthorized");
             my_die(t9n("[RU]Ошибка авторизации $z"."[EN]Authentication failed in $z"));
         }
-		elseif($z === "my" && isset($_GET["login"])){
+		elseif($z === "my" && isset($_GET["login"]) && (substr(mb_strtolower($_GET["login"]), 0, 2) !== "db")){
 		    if(isset($_COOKIE["idb_".$_GET["login"]])){
         		$data_set = Exec_sql("SELECT u.val FROM ".addslashes($_GET["login"])." tok, ".addslashes($_GET["login"])." u"
             						." WHERE u.t=".USER." AND u.val='".addslashes($_GET["login"])."' AND tok.up=u.id AND tok.val='".addslashes($_COOKIE["idb_".$_GET["login"]])."' AND tok.t=".TOKEN
