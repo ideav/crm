@@ -2115,6 +2115,7 @@ cookie `idb_ateh=…`.
 ### Полезные ссылки
 
 - [StructureRules.md](https://github.com/ideav/crm/blob/main/docs/StructureRules.md) — правила структуры таблиц
+- [connector-1c.md](https://github.com/ideav/crm/blob/main/docs/connector-1c.md) — универсальный коннектор к 1С: рабочее место `connector-1c`, выгрузка структуры (`$metadata`) и данных в JSON через OData для маппинга ИИ-агентом, маппинг типов 1С → Интеграм, инструкция администратору 1С
 - [MCP.md](https://github.com/ideav/crm/blob/main/docs/MCP.md) — описание API (неполное)
 - [Roadmap.md](https://github.com/ideav/crm/blob/main/docs/Roadmap.md) — roadmap с примерами API-вызовов
 - [create_perelidoz.ps1](https://github.com/ideav/crm/blob/main/docs/create_perelidoz.ps1) — эталонный скрипт создания таблиц и данных

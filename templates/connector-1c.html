@@ -1,0 +1,579 @@
+<!--
+    Рабочее место «1С Коннектор» (action: connector-1c).
+    Универсальный коннектор к 1С через стандартный OData-интерфейс:
+    подключается к опубликованной базе, выгружает структуру ($metadata),
+    показывает справочники/документы/регистры с маппингом типов на Интеграм,
+    забирает данные постранично и отдаёт структуру и данные в JSON для
+    последующего маппинга ИИ-агентом. Описание — docs/connector-1c.md.
+-->
+<style>
+.c1c-wrap { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+.c1c-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+.c1c-header h4 { margin: 0; font-size: 1.25rem; color: var(--text-primary); }
+.c1c-btn-icon { background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem; padding: 0.2rem 0.4rem; border-radius: 4px; }
+.c1c-btn-icon:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.c1c-card { background: var(--card-bg, var(--bg-primary)); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
+.c1c-card h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
+.c1c-help-box { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; font-size: 0.9rem; line-height: 1.6; color: var(--text-primary); }
+.c1c-help-box h5 { margin: 0 0 0.5rem; color: var(--text-primary); }
+.c1c-help-box p { margin: 0.4rem 0; }
+.c1c-help-box code { background: var(--bg-primary); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.82rem; }
+.c1c-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+.c1c-field { display: flex; flex-direction: column; flex: 1; min-width: 180px; margin-bottom: 0.5rem; }
+.c1c-field label { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem; }
+.c1c-field input, .c1c-field select { padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; box-sizing: border-box; width: 100%; }
+.c1c-field input:focus, .c1c-field select:focus { outline: none; border-color: var(--color-primary, #1283da); }
+.c1c-btn { padding: 0.45rem 1rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.9rem; font-family: inherit; transition: background 0.15s; }
+.c1c-btn:hover { background: var(--bg-primary); }
+.c1c-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.c1c-btn-primary { background: var(--color-primary, #1283da); color: #fff; border-color: transparent; }
+.c1c-btn-primary:hover { opacity: 0.9; background: var(--color-primary, #1283da); }
+.c1c-btn-sm { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+.c1c-status { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 500; }
+.c1c-status-ok { background: var(--color-success-bg, #d1fae5); color: var(--color-success-text, #065f46); }
+.c1c-status-err { background: var(--color-danger-bg, #fee2e2); color: var(--color-danger-text, #991b1b); }
+.c1c-status-busy { background: var(--color-warning-bg, #fef3c7); color: var(--color-warning-text, #92400e); }
+.c1c-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.c1c-search { flex: 1; min-width: 180px; padding: 0.4rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; box-sizing: border-box; }
+.c1c-table-scroll { max-height: 460px; overflow: auto; border: 1px solid var(--border-color); border-radius: 6px; }
+table.c1c-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.c1c-table thead { background: var(--bg-secondary); position: sticky; top: 0; }
+.c1c-table th, .c1c-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+.c1c-table th { font-weight: 600; color: var(--text-secondary); }
+.c1c-table tr.c1c-ent-row { cursor: pointer; }
+.c1c-table tr.c1c-ent-row:hover { background: var(--bg-secondary); }
+.c1c-badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; background: var(--bg-secondary); color: var(--text-secondary); white-space: nowrap; }
+.c1c-fields { background: var(--bg-secondary); }
+.c1c-fields table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.c1c-fields td, .c1c-fields th { padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border-color); }
+.c1c-fields th { color: var(--text-secondary); font-weight: 600; text-align: left; }
+.c1c-type-map { color: var(--color-primary, #1283da); font-family: monospace; }
+.c1c-log { max-height: 320px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; background: var(--bg-secondary); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; white-space: pre-wrap; }
+.c1c-muted { color: var(--text-secondary); }
+.c1c-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.c1c-modal { background: var(--card-bg, var(--bg-primary)); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem 1.5rem; max-width: 420px; width: 90%; color: var(--text-primary); }
+.c1c-modal h5 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+.c1c-modal-msg { font-size: 0.9rem; line-height: 1.5; margin-bottom: 1.25rem; white-space: pre-wrap; }
+.c1c-modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+</style>
+
+<div class="c1c-wrap">
+    <div class="c1c-header">
+        <h4>🔌 1С Коннектор</h4>
+        <button class="c1c-btn-icon" id="c1c-help-btn" title="Справка"><i class="pi pi-question-circle"></i></button>
+    </div>
+
+    <div class="c1c-help-box" id="c1c-help" style="display:none">
+        <h5>Как пользоваться</h5>
+        <p><b>1.</b> Администратор 1С публикует базу на веб-сервере с галочкой «Публиковать стандартный интерфейс OData» и создаёт пользователя только для чтения. Инструкция — в <code>docs/connector-1c.md</code>.</p>
+        <p><b>2.</b> Введите URL OData-сервиса (например <code>https://сервер/база/odata/standard.odata/</code>), логин и пароль, нажмите «Подключиться». Коннектор загрузит <code>$metadata</code> и покажет справочники, документы и регистры.</p>
+        <p><b>3.</b> Кнопка «Скачать структуру (JSON)» сохраняет описание таблиц и полей с маппингом типов 1С → Интеграм — это вход для ИИ-агента маппинга.</p>
+        <p><b>4.</b> Отметьте нужные таблицы и нажмите «Выгрузить выбранные» — коннектор постранично заберёт данные через OData (<code>$top</code>/<code>$skip</code>) и предложит скачать их в JSON.</p>
+        <p><b>CORS:</b> браузер обращается к 1С напрямую. Сервер 1С должен находиться на том же домене или отдавать заголовки CORS (<code>Access-Control-Allow-Origin</code>). Подробнее — <code>docs/connector-1c.md</code>.</p>
+    </div>
+
+    <div class="c1c-card">
+        <h5>Подключение к 1С (OData)</h5>
+        <div class="c1c-row">
+            <div class="c1c-field" style="flex:2">
+                <label>URL OData-сервиса</label>
+                <input type="text" id="c1c-url" placeholder="https://server/base/odata/standard.odata/" autocomplete="off">
+            </div>
+            <div class="c1c-field">
+                <label>Логин</label>
+                <input type="text" id="c1c-login" placeholder="api_integram" autocomplete="off">
+            </div>
+            <div class="c1c-field">
+                <label>Пароль</label>
+                <input type="password" id="c1c-pass" placeholder="••••" autocomplete="new-password">
+            </div>
+            <button class="c1c-btn c1c-btn-primary" id="c1c-connect-btn">Подключиться</button>
+        </div>
+        <label class="c1c-muted" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.25rem;">
+            <input type="checkbox" id="c1c-remember"> Запомнить URL и логин в этом браузере
+        </label>
+        <div id="c1c-conn-status" style="margin-top:0.75rem"></div>
+    </div>
+
+    <div class="c1c-card" id="c1c-meta-card" style="display:none">
+        <h5>Структура 1С (<span id="c1c-meta-count">0</span> таблиц)</h5>
+        <div class="c1c-toolbar">
+            <input type="text" id="c1c-search" class="c1c-search" placeholder="Поиск по имени или синониму...">
+            <button class="c1c-btn c1c-btn-sm" id="c1c-select-all">Выбрать всё</button>
+            <button class="c1c-btn c1c-btn-sm" id="c1c-select-none">Снять всё</button>
+            <button class="c1c-btn c1c-btn-sm" id="c1c-dl-structure"><i class="pi pi-download"></i> Скачать структуру (JSON)</button>
+        </div>
+        <div class="c1c-table-scroll">
+            <table class="c1c-table" id="c1c-meta-table">
+                <thead>
+                    <tr>
+                        <th style="width:2.5rem"></th>
+                        <th style="width:2rem"></th>
+                        <th>Имя в 1С</th>
+                        <th>Синоним</th>
+                        <th>Тип</th>
+                        <th style="width:5rem">Полей</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="c1c-row" style="margin-top:1rem">
+            <div class="c1c-field" style="max-width:160px">
+                <label>Записей на страницу</label>
+                <input type="number" id="c1c-page-size" value="100" min="1" max="1000">
+            </div>
+            <div class="c1c-field" style="max-width:200px">
+                <label>Лимит на таблицу (0 — все)</label>
+                <input type="number" id="c1c-max-rows" value="0" min="0">
+            </div>
+            <button class="c1c-btn c1c-btn-primary" id="c1c-export-btn">Выгрузить выбранные</button>
+            <button class="c1c-btn" id="c1c-dl-data" disabled><i class="pi pi-download"></i> Скачать данные (JSON)</button>
+        </div>
+    </div>
+
+    <div class="c1c-card" id="c1c-log-card" style="display:none">
+        <h5>Ход выгрузки</h5>
+        <div class="c1c-log" id="c1c-log"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    // ============================================================
+    // Чистые функции (доступны для тестов через window.Connector1C)
+    // ============================================================
+
+    // Маппинг типа OData (Edm.*) на тип Интеграма (см. docs/StructureRules.md).
+    function mapType(edmType, maxLength) {
+        switch (edmType) {
+            case 'Edm.Boolean': return { code: 11, name: 'BOOLEAN' };
+            case 'Edm.Byte':
+            case 'Edm.SByte':
+            case 'Edm.Int16':
+            case 'Edm.Int32':
+            case 'Edm.Int64': return { code: 13, name: 'NUMBER' };
+            case 'Edm.Single':
+            case 'Edm.Double':
+            case 'Edm.Decimal': return { code: 14, name: 'SIGNED' };
+            case 'Edm.Date': return { code: 9, name: 'DATE' };
+            case 'Edm.DateTime':
+            case 'Edm.DateTimeOffset': return { code: 4, name: 'DATETIME' };
+            case 'Edm.Binary': return { code: 10, name: 'FILE' };
+            case 'Edm.Guid': return { code: 3, name: 'SHORT' };
+            case 'Edm.String':
+            default:
+                // Длинные строки (без ограничения или > 127) — CHARS, иначе SHORT.
+                var len = parseInt(maxLength, 10);
+                if (!maxLength || isNaN(len) || len > 127) return { code: 8, name: 'CHARS' };
+                return { code: 3, name: 'SHORT' };
+        }
+    }
+
+    // Тип сущности по префиксу имени OData-набора.
+    function classifyEntity(name) {
+        if (name.indexOf('Catalog_') === 0) return 'Справочник';
+        if (name.indexOf('Document_') === 0) return 'Документ';
+        if (name.indexOf('InformationRegister_') === 0) return 'Регистр сведений';
+        if (name.indexOf('AccumulationRegister_') === 0) return 'Регистр накопления';
+        if (name.indexOf('AccountingRegister_') === 0) return 'Регистр бухгалтерии';
+        if (name.indexOf('CalculationRegister_') === 0) return 'Регистр расчёта';
+        if (name.indexOf('ChartOfCharacteristicTypes_') === 0) return 'План видов характеристик';
+        if (name.indexOf('ChartOfAccounts_') === 0) return 'План счетов';
+        if (name.indexOf('BusinessProcess_') === 0) return 'Бизнес-процесс';
+        if (name.indexOf('Task_') === 0) return 'Задача';
+        if (name.indexOf('ExchangePlan_') === 0) return 'План обмена';
+        if (name.indexOf('Constant_') === 0) return 'Константа';
+        return 'Прочее';
+    }
+
+    // Разбор XML $metadata в плоский список сущностей с полями.
+    function parseMetadata(xmlText) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(xmlText, 'text/xml');
+        if (doc.querySelector('parsererror')) {
+            throw new Error('Не удалось разобрать XML метаданных');
+        }
+        var result = [];
+        var entityTypes = doc.querySelectorAll('EntityType');
+
+        entityTypes.forEach(function(et) {
+            var name = et.getAttribute('Name') || '';
+            if (!name || name.indexOf('StandardODATA_') === 0) return;
+
+            var fields = [];
+            et.querySelectorAll(':scope > Property').forEach(function(prop) {
+                var edmType = prop.getAttribute('Type') || 'Edm.String';
+                var maxLength = prop.getAttribute('MaxLength');
+                var mapped = mapType(edmType, maxLength);
+                fields.push({
+                    name: prop.getAttribute('Name'),
+                    edmType: edmType,
+                    nullable: prop.getAttribute('Nullable') !== 'false',
+                    integramType: mapped.name,
+                    integramCode: mapped.code
+                });
+            });
+            et.querySelectorAll(':scope > NavigationProperty').forEach(function(nav) {
+                fields.push({
+                    name: nav.getAttribute('Name'),
+                    edmType: 'NavigationProperty',
+                    nullable: true,
+                    integramType: 'SHORT',
+                    integramCode: 3,
+                    navigation: true
+                });
+            });
+
+            if (fields.length === 0) return;
+
+            result.push({
+                name: name,
+                synonym: extractSynonym(name),
+                type: classifyEntity(name),
+                fields: fields,
+                checked: false
+            });
+        });
+
+        result.sort(function(a, b) { return a.name.localeCompare(b.name, 'ru'); });
+        return result;
+    }
+
+    // Человекочитаемое имя из набора OData: "Catalog_Номенклатура" → "Номенклатура".
+    function extractSynonym(name) {
+        var idx = name.indexOf('_');
+        return idx >= 0 ? name.substring(idx + 1) : name;
+    }
+
+    window.Connector1C = {
+        mapType: mapType,
+        classifyEntity: classifyEntity,
+        parseMetadata: parseMetadata,
+        extractSynonym: extractSynonym
+    };
+
+    // ============================================================
+    // Состояние и DOM-логика рабочего места
+    // ============================================================
+
+    if (typeof document === 'undefined' || !document.getElementById('c1c-connect-btn')) return;
+
+    var STORAGE_KEY = 'connector1c_' + (typeof db !== 'undefined' ? db : 'default');
+    var odataBaseUrl = '';
+    var authHeader = '';
+    var entities = [];
+    var lastExport = null; // { meta, data, ts }
+
+    function $(id) { return document.getElementById(id); }
+
+    function showModal(title, message) {
+        var overlay = document.createElement('div');
+        overlay.className = 'c1c-modal-overlay';
+        var modal = document.createElement('div');
+        modal.className = 'c1c-modal';
+        var h = document.createElement('h5');
+        h.textContent = title;
+        var p = document.createElement('div');
+        p.className = 'c1c-modal-msg';
+        p.textContent = message;
+        var actions = document.createElement('div');
+        actions.className = 'c1c-modal-actions';
+        var ok = document.createElement('button');
+        ok.className = 'c1c-btn c1c-btn-primary';
+        ok.textContent = 'OK';
+        ok.addEventListener('click', function() { document.body.removeChild(overlay); });
+        actions.appendChild(ok);
+        modal.appendChild(h);
+        modal.appendChild(p);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) document.body.removeChild(overlay); });
+        document.body.appendChild(overlay);
+        ok.focus();
+    }
+
+    function log(msg) {
+        var el = $('c1c-log');
+        var time = new Date().toLocaleTimeString();
+        el.textContent += '[' + time + '] ' + msg + '\n';
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function loadSettings() {
+        try {
+            var raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            var s = JSON.parse(raw);
+            if (s.url) $('c1c-url').value = s.url;
+            if (s.login) $('c1c-login').value = s.login;
+            $('c1c-remember').checked = true;
+        } catch (e) { /* ignore */ }
+    }
+
+    function saveSettings() {
+        try {
+            if ($('c1c-remember').checked) {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    url: $('c1c-url').value.trim(),
+                    login: $('c1c-login').value.trim()
+                }));
+            } else {
+                localStorage.removeItem(STORAGE_KEY);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function setStatus(html, cls) {
+        $('c1c-conn-status').innerHTML = '<span class="c1c-status ' + cls + '">' + html + '</span>';
+    }
+
+    function download(filename, text) {
+        var blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    // ---- Подключение ----
+    async function connect() {
+        var url = $('c1c-url').value.trim().replace(/\/+$/, '');
+        var login = $('c1c-login').value.trim();
+        var pass = $('c1c-pass').value;
+
+        if (!url || !login) {
+            setStatus('Заполните URL и логин', 'c1c-status-err');
+            return;
+        }
+
+        odataBaseUrl = url;
+        authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(login + ':' + pass)));
+        setStatus('Подключаюсь...', 'c1c-status-busy');
+        $('c1c-connect-btn').disabled = true;
+        saveSettings();
+
+        try {
+            var resp = await fetch(url + '/$metadata', {
+                headers: { 'Authorization': authHeader, 'Accept': 'application/xml' }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+            var xmlText = await resp.text();
+            entities = parseMetadata(xmlText);
+
+            $('c1c-meta-count').textContent = entities.length;
+            $('c1c-meta-card').style.display = '';
+            $('c1c-log-card').style.display = '';
+            renderMetaTable();
+            setStatus('✓ Подключено. Найдено ' + entities.length + ' сущностей', 'c1c-status-ok');
+            log('Подключение успешно. Сущностей: ' + entities.length);
+        } catch (err) {
+            setStatus('✗ Ошибка: ' + err.message, 'c1c-status-err');
+            log('ОШИБКА подключения: ' + err.message);
+            showModal('Ошибка подключения', err.message + '\n\nЕсли ошибка похожа на сетевую (Failed to fetch) — вероятно, сервер 1С не отдаёт заголовки CORS. См. docs/connector-1c.md.');
+        } finally {
+            $('c1c-connect-btn').disabled = false;
+        }
+    }
+
+    // ---- Отрисовка таблицы метаданных ----
+    function renderMetaTable() {
+        var tbody = $('c1c-meta-table').querySelector('tbody');
+        tbody.innerHTML = '';
+        var q = $('c1c-search').value.trim().toLowerCase();
+
+        entities.forEach(function(ent, i) {
+            if (q && ent.name.toLowerCase().indexOf(q) === -1 && (ent.synonym || '').toLowerCase().indexOf(q) === -1) return;
+
+            var tr = document.createElement('tr');
+            tr.className = 'c1c-ent-row';
+            tr.dataset.index = i;
+
+            var tdCheck = document.createElement('td');
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = ent.checked;
+            cb.addEventListener('click', function(e) { e.stopPropagation(); });
+            cb.addEventListener('change', function() { ent.checked = cb.checked; });
+            tdCheck.appendChild(cb);
+
+            var tdToggle = document.createElement('td');
+            tdToggle.innerHTML = '<i class="pi pi-angle-right"></i>';
+
+            var tdName = document.createElement('td');
+            tdName.innerHTML = '<strong></strong>';
+            tdName.querySelector('strong').textContent = ent.name;
+
+            var tdSyn = document.createElement('td');
+            tdSyn.className = 'c1c-muted';
+            tdSyn.textContent = ent.synonym || '';
+
+            var tdType = document.createElement('td');
+            tdType.innerHTML = '<span class="c1c-badge"></span>';
+            tdType.querySelector('.c1c-badge').textContent = ent.type;
+
+            var tdFields = document.createElement('td');
+            tdFields.textContent = ent.fields.length;
+
+            tr.appendChild(tdCheck);
+            tr.appendChild(tdToggle);
+            tr.appendChild(tdName);
+            tr.appendChild(tdSyn);
+            tr.appendChild(tdType);
+            tr.appendChild(tdFields);
+
+            tr.addEventListener('click', function() { toggleFields(tr, ent, tdToggle); });
+            tbody.appendChild(tr);
+        });
+    }
+
+    function toggleFields(rowEl, ent, toggleCell) {
+        var next = rowEl.nextElementSibling;
+        if (next && next.classList.contains('c1c-fields-row')) {
+            next.parentNode.removeChild(next);
+            toggleCell.innerHTML = '<i class="pi pi-angle-right"></i>';
+            return;
+        }
+        toggleCell.innerHTML = '<i class="pi pi-angle-down"></i>';
+        var tr = document.createElement('tr');
+        tr.className = 'c1c-fields-row';
+        var td = document.createElement('td');
+        td.colSpan = 6;
+        td.className = 'c1c-fields';
+
+        var rows = ent.fields.map(function(f) {
+            var nm = escapeHtml(f.name);
+            var edm = escapeHtml(f.edmType);
+            var req = f.nullable ? '' : '<b>да</b>';
+            return '<tr><td>' + nm + '</td><td class="c1c-muted">' + edm + '</td>' +
+                   '<td class="c1c-type-map">' + f.integramType + '</td><td>' + req + '</td></tr>';
+        }).join('');
+
+        td.innerHTML = '<table><thead><tr><th>Поле</th><th>Тип 1С</th><th>Тип Интеграм</th><th>Обяз.</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        tr.appendChild(td);
+        rowEl.parentNode.insertBefore(tr, rowEl.nextElementSibling);
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // ---- Структура → JSON ----
+    function structureJson() {
+        return {
+            source: odataBaseUrl,
+            exportedAt: new Date().toISOString(),
+            entities: entities.map(function(e) {
+                return {
+                    name: e.name,
+                    synonym: e.synonym,
+                    type: e.type,
+                    fields: e.fields.map(function(f) {
+                        return {
+                            name: f.name,
+                            edmType: f.edmType,
+                            integramType: f.integramType,
+                            integramCode: f.integramCode,
+                            required: !f.nullable,
+                            navigation: !!f.navigation
+                        };
+                    })
+                };
+            })
+        };
+    }
+
+    // ---- Выгрузка данных ----
+    async function exportSelected() {
+        var selected = entities.filter(function(e) { return e.checked; });
+        if (selected.length === 0) {
+            showModal('Нечего выгружать', 'Отметьте хотя бы одну таблицу.');
+            return;
+        }
+        var pageSize = Math.max(1, parseInt($('c1c-page-size').value, 10) || 100);
+        var maxRows = Math.max(0, parseInt($('c1c-max-rows').value, 10) || 0);
+
+        $('c1c-export-btn').disabled = true;
+        $('c1c-dl-data').disabled = true;
+        log('🚀 Выгрузка ' + selected.length + ' таблиц (по ' + pageSize + ' записей на страницу)...');
+
+        var collected = {};
+        for (var i = 0; i < selected.length; i++) {
+            collected[selected[i].name] = await exportEntity(selected[i], pageSize, maxRows);
+        }
+
+        lastExport = { meta: structureJson(), data: collected, ts: new Date().toISOString() };
+        $('c1c-dl-data').disabled = false;
+        log('✅ Выгрузка завершена. Нажмите «Скачать данные (JSON)».');
+        $('c1c-export-btn').disabled = false;
+    }
+
+    async function exportEntity(entity, pageSize, maxRows) {
+        var rows = [];
+        var skip = 0;
+        log('  📦 ' + entity.name + ' — начинаю...');
+        while (true) {
+            var top = pageSize;
+            if (maxRows > 0) top = Math.min(pageSize, maxRows - rows.length);
+            if (top <= 0) break;
+            var url = odataBaseUrl + '/' + encodeURIComponent(entity.name) +
+                      '?$format=json&$top=' + top + '&$skip=' + skip;
+            try {
+                var resp = await fetch(url, { headers: { 'Authorization': authHeader, 'Accept': 'application/json' } });
+                if (!resp.ok) { log('  ⚠️ ' + entity.name + ' — HTTP ' + resp.status + ', пропускаю'); break; }
+                var data = await resp.json();
+                var records = (data && data.value) || [];
+                if (records.length === 0) break;
+                rows = rows.concat(records);
+                skip += records.length;
+                if (records.length < top) break;
+                if (maxRows > 0 && rows.length >= maxRows) break;
+            } catch (err) {
+                log('  ❌ ' + entity.name + ' — ошибка: ' + err.message);
+                break;
+            }
+        }
+        log('  ✓ ' + entity.name + ' — выгружено ' + rows.length + ' записей');
+        return rows;
+    }
+
+    // ============================================================
+    // Привязка событий
+    // ============================================================
+    $('c1c-help-btn').addEventListener('click', function() {
+        var h = $('c1c-help');
+        h.style.display = h.style.display === 'none' ? '' : 'none';
+    });
+    $('c1c-connect-btn').addEventListener('click', connect);
+    $('c1c-pass').addEventListener('keydown', function(e) { if (e.key === 'Enter') connect(); });
+    $('c1c-search').addEventListener('input', renderMetaTable);
+    $('c1c-select-all').addEventListener('click', function() {
+        entities.forEach(function(e) { e.checked = true; });
+        renderMetaTable();
+    });
+    $('c1c-select-none').addEventListener('click', function() {
+        entities.forEach(function(e) { e.checked = false; });
+        renderMetaTable();
+    });
+    $('c1c-dl-structure').addEventListener('click', function() {
+        if (!entities.length) { showModal('Нет данных', 'Сначала подключитесь к 1С.'); return; }
+        download('1c-structure.json', JSON.stringify(structureJson(), null, 2));
+        log('💾 Структура сохранена в 1c-structure.json');
+    });
+    $('c1c-export-btn').addEventListener('click', exportSelected);
+    $('c1c-dl-data').addEventListener('click', function() {
+        if (!lastExport) { showModal('Нет данных', 'Сначала выгрузите выбранные таблицы.'); return; }
+        download('1c-data.json', JSON.stringify(lastExport, null, 2));
+        log('💾 Данные сохранены в 1c-data.json');
+    });
+
+    loadSettings();
+})();
+</script>

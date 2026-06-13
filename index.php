@@ -4760,6 +4760,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$blocks[$block]["top_menu_href"][] = "dir_admin";
 				$blocks[$block]["top_menu"][] = "GS Sync";
 				$blocks[$block]["top_menu_href"][] = "gssync";
+				$blocks[$block]["top_menu"][] = "1С Коннектор";
+				$blocks[$block]["top_menu_href"][] = "connector-1c";
 			}
 			#$blocks[$block]["top_menu"][] = t9n("[RU]Выход[EN]Exit");
 			#$blocks[$block]["top_menu_href"][] = "exit";
