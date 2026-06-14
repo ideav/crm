@@ -142,6 +142,13 @@ table.xlsx-grid td.xr { background: rgba(13, 110, 253, .14); }
 table.xlsx-grid td.xs { outline: 2px solid var(--color-primary, #0d6efd); outline-offset: -2px; font-weight: 600; }
 table.xlsx-grid td.xe { box-shadow: inset 0 0 0 2px var(--color-success, #28a745); }
 table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
+/* Excel-панель: заголовок со значком сворачивания (issue #3382) */
+.xlsx-area-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.xlsx-area-header-title { flex: 1; }
+.xlsx-area-toggle { background: none; border: none; padding: 2px 6px; cursor: pointer; color: var(--text-secondary, #6c757d); font-size: .85rem; line-height: 1; border-radius: 3px; }
+.xlsx-area-toggle:hover { background: var(--bg-secondary, #f1f5f9); color: var(--text-primary, #212529); }
+#xlsx-area.xlsx-collapsed #xlsx-area-body { display: none; }
+#xlsx-area.xlsx-collapsed .xlsx-area-header { margin-bottom: 0 !important; }
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
@@ -226,14 +233,19 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
     </div>
     <div id="log" class="upload-log-bg overflow-auto small shadow-sm p-2 mb-2" style="max-height: 100px; display:none"></div>
     <div id="xlsx-area" class="mb-4 p-2 p-sm-3 shadow" style="display:none">
-        <div class="mb-2"><b>Excel-файл.</b> Выберите лист и кликните <b>стартовую ячейку</b> — будут взяты данные правее и ниже неё. <b>Shift+клик</b> по другой ячейке — задать правую/нижнюю границу.</div>
-        <div class="mb-2 d-flex align-items-center" style="gap:.75rem;flex-wrap:wrap">
-            <label class="mb-0">Лист:&nbsp;<select id="xlsx-sheet" class="form-control d-inline-block" style="width:auto;min-width:140px"></select></label>
-            <span id="xlsx-info" class="small" style="color:var(--text-secondary)"></span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="xlsxClearLimits()">Сбросить границы</button>
+        <div class="xlsx-area-header mb-2">
+            <span class="xlsx-area-header-title"><b>Excel-файл.</b> Выберите лист и кликните <b>стартовую ячейку</b> — будут взяты данные правее и ниже неё. <b>Shift+клик</b> по другой ячейке — задать правую/нижнюю границу.</span>
+            <button type="button" class="xlsx-area-toggle" onclick="xlsxToggleArea()" title="Свернуть / развернуть панель">&#9650;</button>
         </div>
-        <div id="xlsx-grid" class="xlsx-grid-wrap"></div>
-        <div class="mt-2"><button type="button" class="btn btn-primary" onclick="applyXlsxRange()">Применить диапазон</button></div>
+        <div id="xlsx-area-body">
+            <div class="mb-2 d-flex align-items-center" style="gap:.75rem;flex-wrap:wrap">
+                <label class="mb-0">Лист:&nbsp;<select id="xlsx-sheet" class="form-control d-inline-block" style="width:auto;min-width:140px"></select></label>
+                <span id="xlsx-info" class="small" style="color:var(--text-secondary)"></span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="xlsxClearLimits()">Сбросить границы</button>
+            </div>
+            <div id="xlsx-grid" class="xlsx-grid-wrap"></div>
+            <div class="mt-2"><button type="button" class="btn btn-primary" onclick="applyXlsxRange()">Применить диапазон</button></div>
+        </div>
     </div>
     <div id="progress" class="upload-progress-bg shadow p-2" style="display:none"></div>
     <div id="errors" class="upload-errors-bg p-2 mt-1" style="display:none"></div>
@@ -1491,6 +1503,13 @@ function drawXlsxGrid(){
 }
 
 function xlsxClearLimits(){ xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
+
+function xlsxToggleArea(){
+    var area = document.getElementById('xlsx-area');
+    var collapsed = area.classList.toggle('xlsx-collapsed');
+    var btn = area.querySelector('.xlsx-area-toggle');
+    if(btn) btn.innerHTML = collapsed ? '&#9660;' : '&#9650;';
+}
 
 function applyXlsxRange(){
     if(!xlsxRows.length){ xlsxShowError('Лист пуст'); return; }
