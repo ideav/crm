@@ -8611,6 +8611,7 @@ function aiChatError($message, $code=400){
 function aiChatHttpStatusText($code){
     $statuses = array(
         400 => "Bad Request",
+        402 => "Payment Required",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
@@ -8633,6 +8634,214 @@ function getAiAccessibleDbs(){
     if(!in_array("my", $dbs, true))
         $dbs[] = "my";
     return array_values(array_unique($dbs));
+}
+# ============================================================
+# Issue #3392: упрощённый ИИ-агент (/{db}/ai/agent)
+#
+# Новый чат обращается только к нашему фиксированному агенту. Доступ разрешён
+# только пользователю, имя которого совпадает с именем базы. Условие доработки —
+# действующая оплата клиента, которая проверяется запросом к отчёту 237290 и
+# кешируется. Все действия агента ограничены текущей базой данных
+# (см. docs/integram-app-workflow.md).
+# ============================================================
+function handleAiAgentRequest($com){
+    global $z;
+    if($_SERVER["REQUEST_METHOD"] !== "POST")
+        aiAgentError(t9n("[RU]ИИ-агент принимает только POST[EN]The AI agent accepts POST only"), 405);
+    check(); # XSRF
+
+    # Доступ только владельцу базы — пользователю, имя которого совпадает с именем базы.
+    $user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? strtolower((string)$GLOBALS["GLOBAL_VARS"]["user"]) : "";
+    if($user === "" || $user !== strtolower((string)$z))
+        aiAgentError(t9n("[RU]ИИ-агент доступен только владельцу базы — пользователю, имя которого совпадает с именем базы данных.[EN]The AI agent is available only to the database owner — the user whose name matches the database name."), 403);
+
+    # Проверка оплаты (закеширована). При отсутствии/истечении оплаты — ссылка на оплату.
+    $payment = checkAiAgentPayment($z);
+    if(empty($payment["ok"]))
+        aiAgentError($payment["message"], 402, array("paymentStatus" => $payment["status"], "payUrl" => $payment["payUrl"]));
+
+    $message = isset($_POST["message"]) ? trim((string)$_POST["message"]) : "";
+    $attachments = collectAiAgentAttachments();
+    if($message === "" && !count($attachments))
+        aiAgentError(t9n("[RU]Сообщение для ИИ-агента не передано[EN]No message provided for the AI agent"), 400);
+
+    try {
+        $response = callIntegramAgent($z, $message, $attachments, $payment);
+        api_dump(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+    } catch(Exception $e) {
+        $code = (int)$e->getCode();
+        if($code < 400 || $code > 599)
+            $code = 502;
+        aiAgentError($e->getMessage(), $code);
+    }
+}
+function aiAgentError($message, $code=400, $extra=array()){
+    header("HTTP/1.0 ".$code." ".aiChatHttpStatusText($code));
+    $payload = array_merge(array("error" => $message), is_array($extra) ? $extra : array());
+    api_dump(json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+function collectAiAgentAttachments(){
+    $attachments = array();
+    if(empty($_FILES) || !isset($_FILES["files"]))
+        return $attachments;
+    $files = $_FILES["files"];
+    $maxBytes = 10 * 1024 * 1024; # 10 МБ на файл
+    $names = is_array($files["name"]) ? $files["name"] : array($files["name"]);
+    $tmp = is_array($files["tmp_name"]) ? $files["tmp_name"] : array($files["tmp_name"]);
+    $types = is_array($files["type"]) ? $files["type"] : array($files["type"]);
+    $sizes = is_array($files["size"]) ? $files["size"] : array($files["size"]);
+    $errors = is_array($files["error"]) ? $files["error"] : array($files["error"]);
+    foreach($names as $i => $name){
+        if(!isset($errors[$i]) || $errors[$i] !== UPLOAD_ERR_OK)
+            continue;
+        if(!isset($tmp[$i]) || !is_uploaded_file($tmp[$i]))
+            continue;
+        if((int)$sizes[$i] > $maxBytes)
+            continue;
+        $content = @file_get_contents($tmp[$i]);
+        if($content === false)
+            continue;
+        $attachments[] = array(
+            "name" => (string)$name,
+            "type" => (string)$types[$i],
+            "size" => (int)$sizes[$i],
+            "content" => base64_encode($content)
+        );
+    }
+    return $attachments;
+}
+function checkAiAgentPayment($db){
+    $ttl = (int)aiConfigValue(array("AI_AGENT_PAYMENT_CACHE_TTL"));
+    if($ttl <= 0)
+        $ttl = 3600; # кеш на 1 час
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $cacheFile = sys_get_temp_dir()."/ai_agent_pay_".$safeDb.".json";
+    $raw = false;
+    if($safeDb !== "" && is_readable($cacheFile) && (time() - filemtime($cacheFile) < $ttl)){
+        $cached = @file_get_contents($cacheFile);
+        if($cached !== false && trim((string)$cached) !== "")
+            $raw = $cached;
+    }
+    if($raw === false){
+        $fetched = fetchAiAgentPaymentReport($safeDb);
+        if($fetched !== false){
+            $raw = $fetched;
+            if($safeDb !== "")
+                @file_put_contents($cacheFile, $raw);
+        }
+    }
+    return evaluateAiAgentPayment($raw, $safeDb);
+}
+function fetchAiAgentPaymentReport($db){
+    # GET https://ideav.ru/my/report/237290?JSON_KV&FR_DB={db} — срок действия оплаты.
+    $base = aiConfigValue(array("AI_AGENT_PAYMENT_REPORT_URL"));
+    if($base === "")
+        $base = "https://ideav.ru/my/report/237290?JSON_KV&FR_DB=";
+    $url = $base.rawurlencode((string)$db);
+    if(!function_exists("curl_init")){
+        $ctx = stream_context_create(array("http" => array("method" => "GET", "timeout" => 8)));
+        $raw = @file_get_contents($url, false, $ctx);
+        return $raw === false ? false : $raw;
+    }
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if($raw === false || $httpCode < 200 || $httpCode >= 300)
+        return false;
+    return $raw;
+}
+function evaluateAiAgentPayment($raw, $db){
+    $payUrl = aiConfigValue(array("AI_AGENT_PAY_URL"));
+    if($payUrl === "")
+        $payUrl = "https://ideav.ru/my/";
+    $result = array(
+        "ok" => false,
+        "status" => "unknown",
+        "message" => "",
+        "payUrl" => $payUrl,
+        "amount" => 0,
+        "paidAt" => 0,
+        "paidUntil" => 0
+    );
+    $notPaidMessage = t9n("[RU]Доступ к ИИ-агенту не оплачен. Оплатите доступ, чтобы продолжить.[EN]Access to the AI agent is not paid. Please pay to continue.")." ".$payUrl;
+    $data = is_string($raw) && trim($raw) !== "" ? json_decode($raw, true) : null;
+    $row = (is_array($data) && isset($data[0]) && is_array($data[0])) ? $data[0] : null;
+    if(!$row || !isset($row["Paid"]) || trim((string)$row["Paid"]) === ""){
+        $result["status"] = "not_paid";
+        $result["message"] = $notPaidMessage;
+        return $result;
+    }
+    $paidAt = (int)$row["Paid"];
+    $amount = isset($row["Payment"]) ? (float)$row["Payment"] : 0;
+    $result["paidAt"] = $paidAt;
+    $result["amount"] = $amount;
+    # Сумма должна быть 5950 или 12500.
+    $validAmount = (abs($amount - 5950) < 0.01 || abs($amount - 12500) < 0.01);
+    if(!$validAmount){
+        $result["status"] = "not_paid";
+        $result["message"] = $notPaidMessage;
+        return $result;
+    }
+    # Дата не старше месяца.
+    $monthAgo = time() - 31 * 24 * 3600;
+    if($paidAt < $monthAgo){
+        $result["status"] = "expired";
+        $result["message"] = t9n("[RU]Оплаченный период использования ИИ-агента истёк. Продлите оплату, чтобы продолжить.[EN]Your paid AI agent period has expired. Please renew the payment to continue.")." ".$payUrl;
+        return $result;
+    }
+    $result["ok"] = true;
+    $result["status"] = "active";
+    $result["paidUntil"] = $paidAt + 31 * 24 * 3600;
+    return $result;
+}
+function callIntegramAgent($db, $message, $attachments, $payment){
+    # Отправка данных фиксированному ИИ-агенту. Описание API будет предоставлено в
+    # следующем тикете (issue #3392), поэтому endpoint берётся из конфигурации,
+    # а при его отсутствии возвращается подтверждение готовности без вызова.
+    $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
+    $paymentInfo = array("status" => $payment["status"], "paidUntil" => $payment["paidUntil"]);
+    if($endpoint === ""){
+        $names = array();
+        foreach($attachments as $a)
+            $names[] = $a["name"];
+        $note = count($names)
+            ? " ".t9n("[RU]Получены вложения[EN]Attachments received").": ".implode(", ", $names)."."
+            : "";
+        return array(
+            "assistant" => array(
+                "content" => t9n("[RU]ИИ-агент готов к работе, оплата подтверждена. Подключение к API ИИ-агента будет добавлено в следующем тикете.[EN]The AI agent is ready and the payment is confirmed. The AI agent API connection will be added in the next ticket.").$note
+            ),
+            "status" => "pending_api",
+            "payment" => $paymentInfo
+        );
+    }
+    validateAiProviderEndpoint($endpoint);
+    $request = array(
+        "db" => $db,
+        "user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "",
+        "message" => $message,
+        "attachments" => $attachments
+    );
+    $headers = array("Content-Type: application/json; charset=UTF-8", "Accept: application/json", "User-Agent: Integram AI Agent");
+    $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
+    if($token !== "")
+        $headers[] = "Authorization: Bearer ".$token;
+    $raw = aiChatPostJson($endpoint, $request, $headers);
+    $decoded = json_decode($raw, true);
+    $content = extractAiProviderContent($decoded, $raw);
+    if(trim($content) === "")
+        throw new Exception(t9n("[RU]ИИ-агент вернул пустой ответ[EN]The AI agent returned an empty response"), 502);
+    return array(
+        "assistant" => array("content" => $content),
+        "status" => "ok",
+        "payment" => $paymentInfo
+    );
 }
 function getAiChatSettings($settings=array()){
     if(is_string($settings)){
@@ -9749,7 +9958,13 @@ if(Validate_Token())
 	switch ($a)
 	{
         case "ai":
-            handleAiChatRequest($com);
+            # Issue #3392: /{db}/ai/agent — упрощённый чат с фиксированным ИИ-агентом
+            # (доступ только владельцу базы + проверка оплаты). Старый /{db}/ai/chat
+            # сохранён как backend, но скрыт из интерфейса.
+            if(isset($com[3]) && $com[3] === "agent")
+                handleAiAgentRequest($com);
+            else
+                handleAiChatRequest($com);
             break;
 
 		# Issue #3308: серверный прокси для загрузки файла по ссылке в рабочем месте
