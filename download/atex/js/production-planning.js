@@ -1450,7 +1450,9 @@
             var actual = Number(row && row.actual);
             if (!isFinite(order) || order <= 0 || !isFinite(actual) || actual <= 0) return;
             var key = stripWidthKey(order);
-            (index[key] || (index[key] = [])).push({ actual: actual, parsed: parseActualWidthCode(row.code) });
+            // #3408: храним и сам номинал (order), чтобы по факт.ширине восстановить
+            // номинал в сводке полос (resolveNominalWidth) — полосы хранят факт.ширину.
+            (index[key] || (index[key] = [])).push({ order: order, actual: actual, parsed: parseActualWidthCode(row.code) });
         });
         Object.keys(index).forEach(function(key) {
             index[key].sort(function(a, b) {
@@ -1474,6 +1476,28 @@
             }
         }
         return n;
+    }
+
+    // #3408: обратный резолв к resolveCutWidth — по ФАКТИЧЕСКОЙ ширине вернуть номинал
+    // заказа. Полосы резки (Партии ГП) хранят факт.ширину (#3372: p.width = факт.),
+    // поэтому в сводке полос («сначала номинал, потом реальные мм») номинал нужно
+    // восстановить. Берём правило справочника, чья факт.ширина равна заданной и условие
+    // выполнено в этом контексте; условные правила приоритетнее безусловных (как в
+    // прямом резолве). Нет совпадения — возвращаем факт. как есть (ширина не
+    // корректировалась → номинал == факт.).
+    function resolveNominalWidth(actualWidth, ctx, index) {
+        var a = Number(actualWidth);
+        if (!isFinite(a) || a <= 0) return actualWidth;
+        var best = null, bestConditional = -1;
+        Object.keys(index || {}).forEach(function(key) {
+            (index[key] || []).forEach(function(entry) {
+                if (Math.abs(Number(entry.actual) - a) > 1e-6) return;
+                if (!actualWidthCodeMatches(entry.parsed, ctx)) return;
+                var cond = (entry.parsed && entry.parsed.key !== '') ? 1 : 0;
+                if (cond > bestConditional) { bestConditional = cond; best = entry.order; }
+            });
+        });
+        return best != null ? best : a;
     }
 
     function nonStockStripQtyForWidth(layout, width) {
@@ -2829,6 +2853,7 @@
         actualWidthCodeMatches: actualWidthCodeMatches,  // #3372
         buildActualWidthIndex: buildActualWidthIndex,    // #3372
         resolveCutWidth: resolveCutWidth,                // #3372
+        resolveNominalWidth: resolveNominalWidth,        // #3408
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
@@ -6026,8 +6051,13 @@
             if (stripGroups.length) {
                 var jumboWidth = self.jumboWidthByMaterial ? self.jumboWidthByMaterial[String(c.materialId)] : null;
                 var matRows = stripGroups.map(function(g) {
-                    var actual = resolveCutWidth(g.width, { jumbo: jumboWidth, inches: null }, self.actualWidthIndex);
-                    return el('div', { class: 'atex-pp-strip-row', text: formatStripSummaryLine(c, g, actual, runLengthForCut) });
+                    // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
+                    // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
+                    // (обратный резолв по справочнику), а после тире — реальные мм.
+                    var ctx = { jumbo: jumboWidth, inches: null };
+                    var nominal = resolveNominalWidth(g.width, ctx, self.actualWidthIndex);
+                    return el('div', { class: 'atex-pp-strip-row',
+                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) });
                 });
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-material' }, matRows));
             }
