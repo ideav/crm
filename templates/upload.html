@@ -58,6 +58,16 @@ input[type="checkbox"] {
 .cell-empty {
     background-color: var(--bg-secondary);
 }
+/* issue #3390: ячейки из Excel могут содержать переводы строк внутри значения
+   ("59мм … (885мм)\nЛИДЕР ЭТИКЕТКА 37"). По умолчанию white-space:normal схлопывает
+   \n в пробел, и многострочное содержимое выглядит как одна строка. pre-line
+   сохраняет переводы строк (показывает как отдельные визуальные строки внутри
+   одной ячейки/строки таблицы) и при этом не ломает обычный перенос длинного текста.
+   Значение при этом остаётся одной строкой импорта — \n сохраняется в данных. */
+#preview td, #1st2 td {
+    white-space: pre-line;
+    vertical-align: top;
+}
 .upload-tune-bg {
     background-color: var(--bg-secondary);
     color: var(--text-primary);
