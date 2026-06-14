@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<!-- #3354 п.1: визуальная проверка нового дизайна карточки .atex-pp-cut.
+     Разметка построена вручную по новой структуре renderQueue. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; padding: 24px; background: #f4f6f9; }
+  :root {
+    --pp-bg:#fff; --pp-surface:#f1f4f8; --pp-border:#d9dee5; --pp-border-soft:#eef1f5;
+    --pp-accent:#134174; --pp-muted:#6b7785; --pp-warn:#b91c1c; --pp-ok:#15803d;
+    --pp-info-bg:#e8f0fb; --pp-info-text:#23426b;
+  }
+  .atex-pp-queue { max-width: 640px; }
+</style>
+</head>
+<body>
+<div class="atex-pp-queue">
+  <div class="atex-pp-cut is-active" data-cut-id="1">
+    <div class="atex-pp-cut-info">
+      <span class="atex-pp-cut-seq">№ 1</span>
+      <div class="atex-pp-cut-time" role="button" tabindex="0">08:00 – 11:30 (3 ч 30 мин)</div>
+      <span class="atex-pp-cut-name">MW401</span>
+      <span class="atex-pp-cut-winding">OUT</span>
+      <span class="atex-pp-cut-runs">— 300 х 15</span>
+      <span class="atex-pp-cut-supplies">связей: 2</span>
+    </div>
+    <div class="atex-pp-cut-material">
+      <div class="atex-pp-strip-row">MW401 100 x 300 OUT — 99мм х 15 x 4 = 60 шт.</div>
+      <div class="atex-pp-strip-row">MW401 60 x 300 OUT — 59мм х 15 x 10 = 150 шт.</div>
+    </div>
+    <div class="atex-pp-cut-controls">
+      <button class="atex-pp-move" type="button">↑</button>
+      <button class="atex-pp-move" type="button">↓</button>
+      <button class="atex-pp-strips" type="button">Полосы (14)</button>
+    </div>
+  </div>
+
+  <div class="atex-pp-cut" data-cut-id="2">
+    <div class="atex-pp-cut-info">
+      <span class="atex-pp-cut-seq">№ 2</span>
+      <div class="atex-pp-cut-time" role="button" tabindex="0">11:45 – 13:10 (1 ч 25 мин)</div>
+      <span class="atex-pp-cut-name">MW220 длинное название сырья для проверки переноса</span>
+      <span class="atex-pp-cut-winding">IN</span>
+      <span class="atex-pp-cut-runs">— 150 х 8</span>
+      <span class="atex-pp-cut-supplies">нет связей</span>
+    </div>
+    <div class="atex-pp-cut-material">
+      <div class="atex-pp-strip-row">MW220 80 x 150 IN — 79мм х 8 x 6 = 48 шт.</div>
+    </div>
+    <div class="atex-pp-cut-controls">
+      <button class="atex-pp-move" type="button">↑</button>
+      <button class="atex-pp-move" type="button">↓</button>
+      <button class="atex-pp-strips" type="button">Полосы (6)</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

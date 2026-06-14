@@ -2203,6 +2203,63 @@
         return text;
     }
 
+    // ── #3354: компактная шапка карточки и сводка полос ──────────────────────
+    // Метраж прохода для показа: фактический runLength (учёт обеспечения), а при
+    // его отсутствии — сохранённый «Метраж, м» резки.
+    function cutDisplayLength(cut, runLength) {
+        var len = stripNum(runLength);
+        if (len <= 0) len = stripNum(cut && cut.length);
+        return len;
+    }
+
+    // Хвост первой строки карточки: «{длина} х {количество резок}» (#3354 п.1).
+    // Разделитель — кириллическая «х», как в постановке задачи.
+    function formatCutDimensions(cut, runLength) {
+        var len = cutDisplayLength(cut, runLength);
+        var runs = stripNum(cut && cut.plannedRuns);
+        var lenText = len > 0 ? String(round3(len)) : '—';
+        var runsText = runs > 0 ? String(round3(runs)) : '—';
+        return lenText + ' х ' + runsText;
+    }
+
+    // Полосы резки, сгруппированные по ширине → [{ width, count }] (#3354 п.1).
+    // Источник — knifeWidths (развёрнут по qty из cut_strips «Партия ГП»); count —
+    // «кол-во полос» этой ширины. Сортировка по ширине убыв., как в раскладке.
+    function cutStripGroups(cut) {
+        var byKey = {}, order = [];
+        ((cut && cut.knifeWidths) || []).forEach(function(wRaw) {
+            var w = stripNum(wRaw);
+            if (!(w > 0)) return;
+            var key = stripWidthKey(w);
+            if (!byKey[key]) { byKey[key] = { width: w, count: 0 }; order.push(key); }
+            byKey[key].count += 1;
+        });
+        return order.map(function(k) { return byKey[k]; })
+            .sort(function(a, b) { return b.width - a.width; });
+    }
+
+    // Сводная строка полосы данной ширины (#3354 п.1), формат из постановки:
+    // «{сырьё} {ширина} x {длина} {намотка} — {факт.ширина}мм х {резок} x {полос} = {мотков} шт.»
+    // actualWidth — фактическая ширина резки (#3372; при отсутствии правила = номинал);
+    // мотков = резок × полос. Чистая (DOM не трогает) → проверяется модульно.
+    function formatStripSummaryLine(cut, group, actualWidth, runLength) {
+        var material = (cut && cut.materialName) || (cut && cut.materialId != null && String(cut.materialId) !== '' ? '#' + cut.materialId : '—');
+        var width = stripNum(group && group.width);
+        var count = Math.max(0, Math.floor(stripNum(group && group.count)));
+        var len = cutDisplayLength(cut, runLength);
+        var winding = normWinding(cut && cut.winding) || String((cut && cut.winding) == null ? '' : cut.winding).trim();
+        var runs = stripNum(cut && cut.plannedRuns);
+        var actual = stripNum(actualWidth);
+        if (!(actual > 0)) actual = width;
+        var rolls = round3((runs > 0 ? runs : 0) * count);
+        var line = material + ' ' + round3(width) + ' x ' + (len > 0 ? round3(len) : '—');
+        if (winding) line += ' ' + winding;
+        // «х» между мм и резками — кириллическая; «x» между резками и полосами — латинская.
+        line += ' — ' + round3(actual) + 'мм х ' + (runs > 0 ? round3(runs) : '—') +
+                ' x ' + count + ' = ' + rolls + ' шт.';
+        return line;
+    }
+
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
         var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
@@ -2581,15 +2638,18 @@
         return p;
     }
 
-    // #3323: клик по любому месту карточки резки .atex-pp-cut выбирает её (→ боковая
-    // панель «Связанные позиции»). Исключение — клики по самим кнопкам ↑/↓/Полосы и
-    // по панели полос: их перерисовка очереди закрыла бы только что открытую панель
-    // полос. Пустые зоны .atex-pp-cut-controls (отступы и промежутки между кнопками)
-    // теперь тоже считаются кликом по карточке. Чистая (принимает цель клика с
-    // .closest) → проверяется модульным тестом без DOM-движка.
+    // #3323/#3354 п.2: клик по ЛЮБОМУ месту карточки резки .atex-pp-cut выбирает её
+    // (→ боковая панель «Связанные позиции»). Раньше исключались и кнопки ↑/↓/Полосы —
+    // из-за этого клик по ним не обновлял .atex-pp-link (старый дефект п.2). Теперь
+    // выбор резки идёт через лёгкий selectCut (без пересборки очереди), поэтому клики по
+    // кнопкам тоже могут выбирать резку, не закрывая панель полос. Единственное
+    // исключение — клики ВНУТРИ самой панели полос .atex-pp-strip-panel (#3354 п.3): она
+    // не должна сворачиваться/менять выбор ни от каких событий, кроме своего крестика
+    // .atex-pp-strip-close. Чистая (принимает цель клика с .closest) → проверяется
+    // модульным тестом без DOM-движка.
     function cutClickSelectsCut(target) {
         if (!target || typeof target.closest !== 'function') return true;
-        return !(target.closest('button') || target.closest('.atex-pp-strip-panel'));
+        return !target.closest('.atex-pp-strip-panel');
     }
 
     var planning = {
@@ -2734,6 +2794,10 @@
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
         formatCutRuns: formatCutRuns,
+        cutDisplayLength: cutDisplayLength,
+        formatCutDimensions: formatCutDimensions,
+        cutStripGroups: cutStripGroups,
+        formatStripSummaryLine: formatStripSummaryLine,
         resolveTolerance: resolveTolerance
     };
 
@@ -5285,6 +5349,25 @@
         }
     };
 
+    // #3354 п.2/п.3: лёгкий выбор резки без пересборки очереди. Полный render()
+    // заново строит renderQueue → удаляет уже открытую панель полос (.atex-pp-strip-panel),
+    // из-за чего раньше любой клик по карточке её сворачивал. Здесь только: запомнить
+    // выбранную резку, переключить подсветку is-active по карточкам через DOM и обновить
+    // боковую панель «Связанные позиции» (renderLink). Панель полос остаётся нетронутой —
+    // её закрывает лишь собственный крестик .atex-pp-strip-close.
+    AtexProductionPlanning.prototype.selectCut = function(cutId) {
+        this.selectedCutId = cutId;
+        if (this.queueEl) {
+            var cards = this.queueEl.querySelectorAll('.atex-pp-cut');
+            for (var i = 0; i < cards.length; i++) {
+                var card = cards[i];
+                var same = card.dataset && String(card.dataset.cutId) === String(cutId);
+                card.classList.toggle('is-active', !!same);
+            }
+        }
+        this.renderLink();
+    };
+
     // Открыть модалку формы новой резки (#3116 п.1). Содержимое уже отрисовано
     // renderForm; здесь только показываем оверлей.
     AtexProductionPlanning.prototype.openForm = function() {
@@ -5654,37 +5737,21 @@
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
+            var runLengthForCut = runLenByCut[String(c.id)];
             // #3240: контекст тайминга резки для модалки (setup с предыдущей + нормы + старт).
             self._timingByCut[String(c.id)] = buildCutTimingCtx(
                 c, idx > 0 ? activeGroup.cuts[idx - 1] : null, sc,
-                runLenByCut[String(c.id)], windPoints, self.changeTimes
+                runLengthForCut, windPoints, self.changeTimes
             );
             var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
             // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.
             var cutNumTitle = formatCutStartTitle(sc, planBaseMidnightMs) || cutNumberTitle;
-            var info = el('div', { class: 'atex-pp-cut-info' }, [
-                el('span', { class: 'atex-pp-cut-num', title: cutNumTitle, text: formatCutStartTime(sc) }),
-                el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
-                el('span', { class: 'atex-pp-cut-material', title: materialText, text: 'Сырьё: ' + materialText }),
-                el('span', { class: 'atex-pp-cut-winding', text: formatCutWindingLabel(c) }),
-                el('span', { class: 'atex-pp-cut-runs', text: formatCutRuns(c.plannedRuns, runLenByCut[String(c.id)]) }),
-                el('span', { class: 'atex-pp-cut-batch', title: c.materialBatch.label || '', text: c.materialBatch.label || '' }),
-                el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
-                el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
-            ]);
-            cardPanel.appendChild(info);
-            // Выбор резки кликом по всей карточке (#3149, #3323), а не только по
-            // .atex-pp-cut-info. Логика «считать ли клик выбором» вынесена в чистую
-            // cutClickSelectsCut (см. её комментарий и модульный тест #3323).
-            cardPanel.addEventListener('click', function(e) {
-                if (!cutClickSelectsCut(e.target)) return;
-                self.selectedCutId = c.id;
-                self.render();
-            });
 
-            // Строка времени: старт–финиш (длительность) от начала смены 08:00.
+            // #3354 п.1: строка времени резки (старт–финиш окна от начала смены) теперь
+            // живёт в первой строке карточки — между «номером по порядку» и сырьём, а не
+            // отдельным рядом ниже. Клик открывает тайминг и (всплытием) выбирает резку.
+            var timeEl = null;
             if (sc) {
-                var runLengthForCut = runLenByCut[String(c.id)];
                 var scheduleText = formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
                 if (stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
@@ -5695,16 +5762,13 @@
                         windPoints: windPoints
                     });
                 }
-                var timeEl = el('div', {
+                timeEl = el('div', {
                     class: 'atex-pp-cut-time',
                     role: 'button',
                     tabindex: '0',
                     title: 'Показать тайминг резки',
                     text: scheduleText
                 });
-                // Клик по строке времени открывает тайминг И выбирает резку: событие
-                // всплывает к обработчику карточки (selectedCutId → renderLink покажет
-                // «Связанные позиции»). Поэтому здесь НЕ останавливаем всплытие.
                 timeEl.addEventListener('click', function() {
                     self.openCutTiming(c);
                 });
@@ -5714,8 +5778,46 @@
                     e.stopPropagation();
                     self.openCutTiming(c);
                 });
-                cardPanel.appendChild(timeEl);
             }
+
+            // #3354 п.1: первая строка карточки —
+            // {номер по порядку} {время} {название сырья} {тип намотки} — {длина} х {резок};
+            // справа прижата сводка связей (.atex-pp-cut-supplies).
+            var seqText = (c.sequence != null && !isNaN(c.sequence)) ? String(c.sequence) : String(idx + 1);
+            var windingText = normWinding(c.winding) || String(c.winding == null ? '' : c.winding).trim() || '—';
+            var infoChildren = [
+                el('span', { class: 'atex-pp-cut-seq', title: cutNumTitle, text: '№ ' + seqText })
+            ];
+            if (timeEl) infoChildren.push(timeEl);
+            infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
+            infoChildren.push(el('span', { class: 'atex-pp-cut-winding', text: windingText }));
+            infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: '— ' + formatCutDimensions(c, runLengthForCut) }));
+            infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
+            cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
+
+            // #3354 п.1: под первой строкой — сводка полос по ширинам. Контейнер
+            // .atex-pp-cut-material содержит по одной строке .atex-pp-strip-row на ширину:
+            // «{сырьё} {ширина} x {длина} {намотка} — {факт.ширина}мм х {резок} x {полос} = {мотков} шт.».
+            var stripGroups = cutStripGroups(c);
+            if (stripGroups.length) {
+                var jumboWidth = self.jumboWidthByMaterial ? self.jumboWidthByMaterial[String(c.materialId)] : null;
+                var matRows = stripGroups.map(function(g) {
+                    var actual = resolveCutWidth(g.width, { jumbo: jumboWidth, inches: null }, self.actualWidthIndex);
+                    return el('div', { class: 'atex-pp-strip-row', text: formatStripSummaryLine(c, g, actual, runLengthForCut) });
+                });
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-material' }, matRows));
+            }
+
+            // #3354 п.2/п.3: клик по ЛЮБОМУ месту карточки выбирает резку и обновляет
+            // .atex-pp-link, НЕ пересобирая очередь (selectCut вместо render) — поэтому
+            // открытая панель полос (.atex-pp-strip-panel) не сворачивается ни при клике
+            // по этой карточке, ни при клике по другой (закрытие — только её крестиком
+            // .atex-pp-strip-close). cutClickSelectsCut пропускает лишь клики внутри
+            // самой панели полос (она и так гасит всплытие).
+            cardPanel.addEventListener('click', function(e) {
+                if (!cutClickSelectsCut(e.target)) return;
+                self.selectCut(c.id);
+            });
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
