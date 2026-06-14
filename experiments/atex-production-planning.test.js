@@ -1276,7 +1276,7 @@ assertEqual(planning.progressPercent('абв', 10), 0, 'progressPercent: неч�
     // controls(div > buttons ↑/↓/Полосы), strip-panel(div > input/button).
     var card = dom('div', 'atex-pp-cut is-active');
     var info = card.child('div', 'atex-pp-cut-info');
-    var numSpan = info.child('span', 'atex-pp-cut-num');
+    var numSpan = info.child('span', 'atex-pp-cut-seq');
     var timeEl = card.child('div', 'atex-pp-cut-time'); // role=button, но это div
     var controls = card.child('div', 'atex-pp-cut-controls');
     var upBtn = controls.child('button', 'atex-pp-move');
