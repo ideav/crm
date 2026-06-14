@@ -175,45 +175,34 @@
     gap: 8px 12px;
     align-items: center;
 }
-.atex-pp-cut-num {
+.atex-pp-cut-type { font-weight: 600; }
+/* #3354 п.1: «номер по порядку» — ведущий жирный элемент первой строки. */
+.atex-pp-cut-seq {
     flex: 0 0 auto;
     font-weight: 700;
     white-space: nowrap;
 }
-.atex-pp-cut-type { font-weight: 600; }
-.atex-pp-cut-material {
-    flex: 1 1 180px;
-    min-width: 140px;
+/* #3354 п.1: название сырья в первой строке (раньше эту роль играл
+   .atex-pp-cut-material, теперь он — контейнер сводки полос под строкой). */
+.atex-pp-cut-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 280px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 600;
 }
-.atex-pp-cut-seq,
 .atex-pp-cut-winding,
 .atex-pp-cut-runs,
 .atex-pp-cut-date {
     flex: 0 0 auto;
 }
-.atex-pp-cut-batch,
+.atex-pp-cut-winding { font-weight: 600; }
+.atex-pp-cut-runs { white-space: nowrap; }
 .atex-pp-cut-date {
     color: var(--pp-muted);
     white-space: nowrap;
-}
-.atex-pp-cut-batch {
-    flex: 1 1 160px;
-    min-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.atex-pp-cut-status {
-    flex: 0 0 auto;
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--pp-info-bg);
-    color: var(--pp-info-text);
-    text-align: center;
 }
 .atex-pp-cut-supplies {
     margin-left: auto;
@@ -222,12 +211,33 @@
     text-align: right;
     white-space: nowrap;
 }
-/* Строка времени резки (старт–финиш от начала смены) в карточке. */
-.atex-pp-cut-time {
+/* #3354 п.1: сводка полос по ширинам под первой строкой карточки. Контейнер —
+   .atex-pp-cut-material (переиспользован), одна текстовая строка на ширину. */
+.atex-pp-cut-material {
     margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+/* Внутри сводки .atex-pp-strip-row — это обычная текстовая строка-описание полосы,
+   а НЕ табличная сетка из панели редактора полос (та сетка задаётся ниже). */
+.atex-pp-cut-material .atex-pp-strip-row {
+    display: block;
+    grid-template-columns: none;
+    gap: 0;
+    margin-bottom: 0;
+    font-size: 13px;
+    color: var(--pp-info-text);
+    font-variant-numeric: tabular-nums;
+}
+/* #3354 п.1: строка времени резки теперь встроена в первую строку карточки
+   (между номером и сырьём), а не отдельным рядом ниже — поэтому без margin-top. */
+.atex-pp-cut-time {
+    flex: 0 0 auto;
     font-size: 12px;
     color: var(--pp-accent);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     cursor: pointer;
 }
 .atex-pp-cut-time:hover { text-decoration: underline; }
