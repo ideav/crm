@@ -1469,9 +1469,18 @@ function handleExcelFile(file){
             if(saved&&saved.sheet&&xlsxWorkbook.SheetNames.indexOf(saved.sheet)!==-1){
                 $('#xlsx-sheet').val(saved.sheet);
                 renderXlsxSheet(saved.sheet,saved);
+                // issue #3386: восстановили лист/диапазон из сохранённой настройки —
+                // сразу применяем его и сворачиваем панель, чтобы пользователю не
+                // приходилось вручную жать «Применить диапазон». Панель остаётся
+                // доступной (можно развернуть кнопкой ▼) для ручной правки. Если
+                // применять нечего (пустой диапазон), панель не сворачиваем.
+                xlsxSetAreaCollapsed(applyXlsxRange());
             }
-            else
+            else{
                 renderXlsxSheet(xlsxWorkbook.SheetNames[0]);
+                // без сохранённого выбора панель всегда раскрыта — нужен ручной выбор диапазона.
+                xlsxSetAreaCollapsed(false);
+            }
         };
         fr.onerror=function(){ $('#xlsx-area').hide(); xlsxShowError('Ошибка чтения файла'); };
         fr.readAsArrayBuffer(file);
@@ -1546,22 +1555,34 @@ function drawXlsxGrid(){
 
 function xlsxClearLimits(){ xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
 
-function xlsxToggleArea(){
+// Явно задаёт состояние свёрнутости панели #xlsx-area и синхронизирует стрелку
+// кнопки. Используется и кнопкой переключения, и авто-сворачиванием (issue #3386).
+function xlsxSetAreaCollapsed(collapsed){
     var area = document.getElementById('xlsx-area');
-    var collapsed = area.classList.toggle('xlsx-collapsed');
+    if(!area) return;
+    area.classList.toggle('xlsx-collapsed', !!collapsed);
     var btn = area.querySelector('.xlsx-area-toggle');
     if(btn) btn.innerHTML = collapsed ? '&#9660;' : '&#9650;';
 }
 
+function xlsxToggleArea(){
+    var area = document.getElementById('xlsx-area');
+    if(!area) return;
+    xlsxSetAreaCollapsed(!area.classList.contains('xlsx-collapsed'));
+}
+
+// Возвращает true, если диапазон применён (данные нашлись и попали в #input),
+// иначе false — авто-сворачивание панели (issue #3386) опирается на этот признак,
+// чтобы не прятать панель, когда применять нечего.
 function applyXlsxRange(){
-    if(!xlsxRows.length){ xlsxShowError('Лист пуст'); return; }
+    if(!xlsxRows.length){ xlsxShowError('Лист пуст'); return false; }
     var eR=xlsxEndR(), eC=xlsxEndC(), out=[];
     for(var r=xlsxSel.r0;r<=eR;r++){
         var row=[];
         for(var c=xlsxSel.c0;c<=eC;c++) row.push(xlsxRows[r]&&xlsxRows[r][c]!==undefined?xlsxRows[r][c]:'');
         if(row.some(function(v){ return String(v).trim()!==''; })) out.push(row);
     }
-    if(!out.length){ xlsxShowError('В выбранном диапазоне нет данных'); return; }
+    if(!out.length){ xlsxShowError('В выбранном диапазоне нет данных'); return false; }
     // issue #3374: распознанные строки кладём в #input как текст (CSV), чтобы их
     // можно было отредактировать перед загрузкой; дальше идёт обычный текстовый путь
     // (Papa.parse → importDoParse). Так Excel и текстовый импорт ведут себя одинаково:
@@ -1571,6 +1592,7 @@ function applyXlsxRange(){
         return row.map(function(v){ return serializeUploadCellValue(v); });
     }),{delimiter:$('#delim').val()||','}));
     importParse();
+    return true;
 }
 
 $(document).on('click','#xlsx-grid td[data-r]',function(e){
