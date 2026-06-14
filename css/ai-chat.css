@@ -325,6 +325,92 @@
     flex-shrink: 0;
 }
 
+/* Issue #3392: упрощённый ИИ-агент — компоновщик с иконками */
+.ai-chat-composer {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.ai-agent-composer-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.ai-agent-composer-row textarea {
+    flex: 1;
+    min-height: 42px;
+    max-height: 160px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.ai-chat-icon-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ai-agent-send {
+    color: var(--button-primary);
+}
+
+.ai-agent-attachments {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.6rem;
+    padding: 0;
+}
+
+.ai-agent-attachments:empty {
+    display: none;
+}
+
+.ai-agent-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+}
+
+.ai-agent-attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.ai-agent-attachment-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.85rem;
+}
+
+.ai-agent-attachment-remove:hover {
+    color: var(--button-primary);
+}
+
+.ai-chat-message-pay {
+    display: inline-block;
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--button-primary);
+}
+
 @media (max-width: 600px) {
     .ai-chat-panel {
         width: 100vw;
