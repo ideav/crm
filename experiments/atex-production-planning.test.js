@@ -1081,13 +1081,50 @@ assertEqual(sched[1], { cutId:'B', startMin:485.2, finishMin:489.2, setupMin:2, 
 var schedPlannedRuns = planning.buildSchedule([
   { id:'C', plannedRuns:3 }
 ], { windPoints: pts, runLengthByCut: { C:600 }, shiftStartMin: 480 });
-assertEqual(schedPlannedRuns[0], { cutId:'C', startMin:482, finishMin:494, setupMin:2, durationMin:12 },
-    'buildSchedule #3229: длительность очереди учитывает Кол-во план');
+// #3401: лидер 2 заправляется перед КАЖДОЙ из 3 резок → setup = 2 × 3 = 6 (было 2).
+assertEqual(schedPlannedRuns[0], { cutId:'C', startMin:486, finishMin:498, setupMin:6, durationMin:12 },
+    'buildSchedule #3401: лидер учитывается на каждую резку (setup = лидер × Кол-во план)');
 var schedStoredDuration = planning.buildSchedule([
   { id:'D', duration:12.5 }
 ], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 });
 assertEqual(schedStoredDuration[0], { cutId:'D', startMin:482, finishMin:494.5, setupMin:2, durationMin:12.5 },
     'buildSchedule #3229: cut_duration используется как fallback, если метраж отчёта отсутствует');
+
+// ── #3401: лидер (BETWEEN_CUTS) учитывается перед КАЖДОЙ резкой цуга ──
+// setupBreakdown множит лидер на «Кол-во план» (число резок цуга); переналадка — один раз.
+assertEqual(planning.setupBreakdown(null, { plannedRuns:3 }, null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:6}],
+    'setupBreakdown #3401: первая резка цуга из 3 → лидер 2 × 3 = 6');
+assertEqual(planning.setupBreakdown(toBase, toClone({materialId:'2', plannedRuns:4}), null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:8}, {code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    'setupBreakdown #3401: лидер 2 × 4 = 8 + одна переналадка сырья 15');
+// Без «Кол-во план» (0/пусто) лидер остаётся одинарным (поведение до #3401).
+assertEqual(planning.setupBreakdown(null, {}, null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}],
+    'setupBreakdown #3401: без Кол-во план → один лидер (fallback)');
+// buildSchedule: окно резки растёт на лидер × (Кол-во план − 1) относительно прежнего одинарного лидера.
+var sched3401 = planning.buildSchedule([
+  { id:'A', materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60, plannedRuns:2 },
+  { id:'B', materialId:'2', winding:'IN', batchId:'b', knifeCount:4, knifeWidths:[60], rollerWidth:60, plannedRuns:3 }
+], { windPoints: pts, runLengthByCut: { A:600, B:600 }, shiftStartMin: 480 });
+// A: setup = лидер 2 × 2 = 4; намотка 4 × 2 = 8 → 484–492.
+assertEqual(sched3401[0], { cutId:'A', startMin:484, finishMin:492, setupMin:4, durationMin:8 },
+    'buildSchedule #3401: A (2 резки) — лидер 2 × 2 = 4');
+// B: setup = лидер 2 × 3 = 6 + смена сырья 15 = 21; намотка 4 × 3 = 12 → старт 492+21=513.
+assertEqual(sched3401[1], { cutId:'B', startMin:513, finishMin:525, setupMin:21, durationMin:12 },
+    'buildSchedule #3401: B (3 резки) — лидер 2 × 3 = 6 + переналадка 15');
+// splitMachineQueue: лидер входит в стоимость прохода (perPass + leader), раскладывается по дням.
+var seg3401 = planning.splitMachineQueue([{ id:'A' }],
+    { dayStartMin:0, dayEndMin:1000, times:{ BETWEEN_CUTS:3 }, perPassByCut:{ A:10 }, runsByCut:{ A:4 } });
+assertEqual(seg3401.map(function(s){ return { c:s.cutId, runs:s.runs, dur:s.durationMin, setup:s.setupMin }; }),
+    [{ c:'A', runs:4, dur:52, setup:0 }],
+    'splitMachineQueue #3401: 4 прохода × (10 намотка + 3 лидер) = 52 мин');
+// Разбиение по дням: каждый проход стоит perPass+leader, поэтому в день влезает меньше проходов.
+var segDays3401 = planning.splitMachineQueue([{ id:'A' }],
+    { dayStartMin:0, dayEndMin:30, times:{ BETWEEN_CUTS:5 }, perPassByCut:{ A:5 }, runsByCut:{ A:5 } });
+assertEqual(segDays3401.map(function(s){ return { day:s.dayOffset, runs:s.runs }; }),
+    [{ day:0, runs:3 }, { day:1, runs:2 }],
+    'splitMachineQueue #3401: проход = 5+5=10 мин → в окно 30 мин влезает 3 прохода, остаток на след. день');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
 // длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
@@ -1886,18 +1923,20 @@ assertEqual(
     ],
     'splitMachineQueue: перелив дня → продолжение на след. день, setup=0 (ножи остаются)'
 );
-// 3) Лидер съедает часть окна; хвост растягивается на 3 дня.
+// 3) #3401: лидер заправляют перед КАЖДОЙ резкой → каждый проход стоит perPass+leader
+// (10+5=15). В окно 100 мин влезает 6 проходов (90 мин); хвост 20 проходов — на 4 дня.
 assertEqual(
     planning.splitMachineQueue(
         [{ id: 'c1', plannedRuns: 20 }],
         { dayStartMin: 0, dayEndMin: 100, leader: 5, times: splitTimes, perPassByCut: { c1: 10 } }
     ),
     [
-        { cutId: 'c1', dayOffset: 0, runs: 9, windowStartMin: 0, startMin: 5, setupMin: 5, durationMin: 90, isContinuation: false, parentCutId: null },
-        { cutId: 'c1', dayOffset: 1, runs: 10, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 100, isContinuation: true, parentCutId: 'c1' },
-        { cutId: 'c1', dayOffset: 2, runs: 1, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 10, isContinuation: true, parentCutId: 'c1' }
+        { cutId: 'c1', dayOffset: 0, runs: 6, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 90, isContinuation: false, parentCutId: null },
+        { cutId: 'c1', dayOffset: 1, runs: 6, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1' },
+        { cutId: 'c1', dayOffset: 2, runs: 6, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1' },
+        { cutId: 'c1', dayOffset: 3, runs: 2, windowStartMin: 4320, startMin: 4320, setupMin: 0, durationMin: 30, isContinuation: true, parentCutId: 'c1' }
     ],
-    'splitMachineQueue: лидер + многодневный хвост; продолжения без setup'
+    'splitMachineQueue #3401: лидер на каждый проход (perPass+leader); хвост по дням, продолжения без setup'
 );
 // 4) Две одинаковые резки: первая заполняет день, вторая (НЕ продолжение) уходит на день 1.
 var splitTwo = planning.splitMachineQueue(

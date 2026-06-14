@@ -1063,12 +1063,23 @@
         return round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
     }
 
-    // Полный setup перед резкой (#3240): лидер между резками (BETWEEN_CUTS, база) +
-    // переналадка с предыдущей (changeoverParts). prev=null (первая резка очереди/дня) →
-    // только лидер. Σ minutes == setupMin расписания buildSchedule. → [{ code, label, minutes }].
+    // #3401: число резок в цуге (в терминологии заказчика общая «резка» состоит из
+    // множества резок — бывших «проходов», см. «Кол-во резок план»). Лидер BETWEEN_CUTS
+    // («лидер между резками») заправляется ПЕРЕД КАЖДОЙ резкой, поэтому его множим на это
+    // число. Нет «Кол-во план»/0 → 1 (как раньше — один лидер на резку без проходов).
+    function cutLeaderRuns(cut){
+        var r = stripNum(cut && cut.plannedRuns);
+        return r > 0 ? Math.round(r) : 1;
+    }
+
+    // Полный setup перед резкой (#3240): лидер между резками (BETWEEN_CUTS, база × число
+    // резок цуга, #3401) + переналадка с предыдущей (changeoverParts). prev=null (первая
+    // резка очереди/дня) → только лидер. Σ minutes == setupMin расписания buildSchedule.
+    // → [{ code, label, minutes }].
     function setupBreakdown(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
-        var leader = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        // #3401: лидер на каждую резку цуга, а не один раз на весь цуг.
+        var leader = (Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0) * cutLeaderRuns(next);
         var parts = [];
         if (leader > 0) parts.push({ code: 'BETWEEN_CUTS', label: 'лидер между резками', minutes: round3(leader) });
         Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
@@ -1822,7 +1833,7 @@
 
     // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
     // полуночи дня 0 (через сутки — следующий рабочий день). setup перед резкой = лидер
-    // (BETWEEN_CUTS) + переналадка с предыдущей (changeoverCost, мин); длительность =
+    // (BETWEEN_CUTS × число резок цуга, #3401) + переналадка с предыдущей (changeoverCost, мин); длительность =
     // намотка прогона × «Кол-во план» либо сохранённая «Длительность, минут» как
     // fallback. Рабочее окно дня — [shiftStartMin, shiftEndMin] (08:00–16:30);
     // резка, не влезающая до конца окна, переносится на 08:00 следующего дня.
@@ -1844,7 +1855,8 @@
         var t = shiftStart;   // день 0, начало смены
         var out = [];
         (cuts || []).forEach(function(c, i){
-            var setup = leader + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
+            // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
+            var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
             var dur = scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             var start = t + setup;
             var day = Math.floor(start / 1440);
@@ -1908,6 +1920,9 @@
     // резку, упирающуюся в конец рабочего окна, обрезаем по числу влезающих проходов;
     // остаток проходов — продолжение с 08:00 следующего дня ТОЙ ЖЕ резки без переналадки
     // (ножи остаются на станке → setup продолжения = 0).
+    // #3401: лидер (BETWEEN_CUTS) заправляют ПЕРЕД КАЖДОЙ резкой цуга — он входит в стоимость
+    // одного прохода (perPass + leader), а не в одноразовый setup. Так лидеры раскладываются
+    // по дням вместе с проходами (а не упираются все в первый день/переполняют окно).
     //   orderedCuts — уже упорядоченная очередь станка (как из orderCuts).
     //   opts: { dayStartMin, dayEndMin, leader, times, perPassByCut:{cutId:мин/проход},
     //           runsByCut:{cutId:проходов} } (perPass/runs можно не задавать — берём из резки).
@@ -1961,17 +1976,20 @@
                 prevPhysical = c;
                 return;
             }
+            // #3401: каждая резка цуга включает свой лидер — добавляем его к стоимости прохода.
+            var perPassEff = perPass + leader;
             while (remaining > 0) {
-                var setup = isCont ? 0 : (leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0));
+                // #3401: setup сегмента — только переналадка с предыдущей резкой; лидер уже в perPassEff.
+                var setup = isCont ? 0 : (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
                 var avail = effCapacity(day) - clock;
-                var maxPasses = Math.floor((avail - setup) / perPass);
+                var maxPasses = Math.floor((avail - setup) / perPassEff);
                 if (maxPasses < 1) {
                     if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
                     maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
                 }
                 var passesNow = Math.min(remaining, maxPasses);
                 var windowStart = day * 1440 + dayStart + clock;
-                var segDur = passesNow * perPass;
+                var segDur = passesNow * perPassEff;
                 segments.push({ cutId: String(cid), dayOffset: day, runs: passesNow,
                     windowStartMin: round3(windowStart), startMin: round3(windowStart + setup),
                     setupMin: round3(setup), durationMin: round3(segDur),
