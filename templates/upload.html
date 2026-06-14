@@ -1246,8 +1246,31 @@ function importDoParse(input){
         else
             reverseMap[sourceMap[j].name]=importMap[sourceMap[j].id];
     }
+    // issue #3389: считаем строку пустой и пропускаем её, только если пусто ГЛАВНОЕ
+    // значение — поле выбранного типа, которое после раскладки по importMap встаёт
+    // первым в выходе. Раньше проверялась первая ВХОДНАЯ колонка (j==='0'), но она
+    // может быть пустой по задумке и вообще не участвовать в загрузке (например,
+    // ведущая запятая в CSV: ,3580,Образец…). Такие строки терять нельзя.
+    function rowCellTrimmed(row,j){
+        var v=chosenType===undefined?input.data[row][sourceMap[j].id]:input.data[row][importMap[sourceMap[j].id]];
+        if(v!==undefined||$('#trim').prop('checked'))
+            v=serializeUploadCellValue(v);
+        if($('#trim').prop('checked')&&v!==' ')
+            v=v.trim();
+        return v;
+    }
+    function isPrimaryEmpty(row){
+        for(var k in sourceMap)
+            if(sourceMap[k].skip===0&&(chosenType===undefined?k==='0':sourceMap[k].id===chosenType))
+                return rowCellTrimmed(row,k)==='';
+        return false;
+    }
     mainloop:for(i in input.data)
         if(!$('#header').prop('checked')||i!=0){
+            if(isPrimaryEmpty(i)){
+                skippedInvalid++;
+                continue mainloop;
+            }
             l++;
             if(autoParent)
                 toImport[l]=Array(serializeUploadCellValue(input.data[i][autoParent-1]));
@@ -1270,12 +1293,6 @@ function importDoParse(input){
                     if($('#trim').prop('checked'))
                         if(val!==' ')
                             val=val.trim();
-                    if(j==='0'&&val===''){
-                        skippedInvalid++;
-                        l--;
-                        toImport.pop();
-                        continue mainloop;
-                    }
                     if(formulas[sourceMap[j].id]){
                         expr=formulas[sourceMap[j].id].replace(/\[(.+?)\]/mug,function($1,$2){
                                 if(reverseMap[$2]!==undefined)
