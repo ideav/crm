@@ -959,6 +959,10 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 $('#createParent').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
                 if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
                     selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
+                // issue #3384: запоминаем сохранённый выбор листа/диапазона Excel, чтобы
+                // применить его при следующей загрузке .xlsx. Сбрасываем в null, когда у
+                // настройки его нет — иначе он «протёк» бы на другой набор.
+                xlsxSavedSel=(uploadSets[chosenSet]&&uploadSets[chosenSet].xlsx)?uploadSets[chosenSet].xlsx:null;
                 break;
                 
             case 'base':
@@ -997,6 +1001,15 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     saveSet['autoParent']=autoParent;
                 if($('#searchParent').val().length>0)
                     saveSet['searchParent']=$('#searchParent').attr('up-id');
+                // issue #3384: сохраняем настройку импорта из Excel — лист, старт и
+                // границы справа/снизу — чтобы при повторной загрузке того же файла
+                // диапазон восстанавливался автоматически. Если книга сейчас не
+                // загружена (повторное сохранение без выбора Excel) — переносим ранее
+                // сохранённый блок, чтобы не потерять его.
+                if(xlsxWorkbook&&xlsxRows.length)
+                    saveSet['xlsx']={sheet:$('#xlsx-sheet').val(),r0:xlsxSel.r0,c0:xlsxSel.c0,r1:xlsxSel.r1,c1:xlsxSel.c1};
+                else if(uploadSets[chosenSet]&&uploadSets[chosenSet].xlsx)
+                    saveSet['xlsx']=uploadSets[chosenSet].xlsx;
                 if(json.object)
                     intApi('POST','_m_set/'+json.object[0].id+'?JSON&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
                 else
@@ -1418,6 +1431,10 @@ function escape(htmlStr){
 // диапазон (стартовая ячейка + опц. ограничения справа/снизу), срез кормится в importDoParse
 // — дальше тот же пайплайн, что и для текста (маппинг, формулы, превью, autoParent).
 var xlsxWorkbook=null, xlsxRows=[], xlsxSel={r0:0,c0:0,r1:null,c1:null};
+// issue #3384: выбор листа и диапазона Excel, восстановленный из сохранённой
+// настройки. Применяется при следующей загрузке .xlsx (handleExcelFile), т.к. в
+// момент применения настройки сам файл ещё не выбран. null — нечего восстанавливать.
+var xlsxSavedSel=null;
 var XLSX_GRID_MAX_R=60, XLSX_GRID_MAX_C=40;
 
 function isExcelFile(name){ return /\.(xlsx|xlsm|xlsb|xls)$/i.test(name||''); }
@@ -1446,22 +1463,47 @@ function handleExcelFile(file){
             catch(err){ $('#xlsx-area').hide(); xlsxShowError('Не удалось прочитать Excel: '+err.message); return; }
             if(!xlsxWorkbook.SheetNames.length){ $('#xlsx-area').hide(); xlsxShowError('В файле нет листов'); return; }
             $('#xlsx-sheet').html(xlsxWorkbook.SheetNames.map(function(n){ return '<option>'+escape(n)+'</option>'; }).join(''));
-            renderXlsxSheet(xlsxWorkbook.SheetNames[0]);
+            // issue #3384: если из сохранённой настройки пришёл выбор листа/диапазона и
+            // этот лист есть в книге — восстанавливаем его (один раз), иначе авто-определение.
+            var saved=xlsxSavedSel; xlsxSavedSel=null;
+            if(saved&&saved.sheet&&xlsxWorkbook.SheetNames.indexOf(saved.sheet)!==-1){
+                $('#xlsx-sheet').val(saved.sheet);
+                renderXlsxSheet(saved.sheet,saved);
+            }
+            else
+                renderXlsxSheet(xlsxWorkbook.SheetNames[0]);
         };
         fr.onerror=function(){ $('#xlsx-area').hide(); xlsxShowError('Ошибка чтения файла'); };
         fr.readAsArrayBuffer(file);
     }).catch(function(err){ $('#xlsx-area').hide(); xlsxShowError(err.message); });
 }
 
-function renderXlsxSheet(name){
+function renderXlsxSheet(name,saved){
     var ws=xlsxWorkbook.Sheets[name];
     var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
     var maxC=0; rows.forEach(function(r){ if(r.length>maxC) maxC=r.length; });
     rows.forEach(function(r){ while(r.length<maxC) r.push(''); });
     xlsxRows=rows;
-    var det=xlsxAutoDetectStart(rows);
-    xlsxSel={r0:det.r, c0:det.c, r1:null, c1:null};
+    // issue #3384: восстановленный из сохранённой настройки диапазон ограничиваем
+    // фактическими границами листа (файл мог измениться), иначе — авто-определение.
+    if(saved)
+        xlsxSel=xlsxClampSel(saved,rows.length,maxC);
+    else{
+        var det=xlsxAutoDetectStart(rows);
+        xlsxSel={r0:det.r, c0:det.c, r1:null, c1:null};
+    }
     drawXlsxGrid();
+}
+
+// Приводит сохранённый выбор {r0,c0,r1,c1} к границам листа nR×nC. null у r1/c1
+// означает «до края» и сохраняется; r1≥r0 и c1≥c0 — гарантируем непустой диапазон.
+function xlsxClampSel(saved,nR,nC){
+    var lastR=Math.max(nR-1,0), lastC=Math.max(nC-1,0);
+    function clamp(v,lo,hi){ v=v|0; return v<lo?lo:(v>hi?hi:v); }
+    var r0=clamp(saved.r0,0,lastR), c0=clamp(saved.c0,0,lastC);
+    return {r0:r0, c0:c0,
+        r1:(saved.r1==null)?null:clamp(saved.r1,r0,lastR),
+        c1:(saved.c1==null)?null:clamp(saved.c1,c0,lastC)};
 }
 
 // Стартовая ячейка по умолчанию: первая непустая (слева-направо, сверху-вниз) в строке,
