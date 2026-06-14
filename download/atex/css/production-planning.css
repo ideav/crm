@@ -194,11 +194,15 @@
     font-weight: 600;
 }
 .atex-pp-cut-winding,
+.atex-pp-cut-dash,
 .atex-pp-cut-runs,
 .atex-pp-cut-date {
     flex: 0 0 auto;
 }
 .atex-pp-cut-winding { font-weight: 600; }
+/* #3406 п.3: дефис между намоткой и размерами как самостоятельный flex-элемент —
+   одинаковый gap слева/справа ставит его ровно по центру. */
+.atex-pp-cut-dash { color: var(--pp-muted); }
 .atex-pp-cut-runs { white-space: nowrap; }
 .atex-pp-cut-date {
     color: var(--pp-muted);

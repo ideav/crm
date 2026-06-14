@@ -260,6 +260,27 @@ assertEqual(planning.remainingRollsForPosition({ id: 'p1', qty: 10 }, [
     { positionId: 'p1', rolls: 15 }
 ]), 0, 'remainingRollsForPosition #3231: не уходит ниже нуля');
 
+// ── formatLinkedPositionLabel (#3406 п.1): подпись плашки «Связанные позиции» ──
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1 · 25мм * 450м', qty: 70 }, 'p1', 12, 0),
+    'АТХ-3002/1 · 25мм * 450м · 70 шт. · 12 рул.',
+    'formatLinkedPositionLabel #3406: подпись + Количество позиции (шт.) + рулоны обеспечения');
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1 · 25мм * 450м', qty: 70 }, 'p1', 0, 600),
+    'АТХ-3002/1 · 25мм * 450м · 70 шт. · 600 м',
+    'formatLinkedPositionLabel #3406: без рулонов показывает метраж обеспечения');
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1 · 450м', qty: 5 }, 'p1', 0, 450),
+    'АТХ-3002/1 · 450м · 5 шт.',
+    'formatLinkedPositionLabel #3406: метраж не дублируется, если уже есть в подписи');
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1', qty: 0 }, 'p1', 0, 0),
+    'АТХ-3002/1',
+    'formatLinkedPositionLabel #3406: нулевое Количество и обеспечение → только подпись');
+assertEqual(planning.formatLinkedPositionLabel(undefined, '777', 3, 0),
+    'позиция #777 · 3 рул.',
+    'formatLinkedPositionLabel #3406: нет позиции в списке → fallback «позиция #N»');
+
 // ── stripSupplyRolls (#3320): рулоны обеспечения полосы = min(рулоны полосы, 110% остатка) ──
 assertEqual(planning.stripSupplyRolls(8, 20), 8,
     'stripSupplyRolls #3320: рулоны полосы ≤ 110% остатка → берём рулоны полосы');

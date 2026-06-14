@@ -756,6 +756,22 @@
         return remaining > 0 ? round3(remaining) : 0;
     }
 
+    // Подпись плашки «Связанные позиции» (#3406 п.1): подпись позиции +
+    // её «Количество» (qty шт. — сколько рулонов в позиции заказа) + рулоны/метраж
+    // обеспечения. position — объект из rowsToPositions (может отсутствовать →
+    // fallbackId для «позиция #N»). Чистая (DOM не трогает), проверяется модульно.
+    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage) {
+        var posId = position && position.id != null ? position.id : fallbackId;
+        var label = (position && position.label) || ('позиция #' + posId);
+        var qty = stripNum(position && position.qty);
+        if (qty > 0) label += ' · ' + round3(qty) + ' шт.';
+        var rolls = stripNum(supplyRolls);
+        var foot = stripNum(footage);
+        if (rolls > 0) label += ' · ' + round3(rolls) + ' рул.';
+        else if (foot > 0 && label.indexOf(String(round3(foot)) + 'м') < 0) label += ' · ' + foot + ' м';
+        return label;
+    }
+
     // #3320: кол-во рулонов обеспечения для привязки полосы к позиции заказа.
     // База — рулоны полосы (Кол-во полос × проходов), но не больше 110% от
     // необеспеченного остатка позиции. Отрицательные/нулевые входы → 0.
@@ -2841,6 +2857,7 @@
         rowsToPositions: rowsToPositions,
         positionDimensionsLabel: positionDimensionsLabel,
         remainingRollsForPosition: remainingRollsForPosition,
+        formatLinkedPositionLabel: formatLinkedPositionLabel,
         stripSupplyRolls: stripSupplyRolls,
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
@@ -4238,7 +4255,13 @@
         // всё равно сворачивал панель (#3318 чинил так лишь кнопку удаления). Панель —
         // предок всех контролов в пути всплытия, поэтому stopPropagation здесь надёжно
         // гасит клик до карточки независимо от того, отцепился ли e.target.
-        panel.addEventListener('click', function(e) { e.stopPropagation(); });
+        panel.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // #3406 п.2: клик по панели полос выбирает её резку и обновляет
+            // «Связанные позиции» справа (renderLink), не пересобирая очередь —
+            // правки полос/обеспечения сразу отражаются без перезагрузки.
+            self.selectCut(cut.id);
+        });
         panel.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка полос…' }));
         container.appendChild(panel);
 
@@ -5989,7 +6012,10 @@
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
             infoChildren.push(el('span', { class: 'atex-pp-cut-winding', text: windingText }));
-            infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: '— ' + formatCutDimensions(c, runLengthForCut) }));
+            // #3406 п.3: дефис — отдельный элемент между намоткой и размерами, чтобы
+            // он стоял по центру (равный flex-gap слева и справа): «MR194 IN — 600 х 7».
+            infoChildren.push(el('span', { class: 'atex-pp-cut-dash', text: '—' }));
+            infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: formatCutDimensions(c, runLengthForCut) }));
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
             cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
 
@@ -6089,13 +6115,11 @@
             listWrap.appendChild(el('div', { class: 'atex-pp-empty', text: 'Пока нет связей.' }));
         } else {
             var posById = {};
-            this.positions.forEach(function(p) { posById[p.id] = p.label; });
+            this.positions.forEach(function(p) { posById[p.id] = p; });
             linked.forEach(function(s) {
-                var label = posById[s.positionId] || ('позиция #' + s.positionId);
-                var rolls = stripNum(s.rolls);
+                // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж обеспечения.
                 var foot = supplyFootage(s, self.footageBySupply);
-                if (rolls > 0) label += ' · ' + round3(rolls) + ' рул.';
-                else if (foot > 0 && label.indexOf(String(round3(foot)) + 'м') < 0) label += ' · ' + foot + ' м';
+                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
