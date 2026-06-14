@@ -8832,7 +8832,16 @@ function callIntegramAgent($db, $message, $attachments, $payment){
     $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
     if($token !== "")
         $headers[] = "Authorization: Bearer ".$token;
-    $raw = aiChatPostJson($endpoint, $request, $headers);
+    # Таймаут агент-вызова настраивается отдельно от обычного ИИ-чата (issue #3399):
+    # job агента с тул-коллами бывает дольше 60 c. Дефолт — прежние 60 c, верхняя
+    # граница 600 c, чтобы не подвесить php-fpm. Учитывать также max_execution_time /
+    # request_terminate_timeout / fastcgi_read_timeout на сервере.
+    $agentTimeout = (int)aiConfigValue(array("AI_AGENT_TIMEOUT", "INTEGRAM_AGENT_TIMEOUT"));
+    if($agentTimeout <= 0)
+        $agentTimeout = 60;
+    if($agentTimeout > 600)
+        $agentTimeout = 600;
+    $raw = aiChatPostJson($endpoint, $request, $headers, $agentTimeout);
     $decoded = json_decode($raw, true);
     $content = extractAiProviderContent($decoded, $raw);
     if(trim($content) === "")
@@ -9101,7 +9110,7 @@ function buildAiProviderMessages($payload){
     }
     return $messages;
 }
-function aiChatPostJson($endpoint, $request, $headers){
+function aiChatPostJson($endpoint, $request, $headers, $timeout=60){
     if(!function_exists("curl_init"))
         throw new Exception(t9n("[RU]PHP cURL недоступен для ИИ-запросов[EN]PHP cURL is not available for AI requests"), 503);
     $ch = curl_init($endpoint);
@@ -9110,7 +9119,10 @@ function aiChatPostJson($endpoint, $request, $headers){
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HEADER, false);
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+    $timeout = (int)$timeout;
+    if($timeout <= 0)
+        $timeout = 60;
+    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
     $raw = curl_exec($ch);
     $errno = curl_errno($ch);
     $error = curl_error($ch);
