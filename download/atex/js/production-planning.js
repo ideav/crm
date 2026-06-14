@@ -59,7 +59,19 @@
         strip: 'Полоса',
         finishedBatch: 'Партия ГП',
         sleeveTask: 'Задание на втулки',
-        settings: 'Настройка'
+        settings: 'Настройка',
+        maxStock: 'Максимальный запас'   // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
+    };
+    // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
+    // максимально допустимый запас (число); реквизиты задают комбинацию параметров
+    // «Партии ГП», для которой имеет смысл создавать запас. Резолв по имени.
+    var MAX_STOCK_REQ = {
+        material: 'Вид сырья',
+        width: 'Ширина, мм',
+        length: 'Длина, м',
+        winding: 'Тип намотки',
+        sleeve: 'Диаметр втулки',
+        leader: 'Лидер'
     };
     // Реквизиты подчинённой «Полосы» (up = резка). Резолв по имени.
     var STRIP_REQ = {
@@ -1234,6 +1246,123 @@
     function isStockStrip(strip) {
         if (!strip) return false;
         return truthyFlag(strip.toStock) || stockPurpose(strip.purpose);
+    }
+
+    // ───────── «Максимальный запас» (#3391, table/67113) ─────────
+    // Таблица перечисляет номенклатуры «Партии ГП», которые целесообразно нарезать
+    // впрок. Излишек резки (полоса «Склад»), номенклатуры которого нет в списке,
+    // на склад не идёт — это отход. Чистое ядро ниже классифицирует номенклатуру.
+
+    // Канонический ключ номенклатуры запаса: вид сырья + ширина + длина + намотка.
+    // Диаметр втулки и Лидер в ключ не входят — в контексте добора планирования они,
+    // как правило, неизвестны; на них только доуточняем при наличии у обеих сторон
+    // (см. maxStockMatches). Числа округляются (round3), намотка нормализуется.
+    function maxStockKey(nom) {
+        nom = nom || {};
+        var mat = String(nom.material == null ? '' : nom.material).trim();
+        var w = stripNum(nom.width);
+        var len = windLengthValue(nom.length);
+        return mat + '|' + (w > 0 ? round3(w) : '') + '|' +
+            (len > 0 ? round3(len) : '') + '|' + normWinding(nom.winding);
+    }
+
+    // Разбор строк таблицы «Максимальный запас» (JSON_OBJ) → номенклатуры запаса.
+    // Главное значение (r[0]) — максимально допустимый запас (число); реквизиты —
+    // параметры «Партии ГП». Ссылочные поля (Вид сырья/Втулка/Лидер) разбираем parseRef.
+    function parseMaxStockRows(rows, meta) {
+        if (!meta) return [];
+        var iMat = columnIndex(meta, MAX_STOCK_REQ.material);
+        var iWidth = columnIndex(meta, MAX_STOCK_REQ.width);
+        var iLength = columnIndex(meta, MAX_STOCK_REQ.length);
+        var iWind = columnIndex(meta, MAX_STOCK_REQ.winding);
+        var iSleeve = columnIndex(meta, MAX_STOCK_REQ.sleeve);
+        var iLeader = columnIndex(meta, MAX_STOCK_REQ.leader);
+        return (rows || []).map(function(rec) {
+            var r = (rec && rec.r) || [];
+            function refId(idx) { return (idx >= 0 ? (parseRef(r[idx]).id || '') : ''); }
+            return {
+                material: refId(iMat),
+                width: iWidth >= 0 ? stripNum(r[iWidth]) : 0,
+                length: iLength >= 0 ? windLengthValue(r[iLength]) : 0,
+                winding: iWind >= 0 ? normWinding(r[iWind]) : '',
+                sleeve: refId(iSleeve),
+                leader: refId(iLeader),
+                limit: stripNum(r[0])
+            };
+        }).filter(function(n) { return n.material !== '' || n.width > 0; });
+    }
+
+    // Индекс таблицы: { list: [номенклатуры], byKey: {ключ→макс. лимит} }.
+    // empty=true → таблица не настроена/пуста, фича выключена (поведение не меняем).
+    function buildMaxStockIndex(rows, meta) {
+        var list = parseMaxStockRows(rows, meta);
+        var byKey = {};
+        list.forEach(function(n) {
+            var k = maxStockKey(n);
+            if (byKey[k] == null || n.limit > byKey[k]) byKey[k] = n.limit;
+        });
+        return { list: list, byKey: byKey, empty: list.length === 0 };
+    }
+
+    // Настроена ли таблица «Максимальный запас» (есть хотя бы одна номенклатура).
+    function maxStockConfigured(index) {
+        return !!(index && index.list && index.list.length);
+    }
+
+    // Строки таблицы, совпадающие с номенклатурой nom. Совпадение — по ключу
+    // (сырьё/ширина/длина/намотка); втулка/лидер доуточняют, только если заданы
+    // у обеих сторон (иначе игнорируются — мы их в планировании обычно не знаем).
+    function maxStockMatches(index, nom) {
+        if (!index || !index.list) return [];
+        var key = maxStockKey(nom);
+        var sleeve = String((nom && nom.sleeve) == null ? '' : nom.sleeve).trim();
+        var leader = String((nom && nom.leader) == null ? '' : nom.leader).trim();
+        return index.list.filter(function(n) {
+            if (maxStockKey(n) !== key) return false;
+            if (sleeve && n.sleeve && String(n.sleeve) !== sleeve) return false;
+            if (leader && n.leader && String(n.leader) !== leader) return false;
+            return true;
+        });
+    }
+
+    // Максимально допустимый запас для номенклатуры nom (макс. лимит среди совпавших
+    // строк) или null, если номенклатуры нет в списке (нарезать впрок нельзя).
+    function maxStockLimit(index, nom) {
+        var m = maxStockMatches(index, nom);
+        if (!m.length) return null;
+        return m.reduce(function(max, n) {
+            var v = stripNum(n.limit);
+            return v > max ? v : max;
+        }, 0);
+    }
+
+    // Можно ли нарезать номенклатуру nom впрок (на склад). Если таблица не настроена —
+    // true (фича выключена, поведение прежнее). Иначе — есть ли совпадение в списке.
+    function isStockableNomenclature(index, nom) {
+        if (!maxStockConfigured(index)) return true;
+        return maxStockMatches(index, nom).length > 0;
+    }
+
+    // Назначение складской (необеспеченной) полосы с учётом «Максимального запаса»:
+    // «Склад», если номенклатуру целесообразно хранить, иначе «Отходы».
+    function stockStripPurpose(index, nom) {
+        return isStockableNomenclature(index, nom) ? 'Склад' : 'Отходы';
+    }
+
+    // Фильтр ходовых ширин (добор джамбо) по «Максимальному запасу»: оставляем только
+    // те, чья номенклатура (профиль резки + ширина) целесообразна к хранению. Если
+    // таблица не настроена — список не меняем. profile = { material, winding, length }.
+    function filterStockableWidths(index, preferred, profile) {
+        if (!maxStockConfigured(index)) return (preferred || []).slice();
+        profile = profile || {};
+        return (preferred || []).filter(function(p) {
+            return isStockableNomenclature(index, {
+                material: profile.material,
+                width: p && p.width,
+                length: profile.length,
+                winding: profile.winding
+            });
+        });
     }
 
     function positionMap(positions) {
@@ -2742,6 +2871,15 @@
         slitterAffinityKey: slitterAffinityKey,
         batchIsActive: batchIsActive,
         isStockStrip: isStockStrip,
+        maxStockKey: maxStockKey,
+        parseMaxStockRows: parseMaxStockRows,
+        buildMaxStockIndex: buildMaxStockIndex,
+        maxStockConfigured: maxStockConfigured,
+        maxStockMatches: maxStockMatches,
+        maxStockLimit: maxStockLimit,
+        isStockableNomenclature: isStockableNomenclature,
+        stockStripPurpose: stockStripPurpose,
+        filterStockableWidths: filterStockableWidths,
         plannedRunsForLayout: plannedRunsForLayout,
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
@@ -2848,6 +2986,7 @@
         this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
         this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
+        this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
@@ -2925,6 +3064,7 @@
             self.meta.finishedBatch = byName(TABLE.finishedBatch);
             self.meta.sleeveTask = byName(TABLE.sleeveTask);
             self.meta.settings = byName(TABLE.settings);
+            self.meta.maxStock = byName(TABLE.maxStock);   // #3391: необязательная — фича включается её наличием
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -3020,6 +3160,24 @@
         var self = this;
         return this.getJson('report/material_batches?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.materialBatches = rowsToBatches(rows || []);
+        });
+    };
+
+    // #3391: таблица «Максимальный запас» (object/{id}) → индекс целесообразных к
+    // хранению номенклатур. Таблица необязательна: если её нет в метаданных —
+    // индекс пуст (фича выключена, поведение прежнее). Ошибка чтения не валит
+    // загрузку — лишь логируется (планирование работает и без таблицы).
+    AtexProductionPlanning.prototype.loadMaxStock = function() {
+        var self = this;
+        var meta = this.meta.maxStock;
+        this.maxStockIndex = planning.buildMaxStockIndex([], meta);
+        if (!meta) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            self.maxStockIndex = planning.buildMaxStockIndex(rows || [], meta);
+            console.log('[pp] 📦 loadMaxStock: номенклатур запаса:', self.maxStockIndex.list.length);
+        }).catch(function(err) {
+            console.warn('[pp] 📦 loadMaxStock: не удалось прочитать «Максимальный запас»:', err && err.message);
+            self.maxStockIndex = planning.buildMaxStockIndex([], meta);
         });
     };
 
@@ -4193,11 +4351,19 @@
                 row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
 
                 // #3280: «Назначение» — Заказ (на эту Партию ГП есть ссылка из Обеспечения) / Склад.
-                var purpose = (s.id != null && orderedBatchIds[String(s.id)]) ? 'Заказ' : 'Склад';
-                var isOrdered = purpose === 'Заказ';
+                // #3391: необеспеченная полоса идёт на «Склад», только если её номенклатуру
+                // целесообразно хранить (есть в «Максимальном запасе»); иначе — «Отходы».
+                var isOrdered = (s.id != null && orderedBatchIds[String(s.id)]);
+                var purpose = isOrdered ? 'Заказ' : planning.stockStripPurpose(self.maxStockIndex, {
+                    material: cut.materialId,
+                    width: s.width,
+                    length: cut.length,
+                    winding: cut.winding
+                });
+                var purposeMod = isOrdered ? 'order' : (purpose === 'Отходы' ? 'waste' : 'stock');
                 var purposeCell = el('div', { class: 'atex-pp-strip-purpose-cell' }, [
                     el('span', {
-                        class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + (isOrdered ? 'order' : 'stock'),
+                        class: 'atex-pp-strip-purpose atex-pp-strip-purpose--' + purposeMod,
                         text: purpose
                     })
                 ]);
@@ -4285,8 +4451,17 @@
             prefList.innerHTML = '';
             if (prefLoading) { prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' })); return; }
             if (!prefWidths.length) { prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' })); return; }
+            // #3391: добор предлагаем только из номенклатур, целесообразных к хранению
+            // (есть в «Максимальном запасе»); прочие ширины ушли бы в отход, впрок не режем.
+            var stockable = planning.filterStockableWidths(self.maxStockIndex, prefWidths, {
+                material: cut.materialId, winding: cut.winding, length: cut.length
+            });
+            if (!stockable.length) {
+                prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет ходовых, целесообразных к хранению (не в «Максимальном запасе»).' }));
+                return;
+            }
             var rem = (jumbo > 0) ? (jumbo - planning.stripsUsedWidth(strips)) : null;
-            var list = prefWidths.filter(function(p) { return rem == null || (Number(p.width) || 0) <= rem; });
+            var list = stockable.filter(function(p) { return rem == null || (Number(p.width) || 0) <= rem; });
             if (!list.length) { prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет ходовых, помещающихся в остаток.' })); return; }
             list.forEach(function(p) {
                 var b = el('button', { class: 'atex-pp-btn atex-pp-strip-pref-item', type: 'button',
@@ -4474,12 +4649,17 @@
                     var hasOverdue = positionGroup.some(function(p) {
                         return isFinite(p.dueKey) && p.dueKey < planDateKey;
                     });
+                    // #3391: добор джамбо ходовыми — только из номенклатур, целесообразных
+                    // к хранению (есть в «Максимальном запасе»); прочее уходит в отход, не впрок.
+                    var stockablePreferred = planning.filterStockableWidths(
+                        self.maxStockIndex, self.preferredByMaterial[group.key] || [],
+                        { material: mat, winding: group.windDir, length: group.windLength });
                     var res = layoutCore.planLayouts({
                         jumboWidth: jw,
                         positions: positionGroup.map(function(p) {
                             return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
                         }),
-                        preferred: self.preferredByMaterial[group.key] || [],
+                        preferred: stockablePreferred,
                         options: { windowDays: hasOverdue ? WINDOW_DAYS : Infinity, tolerance: self.resolveToleranceMm(mat) }
                     });
                     (res.layouts || []).forEach(function(lay) {
@@ -6068,6 +6248,7 @@
                 return Promise.all([
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadMaterialBatches(),
+                    self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     self.loadGenBatches(), // FIFO-партии для генерации резок + карта batchMaterialById (стоп-лист)
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
@@ -6103,4 +6284,4 @@
 
  
  
-// @version 2026-06-11-issue-3332
+// @version 2026-06-14-issue-3391

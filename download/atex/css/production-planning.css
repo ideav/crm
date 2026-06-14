@@ -344,6 +344,8 @@
 .atex-pp-strip-purpose { text-align: center; font-size: 12px; font-weight: 600; }
 .atex-pp-strip-purpose--order { color: var(--pp-ok); }
 .atex-pp-strip-purpose--stock { color: var(--pp-muted); }
+/* #3391: излишек, номенклатуры которого нет в «Максимальном запасе» → отход. */
+.atex-pp-strip-purpose--waste { color: var(--pp-warn); }
 /* #3320: значок «обеспечить» правее «Склад» — открыть выбор позиции заказа. */
 .atex-pp-strip-supply {
     flex: 0 0 auto;
@@ -708,4 +710,4 @@
     cursor: pointer;
 }
 .atex-pp-skipped-link:hover { text-decoration: none; }
-/* @version 2026-06-10 */
+/* @version 2026-06-14-issue-3391 */
