@@ -8244,7 +8244,7 @@ function Parse_block($block)
 	Get_block_data($block);
 # If there are insertion points, but we haven't got any data, - return
 #	if(preg_match("/\{([A-Za-z0-9\_\*\(\)\'\,\+\-\/]+?)}/", $blocks[$block]["CONTENT"]) && ($i == count($blocks[$block], 1)))
-	if(preg_match("/\{([A-ZА-Я0-9_ \-]*?[^ ;\r\n])}/ui", $blocks[$block]["CONTENT"]) && ($i == count($blocks[$block], 1)))
+	if(preg_match("/\{([A-ZА-Я0-9_ \-]+?[^ ;\r\n])}/ui", $blocks[$block]["CONTENT"]) && ($i == count($blocks[$block], 1)))
 		return "";
 # Get insertion points. Attention: Sub-block pattern has a dot (.) in it!
 #	preg_match_all("/\{([A-Za-z0-9\.&_\*\(\)\'\,\+\-\/]+?)}/", $blocks[$block]["CONTENT"], $temp);
