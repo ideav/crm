@@ -8640,9 +8640,9 @@ function getAiAccessibleDbs(){
 #
 # Новый чат обращается только к нашему фиксированному агенту. Доступ разрешён
 # только пользователю, имя которого совпадает с именем базы. Условие доработки —
-# действующая оплата клиента, которая проверяется запросом к отчёту 237290 и
-# кешируется. Все действия агента ограничены текущей базой данных
-# (см. docs/integram-app-workflow.md).
+# действующая оплата клиента, которая проверяется SQL-запросом напрямую к
+# $connection (issue #3404) и кешируется. Все действия агента ограничены текущей
+# базой данных (см. docs/integram-app-workflow.md).
 # ============================================================
 function handleAiAgentRequest($com){
     global $z;
@@ -8733,10 +8733,56 @@ function checkAiAgentPayment($db){
     return evaluateAiAgentPayment($raw, $safeDb);
 }
 function fetchAiAgentPaymentReport($db){
-    # GET https://ideav.ru/my/report/237290?JSON_KV&FR_DB={db} — срок действия оплаты.
+    # Issue #3404: срок действия оплаты берётся напрямую из базы ($connection)
+    # SQL-запросом, а не из HTTP-отчёта 237290. HTTP-путь сохранён как опция
+    # обратной совместимости — он используется только если задан
+    # AI_AGENT_PAYMENT_REPORT_URL.
     $base = aiConfigValue(array("AI_AGENT_PAYMENT_REPORT_URL"));
-    if($base === "")
-        $base = "https://ideav.ru/my/report/237290?JSON_KV&FR_DB=";
+    if($base !== "")
+        return fetchAiAgentPaymentReportHttp($base, $db);
+    return fetchAiAgentPaymentReportSql($db);
+}
+# Строит SQL-запрос проверки оплаты, подставляя имя базы вместо плейсхолдера
+# {имя БД}. Имя экранируется ($connection при наличии, иначе addslashes), что
+# делает функцию тестируемой без подключения к БД.
+function buildAiAgentPaymentSql($db, $connection=null){
+    $name = ($connection !== null && $connection !== false)
+        ? mysqli_real_escape_string($connection, (string)$db)
+        : addslashes((string)$db);
+    return "SELECT  a967.val as 'Paid',a957.val as 'Payment'\n"
+        ."FROM my a957\n"
+        ."   LEFT JOIN my a967 ON a967.up=a957.id AND a967.t=967\n"
+        ."   LEFT JOIN my a1085 ON a1085.up=a957.id AND a1085.t=1085\n"
+        ."  LEFT JOIN (SELECT a18.id,a18.id a18_id\n"
+        ."  FROM my a18\n"
+        ."    WHERE a18.t=18\n"
+        ."    ) a18 ON a957.up=a18.id\n"
+        ."  LEFT JOIN (SELECT a271.up,a271.val a271_val\n"
+        ."  FROM my a271\n"
+        ."    WHERE a271.t=271\n"
+        ."    ) a271 ON a271.up=a18_id\n"
+        ."WHERE a957.up!=0 AND a957.t!=a957.up AND length(a957.val)!=0 AND a957.t=957  AND a271_val ='".$name."'    AND a1085.val ='c2ai'     \n"
+        ."ORDER BY a967.val DESC LIMIT 1";
+}
+# Выполняет SQL-проверку оплаты к $connection. Возвращает JSON-строку в том же
+# формате, что и прежний отчёт (массив строк с ключами Paid/Payment), чтобы
+# evaluateAiAgentPayment() и кеширование работали без изменений. При ошибке
+# подключения/запроса — false (не кешируется), при отсутствии оплаты — "[]".
+function fetchAiAgentPaymentReportSql($db){
+    global $connection;
+    if(empty($connection))
+        return false;
+    $sql = buildAiAgentPaymentSql($db, $connection);
+    $result = @mysqli_query($connection, $sql);
+    if(!$result)
+        return false;
+    $row = mysqli_fetch_assoc($result);
+    if(is_object($result) && function_exists("mysqli_free_result"))
+        @mysqli_free_result($result);
+    return json_encode(is_array($row) ? array($row) : array(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+function fetchAiAgentPaymentReportHttp($base, $db){
+    # GET https://ideav.ru/my/report/237290?JSON_KV&FR_DB={db} — срок действия оплаты.
     $url = $base.rawurlencode((string)$db);
     if(!function_exists("curl_init")){
         $ctx = stream_context_create(array("http" => array("method" => "GET", "timeout" => 8)));
