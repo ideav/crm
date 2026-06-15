@@ -4740,7 +4740,14 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
-            this.notify('Нет необеспеченных позиций для генерации', 'info');
+            // Новых резок нет, но «Сгенерировать резки» всё равно приводит очередь в
+            // нормальный вид (#3421): пересобираем «Очередность» уже созданных резок
+            // (в т.ч. сохранённых старой генерацией как 6,16,16 → 16,16,6).
+            console.log('[pp] ⚙️ generateCuts: необеспеченных нет — пересобираю очередь существующих резок');
+            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP).then(function(changed) {
+                self.notify(changed ? 'Очередь резок пересобрана (минимум переналадок)'
+                                    : 'Нет необеспеченных позиций; очередь уже в нужном порядке', 'info');
+            });
             return;
         }
         var profiles = groupPositionsByPlanningProfile(unsup);
@@ -4840,11 +4847,13 @@
                 msg.appendChild(document.createTextNode('Пропущено 0.'));
             }
 
-            // Единая кнопка генерации (стратегия «сложные раньше»). inline:true —
-            // оставляем именованную inline-кнопку, не уходя в модалку подтверждения.
+            // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
+            // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
+            // (FATIGUE) по route-score давала ножи по ВОЗРАСТАНИЮ (6,16,16), вопреки
+            // #3130 (ideav/crm#3421). inline:true — именованная inline-кнопка, без модалки.
             self.confirmAction(msg, actionsEl, [
                 { label: 'Сгенерировать', primary: true, inline: true, onConfirm: function() {
-                    self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_FATIGUE);
+                    self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
                 } }
             ]);
         }).catch(function(err) {
@@ -5240,6 +5249,10 @@
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
+            // #3421: свести новые резки с уже существующими в единую правильную очередь
+            // (перемежить по станко-дням, ножи по убыванию). Если порядок уже верный —
+            // no-op без записи. applySplitPlan сам делает reload+render.
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -5357,9 +5370,9 @@
         }
     };
 
-    // DRY-метод сохранения изменённых «Очередностей». pairs = [{cutId, sequence}].
-    // opts.successMessage — если передан, показывается после reload вместо дефолтного;
-    // opts.silent — не показывать уведомление (runPlanning добавит своё).
+    // DRY-метод сохранения изменённых «Очередностей» (ручная перестановка ↑↓).
+    // pairs = [{cutId, sequence}]. opts.successMessage — если передан, показывается
+    // после reload вместо дефолтного; opts.silent — не показывать уведомление.
     // Если pairs пуст — уведомляет и возвращает resolved Promise.
     AtexProductionPlanning.prototype.saveSequences = function(pairs, opts) {
         var self = this;
@@ -5555,83 +5568,61 @@
         });
     };
 
-    // Авто-планирование: запускает planQueues на текущих резках, сохраняет
-    // изменившиеся значения «Очередности» через saveSequences, затем перезагружает
-    // очередь. Подтверждение реализуется без native confirm(): если доступен
-    // window.mainAppController.showDeleteConfirmModal — использует его (Promise);
-    // иначе вставляет inline-блок подтверждения в переданный actionsEl.
-    AtexProductionPlanning.prototype.runPlanning = function(actionsEl, strategy) {
+    // Авто-перестройка «Очередности» загруженных резок (#3421). «Сгенерировать резки»
+    // само планирует очередь — отдельной кнопки нет. Пересобирает порядок каждого
+    // станко-дня (planCutOperations → orderCuts по реальным минутам переналадки #3268,
+    // ножи по убыванию #3130), разбивает по дням (#3280) и сохраняет изменившуюся
+    // «Очередность»/время старта/проходы через applySplitPlan. Тихая (без подтверждения
+    // и без уведомления — их даёт вызывающая генерация). Ручную перестановку (↑↓)
+    // оператор делает ПОСЛЕ генерации. Ничего не изменилось → Promise<false> без записи.
+    // → Promise<boolean> (true, если что-то применилось).
+    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy) {
         var self = this;
-        if (this.busy) return;
+        if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
+        var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes);
 
-        var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
+        // #3280: план разбиения по дням + плановое время старта (t1078). База — дата
+        // из фильтра (.atex-pp-input), без неё — сегодня.
+        var dayWindow = self.workingWindow();
+        var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
+        var windPoints = windingPointsFromTimes(self.opTimes || {});
+        var perPassByCut = {};
+        self.cuts.forEach(function(c) {
+            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
+        });
+        var ops = planCutOperations(self.cuts, {
+            weights: planOptions,
+            times: self.changeTimes,
+            dayStartMin: dayWindow.startMin,
+            dayEndMin: dayWindow.cutEndMin,
+            perPassByCut: perPassByCut,
+            planBaseMidnightMs: planBaseMidnightMs,
+            lunchStartMin: dayWindow.lunchStartMin,
+            lunchDurationMin: dayWindow.lunchDurationMin
+        });
 
-        function doRun(selectedStrategy) {
-            var planOptions = makePlanningOptions(selectedStrategy, self.changeTimes);
+        // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
+        var createParents = {};
+        (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
+        var cutsById = {};
+        self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
+        // Обновляем только то, что реально изменилось (очередность / время старта / проходы).
+        var changedUpdates = (ops.updates || []).filter(function(u) {
+            if (createParents[String(u.cutId)]) return true;
+            var cut = cutsById[String(u.cutId)];
+            if (!cut) return false;
+            var seqChanged = Number(cut.sequence) !== u.sequence;
+            var tsNew = Number(u.planStartTs);
+            var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
+            var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
+            var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
+            return seqChanged || tsChanged || runsChanged;
+        });
 
-            // #3280: план разбиения по дням + плановое время старта (t1078).
-            var dayWindow = self.workingWindow();
-            // #(replan-from-date): ре-планирование строим от даты, выбранной в
-            // фильтре (.atex-pp-input), даже если в прошлом; без даты — от сегодня.
-            var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
-            var windPoints = windingPointsFromTimes(self.opTimes || {});
-            var perPassByCut = {};
-            self.cuts.forEach(function(c) {
-                perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
-            });
-            var ops = planCutOperations(self.cuts, {
-                weights: planOptions,
-                times: self.changeTimes,
-                dayStartMin: dayWindow.startMin,
-                dayEndMin: dayWindow.cutEndMin,
-                perPassByCut: perPassByCut,
-                planBaseMidnightMs: planBaseMidnightMs,
-                lunchStartMin: dayWindow.lunchStartMin,
-                lunchDurationMin: dayWindow.lunchDurationMin
-            });
-
-            // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
-            var createParents = {};
-            (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
-            var cutsById = {};
-            self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-            // Обновляем только то, что реально изменилось (очередность / время старта / проходы).
-            var changedUpdates = (ops.updates || []).filter(function(u) {
-                if (createParents[String(u.cutId)]) return true;
-                var cut = cutsById[String(u.cutId)];
-                if (!cut) return false;
-                var seqChanged = Number(cut.sequence) !== u.sequence;
-                var tsNew = Number(u.planStartTs);
-                var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
-                var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
-                var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
-                return seqChanged || tsChanged || runsChanged;
-            });
-
-            if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
-                self.notify('Очередь уже оптимальна, изменений нет', 'info');
-                return;
-            }
-
-            self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes }).then(function(ok) {
-                if (!ok) return;   // applySplitPlan уже сделал reload+render и (при ошибке) уведомил
-                var total = (ops.updates || []).length + (ops.creates || []).length;
-                var extra = [];
-                if ((ops.creates || []).length) extra.push('перенесено на след. день: ' + ops.creates.length);
-                if ((ops.deletes || []).length) extra.push('слито продолжений: ' + ops.deletes.length);
-                self.notify('Запланировано (' + planningStrategyLabel(planOptions.strategy) + '): ' + total + ' резок' + (extra.length ? ' (' + extra.join('; ') + ')' : ''), 'success');
-            });
+        if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
+            return Promise.resolve(false);
         }
-
-        // Подтверждение без native confirm (общий хелпер confirmAction).
-        if (strategy != null && String(strategy).trim() !== '') {
-            self.confirmAction(MSG_CONFIRM, actionsEl, 'Да, перезаписать', function() { doRun(strategy); });
-            return;
-        }
-        self.confirmAction(MSG_CONFIRM, actionsEl, [
-            { label: 'Мин. переналадок', primary: true, onConfirm: function() { doRun(PLANNING_STRATEGY_SETUP); } },
-            { label: 'Сложные раньше', onConfirm: function() { doRun(PLANNING_STRATEGY_FATIGUE); } }
-        ]);
+        return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes });
     };
 
     // ── Рендеринг ──
@@ -6381,21 +6372,12 @@
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
-        // «Сгенерировать резки» создаёт резки только под НЕобеспеченные позиции и не трогает
-        // уже сохранённую «Очередность». Чтобы пересобрать порядок СУЩЕСТВУЮЩИХ резок по
-        // актуальному правилу (минимум переналадок, #3268; много ножей в начале смены, #3130)
-        // нужен явный триггер — иначе очередь, сохранённая старой генерацией, остаётся как была
-        // (#3418: правка алгоритма #3412/#3415 не доходит до уже созданных резок). runPlanning
-        // перезапускает orderCuts по станкам и сохраняет изменившуюся «Очередность».
-        var planBtn = el('button', { class: 'atex-pp-btn atex-pp-plan-btn', type: 'button', text: 'Автопланирование',
-            title: 'Пересобрать очередь существующих резок: минимум переналадок, много ножей в начале смены' });
-        planBtn.addEventListener('click', function() { self.runPlanning(queueActions); });
-        this.planBtn = planBtn;
+        // Отдельной кнопки «Автопланирование» нет (#3421): «Сгенерировать резки» само
+        // приводит очередь в нормальный вид (autoSequenceQueue в generateCuts).
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
-        queueActions.appendChild(planBtn);
         queueActions.appendChild(addBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),
