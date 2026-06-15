@@ -536,6 +536,20 @@ assertEqual(planning.orderedChangeoverCost(cuts3412), planning.orderedChangeover
     'orderCuts #3412: стоимость переналадки не зависит от исходного порядка (детерминированный минимум)');
 assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (45 мин)');
 
+// #3421: генерация хардкодила стратегию FATIGUE («сложные раньше»), которая по
+// route-score выдаёт ножи по ВОЗРАСТАНИЮ (6,16,16) на данных скриншота — вопреки
+// #3130. Фиксы #3412/#3415 правили SETUP-путь, до генерации не доходили. Поэтому
+// генерация переключена на SETUP (минимум переналадок, ножи по убыванию).
+var cuts3421 = [
+    { id: 'A', materialId: 'MW308', winding: 'OUT', batchId: '', knifeCount: 6,  knifeWidths: w3412([[152, 5], [110, 1]]), rollerWidth: 0 },
+    { id: 'C', materialId: 'MW308', winding: 'OUT', batchId: '', knifeCount: 16, knifeWidths: w3412([[59, 14], [30, 2]]), rollerWidth: 0 },
+    { id: 'B', materialId: 'MR194', winding: 'OUT', batchId: '', knifeCount: 16, knifeWidths: w3412([[59, 14], [30, 2]]), rollerWidth: 0 }
+];
+assertEqual(planning.orderCuts(cuts3421, { strategy: planning.PLANNING_STRATEGY_FATIGUE }).map(function(c){ return c.knifeCount; }), [6, 16, 16],
+    'orderCuts #3421: FATIGUE-стратегия (прежняя генерация) даёт 6,16,16 — почему была проблема');
+assertEqual(planning.orderCuts(cuts3421, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.knifeCount; }), [16, 16, 6],
+    'orderCuts #3421: SETUP-стратегия (новая генерация) даёт 16,16,6');
+
 // #3272/#3270: второй вариант планирования учитывает рост усталости к концу очереди.
 assertEqual(planning.fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #3272: первая позиция без штрафа');
 assertEqual(planning.fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3272: последняя позиция = 1 + alpha');
@@ -2117,29 +2131,27 @@ assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, p
 assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
 assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
 
-// ── #3418: автопланирование пересобирает СОХРАНЁННУЮ очередь существующих резок ──
-// Сценарий со скриншота: три резки одного станко-дня, сохранённые старой генерацией
-// по ВОЗРАСТАНИЮ ножей (6,16,16). Правка алгоритма (#3412/#3415) меняет только новую
-// генерацию — уже созданные резки остаются как были, пока их не пересоберёт явный
-// триггер «Автопланирование» (runPlanning → planCutOperations → orderCuts по станкам).
-// Ожидаем порядок «Очередности»: ножи убывают (16,16,6).
-function cut3418(id, knifeWidths, runs) {
+// ── #3421: «Сгенерировать резки» пересобирает СОХРАНЁННУЮ очередь существующих резок ──
+// Это ядро autoSequenceQueue: planCutOperations по умолчанию (SETUP) на трёх резках
+// станко-дня, сохранённых старой генерацией по возрастанию (6,16,16), возвращает
+// updates в порядке 16,16,6 — без перегенерации резок (нужно для уже «застрявших»).
+function cut3421(id, knifeWidths, runs) {
     return { id: id, slitter: { id: 'm3' }, materialId: id === 'B' ? 'MR194' : 'MW308',
         winding: 'OUT', knifeWidths: knifeWidths, knifeCount: knifeWidths.length,
         plannedRuns: runs, planDate: '1780963200' };
 }
-function w3418(pairs) { var o = []; pairs.forEach(function(pr) { for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
-var ops3418 = planning.planCutOperations(
-    [ cut3418('A', w3418([[152, 5], [110, 1]]), 1),   // 6 ножей, MW308
-      cut3418('C', w3418([[59, 14], [30, 2]]), 1),    // 16 ножей, MW308
-      cut3418('B', w3418([[59, 14], [30, 2]]), 1) ],  // 16 ножей, MR194
+function w3421(pairs) { var o = []; pairs.forEach(function(pr) { for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
+var ops3421 = planning.planCutOperations(
+    [ cut3421('A', w3421([[152, 5], [110, 1]]), 1),   // 6 ножей, MW308
+      cut3421('C', w3421([[59, 14], [30, 2]]), 1),    // 16 ножей, MW308
+      cut3421('B', w3421([[59, 14], [30, 2]]), 1) ],  // 16 ножей, MR194
     { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
       times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
-assertEqual(ops3418.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
-    ['B', 'C', 'A'], 'planCutOperations #3418: автопланирование переставляет 6,16,16 → 16,16,6 (ножи убывают)');
-assertEqual(ops3418.creates, [], 'planCutOperations #3418: один день, без переноса');
-assertEqual(ops3418.deletes, [], 'planCutOperations #3418: без удалений');
+assertEqual(ops3421.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
+    ['B', 'C', 'A'], 'planCutOperations #3421: пересборка переставляет 6,16,16 → 16,16,6 (ножи убывают)');
+assertEqual(ops3421.creates, [], 'planCutOperations #3421: один день, без переноса');
+assertEqual(ops3421.deletes, [], 'planCutOperations #3421: без удалений');
 
 // ── #3280: splitSupplyShares — деление Обеспечения по проходам (рулоны целые) ──
 assertEqual(planning.splitSupplyShares(15, 1500, [10, 5]), [{ rolls: 10, footage: 1000 }, { rolls: 5, footage: 500 }], 'splitSupplyShares: 15 рулонов / 1500 м по 10:5 → 10/1000 и 5/500');
