@@ -2625,12 +2625,10 @@
         ];
     }
 
-    // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
-    function greedySequence(cuts, weights){
-        var pool = (cuts || []).slice();
-        if (!pool.length) return [];
-        pool.sort(function(a, b){ return cmpKey(startKey(a), startKey(b)); });
-        var result = [pool.shift()];
+    // Жадная цепочка от заданного старта: далее argmin changeoverCost, tie-break startKey.
+    function greedyFromStart(start, rest, weights){
+        var pool = (rest || []).slice();
+        var result = [start];
         while (pool.length){
             var cur = result[result.length - 1], bestI = 0, bestCost = Infinity, bestKey = null;
             for (var i = 0; i < pool.length; i++){
@@ -2640,6 +2638,44 @@
             result.push(pool.splice(bestI, 1)[0]);
         }
         return result;
+    }
+    // Суммарная переналадка цепочки (Σ changeoverCost соседей).
+    function chainChangeoverCost(seq, weights){
+        var total = 0;
+        for (var i = 1; i < (seq || []).length; i++) total += changeoverCost(seq[i - 1], seq[i], weights);
+        return round3(total);
+    }
+    // Ряд числа ножей по порядку — критерий «ножи по убыванию» (#3130). Среди равных по
+    // стоимости цепочек предпочитаем ту, чей ряд knifeCount лексикографически больше
+    // (много ножей раньше). Возвращает <0, если ряд a предпочтительнее ряда b.
+    function knifeDescSeq(seq){ return (seq || []).map(function(c){ return Number(c && c.knifeCount) || 0; }); }
+    function cmpKnifeDescSeq(a, b){
+        var n = Math.max(a.length, b.length);
+        for (var i = 0; i < n; i++){ var av = a[i] || 0, bv = b[i] || 0; if (av !== bv) return bv - av; }
+        return 0;
+    }
+    // Лимит полного перебора стартов: при больших очередях остаёмся на одиночном старте
+    // (argmin startKey), чтобы не уходить в O(n³). На станко-день очередь маленькая.
+    var GREEDY_MULTISTART_LIMIT = 60;
+    // Жадная последовательность. Раньше старт жёстко брался argmin startKey (узкий
+    // ролик), из-за чего setup-оптимальная цепочка могла идти по ВОЗРАСТАНИЮ ножей
+    // (6,16,16) вопреки правилу #3130 «много ножей в начале смены» (ideav/crm#3412).
+    // Теперь перебираем все старты, берём минимум суммарной переналадки (#3268), а
+    // среди равных по стоимости — цепочку с ножами по убыванию.
+    function greedySequence(cuts, weights){
+        var pool = (cuts || []).slice();
+        if (pool.length <= 1) return pool;
+        pool.sort(function(a, b){ return cmpKey(startKey(a), startKey(b)); });
+        if (pool.length > GREEDY_MULTISTART_LIMIT) return greedyFromStart(pool[0], pool.slice(1), weights);
+        var best = null, bestCost = Infinity, bestKnife = null;
+        for (var s = 0; s < pool.length; s++){
+            var seq = greedyFromStart(pool[s], pool.slice(0, s).concat(pool.slice(s + 1)), weights);
+            var cost = chainChangeoverCost(seq, weights), knife = knifeDescSeq(seq);
+            if (best === null || cost < bestCost || (cost === bestCost && cmpKnifeDescSeq(knife, bestKnife) < 0)){
+                best = seq; bestCost = cost; bestKnife = knife;
+            }
+        }
+        return best;
     }
     // Внутри последовательности станка число ножей должно убывать к концу дня
     // (ideav/crm#3130): в начале смены ножей много, к вечеру меньше — переналаживать
