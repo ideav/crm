@@ -6381,10 +6381,21 @@
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
+        // «Сгенерировать резки» создаёт резки только под НЕобеспеченные позиции и не трогает
+        // уже сохранённую «Очередность». Чтобы пересобрать порядок СУЩЕСТВУЮЩИХ резок по
+        // актуальному правилу (минимум переналадок, #3268; много ножей в начале смены, #3130)
+        // нужен явный триггер — иначе очередь, сохранённая старой генерацией, остаётся как была
+        // (#3418: правка алгоритма #3412/#3415 не доходит до уже созданных резок). runPlanning
+        // перезапускает orderCuts по станкам и сохраняет изменившуюся «Очередность».
+        var planBtn = el('button', { class: 'atex-pp-btn atex-pp-plan-btn', type: 'button', text: 'Автопланирование',
+            title: 'Пересобрать очередь существующих резок: минимум переналадок, много ножей в начале смены' });
+        planBtn.addEventListener('click', function() { self.runPlanning(queueActions); });
+        this.planBtn = planBtn;
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
+        queueActions.appendChild(planBtn);
         queueActions.appendChild(addBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),

@@ -2117,6 +2117,30 @@ assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, p
 assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
 assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
 
+// ── #3418: автопланирование пересобирает СОХРАНЁННУЮ очередь существующих резок ──
+// Сценарий со скриншота: три резки одного станко-дня, сохранённые старой генерацией
+// по ВОЗРАСТАНИЮ ножей (6,16,16). Правка алгоритма (#3412/#3415) меняет только новую
+// генерацию — уже созданные резки остаются как были, пока их не пересоберёт явный
+// триггер «Автопланирование» (runPlanning → planCutOperations → orderCuts по станкам).
+// Ожидаем порядок «Очередности»: ножи убывают (16,16,6).
+function cut3418(id, knifeWidths, runs) {
+    return { id: id, slitter: { id: 'm3' }, materialId: id === 'B' ? 'MR194' : 'MW308',
+        winding: 'OUT', knifeWidths: knifeWidths, knifeCount: knifeWidths.length,
+        plannedRuns: runs, planDate: '1780963200' };
+}
+function w3418(pairs) { var o = []; pairs.forEach(function(pr) { for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
+var ops3418 = planning.planCutOperations(
+    [ cut3418('A', w3418([[152, 5], [110, 1]]), 1),   // 6 ножей, MW308
+      cut3418('C', w3418([[59, 14], [30, 2]]), 1),    // 16 ножей, MW308
+      cut3418('B', w3418([[59, 14], [30, 2]]), 1) ],  // 16 ножей, MR194
+    { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
+      times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops3418.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
+    ['B', 'C', 'A'], 'planCutOperations #3418: автопланирование переставляет 6,16,16 → 16,16,6 (ножи убывают)');
+assertEqual(ops3418.creates, [], 'planCutOperations #3418: один день, без переноса');
+assertEqual(ops3418.deletes, [], 'planCutOperations #3418: без удалений');
+
 // ── #3280: splitSupplyShares — деление Обеспечения по проходам (рулоны целые) ──
 assertEqual(planning.splitSupplyShares(15, 1500, [10, 5]), [{ rolls: 10, footage: 1000 }, { rolls: 5, footage: 500 }], 'splitSupplyShares: 15 рулонов / 1500 м по 10:5 → 10/1000 и 5/500');
 assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage: 30 }, { rolls: 3, footage: 30 }, { rolls: 3, footage: 30 }], 'splitSupplyShares: остаток рулона по наибольшей дробной части; сумма = 10');
