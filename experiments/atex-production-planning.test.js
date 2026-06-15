@@ -495,6 +495,23 @@ var knifeCuts = [
 assertEqual(planning.orderCuts(knifeCuts).map(function(c){ return c.knifeCount; }), [7, 5, 3], 'orderCuts: ножи убывают к концу дня (7,5,3)');
 assertEqual(planning.byKnifeCountDesc([{ knifeCount: 2, id: 'a' }, { knifeCount: 2, id: 'b' }, { knifeCount: 9, id: 'c' }]).map(function(x){ return x.id; }), ['c', 'a', 'b'], 'byKnifeCountDesc: ↓, равные стабильно');
 
+// #3412: при равной суммарной переналадке очередь должна идти по ножам ↓, а не ↑.
+// Сценарий со скриншота (Станок 3): резки 6, 16, 16 ножей; у малоножевой резки самый
+// узкий ролик → одиночный старт (argmin startKey) выбирал её первой и давал 6,16,16.
+// Цепочка 16,16,6 стоит столько же (мин. переналадка), поэтому ножи должны убывать.
+function w3412(pairs){ var o = []; pairs.forEach(function(pr){ for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
+var cuts3412 = [
+    { id: 'A', materialId: 'MW308', winding: 'OUT', batchId: '', knifeCount: 6,  knifeWidths: w3412([[152, 5], [110, 1]]), rollerWidth: 200 },
+    { id: 'B', materialId: 'MR194', winding: 'OUT', batchId: '', knifeCount: 16, knifeWidths: w3412([[59, 14], [30, 2]]), rollerWidth: 300 },
+    { id: 'C', materialId: 'MW308', winding: 'OUT', batchId: '', knifeCount: 16, knifeWidths: w3412([[59, 14], [30, 2]]), rollerWidth: 300 }
+];
+assertEqual(planning.orderCuts(cuts3412).map(function(c){ return c.knifeCount; }), [16, 16, 6],
+    'orderCuts #3412: при равной переналадке ножи убывают (16,16,6), а не растут (6,16,16)');
+// Минимизация переналадки (#3268) не страдает: цепочка по-прежнему оптимальна по минутам.
+assertEqual(planning.orderedChangeoverCost(cuts3412), planning.orderedChangeoverCost(cuts3412.slice().reverse()),
+    'orderCuts #3412: стоимость переналадки не зависит от исходного порядка (детерминированный минимум)');
+assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (45 мин)');
+
 // #3272/#3270: второй вариант планирования учитывает рост усталости к концу очереди.
 assertEqual(planning.fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #3272: первая позиция без штрафа');
 assertEqual(planning.fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3272: последняя позиция = 1 + alpha');
