@@ -403,6 +403,31 @@
         });
     }
 
+    // #3411: быстрый поиск по очереди резок. Сводит резку к строке поиска: название
+    // сырья, номер, намотка, статус и подписи связанных позиций (linkedLabels — из
+    // rowsToPositions, напр. «1234/5 · 600мм * 1000м»). Совпадение — вхождение КАЖДОГО
+    // слова запроса (регистронезависимо), пустой запрос совпадает со всем. Чистая
+    // функция — связи передаются параметром, чтобы тестировать без контроллера.
+    function cutSearchHaystack(cut, linkedLabels) {
+        var parts = [];
+        if (cut) {
+            if (cut.materialName) parts.push(String(cut.materialName));
+            if (cut.materialId != null && cut.materialId !== '') parts.push('#' + cut.materialId);
+            if (cut.number != null && cut.number !== '') parts.push(String(cut.number));
+            if (cut.winding != null && cut.winding !== '') parts.push(String(cut.winding));
+            if (cut.status != null && cut.status !== '') parts.push(String(cut.status));
+        }
+        (linkedLabels || []).forEach(function(l) { if (l != null && l !== '') parts.push(String(l)); });
+        return parts.join(' ').toLowerCase();
+    }
+
+    function cutMatchesQuery(cut, query, linkedLabels) {
+        var q = String(query == null ? '' : query).trim().toLowerCase();
+        if (q === '') return true;
+        var hay = cutSearchHaystack(cut, linkedLabels);
+        return q.split(/\s+/).every(function(tok) { return tok === '' || hay.indexOf(tok) !== -1; });
+    }
+
     // Видимость резки в очереди диспетчера (за сегодня и позже / по выбранной дате).
     // Резка показывается, если ВСЕ условия выполнены:
     //  1) статус не «Завершён» (выполненные резки в очередь не показываем);
@@ -2857,6 +2882,8 @@
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
+        cutSearchHaystack: cutSearchHaystack,
+        cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
         planDateDayKey: planDateDayKey,
         buildFields: buildFields,
@@ -3048,7 +3075,7 @@
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
         this.draft = this.blankDraft();
-        this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
+        this.filter = { slitter: '', status: '', date: todayISO(), query: '' };  // дата плана по умолчанию — сегодня; query — быстрый поиск (#3411)
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
@@ -5864,9 +5891,53 @@
             self.renderQueue();
             self.renderLink();
         });
+        // #3411: быстрый поиск между «Дата плана» и «Статус». Фильтрует карточки очереди
+        // и пересчитывает счётчики на закладках станков (видно, в каком станке сколько
+        // совпавших позиций). Поиск идёт по сырью/намотке/статусу и подписям связанных
+        // позиций. Ввод не пересобирает всю страницу — только очередь; фокус и каретку
+        // в поле восстанавливаем после перерисовки (см. ниже), чтобы печатать без сбоев.
+        var searchInput = el('input', {
+            class: 'atex-pp-input atex-pp-search',
+            type: 'search',
+            placeholder: 'Поиск по позициям…',
+            value: this.filter.query || ''
+        });
+        searchInput.addEventListener('input', function() {
+            self.filter.query = searchInput.value;
+            self._searchFocused = true;
+            self.renderQueue();
+        });
+        searchInput.addEventListener('focus', function() { self._searchFocused = true; });
+        searchInput.addEventListener('blur', function() { self._searchFocused = false; });
         filters.appendChild(field('Дата плана', dateFilter));
+        filters.appendChild(field('Поиск', searchInput));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
+
+        if (this._searchFocused) {
+            searchInput.focus();
+            var caret = searchInput.value.length;
+            try { searchInput.setSelectionRange(caret, caret); } catch (e) {}
+        }
+
+        // #3411: связанные позиции по резкам — для поиска (haystack) и счётчиков.
+        var query = String(this.filter.query == null ? '' : this.filter.query).trim();
+        var hasQuery = query !== '';
+        var posLabelById = {};
+        (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+        var linkedLabelsByCut = {};
+        (this.supplies || []).forEach(function(s) {
+            var cid = String(s.cutId);
+            if (!linkedLabelsByCut[cid]) linkedLabelsByCut[cid] = [];
+            linkedLabelsByCut[cid].push(posLabelById[String(s.positionId)] || ('позиция #' + s.positionId));
+        });
+        function cutMatchesSearch(c) {
+            return cutMatchesQuery(c, query, linkedLabelsByCut[String(c.id)]);
+        }
+        function groupMatchCount(g) {
+            if (!hasQuery) return g.cuts.length;
+            return g.cuts.filter(cutMatchesSearch).length;
+        }
 
         // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.
         var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
@@ -5885,7 +5956,8 @@
                         el('span', { class: 'atex-pp-tab-label', text: s.label }),
                         el('span', { class: 'atex-pp-tab-count', text: '0' })
                     ]);
-                    tab.addEventListener('click', function() { self.activeSlitter = key; self.renderQueue(); });
+                    // #3411: переключение станка очищает панель «Связанные позиции».
+                    tab.addEventListener('click', function() { self.activeSlitter = key; self.selectedCutId = null; self.renderQueue(); self.renderLink(); });
                     tabs.appendChild(tab);
                 });
                 box.appendChild(tabs);
@@ -5906,11 +5978,14 @@
         var tabs = el('div', { class: 'atex-pp-tabs' });
         groups.forEach(function(g) {
             var key = groupKey(g);
-            var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : ''), type: 'button' }, [
+            // #3411: при активном поиске счётчик показывает число совпавших позиций станка.
+            var count = groupMatchCount(g);
+            var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : '') + (hasQuery && count === 0 ? ' is-empty-match' : ''), type: 'button' }, [
                 el('span', { class: 'atex-pp-tab-label', text: g.slitter.label }),
-                el('span', { class: 'atex-pp-tab-count', text: String(g.cuts.length) })
+                el('span', { class: 'atex-pp-tab-count', text: String(count) })
             ]);
-            tab.addEventListener('click', function() { self.activeSlitter = key; self.renderQueue(); });
+            // #3411: переключение станка очищает панель «Связанные позиции».
+            tab.addEventListener('click', function() { self.activeSlitter = key; self.selectedCutId = null; self.renderQueue(); self.renderLink(); });
             tabs.appendChild(tab);
         });
         box.appendChild(tabs);
@@ -5957,6 +6032,10 @@
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
 
         activeGroup.cuts.forEach(function(c, idx) {
+            // #3411: при поиске показываем только совпавшие карточки. Расписание/индексы
+            // (idx, sameDayCuts) считаются по полной очереди станка, поэтому номера и
+            // перестановки ↑/↓ остаются корректными — прячем лишь несовпавшие карточки.
+            if (hasQuery && !cutMatchesSearch(c)) return;
             var active = String(self.selectedCutId) === String(c.id);
             var supplies = self.supplyCount(c.id);
 
@@ -6119,6 +6198,11 @@
                 }
             }
         });
+        // #3411: активный станок без совпадений по поиску — подсказка вместо пустоты
+        // (счётчики на закладках подскажут, где совпадения есть).
+        if (hasQuery && !groupEl.childNodes.length) {
+            groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'В этом станке нет позиций по запросу «' + query + '».' }));
+        }
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
         } finally {
@@ -6356,4 +6440,4 @@
 
  
  
-// @version 2026-06-14-issue-3391
+// @version 2026-06-15-issue-3411
