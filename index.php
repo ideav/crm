@@ -8645,15 +8645,29 @@ function getAiAccessibleDbs(){
 # базой данных (см. docs/integram-app-workflow.md).
 # ============================================================
 function handleAiAgentRequest($com){
-    global $z;
-    if($_SERVER["REQUEST_METHOD"] !== "POST")
-        aiAgentError(t9n("[RU]ИИ-агент принимает только POST[EN]The AI agent accepts POST only"), 405);
-    check(); # XSRF
-
-    # Доступ только владельцу базы — пользователю, имя которого совпадает с именем базы.
+    # Issue #3410: POST — поставить запрос ИИ-агенту (создаётся job), GET — узнать
+    # статус/результат ранее поставленной задачи (для индикатора «агент думает» и
+    # восстановления результата при повторном открытии панели, в т.ч. с другого
+    # браузера). Сам ответ агента сохраняется на сервере и переживает таймаут.
+    $method = isset($_SERVER["REQUEST_METHOD"]) ? strtoupper((string)$_SERVER["REQUEST_METHOD"]) : "GET";
+    if($method === "GET")
+        return aiAgentStatusRequest($com);
+    if($method !== "POST")
+        aiAgentError(t9n("[RU]ИИ-агент принимает GET (статус) или POST (запрос)[EN]The AI agent accepts GET (status) or POST (request)"), 405);
+    return aiAgentSubmitRequest($com);
+}
+# Доступ к ИИ-агенту — только владельцу базы (имя пользователя совпадает с именем
+# базы). При нарушении завершает запрос ответом 403.
+function aiAgentRequireOwner($db){
     $user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? strtolower((string)$GLOBALS["GLOBAL_VARS"]["user"]) : "";
-    if($user === "" || $user !== strtolower((string)$z))
+    if($user === "" || $user !== strtolower((string)$db))
         aiAgentError(t9n("[RU]ИИ-агент доступен только владельцу базы — пользователю, имя которого совпадает с именем базы данных.[EN]The AI agent is available only to the database owner — the user whose name matches the database name."), 403);
+}
+# POST /{db}/ai/agent — поставить новый запрос ИИ-агенту.
+function aiAgentSubmitRequest($com){
+    global $z;
+    check(); # XSRF
+    aiAgentRequireOwner($z);
 
     # Проверка оплаты (закеширована). При отсутствии/истечении оплаты — ссылка на оплату.
     $payment = checkAiAgentPayment($z);
@@ -8665,15 +8679,55 @@ function handleAiAgentRequest($com){
     if($message === "" && !count($attachments))
         aiAgentError(t9n("[RU]Сообщение для ИИ-агента не передано[EN]No message provided for the AI agent"), 400);
 
+    # Сначала сохраняем задачу как job (статус queued), и только потом обрабатываем.
+    # Если соединение оборвётся по таймауту сервера (30–60 c), клиент подхватит
+    # результат опросом GET /{db}/ai/agent?job=ID (см. js/ai-agent-chat.js).
+    $attachmentNames = array();
+    foreach($attachments as $a)
+        $attachmentNames[] = isset($a["name"]) ? (string)$a["name"] : "";
+    $job = aiAgentJobCreate($z, $message, $attachmentNames);
+    $jobId = $job["id"];
+
     try {
+        aiAgentJobUpdate($z, $jobId, array("status" => "processing"));
+        # callIntegramAgent сейчас отвечает сразу (реальный API агента — в его
+        # тикете). Когда вызов станет асинхронным, здесь задача останется в статусе
+        # processing, а результат запишет отдельный обработчик — клиентский опрос
+        # уже это поддерживает.
         $response = callIntegramAgent($z, $message, $attachments, $payment);
-        api_dump(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        $updated = aiAgentJobUpdate($z, $jobId, array("status" => "done", "result" => $response, "error" => null));
+        $job = $updated ? $updated : aiAgentJobGet($z, $jobId);
     } catch(Exception $e) {
         $code = (int)$e->getCode();
         if($code < 400 || $code > 599)
             $code = 502;
-        aiAgentError($e->getMessage(), $code);
+        aiAgentJobUpdate($z, $jobId, array("status" => "error", "error" => $e->getMessage()));
+        aiAgentError($e->getMessage(), $code, array("jobId" => $jobId));
     }
+
+    if(!$job)
+        $job = aiAgentJobGet($z, $jobId);
+    api_dump(json_encode(array("job" => aiAgentJobPublic($job)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# GET /{db}/ai/agent?job=ID  — статус/результат конкретной задачи.
+# GET /{db}/ai/agent          — последняя задача (для восстановления при открытии
+# панели). Оплата здесь не проверяется: уже готовый результат можно прочитать,
+# даже если оплаченный период истёк.
+function aiAgentStatusRequest($com){
+    global $z;
+    aiAgentRequireOwner($z);
+
+    $jobId = isset($_GET["job"]) ? preg_replace('/[^a-f0-9]/i', '', (string)$_GET["job"]) : "";
+    if($jobId !== ""){
+        $job = aiAgentJobGet($z, $jobId);
+        if(!$job)
+            aiAgentError(t9n("[RU]Задача ИИ-агента не найдена[EN]AI agent job not found"), 404);
+        api_dump(json_encode(array("job" => aiAgentJobPublic($job)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+
+    $job = aiAgentJobLatest($z);
+    api_dump(json_encode(array("job" => $job ? aiAgentJobPublic($job) : null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
 }
 function aiAgentError($message, $code=400, $extra=array()){
     header("HTTP/1.0 ".$code." ".aiChatHttpStatusText($code));
@@ -8897,6 +8951,196 @@ function callIntegramAgent($db, $message, $attachments, $payment){
         "status" => "ok",
         "payment" => $paymentInfo
     );
+}
+# ============================================================
+# Issue #3410: серверное хранилище задач ИИ-агента.
+#
+# Задача (job) запоминается в JSON-файле во временной директории сервера, ключ —
+# имя базы (как и кеш оплаты из #3404). Это даёт:
+#   • индикатор «агент думает», пока задача в работе;
+#   • сохранность результата, если пользователь закрыл вкладку — он подхватывается
+#     при повторном открытии панели, в т.ч. из ДРУГОГО браузера (состояние лежит
+#     на сервере, а не в localStorage);
+#   • устойчивость к таймауту сервера (30–60 c): запрос сохраняется до обработки.
+# Хранилище ограничено владельцем базы (aiAgentRequireOwner) и текущей базой.
+# Пер-база храним последние AI_AGENT_JOBS_MAX задач не старше AI_AGENT_JOBS_TTL.
+# ============================================================
+if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
+if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
+
+function aiAgentJobsFile($db){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    if($safeDb === "")
+        return "";
+    return sys_get_temp_dir()."/ai_agent_jobs_".$safeDb.".json";
+}
+function aiAgentJobId(){
+    if(function_exists("random_bytes")){
+        try { return bin2hex(random_bytes(16)); } catch(Exception $e) {}
+    }
+    return md5(uniqid((string)mt_rand(), true));
+}
+function aiAgentJobNew($message, $attachmentNames, $now){
+    $names = is_array($attachmentNames) ? array_values(array_map("strval", $attachmentNames)) : array();
+    return array(
+        "id" => aiAgentJobId(),
+        "createdAt" => (int)$now,
+        "updatedAt" => (int)$now,
+        "status" => "queued",
+        "message" => (string)$message,
+        "attachments" => $names,
+        "result" => null,
+        "error" => null
+    );
+}
+# --- Чистые операции над списком задач (тестируются без файловой системы) ---
+function aiAgentJobsAppend($jobs, $job, $max){
+    $jobs = is_array($jobs) ? array_values($jobs) : array();
+    $jobs[] = $job;
+    $max = (int)$max > 0 ? (int)$max : 1;
+    if(count($jobs) > $max)
+        $jobs = array_slice($jobs, count($jobs) - $max);
+    return array_values($jobs);
+}
+function aiAgentJobsFind($jobs, $id){
+    if(!is_array($jobs) || (string)$id === "")
+        return null;
+    foreach($jobs as $job)
+        if(is_array($job) && isset($job["id"]) && $job["id"] === $id)
+            return $job;
+    return null;
+}
+function aiAgentJobsLatest($jobs){
+    if(!is_array($jobs))
+        return null;
+    $latest = null;
+    foreach($jobs as $job){
+        if(!is_array($job) || !isset($job["createdAt"]))
+            continue;
+        if($latest === null || (int)$job["createdAt"] >= (int)$latest["createdAt"])
+            $latest = $job;
+    }
+    return $latest;
+}
+function aiAgentJobsPrune($jobs, $now, $ttl){
+    if(!is_array($jobs))
+        return array();
+    $ttl = (int)$ttl;
+    $kept = array();
+    foreach($jobs as $job){
+        if(!is_array($job) || !isset($job["createdAt"]))
+            continue;
+        if($ttl > 0 && ((int)$now - (int)$job["createdAt"]) > $ttl)
+            continue;
+        $kept[] = $job;
+    }
+    return array_values($kept);
+}
+function aiAgentJobsApplyChanges($job, $changes, $now){
+    if(!is_array($job))
+        return $job;
+    if(is_array($changes))
+        foreach($changes as $k => $v)
+            $job[$k] = $v;
+    $job["updatedAt"] = (int)$now;
+    return $job;
+}
+function aiAgentJobsReplace($jobs, $id, $newJob){
+    $out = array();
+    foreach($jobs as $job){
+        if(is_array($job) && isset($job["id"]) && $job["id"] === $id)
+            $out[] = $newJob;
+        else
+            $out[] = $job;
+    }
+    return array_values($out);
+}
+# Публичное представление задачи для клиента — без внутренних полей. Результат
+# отдаётся только для завершённой задачи.
+function aiAgentJobPublic($job){
+    if(!is_array($job))
+        return null;
+    $status = isset($job["status"]) ? (string)$job["status"] : "unknown";
+    $result = ($status === "done" && isset($job["result"])) ? $job["result"] : null;
+    return array(
+        "id" => isset($job["id"]) ? (string)$job["id"] : "",
+        "status" => $status,
+        "createdAt" => isset($job["createdAt"]) ? (int)$job["createdAt"] : 0,
+        "updatedAt" => isset($job["updatedAt"]) ? (int)$job["updatedAt"] : 0,
+        "message" => isset($job["message"]) ? (string)$job["message"] : "",
+        "attachments" => (isset($job["attachments"]) && is_array($job["attachments"])) ? array_values($job["attachments"]) : array(),
+        "result" => $result,
+        "error" => isset($job["error"]) ? $job["error"] : null
+    );
+}
+function aiAgentJobsEncode($jobs){
+    return json_encode(array("jobs" => array_values($jobs)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+function aiAgentJobsDecode($raw){
+    $data = (is_string($raw) && trim($raw) !== "") ? json_decode($raw, true) : null;
+    if(is_array($data) && isset($data["jobs"]) && is_array($data["jobs"]))
+        return array_values($data["jobs"]);
+    return array();
+}
+# --- Файловые обёртки (эксклюзивная блокировка на чтение-модификацию-запись) ---
+function aiAgentJobsLoadRaw($db){
+    $path = aiAgentJobsFile($db);
+    if($path === "" || !is_readable($path))
+        return array();
+    $raw = @file_get_contents($path);
+    return aiAgentJobsDecode($raw === false ? "" : $raw);
+}
+# $mutator(array $jobs): array — должен вернуть array($newJobs, $return).
+function aiAgentJobsMutate($db, $mutator){
+    $path = aiAgentJobsFile($db);
+    if($path === "")
+        return null;
+    $fp = @fopen($path, "c+");
+    if(!$fp){
+        $jobs = aiAgentJobsLoadRaw($db);
+        list($jobs, $ret) = $mutator($jobs);
+        @file_put_contents($path, aiAgentJobsEncode($jobs));
+        return $ret;
+    }
+    @flock($fp, LOCK_EX);
+    $raw = stream_get_contents($fp);
+    $jobs = aiAgentJobsDecode($raw === false ? "" : $raw);
+    list($jobs, $ret) = $mutator($jobs);
+    @ftruncate($fp, 0);
+    @rewind($fp);
+    @fwrite($fp, aiAgentJobsEncode($jobs));
+    @fflush($fp);
+    @flock($fp, LOCK_UN);
+    @fclose($fp);
+    return $ret;
+}
+function aiAgentJobCreate($db, $message, $attachmentNames){
+    $now = time();
+    $job = aiAgentJobNew($message, $attachmentNames, $now);
+    aiAgentJobsMutate($db, function($jobs) use ($job, $now){
+        $jobs = aiAgentJobsPrune($jobs, $now, AI_AGENT_JOBS_TTL);
+        $jobs = aiAgentJobsAppend($jobs, $job, AI_AGENT_JOBS_MAX);
+        return array($jobs, null);
+    });
+    return $job;
+}
+function aiAgentJobUpdate($db, $id, $changes){
+    $now = time();
+    return aiAgentJobsMutate($db, function($jobs) use ($id, $changes, $now){
+        $job = aiAgentJobsFind($jobs, $id);
+        if(!$job)
+            return array($jobs, null);
+        $job = aiAgentJobsApplyChanges($job, $changes, $now);
+        $jobs = aiAgentJobsReplace($jobs, $id, $job);
+        return array($jobs, $job);
+    });
+}
+function aiAgentJobGet($db, $id){
+    return aiAgentJobsFind(aiAgentJobsLoadRaw($db), $id);
+}
+function aiAgentJobLatest($db){
+    $jobs = aiAgentJobsPrune(aiAgentJobsLoadRaw($db), time(), AI_AGENT_JOBS_TTL);
+    return aiAgentJobsLatest($jobs);
 }
 function getAiChatSettings($settings=array()){
     if(is_string($settings)){
