@@ -1,10 +1,20 @@
 /*
- * Issue #3392: упрощённый ИИ-чат.
+ * Issue #3392: упрощённый ИИ-чат. Issue #3410: асинхронная работа агента.
  *
  * Новый чат связан только с нашим фиксированным ИИ-агентом текущей базы данных.
  * Доступ к агенту разрешён сервером (index.php, ветка /{db}/ai/agent) только
  * пользователю, имя которого совпадает с именем базы, и только при действующей
  * оплате. Все действия агента ограничены текущей базой данных.
+ *
+ * Issue #3410: задача агента может выполняться долго (до минуты и дольше) и
+ * ставиться в очередь. Поэтому:
+ *   • POST /{db}/ai/agent создаёт задачу (job) и возвращает её статус;
+ *   • пока задача в работе — показываем «ИИ-агент думает», а при долгом ожидании
+ *     сообщаем, что нужно ещё немного времени;
+ *   • статус/результат опрашиваются GET /{db}/ai/agent?job=ID;
+ *   • при открытии панели подхватываем последнюю задачу (GET ?latest), поэтому
+ *     результат не теряется, если пользователь закрыл вкладку и вернулся — даже
+ *     из другого браузера (состояние хранится на сервере, не в localStorage).
  *
  * Старый расширенный ИИ-чат (js/ai-chat.js) скрыт из интерфейса, но оставлен в
  * репозитории как backend-история.
@@ -16,7 +26,20 @@
         attachments: [],
         sending: false,
 
+        // Issue #3410: состояние ожидания/опроса.
+        pollIntervalMs: 2500,   // как часто опрашивать статус задачи
+        thinkStart: 0,          // когда начали ждать ответ (мс)
+        activeJobId: null,      // id задачи, которую ждём
+        pollJobId: null,        // id задачи, по которой идёт опрос
+        pollTimer: null,        // setInterval опроса статуса
+        tickTimer: null,        // setInterval обновления текста ожидания
+        currentBubble: null,    // «пузырь» агента с индикатором «думает»
+        rendered: {},           // id задач, уже показанных в ленте
+        localActivity: false,   // были ли отправки в этой сессии вкладки
+        resumeChecked: false,   // восстановление выполняем один раз за загрузку
+
         init: function () {
+            this.rendered = {};
             this.toggle = document.getElementById('ai-chat-toggle');
             this.panel = document.getElementById('ai-agent-panel');
             this.backdrop = document.getElementById('ai-agent-backdrop');
@@ -61,6 +84,10 @@
                 });
             }
 
+            // Issue #3410: подхватываем незавершённую/последнюю задачу с сервера —
+            // результат не теряется при перезагрузке или заходе с другого браузера.
+            this.resume();
+
             return true;
         },
 
@@ -80,6 +107,7 @@
             if (this.backdrop) this.backdrop.hidden = false;
             if (this.toggle) this.toggle.setAttribute('aria-expanded', 'true');
             if (this.input) this.input.focus();
+            this.resume();
             this.scrollToBottom();
         },
 
@@ -109,6 +137,14 @@
         getAgentUrl: function () {
             var dbName = this.getCurrentDbName() || 'my';
             return '/' + encodeURIComponent(dbName) + '/ai/agent?JSON=1';
+        },
+
+        // GET-адрес статуса: по id задачи либо последней задачи (?latest).
+        getStatusUrl: function (jobId) {
+            var base = this.getAgentUrl();
+            return jobId
+                ? base + '&job=' + encodeURIComponent(jobId)
+                : base + '&latest=1';
         },
 
         addFiles: function (fileList) {
@@ -158,11 +194,27 @@
             if (this.statusEl) this.statusEl.textContent = text;
         },
 
-        setSending: function (sending) {
-            this.sending = sending;
-            if (this.sendBtn) this.sendBtn.disabled = sending;
-            if (this.attachBtn) this.attachBtn.disabled = sending;
-            this.setStatus(sending ? 'ИИ-агент печатает…' : 'Готов к работе');
+        // --- Issue #3410: тексты ожидания (чистые функции, тестируются в node) ---
+
+        // Сообщение в «пузыре» агента в зависимости от того, сколько уже ждём.
+        waitMessage: function (elapsedMs) {
+            elapsedMs = elapsedMs || 0;
+            if (elapsedMs < 12000)
+                return 'Думаю над ответом…';
+            if (elapsedMs < 45000)
+                return 'Думаю над ответом. Это может занять до минуты — подождите, пожалуйста…';
+            return 'Задача поставлена в очередь, ответ придёт чуть позже. Можно закрыть окно — '
+                + 'результат сохранится и откроется, когда вы вернётесь, даже из другого браузера.';
+        },
+
+        // Короткий текст в шапке панели.
+        statusMessage: function (elapsedMs) {
+            elapsedMs = elapsedMs || 0;
+            if (elapsedMs < 12000)
+                return 'ИИ-агент думает…';
+            if (elapsedMs < 45000)
+                return 'ИИ-агент думает, нужно ещё немного времени…';
+            return 'Задача в очереди, ответ скоро будет…';
         },
 
         send: function () {
@@ -170,6 +222,7 @@
             var text = this.input ? this.input.value.trim() : '';
             if (!text && !this.attachments.length) return;
 
+            this.localActivity = true;
             this.addMessage('user', text || '(вложения)');
 
             var form = new FormData();
@@ -182,7 +235,9 @@
             if (this.input) this.input.value = '';
             this.attachments = [];
             this.renderAttachments();
-            this.setSending(true);
+
+            // Показываем «думает» сразу — ещё до того, как сервер вернул job.
+            this.beginWaiting(null);
 
             var self = this;
             fetch(this.getAgentUrl(), {
@@ -195,31 +250,209 @@
                     return { status: response.status, ok: response.ok, data: data };
                 });
             }).then(function (result) {
-                self.setSending(false);
-                self.handleResponse(result);
+                self.handleSubmitResponse(result);
             }).catch(function () {
-                self.setSending(false);
-                self.addMessage('assistant', 'Не удалось связаться с ИИ-агентом. Повторите попытку позже.');
+                // Соединение оборвалось (например, таймаут сервера). Задача уже
+                // создана на сервере — пробуем подхватить её опросом.
+                self.recoverAfterSubmitFailure();
             });
         },
 
-        handleResponse: function (result) {
+        handleSubmitResponse: function (result) {
             var data = result.data;
 
             // Оплата не подтверждена / истекла — index.php возвращает 402 + ссылку.
             if (result.status === 402 && data) {
-                this.addMessage('assistant', this.getErrorText(data) || 'Доступ к ИИ-агенту не оплачен.', data.payUrl);
+                this.replaceThinking(this.getErrorText(data) || 'Доступ к ИИ-агенту не оплачен.', data.payUrl);
+                this.endWaiting();
                 return;
             }
 
-            if (!result.ok || !data) {
-                this.addMessage('assistant', this.getErrorText(data) || 'ИИ-агент недоступен. Повторите попытку позже.');
+            if (!result.ok && (!data || !data.job)) {
+                this.replaceThinking(this.getErrorText(data) || 'ИИ-агент недоступен. Повторите попытку позже.');
+                this.endWaiting();
                 return;
             }
 
-            var content = this.getAssistantContent(data);
-            this.addMessage('assistant', content || 'ИИ-агент не вернул ответ.');
+            this.routeJob(data && data.job ? data.job : null, false);
         },
+
+        // Подхват задачи, если submit-запрос не дождался ответа (обрыв/таймаут).
+        recoverAfterSubmitFailure: function () {
+            var self = this;
+            fetch(this.getStatusUrl(null), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                return response.json().catch(function () { return null; });
+            }).then(function (data) {
+                var job = data && data.job ? data.job : null;
+                if (job) {
+                    self.routeJob(job, false);
+                } else {
+                    self.replaceThinking('Не удалось связаться с ИИ-агентом. Повторите попытку позже.');
+                    self.endWaiting();
+                }
+            }).catch(function () {
+                self.replaceThinking('Не удалось связаться с ИИ-агентом. Повторите попытку позже.');
+                self.endWaiting();
+            });
+        },
+
+        // Маршрутизация задачи по статусу. fromPoll=true — вызвано опросом (тогда
+        // временные сбои не считаем фатальными).
+        routeJob: function (job, fromPoll) {
+            if (!job) {
+                if (!fromPoll) {
+                    this.replaceThinking('ИИ-агент недоступен. Повторите попытку позже.');
+                    this.endWaiting();
+                }
+                return;
+            }
+            this.activeJobId = job.id;
+
+            if (job.status === 'done') {
+                this.finalizeAnswer(job);
+                this.endWaiting();
+                return;
+            }
+            if (job.status === 'error') {
+                this.replaceThinking(this.getErrorText(job.result) || job.error || 'ИИ-агент завершил работу с ошибкой.');
+                this.endWaiting();
+                return;
+            }
+            // queued / processing — ждём дальше и опрашиваем статус.
+            if (!this.currentBubble) this.currentBubble = this.addThinkingBubble();
+            if (!this.sending) this.beginWaiting(job.id);
+            this.ensurePolling(job.id);
+        },
+
+        finalizeAnswer: function (job) {
+            var content = this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.';
+            this.replaceThinking(content);
+            if (job.id) this.rendered[job.id] = true;
+        },
+
+        // --- ожидание и индикатор «думает» ---
+
+        beginWaiting: function (jobId) {
+            this.sending = true;
+            if (this.sendBtn) this.sendBtn.disabled = true;
+            if (this.attachBtn) this.attachBtn.disabled = true;
+            this.thinkStart = this.now();
+            if (!this.currentBubble) this.currentBubble = this.addThinkingBubble();
+            this.activeJobId = jobId || this.activeJobId;
+            this.updateWaiting();
+            this.startTick();
+        },
+
+        endWaiting: function () {
+            this.sending = false;
+            if (this.sendBtn) this.sendBtn.disabled = false;
+            if (this.attachBtn) this.attachBtn.disabled = false;
+            this.stopTick();
+            this.stopPolling();
+            this.activeJobId = null;
+            this.currentBubble = null;
+            if (this.statusEl) this.statusEl.classList.remove('is-waiting');
+            this.setStatus('Готов к работе');
+        },
+
+        startTick: function () {
+            this.stopTick();
+            var self = this;
+            if (typeof setInterval === 'undefined') return;
+            this.tickTimer = setInterval(function () { self.updateWaiting(); }, 1000);
+        },
+
+        stopTick: function () {
+            if (this.tickTimer && typeof clearInterval !== 'undefined') clearInterval(this.tickTimer);
+            this.tickTimer = null;
+        },
+
+        updateWaiting: function () {
+            var elapsed = this.now() - this.thinkStart;
+            if (this.statusEl) this.statusEl.classList.add('is-waiting');
+            this.setStatus(this.statusMessage(elapsed));
+            if (this.currentBubble && this.currentBubble.label)
+                this.currentBubble.label.textContent = this.waitMessage(elapsed);
+        },
+
+        ensurePolling: function (jobId) {
+            if (!jobId) return;
+            this.activeJobId = jobId;
+            if (this.pollTimer && this.pollJobId === jobId) return;
+            this.stopPolling();
+            this.pollJobId = jobId;
+            var self = this;
+            if (typeof setInterval === 'undefined') return;
+            this.pollTimer = setInterval(function () { self.pollOnce(); }, this.pollIntervalMs);
+        },
+
+        stopPolling: function () {
+            if (this.pollTimer && typeof clearInterval !== 'undefined') clearInterval(this.pollTimer);
+            this.pollTimer = null;
+            this.pollJobId = null;
+        },
+
+        pollOnce: function () {
+            var jobId = this.pollJobId;
+            if (!jobId) return;
+            var self = this;
+            fetch(this.getStatusUrl(jobId), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                return response.json().catch(function () { return null; });
+            }).then(function (data) {
+                // Нет данных — временный сбой/таймаут опроса, продолжаем ждать.
+                if (!data || !data.job) return;
+                self.routeJob(data.job, true);
+            }).catch(function () {
+                // Сетевой сбой опроса не фатален: задача жива на сервере.
+            });
+        },
+
+        // --- восстановление при открытии (в т.ч. из другого браузера) ---
+
+        resume: function () {
+            if (this.resumeChecked) return;
+            this.resumeChecked = true;
+            if (this.localActivity) return;
+            if (typeof fetch === 'undefined') return;
+            var self = this;
+            fetch(this.getStatusUrl(null), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                return response.json().catch(function () { return null; });
+            }).then(function (data) {
+                var job = data && data.job ? data.job : null;
+                if (!job || self.localActivity) return;
+                self.restoreJob(job);
+            }).catch(function () {});
+        },
+
+        restoreJob: function (job) {
+            if (!job || !job.id || this.rendered[job.id]) return;
+            this.addMessage('user', job.message || '(вложения)');
+            this.rendered[job.id] = true;
+
+            if (job.status === 'done') {
+                this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.');
+                return;
+            }
+            if (job.status === 'error') {
+                this.addMessage('assistant', this.getErrorText(job.result) || job.error || 'ИИ-агент завершил работу с ошибкой.');
+                return;
+            }
+            // Задача ещё выполняется — показываем «думает» и продолжаем опрос.
+            this.currentBubble = this.addThinkingBubble();
+            this.beginWaiting(job.id);
+            this.ensurePolling(job.id);
+        },
+
+        // --- сообщения ленты ---
 
         getAssistantContent: function (data) {
             if (!data) return '';
@@ -237,7 +470,7 @@
         },
 
         addMessage: function (role, text, payUrl) {
-            if (!this.messages) return;
+            if (!this.messages) return null;
             var wrap = document.createElement('div');
             wrap.className = 'ai-chat-message ' + (role === 'user' ? 'ai-chat-message-user' : 'ai-chat-message-assistant');
 
@@ -251,31 +484,90 @@
             body.textContent = text;
             wrap.appendChild(body);
 
-            if (payUrl) {
-                var link = document.createElement('a');
-                link.className = 'ai-chat-message-pay';
-                link.href = payUrl;
-                link.target = '_blank';
-                link.rel = 'noopener';
-                link.textContent = 'Перейти к оплате';
-                wrap.appendChild(link);
-            }
+            if (payUrl) this.appendPayLink(wrap, payUrl);
 
             this.messages.appendChild(wrap);
             this.scrollToBottom();
+            return wrap;
+        },
+
+        appendPayLink: function (wrap, payUrl) {
+            var link = document.createElement('a');
+            link.className = 'ai-chat-message-pay';
+            link.href = payUrl;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = 'Перейти к оплате';
+            wrap.appendChild(link);
+        },
+
+        // «Пузырь» агента с анимированным индикатором набора и подписью ожидания.
+        addThinkingBubble: function () {
+            if (!this.messages) return null;
+            var wrap = document.createElement('div');
+            wrap.className = 'ai-chat-message ai-chat-message-assistant ai-chat-message-thinking';
+
+            var author = document.createElement('div');
+            author.className = 'ai-chat-message-author';
+            author.textContent = 'ИИ-агент';
+            wrap.appendChild(author);
+
+            var body = document.createElement('div');
+            body.className = 'ai-chat-message-text';
+
+            var dots = document.createElement('span');
+            dots.className = 'ai-agent-typing';
+            dots.setAttribute('aria-hidden', 'true');
+            dots.innerHTML = '<i></i><i></i><i></i>';
+            body.appendChild(dots);
+
+            var label = document.createElement('span');
+            label.className = 'ai-agent-thinking-label';
+            label.textContent = this.waitMessage(0);
+            body.appendChild(label);
+
+            wrap.appendChild(body);
+            this.messages.appendChild(wrap);
+            this.scrollToBottom();
+            return { el: wrap, label: label };
+        },
+
+        // Заменяет «думает»-пузырь готовым ответом (или создаёт новое сообщение).
+        replaceThinking: function (text, payUrl) {
+            var bubble = this.currentBubble;
+            if (bubble && bubble.el) {
+                bubble.el.className = 'ai-chat-message ai-chat-message-assistant';
+                var body = bubble.el.querySelector('.ai-chat-message-text');
+                if (body) {
+                    body.innerHTML = '';
+                    body.textContent = text;
+                }
+                if (payUrl) this.appendPayLink(bubble.el, payUrl);
+                this.scrollToBottom();
+            } else {
+                this.addMessage('assistant', text, payUrl);
+            }
+            this.currentBubble = null;
         },
 
         scrollToBottom: function () {
             var body = this.messages ? this.messages.parentNode : null;
             if (body && typeof body.scrollTop === 'number') body.scrollTop = body.scrollHeight;
+        },
+
+        now: function () {
+            return (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
         }
     };
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () { IntegramAiAgentChat.init(); });
-    } else {
-        IntegramAiAgentChat.init();
+    if (typeof document !== 'undefined') {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () { IntegramAiAgentChat.init(); });
+        } else {
+            IntegramAiAgentChat.init();
+        }
     }
 
     if (typeof window !== 'undefined') window.IntegramAiAgentChat = IntegramAiAgentChat;
+    if (typeof module !== 'undefined' && module.exports) module.exports = IntegramAiAgentChat;
 })();
