@@ -92,6 +92,30 @@ assertEqual(planning.filterCuts(cuts, { slitter: '101', status: 'В работе
 // пустой фильтр — все
 assertEqual(planning.filterCuts(cuts, {}).length, 4, 'empty filter returns all cuts');
 
+// ── #3411: быстрый поиск по очереди (cutMatchesQuery / cutSearchHaystack) ──
+var searchCut = { id: '7', number: '12', materialName: 'BOPP 30 прозрачный', materialId: '500', winding: 'IN', status: 'В работе' };
+// пустой запрос совпадает со всем
+assertEqual(planning.cutMatchesQuery(searchCut, ''), true, 'cutMatchesQuery: empty query matches everything');
+assertEqual(planning.cutMatchesQuery(searchCut, '   '), true, 'cutMatchesQuery: whitespace query matches everything');
+// поиск по названию сырья, регистронезависимо
+assertEqual(planning.cutMatchesQuery(searchCut, 'bopp'), true, 'cutMatchesQuery: matches material name case-insensitively');
+assertEqual(planning.cutMatchesQuery(searchCut, 'ПРОЗРАЧНЫЙ'), true, 'cutMatchesQuery: matches material name (upper)');
+// несовпадение
+assertEqual(planning.cutMatchesQuery(searchCut, 'фольга'), false, 'cutMatchesQuery: non-matching term → false');
+// поиск по нескольким словам — все должны входить
+assertEqual(planning.cutMatchesQuery(searchCut, 'bopp прозрачный'), true, 'cutMatchesQuery: all words must match');
+assertEqual(planning.cutMatchesQuery(searchCut, 'bopp фольга'), false, 'cutMatchesQuery: one missing word → false');
+// поиск по подписям связанных позиций
+assertEqual(planning.cutMatchesQuery(searchCut, '1234/5', ['1234/5 · 600мм * 1000м']), true,
+    'cutMatchesQuery: matches linked position label');
+assertEqual(planning.cutMatchesQuery(searchCut, '1234/5'), false,
+    'cutMatchesQuery: linked-only term needs linked labels');
+// haystack собирает все поля
+assertEqual(/bopp 30 прозрачный/.test(planning.cutSearchHaystack(searchCut, [])), true,
+    'cutSearchHaystack: includes material name lowercased');
+assertEqual(/1234\/5/.test(planning.cutSearchHaystack(searchCut, ['1234/5 · 600мм'])), true,
+    'cutSearchHaystack: includes linked labels');
+
 // ── buildFields: t{reqId}, пустые значения опускаются ──
 assertEqual(planning.buildFields(
     { slitter: '1090', winding: '1092', materialBatch: '1094', planDate: '1096', status: '1098', notes: '1108' },

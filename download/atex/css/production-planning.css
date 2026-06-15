@@ -146,11 +146,13 @@
 /* Очередь резок по слиттерам */
 .atex-pp-filters {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 12px;
     margin-bottom: 16px;
 }
 .atex-pp-filters .atex-pp-field { margin-bottom: 0; }
+/* #3411: быстрый поиск занимает ту же ширину, что и остальные фильтры. */
+.atex-pp-search { width: 100%; }
 
 .atex-pp-queue-group { margin-bottom: 16px; }
 
@@ -611,6 +613,8 @@
     text-align: center;
 }
 .atex-pp-tab.is-active .atex-pp-tab-count { background: var(--pp-accent); color: #fff; }
+/* #3411: при поиске станок без совпадений приглушаем, чтобы видеть, где есть позиции. */
+.atex-pp-tab.is-empty-match { opacity: 0.45; }
 
 /* Выбор позиций для обеспечения в форме новой резки (#3194) */
 .atex-pp-positions-select {

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>#3411 demo — быстрый поиск в очереди резок</title>
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #eef1f5; }
+  .demo { max-width: 760px; margin: 24px auto; }
+  .demo h2 { font: 600 15px/1.4 sans-serif; color: #334; margin: 24px 0 8px; }
+  .atex-pp-panel { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="atex-pp">
+  <div class="demo">
+    <h2>1. Без поиска — счётчики показывают число резок станка</h2>
+    <div class="atex-pp-panel" id="queue-plain"></div>
+    <h2>2. Поиск «BOPP» — счётчики и карточки сужаются по совпадениям</h2>
+    <div class="atex-pp-panel" id="queue-search"></div>
+  </div>
+</div>
+
+<script>window.db = 'demo';</script>
+<script src="../download/atex/js/production-planning.js"></script>
+<script>
+  var Controller = window.AtexProductionPlanning.Controller;
+
+  function makeController(rootEl, query) {
+    var root = document.createElement('div');
+    root.setAttribute('data-db', 'demo');
+    var c = new Controller(root);
+    c.queueEl = rootEl;
+    c.linkEl = document.createElement('div');
+    c.renderLink = function() {};
+    c.filter = { slitter: '', status: '', date: '', query: query || '' };
+    c.slitters = [
+      { id: '101', label: 'Слиттер №1' },
+      { id: '102', label: 'Слиттер №2' },
+      { id: '103', label: 'Слиттер №3' }
+    ];
+    c.activeSlitter = '101';
+    c.cuts = [
+      { id: 'A', number: '1', slitter: { id: '101', label: 'Слиттер №1' }, status: 'В работе', materialName: 'BOPP прозрачный 30мкм', materialId: '500', winding: 'IN', plannedRuns: 2 },
+      { id: 'B', number: '2', slitter: { id: '101', label: 'Слиттер №1' }, status: 'В работе', materialName: 'PET фольга 12мкм', materialId: '501', winding: 'IN', plannedRuns: 1 },
+      { id: 'C', number: '3', slitter: { id: '102', label: 'Слиттер №2' }, status: 'В работе', materialName: 'BOPP матовый 25мкм', materialId: '502', winding: 'OUT', plannedRuns: 3 },
+      { id: 'D', number: '4', slitter: { id: '103', label: 'Слиттер №3' }, status: 'В работе', materialName: 'CPP 40мкм', materialId: '503', winding: 'IN', plannedRuns: 1 }
+    ];
+    c.positions = [{ id: 'p1', label: '1234/5 · 600мм * 1000м', qty: 0 }];
+    c.supplies = [{ id: 's1', cutId: 'A', positionId: 'p1', rolls: 0 }];
+    c.genBatches = [];
+    c.opTimes = {};
+    c.changeTimes = {};
+    c.footageBySupply = {};
+    c.consumptionByCut = {};
+    c.jumboWidthByMaterial = {};
+    c.actualWidthIndex = null;
+    c.daySettings = {};
+    c.renderQueue();
+    return c;
+  }
+
+  makeController(document.getElementById('queue-plain'), '');
+  makeController(document.getElementById('queue-search'), 'BOPP');
+</script>
+</body>
+</html>
