@@ -28,6 +28,8 @@ function aiAgentError($message, $code=400, $extra=array()){
 }
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s',$v,$m) ? $m[1] : $v; }
 function check(){ /* XSRF — noop в тесте */ }
+# aiConfigValue нужен aiAgentCallbackUrl(): в этом тесте callback не задействован.
+function aiConfigValue($names){ return ""; }
 
 # Управляемые из тестов заглушки оплаты и вызова агента.
 $GLOBALS["__pay_ok"] = true;
@@ -59,7 +61,7 @@ function extract_function_source($source, $name){
 $source = file_get_contents(__DIR__."/../index.php");
 $fns = array(
     "handleAiAgentRequest","aiAgentRequireOwner","aiAgentSubmitRequest","aiAgentStatusRequest",
-    "collectAiAgentAttachments",
+    "aiAgentCallbackUrl","collectAiAgentAttachments",
     "aiAgentJobsFile","aiAgentJobId","aiAgentJobNew","aiAgentJobsAppend","aiAgentJobsFind",
     "aiAgentJobsLatest","aiAgentJobsPrune","aiAgentJobsApplyChanges","aiAgentJobsReplace",
     "aiAgentJobPublic","aiAgentJobsEncode","aiAgentJobsDecode","aiAgentJobsLoadRaw",
