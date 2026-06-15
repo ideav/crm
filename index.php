@@ -92,6 +92,16 @@ elseif($z==="auth.asp" && !empty($_GET['error'])){
 elseif(!preg_match(DB_MASK, $z))
     die("Invalid database");
 
+# Callback асинхронного ИИ-агента (server-to-server, без сессии). Принимаем результат
+# здесь — до подключения к БД и до Validate_Token(); аутентификация — секрет per-job
+# в заголовке X-Agent-Secret (см. handleAiAgentCallback / docs/ai-agent-endpoint.md).
+# Хранилище задач файловое, поэтому соединение с БД не требуется.
+if((isset($com[2]) ? $com[2] : "") === "ai"
+    && (isset($com[3]) ? $com[3] : "") === "agent"
+    && (isset($com[4]) ? $com[4] : "") === "callback"){
+    handleAiAgentCallback($z);
+}
+
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
 # Check the DB existence
@@ -8688,14 +8698,27 @@ function aiAgentSubmitRequest($com){
     $job = aiAgentJobCreate($z, $message, $attachmentNames);
     $jobId = $job["id"];
 
+    # Для асинхронного агента готовим callback (см. docs/ai-agent-endpoint.md):
+    # секрет per-job и URL вида https://host/{db}/ai/agent/callback. Секрет хранится
+    # в задаче (в публичное представление не попадает) и сверяется при приёме
+    # результата в handleAiAgentCallback().
+    $callbackSecret = aiAgentJobId();
+    $callbackUrl = aiAgentCallbackUrl($z);
+
     try {
-        aiAgentJobUpdate($z, $jobId, array("status" => "processing"));
-        # callIntegramAgent сейчас отвечает сразу (реальный API агента — в его
-        # тикете). Когда вызов станет асинхронным, здесь задача останется в статусе
-        # processing, а результат запишет отдельный обработчик — клиентский опрос
-        # уже это поддерживает.
-        $response = callIntegramAgent($z, $message, $attachments, $payment);
-        $updated = aiAgentJobUpdate($z, $jobId, array("status" => "done", "result" => $response, "error" => null));
+        aiAgentJobUpdate($z, $jobId, array("status" => "processing", "callbackSecret" => $callbackSecret));
+        # Синхронный агент (вариант A) отвечает сразу content -> задача done.
+        # Асинхронный (вариант B1) отвечает 202 {status:queued} -> задача остаётся
+        # processing, результат придёт в callback; клиентский опрос это поддерживает.
+        $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret);
+        if(!empty($response["pending"])){
+            $changes = array("status" => "processing");
+            if(!empty($response["agentJobId"]))
+                $changes["agentJobId"] = (string)$response["agentJobId"];
+            $updated = aiAgentJobUpdate($z, $jobId, $changes);
+        } else {
+            $updated = aiAgentJobUpdate($z, $jobId, array("status" => "done", "result" => $response, "error" => null));
+        }
         $job = $updated ? $updated : aiAgentJobGet($z, $jobId);
     } catch(Exception $e) {
         $code = (int)$e->getCode();
@@ -8728,6 +8751,84 @@ function aiAgentStatusRequest($com){
 
     $job = aiAgentJobLatest($z);
     api_dump(json_encode(array("job" => $job ? aiAgentJobPublic($job) : null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# POST /{db}/ai/agent/callback — приём результата от асинхронного ИИ-агента
+# (вариант B1, см. docs/ai-agent-endpoint.md). Вызов server-to-server, без сессии
+# пользователя, поэтому маршрут обрабатывается ДО Validate_Token() (см. диспетчер в
+# начале файла). Аутентификация — секрет per-job (заголовок X-Agent-Secret),
+# сверяемый с секретом, сохранённым в задаче при постановке. БД не требуется:
+# хранилище задач файловое.
+function handleAiAgentCallback($db){
+    if((isset($_SERVER["REQUEST_METHOD"]) ? strtoupper((string)$_SERVER["REQUEST_METHOD"]) : "") !== "POST")
+        aiAgentError(t9n("[RU]Callback ИИ-агента принимает только POST[EN]The AI agent callback accepts POST only"), 405);
+
+    $raw = aiAgentRawInput();
+    $data = (is_string($raw) && trim($raw) !== "") ? json_decode($raw, true) : null;
+    if(!is_array($data))
+        aiAgentError(t9n("[RU]Некорректное тело callback[EN]Invalid callback body"), 400);
+
+    $jobId = isset($data["job_id"]) ? preg_replace('/[^a-f0-9]/i', '', (string)$data["job_id"]) : "";
+    if($jobId === "")
+        aiAgentError(t9n("[RU]В callback не передан job_id[EN]Callback is missing job_id"), 400);
+
+    $job = aiAgentJobGet($db, $jobId);
+    # Принимаем callback только для задачи, которую сами поставили на async (есть
+    # сохранённый секрет). Иначе — 404, чтобы не раскрывать существование задач.
+    if(!$job || empty($job["callbackSecret"]))
+        aiAgentError(t9n("[RU]Задача ИИ-агента не найдена[EN]AI agent job not found"), 404);
+
+    # Сверка секрета (constant-time): секрет задачи либо общий секрет из конфига.
+    $provided = isset($_SERVER["HTTP_X_AGENT_SECRET"]) ? (string)$_SERVER["HTTP_X_AGENT_SECRET"] : "";
+    $globalSecret = aiConfigValue(array("AI_AGENT_CALLBACK_SECRET", "INTEGRAM_AGENT_CALLBACK_SECRET"));
+    $okSecret = ($provided !== "" && hash_equals((string)$job["callbackSecret"], $provided))
+             || ($globalSecret !== "" && $provided !== "" && hash_equals($globalSecret, $provided));
+    if(!$okSecret)
+        aiAgentError(t9n("[RU]Неверный секрет callback[EN]Invalid callback secret"), 403);
+
+    # Идемпотентность: повторный callback по уже завершённой задаче — без изменений.
+    $current = isset($job["status"]) ? (string)$job["status"] : "";
+    if($current === "done" || $current === "error"){
+        api_dump(json_encode(array("ok" => true, "status" => $current), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+
+    $status = isset($data["status"]) ? strtolower(trim((string)$data["status"])) : "done";
+    if($status === "error"){
+        $error = (isset($data["error"]) && trim((string)$data["error"]) !== "")
+            ? (string)$data["error"]
+            : t9n("[RU]ИИ-агент завершил работу с ошибкой[EN]The AI agent finished with an error");
+        aiAgentJobUpdate($db, $jobId, array("status" => "error", "error" => $error));
+        api_dump(json_encode(array("ok" => true, "status" => "error"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+
+    $content = isset($data["content"]) ? (string)$data["content"] : "";
+    if(trim($content) === "")
+        aiAgentError(t9n("[RU]В callback пустой content[EN]Callback content is empty"), 400);
+    aiAgentJobUpdate($db, $jobId, array(
+        "status" => "done",
+        "result" => array("assistant" => array("content" => $content), "status" => "ok"),
+        "error" => null
+    ));
+    api_dump(json_encode(array("ok" => true, "status" => "done"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# Абсолютный HTTPS-URL callback для текущей базы. По умолчанию строится из Host
+# запроса; можно переопределить за прокси через AI_AGENT_CALLBACK_BASE_URL.
+# Сырое тело запроса (вынесено отдельно, чтобы callback можно было тестировать без
+# реального php://input).
+function aiAgentRawInput(){
+    return file_get_contents("php://input");
+}
+function aiAgentCallbackUrl($db){
+    $base = aiConfigValue(array("AI_AGENT_CALLBACK_BASE_URL", "INTEGRAM_AGENT_CALLBACK_BASE_URL"));
+    if($base === ""){
+        $host = isset($_SERVER["HTTP_HOST"]) ? preg_replace('/[^a-z0-9.\-:]/i', '', (string)$_SERVER["HTTP_HOST"]) : "";
+        if($host === "")
+            return "";
+        $base = "https://".$host;
+    }
+    $base = rtrim($base, "/");
+    return $base."/".rawurlencode((string)$db)."/ai/agent/callback";
 }
 function aiAgentError($message, $code=400, $extra=array()){
     header("HTTP/1.0 ".$code." ".aiChatHttpStatusText($code));
@@ -8900,10 +9001,12 @@ function evaluateAiAgentPayment($raw, $db){
     $result["paidUntil"] = $paidAt + 31 * 24 * 3600;
     return $result;
 }
-function callIntegramAgent($db, $message, $attachments, $payment){
-    # Отправка данных фиксированному ИИ-агенту. Описание API будет предоставлено в
-    # следующем тикете (issue #3392), поэтому endpoint берётся из конфигурации,
-    # а при его отсутствии возвращается подтверждение готовности без вызова.
+function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret=""){
+    # Отправка данных фиксированному ИИ-агенту (см. docs/ai-agent-endpoint.md).
+    # Endpoint берётся из конфигурации; при его отсутствии возвращается подтверждение
+    # готовности без вызова. $jobId/$callbackUrl/$callbackSecret включают async-режим
+    # (вариант B1): агент может ответить 202 {status:queued} и прислать результат в
+    # callback вместо синхронного content.
     $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
     $paymentInfo = array("status" => $payment["status"], "paidUntil" => $payment["paidUntil"]);
     if($endpoint === ""){
@@ -8928,6 +9031,13 @@ function callIntegramAgent($db, $message, $attachments, $payment){
         "message" => $message,
         "attachments" => $attachments
     );
+    # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
+    # синхронного агента поля безвредны — он их игнорирует и отвечает content сразу.
+    if($jobId !== "" && $callbackUrl !== ""){
+        $request["job_id"] = $jobId;
+        $request["callback_url"] = $callbackUrl;
+        $request["callback_secret"] = $callbackSecret;
+    }
     $headers = array("Content-Type: application/json; charset=UTF-8", "Accept: application/json", "User-Agent: Integram AI Agent");
     $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
     if($token !== "")
@@ -8943,6 +9053,18 @@ function callIntegramAgent($db, $message, $attachments, $payment){
         $agentTimeout = 600;
     $raw = aiChatPostJson($endpoint, $request, $headers, $agentTimeout);
     $decoded = json_decode($raw, true);
+    # Async-ack (вариант B1): агент принял задачу в очередь и вернёт результат в
+    # callback. Тело не трактуем как ответ — задача остаётся processing до callback.
+    $ackStatus = (is_array($decoded) && isset($decoded["status"])) ? strtolower(trim((string)$decoded["status"])) : "";
+    if(in_array($ackStatus, array("queued", "processing", "accepted", "pending"), true)){
+        return array(
+            "pending" => true,
+            "status" => $ackStatus,
+            "agentJobId" => (is_array($decoded) && isset($decoded["job_id"])) ? (string)$decoded["job_id"] : "",
+            "payment" => $paymentInfo
+        );
+    }
+    # Синхронный ответ (вариант A) — извлекаем content.
     $content = extractAiProviderContent($decoded, $raw);
     if(trim($content) === "")
         throw new Exception(t9n("[RU]ИИ-агент вернул пустой ответ[EN]The AI agent returned an empty response"), 502);
