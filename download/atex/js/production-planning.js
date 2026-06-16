@@ -5986,6 +5986,16 @@
         try {
         var t0 = Date.now();
         var box = this.queueEl;
+        // #3429: фокус и каретку поля поиска запоминаем ДО очистки DOM. box.innerHTML=''
+        // удаляет сфокусированный input → браузер шлёт blur, который сбрасывал флаг
+        // this._searchFocused раньше, чем мы успевали проверить его при восстановлении →
+        // фокус терялся при каждом нажатии. Считываем состояние в локальные переменные
+        // (источник истины — был ли input активным элементом), поэтому blur уже не мешает.
+        var prevSearch = box.querySelector('.atex-pp-search');
+        var searchHadFocus = !!(prevSearch && (this._searchFocused ||
+            (typeof document !== 'undefined' && document.activeElement === prevSearch)));
+        var searchCaret = null;
+        if (prevSearch) { try { searchCaret = prevSearch.selectionStart; } catch (e) {} }
         box.innerHTML = '';
 
         // Панель фильтров. Фильтр по станку заменён закладками (#3116 п.2).
@@ -6023,9 +6033,11 @@
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
 
-        if (this._searchFocused) {
+        // #3429: восстанавливаем фокус/каретку по состоянию, снятому ДО очистки DOM —
+        // надёжно, даже если blur от innerHTML='' успел сбросить this._searchFocused.
+        if (searchHadFocus) {
             searchInput.focus();
-            var caret = searchInput.value.length;
+            var caret = (searchCaret == null) ? searchInput.value.length : searchCaret;
             try { searchInput.setSelectionRange(caret, caret); } catch (e) {}
         }
 
