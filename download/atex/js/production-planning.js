@@ -2224,15 +2224,24 @@
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →
-    //   { updates:[{cutId, sequence, planStartTs, plannedRuns}],            // первый сегмент → существующая запись
-    //     creates:[{parentCutId, sequence, planStartTs, plannedRuns}],       // продолжения → новые записи
-    //     deletes:[cutId…] }                                                 // записи-продолжения прежних цепочек
-    // Деление Обеспечения и копию Полос на продолжения выполняет аппликатор (нужны id новых
-    // записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
+    //   { updates:[{cutId, sequence, planStartTs, plannedRuns}],            // сегменты, легшие на существующие записи цепочки
+    //     creates:[{parentCutId, sequence, planStartTs, plannedRuns}],       // сегменты сверх имеющихся записей → новые
+    //     deletes:[cutId…] }                                                 // лишние записи цепочки (сегментов стало меньше)
+    // #3427: ИДЕМПОТЕНТНОСТЬ. Сегменты-продолжения переиспользуют УЖЕ существующие записи
+    // цепочки (chainByLogical: голова + продолжения по дням), а не пересоздаются каждый раз.
+    // Поэтому повторный прогон при неизменной раскладке даёт те же записи с теми же
+    // очередностью/временем/проходами → autoSequenceQueue отфильтрует их как «без изменений»
+    // и не сделает ни одной записи. Прежняя версия всегда удаляла продолжения и создавала их
+    // заново, а аппликатор при этом повторно делил уже делённое Обеспечение головы (метраж
+    // усыхал на каждый повтор). Новые записи — только если сегментов стало БОЛЬШЕ, чем записей
+    // в цепочке; удаления — только лишние записи, когда сегментов стало МЕНЬШЕ.
+    // Деление Обеспечения и копию Полос на новые продолжения выполняет аппликатор (нужны id
+    // новых записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
     function planCutOperations(cuts, opts){
         opts = opts || {};
         var base = Number(opts.planBaseMidnightMs);
         var merged = mergeContinuationChains(cuts);
+        var chainByLogical = merged.chainByLogical || {};
         var perPass = opts.perPassByCut || {};
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
@@ -2242,7 +2251,9 @@
             if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
             byMachine[key].push(c);
         });
-        var updates = [], creates = [];
+        var updates = [], creates = [], deletes = [];
+        // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
+        var usedByHead = {};
         mOrder.forEach(function(key){
             var ordered = orderCuts(byMachine[key], opts.weights);
             var runsByCut = {};
@@ -2253,16 +2264,38 @@
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin
             });
+            // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
+            var contIndexByHead = {};
             segs.forEach(function(seg, idx){
                 var ts = scheduleStartTimestamp(base, seg.windowStartMin);
                 if (!seg.isContinuation) {
-                    updates.push({ cutId: String(seg.cutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    var head0 = String(seg.cutId);
+                    contIndexByHead[head0] = 0;
+                    usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
                 } else {
-                    creates.push({ parentCutId: String(seg.parentCutId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    var head = String(seg.parentCutId);
+                    var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
+                    var chain = chainByLogical[head] || [head];
+                    var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
+                    if (reuseId != null) {
+                        usedByHead[head] = k + 1;
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    } else {
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    }
                 }
             });
         });
-        return { updates: updates, creates: creates, deletes: merged.deletes };
+        // Лишние записи цепочки (сегментов стало меньше, чем записей) — на удаление. Цепочки
+        // станков, которые мы НЕ раскладывали (usedByHead нет), не трогаем — данные не теряем.
+        Object.keys(chainByLogical).forEach(function(head){
+            var chain = chainByLogical[head];
+            var used = usedByHead[head];
+            if (used == null) return;
+            for (var k = used; k < chain.length; k++) deletes.push(String(chain[k]));
+        });
+        return { updates: updates, creates: creates, deletes: deletes };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
