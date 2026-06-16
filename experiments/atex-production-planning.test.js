@@ -2153,6 +2153,48 @@ assertEqual(ops3421.updates.slice().sort(function(a, b) { return a.sequence - b.
 assertEqual(ops3421.creates, [], 'planCutOperations #3421: один день, без переноса');
 assertEqual(ops3421.deletes, [], 'planCutOperations #3421: без удалений');
 
+// ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
+// Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
+// Повторный planCutOperations должен ПЕРЕИСПОЛЬЗОВАТЬ запись B как update (а не
+// удалить B и создать новое продолжение) — тогда autoSequenceQueue отфильтрует
+// неизменившиеся update'ы и не сделает ни одной записи (нет churn, обеспечение не
+// делится повторно). Прежняя версия всегда давала creates=[B'] + deletes=[B].
+var ops3427 = planning.planCutOperations(
+    [withSig('A', '1780963200', 10), withSig('B', '1781049600', 5)],
+    { perPassByCut: { A: 10, B: 10 }, dayStartMin: 0, dayEndMin: 100,
+      times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops3427.updates,
+    [ { cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 },
+      { cutId: 'B', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 } ],
+    'planCutOperations #3427: оба сегмента → update существующих записей цепочки (B переиспользована)');
+assertEqual(ops3427.creates, [], 'planCutOperations #3427: продолжение не пересоздаётся');
+assertEqual(ops3427.deletes, [], 'planCutOperations #3427: запись B не удаляется');
+
+// #3427: если раскладка изменилась и сегментов стало БОЛЬШЕ записей в цепочке —
+// первые сегменты переиспользуют записи, лишний сегмент создаётся.
+var ops3427grow = planning.planCutOperations(
+    [withSig('A', '1780963200', 25)],   // одна запись, но 25 проходов не влезают в 2 дня по 10
+    { perPassByCut: { A: 10 }, dayStartMin: 0, dayEndMin: 100,
+      times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops3427grow.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 }],
+    'planCutOperations #3427 (рост): голова — update');
+assertEqual(ops3427grow.creates.length, 2, 'planCutOperations #3427 (рост): 2 продолжения создаются (записей цепочки нет)');
+assertEqual(ops3427grow.deletes, [], 'planCutOperations #3427 (рост): без удалений');
+
+// #3427: если сегментов стало МЕНЬШЕ записей в цепочке — лишние записи удаляются.
+// Цепочка [A,B,C] на станке, но теперь всё влезает в один сегмент (день вмещает всё).
+var ops3427shrink = planning.planCutOperations(
+    [withSig('A', '1780963200', 3), withSig('B', '1781049600', 3), withSig('C', '1781136000', 3)],
+    { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
+      times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
+);
+assertEqual(ops3427shrink.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 9 }],
+    'planCutOperations #3427 (сжатие): один сегмент → update головы (9 проходов)');
+assertEqual(ops3427shrink.creates, [], 'planCutOperations #3427 (сжатие): без создания');
+assertEqual(ops3427shrink.deletes, ['B', 'C'], 'planCutOperations #3427 (сжатие): лишние записи B,C удаляются');
+
 // ── #3280: splitSupplyShares — деление Обеспечения по проходам (рулоны целые) ──
 assertEqual(planning.splitSupplyShares(15, 1500, [10, 5]), [{ rolls: 10, footage: 1000 }, { rolls: 5, footage: 500 }], 'splitSupplyShares: 15 рулонов / 1500 м по 10:5 → 10/1000 и 5/500');
 assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage: 30 }, { rolls: 3, footage: 30 }, { rolls: 3, footage: 30 }], 'splitSupplyShares: остаток рулона по наибольшей дробной части; сумма = 10');
