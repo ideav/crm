@@ -903,7 +903,7 @@
             var main = '<tr class="atex-orders-row" data-order-id="' + escapeHtml(order.id) + '">' +
                 '<td class="atex-orders-toggle-cell"><button type="button" class="atex-orders-toggle" data-toggle="' + escapeHtml(order.id) + '" title="Позиции">' +
                 '<i class="pi ' + (isOpen ? 'pi-chevron-down' : 'pi-chevron-right') + '"></i></button></td>' +
-                '<td>' + escapeHtml(order.id) + '</td>' +
+                '<td>' + escapeHtml(order.values.no || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.client || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
                 orderDisplayCell(order, 'created') +
