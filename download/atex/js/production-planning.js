@@ -4893,14 +4893,11 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
-            // Новых резок нет, но «Сгенерировать резки» всё равно приводит очередь в
-            // нормальный вид (#3421): пересобираем «Очередность» уже созданных резок
-            // (в т.ч. сохранённых старой генерацией как 6,16,16 → 16,16,6).
-            console.log('[pp] ⚙️ generateCuts: необеспеченных нет — пересобираю очередь существующих резок');
-            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP).then(function(changed) {
-                self.notify(changed ? 'Очередь резок пересобрана (минимум переналадок)'
-                                    : 'Нет необеспеченных позиций; очередь уже в нужном порядке', 'info');
-            });
+            // #3449: «Сгенерировать резки» только вытаскивает незапланированные позиции.
+            // Если таких нет — ничего не делаем: уже запланированные резки не трогаем и
+            // очередь не пересобираем (это оператор сделает сам, удалив резки и Партии ГП).
+            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — очередь не трогаем');
+            self.notify('Нет незапланированных позиций для генерации резок', 'info');
             return;
         }
         var profiles = groupPositionsByPlanningProfile(unsup);
@@ -5434,10 +5431,9 @@
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
-            // #3421: свести новые резки с уже существующими в единую правильную очередь
-            // (перемежить по станко-дням, ножи по убыванию). Если порядок уже верный —
-            // no-op без записи. applySplitPlan сам делает reload+render.
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP);
+            // #3449: уже запланированные резки не трогаем и очередь не пересобираем.
+            // Новые резки получают «Очередность»/плановое время при создании (дописываются
+            // после существующих в своей группе слиттер/день), reload+render уже сделаны выше.
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -6598,8 +6594,9 @@
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
-        // Отдельной кнопки «Автопланирование» нет (#3421): «Сгенерировать резки» само
-        // приводит очередь в нормальный вид (autoSequenceQueue в generateCuts).
+        // «Сгенерировать резки» только создаёт резки для незапланированных позиций и
+        // дописывает их в конец очереди (#3449); уже запланированные резки не трогает.
+        // Перестановку очереди оператор делает вручную (↑↓).
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         queueActions.appendChild(genSpinner);
