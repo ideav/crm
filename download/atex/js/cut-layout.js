@@ -92,10 +92,13 @@
     (demands || []).forEach(function(dem){
       var w = toNumber(dem.width);
       // ширина вне (0, джамбо] не укладывается (в т.ч. вырожденная ≤0) → overflow
-      if (w <= 0 || w > W) { overflow.push({ width: dem.width, qty: dem.qty, positionId: dem.positionId }); return; }
+      if (w <= 0 || w > W) { overflow.push({ width: dem.width, qty: dem.qty, positionId: dem.positionId, stockable: dem.stockable }); return; }
       var key = String(w);
-      if (!byWidth[key]) { byWidth[key] = { width: w, qty: 0, positionIds: [] }; order.push(key); }
+      if (!byWidth[key]) { byWidth[key] = { width: w, qty: 0, positionIds: [], stockable: true }; order.push(key); }
       byWidth[key].qty += toNumber(dem.qty);
+      // ширина считается запасной только если ВСЕ её позиции запасные (есть в «Максимальном
+      // запасе»); без флага — незапасная (режем под заказ, #3423).
+      if (!dem.stockable) byWidth[key].stockable = false;
       if (dem.positionId != null && byWidth[key].positionIds.indexOf(dem.positionId) < 0) {
         byWidth[key].positionIds.push(dem.positionId);
       }
@@ -107,38 +110,65 @@
     var used = 0;
     widths.forEach(function(g){
       if (round3(used + g.width) <= W) {
-        strips.push({ width: g.width, qty: 1, purpose: 'Заказ', positionIds: g.positionIds.slice(), demandQty: g.qty });
+        strips.push({ width: g.width, qty: 1, purpose: 'Заказ', positionIds: g.positionIds.slice(), demandQty: g.qty, stockable: g.stockable });
         used = round3(used + g.width);
       } else {
-        overflow.push({ width: g.width, qty: g.qty, positionId: g.positionIds[0] });
+        overflow.push({ width: g.width, qty: g.qty, positionId: g.positionIds[0], stockable: g.stockable });
       }
     });
-    // (c) дозаполнение по спросу: пока остаток вмещает любую заказанную ширину, добавлять полосу
-    // ширины с макс. неудовлетворённым спросом (при равенстве — бóльшая ширина, затем меньший id).
-    function unmet(s){ return s.demandQty - s.qty; }
-    var guard = 0;
-    while (guard++ < 100000) {
-      var rem = round3(W - used);
-      // кандидаты с непокрытым спросом, влезающие в остаток
-      var pick = null;
-      strips.forEach(function(s){
-        if (s.purpose !== 'Заказ') return;
-        if (s.width > rem) return;
-        if (unmet(s) <= 0) return;
-        if (pick === null) { pick = s; return; }
-        var u = unmet(s), pu = unmet(pick);
-        if (u > pu) { pick = s; return; }
-        if (u === pu) {
-          if (s.width > pick.width) { pick = s; return; }
-          if (s.width === pick.width) {
-            var sid = String(s.positionIds[0]), pid = String(pick.positionIds[0]);
-            if (sid < pid) pick = s;
-          }
+    // (c) дозаполнение по спросу. Поведение зависит от «Максимального запаса» (#3423):
+    //   • есть НЕзапасная ширина (нет в таблице) → «резать под заказ». Число рулонов ширины
+    //     = полосы × прогоны, прогоны у раскладки ОБЩИЕ (= худшая ширина: max ⌈спрос/полос⌉).
+    //     Полный материал = ширина_джамбо × прогоны × длина, полезный выход (заказы)
+    //     фиксирован → минимум отхода ≡ МИНИМУМ ПРОГОНОВ. Берём наименьшее R, при котором по
+    //     ⌈спрос/R⌉ полос каждой ширины влезают в джамбо: каждая ширина даёт ≈ свой заказ
+    //     (перепроизводство < R), без раздувания одной ширины другой (60 заказ → 60, не 210).
+    //   • ВСЕ ширины запасные → прежняя жадная набивка джамбо по непокрытому спросу: излишек
+    //     уходит в запас (для комбинаций из «Максимального запаса» это допустимо).
+    // База (b) уже дала по 1 полосе на ширину.
+    var orderStrips = strips.filter(function(s){ return s.purpose === 'Заказ'; });
+    var anyNonStock = orderStrips.some(function(s){ return !s.stockable; });
+    if (orderStrips.length && anyNonStock) {
+      var maxDemand = 0;
+      orderStrips.forEach(function(s){ if (s.demandQty > maxDemand) maxDemand = s.demandQty; });
+      if (maxDemand < 1) maxDemand = 1;
+      // R от 1 вверх: при R = maxDemand получаем по 1 полосе/ширину (= база, которая уже
+      // влезла), поэтому цикл гарантированно находит решение.
+      for (var R = 1; R <= maxDemand; R++) {
+        var sumW = 0;
+        orderStrips.forEach(function(s){ sumW = round3(sumW + Math.max(1, Math.ceil(s.demandQty / R)) * s.width); });
+        if (sumW <= W) {
+          orderStrips.forEach(function(s){ s.qty = Math.max(1, Math.ceil(s.demandQty / R)); });
+          break;
         }
-      });
-      if (!pick) break;
-      pick.qty += 1;
-      used = round3(used + pick.width);
+      }
+      used = round3(strips.reduce(function(a, s){ return a + s.width * s.qty; }, 0));
+    } else if (orderStrips.length) {
+      // все ширины запасные: пока остаток вмещает любую заказанную ширину, добавлять полосу
+      // ширины с макс. непокрытым спросом (при равенстве — бóльшая ширина, затем меньший id).
+      var guard = 0;
+      while (guard++ < 100000) {
+        var rem = round3(W - used);
+        var pick = null;
+        strips.forEach(function(s){
+          if (s.purpose !== 'Заказ') return;
+          if (s.width > rem) return;
+          if (s.demandQty - s.qty <= 0) return;
+          if (pick === null) { pick = s; return; }
+          var u = s.demandQty - s.qty, pu = pick.demandQty - pick.qty;
+          if (u > pu) { pick = s; return; }
+          if (u === pu) {
+            if (s.width > pick.width) { pick = s; return; }
+            if (s.width === pick.width) {
+              var sid = String(s.positionIds[0]), pid = String(pick.positionIds[0]);
+              if (sid < pid) pick = s;
+            }
+          }
+        });
+        if (!pick) break;
+        pick.qty += 1;
+        used = round3(used + pick.width);
+      }
     }
     // (d) добор остатка ходовыми → полосы purpose:'Склад'.
     var rem2 = round3(W - used);
@@ -192,7 +222,7 @@
     var tolerance = toNumber(opts.tolerance);
     var positions = (input.positions || []).map(function(p){
       return { id: p.id, width: toNumber(p.width), qty: toNumber(p.qty),
-               dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity };
+               dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity, stockable: !!p.stockable };
     });
 
     var groups = dueWindowGroups(positions, windowDays);
@@ -203,7 +233,7 @@
       var clusterDueKey = Infinity;
       cluster.forEach(function(p){ if (p.dueKey < clusterDueKey) clusterDueKey = p.dueKey; });
 
-      var pending = cluster.map(function(p){ return { width: p.width, qty: p.qty, positionId: p.id }; });
+      var pending = cluster.map(function(p){ return { width: p.width, qty: p.qty, positionId: p.id, stockable: p.stockable }; });
       var guard = 0;
       while (pending.length && guard++ < 100000) {
         var result = composeLayout(W, pending, preferred, tolerance);
@@ -231,7 +261,7 @@
           result.overflow.forEach(function(o){ skipped.push({ positionId: o.positionId, reason: 'шире джамбо' }); });
           break;
         }
-        pending = result.overflow.map(function(o){ return { width: o.width, qty: o.qty, positionId: o.positionId }; });
+        pending = result.overflow.map(function(o){ return { width: o.width, qty: o.qty, positionId: o.positionId, stockable: o.stockable }; });
       }
     });
 

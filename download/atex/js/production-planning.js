@@ -4793,7 +4793,12 @@
                     var res = layoutCore.planLayouts({
                         jumboWidth: jw,
                         positions: positionGroup.map(function(p) {
-                            return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
+                            // #3423: запасные комбинации (есть в «Максимальном запасе») можно
+                            // перепроизводить в запас; незапасные — резать ровно под заказ.
+                            return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey,
+                                stockable: planning.isStockableNomenclature(self.maxStockIndex, {
+                                    material: mat, width: p.width,
+                                    length: group.windLength, winding: group.windDir }) };
                         }),
                         preferred: stockablePreferred,
                         options: { windowDays: hasOverdue ? WINDOW_DAYS : Infinity, tolerance: self.resolveToleranceMm(mat) }
