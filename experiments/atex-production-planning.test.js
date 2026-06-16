@@ -752,14 +752,11 @@ assertEqual(planning.buildFinishedBatchFields(fbMeta3433,
   { t1186: 110, t70190: 2, t70575: 12, t1192: '1' },
   'buildFinishedBatchFields #3433: пустой спрос/ID заказа (запас) → поля пропущены');
 
-// #3433/#3435: batchOrderId — заказы покрытых позиций; несколько → через запятую,
-// спроса нет → '' (запас). Партия под заказ ОБЯЗАНА иметь непустой «ID заказа».
-assertEqual(planning.batchOrderId(['7', '7', '']), '7', 'batchOrderId: один заказ (дубли/пустые свернуты)');
-assertEqual(planning.batchOrderId(['7', '9']), '7,9', 'batchOrderId #3435: несколько заказов → через запятую (не пусто)');
-assertEqual(planning.batchOrderId(['7', '', '9', '7']), '7,9', 'batchOrderId #3435: различные id, сохранён порядок появления');
-assertEqual(planning.batchOrderId(['', '']), '', 'batchOrderId: все пустые → пусто (запас)');
-assertEqual(planning.batchOrderId([]), '', 'batchOrderId: пусто → пусто (запас)');
-assertEqual(planning.batchOrderId(undefined), '', 'batchOrderId: undefined → пусто');
+// #3433: singleOrderId — общий заказ списка позиций или '' (запас/несколько заказов).
+assertEqual(planning.singleOrderId(['7', '7', '']), '7', 'singleOrderId: один заказ (пустые игнорируются)');
+assertEqual(planning.singleOrderId(['7', '9']), '', 'singleOrderId: несколько заказов → пусто');
+assertEqual(planning.singleOrderId(['', '']), '', 'singleOrderId: все пустые → пусто');
+assertEqual(planning.singleOrderId([]), '', 'singleOrderId: пусто → пусто');
 var supMeta3242 = { id: '1077', val: 'Обеспечение', reqs: [
   { id: '1149', val: 'Метраж, м' }, { id: '1154', val: 'В работе' },
   { id: '15016', val: 'Партия ГП', ref: '1081' }, { id: '16424', val: 'Кол-во рулонов' }
