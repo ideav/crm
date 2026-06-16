@@ -14,6 +14,10 @@
     --pp-info-text: #3730a3;
     --pp-warn: var(--color-error, #b91c1c);
     --pp-ok: var(--color-success, #15803d);
+    /* Жёлтая плашка подтверждения генерации — чтобы её было видно. */
+    --pp-attn-bg: #fef08a;       /* amber-200 */
+    --pp-attn-border: #eab308;   /* amber-500 */
+    --pp-attn-text: #713f12;     /* amber-900 — читаемо на жёлтом */
     color: var(--text-primary, #1f2933);
     font-size: 14px;
     box-sizing: border-box;
@@ -22,6 +26,9 @@
 [data-theme="dark"] .atex-pp {
     --pp-info-bg: rgba(129, 140, 248, 0.18);
     --pp-info-text: #c4b5fd;
+    --pp-attn-bg: rgba(234, 179, 8, 0.22);
+    --pp-attn-border: #eab308;
+    --pp-attn-text: #fde68a;
 }
 
 .atex-pp *,
@@ -130,13 +137,13 @@
     flex-wrap: wrap;
     width: 100%;
     padding: 8px;
-    border: 1px solid var(--pp-border-soft);
+    border: 1px solid var(--pp-attn-border);
     border-radius: 6px;
-    background: var(--pp-surface);
+    background: var(--pp-attn-bg);
 }
 .atex-pp-confirm-msg {
     flex: 1 1 220px;
-    color: var(--pp-muted);
+    color: var(--pp-attn-text);
 }
 .atex-pp-panel-actions .atex-pp-confirm-bar {
     flex-basis: 100%;
