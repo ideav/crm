@@ -343,7 +343,12 @@
                 cuts[r.cut_id] = { id: r.cut_id, number: r.cut_no || ('#' + r.cut_id), slitter: r.cut_slitter, status: r.cut_status, footage: r.cut_footage_m };
             }
             if (r.gp_id && !gp[r.gp_id]) {
-                gp[r.gp_id] = { id: r.gp_id, cutId: r.gp_cut_id || '', status: r.gp_status, rolls: r.gp_rolls, footage: r.gp_footage_m, address: r.gp_address };
+                // #3433: «Выпуск ГП» = фактически произведённые рулоны → «Кол-во факт»
+                // (gp_fact). Пока отчёт не отдаёт его — фолбэк на gp_rolls (старое поведение).
+                var gpRolls = (r.gp_fact != null && r.gp_fact !== '') ? r.gp_fact : r.gp_rolls;
+                gp[r.gp_id] = { id: r.gp_id, cutId: r.gp_cut_id || '', status: r.gp_status,
+                    rolls: gpRolls, plan: r.gp_plan, fact: r.gp_fact, orderId: r.gp_order_id || '',
+                    footage: r.gp_footage_m, address: r.gp_address };
             }
         });
         return { orders: vals(orders), positions: vals(positions), provisions: vals(provisions), cuts: vals(cuts), gpBatches: vals(gp) };

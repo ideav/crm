@@ -39,13 +39,19 @@
     var COMPLETED_CUTTING_STATUSES = ['Завершён', 'Завершен', 'Готово', 'Готов'];
 
     // Карта полей таблицы «Партия ГП». `main: true` — первая колонка (дата прихода).
+    // #3433: «Кол-во рулонов» — спрос (план под заказ); «Кол-во план» — план
+    // производства (полосы × проходов); «Кол-во факт» — фактически произведённые
+    // рулоны (заполняется при оприходовании/списании, может отличаться из-за брака).
     var BATCH_FIELDS = [
         { key: 'arrived', label: 'Дата прихода', main: true },
         { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'rolls', label: 'Кол-во рулонов', names: ['Кол-во рулонов', 'Количество рулонов'] },
+        { key: 'planned', label: 'Кол-во план', names: ['Кол-во план'] },
+        { key: 'actual', label: 'Кол-во факт', names: ['Кол-во факт'] },
         { key: 'length', label: 'Метраж, м', names: ['Метраж, м', 'Метраж'] },
         { key: 'address', label: 'Адрес хранения', names: ['Адрес хранения', 'Адрес'] },
+        { key: 'orderId', label: 'ID заказа', names: ['ID заказа'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true },
         // #3242: «Активно» переименовано в «В работе».
         { key: 'active', label: 'В работе', names: ['В работе', 'Активно', 'Активная'] }
@@ -277,11 +283,27 @@
         return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
     }
 
+    // #3433: фактический остаток партии для списания = «Кол-во факт» (реально
+    // произведено); пока факт не проставлен — фолбэк на «Кол-во рулонов» (спрос), затем
+    // на «Кол-во план». Возвращает число рулонов (0, если ничего не задано).
+    function batchRolls(batch) {
+        var v = batch && batch.values;
+        if (!v) return 0;
+        var keys = ['actual', 'rolls', 'planned'];
+        for (var i = 0; i < keys.length; i++) {
+            var raw = v[keys[i]];
+            if (raw == null || raw === '') continue;
+            var n = Number(raw);
+            if (!isNaN(n) && n > 0) return n;
+        }
+        return 0;
+    }
+
     function batchExhaustedByProvision(batch, provision) {
-        var batchRolls = Number(batch && batch.values && batch.values.rolls) || 0;
+        var available = batchRolls(batch);
         var provisionRolls = Number(provision && provision.values && provision.values.rolls) || 0;
-        if (batchRolls <= 0 || provisionRolls <= 0) return false;
-        return provisionRolls >= batchRolls;
+        if (available <= 0 || provisionRolls <= 0) return false;
+        return provisionRolls >= available;
     }
 
     // Список завершённых резок (FIFO-приоритет для оприходования). Если завершённых
@@ -355,8 +377,12 @@
         put('cutting', opts.cuttingId);
         put('width', opts.width);
         put('rolls', opts.rolls);
+        put('planned', opts.planned);
+        // #3433: оприходование фиксирует ФАКТ — введённое кол-во рулонов идёт в «Кол-во факт».
+        put('actual', opts.actual);
         put('length', opts.length);
         put('address', opts.address);
+        put('orderId', opts.orderId);
         put('status', opts.status);
         put('active', opts.active);
 
@@ -563,7 +589,8 @@
                 '<td>' + escapeHtml(fmtDate(batch.values.arrived || batch.main)) + '</td>' +
                 '<td>' + escapeHtml(batch.values.cutting || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.width || '') + '</td>' +
-                '<td>' + escapeHtml(batch.values.rolls || '') + '</td>' +
+                '<td>' + escapeHtml(batch.values.planned || '') + '</td>' +
+                '<td>' + escapeHtml(batch.values.actual || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.length || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.address || '') + '</td>' +
                 '<td>' + statusSelectHtml(state.batchStatuses, batch.values.status,
@@ -573,7 +600,7 @@
 
         container.innerHTML = '<table class="atex-wh-table">' +
             '<thead><tr><th>№</th><th>Дата прихода</th><th>Резка</th><th>Ширина, мм</th>' +
-            '<th>Рулоны</th><th>Метраж, м</th><th>Адрес хранения</th><th>Статус</th></tr></thead>' +
+            '<th>План</th><th>Факт</th><th>Метраж, м</th><th>Адрес хранения</th><th>Статус</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table>';
     }
 
@@ -659,7 +686,7 @@
             '<div class="atex-wh-fields">' +
             '<label>Производственная резка' + cuttingOptionsHtml('atex-wh-cutting') + '</label>' +
             '<label>Ширина, мм<input class="atex-wh-input" type="number" min="0" id="atex-wh-width"></label>' +
-            '<label>Кол-во рулонов<input class="atex-wh-input" type="number" min="0" id="atex-wh-rolls"></label>' +
+            '<label>Кол-во рулонов (факт)<input class="atex-wh-input" type="number" min="0" id="atex-wh-rolls"></label>' +
             '<label>Метраж, м<input class="atex-wh-input" type="number" min="0" step="any" id="atex-wh-length"></label>' +
             '<label>Адрес хранения<input class="atex-wh-input" type="text" id="atex-wh-address"></label>' +
             '<label>Статус' + statusSelectHtml(state.batchStatuses, state.batchStatuses[0], ' id="atex-wh-status"') + '</label>' +
@@ -720,7 +747,8 @@
             columns: state.batchColumns,
             cuttingId: cuttingSel ? cuttingSel.value : '',
             width: widthEl ? widthEl.value : '',
-            rolls: rollsEl ? rollsEl.value : '',
+            // #3433: оприходование фиксирует фактически принятые рулоны → «Кол-во факт».
+            actual: rollsEl ? rollsEl.value : '',
             length: lengthEl ? lengthEl.value : '',
             address: addressEl ? addressEl.value : '',
             status: statusSel ? statusSel.value : state.batchStatuses[0],
@@ -1003,6 +1031,7 @@
         extractNewObjectId: extractNewObjectId,
         isCompletedCutting: isCompletedCutting,
         isActiveBatch: isActiveBatch,
+        batchRolls: batchRolls,
         batchExhaustedByProvision: batchExhaustedByProvision,
         completedCuttings: completedCuttings,
         pickFifoBatch: pickFifoBatch,

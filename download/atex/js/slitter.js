@@ -47,8 +47,12 @@
         event: 'Событие смены',
         batch: 'Партия сырья',
         material: 'Вид сырья',
-        slitter: 'Слиттер'
+        slitter: 'Слиттер',
+        finishedBatch: 'Партия ГП'   // #3433: состав резки — для записи факт. рулонов
     };
+    // #3433: реквизиты «Партии ГП» (состав резки, up = резка), нужные слиттеру для
+    // записи факта: «Кол-во полос» (за проход) и «Кол-во факт» (произведённые рулоны).
+    var FINISHED_BATCH_REQ = { strips: 'Кол-во полос', actual: 'Кол-во факт' };
     var CUT_REQ = {
         slitter: 'Слиттер',
         batch: 'Партия сырья',
@@ -133,6 +137,26 @@
     // мотает назад; при пустом/обратном вводе подсказка = 0).
     function meterageFromCounters(start, end) {
         return round3(Math.max(0, toNumber(end) - toNumber(start)));
+    }
+
+    // #3433: фактическое число проходов резки из погонажа факт ÷ метраж прогона
+    // (округление до целого прохода). Нет данных по погонажу/метражу → фолбэк на план
+    // (чтобы факт хотя бы не был нулём при завершении без замеров). Пусто → 0.
+    function actualRunsFromMeterage(meterageFact, runLength, plannedRuns) {
+        var m = toNumber(meterageFact);
+        var rl = toNumber(runLength);
+        if (m > 0 && rl > 0) return Math.round(m / rl);
+        var pr = toNumber(plannedRuns);
+        return pr > 0 ? pr : 0;
+    }
+
+    // #3433: фактически произведённые рулоны полосы = полос за проход × факт. проходов.
+    // Пусто/0 полос или 0 проходов → '' (поле «Кол-во факт» не пишем).
+    function actualRollsForStrip(stripsPerPass, actualRuns) {
+        var s = toNumber(stripsPerPass);
+        var runs = toNumber(actualRuns);
+        if (!(s > 0) || !(runs > 0)) return '';
+        return round3(s * runs);
     }
 
     // Сумма израсходованного по строкам расхода (для сводки по резке).
@@ -424,6 +448,8 @@
         nextStatus: nextStatus,
         isDone: isDone,
         meterageFromCounters: meterageFromCounters,
+        actualRunsFromMeterage: actualRunsFromMeterage,
+        actualRollsForStrip: actualRollsForStrip,
         sumConsumption: sumConsumption,
         sortFifo: sortFifo,
         pickFifoBatch: pickFifoBatch,
@@ -511,7 +537,7 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
-        this.meta = { cut: null, consumption: null, event: null, batch: null, material: null, slitter: null };
+        this.meta = { cut: null, consumption: null, event: null, batch: null, material: null, slitter: null, finishedBatch: null };
         this.slitters = [];
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder, materialId }]
         this.materialWidths = {}; // { materialId: widthMm }
@@ -631,6 +657,8 @@
             self.meta.batch = byName(TABLE.batch);
             self.meta.material = byName(TABLE.material);
             self.meta.slitter = byName(TABLE.slitter);
+            // #3433: необязательна (старое окружение без «Партии ГП» → факт не пишем).
+            self.meta.finishedBatch = byName(TABLE.finishedBatch);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
         });
@@ -1363,6 +1391,36 @@
         return fields;
     };
 
+    // #3433: при завершении резки зафиксировать фактически произведённые рулоны в её
+    // «Партиях ГП»: «Кол-во факт» = «Кол-во полос» (за проход) × факт. проходов (погонаж
+    // факт ÷ метраж прогона, фолбэк план). Без метаданных/реквизита «Партии ГП» —
+    // тихо пропускаем; ошибка чтения/записи не валит смену статуса (факт уточнит склад).
+    AtexSlitter.prototype.recordActualRolls = function(cut) {
+        var self = this;
+        var fb = this.meta.finishedBatch;
+        if (!fb || !cut) return Promise.resolve();
+        var actualReq = reqIdByName(fb, FINISHED_BATCH_REQ.actual);
+        if (!actualReq) return Promise.resolve();
+        var stripsIdx = colIndex(fb, FINISHED_BATCH_REQ.strips);
+        var actualRuns = core.actualRunsFromMeterage(cut.meterage, cut.runLength, cut.plannedRuns);
+        return this.getJson('object/' + fb.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cut.id) + '&LIMIT=0,500').then(function(rows) {
+            var chain = Promise.resolve();
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var strips = stripsIdx >= 0 ? r[stripsIdx] : '';
+                var rolls = core.actualRollsForStrip(strips, actualRuns);
+                if (rolls === '') return;
+                chain = chain.then(function() {
+                    var f = {}; f['t' + actualReq] = rolls;
+                    return self.post('_m_set/' + rec.i + '?JSON', f);
+                });
+            });
+            return chain;
+        }).catch(function(err) {
+            console.warn('[slitter] recordActualRolls:', err && err.message);
+        });
+    };
+
     AtexSlitter.prototype.setStatus = function(status, eventType) {
         var self = this;
         var cut = this.currentCut;
@@ -1394,6 +1452,10 @@
             return null;
         }).then(function() {
             return self.loadEvents(cut.id);
+        }).then(function() {
+            // #3433: завершение резки → зафиксировать факт рулонов в «Партиях ГП».
+            if (core.isDone(cut.status)) return self.recordActualRolls(cut);
+            return null;
         }).then(function() {
             self.setBusy(false);
             self.notify('Статус: ' + cut.status, 'success');

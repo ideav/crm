@@ -163,6 +163,27 @@ const createActiveBatch = helpers.buildCreateBatchRequest({
 });
 assert.strictEqual(new URLSearchParams(createActiveBatch.body).get('t1999'), '1', 'batch create sets active=1 when the field exists');
 
+// --- #3433: оприходование фиксирует ФАКТ в «Кол-во факт»; FIFO-остаток по факту ---
+const batchColumns3433 = helpers.BATCH_FIELDS.map(function(c) {
+    var ids = { actual: '2001', planned: '2002', orderId: '2003' };
+    return ids[c.key] ? Object.assign({}, c, { reqId: ids[c.key] }) : c;
+});
+const createFactBatch = helpers.buildCreateBatchRequest({
+    db: 'atex', tableId: '113', columns: batchColumns3433,
+    cuttingId: '210', width: '500', actual: '4', length: '1200', address: 'A-12', status: 'Есть', xsrf: 'TOK'
+});
+const factBody = new URLSearchParams(createFactBatch.body);
+assert.strictEqual(factBody.get('t2001'), '4', '#3433: оприходование пишет введённое кол-во в «Кол-во факт» (t2001)');
+assert.strictEqual(factBody.get('t1130'), null, '#3433: «Кол-во рулонов» (спрос) при оприходовании не задаётся');
+
+// batchRolls: фактический остаток = факт; фолбэк рулоны(спрос) → план.
+assert.strictEqual(helpers.batchRolls({ values: { actual: '4', rolls: '9', planned: '12' } }), 4, '#3433: batchRolls — приоритет «Кол-во факт»');
+assert.strictEqual(helpers.batchRolls({ values: { rolls: '9', planned: '12' } }), 9, '#3433: batchRolls — фолбэк на «Кол-во рулонов»');
+assert.strictEqual(helpers.batchRolls({ values: { planned: '12' } }), 12, '#3433: batchRolls — фолбэк на «Кол-во план»');
+assert.strictEqual(helpers.batchRolls({ values: {} }), 0, '#3433: batchRolls — ничего не задано → 0');
+// FIFO-списание учитывает факт (а не спрос): партия с фактом 4 исчерпывается обеспечением 4.
+assert.strictEqual(helpers.batchExhaustedByProvision({ values: { actual: '4', rolls: '99' } }, { values: { rolls: '4' } }), true, '#3433: batchExhaustedByProvision по «Кол-во факт»');
+
 // --- Смена статуса партии: _m_set/{id}?JSON (статус — не первая колонка) ---
 const setStatus = helpers.buildSetStatusRequest({
     db: 'atex',
