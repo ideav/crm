@@ -711,6 +711,25 @@ var fbMeta3242 = { id: '1081', val: 'Партия ГП', reqs: [
 assertEqual(planning.buildFinishedBatchFields(fbMeta3242, { width: 110, rolls: 6, footage: 1200, active: '1' }),
   { t1186: 110, t1188: 6, t1189: 1200, t1192: '1' },
   'buildFinishedBatchFields #3242: Ширина/Кол-во рулонов/Метраж/«В работе»');
+
+// #3431: «Кол-во полос» = полос за проход; «Кол-во рулонов» = полосы × число резок (проходов).
+assertEqual(planning.finishedBatchRolls(2, 6), 12, 'finishedBatchRolls #3431: 2 полосы × 6 проходов = 12 рулонов');
+assertEqual(planning.finishedBatchRolls(2, 0), 2, 'finishedBatchRolls #3431: нет проходов → рулоны = полосам (фолбэк)');
+assertEqual(planning.finishedBatchRolls(0, 6), '', 'finishedBatchRolls #3431: нет полос → пусто');
+assertEqual(planning.finishedBatchRolls('', 6), '', 'finishedBatchRolls #3431: пустое число полос → пусто');
+// Метаданные «Партии ГП» с колонкой «Кол-во полос» (70190).
+var fbMeta3431 = { id: '1081', val: 'Партия ГП', reqs: [
+  { id: '1186', val: 'Ширина, мм' }, { id: '70190', val: 'Кол-во полос' },
+  { id: '1188', val: 'Кол-во рулонов' }, { id: '1189', val: 'Метраж, м' },
+  { id: '1192', val: 'В работе' }
+] };
+assertEqual(planning.buildFinishedBatchFields(fbMeta3431, { width: 110, strips: 2, rolls: 12, footage: 1200, active: '1' }),
+  { t1186: 110, t70190: 2, t1188: 12, t1189: 1200, t1192: '1' },
+  'buildFinishedBatchFields #3431: Кол-во полос → t70190, Кол-во рулонов → t1188');
+// Старое окружение без колонки «Кол-во полос» — поле strips пропускается (graceful).
+assertEqual(planning.buildFinishedBatchFields(fbMeta3242, { width: 110, strips: 2, rolls: 12, footage: 1200, active: '1' }),
+  { t1186: 110, t1188: 12, t1189: 1200, t1192: '1' },
+  'buildFinishedBatchFields #3431: нет колонки «Кол-во полос» → strips пропущен, без ошибки');
 var supMeta3242 = { id: '1077', val: 'Обеспечение', reqs: [
   { id: '1149', val: 'Метраж, м' }, { id: '1154', val: 'В работе' },
   { id: '15016', val: 'Партия ГП', ref: '1081' }, { id: '16424', val: 'Кол-во рулонов' }
@@ -1554,9 +1573,10 @@ function runGenerateCutsDeferredGpTest() {
             req('15016', 'Партия ГП', { ref: '1081' }),
             req('16424', 'Кол-во рулонов')
         ] },
-        // #3242: состав резки — «Партия ГП» (подчинённая резке).
+        // #3242: состав резки — «Партия ГП» (подчинённая резке). #3431: «Кол-во полос».
         finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [
             req('1186', 'Ширина, мм'),
+            req('70190', 'Кол-во полос'),
             req('1188', 'Кол-во рулонов'),
             req('1189', 'Метраж, м'),
             req('1191', 'Адрес хранения'),
@@ -1620,9 +1640,9 @@ function runGenerateCutsDeferredGpTest() {
         var gpPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1081') === 0; });
         assertEqual(gpPosts.length, 2, 'runGenerateCuts #3242: создаются «Партии ГП» по каждой ширине');
         assertEqual(gpPosts[0].path, '_m_new/1081?JSON&up=cut-1', 'runGenerateCuts #3242: Партия ГП подчинена резке (up=cut)');
-        assertEqual({ t1186: gpPosts[0].fields.t1186, t1188: gpPosts[0].fields.t1188, t1189: gpPosts[0].fields.t1189, t1192: gpPosts[0].fields.t1192 },
-            { t1186: 110, t1188: 1, t1189: 1200, t1192: '1' },
-            'runGenerateCuts #3242: Партия ГП пишет Ширину/Кол-во рулонов/Метраж/«В работе»');
+        assertEqual({ t1186: gpPosts[0].fields.t1186, t70190: gpPosts[0].fields.t70190, t1188: gpPosts[0].fields.t1188, t1189: gpPosts[0].fields.t1189, t1192: gpPosts[0].fields.t1192 },
+            { t1186: 110, t70190: 1, t1188: 1, t1189: 1200, t1192: '1' },
+            'runGenerateCuts #3431: Партия ГП пишет Ширину/Кол-во полос/Кол-во рулонов(=полосы×проходов)/Метраж/«В работе»');
         assertEqual(posts.some(function(p) { return p.path.indexOf('_m_new/1073') === 0; }), false,
             'runGenerateCuts #3242: «Полоса» больше не создаётся');
         // #3242: обеспечение ссылается на «Партию ГП» ширины позиции (110 → obj-2), не на резку.
@@ -1974,7 +1994,7 @@ function runApplySplitPlanTest() {
             req('1156', 'Слиттер'), req('24308', 'Очередность'), req('1162', 'Статус'),
             req('16403', 'Кол-во резок план'), req('8463', 'Тип намотки'), req('1140', 'Партия сырья')
         ] },
-        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1114', 'Кол-во рулонов') ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1113', 'Кол-во полос'), req('1114', 'Кол-во рулонов') ] },
         supply: { id: '1077', val: 'Обеспечение', reqs: [
             req('1149', 'Метраж, м'), req('16424', 'Кол-во рулонов'), req('15016', 'Партия ГП'), req('1154', 'В работе')
         ] }
@@ -2007,8 +2027,9 @@ function runApplySplitPlanTest() {
         assertEqual(newB && newB.fields.t1078, 2000, 'applySplitPlan: B — t1078 (старт след. дня)');
         assertEqual(newB && newB.fields.t16403, 5, 'applySplitPlan: B — остаток проходов (5)');
         var newStrip = one('_m_new/1081?JSON&up=newB');
-        assertEqual(newStrip && newStrip.fields.t1112, '100', 'applySplitPlan: B — копия Полосы (ширина 100)');
-        assertEqual(newStrip && newStrip.fields.t1114, '2', 'applySplitPlan: B — копия Полосы (qty за проход 2)');
+        assertEqual(newStrip && newStrip.fields.t1112, '100', 'applySplitPlan: B — копия Партии ГП (ширина 100)');
+        assertEqual(newStrip && newStrip.fields.t1113, '2', 'applySplitPlan #3431: B — «Кол-во полос» за проход (2)');
+        assertEqual(newStrip && newStrip.fields.t1114, 10, 'applySplitPlan #3431: B — «Кол-во рулонов» = полосы × проходов сегмента (2×5=10)');
         var newSup = one('_m_new/1077?JSON&up=pos1');
         assertEqual(newSup && newSup.fields.t16424, 5, 'applySplitPlan: B — Обеспечение 5 рулонов (доля остатка)');
         assertEqual(newSup && newSup.fields.t15016, 'newB', 'applySplitPlan: B — Обеспечение ссылается на скопированную Полосу B');
