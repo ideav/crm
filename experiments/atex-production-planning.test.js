@@ -680,8 +680,13 @@ assertEqual(planning.isStockStrip({ toStock: 1, purpose: 'Заказ' }), true, 
 assertEqual(planning.isStockStrip({ toStock: 0, purpose: 'Склад' }), true, 'isStockStrip: legacy purpose «Склад»');
 assertEqual(planning.isStockStrip({ toStock: 0, purpose: 'Заказ' }), false, 'isStockStrip: заказная полоса не складская');
 assertEqual(planning.plannedRunsForLayout(layout3185, pos3185), 3, 'plannedRunsForLayout: max ceil(demand/non-stock strips)');
-assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p110, 3), 6, 'supplyRollsForPosition: runs × non-stock strips by width');
-assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p70, 3), 3, 'supplyRollsForPosition: width 70 → 3 рулона');
+// #3435: обеспечение = заказанное кол-во позиции (p110 заказал 5), но не больше
+// выпуска ширины (runs 3 × 2 полосы = 6) → 5; излишек 1 рулон уходит в запас.
+assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p110, 3), 5, 'supplyRollsForPosition #3435: min(заказ 5, выпуск 6) = 5');
+assertEqual(planning.supplyRollsForPosition(layout3185, pos3185.p70, 3), 2, 'supplyRollsForPosition #3435: min(заказ 2, выпуск 3) = 2');
+// Заказ больше выпуска ширины → ограничивается выпуском (покрытие из неск. резок).
+assertEqual(planning.supplyRollsForPosition(layout3185, { id: 'big', width: 110, qty: 99 }, 3), 6, 'supplyRollsForPosition #3435: заказ 99 > выпуск 6 → 6 (остаток из другой резки)');
+assertEqual(planning.supplyRollsForPosition(layout3185, { id: 'noqty', width: 110, qty: 0 }, 3), 6, 'supplyRollsForPosition #3435: qty неизвестно → весь выпуск ширины (прежнее поведение)');
 assertEqual(planning.layoutRunLength(layout3185, pos3185), 1200, 'layoutRunLength: max length of covered positions');
 assertEqual(planning.finishedBatchesForLayout(layout3185, 'cut777', 1200, 3), [
   { cutId: 'cut777', width: 55, rolls: 6, length: 1200 },
@@ -696,12 +701,12 @@ assertEqual(planning.producedBatchesForLayout(layout3185, 1200), [
 ], 'producedBatchesForLayout #3253: Партия ГП по ширине — число ПОЛОС за проход (без ×проходов)');
 // #3242: план обеспечений — позиция → Партия ГП своей ширины, рулоны и метраж позиции.
 assertEqual(planning.supplyPlanForLayout(layout3185, pos3185, 3), [
-  { positionId: 'p110', width: 110, rolls: 6, footage: 1200 },
-  { positionId: 'p70', width: 70, rolls: 3, footage: 800 }
-], 'supplyPlanForLayout #3242: позиция → рулоны+метраж для обеспечения');
+  { positionId: 'p110', width: 110, rolls: 5, footage: 1200 },
+  { positionId: 'p70', width: 70, rolls: 2, footage: 800 }
+], 'supplyPlanForLayout #3242/#3435: позиция → заказанные рулоны (не весь выпуск) + метраж');
 assertEqual(planning.supplyPlanForLayout(layout3185, pos3185, 3, { p110: 999, p70: 111 }), [
-  { positionId: 'p110', width: 110, rolls: 6, footage: 999 },
-  { positionId: 'p70', width: 70, rolls: 3, footage: 111 }
+  { positionId: 'p110', width: 110, rolls: 5, footage: 999 },
+  { positionId: 'p70', width: 70, rolls: 2, footage: 111 }
 ], 'supplyPlanForLayout #3242: метраж берётся из posLength, если передан');
 // #3242: билдеры полей «Партия ГП» и «Обеспечение»→«Партия ГП».
 var fbMeta3242 = { id: '1081', val: 'Партия ГП', reqs: [
@@ -863,9 +868,9 @@ var posSleeve3340 = {
   p70:  { id: 'p70',  width: 70,  qty: 2, length: 800,  sleeveId: '8192',  sleeveReady: false }
 };
 assertEqual(planning.positionSleeveTasksForLayout(layout3185, posSleeve3340, 3), [
-  { positionId: 'p110', sleeveId: '35561', qty: 6 },
-  { positionId: 'p70', sleeveId: '8192', qty: 3 }
-], 'positionSleeveTasksForLayout #3340: задачи втулок под позициями (sleeveId + кол-во рулонов)');
+  { positionId: 'p110', sleeveId: '35561', qty: 5 },
+  { positionId: 'p70', sleeveId: '8192', qty: 2 }
+], 'positionSleeveTasksForLayout #3340/#3435: втулок = заказ позиции (не весь выпуск ширины)');
 // «Готовый» тип втулки (sleeveReady) пропускается; позиция без втулки — тоже.
 var posSleeve3340b = {
   p110: { id: 'p110', width: 110, qty: 5, length: 1200, sleeveId: '35561', sleeveReady: true },

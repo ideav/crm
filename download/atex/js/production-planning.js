@@ -1607,12 +1607,19 @@
         return runs;
     }
 
+    // #3435: рулоны обеспечения позиции = её заказанное кол-во, НО не больше выпуска
+    // этой ширины (runs × полос). Несколько позиций одной ширины делят выпуск по своему
+    // заказу, а не получают каждая полный выпуск (иначе спрос/обеспечение задваивались —
+    // у партии на 2 заказа «Кол-во рулонов» = 2 × «Кол-во план»). Излишек выпуска над
+    // заказом — в запас. qty неизвестно (≤0) → весь выпуск ширины (прежнее поведение).
     function supplyRollsForPosition(layout, position, plannedRuns) {
         if (!position) return 0;
         var runs = Number(plannedRuns) || 0;
         if (runs <= 0) runs = plannedRunsForLayout(layout, [position]);
         var strips = nonStockStripQtyForWidth(layout, position.width);
-        return round3(runs * strips);
+        var produced = round3(runs * strips);
+        var qty = Number(position.qty) || 0;
+        return qty > 0 ? Math.min(qty, produced) : produced;
     }
 
     function layoutRunLength(layout, positions) {
