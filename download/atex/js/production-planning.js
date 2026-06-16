@@ -4839,13 +4839,6 @@
         if (this.busy) return;
         console.log('[pp] ⚙️ generateCuts: начало генерации резок...');
 
-        // #(no-srok-when-on-time): срок учитываем (дробим позиции по окну) только если
-        // есть просроченные относительно даты планирования. Если все позиции укладываются
-        // в свой срок (dueKey ≥ planDateKey), окно не нужно — объединяем в один кластер.
-        var planBaseMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var pbmD = new Date(planBaseMs);
-        var planDateKey = pbmD.getFullYear() * 10000 + (pbmD.getMonth() + 1) * 100 + pbmD.getDate();
-
         var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
         if (!layoutCore || typeof layoutCore.planLayouts !== 'function') {
             console.error('[pp] ⚙️ generateCuts: модуль cut-layout не загружен');
@@ -4857,6 +4850,42 @@
             this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Партия ГП)', 'error');
             return;
         }
+
+        // #3444: перед планированием перезапросить позиции (report/positions_list) и
+        // обеспечение/резки — в соседней вкладке могли загрузить новые заказы или сменить
+        // дату, и по кэшу мы бы перепланировали старые позиции вместо генерации новых
+        // резок. Прежнее подтверждение убираем и показываем заново на свежих данных.
+        if (this._genRefreshing) return;
+        var refreshHost = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
+        var oldBar = refreshHost && refreshHost.querySelector && refreshHost.querySelector('.atex-pp-confirm-bar');
+        if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
+        this._genRefreshing = true;
+        this.setGenBusy(true);
+        Promise.all([this.loadPositions(), this.reload()]).then(function() {
+            self._genRefreshing = false;
+            self.setGenBusy(false);
+            self.render();
+            self.planAndConfirmCuts(actionsEl);
+        }).catch(function(err) {
+            self._genRefreshing = false;
+            self.setGenBusy(false);
+            console.error('[pp] ⚙️ generateCuts: не удалось обновить данные перед планированием', err);
+            self.notify('Не удалось обновить данные перед планированием: ' + (err && err.message || err), 'error');
+        });
+    };
+
+    // #3444: планирование + подтверждение (вызывается после перезапроса позиций/обеспечения).
+    AtexProductionPlanning.prototype.planAndConfirmCuts = function(actionsEl) {
+        var self = this;
+        var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
+        if (!layoutCore || typeof layoutCore.planLayouts !== 'function') return;
+
+        // #(no-srok-when-on-time): срок учитываем (дробим позиции по окну) только если
+        // есть просроченные относительно даты планирования. Если все позиции укладываются
+        // в свой срок (dueKey ≥ planDateKey), окно не нужно — объединяем в один кластер.
+        var planBaseMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var pbmD = new Date(planBaseMs);
+        var planDateKey = pbmD.getFullYear() * 10000 + (pbmD.getMonth() + 1) * 100 + pbmD.getDate();
 
         // Необеспеченные позиции, сгруппированные по совместимому профилю:
         // сырьё + направление намотки + длина намотки.
@@ -4958,10 +4987,10 @@
 
             // #3253: в подтверждении не считаем полосы/ножи — только число резок.
             var nCuts = allLayouts.length;
+            // #3444: вопрос «Создать N резок?» — в конце, после «Пропущено N».
             var msg = el('span', { class: 'atex-pp-confirm-msg' });
             msg.appendChild(document.createTextNode(
-                'Не обеспечено резками и складом позиций: ' + unsup.length +
-                '. Создать ' + nCuts + ' резок? '));
+                'Не обеспечено резками и складом позиций: ' + unsup.length + '. '));
             if (skipped.length) {
                 var skipLink = el('a', { class: 'atex-pp-skipped-link', href: '#',
                     text: 'Пропущено ' + skipped.length,
@@ -4971,10 +5000,11 @@
                     self.openSkippedReport(skipped);
                 });
                 msg.appendChild(skipLink);
-                msg.appendChild(document.createTextNode('.'));
+                msg.appendChild(document.createTextNode('. '));
             } else {
-                msg.appendChild(document.createTextNode('Пропущено 0.'));
+                msg.appendChild(document.createTextNode('Пропущено 0. '));
             }
+            msg.appendChild(document.createTextNode('Создать ' + nCuts + ' резок?'));
 
             // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
             // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
