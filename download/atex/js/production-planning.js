@@ -284,19 +284,19 @@
         return round3(s * (runs > 0 ? runs : 1));
     }
 
-    // #3433/#3435: «ID заказа» партии = заказы покрытых позиций (под заказ). Партия,
-    // покрывающая спрос, ДОЛЖНА иметь непустой «ID заказа», иначе её ошибочно сочтут
-    // свободной (запас) и переиспользуют. Один заказ → его id; несколько разных →
-    // через запятую (партия делится между заказами); спроса нет (запас) → '' (заполнится
-    // при подхватывании свободной партии). orderIds — список id заказов покрытых позиций.
-    function batchOrderId(orderIds) {
-        var seen = [];
+    // #3433: «ID заказа» партии = заказ, если все её непустые заказы совпадают (один
+    // заказ); запас или несколько заказов → '' (свободная партия, заполнится при
+    // подхватывании при расчёте резки). orderIds — список id заказов покрытых позиций.
+    function singleOrderId(orderIds) {
+        var seen = '';
         var list = orderIds || [];
         for (var i = 0; i < list.length; i++) {
             var id = String(list[i] == null ? '' : list[i]).trim();
-            if (id !== '' && seen.indexOf(id) === -1) seen.push(id);
+            if (id === '') continue;
+            if (seen === '') seen = id;
+            else if (seen !== id) return '';
         }
-        return seen.join(',');
+        return seen;
     }
 
     // #3242/#3431/#3433: поля записи «Партия ГП» (состав резки): Ширина, Кол-во полос
@@ -3025,7 +3025,7 @@
         buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
         buildFinishedBatchFields: buildFinishedBatchFields,
         finishedBatchRolls: finishedBatchRolls,
-        batchOrderId: batchOrderId,
+        singleOrderId: singleOrderId,
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
@@ -5285,10 +5285,10 @@
                     var batchChain = Promise.resolve();
                     producedBatchesForLayout(lay, runLength).forEach(function(batch) {
                         batchChain = batchChain.then(function() {
-                            // #3431/#3433/#3435: «Кол-во полос» = полос за проход (batch.strips);
+                            // #3431/#3433: «Кол-во полос» = полос за проход (batch.strips);
                             // «Кол-во план» = полосы × проходов сегмента; «Кол-во рулонов» =
-                            // спрос обеспечений этой ширины; «ID заказа» = заказы покрытых
-                            // позиций (несколько → через запятую; спроса нет → пусто = запас).
+                            // спрос обеспечений этой ширины; «ID заказа» = их общий заказ
+                            // (несколько/нет — пусто = в запас).
                             var key = stripWidthKey(batch.width);
                             var demand = demandByWidth[key];
                             var fields = buildFinishedBatchFields(finishedBatchMeta, {
@@ -5296,7 +5296,7 @@
                                 strips: batch.strips,
                                 planned: finishedBatchRolls(batch.strips, plannedRuns),
                                 rolls: demand > 0 ? demand : '',
-                                orderId: batchOrderId(ordersByWidth[key]),
+                                orderId: singleOrderId(ordersByWidth[key]),
                                 footage: batch.length > 0 ? batch.length : '',
                                 active: '1'
                             });
