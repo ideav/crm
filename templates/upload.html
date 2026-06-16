@@ -690,6 +690,26 @@ function parseUploadText(text,options){
     }
     Papa.parse(parseText,parseOptions);
 }
+// issue #3440: значение колонки подставляется в текст формулы и выполняется через
+// eval(). Если ячейка содержит перевод строки (многострочное значение из Excel/CSV,
+// напр. "52мм … (884мм)\nФМ лоджистик"), а в формуле плейсхолдер обёрнут в кавычки
+// ('[Примечание]'), то сырой \n внутри строкового литерала рвёт его и eval падает с
+// SyntaxError — в превью ячейка подсвечивается жёлтым (cell-error) и строка считается
+// ошибочной. Поэтому подставляемое значение экранируем так, чтобы оно было безопасным
+// внутри строкового литерала JS (', " или `): спецсимволы и переводы строк уходят в
+// escape-последовательности. Числовые/незакавыченные значения (357, [Кол-во]*2) не
+// содержат спецсимволов и остаются как есть; перевод строки сохраняется в значении.
+function escapeFormulaValue(v){
+    return String(v===undefined||v===null?'':v)
+        .replace(/\\/g,'\\\\')
+        .replace(/'/g,"\\'")
+        .replace(/"/g,'\\"')
+        .replace(/`/g,'\\`')
+        .replace(/\r/g,'\\r')
+        .replace(/\n/g,'\\n')
+        .replace(/\u2028/g,'\\u2028')
+        .replace(/\u2029/g,'\\u2029');
+}
 function escapeSlashesNSemicolons(v){
     return serializeUploadCellValue(v).replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
 //    return v.replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
@@ -1296,7 +1316,7 @@ function importDoParse(input){
                     if(formulas[sourceMap[j].id]){
                         expr=formulas[sourceMap[j].id].replace(/\[(.+?)\]/mug,function($1,$2){
                                 if(reverseMap[$2]!==undefined)
-                                    return input.data[i][reverseMap[$2]];
+                                    return escapeFormulaValue(input.data[i][reverseMap[$2]]);
                                 return '['+$2+']';
                             });
                         try{
