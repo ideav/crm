@@ -131,8 +131,11 @@
         status: 'Статус'
     };
     // Реквизиты «Партии ГП» (#3242: состав резки, up = резка). Резолв по имени.
+    // #3431: «Кол-во полос» = число полос за проход (геометрия раскроя, бывшее
+    // содержимое «Кол-во рулонов»). «Кол-во рулонов» = полосы × число резок (проходов).
     var FINISHED_BATCH_REQ = {
         width: 'Ширина, мм',
+        strips: 'Кол-во полос',
         rolls: 'Кол-во рулонов',
         footage: 'Метраж, м',
         active: 'В работе'
@@ -263,16 +266,30 @@
         });
     }
 
-    // #3242: поля записи «Партия ГП» (состав резки): Ширина, Кол-во рулонов, Метраж, «В работе».
+    // #3431: «Кол-во рулонов» «Партии ГП» = «Кол-во полос» (за проход) × число резок
+    // (повторов резки = «Кол-во резок план»). Пусто/0 полос → '' (поле не пишем). Без
+    // проходов (0) рулоны = полосам (фолбэк, чтобы не записать 0 рулонов).
+    function finishedBatchRolls(stripsPerPass, plannedRuns) {
+        var s = stripNum(stripsPerPass);
+        if (!(s > 0)) return '';
+        var runs = stripNum(plannedRuns);
+        return round3(s * (runs > 0 ? runs : 1));
+    }
+
+    // #3242/#3431: поля записи «Партия ГП» (состав резки): Ширина, Кол-во полос (за проход),
+    // Кол-во рулонов (полосы × проходов), Метраж, «В работе». Если колонки «Кол-во полос»
+    // в метаданных нет (старое окружение) — поле просто пропускается (buildFields).
     function buildFinishedBatchFields(finishedBatchMeta, values) {
         var reqIds = {
             width: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.width),
+            strips: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.strips),
             rolls: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.rolls),
             footage: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.footage),
             active: activeReqId(finishedBatchMeta)
         };
         return buildFields(reqIds, {
             width: values && values.width,
+            strips: values && values.strips,
             rolls: values && values.rolls,
             footage: values && values.footage,
             active: values && values.active
@@ -1228,8 +1245,10 @@
     // ───────────────────── Хелперы генерации резок ─────────────────────
 
     // Строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} }.
-    // cut_id — abn «Производственной резки»; strip_width — Полоса «Ширина, мм»;
-    // strip_qty — Полоса «Количество». Группировка по cut_id:
+    // cut_id — abn «Производственной резки»; strip_width — «Партия ГП» «Ширина, мм»;
+    // strip_qty — число ПОЛОС за проход. #3431: источник strip_qty в серверном отчёте
+    // cut_strips (queryId 8656) — «Партия ГП» «Кол-во полос» (а НЕ «Кол-во рулонов»,
+    // которое теперь = полосы × проходов). Группировка по cut_id:
     //   knifeCount += Number(strip_qty);
     //   knifeWidths — Number(strip_width), развёрнутый по qty (полоса 110×2 → [110,110]),
     //   нужен для widthSetDistance в changeoverCost. Заменяет удалённую в F2 колонку
@@ -2972,6 +2991,7 @@
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
         buildFinishedBatchFields: buildFinishedBatchFields,
+        finishedBatchRolls: finishedBatchRolls,
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
@@ -4080,7 +4100,10 @@
                 // 1) Партии ГП по ширинам (состав резки).
                 plan.batches.forEach(function(b) {
                     chain = chain.then(function() {
-                        var f = buildFinishedBatchFields(fbMeta, { width: b.width, rolls: b.strips,
+                        // #3431: «Кол-во полос» = полос за проход (b.strips); «Кол-во
+                        // рулонов» = полосы × проходов (plan.plannedRuns).
+                        var f = buildFinishedBatchFields(fbMeta, { width: b.width, strips: b.strips,
+                            rolls: finishedBatchRolls(b.strips, plan.plannedRuns),
                             footage: b.length > 0 ? b.length : '', active: '1' });
                         return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(cutId), f).then(function(r) {
                             var bid = r && (r.obj || r.id || r.i);
@@ -4336,18 +4359,23 @@
     var STRIP_PURPOSES = ['Заказ', 'Склад', 'Отходы'];
 
     // Загрузка состава резки из «Партии ГП» (#3242; подчинённые: F_U = cutId).
-    // Колонки JSON_OBJ резолвятся по имени. → [{id, width, qty=Кол-во рулонов}].
+    // Колонки JSON_OBJ резолвятся по имени. → [{id, width, qty=полос за проход}].
+    // #3431: число полос берём из «Кол-во полос»; для старых записей (колонка пустая) —
+    // фолбэк на «Кол-во рулонов» (раньше там хранилось число полос за проход).
     AtexProductionPlanning.prototype.loadStripsForCut = function(cutId) {
         var sm = this.meta.finishedBatch;
         var widthIdx = columnIndex(sm, FINISHED_BATCH_REQ.width);
-        var qtyIdx = columnIndex(sm, FINISHED_BATCH_REQ.rolls);
+        var stripsIdx = columnIndex(sm, FINISHED_BATCH_REQ.strips);
+        var rollsIdx = columnIndex(sm, FINISHED_BATCH_REQ.rolls);
         return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
             return (rows || []).map(function(rec) {
                 var r = rec.r || [];
+                var stripsVal = (stripsIdx >= 0 && r[stripsIdx] != null) ? String(r[stripsIdx]) : '';
+                var rollsVal = (rollsIdx >= 0 && r[rollsIdx] != null) ? String(r[rollsIdx]) : '';
                 return {
                     id: String(rec.i),
                     width: (widthIdx >= 0 && r[widthIdx] != null) ? String(r[widthIdx]) : '',
-                    qty: (qtyIdx >= 0 && r[qtyIdx] != null) ? String(r[qtyIdx]) : ''
+                    qty: String(stripsVal).trim() !== '' ? stripsVal : rollsVal
                 };
             });
         });
@@ -4661,6 +4689,12 @@
         recalc();
     };
 
+    // #3431: число резок (повторов) резки по id — для «Кол-во рулонов» = полосы × проходов.
+    AtexProductionPlanning.prototype.cutPlannedRunsById = function(cutId) {
+        var c = (this.cuts || []).filter(function(x) { return String(x.id) === String(cutId); })[0];
+        return c ? stripNum(c.plannedRuns) : 0;
+    };
+
     // Авто-сейв одной полосы по мере редактирования (#3127). Есть id → _m_set;
     // нет id, но есть данные → _m_new (up=cutId), сохраняем выданный id в strip.id
     // (флаг _creating защищает от двойного создания при близких change-событиях).
@@ -4669,7 +4703,9 @@
         var self = this;
         var sm = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         if (!sm || !strip) return Promise.resolve();
-        var fields = buildFinishedBatchFields(sm, { width: strip.width, rolls: strip.qty, active: '1' });
+        // #3431: «Кол-во полос» = введённое число полос; «Кол-во рулонов» = полосы × проходов резки.
+        var fields = buildFinishedBatchFields(sm, { width: strip.width, strips: strip.qty,
+            rolls: finishedBatchRolls(strip.qty, this.cutPlannedRunsById(cutId)), active: '1' });
         if (strip.id) {
             return self.post('_m_set/' + strip.id + '?JSON', fields).catch(function(err) {
                 self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
@@ -4694,6 +4730,7 @@
     AtexProductionPlanning.prototype.saveStrips = function(cutId, strips, original) {
         var self = this;
         var sm = this.meta.finishedBatch;
+        var runs = this.cutPlannedRunsById(cutId);   // #3431: «Кол-во рулонов» = полосы × проходов
 
         // Карта исходных записей по id для сравнения.
         var origById = {};
@@ -4703,7 +4740,9 @@
         var ops = [];
         (strips || []).forEach(function(s) {
             var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
-            var fields = buildFinishedBatchFields(sm, { width: s.width, rolls: s.qty, active: '1' });
+            // #3431: «Кол-во полос» = введённое число полос; «Кол-во рулонов» = полосы × проходов.
+            var fields = buildFinishedBatchFields(sm, { width: s.width, strips: s.qty,
+                rolls: finishedBatchRolls(s.qty, runs), active: '1' });
             if (s.id) {
                 keepIds[String(s.id)] = true;
                 var o = origById[String(s.id)];
@@ -5182,10 +5221,12 @@
                     var batchChain = Promise.resolve();
                     producedBatchesForLayout(lay, runLength).forEach(function(batch) {
                         batchChain = batchChain.then(function() {
-                            // #3253: «Кол-во рулонов» «Партии ГП» = число полос за проход (без ×проходов).
+                            // #3431: «Кол-во полос» = полос за проход (batch.strips); «Кол-во
+                            // рулонов» = полосы × проходов этого сегмента (plannedRuns).
                             var fields = buildFinishedBatchFields(finishedBatchMeta, {
                                 width: batch.width,
-                                rolls: batch.strips,
+                                strips: batch.strips,
+                                rolls: finishedBatchRolls(batch.strips, plannedRuns),
                                 footage: batch.length > 0 ? batch.length : '',
                                 active: '1'
                             });
@@ -5563,7 +5604,10 @@
                             });
                             (parentStrips || []).forEach(function(st) {
                                 bChain = bChain.then(function() {
-                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, rolls: st.qty, active: '1' });
+                                    // #3431: st.qty — полос за проход (из «Кол-во полос»); рулоны
+                                    // продолжения = полосы × проходов сегмента (cr.plannedRuns).
+                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
+                                        rolls: finishedBatchRolls(st.qty, cr.plannedRuns), active: '1' });
                                     return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
                                         var nid = r2 && (r2.obj || r2.id || r2.i);
                                         if (nid) stripMap[String(st.id)] = String(nid);
