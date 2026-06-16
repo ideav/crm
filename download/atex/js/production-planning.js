@@ -889,6 +889,11 @@
                 // #3433: заказ позиции — для «ID заказа» создаваемой «Партии ГП». Если
                 // отчёт positions_list ещё не отдаёт order_id, остаётся пусто (в запас).
                 orderId: row.order_id == null ? '' : String(row.order_id).trim(),
+                // #3424: сырые номер заказа/позиции и срок изготовления — для подсказки
+                // «согласовать раньше» (список несогласованных позиций с датами).
+                orderNo: row.order_no == null ? '' : String(row.order_no).trim(),
+                positionNo: row.position_no == null ? '' : String(row.position_no).trim(),
+                dueDate: row.position_due_date == null ? '' : String(row.position_due_date).trim(),
                 approved: orderApproved || itemApproved
             };
         });
@@ -1605,6 +1610,53 @@
             if (out > 0) runs = Math.max(runs, Math.ceil(demandByWidth[key] / out));
         });
         return runs;
+    }
+
+    // #3424: метрики набора раскладок для сравнения сценариев планирования
+    // (только согласованные vs +несогласованные). Удельные показатели, а не суммы:
+    //   wasteRatio       — доля отхода = Σ(остаток×прогонов) / Σ(джамбо×прогонов);
+    //   changeoverPerCut — переналадки (мин) на резку при оптимальном порядке очереди.
+    // Удельные, потому что больший набор позиций всегда даёт больше суммарной работы.
+    // deps = { jumboWidthByMaterial, positions, weights } (weights — makePlanningOptions).
+    function layoutsScenarioMetrics(allLayouts, deps) {
+        var layouts = allLayouts || [];
+        var posById = positionMap((deps && deps.positions) || []);
+        var jumboByMat = (deps && deps.jumboWidthByMaterial) || {};
+        var totalRemainder = 0, totalJumbo = 0, descriptors = [];
+        layouts.forEach(function(lay) {
+            var runs = plannedRunsForLayout(lay, posById);
+            if (!(runs > 0)) runs = 1;
+            var jw = stripNum(jumboByMat[lay.mat]);
+            totalRemainder += Math.max(0, stripNum(lay.remainder)) * runs;
+            totalJumbo += jw * runs;
+            descriptors.push({
+                materialId: lay.mat, winding: lay.windDir, batchId: '',
+                knifeCount: stripsTotalKnives(lay.strips),
+                knifeWidths: knifeWidthsForStrips(lay.strips),
+                rollerWidth: 0, isFoil: !!lay.isFoil, plannedRuns: runs
+            });
+        });
+        var nCuts = layouts.length;
+        var changeoverMin = orderedChangeoverCost(descriptors, (deps && deps.weights) || {});
+        return {
+            nCuts: nCuts,
+            totalWasteMm: round3(totalRemainder),
+            wasteRatio: totalJumbo > 0 ? totalRemainder / totalJumbo : 0,
+            changeoverMin: round3(changeoverMin),
+            changeoverPerCut: nCuts > 0 ? round3(changeoverMin / nCuts) : 0
+        };
+    }
+
+    // #3424: сценарий с несогласованными лучше по Парето, если улучшает хотя бы одну
+    // удельную метрику (доля отхода / переналадки на резку) и не ухудшает другую.
+    function scenarioIsParetoBetter(base, withUnapproved) {
+        if (!base || !withUnapproved) return false;
+        var EPS = 1e-6;
+        var wasteBetter = withUnapproved.wasteRatio < base.wasteRatio - EPS;
+        var wasteWorse = withUnapproved.wasteRatio > base.wasteRatio + EPS;
+        var coBetter = withUnapproved.changeoverPerCut < base.changeoverPerCut - EPS;
+        var coWorse = withUnapproved.changeoverPerCut > base.changeoverPerCut + EPS;
+        return (wasteBetter && !coWorse) || (coBetter && !wasteWorse);
     }
 
     // #3435: рулоны обеспечения позиции = её заказанное кол-во, НО не больше выпуска
@@ -3073,6 +3125,8 @@
         greedySequence: greedySequence,
         orderCuts: orderCuts,
         orderedChangeoverCost: orderedChangeoverCost,
+        layoutsScenarioMetrics: layoutsScenarioMetrics,
+        scenarioIsParetoBetter: scenarioIsParetoBetter,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
         byKnifeCountDesc: byKnifeCountDesc,
@@ -4874,6 +4928,68 @@
         });
     };
 
+    // #3424: предзагрузить «ходовые ширины» (preferable_widths) для профилей набора
+    // позиций. Возвращает Promise (резолвится, когда кэш preferredByMaterial заполнен).
+    AtexProductionPlanning.prototype.preloadPreferredFor = function(positions) {
+        var self = this;
+        var preloads = [];
+        groupPositionsByPlanningProfile(positions || []).forEach(function(group) {
+            if (group.materialId !== '' && !self.preferredByMaterial[group.key]) {
+                preloads.push(self.loadPreferredWidths(group.materialId, group.windDir, group.windLength));
+            }
+        });
+        return Promise.all(preloads);
+    };
+
+    // #3424: построить раскладки cut-layout для набора необеспеченных позиций — чистый
+    // расчёт в памяти, без записи в БД. Профили/ходовые ширины должны быть предзагружены
+    // (preloadPreferredFor). Возвращает { allLayouts, skipped }.
+    AtexProductionPlanning.prototype.buildLayoutsForPositions = function(positions, planDateKey) {
+        var self = this;
+        var layoutCore = window.AtexCutLayout.layout;
+        var allLayouts = [];
+        var skipped = [];
+        groupPositionsByPlanningProfile(positions || []).forEach(function(group) {
+            var mat = group.materialId;
+            var jw = self.jumboWidthByMaterial[mat];
+            if (!jw) {
+                group.positions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
+                return;
+            }
+            layoutPositionGroups(group.positions).forEach(function(positionGroup) {
+                // Нет просроченных позиций (всё в рамках срока) → окно срока не нужно,
+                // объединяем все позиции сырья (windowDays=Infinity); иначе дробим по WINDOW_DAYS.
+                var hasOverdue = positionGroup.some(function(p) {
+                    return isFinite(p.dueKey) && p.dueKey < planDateKey;
+                });
+                // #3391: добор джамбо ходовыми — только из номенклатур, целесообразных к хранению.
+                var stockablePreferred = planning.filterStockableWidths(
+                    self.maxStockIndex, self.preferredByMaterial[group.key] || [],
+                    { material: mat, winding: group.windDir, length: group.windLength });
+                var res = layoutCore.planLayouts({
+                    jumboWidth: jw,
+                    positions: positionGroup.map(function(p) {
+                        // #3423: запасные комбинации можно перепроизводить в запас; незапасные — под заказ.
+                        return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey,
+                            stockable: planning.isStockableNomenclature(self.maxStockIndex, {
+                                material: mat, width: p.width,
+                                length: group.windLength, winding: group.windDir }) };
+                    }),
+                    preferred: stockablePreferred,
+                    options: { windowDays: hasOverdue ? WINDOW_DAYS : Infinity, tolerance: self.resolveToleranceMm(mat) }
+                });
+                (res.layouts || []).forEach(function(lay) {
+                    lay.mat = mat;
+                    lay.windDir = group.windDir;
+                    lay.windLength = group.windLength;
+                    allLayouts.push(lay);
+                });
+                (res.skipped || []).forEach(function(s) { skipped.push(s); });
+            });
+        });
+        return { allLayouts: allLayouts, skipped: skipped };
+    };
+
     // #3444: планирование + подтверждение (вызывается после перезапроса позиций/обеспечения).
     AtexProductionPlanning.prototype.planAndConfirmCuts = function(actionsEl) {
         var self = this;
@@ -4887,87 +5003,44 @@
         var pbmD = new Date(planBaseMs);
         var planDateKey = pbmD.getFullYear() * 10000 + (pbmD.getMonth() + 1) * 100 + pbmD.getDate();
 
-        // Необеспеченные позиции, сгруппированные по совместимому профилю:
-        // сырьё + направление намотки + длина намотки.
-        // Только согласованные (order_approval_date или item_approval_date).
-        var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
-        console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
-        if (!unsup.length) {
+        // Необеспеченные позиции. Согласованные (order_approval_date или item_approval_date)
+        // генерируем и сохраняем. Несогласованные — #3424: только для look-ahead-прогноза
+        // (галка «Учитывать несогласованные»); резки под них не создаём.
+        var uncovered = uncoveredPositions(this.genPositions, this.supplies);
+        var unsupApproved = uncovered.filter(function(p) { return p.approved; });
+        var unsupUnapproved = uncovered.filter(function(p) { return !p.approved; });
+        console.log('[pp] ⚙️ generateCuts: необеспеченных согласованных:', unsupApproved.length,
+            ', несогласованных:', unsupUnapproved.length);
+        if (!unsupApproved.length) {
             // #3449: «Сгенерировать резки» только вытаскивает незапланированные позиции.
-            // Если таких нет — ничего не делаем: уже запланированные резки не трогаем и
-            // очередь не пересобираем (это оператор сделает сам, удалив резки и Партии ГП).
-            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — очередь не трогаем');
+            // Если согласованных таких нет — ничего не делаем: уже запланированные резки не
+            // трогаем и очередь не пересобираем (оператор сам удалит резки и Партии ГП).
+            console.log('[pp] ⚙️ generateCuts: незапланированных согласованных позиций нет — очередь не трогаем');
             self.notify('Нет незапланированных позиций для генерации резок', 'info');
             return;
         }
-        var profiles = groupPositionsByPlanningProfile(unsup);
-        console.log('[pp] ⚙️ generateCuts: сгруппировано по сырью/намотке/метражу:', profiles.length,
-            'профилей:', profiles.map(function(g) { return g.key; }));
 
-        // Догрузить ходовые ширины для профиля, у которого их ещё нет в кеше.
-        var preloads = [];
-        profiles.forEach(function(group) {
-            if (group.materialId !== '' && !self.preferredByMaterial[group.key]) {
-                preloads.push(self.loadPreferredWidths(group.materialId, group.windDir, group.windLength));
-            }
-        });
-
-        // На время запросов preferable_widths (preloads) деактивируем кнопку и
-        // показываем крутилку (#3332), иначе клик «глохнет» без видимой реакции.
-        self.setGenBusy(true);
-        Promise.all(preloads).then(function() {
-            // Запросы завершены — крутилку убираем; далее идёт синхронная раскладка
-            // и (при наличии) модалка подтверждения / runGenerateCuts со своим busy.
-            self.setGenBusy(false);
-            // Построить раскладки по каждому профилю; собрать пропуски.
-            var allLayouts = [];   // [{...layout, mat}]
-            var skipped = [];      // [{positionId, reason}]
-            profiles.forEach(function(group) {
-                var mat = group.materialId;
-                var jw = self.jumboWidthByMaterial[mat];
-                if (!jw) {
-                    group.positions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
-                    return;
-                }
-                layoutPositionGroups(group.positions).forEach(function(positionGroup) {
-                    // Нет просроченных позиций (всё в рамках срока) → окно срока не нужно,
-                    // объединяем все позиции сырья (windowDays=Infinity); иначе дробим по WINDOW_DAYS.
-                    var hasOverdue = positionGroup.some(function(p) {
-                        return isFinite(p.dueKey) && p.dueKey < planDateKey;
-                    });
-                    // #3391: добор джамбо ходовыми — только из номенклатур, целесообразных
-                    // к хранению (есть в «Максимальном запасе»); прочее уходит в отход, не впрок.
-                    var stockablePreferred = planning.filterStockableWidths(
-                        self.maxStockIndex, self.preferredByMaterial[group.key] || [],
-                        { material: mat, winding: group.windDir, length: group.windLength });
-                    var res = layoutCore.planLayouts({
-                        jumboWidth: jw,
-                        positions: positionGroup.map(function(p) {
-                            // #3423: запасные комбинации (есть в «Максимальном запасе») можно
-                            // перепроизводить в запас; незапасные — резать ровно под заказ.
-                            return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey,
-                                stockable: planning.isStockableNomenclature(self.maxStockIndex, {
-                                    material: mat, width: p.width,
-                                    length: group.windLength, winding: group.windDir }) };
-                        }),
-                        preferred: stockablePreferred,
-                        options: { windowDays: hasOverdue ? WINDOW_DAYS : Infinity, tolerance: self.resolveToleranceMm(mat) }
-                    });
-                    (res.layouts || []).forEach(function(lay) {
-                        lay.mat = mat;
-                        lay.windDir = group.windDir;
-                        lay.windLength = group.windLength;
-                        allLayouts.push(lay);
-                    });
-                    (res.skipped || []).forEach(function(s) { skipped.push(s); });
-                });
+        // #3424: удельные метрики сценария (доля отхода / переналадки на резку) для сравнения.
+        var planWeights = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes);
+        function metricsFor(layouts) {
+            return layoutsScenarioMetrics(layouts, {
+                jumboWidthByMaterial: self.jumboWidthByMaterial,
+                positions: self.genPositions,
+                weights: planWeights
             });
+        }
 
+        // На время запросов preferable_widths деактивируем кнопку и показываем крутилку (#3332).
+        self.setGenBusy(true);
+        self.preloadPreferredFor(unsupApproved).then(function() {
+            self.setGenBusy(false);
+            // Сценарий A — только согласованные позиции (его и сохраняем при «Сгенерировать»).
+            var planA = self.buildLayoutsForPositions(unsupApproved, planDateKey);
+            var allLayouts = planA.allLayouts;
+            var skipped = planA.skipped;
             console.log('[pp] ⚙️ generateCuts: раскладок построено:', allLayouts.length, ', пропущено:', skipped.length);
-            if (skipped.length > 0) console.log('[pp] ⚙️ generateCuts: первые пропуски:', JSON.stringify(skipped.slice(0, 5)));
 
             if (!allLayouts.length) {
-                console.log('[pp] ⚙️ generateCuts: нет раскладок, выход');
                 self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
                 return;
             }
@@ -4981,13 +5054,14 @@
                     (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
                 return;
             }
+            var metricsA = metricsFor(allLayouts);
 
             // #3253: в подтверждении не считаем полосы/ножи — только число резок.
             var nCuts = allLayouts.length;
             // #3444: вопрос «Создать N резок?» — в конце, после «Пропущено N».
             var msg = el('span', { class: 'atex-pp-confirm-msg' });
             msg.appendChild(document.createTextNode(
-                'Не обеспечено резками и складом позиций: ' + unsup.length + '. '));
+                'Не обеспечено резками и складом позиций: ' + unsupApproved.length + '. '));
             if (skipped.length) {
                 var skipLink = el('a', { class: 'atex-pp-skipped-link', href: '#',
                     text: 'Пропущено ' + skipped.length,
@@ -5003,10 +5077,15 @@
             }
             msg.appendChild(document.createTextNode('Создать ' + nCuts + ' резок?'));
 
-            // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
-            // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
-            // (FATIGUE) по route-score давала ножи по ВОЗРАСТАНИЮ (6,16,16), вопреки
-            // #3130 (ideav/crm#3421). inline:true — именованная inline-кнопка, без модалки.
+            // #3424: галка «Учитывать несогласованные позиции» (по умолчанию выключена).
+            // По клику считаем прогноз сценария «+несогласованные» в памяти (резки не
+            // создаём) и, если он лучше по Парето, предлагаем согласовать эти позиции раньше.
+            if (unsupUnapproved.length) {
+                self.appendUnapprovedLookahead(msg, uncovered, unsupUnapproved, planDateKey, metricsA, metricsFor);
+            }
+
+            // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268) с
+            // ножами по убыванию (#3130) — стратегия SETUP. Сохраняем только сценарий A.
             self.confirmAction(msg, actionsEl, [
                 { label: 'Сгенерировать', primary: true, inline: true, onConfirm: function() {
                     self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
@@ -5015,6 +5094,69 @@
         }).catch(function(err) {
             self.setGenBusy(false);
             self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
+        });
+    };
+
+    // #3424: добавить в сообщение подтверждения галку look-ahead «Учитывать несогласованные
+    // позиции» и (по включению) строку прогноза сценария с несогласованными позициями.
+    // uncovered — все необеспеченные (для сценария B), unsupUnapproved — несогласованные из них.
+    AtexProductionPlanning.prototype.appendUnapprovedLookahead = function(msg, uncovered, unsupUnapproved, planDateKey, metricsA, metricsFor) {
+        var self = this;
+        var cbInput = el('input', { type: 'checkbox' });
+        var cbLabel = el('label', { class: 'atex-pp-checkbox-field',
+            title: 'Учесть в прогнозе позиции, ожидающие согласования. Резки под них не создаются.' },
+            [cbInput, el('span', { text: 'Учитывать несогласованные позиции (' + unsupUnapproved.length + ')' })]);
+        var lookahead = el('span', { class: 'atex-pp-lookahead' });
+        msg.appendChild(el('br'));
+        msg.appendChild(cbLabel);
+        msg.appendChild(lookahead);
+
+        function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+        function pct(x) { return (x * 100).toFixed(1).replace('.', ',') + '%'; }
+
+        function renderLookahead(planB, metricsB) {
+            clear(lookahead);
+            lookahead.appendChild(document.createTextNode(
+                ' Прогноз с несогласованными: ' + metricsB.nCuts + ' резок, доля отхода ' +
+                pct(metricsB.wasteRatio) + ' (было ' + pct(metricsA.wasteRatio) + '), переналадки ' +
+                metricsB.changeoverPerCut + ' мин/резку (было ' + metricsA.changeoverPerCut + '). '));
+            if (scenarioIsParetoBetter(metricsA, metricsB)) {
+                // Несогласованные позиции, реально попавшие в раскладки сценария B.
+                var coveredIds = {};
+                (planB.allLayouts || []).forEach(function(lay) {
+                    (lay.positionsCovered || []).forEach(function(pid) { coveredIds[String(pid)] = true; });
+                });
+                var toApprove = unsupUnapproved.filter(function(p) { return coveredIds[String(p.id)]; });
+                if (toApprove.length) {
+                    var link = el('a', { class: 'atex-pp-skipped-link', href: '#',
+                        text: 'согласовать раньше: ' + toApprove.length,
+                        title: 'Список заказов/позиций, согласование которых улучшит упаковку' });
+                    link.addEventListener('click', function(ev) {
+                        ev.preventDefault();
+                        self.openApprovalSuggestionReport(toApprove, metricsA, metricsB);
+                    });
+                    lookahead.appendChild(document.createTextNode('Меньше отходов/переналадок, если '));
+                    lookahead.appendChild(link);
+                    lookahead.appendChild(document.createTextNode('.'));
+                    return;
+                }
+            }
+            lookahead.appendChild(document.createTextNode('Согласование несогласованных позиций план не улучшит.'));
+        }
+
+        var busy = false;
+        cbInput.addEventListener('change', function() {
+            clear(lookahead);
+            if (!cbInput.checked || busy) return;
+            busy = true;
+            lookahead.appendChild(document.createTextNode(' Считаю прогноз…'));
+            self.preloadPreferredFor(uncovered).then(function() {
+                var planB = self.buildLayoutsForPositions(uncovered, planDateKey);
+                renderLookahead(planB, metricsFor(planB.allLayouts));
+            }).catch(function(err) {
+                clear(lookahead);
+                lookahead.appendChild(document.createTextNode(' Ошибка прогноза: ' + (err && err.message || err)));
+            }).then(function() { busy = false; });
         });
     };
 
@@ -5496,6 +5638,57 @@
             'Проверьте параметры (ширина джамбо, сырьё) и повторите генерацию.</p>' +
             '<table><thead><tr><th>№</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
             '<tbody>' + (trs || '<tr><td colspan="6">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
+        var w = window.open('', '_blank');
+        if (!w) { this.notify('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.', 'error'); return; }
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+    };
+
+    // #3424: отчёт-подсказка «согласовать раньше» — несогласованные позиции, чьё включение
+    // улучшило бы упаковку (меньше отходов/переналадок). Заказ/позиция/ширина/кол-во/срок.
+    AtexProductionPlanning.prototype.openApprovalSuggestionReport = function(positions, metricsA, metricsB) {
+        function esc(v) {
+            return String(v == null ? '' : v).replace(/[&<>"]/g, function(c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+        function pct(x) { return (Number(x) * 100).toFixed(1).replace('.', ',') + '%'; }
+        var base = '/' + encodeURIComponent(this.db) + '/object/';
+        var rows = (positions || []).map(function(p) {
+            var head = (p.orderNo !== '' ? p.orderNo : '—') + '/' + (p.positionNo !== '' ? p.positionNo : (p.id || '—'));
+            return { id: p.id || '', head: head, width: (p.width != null ? p.width : '') || '',
+                qty: p.qty || '', length: p.length || '', due: p.dueDate || '' };
+        });
+        var trs = rows.map(function(r, i) {
+            return '<tr><td>' + (i + 1) + '</td>' +
+                '<td>' + esc(r.head) + '</td>' +
+                '<td><a href="' + base + esc(r.id) + '" target="_blank" rel="noopener">' + esc(r.id) + '</a></td>' +
+                '<td>' + esc(r.width) + '</td>' +
+                '<td>' + esc(r.qty) + '</td>' +
+                '<td>' + esc(r.length) + '</td>' +
+                '<td>' + esc(r.due) + '</td></tr>';
+        }).join('');
+        var gain = '';
+        if (metricsA && metricsB) {
+            gain = '<p>С учётом этих позиций: доля отхода ' + esc(pct(metricsB.wasteRatio)) +
+                ' (сейчас ' + esc(pct(metricsA.wasteRatio)) + '), переналадки ' + esc(metricsB.changeoverPerCut) +
+                ' мин/резку (сейчас ' + esc(metricsA.changeoverPerCut) + ').</p>';
+        }
+        var html = '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+            '<title>Согласовать раньше (' + rows.length + ')</title>' +
+            '<style>body{font:14px/1.45 system-ui,Arial,sans-serif;margin:24px;color:#1a1a1a}' +
+            'h1{font-size:18px;margin:0 0 4px}p{color:#666;margin:0 0 16px;max-width:760px}' +
+            'table{border-collapse:collapse;width:100%;max-width:900px}' +
+            'th,td{border:1px solid #ddd;padding:6px 10px;text-align:left}' +
+            'th{background:#f4f6fa}tr:nth-child(even) td{background:#fafbfc}' +
+            'a{color:#1283da}</style></head><body>' +
+            '<h1>Согласовать раньше — ' + rows.length + ' позиций</h1>' +
+            '<p>Эти позиции ожидают согласования. Если согласовать их раньше, генератор сможет ' +
+            'объединить их с текущими заказами в общих прогонах джамбо — меньше отходов и переналадок.</p>' +
+            gain +
+            '<table><thead><tr><th>№</th><th>Заказ/Позиция</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Срок изготовления</th></tr></thead>' +
+            '<tbody>' + (trs || '<tr><td colspan="7">Нет позиций</td></tr>') + '</tbody></table></body></html>';
         var w = window.open('', '_blank');
         if (!w) { this.notify('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.', 'error'); return; }
         w.document.open();

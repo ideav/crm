@@ -149,6 +149,18 @@
     flex-basis: 100%;
     justify-content: flex-end;
 }
+/* #3424: галка «Учитывать несогласованные» и строка look-ahead-прогноза в плашке. */
+.atex-pp-confirm-msg .atex-pp-checkbox-field {
+    margin: 6px 0 0;
+    font-weight: 600;
+}
+.atex-pp-lookahead {
+    display: block;
+    margin-top: 6px;
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--pp-attn-text);
+}
 
 /* Очередь резок по слиттерам */
 .atex-pp-filters {
