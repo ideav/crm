@@ -730,6 +730,33 @@ assertEqual(planning.buildFinishedBatchFields(fbMeta3431, { width: 110, strips: 
 assertEqual(planning.buildFinishedBatchFields(fbMeta3242, { width: 110, strips: 2, rolls: 12, footage: 1200, active: '1' }),
   { t1186: 110, t1188: 12, t1189: 1200, t1192: '1' },
   'buildFinishedBatchFields #3431: нет колонки «Кол-во полос» → strips пропущен, без ошибки');
+
+// #3433: разделение план/факт — «Кол-во рулонов» (спрос), «Кол-во план» (полосы ×
+// проходов), «Кол-во факт» (факт), «ID заказа». Метаданные с полными колонками.
+var fbMeta3433 = { id: '1081', val: 'Партия ГП', reqs: [
+  { id: '1186', val: 'Ширина, мм' }, { id: '70190', val: 'Кол-во полос' },
+  { id: '1188', val: 'Кол-во рулонов' }, { id: '70575', val: 'Кол-во план' },
+  { id: '70573', val: 'Кол-во факт' }, { id: '70577', val: 'ID заказа' },
+  { id: '1189', val: 'Метраж, м' }, { id: '1192', val: 'В работе' }
+] };
+assertEqual(planning.buildFinishedBatchFields(fbMeta3433,
+    { width: 110, strips: 2, rolls: 8, planned: 12, orderId: '1966', footage: 1200, active: '1' }),
+  { t1186: 110, t70190: 2, t1188: 8, t70575: 12, t70577: '1966', t1189: 1200, t1192: '1' },
+  'buildFinishedBatchFields #3433: спрос→t1188, план→t70575, ID заказа→t70577');
+assertEqual(planning.buildFinishedBatchFields(fbMeta3433, { actual: 14 }),
+  { t70573: 14 },
+  'buildFinishedBatchFields #3433: «Кол-во факт» → t70573');
+// Пустой спрос/заказ (запас) — поля не пишутся (buildFields пропускает '').
+assertEqual(planning.buildFinishedBatchFields(fbMeta3433,
+    { width: 110, strips: 2, planned: 12, rolls: '', orderId: '', active: '1' }),
+  { t1186: 110, t70190: 2, t70575: 12, t1192: '1' },
+  'buildFinishedBatchFields #3433: пустой спрос/ID заказа (запас) → поля пропущены');
+
+// #3433: singleOrderId — общий заказ списка позиций или '' (запас/несколько заказов).
+assertEqual(planning.singleOrderId(['7', '7', '']), '7', 'singleOrderId: один заказ (пустые игнорируются)');
+assertEqual(planning.singleOrderId(['7', '9']), '', 'singleOrderId: несколько заказов → пусто');
+assertEqual(planning.singleOrderId(['', '']), '', 'singleOrderId: все пустые → пусто');
+assertEqual(planning.singleOrderId([]), '', 'singleOrderId: пусто → пусто');
 var supMeta3242 = { id: '1077', val: 'Обеспечение', reqs: [
   { id: '1149', val: 'Метраж, м' }, { id: '1154', val: 'В работе' },
   { id: '15016', val: 'Партия ГП', ref: '1081' }, { id: '16424', val: 'Кол-во рулонов' }
@@ -864,13 +891,13 @@ assertEqual(planning.pickSleeveBatchId([{ id: 'x', diameterId: '35561', dateKey:
 // ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([
-  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200', sleeve_id:'35561', sleeve_ready:'' },
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_length:'1200', sleeve_id:'35561', sleeve_ready:'', order_id:'900' },
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'', sleeve_id:'8192', sleeve_ready:'X' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveId:'35561', sleeveReady:false, dueKey: Infinity, approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveId:'8192', sleeveReady:true, dueKey: Infinity, approved:false }
-], 'rowsToGenPositions #3340: sleeve_id/sleeve_ready из отчёта; пустые ширина/кол-во/длина → 0');
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
+], 'rowsToGenPositions #3340/#3433: sleeve_id/sleeve_ready + order_id («ID заказа»); пустые ширина/кол-во/длина → 0');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
 var grpDue = planning.rowsToGenPositions([
@@ -1994,14 +2021,14 @@ function runApplySplitPlanTest() {
             req('1156', 'Слиттер'), req('24308', 'Очередность'), req('1162', 'Статус'),
             req('16403', 'Кол-во резок план'), req('8463', 'Тип намотки'), req('1140', 'Партия сырья')
         ] },
-        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1113', 'Кол-во полос'), req('1114', 'Кол-во рулонов') ] },
+        finishedBatch: { id: '1081', val: 'Партия ГП', reqs: [ req('1112', 'Ширина, мм'), req('1113', 'Кол-во полос'), req('1114', 'Кол-во рулонов'), req('1115', 'Кол-во план'), req('1116', 'Кол-во факт'), req('1117', 'ID заказа') ] },
         supply: { id: '1077', val: 'Обеспечение', reqs: [
             req('1149', 'Метраж, м'), req('16424', 'Кол-во рулонов'), req('15016', 'Партия ГП'), req('1154', 'В работе')
         ] }
     };
     controller.cuts = [{ id: 'A', slitter: { id: 'm1' }, status: 'Запланирована', winding: 'OUT', batchId: '', plannedRuns: 15, number: '999' }];
     controller.supplies = [{ id: 'sup1', cutId: 'A', positionId: 'pos1', finishedBatchId: 'strip1', footage: 1500, rolls: 15 }];
-    controller.loadStripsForCut = function() { return Promise.resolve([{ id: 'strip1', width: '100', qty: '2' }]); };
+    controller.loadStripsForCut = function() { return Promise.resolve([{ id: 'strip1', width: '100', qty: '2', orderId: '900' }]); };
     controller.setBusy = function() {};
     controller.reload = function() { return Promise.resolve(); };
     controller.render = function() {};
@@ -2023,13 +2050,19 @@ function runApplySplitPlanTest() {
         assertEqual(setA && setA.fields.t16403, '10', 'applySplitPlan: A — проходы сегодня (10)');
         var setSup = one('_m_set/sup1?JSON');
         assertEqual(setSup && setSup.fields.t16424, 10, 'applySplitPlan: Обеспечение A уменьшено до 10 рулонов (доля сегодня)');
+        // #3433: «Партия ГП» резки A пересчитана под сегмент 0.
+        var setStripA = one('_m_set/strip1?JSON');
+        assertEqual(setStripA && setStripA.fields.t1115, 20, 'applySplitPlan #3433: A — «Кол-во план» = полосы × проходов A (2×10=20)');
+        assertEqual(setStripA && setStripA.fields.t1114, 10, 'applySplitPlan #3433: A — «Кол-во рулонов» = спрос сегмента 0 (10)');
         var newB = one('_m_new/1078?JSON&up=1');
         assertEqual(newB && newB.fields.t1078, 2000, 'applySplitPlan: B — t1078 (старт след. дня)');
         assertEqual(newB && newB.fields.t16403, 5, 'applySplitPlan: B — остаток проходов (5)');
         var newStrip = one('_m_new/1081?JSON&up=newB');
         assertEqual(newStrip && newStrip.fields.t1112, '100', 'applySplitPlan: B — копия Партии ГП (ширина 100)');
         assertEqual(newStrip && newStrip.fields.t1113, '2', 'applySplitPlan #3431: B — «Кол-во полос» за проход (2)');
-        assertEqual(newStrip && newStrip.fields.t1114, 10, 'applySplitPlan #3431: B — «Кол-во рулонов» = полосы × проходов сегмента (2×5=10)');
+        assertEqual(newStrip && newStrip.fields.t1115, 10, 'applySplitPlan #3433: B — «Кол-во план» = полосы × проходов сегмента (2×5=10)');
+        assertEqual(newStrip && newStrip.fields.t1114, 5, 'applySplitPlan #3433: B — «Кол-во рулонов» = спрос сегмента (5)');
+        assertEqual(newStrip && newStrip.fields.t1117, '900', 'applySplitPlan #3433: B — «ID заказа» копируется из родительской полосы');
         var newSup = one('_m_new/1077?JSON&up=pos1');
         assertEqual(newSup && newSup.fields.t16424, 5, 'applySplitPlan: B — Обеспечение 5 рулонов (доля остатка)');
         assertEqual(newSup && newSup.fields.t15016, 'newB', 'applySplitPlan: B — Обеспечение ссылается на скопированную Полосу B');

@@ -53,6 +53,16 @@ assertEqual(core.meterageFromCounters('1 000', '1 850,5'), 850.5, 'meterage pars
 assertEqual(core.meterageFromCounters(2000, 1500), 0, 'meterage never negative (counter does not rewind)');
 assertEqual(core.meterageFromCounters('', ''), 0, 'meterage of empty counters → 0');
 
+// ── #3433: факт. проходы из погонажа и факт. рулоны полосы ──
+assertEqual(core.actualRunsFromMeterage(1200, 400, 5), 3, 'actualRunsFromMeterage: 1200 ÷ 400 = 3 прохода');
+assertEqual(core.actualRunsFromMeterage(1250, 400, 5), 3, 'actualRunsFromMeterage: округление до целого прохода (1250/400≈3)');
+assertEqual(core.actualRunsFromMeterage(0, 400, 5), 5, 'actualRunsFromMeterage: нет погонажа → фолбэк на план (5)');
+assertEqual(core.actualRunsFromMeterage(1200, 0, 5), 5, 'actualRunsFromMeterage: нет метража прогона → фолбэк на план');
+assertEqual(core.actualRunsFromMeterage(0, 0, 0), 0, 'actualRunsFromMeterage: нет данных → 0');
+assertEqual(core.actualRollsForStrip(2, 3), 6, 'actualRollsForStrip: 2 полосы × 3 прохода = 6 рулонов факт');
+assertEqual(core.actualRollsForStrip(0, 3), '', 'actualRollsForStrip: нет полос → пусто (поле не пишем)');
+assertEqual(core.actualRollsForStrip(2, 0), '', 'actualRollsForStrip: нет проходов → пусто');
+
 // ── sumConsumption: сумма израсходованного ──
 assertEqual(core.sumConsumption([
     { amount: '120,5' }, { amount: 80 }, { amount: '' }

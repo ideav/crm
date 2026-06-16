@@ -97,7 +97,8 @@ var PR = [
     position_id:'21', position_status:'Отгружена', position_width_mm:'57', position_length_m:'10',
     provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
     cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
-    gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
+    gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_plan:'12', gp_fact:'8', gp_order_id:'11',
+    gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
 ];
 var ent = dashboards.rowsToEntities(PR);
 assertEqual(ent.orders.length, 2, 'rowsToEntities: 2 заказа (dedup)');
@@ -106,7 +107,13 @@ assertEqual(ent.cuts.length, 1, 'rowsToEntities: пустые стадии не 
 assertEqual(ent.cuts[0], { id:'41', number:'4', slitter:'Станок 1', status:'Завершён', footage:'1300' }, 'rowsToEntities: резка');
 assertEqual(ent.positions[0].orderId, '11', 'rowsToEntities: позиция знает заказ');
 assertEqual(ent.provisions[0], { id:'31', positionId:'21', cutId:'41', gpId:'51', footage:'1200', status:'Выполнено' }, 'rowsToEntities: обеспечение');
-assertEqual(ent.gpBatches[0], { id:'51', cutId:'41', status:'Отгружен', rolls:'10', footage:'1200', address:'A-3' }, 'rowsToEntities: ГП');
+// #3433: «Выпуск ГП» берёт фактически произведённые рулоны (gp_fact), а не спрос (gp_rolls).
+assertEqual(ent.gpBatches[0], { id:'51', cutId:'41', status:'Отгружен', rolls:'8', plan:'12', fact:'8', orderId:'11', footage:'1200', address:'A-3' }, 'rowsToEntities #3433: ГП — rolls = «Кол-во факт» (8), план/факт/заказ отдельно');
+// Без gp_fact (отчёт ещё не отдаёт колонку) — фолбэк на gp_rolls.
+var entFallback = dashboards.rowsToEntities([
+  { gp_id:'52', gp_status:'Есть', gp_rolls:'10', gp_footage_m:'600', gp_address:'B-1', gp_cut_id:'42' }
+]);
+assertEqual(entFallback.gpBatches[0].rolls, '10', 'rowsToEntities #3433: нет gp_fact → фолбэк на gp_rolls');
 
 // ── collect(): два отчёта → сводки ──
 global.window = { db: 'atex' };

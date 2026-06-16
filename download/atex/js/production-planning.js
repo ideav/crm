@@ -131,12 +131,20 @@
         status: 'Статус'
     };
     // Реквизиты «Партии ГП» (#3242: состав резки, up = резка). Резолв по имени.
-    // #3431: «Кол-во полос» = число полос за проход (геометрия раскроя, бывшее
-    // содержимое «Кол-во рулонов»). «Кол-во рулонов» = полосы × число резок (проходов).
+    // #3431: «Кол-во полос» = число полос за проход (геометрия раскроя, число ножей).
+    // #3433: разделение план/факт рулонов:
+    //   «Кол-во рулонов» — СПРОС (рулоны из связанного «Обеспечения», под заказ);
+    //   «Кол-во план»    — план производства = полосы × число резок (проходов);
+    //   «Кол-во факт»    — фактически произведённые рулоны (пишется в производстве/
+    //                      на складе, может отличаться от плана из-за брака и пр.);
+    //   «ID заказа»      — заказ, под который создана партия; пусто = в запас (склад).
     var FINISHED_BATCH_REQ = {
         width: 'Ширина, мм',
         strips: 'Кол-во полос',
         rolls: 'Кол-во рулонов',
+        planned: 'Кол-во план',
+        actual: 'Кол-во факт',
+        orderId: 'ID заказа',
         footage: 'Метраж, м',
         active: 'В работе'
     };
@@ -266,9 +274,9 @@
         });
     }
 
-    // #3431: «Кол-во рулонов» «Партии ГП» = «Кол-во полос» (за проход) × число резок
-    // (повторов резки = «Кол-во резок план»). Пусто/0 полос → '' (поле не пишем). Без
-    // проходов (0) рулоны = полосам (фолбэк, чтобы не записать 0 рулонов).
+    // #3431/#3433: ПЛАН производства «Партии ГП» = «Кол-во полос» (за проход) × число
+    // резок (повторов = «Кол-во резок план»). Пишется в «Кол-во план». Пусто/0 полос →
+    // '' (поле не пишем). Без проходов (0) план = полосам (фолбэк, чтобы не записать 0).
     function finishedBatchRolls(stripsPerPass, plannedRuns) {
         var s = stripNum(stripsPerPass);
         if (!(s > 0)) return '';
@@ -276,14 +284,33 @@
         return round3(s * (runs > 0 ? runs : 1));
     }
 
-    // #3242/#3431: поля записи «Партия ГП» (состав резки): Ширина, Кол-во полос (за проход),
-    // Кол-во рулонов (полосы × проходов), Метраж, «В работе». Если колонки «Кол-во полос»
-    // в метаданных нет (старое окружение) — поле просто пропускается (buildFields).
+    // #3433: «ID заказа» партии = заказ, если все её непустые заказы совпадают (один
+    // заказ); запас или несколько заказов → '' (свободная партия, заполнится при
+    // подхватывании при расчёте резки). orderIds — список id заказов покрытых позиций.
+    function singleOrderId(orderIds) {
+        var seen = '';
+        var list = orderIds || [];
+        for (var i = 0; i < list.length; i++) {
+            var id = String(list[i] == null ? '' : list[i]).trim();
+            if (id === '') continue;
+            if (seen === '') seen = id;
+            else if (seen !== id) return '';
+        }
+        return seen;
+    }
+
+    // #3242/#3431/#3433: поля записи «Партия ГП» (состав резки): Ширина, Кол-во полос
+    // (за проход), Кол-во рулонов (спрос), Кол-во план (полосы × проходов), Кол-во факт
+    // (факт производства), ID заказа, Метраж, «В работе». Пустые значения и колонки,
+    // отсутствующие в метаданных (старое окружение), просто пропускаются (buildFields).
     function buildFinishedBatchFields(finishedBatchMeta, values) {
         var reqIds = {
             width: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.width),
             strips: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.strips),
             rolls: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.rolls),
+            planned: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.planned),
+            actual: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.actual),
+            orderId: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.orderId),
             footage: reqIdByName(finishedBatchMeta, FINISHED_BATCH_REQ.footage),
             active: activeReqId(finishedBatchMeta)
         };
@@ -291,6 +318,9 @@
             width: values && values.width,
             strips: values && values.strips,
             rolls: values && values.rolls,
+            planned: values && values.planned,
+            actual: values && values.actual,
+            orderId: values && values.orderId,
             footage: values && values.footage,
             active: values && values.active
         });
@@ -856,6 +886,9 @@
                 sleeveId: row.sleeve_id == null ? '' : String(row.sleeve_id).trim(),
                 sleeveReady: String(row.sleeve_ready == null ? '' : row.sleeve_ready).trim() !== '',
                 dueKey: batchDateKey(row.position_due_date),
+                // #3433: заказ позиции — для «ID заказа» создаваемой «Партии ГП». Если
+                // отчёт positions_list ещё не отдаёт order_id, остаётся пусто (в запас).
+                orderId: row.order_id == null ? '' : String(row.order_id).trim(),
                 approved: orderApproved || itemApproved
             };
         });
@@ -2992,6 +3025,7 @@
         buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
         buildFinishedBatchFields: buildFinishedBatchFields,
         finishedBatchRolls: finishedBatchRolls,
+        singleOrderId: singleOrderId,
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
@@ -4100,10 +4134,15 @@
                 // 1) Партии ГП по ширинам (состав резки).
                 plan.batches.forEach(function(b) {
                     chain = chain.then(function() {
-                        // #3431: «Кол-во полос» = полос за проход (b.strips); «Кол-во
-                        // рулонов» = полосы × проходов (plan.plannedRuns).
+                        // #3431/#3433: «Кол-во полос» = полос за проход (b.strips); «Кол-во
+                        // план» = полосы × проходов; «Кол-во рулонов» = спрос: для ширины
+                        // позиции — её рулоны (plan.qty) под этот заказ, прочие ширины (добор
+                        // ходовыми) — в запас (спрос/заказ пусто).
+                        var isPosWidth = stripWidthKey(b.width) === stripWidthKey(plan.posWidth);
                         var f = buildFinishedBatchFields(fbMeta, { width: b.width, strips: b.strips,
-                            rolls: finishedBatchRolls(b.strips, plan.plannedRuns),
+                            planned: finishedBatchRolls(b.strips, plan.plannedRuns),
+                            rolls: isPosWidth && plan.qty > 0 ? plan.qty : '',
+                            orderId: isPosWidth ? (plan.position && plan.position.orderId) || '' : '',
                             footage: b.length > 0 ? b.length : '', active: '1' });
                         return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(cutId), f).then(function(r) {
                             var bid = r && (r.obj || r.id || r.i);
@@ -4367,6 +4406,7 @@
         var widthIdx = columnIndex(sm, FINISHED_BATCH_REQ.width);
         var stripsIdx = columnIndex(sm, FINISHED_BATCH_REQ.strips);
         var rollsIdx = columnIndex(sm, FINISHED_BATCH_REQ.rolls);
+        var orderIdx = columnIndex(sm, FINISHED_BATCH_REQ.orderId);
         return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
             return (rows || []).map(function(rec) {
                 var r = rec.r || [];
@@ -4375,7 +4415,9 @@
                 return {
                     id: String(rec.i),
                     width: (widthIdx >= 0 && r[widthIdx] != null) ? String(r[widthIdx]) : '',
-                    qty: String(stripsVal).trim() !== '' ? stripsVal : rollsVal
+                    qty: String(stripsVal).trim() !== '' ? stripsVal : rollsVal,
+                    // #3433: «ID заказа» — копируется в записи-продолжения при дроблении по дням.
+                    orderId: (orderIdx >= 0 && r[orderIdx] != null) ? String(r[orderIdx]) : ''
                 };
             });
         });
@@ -4703,9 +4745,11 @@
         var self = this;
         var sm = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         if (!sm || !strip) return Promise.resolve();
-        // #3431: «Кол-во полос» = введённое число полос; «Кол-во рулонов» = полосы × проходов резки.
+        // #3431/#3433: «Кол-во полос» = введённое число полос; «Кол-во план» = полосы ×
+        // проходов резки. «Кол-во рулонов» (спрос) и «ID заказа» проставляются при
+        // привязке «Обеспечения», поэтому здесь не пишутся (ручное редактирование состава).
         var fields = buildFinishedBatchFields(sm, { width: strip.width, strips: strip.qty,
-            rolls: finishedBatchRolls(strip.qty, this.cutPlannedRunsById(cutId)), active: '1' });
+            planned: finishedBatchRolls(strip.qty, this.cutPlannedRunsById(cutId)), active: '1' });
         if (strip.id) {
             return self.post('_m_set/' + strip.id + '?JSON', fields).catch(function(err) {
                 self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
@@ -4730,7 +4774,7 @@
     AtexProductionPlanning.prototype.saveStrips = function(cutId, strips, original) {
         var self = this;
         var sm = this.meta.finishedBatch;
-        var runs = this.cutPlannedRunsById(cutId);   // #3431: «Кол-во рулонов» = полосы × проходов
+        var runs = this.cutPlannedRunsById(cutId);   // #3431/#3433: «Кол-во план» = полосы × проходов
 
         // Карта исходных записей по id для сравнения.
         var origById = {};
@@ -4740,9 +4784,10 @@
         var ops = [];
         (strips || []).forEach(function(s) {
             var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
-            // #3431: «Кол-во полос» = введённое число полос; «Кол-во рулонов» = полосы × проходов.
+            // #3431/#3433: «Кол-во полос» = введённое число полос; «Кол-во план» = полосы ×
+            // проходов. «Кол-во рулонов» (спрос)/«ID заказа» — при привязке «Обеспечения».
             var fields = buildFinishedBatchFields(sm, { width: s.width, strips: s.qty,
-                rolls: finishedBatchRolls(s.qty, runs), active: '1' });
+                planned: finishedBatchRolls(s.qty, runs), active: '1' });
             if (s.id) {
                 keepIds[String(s.id)] = true;
                 var o = origById[String(s.id)];
@@ -5214,19 +5259,44 @@
                     throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
 
-                // #3242: состав резки — «Партия ГП» по каждой ширине (Σ рулонов × прогоны).
-                // Запоминаем id по ширине, чтобы обеспечения сослались на нужную партию.
+                // #3242: состав резки — «Партия ГП» по каждой ширине. Запоминаем id по
+                // ширине, чтобы обеспечения сослались на нужную партию.
                 var widthToBatchId = {};
+                // #3280/#3433: доля обеспечений ЭТОГО сегмента-дня по позициям (рулоны +
+                // метраж). Считаем один раз и переиспользуем для спроса/заказа «Партии ГП»
+                // (createFinishedBatches) и для самих обеспечений (createSupplies).
+                var segSupplies = [];
+                supplyPlanForLayout(lay, posById, unit.fullPlannedRuns, posLength).forEach(function(plan) {
+                    var share = splitSupplyShares(plan.rolls, plan.footage, unit.segRunsAll)[unit.segIndex] || { rolls: 0, footage: 0 };
+                    var pos = posById[String(plan.positionId)] || {};
+                    segSupplies.push({ positionId: plan.positionId, width: plan.width,
+                        rolls: share.rolls, footage: share.footage, orderId: pos.orderId || '' });
+                });
+                // Спрос (Σ рулонов сегмента) и заказы по ширине «Партии ГП».
+                var demandByWidth = {};
+                var ordersByWidth = {};
+                segSupplies.forEach(function(s) {
+                    if (!(s.rolls > 0)) return;
+                    var key = stripWidthKey(s.width);
+                    demandByWidth[key] = round3((demandByWidth[key] || 0) + s.rolls);
+                    (ordersByWidth[key] = ordersByWidth[key] || []).push(s.orderId);
+                });
                 function createFinishedBatches(cutId) {
                     var batchChain = Promise.resolve();
                     producedBatchesForLayout(lay, runLength).forEach(function(batch) {
                         batchChain = batchChain.then(function() {
-                            // #3431: «Кол-во полос» = полос за проход (batch.strips); «Кол-во
-                            // рулонов» = полосы × проходов этого сегмента (plannedRuns).
+                            // #3431/#3433: «Кол-во полос» = полос за проход (batch.strips);
+                            // «Кол-во план» = полосы × проходов сегмента; «Кол-во рулонов» =
+                            // спрос обеспечений этой ширины; «ID заказа» = их общий заказ
+                            // (несколько/нет — пусто = в запас).
+                            var key = stripWidthKey(batch.width);
+                            var demand = demandByWidth[key];
                             var fields = buildFinishedBatchFields(finishedBatchMeta, {
                                 width: batch.width,
                                 strips: batch.strips,
-                                rolls: finishedBatchRolls(batch.strips, plannedRuns),
+                                planned: finishedBatchRolls(batch.strips, plannedRuns),
+                                rolls: demand > 0 ? demand : '',
+                                orderId: singleOrderId(ordersByWidth[key]),
                                 footage: batch.length > 0 ? batch.length : '',
                                 active: '1'
                             });
@@ -5262,26 +5332,25 @@
                 // Излишек рулонов сверх обеспечений остаётся складом той же Партией ГП.
                 function createSupplies() {
                     var supChain = Promise.resolve();
-                    // #3280: Обеспечение позиции считаем на ПОЛНОЕ кол-во проходов резки,
-                    // затем делим по сегментам-дням (splitSupplyShares) — берём долю этого сегмента.
-                    supplyPlanForLayout(lay, posById, unit.fullPlannedRuns, posLength).forEach(function(plan) {
-                        var share = splitSupplyShares(plan.rolls, plan.footage, unit.segRunsAll)[unit.segIndex] || { rolls: 0, footage: 0 };
-                        if (!(share.rolls > 0) && !(share.footage > 0)) return;
+                    // #3280/#3433: доли сегмента уже посчитаны (segSupplies). Каждое
+                    // обеспечение ссылается на «Партию ГП» своей ширины.
+                    segSupplies.forEach(function(s) {
+                        if (!(s.rolls > 0) && !(s.footage > 0)) return;
                         supChain = supChain.then(function() {
-                            var batchId = widthToBatchId[stripWidthKey(plan.width)];
+                            var batchId = widthToBatchId[stripWidthKey(s.width)];
                             if (!batchId) {
-                                console.error('[pp] ⚙️ runGenerateCuts: нет «Партии ГП» ширины ' + plan.width +
-                                    ' для позиции ' + plan.positionId + ' — обеспечение не создаём (не сирота)');
+                                console.error('[pp] ⚙️ runGenerateCuts: нет «Партии ГП» ширины ' + s.width +
+                                    ' для позиции ' + s.positionId + ' — обеспечение не создаём (не сирота)');
                                 return;
                             }
                             var fields = buildSupplyFieldsForFinishedBatch(supplyMeta, {
                                 finishedBatchId: batchId,
-                                footage: share.footage > 0 ? share.footage : '',
-                                rolls: share.rolls,
+                                footage: s.footage > 0 ? s.footage : '',
+                                rolls: s.rolls,
                                 active: '1',
                                 status: SUPPLY_STATUSES[0]
                             });
-                            return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(plan.positionId), fields)
+                            return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(s.positionId), fields)
                                 .then(function() { nPositions += 1; });
                         });
                     });
@@ -5565,6 +5634,14 @@
             chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
                 var parentSupplies = (self.supplies || []).filter(function(s) { return String(s.cutId) === String(parentId); });
                 var shareBySupply = parentSupplies.map(function(s) { return { s: s, shares: splitSupplyShares(s.rolls, s.footage, segRuns) }; });
+                // #3433: спрос на «Партию ГП» по сегментам (Σ долей обеспечений этой партии).
+                // Ключ = id записи «Партии ГП» (= id полосы parentStrips, = supply.finishedBatchId).
+                var demandByBatchSeg = {};
+                shareBySupply.forEach(function(item) {
+                    var bId = String(item.s.finishedBatchId);
+                    var arr = demandByBatchSeg[bId] || (demandByBatchSeg[bId] = []);
+                    (item.shares || []).forEach(function(sh, i) { arr[i] = round3((arr[i] || 0) + ((sh && sh.rolls) || 0)); });
+                });
                 var cChain = Promise.resolve();
                 // 2a) уменьшить Обеспечение A до доли сегмента 0.
                 shareBySupply.forEach(function(item) {
@@ -5576,6 +5653,19 @@
                             active: '1', status: SUPPLY_STATUSES[0]
                         });
                         return self.post('_m_set/' + item.s.id + '?JSON', f);
+                    });
+                });
+                // 2a-bis) #3433: «Партии ГП» резки A пересчитать под сегмент 0 — «Кол-во
+                // план» = полосы × проходов A (aRuns), «Кол-во рулонов» = спрос сегмента 0.
+                (parentStrips || []).forEach(function(st) {
+                    cChain = cChain.then(function() {
+                        var seg0 = (demandByBatchSeg[String(st.id)] || [])[0] || 0;
+                        var f = buildFinishedBatchFields(fbMeta, {
+                            planned: finishedBatchRolls(st.qty, aRuns),
+                            rolls: seg0 > 0 ? seg0 : ''
+                        });
+                        if (!Object.keys(f).length) return;
+                        return self.post('_m_set/' + st.id + '?JSON', f);
                     });
                 });
                 // 2b) каждое продолжение B (сегменты 1..N).
@@ -5604,10 +5694,15 @@
                             });
                             (parentStrips || []).forEach(function(st) {
                                 bChain = bChain.then(function() {
-                                    // #3431: st.qty — полос за проход (из «Кол-во полос»); рулоны
-                                    // продолжения = полосы × проходов сегмента (cr.plannedRuns).
+                                    // #3431/#3433: st.qty — полос за проход; «Кол-во план»
+                                    // продолжения = полосы × проходов сегмента (cr.plannedRuns);
+                                    // «Кол-во рулонов» = спрос этого сегмента; «ID заказа»
+                                    // копируется из родительской полосы.
+                                    var segDemand = (demandByBatchSeg[String(st.id)] || [])[segIdx] || 0;
                                     var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
-                                        rolls: finishedBatchRolls(st.qty, cr.plannedRuns), active: '1' });
+                                        planned: finishedBatchRolls(st.qty, cr.plannedRuns),
+                                        rolls: segDemand > 0 ? segDemand : '',
+                                        orderId: st.orderId || '', active: '1' });
                                     return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
                                         var nid = r2 && (r2.obj || r2.id || r2.i);
                                         if (nid) stripMap[String(st.id)] = String(nid);
