@@ -136,3 +136,14 @@
             return ts ? this.formatDateTimeDisplay(ts) : raw;
         }
 
+        // Метка опции в списке ссылок на справочник (issue #3454). Если справочник имеет
+        // DATETIME-главное-значение (REF-колонка с type=4 → normalizeFormat='DATETIME'),
+        // сервер отдаёт метку unix-штампом — показываем её как дату-время (как в ячейке
+        // таблицы, #3211). Прочие справочники (SHORT/NUMBER) не трогаем. id записи и
+        // отправляемое значение не меняются — форматируется только видимый текст.
+        formatReferenceOptionLabel(label, column) {
+            if (!column || column.type == null) return label;
+            if (this.normalizeFormat(column.type) !== 'DATETIME') return label;
+            return this.formatRecordTitleValue(label);
+        }
+
