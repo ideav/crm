@@ -2263,6 +2263,40 @@ assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage:
 assertEqual(planning.splitSupplyShares(7, 700, []), [], 'splitSupplyShares: нет сегментов → []');
 assertEqual(planning.splitSupplyShares(7, 700, [0, 0]), [{ rolls: 7, footage: 700 }, { rolls: 0, footage: 0 }], 'splitSupplyShares: нулевые проходы → всё в сегмент 0');
 
+// #3457: generateCuts перезапрашивает позиции (loadPositions сбрасывает genPositions к
+// НОМИНАЛЬНОЙ ширине заказа). Раньше фактическая ширина резки (#3372, справочник 66190)
+// терялась, т.к. annotatePositionsCutWidth вызывался только в start(). Проверяем, что к
+// моменту планирования (planAndConfirmCuts) ширина уже фактическая (60 → 59).
+function runGenerateCutsReannotatesActualWidthTest() {
+    var prevWindow = global.window;
+    global.window = { AtexCutLayout: { layout: { planLayouts: function() {} } } };
+    var controller = Object.create(api.Controller.prototype);
+    controller.meta = { cut: {}, supply: {}, finishedBatch: {} };
+    controller.actualWidthIndex = planning.buildActualWidthIndex([{ order: 60, actual: 59, code: '' }]);
+    controller.jumboWidthByMaterial = {};
+    controller.sleeveInchesById = {};
+    controller.setGenBusy = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    // Как настоящий loadPositions: пересоздаёт genPositions с НОМИНАЛЬНОЙ шириной заказа.
+    controller.loadPositions = function() {
+        controller.genPositions = [{ id: 'p1', materialId: 'M', width: 60, qty: 1 }];
+        return Promise.resolve();
+    };
+    var widthsAtPlanning = null;
+    controller.planAndConfirmCuts = function() {
+        widthsAtPlanning = controller.genPositions.map(function(p) {
+            return { width: p.width, orderWidth: p.orderWidth };
+        });
+    };
+    controller.generateCuts({ querySelector: function() { return null; } });
+    return new Promise(function(resolve) { setTimeout(resolve, 0); }).then(function() {
+        assertEqual(widthsAtPlanning, [{ width: 59, orderWidth: 60 }],
+            'generateCuts #3457: после перезапроса позиций фактическая ширина (60→59) проставлена до планирования');
+        global.window = prevWindow;
+    });
+}
+
 runSaveSequencesT1078Test()
     .then(runApplySplitPlanTest)
     .then(runPreferredWidthsFilterTest)
@@ -2272,6 +2306,7 @@ runSaveSequencesT1078Test()
     .then(runGenerateCutsFatigueStrategyTest)
     .then(runCreateCutPayloadDiagnosticsTest)
     .then(runCreateCutMainValueTest)
+    .then(runGenerateCutsReannotatesActualWidthTest)
     .then(function() {
     console.log('\n' + passed + ' assertions passed');
 }).catch(function(err) {
