@@ -5098,6 +5098,16 @@
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
             var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
+            // #3453: нет партии сырья (нет активной «Партии сырья» этого вида с остатком) —
+            // не создаём резку с пустой «Партией сырья», а помечаем позиции пропущенными.
+            // pickBatchFIFOForRun при отсутствии партии возвращает null без списания остатка.
+            if (!batchId) {
+                console.warn('[pp] 🔧 runGenerateCuts: раскладка без партии сырья (сырьё ' + lay.mat + ') — пропущена');
+                (lay.positionsCovered || []).forEach(function(pid) {
+                    skipped.push({ positionId: pid, reason: 'нет партии сырья' });
+                });
+                return;
+            }
             var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
             var day = cutPlanDayKey({ planDate: cutMainValue });
             if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
@@ -5144,6 +5154,7 @@
             });
         });
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
+        nCuts = layoutPlans.length;   // #3453: раскладки без партии сырья отброшены — считаем по факту
 
         // Create requests stay in layout order, but queue numbers for same-day
         // generated cuts follow the operator-selected planner (#3272).
