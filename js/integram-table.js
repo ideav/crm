@@ -2187,6 +2187,17 @@ class IntegramTable{
             return ts ? this.formatDateTimeDisplay(ts) : raw;
         }
 
+        // Метка опции в списке ссылок на справочник (issue #3454). Если справочник имеет
+        // DATETIME-главное-значение (REF-колонка с type=4 → normalizeFormat='DATETIME'),
+        // сервер отдаёт метку unix-штампом — показываем её как дату-время (как в ячейке
+        // таблицы, #3211). Прочие справочники (SHORT/NUMBER) не трогаем. id записи и
+        // отправляемое значение не меняются — форматируется только видимый текст.
+        formatReferenceOptionLabel(label, column) {
+            if (!column || column.type == null) return label;
+            if (this.normalizeFormat(column.type) !== 'DATETIME') return label;
+            return this.formatRecordTitleValue(label);
+        }
+
         shouldRenderSubordinateRowNumber(rowIndex, colIndex) {
             if (colIndex !== 0 || rowIndex === null || rowIndex === undefined) {
                 return false;
@@ -4792,7 +4803,7 @@ class IntegramTable{
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
-                            ${this.renderReferenceOptions(options, currentValue)}
+                            ${this.renderReferenceOptions(options, currentValue, column)}
                         </div>
                     </div>
                 `;
@@ -4819,7 +4830,8 @@ class IntegramTable{
                 // Issue #1518: Pre-fill search input with current value so user can see what is selected.
                 // Select all text so any keystroke immediately replaces it for a new search.
                 if (currentValue) {
-                    searchInput.value = currentValue;
+                    // Issue #3454: показать выбранное значение DATETIME-ссылки датой, не штампом.
+                    searchInput.value = this.formatReferenceOptionLabel(currentValue, column);
                     searchInput.select();
                 }
 
@@ -4858,18 +4870,18 @@ class IntegramTable{
                     searchTimeout = setTimeout(async () => {
                         if (searchText === '') {
                             // Show original options
-                            dropdown.innerHTML = this.renderReferenceOptions(this.currentEditingCell.referenceOptions, currentValue);
+                            dropdown.innerHTML = this.renderReferenceOptions(this.currentEditingCell.referenceOptions, currentValue, column);
                         } else {
                             // Filter locally first
                             const filtered = this.filterReferenceOptions(this.currentEditingCell.referenceOptions, searchText, currentValue);
-                            dropdown.innerHTML = this.renderReferenceOptions(filtered, currentValue);
+                            dropdown.innerHTML = this.renderReferenceOptions(filtered, currentValue, column);
 
                             // If we have exactly 50 options (not all fetched), re-query from server
                             if (!this.currentEditingCell.allOptionsFetched) {
                                 try {
                                     const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     this.currentEditingCell.referenceOptions = serverOptions;
-                                    dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue);
+                                    dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue, column);
                                 } catch (error) {
                                     console.error('Error re-querying reference options:', error);
                                 }
@@ -5687,7 +5699,7 @@ class IntegramTable{
             }
         }
 
-        renderReferenceOptions(options, currentValue) {
+        renderReferenceOptions(options, currentValue, column = null) {
             // options is an array of [id, text] tuples
             // Filter out current value from options
             const filteredOptions = options.filter(([id, text]) => text !== currentValue);
@@ -5697,7 +5709,8 @@ class IntegramTable{
             }
 
             return filteredOptions.map(([id, text]) => {
-                const decodedText = this.decodeHtmlEntities(text);
+                // Issue #3454: справочник типа DATETIME → метку показываем датой, не штампом.
+                const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), column);
                 const escapedText = this.escapeHtml(decodedText);
                 return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');
@@ -10298,7 +10311,9 @@ class IntegramTable{
                     // Find the option whose ID matches the refId from the URL filter
                     const match = options.find(([id]) => String(id) === String(urlFilter.refId));
                     if (match) {
-                        const [, label] = match;
+                        // Issue #3454: справочник типа DATETIME → метку датой, не штампом.
+                        const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
+                        const label = this.formatReferenceOptionLabel(match[1], refColumn);
                         // Only update displayValue if the filter has not been overridden by the user
                         if (this.filters[colId] && this.filters[colId].value === urlFilter.value) {
                             this.filters[colId].displayValue = label;
@@ -11336,9 +11351,11 @@ class IntegramTable{
             // Build display text
             let displayText = '';
             if (selectedIds.size > 0) {
+                // Issue #3454: справочник типа DATETIME → выбранные метки датами, не штампами.
+                const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
                 const selectedTexts = cachedOptions
                     .filter(([id]) => selectedIds.has(String(id)))
-                    .map(([, text]) => text);
+                    .map(([, text]) => this.formatReferenceOptionLabel(text, refColumn));
                 if (selectedTexts.length > 0) {
                     displayText = selectedTexts.length > 2
                         ? `${selectedTexts.length} выбрано`
@@ -11391,6 +11408,8 @@ class IntegramTable{
             dropdown.className = 'filter-ref-dropdown-overlay';
             dropdown.dataset.columnId = colId;
 
+            // Issue #3454: справочник типа DATETIME → метки опций датами, не штампами.
+            const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
             // Build options HTML with checkboxes
             const renderOptionsHtml = (options, selSet) => {
                 if (!options || options.length === 0) {
@@ -11398,7 +11417,7 @@ class IntegramTable{
                 }
                 return options.map(([id, text]) => {
                     const isSelected = selSet.has(String(id));
-                    const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const escapedText = String(this.formatReferenceOptionLabel(text, refColumn)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     return `
                         <label class="filter-ref-option" data-id="${id}">
                             <input type="checkbox" value="${id}" ${isSelected ? 'checked' : ''}>
@@ -12408,7 +12427,7 @@ class IntegramTable{
                 else if (req.ref_id && isMulti) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -12438,7 +12457,7 @@ class IntegramTable{
                 else if (req.ref_id) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -14012,7 +14031,7 @@ class IntegramTable{
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
                     formHtml += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -14041,7 +14060,7 @@ class IntegramTable{
                 // Single-select reference field
                 else if (req.ref_id) {
                     formHtml += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -14635,7 +14654,8 @@ class IntegramTable{
                     if (currentReference.id) {
                         hiddenInput.value = currentReference.id;
                         if (currentReference.text) {
-                            searchInput.value = this.decodeHtmlEntities(currentReference.text);
+                            // Issue #3454: выбранное значение DATETIME-ссылки — датой, не штампом.
+                            searchInput.value = this.formatReferenceOptionLabel(this.decodeHtmlEntities(currentReference.text), reqMeta);
                         }
                     }
 
@@ -15443,8 +15463,14 @@ class IntegramTable{
                 return;
             }
 
+            // Issue #3454: справочник типа DATETIME → метки опций показываем датами, не
+            // штампами. Базовый тип ссылки берём из data-атрибута редактора-обёртки.
+            const refWrapper = (dropdown && dropdown.closest) ? dropdown.closest('.form-reference-editor') : null;
+            const refColumn = (refWrapper && refWrapper.dataset.refBaseType)
+                ? { type: refWrapper.dataset.refBaseType } : null;
+
             options.forEach(([id, text]) => {
-                const decodedText = this.decodeHtmlEntities(text);
+                const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), refColumn);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
                 optionDiv.textContent = decodedText;
@@ -15570,7 +15596,7 @@ class IntegramTable{
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-ref-base-type="${req.type}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -18940,6 +18966,24 @@ class IntegramCreateFormHelper {
         return parseIntegramAttrs(attrs);
     }
 
+    // Issue #3454: метка опции в списке ссылок на справочник типа DATETIME должна быть
+    // датой, а не unix-штампом (как в IntegramTable.formatRecordTitleValue/#3211).
+    // baseType — тип ссылки (req.type): для DATETIME-цели = 4. Прочие справочники
+    // (SHORT/NUMBER) не трогаем; нечисловые/вне диапазона 2001–2100 значения остаются как есть.
+    formatRefOptionLabel(label, baseType) {
+        if (baseType == null || this.normalizeFormat(baseType) !== 'DATETIME') return label;
+        const raw = String(label == null ? '' : label).trim();
+        if (!/^\d{9,}(\.\d+)?$/.test(raw)) return label;
+        let n = parseFloat(raw);
+        if (!isFinite(n)) return label;
+        if (n >= 1e12) n = n / 1000;   // JS-штамп в миллисекундах → секунды
+        const d = new Date(n * 1000);
+        const year = d.getFullYear();
+        if (year < 2001 || year > 2100) return label;
+        const pad = (v) => String(v).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     normalizeFormat(baseTypeId) {
         const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
                               'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
@@ -19551,7 +19595,7 @@ class IntegramCreateFormHelper {
                     optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
                 } else {
                     entries.forEach(([id, text]) => {
-                        const decodedText = this.decodeHtmlEntities(text);
+                        const decodedText = this.formatRefOptionLabel(this.decodeHtmlEntities(text), req.type);
                         optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(decodedText)}</div>`;
                     });
                 }
@@ -19561,7 +19605,8 @@ class IntegramCreateFormHelper {
                 if (currentReference.id) {
                     hiddenInput.value = currentReference.id;
                     if (currentReference.text && searchInput) {
-                        searchInput.value = this.decodeHtmlEntities(currentReference.text);
+                        // Issue #3454: выбранное значение DATETIME-ссылки — датой, не штампом.
+                        searchInput.value = this.formatRefOptionLabel(this.decodeHtmlEntities(currentReference.text), req.type);
                     }
                 }
 

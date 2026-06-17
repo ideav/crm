@@ -24,9 +24,11 @@
             // Build display text
             let displayText = '';
             if (selectedIds.size > 0) {
+                // Issue #3454: справочник типа DATETIME → выбранные метки датами, не штампами.
+                const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
                 const selectedTexts = cachedOptions
                     .filter(([id]) => selectedIds.has(String(id)))
-                    .map(([, text]) => text);
+                    .map(([, text]) => this.formatReferenceOptionLabel(text, refColumn));
                 if (selectedTexts.length > 0) {
                     displayText = selectedTexts.length > 2
                         ? `${selectedTexts.length} выбрано`
@@ -79,6 +81,8 @@
             dropdown.className = 'filter-ref-dropdown-overlay';
             dropdown.dataset.columnId = colId;
 
+            // Issue #3454: справочник типа DATETIME → метки опций датами, не штампами.
+            const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
             // Build options HTML with checkboxes
             const renderOptionsHtml = (options, selSet) => {
                 if (!options || options.length === 0) {
@@ -86,7 +90,7 @@
                 }
                 return options.map(([id, text]) => {
                     const isSelected = selSet.has(String(id));
-                    const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const escapedText = String(this.formatReferenceOptionLabel(text, refColumn)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     return `
                         <label class="filter-ref-option" data-id="${id}">
                             <input type="checkbox" value="${id}" ${isSelected ? 'checked' : ''}>

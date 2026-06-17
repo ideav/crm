@@ -100,7 +100,7 @@
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
                     formHtml += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -129,7 +129,7 @@
                 // Single-select reference field
                 else if (req.ref_id) {
                     formHtml += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -723,7 +723,8 @@
                     if (currentReference.id) {
                         hiddenInput.value = currentReference.id;
                         if (currentReference.text) {
-                            searchInput.value = this.decodeHtmlEntities(currentReference.text);
+                            // Issue #3454: выбранное значение DATETIME-ссылки — датой, не штампом.
+                            searchInput.value = this.formatReferenceOptionLabel(this.decodeHtmlEntities(currentReference.text), reqMeta);
                         }
                     }
 
@@ -1531,8 +1532,14 @@
                 return;
             }
 
+            // Issue #3454: справочник типа DATETIME → метки опций показываем датами, не
+            // штампами. Базовый тип ссылки берём из data-атрибута редактора-обёртки.
+            const refWrapper = (dropdown && dropdown.closest) ? dropdown.closest('.form-reference-editor') : null;
+            const refColumn = (refWrapper && refWrapper.dataset.refBaseType)
+                ? { type: refWrapper.dataset.refBaseType } : null;
+
             options.forEach(([id, text]) => {
-                const decodedText = this.decodeHtmlEntities(text);
+                const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), refColumn);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
                 optionDiv.textContent = decodedText;
@@ -1658,7 +1665,7 @@
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-ref-base-type="${req.type}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
