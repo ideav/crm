@@ -4864,6 +4864,11 @@
         Promise.all([this.loadPositions(), this.reload()]).then(function() {
             self._genRefreshing = false;
             self.setGenBusy(false);
+            // #3457: loadPositions() пересоздал genPositions с НОМИНАЛЬНОЙ шириной заказа —
+            // заново проставляем фактическую ширину резки (#3372: справочник 66190), иначе
+            // планирование/раскладка/Партии ГП пойдут по номиналу (60мм вместо 59мм).
+            // Справочники (actualWidthIndex/jumboWidthByMaterial/sleeveInchesById) живут с start().
+            self.annotatePositionsCutWidth();
             self.render();
             self.planAndConfirmCuts(actionsEl);
         }).catch(function(err) {
@@ -6692,4 +6697,4 @@
 
  
  
-// @version 2026-06-15-issue-3411
+// @version 2026-06-17-issue-3457
