@@ -1,0 +1,51 @@
+<link rel="stylesheet" href="/css/xcom-mass-match.css?0{_global_.version}">
+
+<div id="xcom-mass-match-app"
+     class="xcom-mass"
+     data-db="{_global_.z}"
+     data-rfp-table="2032189"
+     data-query="mass_match"
+     data-rfp-filter="RFPID"
+     data-batch-size="50"
+     data-concurrency="3">
+    <section class="xcom-mass-panel">
+        <div class="xcom-mass-head">
+            <div>
+                <h1>Массовый подбор SKU</h1>
+                <p id="xcom-mass-batch-hint">Пачка по 50, одновременно не более 3 запросов</p>
+            </div>
+            <div class="xcom-mass-actions">
+                <span id="xcom-mass-summary" class="xcom-mass-summary">Загрузка…</span>
+                <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button" title="Загрузить следующую пачку">
+                    <i class="pi pi-refresh"></i>
+                    <span>Обновить</span>
+                </button>
+                <button id="xcom-mass-start" class="xcom-mass-btn xcom-mass-btn-primary" type="button" title="Запустить обработку" disabled>
+                    <i class="pi pi-play"></i>
+                    <span>Старт</span>
+                </button>
+                <button id="xcom-mass-stop" class="xcom-mass-btn xcom-mass-btn-danger" type="button" title="Остановить обработку" hidden>
+                    <i class="pi pi-stop"></i>
+                    <span>Стоп</span>
+                </button>
+            </div>
+        </div>
+        <div id="xcom-mass-progress" class="xcom-mass-progress" hidden>
+            <div class="xcom-mass-progress-track">
+                <div id="xcom-mass-progress-bar" class="xcom-mass-progress-bar"></div>
+            </div>
+            <span id="xcom-mass-progress-label" class="xcom-mass-summary">Обработано 0 из 0</span>
+        </div>
+    </section>
+
+    <section class="xcom-mass-pane">
+        <div id="xcom-mass-list" class="xcom-mass-table-wrap">
+            <div class="xcom-mass-loading">
+                <span class="xcom-mass-spinner"></span>
+                <span>Загрузка строк RFP…</span>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script src="/js/xcom-mass-match.js?0{_global_.version}" defer></script>
