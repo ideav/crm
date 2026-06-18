@@ -1096,10 +1096,14 @@
     // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
     // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
     //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
-    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база);
+    //   KNIFE_MOVE — стоимость ОДНОГО перемещения ножа (#3472, позиционная модель: цена
+    //     ножей = KNIFE_MOVE × число переставленных ножей; идентичные полосы → 0);
+    //   KNIFE — устар.: прежняя плоская «смена ножей» (оставлен для совместимости настроек);
+    //   BETWEEN_CUTS — лидер между резками (база);
     //   CLEANUP_SHIFT — уборка в конце рабочего дня (#3155, ставится после последней резки дня).
-    // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
-    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
+    // #3472: приоритет — неизменность полос (0), затем меньше перемещений (2×ножи),
+    // смена сырья (15); полная смена ~16 ножей ≈ 32 ≈ прежняя «смена ножей» 30.
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -1121,6 +1125,31 @@
         return d;
     }
 
+    // #3472: число НОЖЕЙ для перестановки prev→next. Нож, чья ширина есть в ОБОИХ
+    // наборах, сохраняется (не двигается) — это приоритет неизменности полос. Поэтому
+    // moves = max(|prev|, |next|) − |пересечение мультимножеств ширин|: добавить/убрать
+    // нож = 1 перемещение, сменить ширину = 1, идентичный набор = 0. (Смена количества —
+    // частный случай перемещений, отдельно не штрафуем.)
+    function knifeMoves(prevWidths, nextWidths){
+        function tally(arr){ var m = {}; (arr || []).forEach(function(x){ var k = String(x); m[k] = (m[k] || 0) + 1; }); return m; }
+        var a = prevWidths || [], b = nextWidths || [];
+        var ta = tally(a), tb = tally(b), inter = 0;
+        Object.keys(ta).forEach(function(k){ if (tb[k]) inter += Math.min(ta[k], tb[k]); });
+        return Math.max(a.length, b.length) - inter;
+    }
+
+    // Ширины ножей резки для knifeMoves. В реальных данных knifeWidths развёрнут по числу
+    // ножей (длина == knifeCount, см. aggregateStrips). Если ширины не развёрнуты
+    // (placeholder/пусто), а число ножей задано — дополняем сентинелом «нож без известной
+    // ширины», чтобы перестановка считалась по числу ножей (фоллбэк совместимости).
+    function effKnifeWidths(cut){
+        var w = (cut && cut.knifeWidths) || [];
+        var keys = w.map(function(x){ return String(Number(x)); });
+        var n = Number(cut && cut.knifeCount) || 0;
+        while (keys.length < n) keys.push('·');
+        return keys;
+    }
+
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
@@ -1134,17 +1163,20 @@
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
-        var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
+        var moveCost = Number(t.KNIFE_MOVE != null ? t.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE) || 0;
         var parts = [];
         if (!prev || !next) return parts;
         var matWindChange = String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
             || String(prev.batchId) !== String(next.batchId);
         if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
-        var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
-            || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
-            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
-        if (knifeChange && knife > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knife) });
+        // #3472: стоимость ножей = KNIFE_MOVE × число переставленных ножей (позиционно;
+        // нож с сохранённой шириной не двигаем — приоритет неизменности полос). Сужение
+        // ролика требует переустановки края → минимум одно перемещение.
+        var moves = knifeMoves(effKnifeWidths(prev), effKnifeWidths(next));
+        if ((Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0)) moves = Math.max(moves, 1);
+        var knifeMin = round3(moveCost * moves);
+        if (knifeMin > 0) parts.push({ code: 'KNIFE', label: 'перестановка ножей / сужение ролика', minutes: knifeMin });
         return parts;
     }
 
@@ -3059,6 +3091,7 @@
         PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
+        knifeMoves: knifeMoves,
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
@@ -3751,6 +3784,8 @@
             self.changeTimes = {
                 MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
                 KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
+                // #3472: стоимость одного перемещения ножа (код «KNIFE_MOVE»); дефолт 2 мин.
+                KNIFE_MOVE: raw.KNIFE_MOVE != null ? raw.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE,
                 BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS,
                 CLEANUP_SHIFT: raw.CLEANUP_SHIFT != null ? raw.CLEANUP_SHIFT : DEFAULT_OP_TIMES.CLEANUP_SHIFT
             };

@@ -209,10 +209,53 @@
     return String(materialId == null ? '' : materialId) + '|' + parts.join('+');
   }
 
-  // planLayouts: оркестратор раскладки. input = {jumboWidth, positions, preferred, options:{windowDays=3, tolerance}}.
-  // Группирует позиции по окну срока, для каждого кластера composeLayout; пока overflow непустой
-  // и есть прогресс — повторный composeLayout на overflow → доп. раскладка. Позиции шире джамбо
-  // (overflow без прогресса) → skipped 'шире джамбо'. Вход не мутирует, детерминировано.
+  // ───────────────────── #3472: цель раскроя ─────────────────────
+  // Менеджер минимизирует РАСХОД джамбо (число прогонов ≡ метраж сырья), затем СКРАП
+  // (перепроизводство НЕзапасных ширин — рулоны сверх заказа, которые некуда деть).
+  // Эти две величины — лексикографическая цель оптимизатора (отход первичен, #3472):
+  // 110×8 + 89×10 раздельно = 18 прогонов выгоднее, чем 4+4 слитно = 20.
+
+  // orderStripQty: полос назначения «Заказ» данной ширины (миррор
+  // nonStockStripQtyForWidth в production-planning — добор «Склад» не считаем).
+  function orderStripQty(strips, width){
+    var key = round3(toNumber(width));
+    return (strips || []).reduce(function(sum, s){
+      if (s.purpose !== 'Заказ') return sum;
+      return round3(toNumber(s.width)) === key ? sum + toNumber(s.qty) : sum;
+    }, 0);
+  }
+
+  // layoutRuns: прогоны раскладки = max по заказанным ширинам ⌈спрос/полос⌉
+  // (как plannedRunsForLayout). demandByWidth: { ключ_ширины: суммарный спрос }.
+  function layoutRuns(strips, demandByWidth){
+    var runs = 1;
+    Object.keys(demandByWidth || {}).forEach(function(k){
+      var out = orderStripQty(strips, Number(k));
+      if (out > 0) runs = Math.max(runs, Math.ceil(demandByWidth[k] / out));
+    });
+    return runs;
+  }
+
+  // layoutScrap: скрап раскладки = Σ перепроизводство НЕзапасных ширин × ширина
+  // (запасное перепроизводство уходит в «Склад» и отходом не считается).
+  function layoutScrap(strips, runs, demandByWidth, stockableByWidth){
+    var scrap = 0;
+    Object.keys(demandByWidth || {}).forEach(function(k){
+      if (stockableByWidth && stockableByWidth[k]) return;
+      var out = orderStripQty(strips, Number(k));
+      var over = out * runs - demandByWidth[k];
+      if (over > 0) scrap = round3(scrap + over * Number(k));
+    });
+    return scrap;
+  }
+
+  // planLayouts: оркестратор раскладки (#3472). input = {jumboWidth, positions,
+  // preferred, options:{windowDays=3, tolerance}}. Группирует позиции по окну срока;
+  // ВНУТРИ окна — менеджерская модель: каждый заказ (различная ширина) сначала идёт
+  // ОТДЕЛЬНОЙ раскладкой (seed «1 заказ = 1 резка», макс. заполнение джамбо). Затем
+  // ограниченный перебор слияний: две раскладки сливаются в комбо ТОЛЬКО если это
+  // лексикографически снижает цель (прогоны, затем скрап) — заказ не дробится,
+  // объединение лишь по выгоде. Позиции шире джамбо → skipped. Вход не мутирует.
   function planLayouts(input){
     input = input || {};
     var W = toNumber(input.jumboWidth);
@@ -225,44 +268,94 @@
                dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity, stockable: !!p.stockable };
     });
 
-    var groups = dueWindowGroups(positions, windowDays);
+    var MERGE_BUILD_LIMIT = 20000;
+    var buildCalls = 0;
+
+    // buildGroup: уложить набор demands (одна/несколько ширин) в одну раскладку и
+    // посчитать её цену (прогоны, скрап). demands: [{width, qty, positionId, stockable}].
+    function buildGroup(demands){
+      buildCalls++;
+      var result = composeLayout(W, demands, preferred, tolerance);
+      var demandByWidth = {}, stockableByWidth = {};
+      demands.forEach(function(dm){
+        var w = toNumber(dm.width);
+        if (w <= 0 || w > W) return;                 // шире джамбо → в overflow, не в спрос
+        var k = String(round3(w));
+        demandByWidth[k] = round3((demandByWidth[k] || 0) + toNumber(dm.qty));
+        if (stockableByWidth[k] == null) stockableByWidth[k] = true;
+        if (!dm.stockable) stockableByWidth[k] = false;
+      });
+      var covered = [];
+      result.strips.forEach(function(s){
+        if (s.purpose !== 'Заказ') return;
+        s.positionIds.forEach(function(pid){ if (covered.indexOf(pid) < 0) covered.push(pid); });
+      });
+      var runs = layoutRuns(result.strips, demandByWidth);
+      return {
+        demands: demands, result: result, demandByWidth: demandByWidth,
+        stockableByWidth: stockableByWidth, positionsCovered: covered,
+        runs: runs, scrap: layoutScrap(result.strips, runs, demandByWidth, stockableByWidth),
+        overflow: result.overflow
+      };
+    }
+
+    var clusters = dueWindowGroups(positions, windowDays);
     var layouts = [];
     var skipped = [];
 
-    groups.forEach(function(cluster){
+    clusters.forEach(function(cluster){
       var clusterDueKey = Infinity;
       cluster.forEach(function(p){ if (p.dueKey < clusterDueKey) clusterDueKey = p.dueKey; });
 
-      var pending = cluster.map(function(p){ return { width: p.width, qty: p.qty, positionId: p.id, stockable: p.stockable }; });
+      // seed: одна раскладка на каждую РАЗЛИЧНУЮ ширину (одинаковая ширина — один продукт,
+      // склейка бесплатна; разные ширины — отдельные резки по умолчанию, без дробления заказа).
+      var widthOrder = [], byWidth = {};
+      cluster.forEach(function(p){
+        var k = String(round3(p.width));
+        if (!byWidth[k]) { byWidth[k] = []; widthOrder.push(k); }
+        byWidth[k].push({ width: p.width, qty: p.qty, positionId: p.id, stockable: p.stockable });
+      });
+      var groups = widthOrder.map(function(k){ return buildGroup(byWidth[k]); });
+
+      // refine: пока есть лексикографически улучшающее слияние пары — сливаем (B&B по парам).
       var guard = 0;
-      while (pending.length && guard++ < 100000) {
-        var result = composeLayout(W, pending, preferred, tolerance);
-        var ordered = [];
-        result.strips.forEach(function(s){
-          if (s.purpose === 'Заказ') {
-            s.positionIds.forEach(function(pid){ if (ordered.indexOf(pid) < 0) ordered.push(pid); });
+      while (guard++ < 1000 && buildCalls < MERGE_BUILD_LIMIT) {
+        var best = null;   // { i, j, group, dr, ds }
+        for (var i = 0; i < groups.length; i++) {
+          for (var j = i + 1; j < groups.length && buildCalls < MERGE_BUILD_LIMIT; j++) {
+            var gi = groups[i], gj = groups[j];
+            if (!gi.positionsCovered.length || !gj.positionsCovered.length) continue;
+            var merged = buildGroup(gi.demands.concat(gj.demands));
+            if (merged.overflow.length) continue;                 // не влезли вместе → не слить
+            if (merged.positionsCovered.length < gi.positionsCovered.length + gj.positionsCovered.length) continue;
+            var dr = merged.runs - (gi.runs + gj.runs);
+            var ds = round3(merged.scrap - (gi.scrap + gj.scrap));
+            var improves = dr < 0 || (dr === 0 && ds < 0);        // строго лучше по (прогоны, скрап)
+            if (!improves) continue;
+            if (!best || dr < best.dr || (dr === best.dr && ds < best.ds)) {
+              best = { i: i, j: j, group: merged, dr: dr, ds: ds };
+            }
           }
-        });
-        // прогресс: хотя бы одна заказанная полоса уложена
-        var madeProgress = ordered.length > 0;
-        if (madeProgress) {
+        }
+        if (!best) break;
+        groups.splice(best.j, 1);
+        groups.splice(best.i, 1, best.group);
+      }
+
+      // эмиссия раскладок + пропусков (ширина шире джамбо)
+      groups.forEach(function(g){
+        if (g.positionsCovered.length) {
           layouts.push({
-            positionsCovered: ordered,
-            strips: result.strips,
-            used: result.used,
-            remainder: result.remainder,
-            withinTolerance: result.withinTolerance,
+            positionsCovered: g.positionsCovered,
+            strips: g.result.strips,
+            used: g.result.used,
+            remainder: g.result.remainder,
+            withinTolerance: g.result.withinTolerance,
             dueKey: clusterDueKey
           });
         }
-        if (!result.overflow.length) break;
-        if (!madeProgress) {
-          // ничего не уложилось → остаток overflow не лезет (шире джамбо)
-          result.overflow.forEach(function(o){ skipped.push({ positionId: o.positionId, reason: 'шире джамбо' }); });
-          break;
-        }
-        pending = result.overflow.map(function(o){ return { width: o.width, qty: o.qty, positionId: o.positionId, stockable: o.stockable }; });
-      }
+        g.overflow.forEach(function(o){ skipped.push({ positionId: o.positionId, reason: 'шире джамбо' }); });
+      });
     });
 
     return { layouts: layouts, skipped: skipped };
@@ -270,6 +363,7 @@
 
   var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups,
                  bestFill: bestFill, composeLayout: composeLayout,
+                 orderStripQty: orderStripQty, layoutRuns: layoutRuns, layoutScrap: layoutScrap,
                  combinationSignature: combinationSignature, planLayouts: planLayouts };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { layout: layout };

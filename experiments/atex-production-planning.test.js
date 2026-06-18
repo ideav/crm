@@ -465,17 +465,21 @@ assertEqual(planning.awkwardRemainder(-5), false, 'awkward: отриц → false
 // DEFAULT_OP_TIMES экспортирован (минуты-фоллбэк из таблицы «Время операции»)
 assertEqual(planning.DEFAULT_OP_TIMES.MATERIAL_WINDING, 15, 'дефолт: смена сырья/намотки = 15 мин');
 assertEqual(planning.DEFAULT_OP_TIMES.KNIFE, 30, 'дефолт: смена ножей = 30 мин');
-// changeoverCost в минутах: сырьё/намотка/партия → MATERIAL_WINDING(15); ножи/сужение ролика → KNIFE(30)
+assertEqual(planning.DEFAULT_OP_TIMES.KNIFE_MOVE, 2, 'дефолт #3472: перемещение ножа = 2 мин');
+// #3472: changeoverCost в минутах: сырьё/намотка/партия → MATERIAL_WINDING(15);
+// ножи → KNIFE_MOVE(2) × число переставленных ножей (нож с сохранённой шириной не двигаем).
 var base = { materialId:'1', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[60,60,60,60], rollerWidth:60 };
 function clone(o,patch){ var c={}; for(var k in o) c[k]=o[k]; for(var k in (patch||{})) c[k]=patch[k]; return c; }
 assertEqual(planning.changeoverCost(base, clone(base), null), 0, 'cost: идентичные → 0');
 assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), null), 15, 'cost: смена сырья = 15');
 assertEqual(planning.changeoverCost(base, clone(base,{winding:'OUT'}), null), 15, 'cost: смена намотки = 15 (та же операция)');
 assertEqual(planning.changeoverCost(base, clone(base,{batchId:'b2'}), null), 15, 'cost: смена партии = смена сырья = 15');
-assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null), 30, 'cost: смена ножей = 30');
-assertEqual(planning.changeoverCost(base, clone(base,{rollerWidth:40}), null), 30, 'cost: сужение ролика = смена ножей = 30');
-assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2', knifeCount:20, knifeWidths:[20,20,20]}), null), 45, 'cost: сырьё+ножи = 15+30 = 45');
-assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), { MATERIAL_WINDING:7, KNIFE:99 }), 7, 'cost: времена берутся из переданной таблицы');
+// #3472: 4 ножа[60] → набор 20 ножей[20] (общих ширин нет) = 20 перестановок × 2 = 40.
+assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null), 40, 'cost #3472: полная смена 20 ножей = 40');
+// #3472: ножи те же, ролик сужается → минимум одно перемещение = 2.
+assertEqual(planning.changeoverCost(base, clone(base,{rollerWidth:40}), null), 2, 'cost #3472: сужение ролика = 2 (минимум 1 перемещение)');
+assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2', knifeCount:20, knifeWidths:[20,20,20]}), null), 55, 'cost #3472: сырьё+ножи = 15+40 = 55');
+assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), { MATERIAL_WINDING:7, KNIFE_MOVE:99 }), 7, 'cost: времена берутся из переданной таблицы');
 
 // ── orderCuts: жадное упорядочивание, Фольга в конец, настройка весов ──
 function cut(id,o){ return { id:id, materialId:o.m, winding:o.w||'IN', batchId:o.b||('B'+id), jumboRemainingM:o.r==null?0:o.r, knifeCount:o.k||4, knifeWidths:o.kw||[60], isFoil:!!o.foil, rollerWidth:o.rw||60 }; }
@@ -487,7 +491,7 @@ var outMat = planning.orderCuts(inMat).map(function(c){return c.materialId;});
 var bnd = 0; for (var i=1;i<outMat.length;i++) if (outMat[i]!==outMat[i-1]) bnd++;
 assertEqual(bnd, 1, 'orderCuts: сырьё сгруппировано (1 граница)');
 // #3268: реальные минуты переналадки важнее механической сортировки по ножам.
-// A-high → A-low → B-mid = 30 + 45 = 75 мин; A-high → B-mid → A-low = 45 + 45 = 90 мин.
+// #3472: A-high → A-low → B-mid = 4 + 17 = 21 мин; A-high → B-mid → A-low = 17 + 17 = 34 мин.
 var setupMinuteCuts = [
     cut('A-high', { m:'A', b:'bA', k:8, kw:[60] }),
     cut('B-mid',  { m:'B', b:'bB', k:7, kw:[60] }),
@@ -501,9 +505,9 @@ assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_ST
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
 assertEqual(outFoil[outFoil.length-1], '1', 'orderCuts: Фольга в конце');
-// нож (30) дороже смены сырья (15): смена набора ножей штрафуется сильнее, чем смена сырья.
+// #3472: полная смена набора ножей дороже смены сырья (9 перестановок = 18 > 15).
 assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null) >
-            planning.changeoverCost(base, clone(base,{materialId:'9'}), null), true, 'changeoverCost: смена ножей (30) дороже смены сырья (15)');
+            planning.changeoverCost(base, clone(base,{materialId:'9'}), null), true, 'changeoverCost #3472: полная смена ножей (18) дороже смены сырья (15)');
 // sequence 1..N и вход не мутируется
 var src = [ cut('1',{m:'A'}), cut('2',{m:'A'}) ];
 var res = planning.orderCuts(src);
@@ -534,7 +538,7 @@ assertEqual(planning.orderCuts(cuts3412).map(function(c){ return c.knifeCount; }
 // Минимизация переналадки (#3268) не страдает: цепочка по-прежнему оптимальна по минутам.
 assertEqual(planning.orderedChangeoverCost(cuts3412), planning.orderedChangeoverCost(cuts3412.slice().reverse()),
     'orderCuts #3412: стоимость переналадки не зависит от исходного порядка (детерминированный минимум)');
-assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (45 мин)');
+assertEqual(planning.orderedChangeoverCost(cuts3412), 47, 'orderCuts #3412: суммарная переналадка минимальна (#3472: 15 + 16×2 = 47)');
 
 // #3421: генерация хардкодила стратегию FATIGUE («сложные раньше»), которая по
 // route-score выдаёт ножи по ВОЗРАСТАНИЮ (6,16,16) на данных скриншота — вопреки
@@ -555,9 +559,11 @@ assertEqual(planning.fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #
 assertEqual(planning.fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3272: последняя позиция = 1 + alpha');
 assertEqual(planning.estimatedKnifeCount({ rollerWidth: 25 }, 1600), 64, 'estimatedKnifeCount #3272: Wmax / width');
 assertEqual(planning.estimatedKnifeCount({ knifeCount: 7, rollerWidth: 25 }, 1600), 7, 'estimatedKnifeCount #3272: явное число ножей важнее оценки по ширине');
+// #3472: наборы ножей заданы явно (узкая = 30 ножей по 25, широкая = 4 по 200) — стоимость
+// маршрута теперь отражает реальные перестановки; estimatedKnifeCount по-прежнему от ширины ролика.
 var fatigueNarrowFirst = [
-    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
-    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: [] }
+    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: w3412([[25, 30]]) },
+    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: w3412([[200, 4]]) }
 ];
 assertEqual(planning.fatigueRouteScore(fatigueNarrowFirst, { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }) <
             planning.fatigueRouteScore(fatigueNarrowFirst.slice().reverse(), { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }),
@@ -1153,8 +1159,8 @@ assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2'}), null),
     [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
     'changeoverParts: смена сырья → MATERIAL_WINDING 15');
 assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2', knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null),
-    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}, {code:'KNIFE', label:'смена ножей / сужение ролика', minutes:30}],
-    'changeoverParts: сырьё+ножи → две операции (15+30)');
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}, {code:'KNIFE', label:'перестановка ножей / сужение ролика', minutes:18}],
+    'changeoverParts #3472: сырьё+ножи → две операции (15 + 9×2=18)');
 assertEqual(planning.changeoverParts(null, toBase, null), [], 'changeoverParts: нет предыдущей → []');
 assertEqual(planning.setupBreakdown(null, toBase, null),
     [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}],
