@@ -881,6 +881,11 @@
                 length: length,
                 windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
                 windLength: windLengthValue(windLengthRaw),
+                // #3472: «Лидер» заказа — отдельное измерение профиля планирования (заказы
+                // с разным лидером нельзя класть в одну резку, она заправляется одним
+                // лидером). Отчёт positions_list пока может не отдавать колонку — тогда
+                // пусто и разбиения по лидеру нет (как order_id в #3433).
+                leader: rowFirstValue(row, ['position_leader', 'order_leader']),
                 // #3340: тип втулки и готовность приходят прямо из positions_list:
                 // sleeve_id — id записи «Диаметр втулки»; sleeve_ready (непустое) — уже нарезано.
                 sleeveId: row.sleeve_id == null ? '' : String(row.sleeve_id).trim(),
@@ -926,22 +931,33 @@
         return true;
     }
 
+    function planningLeaderKey(p) {
+        return String(p && p.leader != null ? p.leader : '').trim();
+    }
+
+    // #3472: профиль планирования = сырьё + намотка + длина + ЛИДЕР. Лидер добавлен как
+    // отдельное измерение — заказы с разным лидером идут в разные резки (резка заправляется
+    // одним лидером). group.key (для добора ходовыми) остаётся БЕЗ лидера: ходовые ширины
+    // от лидера не зависят. Пустой лидер у всех (отчёт ещё не отдаёт колонку) → разбиения нет.
     function groupPositionsByPlanningProfile(positions) {
         var groups = {};
         var order = [];
         (positions || []).forEach(function(p) {
-            var key = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
-            if (!groups[key]) {
-                groups[key] = {
-                    key: key,
+            var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
+            var leader = planningLeaderKey(p);
+            var groupKey = prefKey + '|L=' + leader;
+            if (!groups[groupKey]) {
+                groups[groupKey] = {
+                    key: prefKey,
+                    leader: leader,
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
                     positions: []
                 };
-                order.push(key);
+                order.push(groupKey);
             }
-            groups[key].positions.push(p);
+            groups[groupKey].positions.push(p);
         });
         return order.map(function(key) { return groups[key]; });
     }

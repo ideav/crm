@@ -909,9 +909,14 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'', sleeve_id:'8192', sleeve_ready:'X' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, leader:'', sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, leader:'', sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
 ], 'rowsToGenPositions #3340/#3433: sleeve_id/sleeve_ready + order_id («ID заказа»); пустые ширина/кол-во/длина → 0');
+// #3472: «Лидер» читается из колонки отчёта (order_leader/position_leader); нет колонки → пусто.
+assertEqual(planning.rowsToGenPositions([{ position_id:'1', order_leader:'Софмикс' }])[0].leader, 'Софмикс',
+    'rowsToGenPositions #3472: лидер из order_leader');
+assertEqual(planning.rowsToGenPositions([{ position_id:'2' }])[0].leader, '',
+    'rowsToGenPositions #3472: нет колонки лидера → пусто (без разбиения)');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
 var grpDue = planning.rowsToGenPositions([
@@ -948,6 +953,18 @@ assertEqual(planning.groupPositionsByPlanningProfile([
   { materialId:'3000', windDir:'OUT', windLength:600, ids:['p4'] },
   { materialId:'2086', windDir:'OUT', windLength:450, ids:['p5'] }
 ], 'groupPositionsByPlanningProfile #3219: сырьё+намотка+метраж должны совпадать');
+// #3472: лидер — отдельное измерение профиля. Совпадают сырьё/намотка/длина, но разный
+// лидер → разные группы (резка заправляется одним лидером). group.key (ходовые) без лидера.
+assertEqual(planning.groupPositionsByPlanningProfile([
+  { id:'l1', materialId:'2086', windDir:'OUT', windLength:600, leader:'Софмикс' },
+  { id:'l2', materialId:'2086', windDir:'OUT', windLength:600, leader:'Этикетка37' },
+  { id:'l3', materialId:'2086', windDir:'OUT', windLength:600, leader:'Софмикс' },
+  { id:'l4', materialId:'2086', windDir:'OUT', windLength:600 }
+]).map(function(g) { return { leader:g.leader, key:g.key, ids:g.positions.map(function(p) { return p.id; }) }; }), [
+  { leader:'Софмикс',    key:'2086|OUT|600', ids:['l1','l3'] },
+  { leader:'Этикетка37', key:'2086|OUT|600', ids:['l2'] },
+  { leader:'',           key:'2086|OUT|600', ids:['l4'] }
+], 'groupPositionsByPlanningProfile #3472: разный лидер → разные резки, key (ходовые) без лидера');
 assertEqual(planning.preferredWidthsKey('2086', 'out', '600.00'), '2086|OUT|600',
     'preferredWidthsKey #3219: cache key normalizes material/winding/length');
 
