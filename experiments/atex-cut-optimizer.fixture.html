@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Расчёт оптимальной резки» (#3465).
+     Мокает fetch: metadata и object/{Вид сырья} (справочник сырья с шириной
+     и длиной рулона). Использует те же js/css, что и продакшн-шаблон
+     templates/atex/cut-optimizer.html. Открывать локально в браузере. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Расчёт оптимальной резки — стенд</title>
+<link rel="stylesheet" href="../download/atex/css/cut-optimizer.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-cut-optimizer" class="atex-co" data-db="atex" data-xsrf="test-token">
+    <div class="atex-co-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 100, val: 'Вид сырья', reqs: [
+        { id: 1001, val: 'Полное название' },
+        { id: 1003, val: 'Ширина, мм' },
+        { id: 1005, val: 'Длина рулона, м' },
+        { id: 1007, val: 'Примечания' }
+    ]}
+];
+
+// Справочник сырья: [Название, Полное название, Ширина, Длина рулона, Примечания]
+var MATERIALS = [
+    { i: 201, r: ['Сталь 0.5мм', 'Сталь холоднокатаная 0.5 мм', '880', '4000', ''] },
+    { i: 202, r: ['Алюминий 1.0мм', 'Алюминий АД1 1.0 мм', '910', '3000', ''] },
+    { i: 203, r: ['ПВХ-плёнка', 'ПВХ-плёнка прозрачная', '1000', '5000', ''] }
+];
+
+window.fetch = function(url) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata(?:$|\?)/.test(u)) return json(META);
+    if (/\/object\/100\//.test(u)) return json(MATERIALS);
+    return json([]);
+};
+</script>
+<script src="../download/atex/js/ref-search.js"></script>
+<script src="../download/atex/js/cut-optimizer.js"></script>
+</body>
+</html>
