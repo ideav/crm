@@ -53,6 +53,9 @@
     // #3433: реквизиты «Партии ГП» (состав резки, up = резка), нужные слиттеру для
     // записи факта: «Кол-во полос» (за проход) и «Кол-во факт» (произведённые рулоны).
     var FINISHED_BATCH_REQ = { strips: 'Кол-во полос', actual: 'Кол-во факт' };
+    // #3460: геометрия раскладки ножей берётся из «Партии ГП» (состав резки):
+    // «Кол-во полос» — число ножей за проход, «Ширина, мм» — ширина полосы.
+    var STRIP_REQ = { width: 'Ширина, мм', qty: 'Кол-во полос', purpose: 'Назначение' };
     var CUT_REQ = {
         slitter: 'Слиттер',
         batch: 'Партия сырья',
@@ -385,10 +388,23 @@
         return toNumber(value);
     }
 
+    function normMaterial(value) {
+        return String(value == null ? '' : value).trim().toLowerCase();
+    }
+
+    // #3460: партии из отчёта могут не иметь id вида сырья — тогда сверяем по
+    // названию вида сырья (batch_material). Если у резки известен id — он в
+    // приоритете; иначе сравниваем по названию. Нет ориентира → пропускаем.
     function batchMatchesCut(batch, cut) {
         var cutMat = String((cut && cut.materialId) || '').trim();
-        if (!cutMat) return true;
-        return String((batch && batch.materialId) || '').trim() === cutMat;
+        var cutLabel = normMaterial(cut && cut.materialLabel);
+        if (cutMat) {
+            var bid = String((batch && batch.materialId) || '').trim();
+            if (bid) return bid === cutMat;
+            return cutLabel ? normMaterial(batch && batch.materialLabel) === cutLabel : true;
+        }
+        if (cutLabel) return normMaterial(batch && batch.materialLabel) === cutLabel;
+        return true;
     }
 
     function batchPasses(batch, cut) {
@@ -439,6 +455,179 @@
             ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
     }
 
+    // #3460: «номер» резки на самом деле — плановое время старта в unix-секундах
+    // (главное значение записи, см. #3242/#3352), а в UI выводился сырым числом.
+    // Распознаём штамп так же, как production-planning.js/ref-search.js: только
+    // цифры, n ≥ 1e9, год 2001–2100. Короткие id и обычный текст не трогаем.
+    function isTimestampSeconds(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!/^\d+$/.test(s)) return false;
+        var n = Number(s);
+        if (!isFinite(n) || n < 1000000000) return false;
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return false;
+        var year = d.getFullYear();
+        return year >= 2001 && year <= 2100;
+    }
+
+    // Штамп → «ЧЧ:ММ» (требование #3460). Не-штамп возвращается как есть.
+    function formatClock(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!isTimestampSeconds(s)) return s;
+        var d = new Date(Number(s) * 1000);
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+
+    // Штамп → «ДД.ММ.ГГГГ». Не-штамп возвращается как есть.
+    function formatDate(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!isTimestampSeconds(s)) return s;
+        var d = new Date(Number(s) * 1000);
+        return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
+    }
+
+    // Заголовок резки: штамп показываем как «Резка ЧЧ:ММ», иначе «Резка №…»
+    // (пустое значение → просто «Резка»).
+    function cutTitle(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!s) return 'Резка';
+        return isTimestampSeconds(s) ? ('Резка ' + formatClock(s)) : ('Резка №' + s);
+    }
+
+    // Любую дату-подпись приводим к читаемому виду: штамп → дата, иначе как есть.
+    function humanizeLabel(value) {
+        return isTimestampSeconds(value) ? formatDate(value) : String(value == null ? '' : value);
+    }
+
+    // ── #3460: чистое ядро раскладки ножей (порт из cut-map.js) ──
+    // Карта раскроя слиттера: каждая «полоса» даёт `qty` ножей шириной `width`.
+
+    // «Итого ножей» = полос за проход = Σ(кол-во полос).
+    function totalKnives(strips) {
+        return (strips || []).reduce(function(sum, s) { return sum + toNumber(s.qty); }, 0);
+    }
+
+    // Занятая полосами ширина — Σ(ширина × количество).
+    function usedWidth(strips) {
+        return round3((strips || []).reduce(function(sum, s) {
+            return sum + toNumber(s.width) * toNumber(s.qty);
+        }, 0));
+    }
+
+    // Разворачивает полосы в последовательность сегментов-ножей с накопленным
+    // смещением слева (offset) — геометрия раскладки по ширине входа.
+    function expandSegments(strips) {
+        var segments = [];
+        var offset = 0;
+        (strips || []).forEach(function(s, stripIndex) {
+            var width = round3(toNumber(s.width));
+            var count = Math.max(0, Math.round(toNumber(s.qty)));
+            for (var k = 0; k < count; k++) {
+                segments.push({
+                    stripIndex: stripIndex,
+                    indexInStrip: k,
+                    width: width,
+                    purpose: s.purpose || '',
+                    label: (s.name == null ? '' : String(s.name)),
+                    offset: round3(offset)
+                });
+                offset = round3(offset + width);
+            }
+        });
+        return segments;
+    }
+
+    // Полная раскладка резки: сегменты ножей, занятая ширина, остаток, флаги.
+    function computeLayout(inputWidth, strips, tolerance) {
+        var W = round3(toNumber(inputWidth));
+        var segments = expandSegments(strips);
+        var used = usedWidth(strips);
+        var rem = round3(W - used);
+        var tol = (tolerance === undefined || tolerance === null || tolerance === '')
+            ? null : Math.abs(toNumber(tolerance));
+        return {
+            inputWidth: W,
+            usedWidth: used,
+            remainder: rem,
+            totalKnives: totalKnives(strips),
+            stripKinds: (strips || []).length,
+            segments: segments,
+            overflow: rem < 0,
+            tolerance: tol,
+            withinTolerance: tol === null ? null : Math.abs(rem) <= tol
+        };
+    }
+
+    // Доля сегмента шириной `width` в общей шкале (max ширины входа и занятой).
+    function widthPercent(width, layoutResult) {
+        var scale = Math.max(toNumber(layoutResult && layoutResult.inputWidth),
+            toNumber(layoutResult && layoutResult.usedWidth));
+        if (scale <= 0) return 0;
+        return round3(toNumber(width) / scale * 100);
+    }
+
+    // Класс назначения полосы → CSS-модификатор сегмента (цвет).
+    function purposeKind(purpose) {
+        var p = String(purpose || '').trim().toLowerCase();
+        if (p.indexOf('заказ') === 0) return 'order';
+        if (p.indexOf('склад') === 0) return 'stock';
+        if (p.indexOf('отход') === 0) return 'waste';
+        return 'other';
+    }
+
+    // ── #3460: разбор партий сырья из защищённого отчёта report/material_batches ──
+    // Имена колонок отчёта берём из production-planning.js (rowsToBatches):
+    // batch_id, batch_no, batch_material, batch_remainder_m(_m2). Поле склада в
+    // отчёте называется не строго заданным образом — берём первое непустое из
+    // набора кандидатов. Партии со складом «Атех» помечаем foreign (другой склад —
+    // показываем, но выбрать нельзя).
+    function firstField(row, keys) {
+        for (var i = 0; i < (keys || []).length; i++) {
+            var k = keys[i];
+            if (row && row[k] != null && String(row[k]).trim() !== '') return String(row[k]).trim();
+        }
+        return '';
+    }
+
+    function batchWarehouse(row) {
+        return firstField(row, ['batch_warehouse', 'warehouse', 'batch_store', 'store', 'batch_stock', 'склад', 'Склад']);
+    }
+
+    // Совпадает ли склад партии с «чужим» (по умолчанию «Атех»)? Сравниваем
+    // регистронезависимо по вхождению подстроки (склад может писаться по-разному).
+    function isForeignWarehouse(name, foreignNames) {
+        var s = String(name == null ? '' : name).trim().toLowerCase();
+        if (!s) return false;
+        var list = (foreignNames && foreignNames.length) ? foreignNames : ['атех'];
+        return list.some(function(fn) { return s.indexOf(String(fn).trim().toLowerCase()) >= 0; });
+    }
+
+    function rowsToActiveBatches(rows, opts) {
+        var o = opts || {};
+        var foreign = o.foreignWarehouses || ['Атех'];
+        return (rows || []).map(function(row) {
+            var wh = batchWarehouse(row);
+            var matLabel = firstField(row, ['batch_material', 'material', 'Вид сырья']);
+            var matId = firstField(row, ['batch_material_id', 'material_id']);
+            var label = firstField(row, ['batch_no', 'batch_barcode', 'barcode', 'batch_name', 'name']);
+            return {
+                id: firstField(row, ['batch_id', 'id', 'i']),
+                label: label || ('Партия ' + firstField(row, ['batch_id', 'id'])),
+                // Отчёт уже отсортирован по FIFO; если есть дата прихода — сохраняем
+                // её для sortFifo, иначе пустая дата оставит стабильный порядок отчёта.
+                date: firstField(row, ['batch_date', 'batch_arrival', 'batch_arrival_date', 'date']),
+                remainder: toNumber(firstField(row, ['batch_remainder_m2', 'remainder_m2', 'batch_remainder'])),
+                remainderM: toNumber(firstField(row, ['batch_remainder_m', 'remainder_m'])),
+                materialId: matId || null,
+                materialLabel: matLabel,
+                warehouse: wh,
+                foreign: isForeignWarehouse(wh, foreign),
+                active: firstField(row, ['is_active', 'batch_is_active', 'active']) || '1',
+                barcode: firstField(row, ['batch_barcode', 'barcode', 'batch_no'])
+            };
+        });
+    }
+
     var core = {
         STATUSES: STATUSES,
         EVENT_TYPES: EVENT_TYPES,
@@ -468,8 +657,24 @@
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
         batchPasses: batchPasses,
+        batchMatchesCut: batchMatchesCut,
         availableBatchesForCut: availableBatchesForCut,
-        batchCoverage: batchCoverage
+        batchCoverage: batchCoverage,
+        // #3460: формат времени резки и разбор партий из отчёта
+        isTimestampSeconds: isTimestampSeconds,
+        formatClock: formatClock,
+        formatDate: formatDate,
+        cutTitle: cutTitle,
+        humanizeLabel: humanizeLabel,
+        rowsToActiveBatches: rowsToActiveBatches,
+        isForeignWarehouse: isForeignWarehouse,
+        // #3460: раскладка ножей (визуализация)
+        totalKnives: totalKnives,
+        usedWidth: usedWidth,
+        expandSegments: expandSegments,
+        computeLayout: computeLayout,
+        widthPercent: widthPercent,
+        purposeKind: purposeKind
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -543,11 +748,13 @@
         this.materialWidths = {}; // { materialId: widthMm }
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
-        this.selectedSlitterId = '';
+        // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
+        this.selectedSlitterId = this.loadStoredSlitter();
         this.selectedDate = core.todayISO();
         this.includeDone = false;
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
+        this.currentStrips = [];  // #3460: полосы выбранной резки (раскладка ножей)
         this.consumptions = [];   // расход сырья выбранной резки
         this.events = [];         // события смены выбранной резки
         this.shiftEvents = [];    // события смены оператора за выбранную дату
@@ -557,6 +764,26 @@
 
     AtexSlitter.prototype.url = function(path) {
         return '/' + encodeURIComponent(this.db) + '/' + path;
+    };
+
+    // #3460: запоминаем выбор станка в localStorage (ключ скоупится по БД, чтобы
+    // разные базы не пересекались). Доступ к localStorage защищён try/catch —
+    // приватный режим/отключённое хранилище не должны ломать пульт.
+    AtexSlitter.prototype.storageKey = function() {
+        return 'atex-sl:slitter:' + (this.db || '');
+    };
+    AtexSlitter.prototype.loadStoredSlitter = function() {
+        try {
+            return (typeof window !== 'undefined' && window.localStorage &&
+                window.localStorage.getItem(this.storageKey())) || '';
+        } catch (e) { return ''; }
+    };
+    AtexSlitter.prototype.storeSelectedSlitter = function() {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) return;
+            if (this.selectedSlitterId) window.localStorage.setItem(this.storageKey(), String(this.selectedSlitterId));
+            else window.localStorage.removeItem(this.storageKey());
+        } catch (e) { /* хранилище недоступно — молча игнорируем */ }
     };
 
     // GET → JSON. Бросает Error при сетевой/JSON-ошибке.
@@ -676,7 +903,24 @@
         });
     };
 
+    // #3460: партии сырья грузим из защищённого отчёта `report/material_batches`
+    // (раньше брали object/{Партия сырья} — поле «В работе» пустое, список выходил
+    // пустым). Отчёт фильтруем по FR_is_active=% (только те, что в работе) и уже
+    // отсортирован по FIFO. Партии со складом «Атех» помечаются foreign (другой
+    // склад) — их показываем, но выбрать нельзя. На случай отсутствия отчёта в
+    // сборке — тихий фолбэк на прямое чтение таблицы.
     AtexSlitter.prototype.loadBatches = function() {
+        var self = this;
+        return this.getJson('report/material_batches?JSON_KV&FR_is_active=%25&LIMIT=0,2000')
+            .then(function(rows) {
+                var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
+                self.batches = core.rowsToActiveBatches(list);
+            })
+            .catch(function() { return self.loadBatchesFromTable(); });
+    };
+
+    // Фолбэк #3460: прямое чтение таблицы «Партия сырья», если отчёт недоступен.
+    AtexSlitter.prototype.loadBatchesFromTable = function() {
         var self = this;
         var meta = this.meta.batch;
         if (!meta) { this.batches = []; return Promise.resolve(); }
@@ -698,6 +942,8 @@
                     remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0,
                     materialId: matRef.id,
                     materialLabel: matRef.label,
+                    warehouse: '',
+                    foreign: false,
                     active: activeIdx >= 0 ? row[activeIdx] : '',
                     barcode: barcodeIdx >= 0 ? (row[barcodeIdx] || '') : ''
                 };
@@ -751,7 +997,9 @@
                 var batchRef = batchIdx >= 0 ? parseRef(row[batchIdx]) : { id: null, label: '' };
                 return {
                     id: String(r.i),
-                    label: 'Резка №' + (row[0] || r.i),
+                    // #3460: главное значение резки — плановое время старта (штамп);
+                    // показываем «Резка ЧЧ:ММ», а не сырой номер.
+                    label: core.cutTitle(row[0] || r.i),
                     status: statusIdx >= 0 ? core.normalizeStatus(row[statusIdx]) : STATUSES[0],
                     slitterId: slitterRef.id,
                     slitter: slitterRef.label,
@@ -785,7 +1033,7 @@
             self.currentCut = {
                 id: String(rec.i),
                 number: row[0] || '',
-                label: 'Резка №' + (row[0] || rec.i),
+                label: core.cutTitle(row[0] || rec.i),
                 slitterId: slitterRef.id,
                 slitter: slitterRef.label,
                 batch: batchRef.label,
@@ -806,6 +1054,57 @@
                 notes: val(CUT_REQ.notes)
             };
         });
+    };
+
+    // #3460: состав резки — полосы (подчинённая «Партия ГП»). Нужны для метрик
+    // (число полос/ножей) и цветной раскладки ножей. Ширину/кол-во/назначение
+    // берём по именам реквизитов (как в cut-map.html).
+    AtexSlitter.prototype.loadStrips = function(cutId) {
+        var self = this;
+        var meta = this.meta.finishedBatch;
+        if (!meta) { this.currentStrips = []; return Promise.resolve(); }
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,1000').then(function(rows) {
+            var widthIdx = colIndex(meta, STRIP_REQ.width);
+            var qtyIdx = colIndex(meta, STRIP_REQ.qty);
+            var purposeIdx = colIndex(meta, STRIP_REQ.purpose);
+            self.currentStrips = (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                return {
+                    id: String(rec.i),
+                    name: r[0] || '',
+                    width: widthIdx >= 0 ? (r[widthIdx] || '') : '',
+                    qty: qtyIdx >= 0 ? (r[qtyIdx] || '') : '',
+                    purpose: purposeIdx >= 0 ? (r[purposeIdx] || '') : ''
+                };
+            });
+        }).catch(function() { self.currentStrips = []; });
+    };
+
+    // #3460: вид сырья резки для шапки. У резки нет прямого поля «Вид сырья» —
+    // выводим из плановой партии: сперва из загруженного пула партий (findBatch),
+    // иначе тихо дочитываем объект партии и берём ссылку «Вид сырья».
+    AtexSlitter.prototype.loadCutMaterial = function() {
+        var self = this;
+        var cut = this.currentCut;
+        if (!cut) return Promise.resolve();
+        var batch = cut.batchId ? this.findBatch(cut.batchId) : null;
+        if (batch) {
+            cut.materialId = batch.materialId || cut.materialId || '';
+            cut.material = batch.materialLabel || cut.material || cut.batch || '';
+            return Promise.resolve();
+        }
+        if (!cut.material) cut.material = cut.batch || '';
+        var batchMeta = this.meta.batch;
+        if (!cut.batchId || !batchMeta) return Promise.resolve();
+        return this.getJson('object/' + batchMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cut.batchId) + '&LIMIT=0,1').then(function(rows) {
+            var rec = (rows || [])[0];
+            if (!rec) return;
+            var kindIdx = colIndex(batchMeta, BATCH_REQ.kind);
+            if (kindIdx < 0) return;
+            var matRef = parseRef((rec.r || [])[kindIdx]);
+            if (matRef.id) cut.materialId = matRef.id;
+            if (matRef.label) cut.material = matRef.label;
+        }).catch(function() {});
     };
 
     // ── Чтение расхода сырья (подчинён резке) ──
@@ -832,7 +1131,7 @@
     };
 
     AtexSlitter.prototype.blankConsumption = function() {
-        var fifo = core.availableBatchesForCut(this.batches, this.currentCut)[0] || core.pickFifoBatch(this.batches);
+        var fifo = core.availableBatchesForCut(this.batches, this.currentCut).filter(function(b) { return !b.foreign; })[0] || core.pickFifoBatch(this.batches);
         return { id: null, name: '', batchId: fifo ? fifo.id : null, amount: '', savedAmount: 0 };
     };
 
@@ -970,6 +1269,7 @@
         });
         select.addEventListener('change', function() {
             self.selectedSlitterId = select.value;
+            self.storeSelectedSlitter(); // #3460: запоминаем выбор станка
             self.currentCutId = null;
             self.currentCut = null;
             self.selectedBatchIds = [];
@@ -1009,8 +1309,8 @@
                 el('div', { class: 'atex-sl-cut-main' }, [
                     el('span', { class: 'atex-sl-cut-label', text: cut.label }),
                     el('span', { class: 'atex-sl-cut-sub', text: [
-                        cut.batch,
-                        cut.startedAt ? ('Начато: ' + cut.startedAt) : 'Начато: —'
+                        core.humanizeLabel(cut.batch),
+                        cut.startedAt ? ('Начато: ' + core.humanizeLabel(cut.startedAt)) : 'Начато: —'
                     ].filter(Boolean).join(' · ') })
                 ]),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
@@ -1049,6 +1349,7 @@
         }
 
         host.appendChild(this.renderHead());
+        host.appendChild(this.renderCutMap());
         host.appendChild(this.renderStatusBar());
         host.appendChild(this.renderBatchSelection());
         host.appendChild(this.renderReadings());
@@ -1072,15 +1373,116 @@
         var cut = this.currentCut;
         var meta = [];
         if (cut.slitter) meta.push('Слиттер: ' + cut.slitter);
-        if (cut.batch) meta.push('Партия: ' + cut.batch);
-        if (cut.planDate) meta.push('План: ' + cut.planDate);
-        return el('div', { class: 'atex-sl-head' }, [
+        if (cut.batch) meta.push('Партия: ' + core.humanizeLabel(cut.batch));
+        if (cut.planDate) meta.push('План: ' + this.formatPlanDateTime(cut.planDate));
+        var head = el('div', { class: 'atex-sl-head' }, [
             el('div', {}, [
                 el('h2', { class: 'atex-sl-head-title', text: cut.label }),
                 el('div', { class: 'atex-sl-head-meta', text: meta.join('   •   ') })
             ]),
             el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
         ]);
+        var wrap = el('div');
+        wrap.appendChild(head);
+        wrap.appendChild(this.renderCutMetrics());
+        return wrap;
+    };
+
+    // #3460: плановое время старта (штамп) → «ДД.ММ.ГГГГ ЧЧ:ММ»; иначе как есть.
+    AtexSlitter.prototype.formatPlanDateTime = function(value) {
+        if (!core.isTimestampSeconds(value)) return String(value == null ? '' : value);
+        return core.formatDate(value) + ' ' + core.formatClock(value);
+    };
+
+    // #3460: сводка резки — название сырья, метраж, число полос/ножей и резок.
+    // «Ножей» = «полос за проход» = Σ(кол-во полос) (см. cut-map/#3431); «Полос
+    // всего» = ножей × резок; «Резок» = план. число проходов.
+    AtexSlitter.prototype.renderCutMetrics = function() {
+        var cut = this.currentCut;
+        var strips = this.currentStrips || [];
+        var knives = core.totalKnives(strips);
+        var runs = core.plannedRunsForCut(cut);
+        var runLength = core.runLengthForCut(cut);
+        var material = cut.material || cut.materialLabel || cut.batch || '—';
+        var cells = [
+            ['Вид сырья', material || '—'],
+            ['Метраж, м', runLength > 0 ? String(core.round3(runLength)) : '—'],
+            ['Ножей (полос за проход)', knives > 0 ? String(knives) : '—'],
+            ['Резок', String(runs)],
+            ['Полос всего', knives > 0 ? String(core.round3(knives * runs)) : '—']
+        ];
+        var grid = el('div', { class: 'atex-sl-metrics' });
+        cells.forEach(function(pair) {
+            grid.appendChild(el('div', { class: 'atex-sl-metric' }, [
+                el('span', { class: 'atex-sl-metric-label', text: pair[0] }),
+                el('span', { class: 'atex-sl-metric-value', text: String(pair[1]) })
+            ]));
+        });
+        return grid;
+    };
+
+    // #3460: цветная карта раскроя ножей с подписями ширин прямо на полосах
+    // (как в cut-map.html, но в цвете). Ширина входа = ширина сырья текущей
+    // резки; при отсутствии — fallback на занятую полосами ширину.
+    AtexSlitter.prototype.renderCutMap = function() {
+        var cut = this.currentCut;
+        var strips = this.currentStrips || [];
+        var section = el('section', { class: 'atex-sl-section' }, [
+            el('h3', { class: 'atex-sl-section-title', text: 'Раскладка ножей' })
+        ]);
+        if (!strips.length) {
+            section.appendChild(el('div', { class: 'atex-sl-empty', text: 'У резки нет полос — раскраивать нечего.' }));
+            return section;
+        }
+        var inputWidth = core.toNumber(cut.materialWidthMm);
+        if (!(inputWidth > 0)) inputWidth = core.usedWidth(strips);
+        var lay = core.computeLayout(inputWidth, strips, null);
+
+        section.appendChild(el('div', { class: 'atex-sl-cm-caption' }, [
+            el('span', { text: 'Ширина входа: ' + lay.inputWidth + ' мм' }),
+            el('span', { class: 'atex-sl-cm-caption-used', text: 'Занято: ' + lay.usedWidth + ' мм' })
+        ]));
+
+        var bar = el('div', { class: 'atex-sl-cm-bar' + (lay.overflow ? ' is-overflow' : '') });
+        lay.segments.forEach(function(seg) {
+            var pct = core.widthPercent(seg.width, lay);
+            var kind = core.purposeKind(seg.purpose);
+            var title = (seg.label ? seg.label + ' · ' : '') + seg.width + ' мм' + (seg.purpose ? ' · ' + seg.purpose : '');
+            var segNode = el('div', {
+                class: 'atex-sl-cm-seg atex-sl-cm-seg-' + kind,
+                title: title,
+                dataset: { width: String(seg.width) }
+            });
+            segNode.style.width = pct + '%';
+            // Подпись ширины — прямо на полосе (требование #3460).
+            if (pct >= 4) segNode.appendChild(el('span', { class: 'atex-sl-cm-seg-label', text: String(seg.width) }));
+            bar.appendChild(segNode);
+        });
+        if (lay.remainder > 0) {
+            var rpct = core.widthPercent(lay.remainder, lay);
+            var rem = el('div', { class: 'atex-sl-cm-seg atex-sl-cm-seg-remainder', title: 'Остаток (обрезь): ' + lay.remainder + ' мм' });
+            rem.style.width = rpct + '%';
+            if (rpct >= 4) rem.appendChild(el('span', { class: 'atex-sl-cm-seg-label', text: String(lay.remainder) }));
+            bar.appendChild(rem);
+        }
+        section.appendChild(bar);
+
+        if (lay.overflow) {
+            section.appendChild(el('div', { class: 'atex-sl-cm-warn', text: 'Полосы превышают ширину входа на ' + Math.abs(lay.remainder) + ' мм.' }));
+        }
+
+        // Легенда по видам полос (ширина · кол-во · назначение) с цветом.
+        var legend = el('div', { class: 'atex-sl-cm-legend' });
+        strips.forEach(function(s) {
+            var kind = core.purposeKind(s.purpose);
+            legend.appendChild(el('div', { class: 'atex-sl-cm-legend-item' }, [
+                el('span', { class: 'atex-sl-cm-swatch atex-sl-cm-seg-' + kind }),
+                el('span', { text: core.round3(core.toNumber(s.width)) + ' мм × ' + core.round3(core.toNumber(s.qty)) +
+                    (s.purpose ? ' · ' + s.purpose : '') })
+            ]));
+        });
+        section.appendChild(legend);
+        return section;
     };
 
     // Полоса статусов: цепочка-степпер + кнопка перехода на следующий статус.
@@ -1129,7 +1531,9 @@
     AtexSlitter.prototype.syncInitialBatchSelection = function() {
         var cut = this.currentCut;
         if (!cut) return;
-        var available = core.availableBatchesForCut(this.batches, cut);
+        // #3460: партии со склада «Атех» (foreign) — на другом складе, выбрать
+        // их нельзя, поэтому из автоподбора по умолчанию исключаем.
+        var available = core.availableBatchesForCut(this.batches, cut).filter(function(b) { return !b.foreign; });
         if (!available.length) { this.selectedBatchIds = []; return; }
         var preferred = cut.batchId && available.filter(function(batch) {
             return String(batch.id) === String(cut.batchId);
@@ -1170,23 +1574,36 @@
         var grid = el('div', { class: 'atex-sl-batch-grid' });
         available.forEach(function(batch) {
             var passes = core.batchPasses(batch, cut);
-            var cls = 'atex-sl-batch-card' + (selected[String(batch.id)] ? ' is-selected' : '');
-            var card = el('button', { class: cls, type: 'button' }, [
+            // #3460: партии со склада «Атех» — на другом складе; показываем, но
+            // выбрать нельзя (карточка неактивна).
+            var foreign = !!batch.foreign;
+            var cls = 'atex-sl-batch-card' +
+                (selected[String(batch.id)] ? ' is-selected' : '') +
+                (foreign ? ' is-disabled' : '');
+            var cells = [
                 el('span', { class: 'atex-sl-batch-title', text: batch.label }),
                 el('span', { class: 'atex-sl-batch-meta', text: 'Приход: ' + (batch.date || '—') }),
                 el('span', { class: 'atex-sl-batch-metric', text: 'Остаток, м: ' + core.round3(batch.remainderM || 0) }),
                 el('span', { class: 'atex-sl-batch-meta', text: 'Штрих-код: ' + (batch.barcode || '—') }),
                 el('span', { class: 'atex-sl-batch-meta', text: 'Проходов: ' + passes })
-            ]);
-            card.addEventListener('click', function() {
-                var id = String(batch.id);
-                var idx = self.selectedBatchIds.indexOf(id);
-                if (idx >= 0) self.selectedBatchIds.splice(idx, 1);
-                else self.selectedBatchIds.push(id);
-                if (!cut.counterStart && batch.remainderM > 0) cut.counterStart = String(core.round3(batch.remainderM));
-                if (!cut.batchId) cut.batchId = id;
-                self.renderMain();
-            });
+            ];
+            if (foreign) {
+                cells.push(el('span', { class: 'atex-sl-batch-warn', text: 'Склад «' + (batch.warehouse || 'Атех') + '» — другой склад' }));
+            }
+            var card = el('button', { class: cls, type: 'button' }, cells);
+            if (foreign) {
+                card.disabled = true;
+            } else {
+                card.addEventListener('click', function() {
+                    var id = String(batch.id);
+                    var idx = self.selectedBatchIds.indexOf(id);
+                    if (idx >= 0) self.selectedBatchIds.splice(idx, 1);
+                    else self.selectedBatchIds.push(id);
+                    if (!cut.counterStart && batch.remainderM > 0) cut.counterStart = String(core.round3(batch.remainderM));
+                    if (!cut.batchId) cut.batchId = id;
+                    self.renderMain();
+                });
+            }
             grid.appendChild(card);
         });
         section.appendChild(grid);
@@ -1297,7 +1714,8 @@
         var self = this;
         var card = el('div', { class: 'atex-sl-row' });
 
-        var batchOptions = core.sortFifo(this.batches).map(function(b) {
+        // #3460: партии склада «Атех» (foreign) списывать нельзя — на другом складе.
+        var batchOptions = core.sortFifo(this.batches).filter(function(b) { return !b.foreign; }).map(function(b) {
             return { id: b.id, label: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' };
         });
         var batchRef = this.refSelect({
@@ -1716,10 +2134,13 @@
                 self.selectedBatchIds = [];
                 self.syncInitialBatchSelection();
                 return Promise.all([
+                    self.loadStrips(cutId),       // #3460: полосы для метрик и раскладки
+                    self.loadCutMaterial(),       // #3460: вид сырья для шапки
                     self.loadConsumptions(cutId),
                     self.loadEvents(cutId)
                 ]);
             }).then(function() {
+                self.resolveCutWidth();  // #3460: уточнить ширину входа после loadCutMaterial
                 self.setBusy(false);
                 self.render();
             }).catch(function(err) {
@@ -1755,6 +2176,15 @@
         this.root.appendChild(el('div', { class: 'atex-sl-fatal', text: message }));
     };
 
+    // #3460: восстановленный из localStorage станок мог исчезнуть из справочника —
+    // тогда сбрасываем выбор, чтобы не показывать пустую очередь без объяснения.
+    AtexSlitter.prototype.validateStoredSlitter = function() {
+        if (!this.selectedSlitterId) return;
+        var id = String(this.selectedSlitterId);
+        var exists = this.slitterOptions().some(function(item) { return String(item.id) === id; });
+        if (!exists) { this.selectedSlitterId = ''; this.storeSelectedSlitter(); }
+    };
+
     AtexSlitter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
@@ -1785,7 +2215,7 @@
 
         return this.loadMetadata()
             .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
-            .then(function() { return self.loadShiftEvents(); })
+            .then(function() { self.validateStoredSlitter(); return self.loadShiftEvents(); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

@@ -23,6 +23,14 @@
     --sl-danger-border: #fecaca;
     --sl-warn: var(--color-error, #b91c1c);
     --sl-ok: var(--color-success, #15803d);
+    /* #3460: палитра цветной раскладки ножей (как в cut-map). */
+    --sl-cm-order: var(--atex-navy, #134174);
+    --sl-cm-stock: #0d9488;
+    --sl-cm-waste: #b45309;
+    --sl-cm-other: var(--text-secondary, #6b7280);
+    --sl-cm-remainder: #cbd5e1;
+    --sl-cm-stripe-a: #f1f5f9;
+    --sl-cm-stripe-b: #e2e8f0;
     color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
@@ -36,6 +44,9 @@
     --sl-info-text: #93c5fd;
     --sl-add-border: rgba(96, 165, 250, 0.45);
     --sl-danger-border: rgba(248, 113, 113, 0.45);
+    --sl-cm-remainder: #475569;
+    --sl-cm-stripe-a: rgba(148, 163, 184, 0.16);
+    --sl-cm-stripe-b: rgba(148, 163, 184, 0.28);
 }
 
 .atex-sl *,
@@ -237,9 +248,16 @@
     border-color: var(--sl-accent);
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .12);
 }
+.atex-sl-batch-card.is-disabled {
+    cursor: not-allowed;
+    opacity: .55;
+    background: var(--sl-surface);
+}
+.atex-sl-batch-card.is-disabled:hover { background: var(--sl-surface); }
 .atex-sl-batch-title { font-weight: 700; }
 .atex-sl-batch-meta { color: var(--sl-muted); font-size: 12px; }
 .atex-sl-batch-metric { font-weight: 700; color: var(--sl-accent-d); }
+.atex-sl-batch-warn { color: var(--sl-warn); font-size: 12px; font-weight: 600; }
 
 /* Строки расхода сырья */
 .atex-sl-rows { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
@@ -334,3 +352,95 @@
 .atex-sl-toast-success { background: #15803d; }
 .atex-sl-toast-error { background: #b91c1c; }
 .atex-sl-toast-info { background: #334155; }
+
+/* #3460: сводка резки (вид сырья, метраж, ножи, резки, полосы) */
+.atex-sl-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.atex-sl-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--sl-border-soft);
+    border-radius: 8px;
+    background: var(--sl-surface);
+}
+.atex-sl-metric-label {
+    font-size: 11px;
+    color: var(--sl-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.atex-sl-metric-value { font-size: 18px; font-weight: 700; color: var(--sl-accent-d); }
+
+/* #3460: цветная раскладка ножей (как cut-map, но в цвете и с подписями) */
+.atex-sl-cm-caption {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--sl-muted);
+    margin-bottom: 6px;
+}
+.atex-sl-cm-caption-used { font-weight: 600; }
+.atex-sl-cm-bar {
+    display: flex;
+    width: 100%;
+    height: 64px;
+    border: 1px solid var(--sl-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+        repeating-linear-gradient(45deg, var(--sl-cm-stripe-a), var(--sl-cm-stripe-a) 6px, var(--sl-cm-stripe-b) 6px, var(--sl-cm-stripe-b) 12px);
+}
+.atex-sl-cm-bar.is-overflow { box-shadow: 0 0 0 2px rgba(185, 28, 28, .35); }
+.atex-sl-cm-seg {
+    height: 100%;
+    border-right: 1px solid rgba(255, 255, 255, .65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-width: 1px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+}
+.atex-sl-cm-seg-label {
+    white-space: nowrap;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
+    pointer-events: none;
+}
+.atex-sl-cm-seg-order { background: var(--sl-cm-order); }
+.atex-sl-cm-seg-stock { background: var(--sl-cm-stock); }
+.atex-sl-cm-seg-waste { background: var(--sl-cm-waste); }
+.atex-sl-cm-seg-other { background: var(--sl-cm-other); }
+.atex-sl-cm-seg-remainder {
+    background: var(--sl-cm-remainder);
+    color: var(--text-secondary, #475569);
+    border-right: none;
+}
+.atex-sl-cm-warn { margin-top: 8px; color: var(--sl-warn); font-weight: 600; }
+.atex-sl-cm-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 12px;
+}
+.atex-sl-cm-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--sl-muted);
+}
+.atex-sl-cm-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: none;
+    display: inline-block;
+}
