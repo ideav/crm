@@ -255,7 +255,9 @@
   // ОТДЕЛЬНОЙ раскладкой (seed «1 заказ = 1 резка», макс. заполнение джамбо). Затем
   // ограниченный перебор слияний: две раскладки сливаются в комбо ТОЛЬКО если это
   // лексикографически снижает цель (прогоны, затем скрап) — заказ не дробится,
-  // объединение лишь по выгоде. Позиции шире джамбо → skipped. Вход не мутирует.
+  // объединение лишь по выгоде. Комбо ограничено (#3472 п.3): не более
+  // options.maxWidthsPerCut (3) ширин и options.maxPositionsPerCut (3) заказов.
+  // Позиции шире джамбо → skipped. Вход не мутирует.
   function planLayouts(input){
     input = input || {};
     var W = toNumber(input.jumboWidth);
@@ -263,6 +265,11 @@
     var opts = input.options || {};
     var windowDays = (opts.windowDays == null) ? 3 : opts.windowDays;
     var tolerance = toNumber(opts.tolerance);
+    // #3472 п.3: разумные ограничения комбо-резки — отсекают бессмысленные слияния и
+    // держат резку дружелюбной к оператору/упаковщику. Дефолты: ≤3 ширин, ≤3 позиций.
+    // 0/Infinity → ограничение снято (toNumber делает не-конечное 0).
+    var maxWidths = (opts.maxWidthsPerCut == null) ? 3 : toNumber(opts.maxWidthsPerCut);
+    var maxPositions = (opts.maxPositionsPerCut == null) ? 3 : toNumber(opts.maxPositionsPerCut);
     var positions = (input.positions || []).map(function(p){
       return { id: p.id, width: toNumber(p.width), qty: toNumber(p.qty),
                dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity, stockable: !!p.stockable };
@@ -328,6 +335,9 @@
             var merged = buildGroup(gi.demands.concat(gj.demands));
             if (merged.overflow.length) continue;                 // не влезли вместе → не слить
             if (merged.positionsCovered.length < gi.positionsCovered.length + gj.positionsCovered.length) continue;
+            // #3472 п.3: комбо-резка — не более maxWidths ширин и maxPositions заказов.
+            if (maxWidths > 0 && Object.keys(merged.demandByWidth).length > maxWidths) continue;
+            if (maxPositions > 0 && merged.positionsCovered.length > maxPositions) continue;
             var dr = merged.runs - (gi.runs + gj.runs);
             var ds = round3(merged.scrap - (gi.scrap + gj.scrap));
             var improves = dr < 0 || (dr === 0 && ds < 0);        // строго лучше по (прогоны, скрап)

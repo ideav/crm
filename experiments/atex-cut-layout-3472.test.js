@@ -81,4 +81,32 @@ var split = false;
 issue.layouts.forEach(function(l){ l.positionsCovered.forEach(function(pid){ if (seen[pid]) split = true; seen[pid] = 1; }); });
 assertEqual(split, false, 'issue: ни один заказ не дроблён на две раскладки');
 
+// ── #3472 п.3: разумные ограничения комбо-резки (≤3 ширин, ≤3 заказов по умолчанию). ──
+// Вход, который БЕЗ ограничения сливается в одну раскладку из 4 ширин / 4 позиций.
+var capPos = [[110, 50], [70, 30], [50, 20], [40, 10]].map(function(p, i){
+  return { id: 'c' + i, width: p[0], qty: p[1], dueKey: 20260601 };
+});
+function capPlan(cap){
+  return layout.planLayouts({ jumboWidth: 910, positions: capPos, preferred: [],
+    options: { windowDays: 3, tolerance: 0, maxWidthsPerCut: cap, maxPositionsPerCut: cap } });
+}
+function widthsOf(l){ var w = {}; l.strips.forEach(function(s){ if (s.purpose === 'Заказ') w[s.width] = 1; }); return Object.keys(w).length; }
+function maxOver(res, fn){ return res.layouts.reduce(function(m, l){ return Math.max(m, fn(l)); }, 0); }
+
+// без ограничения (большой cap) — все 4 ширины в одной резке (контроль кейса).
+var uncapped = capPlan(1e9);
+assertEqual(uncapped.layouts.length === 1 && widthsOf(uncapped.layouts[0]) === 4, true,
+  'cap: без ограничения 4 ширины сливаются в одну резку (контроль)');
+
+// дефолт (ограничения не переданы → 3): ни одна резка не превышает 3 ширин/3 позиций.
+var def = layout.planLayouts({ jumboWidth: 910, positions: capPos, preferred: [], options: { windowDays: 3, tolerance: 0 } });
+assertEqual(maxOver(def, widthsOf) <= 3, true, 'cap #3472: дефолт — не более 3 ширин в резке');
+assertEqual(maxOver(def, function(l){ return l.positionsCovered.length; }) <= 3, true, 'cap #3472: дефолт — не более 3 заказов в резке');
+// все позиции по-прежнему покрыты (ограничение не теряет заказы).
+var defCovered = {}; def.layouts.forEach(function(l){ l.positionsCovered.forEach(function(pid){ defCovered[pid] = 1; }); });
+assertEqual(Object.keys(defCovered).length, 4, 'cap: все 4 заказа покрыты, несмотря на ограничение');
+
+// жёстче (2): ни одна резка не превышает 2 ширин.
+assertEqual(maxOver(capPlan(2), widthsOf) <= 2, true, 'cap #3472: maxWidthsPerCut=2 соблюдается');
+
 console.log('\n' + passed + ' assertions passed');
