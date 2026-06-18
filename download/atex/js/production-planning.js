@@ -972,7 +972,7 @@
                     label: CUT_REQ.plannedRuns,
                     reason: 'value',
                     layoutIndex: index,
-                    message: 'Не рассчитано поле «' + CUT_REQ.plannedRuns + '» для резки ' + layoutNo
+                    message: 'Не рассчитано поле «' + CUT_REQ.plannedRuns + '» для задания ' + layoutNo
                 });
                 return;
             }
@@ -987,7 +987,7 @@
                     reason: 'value',
                     layoutIndex: index,
                     positionIds: missingIds,
-                    message: 'Не рассчитано поле «' + CUT_REQ.length + '» для резки ' + layoutNo +
+                    message: 'Не рассчитано поле «' + CUT_REQ.length + '» для задания ' + layoutNo +
                         (missingIds.length ? ': нет длины у позиций ' + missingIds.join(', ') : ': нет длины прогона') +
                         '. Проверьте positions_list: position_length / wind_length'
                 });
@@ -1001,7 +1001,7 @@
                     layoutIndex: index,
                     runLength: runLength,
                     plannedRuns: plannedRuns,
-                    message: 'Не рассчитано поле «' + CUT_REQ.duration + '» для резки ' + layoutNo +
+                    message: 'Не рассчитано поле «' + CUT_REQ.duration + '» для задания ' + layoutNo +
                         (windPoints.length ? ': длительность 0 при метраже ' + runLength + ' м и проходах ' + plannedRuns : ': нет норм WIND_* в «Время операции, мин»')
                 });
             }
@@ -3481,7 +3481,7 @@
         if (!meta || !cut) return Promise.resolve();
         if (this.busy) return Promise.resolve();
         var materialId = cut.materialId ? String(cut.materialId) : '';
-        if (materialId === '') { this.notify('У резки не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
+        if (materialId === '') { this.notify('У задания не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
         var widthM = (Number(this.jumboWidthByMaterial[materialId]) || 0) / 1000;
         var requiredLin = cutRunLength(cut, this.supplies, this.footageBySupply);
         // свободный остаток без учёта собственных прежних резервов этой резки (их перезапишем)
@@ -3935,12 +3935,12 @@
         }
         var payloadDiagnostics = traceCutCreatePayload('createCut', meta, reqIds, fields, this, requiredWriteKeys);
         if (payloadDiagnostics.length) {
-            this.notify('Не могу создать резку: ' + cutWriteDiagnosticSummary(payloadDiagnostics), 'error');
+            this.notify('Не могу создать производственное задание: ' + cutWriteDiagnosticSummary(payloadDiagnostics), 'error');
             return;
         }
 
         function finishCreatedCut(id) {
-            if (!id) throw new Error('Сервер не вернул id новой резки');
+            if (!id) throw new Error('Сервер не вернул id нового задания');
             // #3242: «Обеспечение» теперь ссылается на «Партию ГП», которой в ручном
             // создании резки ещё нет (состав добавляется отдельно). Поэтому здесь
             // обеспечения НЕ создаём — иначе вышли бы «сироты» без ссылки. Привязка
@@ -3952,7 +3952,7 @@
                 self.draft = self.blankDraft();
                 self.selectedCutId = String(id);
                 self.closeForm();
-                self.notify('Производственная резка #' + id + ' создана' +
+                self.notify('Производственное задание #' + id + ' создано' +
                     (selectedPositions.length ? ' (привязка позиций — через планирование)' : ''), 'success');
                 self.render();
             });
@@ -3964,7 +3964,7 @@
             return finishCreatedCut(res && (res.obj || res.id || res.i));
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка создания резки: ' + err.message, 'error');
+            self.notify('Ошибка создания производственного задания: ' + err.message, 'error');
         });
     };
 
@@ -4087,7 +4087,7 @@
         if (this.busy) return;
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supplyMeta = this.meta.supply;
-        if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц резки/Партии ГП/Обеспечения', 'error'); return; }
+        if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц задания/Партии ГП/Обеспечения', 'error'); return; }
         var key = String(d.positionId) + '|' + (Math.floor(Number(d.qty) || 0));
         var ensure = (d.prospect && !d.prospect.error && d.prospect.forKey === key)
             ? Promise.resolve(d.prospect)
@@ -4135,7 +4135,7 @@
 
             return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', fields).then(function(res) {
                 var cutId = res && (res.obj || res.id || res.i);
-                if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                if (!cutId) throw new Error('Сервер не вернул id нового задания');
                 var widthToBatchId = {};
                 var chain = Promise.resolve();
                 // 1) Партии ГП по ширинам (состав резки).
@@ -4185,13 +4185,13 @@
                     self.draft = self.blankDraft();
                     self.selectedCutId = String(cutId);
                     self.closeForm();
-                    self.notify('Резка #' + cutId + ' создана, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
+                    self.notify('Производственное задание #' + cutId + ' создано, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
                     self.render();
                 });
             });
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка создания резки: ' + err.message, 'error');
+            self.notify('Ошибка создания производственного задания: ' + err.message, 'error');
         });
     };
 
@@ -4201,13 +4201,13 @@
         if (this.busy) return;
         var meta = this.meta.supply;
         if (!opts.positionId) { this.notify('Выберите позицию заказа', 'error'); return; }
-        if (!opts.cutId) { this.notify('Не выбрана резка', 'error'); return; }
+        if (!opts.cutId) { this.notify('Не выбрано производственное задание', 'error'); return; }
 
         // #3242: «Обеспечение» теперь ссылается на «Партию ГП», а не на резку. Ручная
         // привязка «позиция → резка» без выбора конкретной Партии ГП создала бы
         // «сироту» без ссылки — поэтому временно заблокирована до доработки UI (#3242 PR3).
         if (!opts.finishedBatchId) {
-            this.notify('Ручная привязка к резке временно недоступна: обеспечение теперь ссылается на «Партию ГП». Используйте планирование.', 'error');
+            this.notify('Ручная привязка к производственному заданию временно недоступна: обеспечение теперь ссылается на «Партию ГП». Используйте планирование.', 'error');
             return;
         }
         var fields = buildSupplyFieldsForFinishedBatch(meta, {
@@ -4224,7 +4224,7 @@
             if (!id) throw new Error('Сервер не вернул id обеспечения');
             return self.loadPlanning().then(function() {
                 self.setBusy(false);
-                self.notify('Обеспечение создано: позиция связана с резкой', 'success');
+                self.notify('Обеспечение создано: позиция связана с производственным заданием', 'success');
                 self.render();
             });
         }).catch(function(err) {
@@ -4847,7 +4847,7 @@
         }
         if (!this.meta.cut || !this.meta.supply || !this.meta.finishedBatch) {
             console.error('[pp] ⚙️ generateCuts: не найдены метаданные', {cut:!!this.meta.cut, supply:!!this.meta.supply, finishedBatch:!!this.meta.finishedBatch});
-            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Партия ГП)', 'error');
+            this.notify('Не найдены метаданные таблиц (Задание/Обеспечение/Партия ГП)', 'error');
             return;
         }
 
@@ -4902,7 +4902,7 @@
             // Если таких нет — ничего не делаем: уже запланированные резки не трогаем и
             // очередь не пересобираем (это оператор сделает сам, удалив резки и Партии ГП).
             console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — очередь не трогаем');
-            self.notify('Нет незапланированных позиций для генерации резок', 'info');
+            self.notify('Нет незапланированных позиций для генерации заданий', 'info');
             return;
         }
         var profiles = groupPositionsByPlanningProfile(unsup);
@@ -4982,17 +4982,15 @@
                     diagnostics: timingDiagnostics,
                     layouts: allLayouts.slice(0, 5)
                 });
-                self.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+                self.notify('Ошибка подготовки заданий: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
                     (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
                 return;
             }
 
-            // #3253: в подтверждении не считаем полосы/ножи — только число резок.
-            var nCuts = allLayouts.length;
-            // #3444: вопрос «Создать N резок?» — в конце, после «Пропущено N».
+            // #3470: вопрос «Создать производственные задания?» — в конце, после «Пропущено N».
             var msg = el('span', { class: 'atex-pp-confirm-msg' });
             msg.appendChild(document.createTextNode(
-                'Не обеспечено резками и складом позиций: ' + unsup.length + '. '));
+                'Не обеспечено заданиями и складом позиций: ' + unsup.length + '. '));
             if (skipped.length) {
                 var skipLink = el('a', { class: 'atex-pp-skipped-link', href: '#',
                     text: 'Пропущено ' + skipped.length,
@@ -5006,7 +5004,7 @@
             } else {
                 msg.appendChild(document.createTextNode('Пропущено 0. '));
             }
-            msg.appendChild(document.createTextNode('Создать ' + nCuts + ' резок?'));
+            msg.appendChild(document.createTextNode('Создать производственные задания?'));
 
             // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
             // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
@@ -5088,7 +5086,7 @@
             console.error('[pp] ❌ runGenerateCuts: ошибка подготовки полей резки — ' + cutWriteDiagnosticSummary(timingDiagnostics), {
                 diagnostics: timingDiagnostics
             });
-            this.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+            this.notify('Ошибка подготовки заданий: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
                 (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
             return Promise.resolve();
         }
@@ -5276,14 +5274,14 @@
         Object.keys(segmentsByLayout).forEach(function(k) { nRecords += segmentsByLayout[k].length; });
         if (!nRecords) nRecords = nCuts;
         console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nRecords + ' записей (' + nCuts + ' раскладок)...');
-        this.showProgress('Генерация резок…', nRecords);
+        this.showProgress('Генерация заданий…', nRecords);
         var chain = Promise.resolve();
         var startTime = Date.now();
         layouts.forEach(function(lay, layIdx) {
           var units = segmentsByLayout[layIdx] || [];
           units.forEach(function(unit) {
             chain = chain.then(function() {
-                self.updateProgress(doneCuts, 'Создаётся резка ' + (doneCuts + 1) + ' из ' + nRecords + '…');
+                self.updateProgress(doneCuts, 'Создаётся задание ' + (doneCuts + 1) + ' из ' + nRecords + '…');
                 var plannedRuns = unit.plannedRuns;
                 var runLength = unit.runLength;
                 var duration = unit.duration;
@@ -5306,7 +5304,7 @@
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
                 var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'timing', 'length']);
                 if (payloadDiagnostics.length) {
-                    throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
+                    throw new Error('Неполный payload задания ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
 
                 // #3242: состав резки — «Партия ГП» по каждой ширине. Запоминаем id по
@@ -5410,7 +5408,7 @@
                 // 1) корневая резка, 2) Партии ГП (состав), 3) втулки, 4) обеспечения→Партия ГП.
                 return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
-                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                    if (!cutId) throw new Error('Сервер не вернул id нового задания');
                     return createFinishedBatches(cutId)
                         .then(function() { return createSleeveTasks(); })
                         .then(function() { return createSupplies(); });
@@ -5443,7 +5441,7 @@
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
             console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
-            self.notify('Создано ' + nRecords + ' резок (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
+            self.notify('Создано ' + nRecords + ' производственных заданий (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
@@ -5455,7 +5453,7 @@
             self.setBusy(false);
             self.setGenBusy(false);
             console.error('[pp] 🔧 runGenerateCuts: ОШИБКА', err.message, err.stack);
-            self.notify('Ошибка генерации резок: ' + err.message, 'error');
+            self.notify('Ошибка генерации заданий: ' + err.message, 'error');
         });
     };
 
@@ -5508,7 +5506,7 @@
             'th{background:#f4f6fa}tr:nth-child(even) td{background:#fafbfc}' +
             'a{color:#1283da}</style></head><body>' +
             '<h1>Пропущенные позиции — ' + rows.length + '</h1>' +
-            '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку резки и не создал резки. ' +
+            '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку и не создал производственные задания. ' +
             'Проверьте параметры (ширина джамбо, сырьё) и повторите генерацию.</p>' +
             '<table><thead><tr><th>№</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
             '<tbody>' + (trs || '<tr><td colspan="6">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
@@ -5732,7 +5730,7 @@
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
-                            if (!bId) throw new Error('Сервер не вернул id продолжения резки');
+                            if (!bId) throw new Error('Сервер не вернул id продолжения задания');
                             var stripMap = {};
                             // Главное значение B (плановое время старта) — _m_save с t{tableId}.
                             var bChain = Promise.resolve().then(function() {
@@ -5789,7 +5787,7 @@
             self.setBusy(false); self.render(); return true;
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка разбиения резок: ' + err.message, 'error');
+            self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
         });
     };
@@ -5994,8 +5992,8 @@
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
-        form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
-        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка под одну позицию заказа: выберите позицию и кол-во рулонов (≤ необеспеченного), затем станок — в списке станков показано ближайшее свободное окно.' }));
+        form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новое производственное задание' }));
+        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Задание под одну позицию заказа: выберите позицию и кол-во рулонов (≤ необеспеченного), затем станок — в списке станков показано ближайшее свободное окно.' }));
 
         // Только согласованные, ещё не обеспеченные позиции с ненулевым остатком.
         var posLabelById = {};
@@ -6104,16 +6102,16 @@
                 'Произведём этой ширины: ' + round3(pl.producedPosRolls) + ' рул. · обеспечим: ' + round3(pl.supplyRolls) + ' · склад: ' + round3(pl.stockRolls),
                 'Длительность резки: ~' + round3(pl.duration) + ' мин'
             ];
-            if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько резок — создаётся первая.');
+            if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько заданий — создаётся первое.');
             lines.forEach(function(txt) { previewBox.appendChild(el('div', { class: 'atex-pp-cut-preview-line', text: txt })); });
         } else {
             previewBox.appendChild(el('div', { class: 'atex-pp-hint',
-                text: prospectReady ? 'Выберите станок — покажу состав резки.' : 'Заполните позицию и кол-во рулонов.' }));
+                text: prospectReady ? 'Выберите станок — покажу состав задания.' : 'Заполните позицию и кол-во рулонов.' }));
         }
         form.appendChild(previewBox);
 
         var actions = el('div', { class: 'atex-pp-actions' });
-        var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать резку' });
+        var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать задание' });
         createBtn.disabled = !canCreate;
         createBtn.addEventListener('click', function() { self.createCutForPosition(); });
         actions.appendChild(createBtn);
@@ -6226,9 +6224,9 @@
                     tabs.appendChild(tab);
                 });
                 box.appendChild(tabs);
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
+                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
             } else {
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
+                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
             }
             return;
         }
@@ -6333,7 +6331,7 @@
                 c, idx > 0 ? activeGroup.cuts[idx - 1] : null, sc,
                 runLengthForCut, windPoints, self.changeTimes
             );
-            var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
+            var cutNumberTitle = 'Задание № ' + (formatCutNumber(c.number) || c.id);
             // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.
             var cutNumTitle = formatCutStartTitle(sc, planBaseMidnightMs) || cutNumberTitle;
 
@@ -6482,7 +6480,7 @@
         var cut = this.cuts.filter(function(c) { return String(c.id) === String(this.selectedCutId); }, this)[0];
 
         if (!cut) {
-            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите резку в очереди, чтобы увидеть связанные позиции.' }));
+            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите задание в очереди, чтобы увидеть связанные позиции.' }));
             return;
         }
 
@@ -6500,7 +6498,7 @@
                 var foot = supplyFootage(s, self.footageBySupply);
                 var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
-                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
+                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
                 children.push(del);
                 listWrap.appendChild(el('div', { class: 'atex-pp-linked-item' }, children));
@@ -6553,7 +6551,7 @@
         bar.appendChild(fill);
         var counter = el('div', { class: 'atex-pp-progress-count', text: '' });
         var dialog = el('div', { class: 'atex-pp-progress-dialog' }, [
-            el('div', { class: 'atex-pp-progress-title', text: title || 'Генерация резок…' }),
+            el('div', { class: 'atex-pp-progress-title', text: title || 'Генерация заданий…' }),
             bar,
             counter
         ]);
@@ -6604,22 +6602,22 @@
 
         // Шапка очереди: заголовок слева, затем кнопка «Сгенерировать резки» и «+ Новая резка» справа вверху.
         var queueActions = el('div', { class: 'atex-pp-panel-actions' });
-        var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация резок…' });
+        var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация заданий…' });
         genSpinner.style.display = 'none';
-        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-gen-btn', type: 'button', text: 'Сгенерировать резки' });
+        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-gen-btn', type: 'button', text: 'Сгенерировать задания' });
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
         // «Сгенерировать резки» только создаёт резки для незапланированных позиций и
         // дописывает их в конец очереди (#3449); уже запланированные резки не трогает.
         // Перестановку очереди оператор делает вручную (↑↓).
-        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новое задание' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
-            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),
+            el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
         ]);
         var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [queueHead]);
