@@ -1,0 +1,282 @@
+/* Рабочее место atex «Расчёт оптимальной резки» (ideav/crm#3465).
+   Стили скоупятся под #atex-cut-optimizer / .atex-co, чтобы не пересекаться
+   с остальными рабочими местами в main.html. Палитра и приёмы — как в
+   cut-map.css (карта раскроя), у которого это рабочее место — близнец-калькулятор. */
+
+.atex-co {
+    --co-border: var(--input-border, #d9dee5);
+    --co-border-soft: var(--border-color, #eef1f5);
+    --co-bg: var(--input-bg, #ffffff);
+    --co-surface: var(--bg-secondary, #f8fafc);
+    --co-muted: var(--text-secondary, #6b7280);
+    --co-accent: var(--atex-navy, #134174);
+    --co-warn: var(--color-error, #b91c1c);
+    --co-ok: var(--color-success, #15803d);
+    /* Цвета сегментов по назначению полосы */
+    --co-order: var(--atex-navy, #134174);
+    --co-stock: #0d9488;
+    --co-other: var(--text-secondary, #6b7280);
+    --co-remainder: #cbd5e1;
+    --co-bar-stripe-a: #f1f5f9;
+    --co-bar-stripe-b: #e2e8f0;
+    color: var(--text-primary, #1f2933);
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-co {
+    --co-remainder: #475569;
+    --co-bar-stripe-a: rgba(148, 163, 184, 0.16);
+    --co-bar-stripe-b: rgba(148, 163, 184, 0.28);
+}
+
+.atex-co *,
+.atex-co *::before,
+.atex-co *::after { box-sizing: border-box; }
+
+.atex-co.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-co-loading,
+.atex-co-fatal,
+.atex-co-placeholder {
+    padding: 24px;
+    color: var(--co-muted);
+}
+.atex-co-fatal { color: var(--co-warn); }
+
+.atex-co-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+}
+@media (max-width: 760px) {
+    .atex-co-layout { grid-template-columns: 1fr; }
+}
+
+/* Левая колонка — форма */
+.atex-co-form {
+    border: 1px solid var(--co-border);
+    border-radius: 8px;
+    background: var(--co-bg);
+    padding: 16px;
+}
+.atex-co-form-title { margin: 0 0 14px; font-size: 16px; }
+.atex-co-loading { padding: 8px 0; }
+
+.atex-co-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.atex-co-label {
+    font-size: 12px;
+    color: var(--co-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.atex-co-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.atex-co-input {
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    background: var(--co-bg);
+    color: inherit;
+    font: inherit;
+    padding: 8px 10px;
+    width: 100%;
+}
+.atex-co-input:focus {
+    outline: none;
+    border-color: var(--co-accent);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
+}
+
+.atex-co-rows-head { margin: 6px 0 6px; }
+.atex-co-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.atex-co-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 32px;
+    gap: 8px;
+    align-items: center;
+}
+.atex-co-row-del {
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    background: var(--co-surface);
+    color: var(--co-muted);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 6px 0;
+}
+.atex-co-row-del:hover { color: var(--co-warn); border-color: var(--co-warn); }
+
+.atex-co-btn {
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    background: var(--co-bg);
+    padding: 9px 14px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1.2;
+}
+.atex-co-btn:hover { background: var(--co-surface); }
+.atex-co-btn-secondary { background: var(--co-surface); width: 100%; margin-bottom: 12px; }
+.atex-co-btn-primary {
+    background: var(--co-accent);
+    border-color: var(--co-accent);
+    color: #fff;
+    font-weight: 600;
+    width: 100%;
+    margin-top: 4px;
+}
+.atex-co-btn-primary:hover { filter: brightness(1.08); background: var(--co-accent); }
+
+/* Правая колонка — результат */
+.atex-co-view {
+    border: 1px solid var(--co-border);
+    border-radius: 8px;
+    background: var(--co-bg);
+    padding: 18px 20px;
+    min-height: 200px;
+}
+.atex-co-result-title { margin: 0 0 14px; font-size: 18px; }
+.atex-co-note {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--co-surface);
+    border: 1px solid var(--co-border);
+    color: var(--co-muted);
+    font-size: 13px;
+}
+.atex-co-warn { color: var(--co-warn); font-weight: 600; padding: 8px 0; }
+
+/* Карта-полоса (раскладка одной резки) */
+.atex-co-bar-wrap { margin: 8px 0 20px; }
+.atex-co-bar-caption {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--co-muted);
+    margin-bottom: 6px;
+}
+.atex-co-bar-caption-used { font-weight: 600; }
+.atex-co-bar {
+    display: flex;
+    width: 100%;
+    height: 64px;
+    border: 1px solid var(--co-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+        repeating-linear-gradient(45deg, var(--co-bar-stripe-a), var(--co-bar-stripe-a) 6px, var(--co-bar-stripe-b) 6px, var(--co-bar-stripe-b) 12px);
+}
+.atex-co-seg {
+    height: 100%;
+    border-right: 1px solid rgba(255, 255, 255, .65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-width: 1px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+}
+.atex-co-seg-label {
+    white-space: nowrap;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
+    pointer-events: none;
+}
+.atex-co-seg-order { background: var(--co-order); }
+.atex-co-seg-stock { background: var(--co-stock); }
+.atex-co-seg-other { background: var(--co-other); }
+.atex-co-seg-remainder {
+    background: var(--co-remainder);
+    color: var(--text-secondary, #475569);
+    border-right: none;
+}
+
+/* Легенда цветов */
+.atex-co-legend-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--co-muted);
+}
+.atex-co-legend-key { display: inline-flex; align-items: center; gap: 6px; }
+.atex-co-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: none;
+    display: inline-block;
+}
+
+/* Таблица результатов по ширинам */
+.atex-co-table {
+    border: 1px solid var(--co-border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 18px;
+}
+.atex-co-table-head,
+.atex-co-table-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.6fr 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+}
+.atex-co-table-head {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--co-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    background: var(--co-surface);
+    border-bottom: 1px solid var(--co-border);
+}
+.atex-co-table-row { border-bottom: 1px solid var(--co-border-soft); }
+.atex-co-table-row:last-child { border-bottom: none; }
+.atex-co-dev.is-ok { color: var(--co-ok); }
+.atex-co-dev.is-surplus { color: var(--co-stock); }
+.atex-co-dev.is-short { color: var(--co-warn); }
+
+/* Сводка-метрики */
+.atex-co-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px;
+    border-radius: 8px;
+    background: var(--co-surface);
+    border: 1px solid var(--co-border);
+}
+.atex-co-metric { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.atex-co-metric-label { font-size: 12px; color: var(--co-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-co-metric-value { font-size: 22px; font-weight: 700; }
+.atex-co-metric.is-warn .atex-co-metric-value { color: var(--co-warn); }
+.atex-co-metric.is-ok .atex-co-metric-value { color: var(--co-ok); }
+
+/* Тосты-уведомления (без alert/confirm/prompt) */
+.atex-co-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .25s, transform .25s;
+}
+.atex-co-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-co-toast-success { background: #15803d; }
+.atex-co-toast-error { background: #b91c1c; }
+.atex-co-toast-info { background: #334155; }
