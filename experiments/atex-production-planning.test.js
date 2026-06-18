@@ -205,14 +205,25 @@ assertEqual(plan.cuts, [
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
-      orderId: '', orderApprovalDate: '' },
+      orderId: '', orderApprovalDate: '', leaders: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
-      orderId: '', orderApprovalDate: '' }
+      orderId: '', orderApprovalDate: '', leaders: [] }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
+// #3472: cut_leader собирается в leaders[] (различные); легаси-смешение → несколько.
+var leadPlan = planning.rowsToPlanning([
+    { cut_id:'31', cut_plan_date:'x', supply_id:'s1', supply_position_id:'p1', cut_leader:'Софмикс' },
+    { cut_id:'31', cut_plan_date:'x', supply_id:'s2', supply_position_id:'p2', cut_leader:'Софмикс' },
+    { cut_id:'32', cut_plan_date:'y', supply_id:'s3', supply_position_id:'p3', cut_leader:'Этикетка37' },
+    { cut_id:'32', cut_plan_date:'y', supply_id:'s4', supply_position_id:'p4', cut_leader:'MONOCHROME' },
+    { cut_id:'33', cut_plan_date:'z', supply_id:'s5', supply_position_id:'p5' }
+]);
+assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
+    [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
+    'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
 assertEqual(plan.supplies, [
     { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 },
     { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 }

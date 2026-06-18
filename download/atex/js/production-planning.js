@@ -743,9 +743,16 @@
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
-                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
+                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
+                    // #3472: лидеры резки (из cut_leader по всем строкам). Новые резки —
+                    // один лидер; легаси (до ограничения по лидеру) могут мешать несколько.
+                    leaders: []
                 };
                 order.push(cutId);
+            }
+            if (cutId && cutsById[cutId]) {
+                var leaderVal = str(row.cut_leader).trim();
+                if (leaderVal && cutsById[cutId].leaders.indexOf(leaderVal) < 0) cutsById[cutId].leaders.push(leaderVal);
             }
             var supplyId = str(row.supply_id);
             if (supplyId) {
@@ -6434,6 +6441,18 @@
             // он стоял по центру (равный flex-gap слева и справа): «MR194 IN — 600 х 7».
             infoChildren.push(el('span', { class: 'atex-pp-cut-dash', text: '—' }));
             infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: formatCutDimensions(c, runLengthForCut) }));
+            // #3472: лидер резки — после размеров (перед связями, которые прижаты вправо).
+            // Один лидер — обычная плашка; несколько (легаси-смешение до ограничения по
+            // лидеру) — выделяем предупреждением.
+            var cutLeaders = (c.leaders || []).filter(function(s) { return s; });
+            if (cutLeaders.length) {
+                var mixed = cutLeaders.length > 1;
+                infoChildren.push(el('span', {
+                    class: 'atex-pp-cut-leader' + (mixed ? ' atex-pp-cut-leader-mixed' : ''),
+                    title: (mixed ? 'В резке смешаны разные лидеры: ' : 'Лидер: ') + cutLeaders.join(', '),
+                    text: 'лидер: ' + cutLeaders.join(', ')
+                }));
+            }
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
             cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
 
