@@ -89,12 +89,13 @@
     };
     var MATERIAL_REQ = { width: 'Ширина, мм' };
 
-    // Статусы резки по дизайн-спеке atex (§3.5): жёсткая цепочка переходов.
-    var STATUSES = ['Ожидает', 'Наладка', 'В работе', 'Завершён'];
-    var DONE_STATUSES = ['Завершён', 'Завершена', 'Готова'];
+    // Статусы резки по дизайн-спеке atex (§3.5): упрощённая цепочка (#3459).
+    // Ожидает → В работе → Завершена (Наладка убрана, оператор запускает резку сразу).
+    var STATUSES = ['Ожидает', 'В работе', 'Завершена'];
+    var DONE_STATUSES = ['Завершена', 'Завершён', 'Готова'];
     var WAIT_STATUSES = ['Ожидает', 'Запланирована', 'В очереди'];
     // Типы событий смены (дизайн-спека atex, «Событие смены»).
-    var EVENT_TYPES = ['Начало смены', 'Запуск резки', 'Пауза', 'Обед', 'Переналадка', 'Счётчик', 'Брак', 'Завершение резки', 'Конец смены'];
+    var EVENT_TYPES = ['Начало смены', 'Запуск резки', 'Пауза', 'Обед', 'Переналадка', 'Счётчик', 'Брак', 'Завершение резки', 'Пропуск', 'Отмена', 'Конец смены'];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -1299,23 +1300,33 @@
             return;
         }
         var firstOpenId = this.currentQueue().firstOpenCutId;
+        // #3459: только первая резка в «Ожидает» доступна; остальные disabled.
+        // Резка в работе или на паузе остаётся доступной для своего оператора.
         list.forEach(function(cut) {
             var active = String(self.currentCutId) === String(cut.id);
-            var next = firstOpenId && String(firstOpenId) === String(cut.id);
+            var isFirstOpen = firstOpenId && String(firstOpenId) === String(cut.id);
+            var isWaiting = core.normalizeStatus(cut.status) === 'Ожидает';
+            var isInProgress = core.normalizeStatus(cut.status) === 'В работе' || core.isPauseStatus(cut.status);
+            // Блокируем «Ожидает»-резки кроме первой в очереди
+            var disabled = isWaiting && !isFirstOpen && !active;
             var item = el('button', {
-                class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (next ? ' is-next' : ''),
-                type: 'button'
+                class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (disabled ? ' is-disabled' : ''),
+                type: 'button',
+                disabled: disabled ? 'disabled' : undefined
             }, [
                 el('div', { class: 'atex-sl-cut-main' }, [
                     el('span', { class: 'atex-sl-cut-label', text: cut.label }),
                     el('span', { class: 'atex-sl-cut-sub', text: [
                         core.humanizeLabel(cut.batch),
-                        cut.startedAt ? ('Начато: ' + core.humanizeLabel(cut.startedAt)) : 'Начато: —'
+                        cut.startedAt ? ('Начато: ' + core.humanizeLabel(cut.startedAt)) : 'Начато: —',
+                        disabled ? 'ожидает предыдущую' : ''
                     ].filter(Boolean).join(' · ') })
                 ]),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]);
-            item.addEventListener('click', function() { self.openCut(cut.id); });
+            if (!disabled) {
+                item.addEventListener('click', function() { self.openCut(cut.id); });
+            }
             box.appendChild(item);
         });
     };
@@ -1324,7 +1335,6 @@
         if (core.isDone(status)) return 'atex-sl-badge-done';
         if (core.normalizeStatus(status) === 'В работе') return 'atex-sl-badge-run';
         if (core.isPauseStatus(status)) return 'atex-sl-badge-setup';
-        if (core.normalizeStatus(status) === 'Наладка') return 'atex-sl-badge-setup';
         return 'atex-sl-badge-wait';
     }
 
@@ -1485,7 +1495,7 @@
         return section;
     };
 
-    // Полоса статусов: цепочка-степпер + кнопка перехода на следующий статус.
+    // Полоса статусов: цепочка-степпер + кнопки действий по статусу (#3459).
     AtexSlitter.prototype.renderStatusBar = function() {
         var self = this;
         var cut = this.currentCut;
@@ -1493,9 +1503,9 @@
             el('h3', { class: 'atex-sl-section-title', text: 'Статус резки' })
         ]);
 
+        // Степпер: визуальная цепочка Ожидает → В работе → Завершена
         var steps = el('div', { class: 'atex-sl-steps' });
         var curIdx = core.STATUSES.indexOf(core.normalizeStatus(cut.status));
-        // Каждый шаг — кликабельная кнопка установки статуса.
         core.STATUSES.forEach(function(st, i) {
             var cls = 'atex-sl-step';
             if (i < curIdx) cls += ' is-past';
@@ -1507,22 +1517,35 @@
         bar.appendChild(steps);
 
         var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
-        if (!core.isDone(cut.status)) {
-            if (core.normalizeStatus(cut.status) === 'В работе') {
-                var pause = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пауза' });
-                pause.addEventListener('click', function() { self.setStatus('Пауза', 'Пауза'); });
-                actions.appendChild(pause);
-            } else {
-                var startText = core.isPauseStatus(cut.status) ? 'Возобновить' : 'Начать';
-                var start = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: startText });
-                start.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
-                actions.appendChild(start);
-            }
-            var done = el('button', { class: 'atex-sl-btn atex-sl-btn-advance', type: 'button', text: 'Завершить' });
-            done.addEventListener('click', function() { self.setStatus('Завершён', 'Завершение резки'); });
-            actions.appendChild(done);
-        } else {
+        if (core.isDone(cut.status)) {
             actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка завершена' }));
+        } else if (core.normalizeStatus(cut.status) === 'Ожидает') {
+            // Ожидает → «В работу» / «Пропустить»
+            var startBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'В работу' });
+            startBtn.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
+            actions.appendChild(startBtn);
+
+            var skipBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пропустить' });
+            skipBtn.addEventListener('click', function() { self.skipCut(); });
+            actions.appendChild(skipBtn);
+        } else if (core.normalizeStatus(cut.status) === 'В работе') {
+            // В работе → «Пауза» / «Завершить» / «Отменить»
+            var pauseBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пауза' });
+            pauseBtn.addEventListener('click', function() { self.addQuickEvent('Пауза'); });
+            actions.appendChild(pauseBtn);
+
+            var doneBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-advance', type: 'button', text: 'Завершить' });
+            doneBtn.addEventListener('click', function() { self.finishCut(); });
+            actions.appendChild(doneBtn);
+
+            var cancelBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отменить' });
+            cancelBtn.addEventListener('click', function() { self.cancelCut(); });
+            actions.appendChild(cancelBtn);
+        } else if (core.isPauseStatus(cut.status)) {
+            // Пауза → «Возобновить»
+            var resumeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Возобновить' });
+            resumeBtn.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
+            actions.appendChild(resumeBtn);
         }
         bar.appendChild(actions);
         return bar;
@@ -1610,7 +1633,8 @@
         return section;
     };
 
-    // Показания счётчика, погонаж, брак, примечания + сохранение в резку.
+    // #3459: Показания счётчика, погонаж (read-only, вычисляемый), брак, примечания.
+    // Счётчик нач. заполняется из остатка партии. Погонаж факт = счётчик кон. − счётчик нач.
     AtexSlitter.prototype.renderReadings = function() {
         var self = this;
         var cut = this.currentCut;
@@ -1620,19 +1644,25 @@
 
         var grid = el('div', { class: 'atex-sl-grid' });
 
+        // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки
         var cStart = numInput(cut.counterStart, '0');
-        cStart.addEventListener('input', function() { cut.counterStart = cStart.value; updateHint(); });
-        grid.appendChild(field('Счётчик нач.', cStart));
+        cStart.addEventListener('input', function() { cut.counterStart = cStart.value; refreshMeterage(); });
+        var cStartField = field('Счётчик нач.', cStart);
+        var cStartHint = el('span', { class: 'atex-sl-hint', text: '' });
+        cStartField.appendChild(cStartHint);
+        grid.appendChild(cStartField);
 
         var cEnd = numInput(cut.counterEnd, '0');
-        cEnd.addEventListener('input', function() { cut.counterEnd = cEnd.value; updateHint(); });
+        cEnd.addEventListener('input', function() { cut.counterEnd = cEnd.value; refreshMeterage(); });
         grid.appendChild(field('Счётчик кон.', cEnd));
 
-        var meterage = numInput(cut.meterage, '0');
-        meterage.addEventListener('input', function() { cut.meterage = meterage.value; });
-        var meterField = field('Погонаж факт, м', meterage);
-        var hint = el('button', { class: 'atex-sl-hint', type: 'button' });
-        meterField.appendChild(hint);
+        // #3459: Погонаж факт — вычисляемый (read-only), не сохраняется в БД отдельно
+        var meterageDisplay = el('input', {
+            class: 'atex-sl-input', type: 'text', readonly: 'readonly',
+            placeholder: 'вычисляется из счётчиков',
+            style: 'background:#f0f0f0;cursor:default'
+        });
+        var meterField = field('Погонаж факт, м (расчёт)', meterageDisplay);
         grid.appendChild(meterField);
 
         var defectM = numInput(cut.defectM, '0');
@@ -1650,7 +1680,7 @@
         defectField.appendChild(defectHint);
         grid.appendChild(defectField);
 
-        // Фото брака: выбор файла (камера на планшете) → multipart в реквизит FILE.
+        // Фото брака
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
         var photoBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Фото брака' });
         var photoStatus = el('span', { class: 'atex-sl-hint', text: cut.defectPhoto ? 'фото загружено' : '' });
@@ -1674,15 +1704,19 @@
         actions.appendChild(saveBtn);
         section.appendChild(actions);
 
-        updateHint();
+        refreshMeterage();
         return section;
 
-        // Подсказка «погонаж из счётчиков»: показывает разницу кон.−нач. и
-        // по клику подставляет её в поле погонажа.
-        function updateHint() {
+        // Обновление подсказок: погонаж = кон. − нач.; остаток партии → счётчик нач.
+        function refreshMeterage() {
             var suggested = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
-            hint.textContent = 'из счётчиков: ' + suggested + ' м';
-            hint.onclick = function() { cut.meterage = String(suggested); meterage.value = suggested; };
+            cut.meterage = String(suggested);
+            meterageDisplay.value = suggested;
+            // Подсказка к счётчику нач.: откуда взято значение
+            var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
+            cStartHint.textContent = batch && batch.remainderM > 0
+                ? ' (остаток партии: ' + core.round3(batch.remainderM) + ' м)'
+                : '';
         }
     };
 
@@ -1742,34 +1776,27 @@
         return card;
     };
 
-    // События смены: быстрое добавление + хронология последних событий.
+    // #3459: События смены — только список событий + кнопки быстрых действий.
+    // Поля ввода (значение, примечания) убраны — события пишутся без доп. полей.
     AtexSlitter.prototype.renderEvents = function() {
         var self = this;
         var section = el('section', { class: 'atex-sl-section' }, [
             el('h3', { class: 'atex-sl-section-title', text: 'События смены' })
         ]);
 
-        var form = el('div', { class: 'atex-sl-event-form' });
-        var valueInp = numInput('', '0');
-        form.appendChild(field('Значение', valueInp));
-
-        var noteInp = el('input', { class: 'atex-sl-input', type: 'text', placeholder: 'Примечания' });
-        form.appendChild(field('Примечания', noteInp));
-
+        // Кнопки быстрых событий (без полей ввода)
         var buttons = el('div', { class: 'atex-sl-event-buttons' });
         ['Обед', 'Переналадка', 'Счётчик', 'Брак'].forEach(function(type) {
             var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: type });
-            btn.addEventListener('click', function() {
-                self.addEvent({ type: type, value: valueInp.value, notes: noteInp.value });
-            });
+            btn.addEventListener('click', function() { self.addQuickEvent(type); });
             buttons.appendChild(btn);
         });
         var closeBtn = el('button', { class: 'atex-sl-btn', type: 'button', text: 'Закрыть смену' });
         closeBtn.addEventListener('click', function() { self.closeShift(); });
         buttons.appendChild(closeBtn);
-        form.appendChild(buttons);
-        section.appendChild(form);
+        section.appendChild(buttons);
 
+        // Хронология событий смены
         var list = el('div', { class: 'atex-sl-events' });
         if (!this.shiftEvents.length) {
             list.appendChild(el('div', { class: 'atex-sl-empty', text: 'Событий смены ещё нет.' }));
@@ -1801,7 +1828,7 @@
         set(CUT_REQ.status, core.normalizeStatus(cut.status));
         set(CUT_REQ.counterStart, num(cut.counterStart));
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
-        set(CUT_REQ.meterage, num(cut.meterage));
+        // #3459: погонаж вычисляемый, в БД не пишется
         set(CUT_REQ.defectM, num(cut.defectM));
         var defM2 = core.defectM2(cut.defectM, cut.materialWidthMm);
         if (defM2 > 0) set(CUT_REQ.defect, defM2);
@@ -1839,11 +1866,179 @@
         });
     };
 
+    // #3459: Быстрое событие без дополнительных полей (Пауза, Обед, Переналадка...).
+    AtexSlitter.prototype.addQuickEvent = function(type) {
+        var self = this;
+        if (this.busy || !this.currentCutId) return;
+        this.setBusy(true);
+        this.createEvent({ type: type }, this.currentCutId).then(function() {
+            return self.loadEvents(self.currentCutId);
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Событие «' + type + '» зафиксировано', 'success');
+            self.renderMain();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Не удалось записать событие: ' + err.message, 'error');
+        });
+    };
+
+    // #3459: Пропустить резку (Ожидает → остаётся Ожидает, пишется событие «Пропуск» с примечанием).
+    AtexSlitter.prototype.skipCut = function() {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+        var reason = (typeof window !== 'undefined' && window.prompt)
+            ? window.prompt('Причина пропуска (обязательно):', '')
+            : '';
+        if (!reason || !String(reason).trim()) {
+            this.notify('Укажите причину пропуска', 'error');
+            return;
+        }
+        this.setBusy(true);
+        this.createEvent({ type: 'Пропуск', notes: String(reason).trim() }, cut.id).then(function() {
+            return self.loadEvents(cut.id);
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Резка пропущена: ' + reason, 'success');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка: ' + err.message, 'error');
+        });
+    };
+
+    // #3459: Отменить резку (В работе → Ожидает, пишется событие «Отмена» с примечанием).
+    AtexSlitter.prototype.cancelCut = function() {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+        var reason = (typeof window !== 'undefined' && window.prompt)
+            ? window.prompt('Причина отмены (обязательно):', '')
+            : '';
+        if (!reason || !String(reason).trim()) {
+            this.notify('Укажите причину отмены', 'error');
+            return;
+        }
+        this.setBusy(true);
+        var rid = reqIdByName(this.meta.cut, CUT_REQ.status);
+        if (!rid) {
+            this.setBusy(false);
+            this.notify('Реквизит «Статус» не найден', 'error');
+            return;
+        }
+        var fields = {};
+        fields['t' + rid] = 'Ожидает';
+        this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
+            cut.status = 'Ожидает';
+            self.cuts.forEach(function(c) {
+                if (String(c.id) === String(cut.id)) c.status = 'Ожидает';
+            });
+            return self.createEvent({ type: 'Отмена', notes: String(reason).trim() }, cut.id);
+        }).then(function() {
+            return self.loadEvents(cut.id);
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Резка отменена: ' + reason, 'success');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка отмены: ' + err.message, 'error');
+        });
+    };
+
+    // #3459: Завершить резку с проверками и обновлением партии.
+    // Проверяет: счётчик нач., счётчик кон., погонаж факт заполнены.
+    // Счётчик кон. → «Остаток, м» партии. Ставит «Закончено», сбрасывает «В работе».
+    AtexSlitter.prototype.finishCut = function() {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+
+        // Проверки заполнения
+        var cStart = core.toNumber(cut.counterStart);
+        var cEnd = core.toNumber(cut.counterEnd);
+        var meterage = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
+        if (!(cStart > 0)) { this.notify('Заполните «Счётчик нач.» перед завершением', 'error'); return; }
+        if (!(cEnd > 0)) { this.notify('Заполните «Счётчик кон.» перед завершением', 'error'); return; }
+        if (meterage <= 0) { this.notify('Погонаж факт не может быть нулевым (счётчик кон. > счётчик нач.)', 'error'); return; }
+
+        this.setBusy(true);
+
+        // 1. Обновить статус резки на «Завершена» + заполнить погонаж и Закончено
+        var meta = this.meta.cut;
+        var statusRid = reqIdByName(meta, CUT_REQ.status);
+        var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
+        var finishedReqName = 'Закончено';
+        var finishedRid = reqIdByName(meta, finishedReqName) || reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
+        var activeReqName = 'В работе';
+        var activeRid = reqIdByAnyName(meta, [activeReqName, 'Активно', 'Действует']);
+
+        var fields = {};
+        if (statusRid) fields['t' + statusRid] = 'Завершена';
+        if (meterageRid) fields['t' + meterageRid] = meterage;
+        if (finishedRid) fields['t' + finishedRid] = this.eventDateTime();
+
+        this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
+            cut.status = 'Завершена';
+            cut.meterage = String(meterage);
+            self.cuts.forEach(function(c) {
+                if (String(c.id) === String(cut.id)) {
+                    c.status = 'Завершена';
+                }
+            });
+
+            // 2. Счётчик кон. → «Остаток, м» партии сырья резки
+            var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
+            var batchMeta = self.meta.batch;
+            if (!batch || !batchMeta) return null;
+            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
+            if (!remReq) return null;
+            var newRem = cEnd; // счётчик кон. становится новым остатком, м
+            var bf = {};
+            bf['t' + remReq] = newRem;
+            // Сброс флага «В работе» у партии
+            if (activeRid && batchMeta) {
+                var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
+                if (batchActiveReq) bf['t' + batchActiveReq] = '';
+            }
+            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
+                batch.remainderM = newRem;
+                if (typeof batch.active !== 'undefined') batch.active = '';
+            });
+        }).then(function() {
+            // 3. Событие «Завершение резки»
+            return self.createEvent({ type: 'Завершение резки', value: String(meterage) }, cut.id);
+        }).then(function() {
+            return self.loadEvents(cut.id);
+        }).then(function() {
+            // #3433: зафиксировать факт рулонов в «Партиях ГП»
+            return self.recordActualRolls(cut);
+        }).then(function() {
+            return self.loadBatches();
+        }).then(function() {
+            self.setBusy(false);
+            self.notify('Резка завершена. Погонаж: ' + meterage + ' м. Остаток партии: ' + (cut.batchId ? self.findBatch(cut.batchId) : {}).remainderM + ' м', 'success');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка завершения: ' + err.message, 'error');
+        });
+    };
+
+    // Установка статуса (не финального) — для переходов Ожидает→В работе и кликов по степперу.
+    // Завершение резки — через finishCut() с проверками и обновлением партии (#3459).
     AtexSlitter.prototype.setStatus = function(status, eventType) {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
-        cut.status = core.normalizeStatus(status);
+        var newStatus = core.normalizeStatus(status);
+        // Финальный статус — только через finishCut
+        if (core.isDone(newStatus)) {
+            this.notify('Для завершения резки используйте кнопку «Завершить»', 'error');
+            return;
+        }
+        cut.status = newStatus;
         this.setBusy(true);
         var rid = reqIdByName(this.meta.cut, CUT_REQ.status);
         if (!rid) {
@@ -1859,7 +2054,6 @@
             fields['t' + startedReq] = cut.startedAt;
         }
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
-            // Обновим статус и в списке слева.
             self.cuts.forEach(function(c) {
                 if (String(c.id) === String(cut.id)) {
                     c.status = cut.status;
@@ -1871,10 +2065,6 @@
         }).then(function() {
             return self.loadEvents(cut.id);
         }).then(function() {
-            // #3433: завершение резки → зафиксировать факт рулонов в «Партиях ГП».
-            if (core.isDone(cut.status)) return self.recordActualRolls(cut);
-            return null;
-        }).then(function() {
             self.setBusy(false);
             self.notify('Статус: ' + cut.status, 'success');
             self.render();
@@ -1884,39 +2074,17 @@
         });
     };
 
+    // #3459: Сохраняет показания (счётчики, брак, примечания) в резку. Погонаж вычисляемый,
+    // в БД не пишется. Остаток партии обновляется только при завершении резки (finishCut).
     AtexSlitter.prototype.saveReadings = function() {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         this.setBusy(true);
-        var meterageNow = core.toNumber(cut.meterage);
-        var meterageWas = core.toNumber(cut.savedMeterage);
-        var delta = meterageNow - meterageWas; // сколько ещё списать с остатка,м
-        var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
-        var batchMeta = this.meta.batch;
-
-        // Порядок «резка → остаток партии» безопасен для повтора: cut.savedMeterage
-        // двигаем только после успеха всей цепочки, поэтому при сбое второго POST
-        // повторное сохранение применит дельту заново без двойного списания.
+        // Сохраняем поля резки (без meterage — он вычисляемый)
         this.post('_m_set/' + cut.id + '?JSON', this.cutFields(cut)).then(function() {
-            // Списываем дельту погонажа с остатка,м партии резки.
-            if (!batch || !batchMeta || delta === 0) return null;
-            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
-            if (!remReq) return null;
-            var newRem = delta > 0
-                ? core.applyConsumption(batch.remainderM, delta)
-                : core.restoreConsumption(batch.remainderM, -delta);
-            var bf = {};
-            bf['t' + remReq] = newRem;
-            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
-                batch.remainderM = newRem;
-            });
-        }).then(function() {
-            cut.savedMeterage = meterageNow;
-            return self.loadBatches();
-        }).then(function() {
             self.setBusy(false);
-            self.notify('Показания сохранены; остаток партии (м) обновлён', 'success');
+            self.notify('Показания сохранены', 'success');
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');
