@@ -174,4 +174,85 @@ assertEqual(core.batchCoverage(rawBatches, ['old', 'new'], cutForCoverage), {
     ]
 }, 'batchCoverage counts whole passes and sums selected batches');
 
+// ─────────────────────── #3460 ───────────────────────
+
+// ── isTimestampSeconds: распознаём unix-секунды (а не любые числа) ──
+var sampleTs = Math.floor(new Date(2026, 5, 18, 14, 30, 0).getTime() / 1000); // локальный TZ
+assertEqual(core.isTimestampSeconds(sampleTs), true, 'isTimestampSeconds: валидный штамп 2026 → true');
+assertEqual(core.isTimestampSeconds('1781758800'), true, 'isTimestampSeconds: пример из issue → true');
+assertEqual(core.isTimestampSeconds('42'), false, 'isTimestampSeconds: маленькое число → false');
+assertEqual(core.isTimestampSeconds('12,5'), false, 'isTimestampSeconds: не целое → false');
+assertEqual(core.isTimestampSeconds(''), false, 'isTimestampSeconds: пусто → false');
+assertEqual(core.isTimestampSeconds('Резка'), false, 'isTimestampSeconds: текст → false');
+
+// ── formatClock: штамп → ЧЧ:ММ (локальное время, как и конструкция) ──
+assertEqual(core.formatClock(sampleTs), '14:30', 'formatClock: штамп → 14:30');
+assertEqual(core.formatClock('Резка'), 'Резка', 'formatClock: не штамп → как есть');
+assertEqual(core.formatClock(''), '', 'formatClock: пусто → пусто');
+
+// ── formatDate: штамп → ДД.ММ.ГГГГ ──
+assertEqual(core.formatDate(sampleTs), '18.06.2026', 'formatDate: штамп → 18.06.2026');
+assertEqual(core.formatDate('—'), '—', 'formatDate: не штамп → как есть');
+
+// ── cutTitle: «Резка ЧЧ:ММ» из штампа, иначе «Резка №…» ──
+assertEqual(core.cutTitle(sampleTs), 'Резка 14:30', 'cutTitle: штамп → Резка 14:30');
+assertEqual(core.cutTitle('7'), 'Резка №7', 'cutTitle: обычный номер → Резка №7');
+assertEqual(core.cutTitle(''), 'Резка', 'cutTitle: пусто → Резка');
+
+// ── humanizeLabel: штамп → дата, прочее → как есть ──
+assertEqual(core.humanizeLabel(sampleTs), '18.06.2026', 'humanizeLabel: штамп → дата');
+assertEqual(core.humanizeLabel('Партия 17'), 'Партия 17', 'humanizeLabel: текст → как есть');
+
+// ── isForeignWarehouse: склад «Атех» — чужой (другой склад) ──
+assertEqual(core.isForeignWarehouse('Атех'), true, 'isForeignWarehouse: Атех → true');
+assertEqual(core.isForeignWarehouse('Склад Атех №2'), true, 'isForeignWarehouse: вхождение подстроки → true');
+assertEqual(core.isForeignWarehouse('атех'), true, 'isForeignWarehouse: регистронезависимо');
+assertEqual(core.isForeignWarehouse('Основной'), false, 'isForeignWarehouse: другой склад → false');
+assertEqual(core.isForeignWarehouse(''), false, 'isForeignWarehouse: пусто → false');
+
+// ── rowsToActiveBatches: разбор строк отчёта material_batches (JSON_KV) ──
+var reportRows = [
+    { batch_id: '10', batch_no: 'A-100', batch_material: 'ПЭТ 12', batch_remainder_m: '700', batch_warehouse: 'Основной' },
+    { batch_id: '11', batch_no: 'A-101', batch_material: 'ПЭТ 12', batch_remainder_m: '950', batch_warehouse: 'Атех' }
+];
+var parsedBatches = core.rowsToActiveBatches(reportRows);
+assertEqual(parsedBatches.map(function(b) { return b.id; }), ['10', '11'], 'rowsToActiveBatches: id из batch_id');
+assertEqual(parsedBatches.map(function(b) { return b.label; }), ['A-100', 'A-101'], 'rowsToActiveBatches: label из batch_no');
+assertEqual(parsedBatches.map(function(b) { return b.remainderM; }), [700, 950], 'rowsToActiveBatches: остаток,м числом');
+assertEqual(parsedBatches.map(function(b) { return b.materialLabel; }), ['ПЭТ 12', 'ПЭТ 12'], 'rowsToActiveBatches: вид сырья');
+assertEqual(parsedBatches.map(function(b) { return b.foreign; }), [false, true], 'rowsToActiveBatches: склад Атех → foreign');
+
+// ── availableBatchesForCut: партии по названию вида сырья (id может отсутствовать) ──
+var cutByLabel = { materialLabel: 'ПЭТ 12', runLength: 400, plannedRuns: 3 };
+assertEqual(core.availableBatchesForCut(parsedBatches, cutByLabel).map(function(b) { return b.id; }),
+    ['10', '11'], 'availableBatchesForCut: сопоставление по названию вида сырья');
+
+// ── batchMatchesCut: фолбэк на название, когда нет id ──
+assertEqual(core.batchMatchesCut({ materialLabel: 'ПЭТ 12' }, { materialLabel: 'ПЭТ 12' }), true,
+    'batchMatchesCut: совпадение по названию');
+assertEqual(core.batchMatchesCut({ materialLabel: 'БОПП 20' }, { materialLabel: 'ПЭТ 12' }), false,
+    'batchMatchesCut: разные названия → false');
+assertEqual(core.batchMatchesCut({ materialId: 'm1', materialLabel: 'ПЭТ 12' }, { materialId: 'm1' }), true,
+    'batchMatchesCut: совпадение по id в приоритете');
+
+// ── раскладка ножей: ножи за проход, занятая ширина, проценты, остаток ──
+var strips = [
+    { width: '300', qty: '2', purpose: 'заказ' },
+    { width: '200', qty: '1', purpose: 'склад' }
+];
+assertEqual(core.totalKnives(strips), 3, 'totalKnives: Σ кол-во полос = 3 (ножа за проход)');
+assertEqual(core.usedWidth(strips), 800, 'usedWidth: 300×2 + 200×1 = 800');
+assertEqual(core.purposeKind('заказ'), 'order', 'purposeKind: заказ → order');
+assertEqual(core.purposeKind('склад'), 'stock', 'purposeKind: склад → stock');
+assertEqual(core.purposeKind('отход'), 'waste', 'purposeKind: отход → waste');
+assertEqual(core.purposeKind('прочее'), 'other', 'purposeKind: иное → other');
+var layout = core.computeLayout(1000, strips, null);
+assertEqual(layout.usedWidth, 800, 'computeLayout: занятая ширина 800');
+assertEqual(layout.remainder, 200, 'computeLayout: остаток входа 1000−800 = 200');
+assertEqual(layout.overflow, false, 'computeLayout: без переполнения');
+assertEqual(layout.segments.length, 3, 'computeLayout: 3 сегмента (по одному на нож)');
+assertEqual(core.widthPercent(300, layout), 30, 'widthPercent: 300 из 1000 → 30%');
+var overflowLayout = core.computeLayout(700, strips, null);
+assertEqual(overflowLayout.overflow, true, 'computeLayout: полосы шире входа → overflow');
+
 console.log('\n' + passed + ' assertions passed');
