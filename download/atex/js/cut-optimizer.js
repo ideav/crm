@@ -74,6 +74,10 @@
     var DEFAULT_ORDER_STATUS = 'Новый';
     var DEFAULT_POSITION_STATUS = 'Новая';
     var MAX_MAPS = 3;
+    // Длина рулона по умолчанию и набор стандартных длин для выбора (можно ввести
+    // свою). Список — по частоте использования в заказах (м).
+    var DEFAULT_LENGTH = 450;
+    var LENGTH_PRESETS = [300, 600, 700, 900, 1000];
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
 
@@ -472,6 +476,7 @@
         this.actualWidthIndex = {};
         this.materialId = '';
         this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние)
+        this.lengthValue = String(DEFAULT_LENGTH); // длина рулона по умолчанию (#3474-fix)
         this.plan = null;
         this.busy = false;
     }
@@ -651,15 +656,20 @@
         var dims = el('div', { class: 'atex-co-grid2' });
         this.widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
             placeholder: 'напр. 910', value: this.widthValue || '' });
+        // Длина рулона: выбор из стандартного списка с возможностью ввести свою.
+        var lengthListId = 'atex-co-length-list';
+        var lengthList = el('datalist', { id: lengthListId },
+            LENGTH_PRESETS.map(function(v) { return el('option', { value: String(v) }); }));
         this.lengthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
-            placeholder: 'напр. 4000', value: this.lengthValue || '' });
+            list: lengthListId, autocomplete: 'off', placeholder: 'напр. 450',
+            value: (this.lengthValue == null || this.lengthValue === '') ? String(DEFAULT_LENGTH) : this.lengthValue });
         this.widthInput.addEventListener('input', function() { self.widthValue = self.widthInput.value; self.maybeRecalc(); });
         this.lengthInput.addEventListener('input', function() { self.lengthValue = self.lengthInput.value; self.maybeRecalc(); });
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Ширина входа (джамбо), мм' }), this.widthInput
         ]));
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
-            el('label', { class: 'atex-co-label', text: 'Длина рулона, м' }), this.lengthInput
+            el('label', { class: 'atex-co-label', text: 'Длина рулона, м' }), this.lengthInput, lengthList
         ]));
         form.appendChild(dims);
 
@@ -712,10 +722,10 @@
         this.materialId = String(id || '');
         var m = this.materialById(this.materialId);
         if (m) {
+            // Подставляем только ширину джамбо; длину рулона задаёт пользователь
+            // (по умолчанию 450, выбор из списка стандартных длин), материал её не диктует.
             if (this.widthInput) this.widthInput.value = String(m.width || '');
-            if (this.lengthInput) this.lengthInput.value = String(m.length || '');
             this.widthValue = String(m.width || '');
-            this.lengthValue = String(m.length || '');
         }
         this.maybeRecalc();
     };
