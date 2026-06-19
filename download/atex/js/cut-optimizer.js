@@ -857,7 +857,13 @@
     AtexCutOptimizer.prototype.renderSummary = function(p) {
         var summary = el('div', { class: 'atex-co-summary' });
         // Главные параметры (req #3474.5) — выделены классом is-primary (цветом).
-        summary.appendChild(metric('Итого рулонов', p.totalProduced + ' / ' + p.totalDesired, true));
+        // «Итого рулонов» — «<получится> из <желаемо>»; число «получится» это то,
+        // что сообщают клиенту, поэтому выделено отдельно (atex-co-rolls-got).
+        var rolls = el('span', { class: 'atex-co-rolls' }, [
+            el('span', { class: 'atex-co-rolls-got', text: String(p.totalProduced) }),
+            el('span', { class: 'atex-co-rolls-of', text: ' из ' + p.totalDesired })
+        ]);
+        summary.appendChild(metric('Итого рулонов', rolls, true));
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
         summary.appendChild(metric('Карт раскроя', p.mapCount));
         summary.appendChild(metric('Всего резок', p.totalPasses));
@@ -865,9 +871,12 @@
         return summary;
 
         function metric(label, value, primary) {
+            var valueEl = el('span', { class: 'atex-co-metric-value' });
+            if (value && value.nodeType) valueEl.appendChild(value);
+            else valueEl.textContent = String(value);
             return el('div', { class: 'atex-co-metric' + (primary ? ' is-primary' : '') }, [
                 el('span', { class: 'atex-co-metric-label', text: label }),
-                el('span', { class: 'atex-co-metric-value', text: String(value) })
+                valueEl
             ]);
         }
     };
