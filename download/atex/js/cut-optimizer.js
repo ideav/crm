@@ -455,6 +455,25 @@
         return idx >= 0 ? r[idx] : undefined;
     }
 
+    // Номер партии сырья (batch_no) = главное значение «Партии сырья», а это поле
+    // DATETIME — приходит unix-штампом в СЕКУНДАХ (дата+время прихода), а не номером.
+    // Форматируем «ДД.ММ.ГГГГ ЧЧ:ММ» (через AtexRefSearch.formatDateTime); не-штамп
+    // (короткий id/строка) возвращаем как есть.
+    function formatBatchTimestamp(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!/^\d+$/.test(s) || Number(s) < 1000000000) return s;
+        if (typeof window !== 'undefined' && window.AtexRefSearch &&
+            typeof window.AtexRefSearch.formatDateTime === 'function') {
+            var f = window.AtexRefSearch.formatDateTime(s);
+            if (f) return String(f);
+        }
+        var d = new Date(Number(s) * 1000);
+        if (isNaN(d.getTime())) return s;
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
+            ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
     // id реквизита таблицы по любому из имён (для записи t{reqId}=...).
     function reqIdByNames(meta, names) {
         if (!meta) return '';
@@ -761,7 +780,7 @@
             var insufficient = neededM2 > 0 && b.remainderM2 < neededM2;
             var row = el('div', { class: 'atex-co-batch' + (insufficient ? ' is-insufficient' : '') });
             if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
-            row.appendChild(el('span', { class: 'atex-co-batch-no', text: b.no || ('#' + b.id) }));
+            row.appendChild(el('span', { class: 'atex-co-batch-no', text: formatBatchTimestamp(b.no) || ('#' + b.id) }));
             row.appendChild(el('span', { class: 'atex-co-batch-rem', text: b.remainderM2 + ' м²' }));
             row.appendChild(el('span', { class: 'atex-co-batch-flag', text: 'В работе' }));
             box.appendChild(row);
