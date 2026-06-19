@@ -71,7 +71,7 @@ window.fetch = function(url, opts) {
     if (/\/object\/200\//.test(u)) return json(SLEEVES);
     if (/\/object\/103\//.test(u)) return json(CLIENTS);
     if (/\/object\/107\//.test(u)) return json(ORDERS);
-    if (/\/report\/nextOrder/i.test(u)) return json([{ next: 1003 }]);
+    if (/\/report\/nextOrder/i.test(u)) return json([{ 'Заказ': '3690' }]); // как в БД ateh
     return json([]);
 };
 </script>

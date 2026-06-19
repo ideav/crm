@@ -871,11 +871,17 @@
             });
             return max > 0 ? String(max + 1) : '';
         }
+        // Отчёт ateh `nextOrder` отдаёт JSON_KV `[{"Заказ":"3690"}]`; на всякий
+        // случай распознаём и иные имена колонки, иначе берём единственную колонку.
         return this.getJson('report/nextOrder?JSON_KV').then(function(data) {
             var row = Array.isArray(data) ? data[0] : data;
-            var val = row && (row.next != null ? row.next : (row.nextOrder != null ? row.nextOrder
-                : (row.next_order != null ? row.next_order : (row.order_no != null ? row.order_no : null))));
-            if (val == null && row && typeof row === 'object') {
+            if (!row || typeof row !== 'object') return fromList();
+            var names = ['Заказ', 'next', 'nextOrder', 'next_order', 'order_no'];
+            var val = null;
+            for (var i = 0; i < names.length && val == null; i++) {
+                if (row[names[i]] != null) val = row[names[i]];
+            }
+            if (val == null) {
                 var keys = Object.keys(row);
                 if (keys.length === 1) val = row[keys[0]];
             }
