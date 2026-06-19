@@ -89,6 +89,42 @@
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 
+/* Комбобокс «Длина рулона» (#3482): свой ввод + полный нефильтруемый список */
+.atex-co-combo { position: relative; }
+.atex-co-combo-input { padding-right: 30px; }
+.atex-co-combo-caret {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--co-muted);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+}
+.atex-co-combo-caret:hover { color: var(--co-accent); }
+.atex-co-combo-list {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    right: 0;
+    top: calc(100% + 2px);
+    max-height: 220px;
+    overflow: auto;
+    background: var(--co-bg);
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .14);
+}
+.atex-co-combo.is-open .atex-co-combo-list { display: block; }
+.atex-co-combo-item { padding: 7px 10px; cursor: pointer; }
+.atex-co-combo-item:hover { background: var(--co-surface); }
+.atex-co-combo-item.is-active { background: var(--co-surface); font-weight: 600; color: var(--co-accent); }
+
 .atex-co-rows-head { margin: 6px 0 6px; }
 .atex-co-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .atex-co-row {
