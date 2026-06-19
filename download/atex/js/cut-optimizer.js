@@ -75,9 +75,10 @@
     var DEFAULT_POSITION_STATUS = 'Новая';
     var MAX_MAPS = 3;
     // Длина рулона по умолчанию и набор стандартных длин для выбора (можно ввести
-    // свою). Список — по частоте использования в заказах (м).
+    // свою). Список показывается целиком, без фильтрации по введённому значению,
+    // и включает значение по умолчанию (#3482).
     var DEFAULT_LENGTH = 450;
-    var LENGTH_PRESETS = [300, 600, 700, 900, 1000];
+    var LENGTH_PRESETS = [300, 450, 600, 700, 900, 1000];
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
 
@@ -656,20 +657,16 @@
         var dims = el('div', { class: 'atex-co-grid2' });
         this.widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
             placeholder: 'напр. 910', value: this.widthValue || '' });
-        // Длина рулона: выбор из стандартного списка с возможностью ввести свою.
-        var lengthListId = 'atex-co-length-list';
-        var lengthList = el('datalist', { id: lengthListId },
-            LENGTH_PRESETS.map(function(v) { return el('option', { value: String(v) }); }));
-        this.lengthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
-            list: lengthListId, autocomplete: 'off', placeholder: 'напр. 450',
-            value: (this.lengthValue == null || this.lengthValue === '') ? String(DEFAULT_LENGTH) : this.lengthValue });
         this.widthInput.addEventListener('input', function() { self.widthValue = self.widthInput.value; self.maybeRecalc(); });
-        this.lengthInput.addEventListener('input', function() { self.lengthValue = self.lengthInput.value; self.maybeRecalc(); });
+        // Длина рулона: комбобокс — выбор из полного (нефильтруемого) списка
+        // стандартных длин с возможностью ввести свою (#3482).
+        var lengthCombo = this.makeLengthCombo();
+        this.lengthInput = lengthCombo.input;
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Ширина входа (джамбо), мм' }), this.widthInput
         ]));
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
-            el('label', { class: 'atex-co-label', text: 'Длина рулона, м' }), this.lengthInput, lengthList
+            el('label', { class: 'atex-co-label', text: 'Длина рулона, м' }), lengthCombo.node
         ]));
         form.appendChild(dims);
 
@@ -716,6 +713,49 @@
             });
             box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput, del]));
         });
+    };
+
+    // Комбобокс «Длина рулона»: текстовое поле (свой ввод) + кнопка-стрелка,
+    // открывающая ПОЛНЫЙ список стандартных длин без фильтрации по значению (#3482).
+    AtexCutOptimizer.prototype.makeLengthCombo = function() {
+        var self = this;
+        var input = el('input', { class: 'atex-co-input atex-co-combo-input', type: 'text', inputmode: 'decimal',
+            autocomplete: 'off', placeholder: 'напр. 450', role: 'combobox',
+            value: (this.lengthValue == null || this.lengthValue === '') ? String(DEFAULT_LENGTH) : this.lengthValue });
+        var caret = el('button', { class: 'atex-co-combo-caret', type: 'button', tabindex: '-1',
+            'aria-label': 'Показать список длин', text: '▾' });
+        var listEl = el('div', { class: 'atex-co-combo-list', role: 'listbox' });
+        var wrap = el('div', { class: 'atex-co-combo' }, [input, caret, listEl]);
+
+        function rebuild() {
+            listEl.innerHTML = '';
+            LENGTH_PRESETS.forEach(function(v) {
+                var active = String(v) === String(input.value).trim();
+                var item = el('div', { class: 'atex-co-combo-item' + (active ? ' is-active' : ''),
+                    role: 'option', text: String(v) + ' м' });
+                item.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    input.value = String(v);
+                    self.lengthValue = String(v);
+                    closeList();
+                    self.maybeRecalc();
+                });
+                listEl.appendChild(item);
+            });
+        }
+        function openList() { rebuild(); wrap.classList.add('is-open'); }
+        function closeList() { wrap.classList.remove('is-open'); }
+        function isOpen() { return wrap.classList.contains('is-open'); }
+
+        caret.addEventListener('mousedown', function(e) { e.preventDefault(); if (isOpen()) closeList(); else openList(); input.focus(); });
+        input.addEventListener('focus', openList);
+        // Ввод своей длины: список НЕ фильтруем — показываем целиком (только
+        // подсвечиваем совпадение), значение пересчитывает раскладку.
+        input.addEventListener('input', function() { self.lengthValue = input.value; rebuild(); self.maybeRecalc(); });
+        input.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeList(); });
+        document.addEventListener('mousedown', function(e) { if (!wrap.contains(e.target)) closeList(); });
+
+        return { node: wrap, input: input };
     };
 
     AtexCutOptimizer.prototype.onMaterialChange = function(id) {
