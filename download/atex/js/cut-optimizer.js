@@ -653,6 +653,8 @@
             placeholder: 'напр. 910', value: this.widthValue || '' });
         this.lengthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
             placeholder: 'напр. 4000', value: this.lengthValue || '' });
+        this.widthInput.addEventListener('input', function() { self.widthValue = self.widthInput.value; self.maybeRecalc(); });
+        this.lengthInput.addEventListener('input', function() { self.lengthValue = self.lengthInput.value; self.maybeRecalc(); });
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Ширина входа (джамбо), мм' }), this.widthInput
         ]));
@@ -670,7 +672,7 @@
         this.renderRows();
 
         var addBtn = el('button', { class: 'atex-co-btn atex-co-btn-secondary', type: 'button', text: '+ Добавить ширину' });
-        addBtn.addEventListener('click', function() { self.rows.push({ width: '', qty: '1' }); self.renderRows(); });
+        addBtn.addEventListener('click', function() { self.rows.push({ width: '', qty: '1' }); self.renderRows(); self.maybeRecalc(); });
         form.appendChild(addBtn);
 
         var calcBtn = el('button', { class: 'atex-co-btn atex-co-btn-primary', type: 'button', text: 'Рассчитать' });
@@ -690,15 +692,17 @@
         this.rows.forEach(function(row, idx) {
             var widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
                 placeholder: 'ширина, мм', value: row.width });
-            widthInput.addEventListener('input', function() { row.width = widthInput.value; });
-            var qtyInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'numeric',
-                placeholder: 'кол-во', value: row.qty });
-            qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; });
+            widthInput.addEventListener('input', function() { row.width = widthInput.value; self.maybeRecalc(); });
+            // Кол-во — целое, числовое, шаг 5 (#3478).
+            var qtyInput = el('input', { class: 'atex-co-input', type: 'number', inputmode: 'numeric',
+                min: '0', step: '5', placeholder: 'кол-во', value: row.qty });
+            qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; self.maybeRecalc(); });
             var del = el('button', { class: 'atex-co-row-del', type: 'button', title: 'Удалить', text: '×' });
             del.addEventListener('click', function() {
                 self.rows.splice(idx, 1);
                 if (!self.rows.length) self.rows.push({ width: '', qty: '1' });
                 self.renderRows();
+                self.maybeRecalc();
             });
             box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput, del]));
         });
@@ -713,6 +717,7 @@
             this.widthValue = String(m.width || '');
             this.lengthValue = String(m.length || '');
         }
+        this.maybeRecalc();
     };
 
     // ── Расчёт ──
@@ -726,7 +731,17 @@
             actualWidthIndex: this.actualWidthIndex,
             maxMaps: MAX_MAPS
         });
+        this.calculated = true;   // после первого расчёта правки полей пересчитывают раскладку (#3478)
         this.renderResult();
+    };
+
+    // Живой пересчёт раскладки при изменении полей — только после первого
+    // «Рассчитать» (#3478). Дебаунс, чтобы не пересчитывать на каждое нажатие.
+    AtexCutOptimizer.prototype.maybeRecalc = function() {
+        if (!this.calculated) return;
+        var self = this;
+        if (this._recalcTimer) clearTimeout(this._recalcTimer);
+        this._recalcTimer = setTimeout(function() { self._recalcTimer = null; self.calculate(); }, 200);
     };
 
     AtexCutOptimizer.prototype.renderResult = function() {
