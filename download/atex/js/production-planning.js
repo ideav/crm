@@ -743,9 +743,16 @@
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
-                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
+                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
+                    // #3472: лидеры резки (из cut_leader по всем строкам). Новые резки —
+                    // один лидер; легаси (до ограничения по лидеру) могут мешать несколько.
+                    leaders: []
                 };
                 order.push(cutId);
+            }
+            if (cutId && cutsById[cutId]) {
+                var leaderVal = str(row.cut_leader).trim();
+                if (leaderVal && cutsById[cutId].leaders.indexOf(leaderVal) < 0) cutsById[cutId].leaders.push(leaderVal);
             }
             var supplyId = str(row.supply_id);
             if (supplyId) {
@@ -881,6 +888,11 @@
                 length: length,
                 windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
                 windLength: windLengthValue(windLengthRaw),
+                // #3472: «Лидер» заказа — отдельное измерение профиля планирования (заказы
+                // с разным лидером нельзя класть в одну резку, она заправляется одним
+                // лидером). Отчёт positions_list пока может не отдавать колонку — тогда
+                // пусто и разбиения по лидеру нет (как order_id в #3433).
+                leader: rowFirstValue(row, ['position_leader', 'order_leader']),
                 // #3340: тип втулки и готовность приходят прямо из positions_list:
                 // sleeve_id — id записи «Диаметр втулки»; sleeve_ready (непустое) — уже нарезано.
                 sleeveId: row.sleeve_id == null ? '' : String(row.sleeve_id).trim(),
@@ -926,22 +938,33 @@
         return true;
     }
 
+    function planningLeaderKey(p) {
+        return String(p && p.leader != null ? p.leader : '').trim();
+    }
+
+    // #3472: профиль планирования = сырьё + намотка + длина + ЛИДЕР. Лидер добавлен как
+    // отдельное измерение — заказы с разным лидером идут в разные резки (резка заправляется
+    // одним лидером). group.key (для добора ходовыми) остаётся БЕЗ лидера: ходовые ширины
+    // от лидера не зависят. Пустой лидер у всех (отчёт ещё не отдаёт колонку) → разбиения нет.
     function groupPositionsByPlanningProfile(positions) {
         var groups = {};
         var order = [];
         (positions || []).forEach(function(p) {
-            var key = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
-            if (!groups[key]) {
-                groups[key] = {
-                    key: key,
+            var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
+            var leader = planningLeaderKey(p);
+            var groupKey = prefKey + '|L=' + leader;
+            if (!groups[groupKey]) {
+                groups[groupKey] = {
+                    key: prefKey,
+                    leader: leader,
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
                     positions: []
                 };
-                order.push(key);
+                order.push(groupKey);
             }
-            groups[key].positions.push(p);
+            groups[groupKey].positions.push(p);
         });
         return order.map(function(key) { return groups[key]; });
     }
@@ -1096,10 +1119,14 @@
     // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
     // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
     //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
-    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база);
+    //   KNIFE_MOVE — стоимость ОДНОГО перемещения ножа (#3472, позиционная модель: цена
+    //     ножей = KNIFE_MOVE × число переставленных ножей; идентичные полосы → 0);
+    //   KNIFE — устар.: прежняя плоская «смена ножей» (оставлен для совместимости настроек);
+    //   BETWEEN_CUTS — лидер между резками (база);
     //   CLEANUP_SHIFT — уборка в конце рабочего дня (#3155, ставится после последней резки дня).
-    // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
-    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
+    // #3472: приоритет — неизменность полос (0), затем меньше перемещений (2×ножи),
+    // смена сырья (15); полная смена ~16 ножей ≈ 32 ≈ прежняя «смена ножей» 30.
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -1121,6 +1148,31 @@
         return d;
     }
 
+    // #3472: число НОЖЕЙ для перестановки prev→next. Нож, чья ширина есть в ОБОИХ
+    // наборах, сохраняется (не двигается) — это приоритет неизменности полос. Поэтому
+    // moves = max(|prev|, |next|) − |пересечение мультимножеств ширин|: добавить/убрать
+    // нож = 1 перемещение, сменить ширину = 1, идентичный набор = 0. (Смена количества —
+    // частный случай перемещений, отдельно не штрафуем.)
+    function knifeMoves(prevWidths, nextWidths){
+        function tally(arr){ var m = {}; (arr || []).forEach(function(x){ var k = String(x); m[k] = (m[k] || 0) + 1; }); return m; }
+        var a = prevWidths || [], b = nextWidths || [];
+        var ta = tally(a), tb = tally(b), inter = 0;
+        Object.keys(ta).forEach(function(k){ if (tb[k]) inter += Math.min(ta[k], tb[k]); });
+        return Math.max(a.length, b.length) - inter;
+    }
+
+    // Ширины ножей резки для knifeMoves. В реальных данных knifeWidths развёрнут по числу
+    // ножей (длина == knifeCount, см. aggregateStrips). Если ширины не развёрнуты
+    // (placeholder/пусто), а число ножей задано — дополняем сентинелом «нож без известной
+    // ширины», чтобы перестановка считалась по числу ножей (фоллбэк совместимости).
+    function effKnifeWidths(cut){
+        var w = (cut && cut.knifeWidths) || [];
+        var keys = w.map(function(x){ return String(Number(x)); });
+        var n = Number(cut && cut.knifeCount) || 0;
+        while (keys.length < n) keys.push('·');
+        return keys;
+    }
+
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
@@ -1134,17 +1186,20 @@
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
-        var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
+        var moveCost = Number(t.KNIFE_MOVE != null ? t.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE) || 0;
         var parts = [];
         if (!prev || !next) return parts;
         var matWindChange = String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
             || String(prev.batchId) !== String(next.batchId);
         if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
-        var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
-            || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
-            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
-        if (knifeChange && knife > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knife) });
+        // #3472: стоимость ножей = KNIFE_MOVE × число переставленных ножей (позиционно;
+        // нож с сохранённой шириной не двигаем — приоритет неизменности полос). Сужение
+        // ролика требует переустановки края → минимум одно перемещение.
+        var moves = knifeMoves(effKnifeWidths(prev), effKnifeWidths(next));
+        if ((Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0)) moves = Math.max(moves, 1);
+        var knifeMin = round3(moveCost * moves);
+        if (knifeMin > 0) parts.push({ code: 'KNIFE', label: 'перестановка ножей / сужение ролика', minutes: knifeMin });
         return parts;
     }
 
@@ -3059,6 +3114,7 @@
         PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
+        knifeMoves: knifeMoves,
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
@@ -3751,6 +3807,8 @@
             self.changeTimes = {
                 MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
                 KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
+                // #3472: стоимость одного перемещения ножа (код «KNIFE_MOVE»); дефолт 2 мин.
+                KNIFE_MOVE: raw.KNIFE_MOVE != null ? raw.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE,
                 BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS,
                 CLEANUP_SHIFT: raw.CLEANUP_SHIFT != null ? raw.CLEANUP_SHIFT : DEFAULT_OP_TIMES.CLEANUP_SHIFT
             };
@@ -6383,6 +6441,18 @@
             // он стоял по центру (равный flex-gap слева и справа): «MR194 IN — 600 х 7».
             infoChildren.push(el('span', { class: 'atex-pp-cut-dash', text: '—' }));
             infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: formatCutDimensions(c, runLengthForCut) }));
+            // #3472: лидер резки — после размеров (перед связями, которые прижаты вправо).
+            // Один лидер — обычная плашка; несколько (легаси-смешение до ограничения по
+            // лидеру) — выделяем предупреждением.
+            var cutLeaders = (c.leaders || []).filter(function(s) { return s; });
+            if (cutLeaders.length) {
+                var mixed = cutLeaders.length > 1;
+                infoChildren.push(el('span', {
+                    class: 'atex-pp-cut-leader' + (mixed ? ' atex-pp-cut-leader-mixed' : ''),
+                    title: (mixed ? 'В резке смешаны разные лидеры: ' : 'Лидер: ') + cutLeaders.join(', '),
+                    text: 'лидер: ' + cutLeaders.join(', ')
+                }));
+            }
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
             cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
 

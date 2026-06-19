@@ -224,6 +224,17 @@
     text-align: right;
     white-space: nowrap;
 }
+/* #3472: лидер резки. Смешанные лидеры (легаси) — предупреждающий стиль. */
+.atex-pp-cut-leader {
+    flex: 0 0 auto;
+    font-size: 12px;
+    color: var(--pp-muted);
+    white-space: nowrap;
+}
+.atex-pp-cut-leader-mixed {
+    color: var(--pp-danger, #c0392b);
+    font-weight: 600;
+}
 /* #3354 п.1: сводка полос по ширинам под первой строкой карточки. Контейнер —
    .atex-pp-cut-material (переиспользован), одна текстовая строка на ширину. */
 .atex-pp-cut-material {
