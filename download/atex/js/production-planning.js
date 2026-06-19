@@ -515,12 +515,43 @@
         return planDateDayKey(pd) === planDateDayKey(sd);
     }
 
+    // #3475: задания и обеспечения выбранного дня — мишени кнопки «Удалить». Берём резки
+    // с непустой плановой датой именно этого дня (незавершённые); недатированные резки к
+    // дню не относим. Обеспечения — все, чьё cutId входит в набор резок дня. Чистая
+    // функция (без контроллера/сети), чтобы покрыть отбор тестами.
+    function dayDeletionTargets(cuts, supplies, selectedDate) {
+        var sd = String(selectedDate == null ? '' : selectedDate).trim();
+        if (sd === '') return { cuts: [], supplies: [] };
+        var dayKey = planDateDayKey(sd);
+        var dayCuts = (cuts || []).filter(function(c) {
+            if (!c) return false;
+            if (String(c.status || '').trim() === 'Завершён') return false;
+            var pd = String(c.planDate || '').trim();
+            if (pd === '') return false;
+            return planDateDayKey(pd) === dayKey;
+        });
+        var cutIds = {};
+        dayCuts.forEach(function(c) { cutIds[String(c.id)] = true; });
+        var daySupplies = (supplies || []).filter(function(s) {
+            return s && cutIds[String(s.cutId)] === true;
+        });
+        return { cuts: dayCuts, supplies: daySupplies };
+    }
+
     // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
     function todayISO() {
         var d = new Date();
         var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
         var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
         return d.getFullYear() + '-' + m + '-' + day;
+    }
+
+    // #3475: «ГГГГ-ММ-ДД» → «ДД.ММ.ГГГГ» для подписей (подтверждение/тост удаления дня).
+    // Чужой формат не трогаем — возвращаем как есть.
+    function formatPlanDayLabel(dateStr) {
+        var s = String(dateStr == null ? '' : dateStr).trim();
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+        return m ? (m[3] + '.' + m[2] + '.' + m[1]) : s;
     }
 
     // Полночь (мс) базовой даты планирования: дата из фильтра «.atex-pp-input»
@@ -3068,6 +3099,7 @@
         cutSearchHaystack: cutSearchHaystack,
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
+        dayDeletionTargets: dayDeletionTargets,
         planDateDayKey: planDateDayKey,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
@@ -4309,6 +4341,83 @@
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка удаления связи: ' + err.message, 'error');
+        });
+    };
+
+    // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение
+    // (сколько резок/обеспечений будет удалено), затем зовёт runDeleteDayTasks. День —
+    // «Дата плана» из фильтра (this.filter.date); без даты удалять нечего (неоднозначно).
+    AtexProductionPlanning.prototype.deleteDayTasks = function(actionsEl) {
+        var self = this;
+        if (this.busy) return;
+        var dateStr = String(this.filter && this.filter.date || '').trim();
+        if (dateStr === '') {
+            this.notify('Выберите «Дату плана», чтобы удалить задания дня', 'error');
+            return;
+        }
+        var targets = dayDeletionTargets(this.cuts, this.supplies, dateStr);
+        var dateLabel = formatPlanDayLabel(dateStr);
+        if (!targets.cuts.length) {
+            this.notify('Нет заданий за ' + dateLabel + ' для удаления', 'info');
+            return;
+        }
+        // Снять прежнюю плашку подтверждения (генерации/удаления), если висит.
+        var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
+        var oldBar = host && host.querySelector && host.querySelector('.atex-pp-confirm-bar');
+        if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
+
+        var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+            'Удалить все задания за ' + dateLabel + '? Будет удалено: заданий — ' + targets.cuts.length +
+            ', обеспечений — ' + targets.supplies.length + '. Действие необратимо.' });
+        this.confirmAction(msg, host, [
+            { label: 'Удалить', warning: true, inline: true, onConfirm: function() {
+                self.runDeleteDayTasks(targets.cuts, targets.supplies, dateLabel);
+            } }
+        ]);
+    };
+
+    // #3475: последовательное удаление заданий дня. Порядок принципиален: сперва все
+    // «Обеспечение» (они ссылаются на «Партии ГП» — подчинённые резки; пока ссылки живы,
+    // _m_del резки вернёт 409, см. DeleteTreeRefsCount в index.php), затем сами резки —
+    // backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход сырья.
+    AtexProductionPlanning.prototype.runDeleteDayTasks = function(cuts, supplies, dateLabel) {
+        var self = this;
+        if (this.busy) return;
+        var supplyIds = (supplies || []).map(function(s) { return String(s.id); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var cutIds = (cuts || []).map(function(c) { return String(c.id); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var total = supplyIds.length + cutIds.length;
+        if (!total) { this.notify('Нечего удалять', 'info'); return; }
+
+        this.setBusy(true);
+        this.showProgress('Удаление заданий за ' + dateLabel + '…', total);
+        var done = 0;
+        function del(id) {
+            return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
+                self.updateProgress(++done);
+            });
+        }
+        // Цепочка: сначала обеспечения, потом резки (см. комментарий выше).
+        var chain = Promise.resolve();
+        supplyIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+        cutIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress();
+            self.setBusy(false);
+            self.selectedCutId = null;   // панель «Связанные позиции» больше не на удалённую резку
+            self.render();
+            self.notify('Удалены задания за ' + dateLabel + ': резок — ' + cutIds.length +
+                ', обеспечений — ' + supplyIds.length, 'success');
+        }).catch(function(err) {
+            self.hideProgress();
+            self.setBusy(false);
+            // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка удаления заданий дня: ' + (err && err.message || err), 'error');
         });
     };
 
@@ -5581,7 +5690,9 @@
                 var a = action || {};
                 return {
                     label: a.label || a.text || 'Да',
-                    primary: a.primary === true || i === 0,
+                    // #3475: warning-кнопка (жёлтая) не должна одновременно быть primary.
+                    warning: a.warning === true,
+                    primary: a.warning !== true && (a.primary === true || i === 0),
                     inline: a.inline === true,
                     onConfirm: a.onConfirm || a.action || a.handler
                 };
@@ -5609,7 +5720,7 @@
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
         function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
         actions.forEach(function(action) {
-            var cls = 'atex-pp-btn' + (action.primary ? ' atex-pp-btn-primary' : '');
+            var cls = 'atex-pp-btn' + (action.warning ? ' atex-pp-btn-warning' : (action.primary ? ' atex-pp-btn-primary' : ''));
             var btn = el('button', { class: cls, type: 'button', text: action.label });
             btn.addEventListener('click', function() { removeBar(); action.onConfirm(); });
             bar.appendChild(btn);
@@ -6670,22 +6781,32 @@
         // Форма новой резки живёт в модалке (#3116 п.1), открывается кнопкой «+».
         this.formEl = el('section', { class: 'atex-pp-form', 'data-submit-scope': '' });
 
-        // Шапка очереди: заголовок слева, затем кнопка «Сгенерировать резки» и «+ Новая резка» справа вверху.
+        // #3475: панель действий — под заголовком (.atex-pp-panel-head column в CSS).
+        // Порядок: «Сгенерировать» (основная) → «Добавить вручную» (второстепенная) →
+        // «Удалить» (warning, последняя). Названия укорочены, акценты переставлены.
         var queueActions = el('div', { class: 'atex-pp-panel-actions' });
         var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация заданий…' });
         genSpinner.style.display = 'none';
-        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-gen-btn', type: 'button', text: 'Сгенерировать задания' });
+        // #3475: «Сгенерировать» — основная кнопка (atex-pp-btn-primary).
+        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-gen-btn', type: 'button', text: 'Сгенерировать' });
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
         // «Сгенерировать резки» только создаёт резки для незапланированных позиций и
         // дописывает их в конец очереди (#3449); уже запланированные резки не трогает.
         // Перестановку очереди оператор делает вручную (↑↓).
-        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новое задание' });
+        // #3475: «Добавить вручную» — второстепенная кнопка (без -primary).
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить вручную' });
         addBtn.addEventListener('click', function() { self.openForm(); });
+        // #3475: «Удалить» (warning, жёлтая) — удаляет все задания выбранного дня:
+        // сначала «Обеспечение» (снимаем ссылки на «Партии ГП»), затем «Производственную
+        // резку» (BatchDelete каскадом снимет подчинённые Партии ГП/Полосы/Расход).
+        var delBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-warning atex-pp-del-day', type: 'button', text: 'Удалить' });
+        delBtn.addEventListener('click', function() { self.deleteDayTasks(queueActions); });
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
+        queueActions.appendChild(delBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
@@ -6776,4 +6897,4 @@
 
  
  
-// @version 2026-06-17-issue-3457
+// @version 2026-06-19-issue-3475
