@@ -476,6 +476,7 @@
         this.orders = [];         // [{ id, number }]
         this.actualWidthIndex = {};
         this.materialId = '';
+        this.batches = [];        // [{ id, no, materialId, remainderM2, active, … }]
         this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние)
         this.lengthValue = String(DEFAULT_LENGTH); // длина рулона по умолчанию (#3474-fix)
         this.plan = null;
@@ -585,6 +586,27 @@
         }).catch(function() { return []; });
     };
 
+    // Партии сырья — отчёт material_batches (JSON_KV): № партии, вид сырья (id+имя),
+    // остаток (м²), флаг «В работе» (is_active). Нет отчёта/доступа → пустой список.
+    AtexCutOptimizer.prototype.loadMaterialBatches = function() {
+        var self = this;
+        this.batches = [];
+        return this.getJson('report/material_batches?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            self.batches = (Array.isArray(rows) ? rows : []).map(function(row) {
+                return {
+                    id: row.batch_id == null ? '' : String(row.batch_id),
+                    no: row.batch_no == null ? '' : String(row.batch_no).trim(),
+                    materialId: row.batch_material_id == null ? '' : String(row.batch_material_id).trim(),
+                    materialName: row.batch_material == null ? '' : String(row.batch_material).trim(),
+                    remainderM2: toNumber(row.batch_remainder_m2),
+                    remainderM: toNumber(row.batch_remainder_m),
+                    warehouse: row['Склад'] == null ? '' : String(row['Склад']).trim(),
+                    active: String(row.is_active == null ? '' : row.is_active).trim() !== ''
+                };
+            });
+        }).catch(function() { self.batches = []; });
+    };
+
     AtexCutOptimizer.prototype.materialById = function(id) {
         var wanted = String(id);
         return this.materials.filter(function(m) { return String(m.id) === wanted; })[0] || null;
@@ -618,7 +640,8 @@
                     self.loadRefList(self.meta.client).then(function(l) { self.clients = l; }),
                     self.loadRefList(self.meta.order).then(function(l) {
                         self.orders = l.map(function(o) { return { id: o.id, number: o.label }; });
-                    })
+                    }),
+                    self.loadMaterialBatches()
                 ]);
             })
             .then(function() { self.renderForm(); })
@@ -700,6 +723,53 @@
         form.addEventListener('keydown', function(e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); self.calculate(); }
         });
+
+        // Подходящие партии сырья (внизу формы).
+        this.batchesEl = el('div', { class: 'atex-co-batches' });
+        form.appendChild(this.batchesEl);
+        this.renderBatches();
+    };
+
+    // Список подходящих партий сырья выбранного вида: только «В работе», по
+    // возрастанию остатка (м²). Партии, чьего остатка не хватает на текущий план
+    // (площадь джамбо = ширина × длина × число резок), показываются неактивными —
+    // их остаток лучше предложить клиенту, а не пускать в работу.
+    AtexCutOptimizer.prototype.renderBatches = function() {
+        var box = this.batchesEl;
+        if (!box) return;
+        box.innerHTML = '';
+        box.appendChild(el('div', { class: 'atex-co-rows-head' }, [
+            el('span', { class: 'atex-co-label', text: 'Подходящие партии сырья' })
+        ]));
+        if (!this.materialId) {
+            box.appendChild(el('div', { class: 'atex-co-batches-hint', text: 'Выберите вид сырья, чтобы увидеть партии.' }));
+            return;
+        }
+        var matId = String(this.materialId);
+        var list = this.batches
+            .filter(function(b) { return b.active && String(b.materialId) === matId; })
+            .sort(function(a, b) { return a.remainderM2 - b.remainderM2; });
+        if (!list.length) {
+            box.appendChild(el('div', { class: 'atex-co-batches-hint', text: 'Нет партий «В работе» по этому виду сырья.' }));
+            return;
+        }
+        // Сколько м² сырья нужно на план: ширина джамбо × длина рулона × число резок.
+        var p = this.plan;
+        var neededM2 = (p && p.feasible && p.inputWidth > 0 && p.rollLength > 0)
+            ? round3(p.inputWidth / 1000 * p.rollLength * p.totalPasses) : 0;
+        list.forEach(function(b) {
+            var insufficient = neededM2 > 0 && b.remainderM2 < neededM2;
+            var row = el('div', { class: 'atex-co-batch' + (insufficient ? ' is-insufficient' : '') });
+            if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
+            row.appendChild(el('span', { class: 'atex-co-batch-no', text: b.no || ('#' + b.id) }));
+            row.appendChild(el('span', { class: 'atex-co-batch-rem', text: b.remainderM2 + ' м²' }));
+            row.appendChild(el('span', { class: 'atex-co-batch-flag', text: 'В работе' }));
+            box.appendChild(row);
+        });
+        if (neededM2 > 0) {
+            box.appendChild(el('div', { class: 'atex-co-batches-hint',
+                text: 'Серые — остатка < ' + neededM2 + ' м² (на план), их лучше продать клиенту.' }));
+        }
     };
 
     AtexCutOptimizer.prototype.renderRows = function() {
@@ -780,6 +850,7 @@
             if (this.tolInput) this.tolInput.value = String(m.tolerance || '');
             this.tolValue = String(m.tolerance || '');
         }
+        this.renderBatches();
         this.maybeRecalc();
     };
 
@@ -796,6 +867,7 @@
         });
         this.calculated = true;   // после первого расчёта правки полей пересчитывают раскладку (#3478)
         this.renderResult();
+        this.renderBatches();     // достаточность остатка зависит от плана
     };
 
     // Живой пересчёт раскладки при изменении полей — только после первого

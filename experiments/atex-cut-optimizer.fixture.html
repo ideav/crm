@@ -56,6 +56,14 @@ var ACTUAL = [
 var SLEEVES = [ { i: 401, r: ['76 мм'] }, { i: 402, r: ['152 мм'] } ];
 var CLIENTS = [ { i: 501, r: ['ООО «Ромашка»'] }, { i: 502, r: ['ИП Петров'] } ];
 var ORDERS = [ { i: 601, r: ['1001'] }, { i: 602, r: ['1002'] } ];
+// Партии сырья (report/material_batches как в ateh): is_active 'X' = «В работе».
+var BATCHES = [
+    { batch_id: '701', batch_no: '1781000001', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '12000', batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '702', batch_no: '1781000002', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '5000',  batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '703', batch_no: '1781000003', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '900',   batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '704', batch_no: '1781000004', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '50',    batch_remainder_m: '', is_active: '',  'Склад': 'Производство' }, // не «В работе» — не показывается
+    { batch_id: '705', batch_no: '1781000005', batch_material: 'Сталь 0.5мм',    batch_material_id: '201', batch_remainder_m2: '8000',  batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' }
+];
 
 window.fetch = function(url, opts) {
     var u = String(url);
@@ -73,6 +81,7 @@ window.fetch = function(url, opts) {
     if (/\/object\/103\//.test(u)) return json(CLIENTS);
     if (/\/object\/107\//.test(u)) return json(ORDERS);
     if (/\/report\/nextOrder/i.test(u)) return json([{ 'Заказ': '3690' }]); // как в БД ateh
+    if (/\/report\/material_batches/i.test(u)) return json(BATCHES);
     return json([]);
 };
 </script>
