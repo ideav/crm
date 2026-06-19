@@ -55,7 +55,7 @@
         sleeve: 'Диаметр втулки',
         client: 'Клиент'
     };
-    var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м' };
+    var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм' };
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
     // «Ширина в заказе» — номинал, «Код» — условие применения.
     var ACTUAL_WIDTH_REQ = { order: 'Ширина в заказе', code: 'Код' };
@@ -549,7 +549,8 @@
                     id: String(rec.i),
                     label: (rec.r && rec.r[0]) || ('#' + rec.i),
                     width: cellValue(rec, meta, MATERIAL_REQ.width) || '',
-                    length: cellValue(rec, meta, MATERIAL_REQ.length) || ''
+                    length: cellValue(rec, meta, MATERIAL_REQ.length) || '',
+                    tolerance: cellValue(rec, meta, MATERIAL_REQ.tolerance) || ''
                 };
             });
         });
@@ -670,6 +671,15 @@
         ]));
         form.appendChild(dims);
 
+        // Допуск на отход, мм — автоподстановка из Вида сырья («Допуск, мм»),
+        // редактируемый. По нему красится отход каждой карты раскроя.
+        this.tolInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
+            placeholder: 'напр. 20', value: this.tolValue || '' });
+        this.tolInput.addEventListener('input', function() { self.tolValue = self.tolInput.value; self.maybeRecalc(); });
+        form.appendChild(el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Допуск, мм' }), this.tolInput
+        ]));
+
         // Желаемые полосы (ширина + количество), редактируемый список.
         form.appendChild(el('div', { class: 'atex-co-rows-head' }, [
             el('span', { class: 'atex-co-label', text: 'Желаемые рулоны (ширина в заказе)' })
@@ -766,6 +776,9 @@
             // (по умолчанию 450, выбор из списка стандартных длин), материал её не диктует.
             if (this.widthInput) this.widthInput.value = String(m.width || '');
             this.widthValue = String(m.width || '');
+            // Допуск на отход — из выбранного материала (поле редактируемое).
+            if (this.tolInput) this.tolInput.value = String(m.tolerance || '');
+            this.tolValue = String(m.tolerance || '');
         }
         this.maybeRecalc();
     };
@@ -834,6 +847,8 @@
     // Несколько карт раскроя (по одной на ширину, объединённые ради отхода).
     AtexCutOptimizer.prototype.renderMaps = function(p) {
         var wrap = el('div', { class: 'atex-co-maps' });
+        // Допуск на отход материала (Вид сырья → «Допуск, мм»), редактируемый.
+        var tol = this.tolInput ? toNumber(this.tolInput.value) : 0;
         p.maps.forEach(function(m) {
             var card = el('div', { class: 'atex-co-map' });
             var widthsLabel = m.pattern.map(function(s) { return s.width + '×' + s.knives; }).join(' + ');
@@ -847,21 +862,29 @@
                 var pct = widthPercent(seg.width, p.inputWidth, m.usedWidth);
                 var node = el('div', { class: 'atex-co-seg atex-co-seg-order', title: seg.width + ' мм · Заказ' });
                 node.style.width = pct + '%';
-                if (pct >= 6) node.appendChild(el('span', { class: 'atex-co-seg-label', text: String(seg.width) }));
+                // Подпись ширины — для ВСЕХ полос, в т.ч. узких (#3478-fix): узкая
+                // подпись поворачивается вертикально (класс is-narrow), чтобы влезть.
+                appendSegLabel(node, seg.width, pct);
                 bar.appendChild(node);
             });
             if (m.trimWidth > 0) {
                 var rpct = widthPercent(m.trimWidth, p.inputWidth, m.usedWidth);
                 var rem = el('div', { class: 'atex-co-seg atex-co-seg-remainder', title: 'Отход: ' + m.trimWidth + ' мм' });
                 rem.style.width = rpct + '%';
-                if (rpct >= 6) rem.appendChild(el('span', { class: 'atex-co-seg-label', text: String(m.trimWidth) }));
+                appendSegLabel(rem, m.trimWidth, rpct);
                 bar.appendChild(rem);
             }
             card.appendChild(bar);
+            // Цвет отхода по допуску материала: ≤ допуска — норма (зелёный),
+            // больше — превышение (красный). Без допуска — нейтрально (0 = зелёный).
+            var wasteCls = 'atex-co-map-waste';
+            if (tol > 0) wasteCls += (m.trimWidth <= tol ? ' is-ok' : ' is-warn');
+            else if (m.trimWidth === 0) wasteCls += ' is-ok';
+            var wasteText = 'Отход: ' + m.trimWidth + ' мм (' + m.trimPct + '%)'
+                + (tol > 0 ? ' · допуск ' + round3(tol) + ' мм' : '');
             card.appendChild(el('div', { class: 'atex-co-map-foot' }, [
                 el('span', { text: 'Полос/резку: ' + m.knivesTotal }),
-                el('span', { class: m.trimWidth > 0 ? 'atex-co-map-waste' : 'atex-co-map-waste is-ok',
-                    text: 'Отход: ' + m.trimWidth + ' мм (' + m.trimPct + '%)' })
+                el('span', { class: wasteCls, text: wasteText })
             ]));
             wrap.appendChild(card);
         });
@@ -870,6 +893,14 @@
             legendKey('remainder', 'Отход')
         ]));
         return wrap;
+
+        // Подпись ширины для ВСЕХ полос; узкая (pct < 6) поворачивается вертикально.
+        function appendSegLabel(node, width, pct) {
+            node.appendChild(el('span', {
+                class: 'atex-co-seg-label' + (pct < 6 ? ' is-narrow' : ''),
+                text: String(width)
+            }));
+        }
 
         function legendKey(kind, label) {
             return el('span', { class: 'atex-co-legend-key' }, [
@@ -917,7 +948,6 @@
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
         summary.appendChild(metric('Карт раскроя', p.mapCount));
         summary.appendChild(metric('Всего резок', p.totalPasses));
-        summary.appendChild(metric('Общий отход, мм', p.totalWasteWidth + ' (' + p.wastePct + '%)'));
         return summary;
 
         function metric(label, value, primary) {
