@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<!-- Браузерный стенд для рабочего места «Расчёт оптимальной резки» (#3465).
-     Мокает fetch: metadata и object/{Вид сырья} (справочник сырья с шириной
-     и длиной рулона). Использует те же js/css, что и продакшн-шаблон
-     templates/atex/cut-optimizer.html. Открывать локально в браузере. -->
+<!-- Браузерный стенд для рабочего места «Расчёт оптимальной резки» (#3465, #3474).
+     Мокает fetch: metadata, справочники (Вид сырья / Фактическая ширина резки /
+     Диаметр втулки / Клиент / Заказ), report/nextOrder и запись позиций (_m_new).
+     Использует те же js/css, что и продакшн-шаблон templates/atex/cut-optimizer.html.
+     Открывать локально в браузере. -->
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -11,35 +12,66 @@
 <style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
 </head>
 <body>
-<div id="atex-cut-optimizer" class="atex-co" data-db="atex" data-xsrf="test-token">
+<div id="atex-cut-optimizer" class="atex-co" data-db="atex" data-xsrf="test-token" data-user="dispatcher">
     <div class="atex-co-loading">Загрузка…</div>
 </div>
 
 <script>
+window.uid = '42';
 // ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
 var META = [
     { id: 100, val: 'Вид сырья', reqs: [
         { id: 1001, val: 'Полное название' },
         { id: 1003, val: 'Ширина, мм' },
-        { id: 1005, val: 'Длина рулона, м' },
-        { id: 1007, val: 'Примечания' }
-    ]}
+        { id: 1005, val: 'Длина рулона, м' }
+    ]},
+    { id: 660, val: 'Фактическая ширина резки', reqs: [
+        { id: 6601, val: 'Ширина в заказе' },
+        { id: 6603, val: 'Код' }
+    ]},
+    { id: 107, val: 'Заказ', reqs: [
+        { id: 1052, val: 'Клиент' }, { id: 1054, val: 'Пользователь' },
+        { id: 1056, val: 'Дата создания' }, { id: 1060, val: 'Статус' }, { id: 1062, val: 'Лидер' }
+    ]},
+    { id: 108, val: 'Позиция заказа', reqs: [
+        { id: 1067, val: 'Кол-во' }, { id: 1069, val: 'Вид сырья' }, { id: 1073, val: 'Ширина, мм' },
+        { id: 1075, val: 'Длина, м' }, { id: 1077, val: 'Диаметр втулки' }, { id: 1151, val: 'Тип намотки' },
+        { id: 1079, val: 'Статус' }
+    ]},
+    { id: 200, val: 'Диаметр втулки', reqs: [] },
+    { id: 103, val: 'Клиент', reqs: [] }
 ];
 
-// Справочник сырья: [Название, Полное название, Ширина, Длина рулона, Примечания]
+// [Название, Полное название, Ширина, Длина рулона]
 var MATERIALS = [
-    { i: 201, r: ['Сталь 0.5мм', 'Сталь холоднокатаная 0.5 мм', '880', '4000', ''] },
-    { i: 202, r: ['Алюминий 1.0мм', 'Алюминий АД1 1.0 мм', '910', '3000', ''] },
-    { i: 203, r: ['ПВХ-плёнка', 'ПВХ-плёнка прозрачная', '1000', '5000', ''] }
+    { i: 201, r: ['Сталь 0.5мм', 'Сталь холоднокатаная 0.5 мм', '880', '4000'] },
+    { i: 202, r: ['Алюминий 1.0мм', 'Алюминий АД1 1.0 мм', '910', '3000'] }
 ];
+// Фактическая ширина: [факт, Ширина в заказе, Код]
+var ACTUAL = [
+    { i: 301, r: ['59', '60', ''] },        // номинал 60 → факт 59 (безусловно)
+    { i: 302, r: ['39', '40', 'j=880'] }    // номинал 40 → факт 39 при джамбо 880
+];
+var SLEEVES = [ { i: 401, r: ['76 мм'] }, { i: 402, r: ['152 мм'] } ];
+var CLIENTS = [ { i: 501, r: ['ООО «Ромашка»'] }, { i: 502, r: ['ИП Петров'] } ];
+var ORDERS = [ { i: 601, r: ['1001'] }, { i: 602, r: ['1002'] } ];
 
-window.fetch = function(url) {
+window.fetch = function(url, opts) {
     var u = String(url);
     function json(data) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
+    if (opts && String(opts.method).toUpperCase() === 'POST') {
+        console.log('POST', u, opts.body);
+        return json({ obj: Math.floor(1000 + Math.random() * 9000) });
+    }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
     if (/\/object\/100\//.test(u)) return json(MATERIALS);
+    if (/\/object\/660\//.test(u)) return json(ACTUAL);
+    if (/\/object\/200\//.test(u)) return json(SLEEVES);
+    if (/\/object\/103\//.test(u)) return json(CLIENTS);
+    if (/\/object\/107\//.test(u)) return json(ORDERS);
+    if (/\/report\/nextOrder/i.test(u)) return json([{ 'Заказ': '3690' }]); // как в БД ateh
     return json([]);
 };
 </script>

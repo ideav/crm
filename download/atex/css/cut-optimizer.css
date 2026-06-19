@@ -139,7 +139,20 @@
     padding: 18px 20px;
     min-height: 200px;
 }
-.atex-co-result-title { margin: 0 0 14px; font-size: 18px; }
+.atex-co-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.atex-co-result-title { margin: 0; font-size: 18px; }
+.atex-co-to-order { width: auto; margin: 0; flex: none; white-space: nowrap; }
+
+/* #3474: фактическая ширина задана .atex-co-input, поэтому searchable-input
+   Вида сырья/справочников совпадает по высоте и бордюру с прочими полями.
+   Подстраховка на случай отсутствия inputClass. */
+.atex-co .atex-ref-search { height: auto; }
 .atex-co-note {
     margin-bottom: 12px;
     padding: 8px 12px;
@@ -150,6 +163,28 @@
     font-size: 13px;
 }
 .atex-co-warn { color: var(--co-warn); font-weight: 600; padding: 8px 0; }
+
+/* Несколько карт раскроя (#3474: по одной на ширину, ≤ 3) */
+.atex-co-maps { margin: 8px 0 20px; }
+.atex-co-map {
+    margin-bottom: 14px;
+    padding: 12px;
+    border: 1px solid var(--co-border);
+    border-radius: 8px;
+    background: var(--co-surface);
+}
+.atex-co-map:last-of-type { margin-bottom: 8px; }
+.atex-co-map-title { font-weight: 600; color: var(--text-primary, #1f2933); }
+.atex-co-map-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--co-muted);
+}
+.atex-co-map-waste { font-weight: 600; }
+.atex-co-map-waste.is-ok { color: var(--co-ok); }
 
 /* Карта-полоса (раскладка одной резки) */
 .atex-co-bar-wrap { margin: 8px 0 20px; }
@@ -260,6 +295,17 @@
 .atex-co-metric-value { font-size: 22px; font-weight: 700; }
 .atex-co-metric.is-warn .atex-co-metric-value { color: var(--co-warn); }
 .atex-co-metric.is-ok .atex-co-metric-value { color: var(--co-ok); }
+/* #3474.5: главные параметры выделены отдельно и цветом */
+.atex-co-metric.is-primary {
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: var(--co-bg);
+    border: 1px solid var(--co-accent);
+}
+.atex-co-metric.is-primary .atex-co-metric-label { color: var(--co-accent); }
+.atex-co-metric.is-primary .atex-co-metric-value { color: var(--co-accent); font-size: 26px; }
+
+.atex-co-nominal { color: var(--co-muted); }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-co-toast {
@@ -280,3 +326,42 @@
 .atex-co-toast-success { background: #15803d; }
 .atex-co-toast-error { background: #b91c1c; }
 .atex-co-toast-info { background: #334155; }
+
+/* Модалка «В заказ» (#3474) — без alert/confirm/prompt */
+.atex-co-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh 16px;
+    background: rgba(15, 23, 42, .45);
+    overflow: auto;
+}
+.atex-co-modal {
+    width: 100%;
+    max-width: 420px;
+    background: var(--co-bg);
+    border: 1px solid var(--co-border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+}
+.atex-co-modal-title { margin: 0 0 4px; font-size: 18px; }
+.atex-co-modal-sub { margin: 0 0 14px; font-size: 13px; color: var(--co-muted); }
+.atex-co-modal-hint { font-size: 12px; color: var(--co-muted); margin-top: 2px; }
+.atex-co-modal-neworder {
+    border-top: 1px dashed var(--co-border);
+    margin-top: 4px;
+    padding-top: 10px;
+}
+.atex-co-modal-msg { min-height: 18px; font-size: 13px; color: var(--co-muted); margin: 6px 0 2px; }
+.atex-co-modal-msg.is-error { color: var(--co-warn); font-weight: 600; }
+.atex-co-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 12px;
+}
+.atex-co-modal-actions .atex-co-btn { width: auto; margin: 0; }
