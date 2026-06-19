@@ -52,22 +52,20 @@
     .atex-pp-layout { grid-template-columns: 1fr; }
 }
 
-/* Шапка панели очереди: заголовок слева, действия справа (#3116 п.1, #3215). */
+/* Шапка панели очереди: заголовок, под ним — действия (#3116 п.1, #3215, #3475). */
 .atex-pp-panel-head {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;   /* #3475: действия под заголовком, не справа от него */
+    align-items: stretch;     /* действия на всю ширину — чтобы плашка подтверждения была видна */
+    gap: 8px;
     margin-bottom: 10px;
-    flex-wrap: wrap;
 }
 .atex-pp-panel-head .atex-pp-form-title { margin: 0; }
 .atex-pp-panel-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;   /* #3475: кнопки слева, под заголовком */
     gap: 8px;
-    margin-left: auto;
     flex-wrap: wrap;
 }
 .atex-pp-add { white-space: nowrap; }
@@ -129,6 +127,9 @@
 .atex-pp-btn:hover { background: var(--pp-surface); }
 .atex-pp-btn-primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
 .atex-pp-btn-primary:hover { background: var(--pp-accent-d); }
+/* #3475: «Удалить» — жёлтая кнопка-предупреждение (амбер-плашка подтверждения). */
+.atex-pp-btn-warning { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); color: var(--pp-attn-text); }
+.atex-pp-btn-warning:hover { background: var(--pp-attn-border); color: var(--pp-attn-text); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
 .atex-pp-confirm-bar {
     display: flex;
@@ -736,4 +737,4 @@
     cursor: pointer;
 }
 .atex-pp-skipped-link:hover { text-decoration: none; }
-/* @version 2026-06-14-issue-3391 */
+/* @version 2026-06-19-issue-3475 */
