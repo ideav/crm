@@ -304,6 +304,10 @@
 }
 .atex-co-metric.is-primary .atex-co-metric-label { color: var(--co-accent); }
 .atex-co-metric.is-primary .atex-co-metric-value { color: var(--co-accent); font-size: 26px; }
+/* «Итого рулонов»: «получится» (то, что сообщают клиенту) выделено крупно;
+   «из <желаемо>» — мельче и приглушённо. */
+.atex-co-rolls-got { font-size: 32px; font-weight: 800; }
+.atex-co-rolls-of { font-size: 15px; font-weight: 600; color: var(--co-muted); }
 
 .atex-co-nominal { color: var(--co-muted); }
 
