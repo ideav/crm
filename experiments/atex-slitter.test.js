@@ -152,6 +152,26 @@ assertEqual(core.hasOpenShift([
     { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '702' }
 ], '701', '2026-06-11'), false, 'hasOpenShift ignores another operator');
 
+// ── #3522: смена отдельно для каждого станка (станок — в «Примечаниях» события) ──
+assertEqual(core.shiftEventSlitterLabel({ notes: 'Станок 1 · 2026-06-11' }), 'Станок 1',
+    'shiftEventSlitterLabel: первый сегмент до « · »');
+assertEqual(core.shiftEventSlitterLabel({ notes: 'Станок 1' }), 'Станок 1',
+    'shiftEventSlitterLabel: только метка без даты');
+assertEqual(core.shiftEventSlitterLabel({ notes: '' }), '', 'shiftEventSlitterLabel: пусто → пусто');
+var twoMachineEvents = [
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '701', notes: 'Станок 1 · 2026-06-11' },
+    { when: '2026-06-11 09:00:00', type: 'Начало смены', userId: '701', notes: 'Станок 2 · 2026-06-11' },
+    { when: '2026-06-11 16:30:00', type: 'Конец смены',  userId: '701', notes: 'Станок 2 · 2026-06-11' }
+];
+assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11', 'Станок 1'), true,
+    'hasOpenShift: на «Станок 1» смена открыта (свой станок)');
+assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11', 'Станок 2'), false,
+    'hasOpenShift: на «Станок 2» смена закрыта (своё «Конец смены»), хотя «Станок 1» открыт');
+assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11', 'Станок 3'), false,
+    'hasOpenShift: на «Станок 3» смены нет (нет событий этого станка)');
+assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11'), false,
+    'hasOpenShift: без станка — глобально последнее событие «Конец смены» → закрыта (а per-станок «Станок 1» открыт)');
+
 // ── партии сырья: FIFO, только В работе, остатка хватает минимум на один проход ──
 var rawBatches = [
     { id: 'new', date: '2026-06-05', remainderM: 950, materialId: 'm1', active: '1', barcode: 'NEW' },
