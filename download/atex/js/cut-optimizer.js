@@ -202,8 +202,9 @@
             return { knives: widths.map(function() { return 0; }), passes: 0, usedWidth: 0, trimWidth: W, fits: false };
         }
         var knives = ratio.map(function(r) { return sets * r; });
-        // Число проходов: sets·passes ≈ НОД, чтобы итог по рулонам лёг ближе к желаемому.
-        var passes = Math.max(1, Math.round(g / sets));
+        // Число проходов: sets·passes ≥ НОД (округление вверх), чтобы итог по
+        // рулонам был не меньше желаемого, а не просто ближайшим к нему (#3494).
+        var passes = Math.max(1, Math.ceil(g / sets));
         var usedWidth = round3(knives.reduce(function(s, c, i) { return s + c * widths[i]; }, 0));
         return { knives: knives, passes: passes, usedWidth: usedWidth, trimWidth: round3(W - usedWidth), fits: true };
     }
