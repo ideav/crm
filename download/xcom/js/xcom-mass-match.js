@@ -54,6 +54,7 @@
         running: false,
         stopRequested: false,
         loadToken: 0,
+        keyword: '',        // ключевое слово фильтра по «Наименованию» RFP (issue #3523)
         seenIds: {},        // id строк, уже взятых в работу в этом прогоне — защита от зацикливания
         // issue #3522: статистика и время выполнения авто-прогона
         outcomes: {},       // { recordId: 'matched'|'noMatch'|'error' } — итог по строке для статистики
@@ -270,12 +271,17 @@
 
     // Запрос пачки необработанных строк RFP: серверный фильтр «Наш артикул» пуст (F_{id}=!%).
     // Обработанные (с заполненным «Наш артикул») сервер не возвращает — пачка всегда «свежая»,
-    // без клиентского сканирования таблицы.
+    // без клиентского сканирования таблицы. issue #3523: если задано ключевое слово —
+    // дополнительно ограничиваем выборку строками, чьё «Наименование» его содержит
+    // (F_{rfpNameId}=%слово% — LIKE-«содержит», как column-фильтр у object-эндпоинта).
     function buildScanUrl(limit) {
         var params = new URLSearchParams();
         params.set('JSON_OBJ', '');
         if (state.fields.our && state.fields.our.id) {
             params.set('F_' + state.fields.our.id, '!%');
+        }
+        if (state.keyword && state.fields.rfpName && state.fields.rfpName.id) {
+            params.set('F_' + state.fields.rfpName.id, '%' + state.keyword + '%');
         }
         params.set('LIMIT', '0,' + limit);
         return '/' + encodePathSegment(state.db) + '/object/' +
@@ -555,6 +561,7 @@
     function setControls(mode) {
         // mode: 'idle' | 'running' | 'loading'
         setDisabled('xcom-mass-reload', mode !== 'idle');
+        setDisabled('xcom-mass-keyword', mode !== 'idle');
         setHidden('xcom-mass-start', mode === 'running');
         setDisabled('xcom-mass-start', mode !== 'idle' || !state.records.length);
         setHidden('xcom-mass-stop', mode !== 'running');
@@ -845,11 +852,25 @@
         var start = document.getElementById('xcom-mass-start');
         var stop = document.getElementById('xcom-mass-stop');
         var concurrency = document.getElementById('xcom-mass-concurrency');
+        var keyword = document.getElementById('xcom-mass-keyword');
 
         if (reload) reload.addEventListener('click', function() {
             if (state.running) return;
             loadBatch();
         });
+        // Ключевое слово фильтра по «Наименованию» RFP (issue #3523): применяется по Enter/blur/
+        // очистке (события change/search у input[type=search]); пустое слово = без фильтра.
+        if (keyword) {
+            var applyKeyword = function() {
+                if (state.running) return;
+                var value = trimValue(keyword.value);
+                if (value === state.keyword) return;   // без изменений — не перезагружаем
+                state.keyword = value;
+                loadBatch();
+            };
+            keyword.addEventListener('change', applyKeyword);
+            keyword.addEventListener('search', applyKeyword);
+        }
         if (start) start.addEventListener('click', function() {
             runAuto();
         });
