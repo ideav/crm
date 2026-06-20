@@ -202,13 +202,13 @@ var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
       materialBatch: { id: null, label: '' },
-      planDate: '06.05.2026', status: 'В работе', sequence: null,
+      planDate: '06.05.2026', status: 'В работе', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
-      planDate: '27.05.2026', status: 'Ожидает', sequence: null,
+      planDate: '27.05.2026', status: 'Ожидает', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [] }

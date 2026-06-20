@@ -94,7 +94,8 @@
         timing: 'Тайминг',
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м',
-        winding: 'Тип намотки'
+        winding: 'Тип намотки',
+        fixed: 'Зафиксировано'   // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -527,6 +528,7 @@
         var dayCuts = (cuts || []).filter(function(c) {
             if (!c) return false;
             if (String(c.status || '').trim() === 'Завершён') return false;
+            if (c.fixed) return false;   // #3508 п.3: зафиксированные задания при удалении дня пропускаем
             var pd = String(c.planDate || '').trim();
             if (pd === '') return false;
             return planDateDayKey(pd) === dayKey;
@@ -569,6 +571,17 @@
         var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
         var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
         return d.getFullYear() + '-' + m + '-' + day;
+    }
+
+    // #3508 п.1: сдвиг даты фильтра «ГГГГ-ММ-ДД» на ±N дней (стрелки листания).
+    // Пустую/чужую дату трактуем как сегодня — первый клик задаёт конкретный день.
+    function shiftPlanDate(dateStr, deltaDays) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+        var d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0) : new Date();
+        d.setDate(d.getDate() + deltaDays);
+        var mm = String(d.getMonth() + 1); if (mm.length < 2) mm = '0' + mm;
+        var dd = String(d.getDate()); if (dd.length < 2) dd = '0' + dd;
+        return d.getFullYear() + '-' + mm + '-' + dd;
     }
 
     // #3475: «ГГГГ-ММ-ДД» → «ДД.ММ.ГГГГ» для подписей (подтверждение/тост удаления дня).
@@ -785,6 +798,7 @@
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
                     sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    fixed: false,   // #3508: уточняется из object/ в loadPlanning (отчёт флаг не отдаёт)
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
                     batchId: '',
@@ -3016,6 +3030,10 @@
         var arr = (orderedCuts || []).slice();
         var target = index + dir;
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return [];
+        // #3508 п.3: зафиксированные задания — «стены». Нельзя двигать сам зафиксированный
+        // и нельзя перепрыгивать через зафиксированного соседа: их относительный порядок и
+        // «Очередность» неизменны, нумерация остальных 1..N остаётся сплошной (без дублей).
+        if ((arr[index] && arr[index].fixed) || (arr[target] && arr[target].fixed)) return [];
         var tmp = arr[index]; arr[index] = arr[target]; arr[target] = tmp;
         var changed = [];
         arr.forEach(function(c, i){ var seq = i + 1; if (Number(c.sequence) !== seq) changed.push({ cutId: c.id, sequence: seq }); });
@@ -3672,23 +3690,31 @@
         });
     };
 
-    // Прямая карта очередности из object/ «Задание в производство». Нужна как источник
-    // истины после _m_set: отчёт cut_planning может отставать или отдать старый alias.
+    // Прямые карты очередности и флага «Зафиксировано» из object/ «Задание в
+    // производство». Нужны как источник истины после _m_set: отчёт cut_planning может
+    // отставать/отдать старый alias и вовсе НЕ содержит «Зафиксировано» (#3508).
+    // Возвращает { seq: { cutId: число|строка }, fixed: { cutId: bool } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
-        if (!meta) return Promise.resolve({});
+        if (!meta) return Promise.resolve({ seq: {}, fixed: {} });
         var seqIdx = columnIndex(meta, CUT_REQ.sequence);
-        if (seqIdx < 0) return Promise.resolve({});
+        var fixedIdx = columnIndex(meta, CUT_REQ.fixed);   // #3508
+        if (seqIdx < 0 && fixedIdx < 0) return Promise.resolve({ seq: {}, fixed: {} });
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {};
+            var seq = {}, fixed = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                var raw = r[seqIdx];
-                if (raw == null || String(raw).trim() === '') return;
-                var n = Number(raw);
-                map[String(rec.i)] = isFinite(n) ? n : String(raw);
+                var id = String(rec.i);
+                if (seqIdx >= 0) {
+                    var raw = r[seqIdx];
+                    if (raw != null && String(raw).trim() !== '') {
+                        var n = Number(raw);
+                        seq[id] = isFinite(n) ? n : String(raw);
+                    }
+                }
+                if (fixedIdx >= 0) fixed[id] = truthyFlag(r[fixedIdx]);   // #3508
             });
-            return map;
+            return { seq: seq, fixed: fixed };
         });
     };
 
@@ -3944,7 +3970,9 @@
             this.loadCutSequences()
         ]).then(function(results) {
             var rows = results[0];
-            var sequenceByCut = results[1] || {};
+            var seqResult = results[1] || {};
+            var sequenceByCut = seqResult.seq || {};
+            var fixedByCut = seqResult.fixed || {};   // #3508
             self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
@@ -3955,6 +3983,7 @@
                 if (Object.prototype.hasOwnProperty.call(sequenceByCut, String(cut.id))) {
                     cut.sequence = sequenceByCut[String(cut.id)];
                 }
+                cut.fixed = !!fixedByCut[String(cut.id)];   // #3508: флаг «Зафиксировано»
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -4370,6 +4399,84 @@
         });
     };
 
+    // #3508 п.2/п.4: проставить/снять флаг «Зафиксировано» у набора заданий. Пишем
+    // булев реквизит (t{id}='1'/'0') командой _m_set последовательно, затем перечитываем
+    // очередь — чтобы серая кайма/блокировки (п.3/п.5) обновились по источнику истины.
+    AtexProductionPlanning.prototype.setCutsFixed = function(cutIds, value, opts) {
+        var self = this;
+        var o = opts || {};
+        if (this.busy) return Promise.resolve(false);
+        var ids = (cutIds || []).map(function(x) { return String(x); })
+            .filter(function(id) { return id && id !== 'null'; });
+        if (!ids.length) {
+            if (!o.silent) self.notify(o.emptyMessage || 'Нет заданий для фиксации', 'info');
+            return Promise.resolve(false);
+        }
+        var fixedReqId = reqIdByName(this.meta.cut, CUT_REQ.fixed);
+        if (!fixedReqId) {
+            self.notify('Реквизит «' + CUT_REQ.fixed + '» не найден в метаданных', 'error');
+            return Promise.resolve(false);
+        }
+        var fieldKey = 't' + fixedReqId;
+        var flag = value ? '1' : '0';
+        this.setBusy(true);
+        this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
+        var done = 0;
+        var chain = Promise.resolve();
+        ids.forEach(function(id) {
+            chain = chain.then(function() {
+                var fields = {}; fields[fieldKey] = flag;
+                return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
+                    .then(function() { self.updateProgress(++done); });
+            });
+        });
+        return chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress(); self.setBusy(false); self.render();
+            if (!o.silent) {
+                self.notify(o.successMessage ||
+                    ((value ? 'Зафиксировано заданий: ' : 'Снята фиксация заданий: ') + ids.length), 'success');
+            }
+            return true;
+        }).catch(function(err) {
+            self.hideProgress(); self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка фиксации заданий: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня (все
+    // станки). День берём из фильтра «Дата плана». Уже зафиксированные не трогаем.
+    AtexProductionPlanning.prototype.fixDayTasks = function() {
+        var self = this;
+        if (this.busy) return;
+        var dateStr = String(this.filter && this.filter.date || '').trim();
+        if (dateStr === '') {
+            this.notify('Выберите «Дату плана», чтобы зафиксировать задания дня', 'error');
+            return;
+        }
+        var dayKey = planDateDayKey(dateStr);
+        var dayCuts = (this.cuts || []).filter(function(c) { return planDateDayKey(c.planDate) === dayKey; });
+        var toFix = dayCuts.filter(function(c) { return !c.fixed; });
+        var dateLabel = formatPlanDayLabel(dateStr);
+        if (!dayCuts.length) { this.notify('Нет заданий за ' + dateLabel + ' для фиксации', 'info'); return; }
+        if (!toFix.length) { this.notify('Все задания за ' + dateLabel + ' уже зафиксированы', 'info'); return; }
+        self.setCutsFixed(toFix.map(function(c) { return c.id; }), true, {
+            successMessage: 'Зафиксированы задания за ' + dateLabel + ': ' + toFix.length
+        });
+    };
+
+    // #3508 п.4: иконка «🔒» в карточке — переключить фиксацию одного задания
+    // (зафиксировано ↔ снято), чтобы можно было и поставить, и снять флаг.
+    AtexProductionPlanning.prototype.toggleCutFixed = function(cut) {
+        if (!cut) return;
+        this.setCutsFixed([cut.id], !cut.fixed, {
+            successMessage: (cut.fixed ? 'Снята фиксация задания' : 'Задание зафиксировано')
+        });
+    };
+
     // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение
     // (сколько резок/обеспечений будет удалено), затем зовёт runDeleteDayTasks. День —
     // «Дата плана» из фильтра (this.filter.date); без даты удалять нечего (неоднозначно).
@@ -4746,12 +4853,30 @@
             var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
             var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
             self.renderStripPanel(panel, cut, strips, original);
+            if (cut.fixed) self.lockStripPanel(panel);   // #3508 п.3: зафиксированное — только просмотр
         }).catch(function(err) {
             if (panel.parentNode) {
                 panel.innerHTML = '';
                 panel.appendChild(el('div', { class: 'atex-pp-empty', text: 'Ошибка загрузки полос: ' + err.message }));
             }
         });
+    };
+
+    // #3508 п.3: панель полос зафиксированного задания — только просмотр. Глушим все
+    // инпуты/кнопки, кроме крестика закрытия, и показываем пометку. Изменения состава
+    // невозможны (как и удаление/перепланирование/смена очередности зафиксированного).
+    AtexProductionPlanning.prototype.lockStripPanel = function(panel) {
+        if (!panel) return;
+        panel.classList.add('is-readonly');
+        var nodes = panel.querySelectorAll('input, select, textarea, button');
+        Array.prototype.forEach.call(nodes, function(n) {
+            if (n.classList && n.classList.contains('atex-pp-strip-close')) return;
+            n.disabled = true;
+        });
+        var note = el('div', { class: 'atex-pp-strip-locked-note', text: '🔒 Задание зафиксировано — изменение полос недоступно' });
+        var header = panel.querySelector('.atex-pp-strip-header');
+        if (header && header.parentNode) header.parentNode.insertBefore(note, header.nextSibling);
+        else panel.appendChild(note);
     };
 
     // Рендер содержимого панели редактора полос (таблица + сводка + ходовые + кнопки).
@@ -6430,6 +6555,18 @@
             self.renderQueue();
             self.renderLink();
         });
+        // #3508 п.1: стрелки ‹/› по бокам поля «Дата плана» — листание на ±1 день.
+        function shiftFilterDate(delta) {
+            self.filter.date = shiftPlanDate(self.filter.date || todayISO(), delta);
+            self.selectedCutId = null;   // как и при ручной смене даты
+            self.renderQueue();
+            self.renderLink();
+        }
+        var datePrev = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '‹', title: 'Предыдущий день' });
+        var dateNext = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '›', title: 'Следующий день' });
+        datePrev.addEventListener('click', function() { if (!self.busy) shiftFilterDate(-1); });
+        dateNext.addEventListener('click', function() { if (!self.busy) shiftFilterDate(1); });
+        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFilter, dateNext]);
         // #3411: быстрый поиск между «Дата плана» и «Статус». Фильтрует карточки очереди
         // и пересчитывает счётчики на закладках станков (видно, в каком станке сколько
         // совпавших позиций). Поиск идёт по сырью/намотке/статусу и подписям связанных
@@ -6448,7 +6585,7 @@
         });
         searchInput.addEventListener('focus', function() { self._searchFocused = true; });
         searchInput.addEventListener('blur', function() { self._searchFocused = false; });
-        filters.appendChild(field('Дата плана', dateFilter));
+        filters.appendChild(field('Дата плана', dateNav));
         filters.appendChild(field('Поиск', searchInput));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
@@ -6599,7 +6736,8 @@
                     if (resLin + 1e-6 < needLin) unreserved = true;
                 }
             }
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
+            // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : ''), dataset: { cutId: String(c.id) } });
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
@@ -6649,7 +6787,13 @@
             // #3354 п.1: первая строка карточки —
             // {номер по порядку} {время} {название сырья} {тип намотки} — {длина} х {резок};
             // справа прижата сводка связей (.atex-pp-cut-supplies).
-            var seqText = (c.sequence != null && !isNaN(c.sequence)) ? String(c.sequence) : String(idx + 1);
+            // #3508 п.7: «Очередность» в карточке = позиция задания в очереди станка за день
+            // (1..N по dayCutsByKey), а НЕ хранимое значение «Очередности»: хранимые могли
+            // задвоиться (два «первых» и т.п.), позиционная нумерация всегда сплошная и
+            // уникальная. Хранимые значения дочищаются при перестановке ↑↓ / генерации.
+            var sameDayCuts = dayCutsByKey[cutPlanDayKey(c)] || activeGroup.cuts;
+            var dayIdx = sameDayCuts.indexOf(c);
+            var seqText = String((dayIdx >= 0 ? dayIdx : idx) + 1);
             var windingText = normWinding(c.winding) || String(c.winding == null ? '' : c.winding).trim() || '—';
             var infoChildren = [
                 el('span', { class: 'atex-pp-cut-seq', title: cutNumTitle, text: '№ ' + seqText })
@@ -6708,37 +6852,58 @@
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
-            var sameDayCuts = dayCutsByKey[cutPlanDayKey(c)] || activeGroup.cuts;
-            var dayIdx = sameDayCuts.indexOf(c);
-            if (dayIdx === 0) up.disabled = true;
-            if (dayIdx === sameDayCuts.length - 1) down.disabled = true;
+            // sameDayCuts/dayIdx вычислены выше (для seqText #3508 п.7) — переиспользуем.
+            // #3508 п.3: зафиксированное задание нельзя двигать по очереди (↑↓ заблокированы).
+            if (dayIdx === 0 || c.fixed) up.disabled = true;
+            if (dayIdx === sameDayCuts.length - 1 || c.fixed) down.disabled = true;
             up.addEventListener('click', function() {
-                if (self.busy) return;
+                if (self.busy || c.fixed) return;
                 var p = moveInQueue(sameDayCuts, dayIdx, -1);
                 if (p.length) self.saveSequences(p);
             });
             down.addEventListener('click', function() {
-                if (self.busy) return;
+                if (self.busy || c.fixed) return;
                 var p = moveInQueue(sameDayCuts, dayIdx, 1);
                 if (p.length) self.saveSequences(p);
             });
             var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: stripsButtonLabel(c.knifeCount), title: 'Полосы резки (количество полос)' });
             strips.addEventListener('click', function() {
                 if (self.busy) return;
-                self.openStrips(c, cardPanel);
+                self.openStrips(c, cardPanel);   // #3508 п.3: для зафиксированных панель полос открывается только на просмотр
+            });
+            // #3508 п.4: «🔒» — переключить фиксацию ОДНОГО задания (зафиксировать ↔ снять).
+            // Левее «🗑». is-active — когда задание уже зафиксировано (визуальный замок).
+            var fix = el('button', {
+                class: 'atex-pp-cut-fix' + (c.fixed ? ' is-active' : ''),
+                type: 'button',
+                text: '🔒',
+                title: c.fixed ? 'Снять фиксацию задания' : 'Зафиксировать задание'
+            });
+            fix.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy) return;
+                self.toggleCutFixed(c);
             });
             // #3486: «🗑» — удалить задание (резку) с её «Обеспечениями». stopPropagation,
             // чтобы клик по кнопке не выбирал резку (см. #3149: клики по контролам не
             // выбирают карточку). Подтверждение и удаление — в deleteCutTask.
-            var del = el('button', { class: 'atex-pp-cut-del', type: 'button', text: '🗑', title: 'Удалить задание' });
+            // #3508 п.3: зафиксированное задание удалить нельзя — кнопка заблокирована.
+            var del = el('button', {
+                class: 'atex-pp-cut-del' + (c.fixed ? ' is-disabled' : ''),
+                type: 'button',
+                text: '🗑',
+                title: c.fixed ? 'Зафиксированное задание удалить нельзя (снимите фиксацию)' : 'Удалить задание'
+            });
+            if (c.fixed) del.disabled = true;
             del.addEventListener('click', function(e) {
                 if (e && e.stopPropagation) e.stopPropagation();
-                if (self.busy) return;
+                if (self.busy || c.fixed) return;
                 self.deleteCutTask(c, cardPanel);
             });
             controls.appendChild(up);
             controls.appendChild(down);
             controls.appendChild(strips);
+            controls.appendChild(fix);
             controls.appendChild(del);
             cardPanel.appendChild(controls);
 
@@ -6917,6 +7082,10 @@
         // #3475: «Добавить вручную» — второстепенная кнопка (без -primary).
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить вручную' });
         addBtn.addEventListener('click', function() { self.openForm(); });
+        // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня
+        // (все станки). Между «Добавить вручную» и «Удалить».
+        var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать' });
+        fixBtn.addEventListener('click', function() { self.fixDayTasks(); });
         // #3475: «Удалить» (warning, жёлтая) — удаляет все задания выбранного дня:
         // сначала «Обеспечение» (снимаем ссылки на «Партии ГП»), затем «Производственную
         // резку» (BatchDelete каскадом снимет подчинённые Партии ГП/Полосы/Расход).
@@ -6925,6 +7094,7 @@
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
+        queueActions.appendChild(fixBtn);
         queueActions.appendChild(delBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
@@ -7016,4 +7186,4 @@
 
  
  
-// @version 2026-06-19-issue-3475
+// @version 2026-06-20-issue-3508
