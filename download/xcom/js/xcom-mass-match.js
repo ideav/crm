@@ -15,6 +15,11 @@
     var DEFAULT_BATCH_SIZE = 50;
     var DEFAULT_CONCURRENCY = 5;                       // одновременных запросов (issue #3522)
     var CONCURRENCY_OPTIONS = [3, 5, 7, 10, 15, 20];  // допустимые значения переключателя (issue #3522)
+    // Авто-регулировка числа потоков по скорости пачки (issue #3527)
+    var MIN_CONCURRENCY = 1;
+    var MAX_CONCURRENCY = 20;
+    var TUNE_COOLDOWN_BATCHES = 3;    // через сколько пачек повторить пробу после неудачной
+    var SPEED_DROP_RATIO = 0.9;       // падение скорости ≥10% к прошлой пачке → уменьшать потоки
     var DEFAULT_MAX_CANDIDATES = 20;
     // Запись-заглушка «Наш артикул» для строк без совпадений или с ошибкой — чтобы они вышли
     // из выборки необработанных (фильтр пустого «Наш артикул») и не возвращались в каждую пачку.
@@ -60,7 +65,12 @@
         outcomes: {},       // { recordId: 'matched'|'noMatch'|'error' } — итог по строке для статистики
         startTime: 0,       // Date.now() начала прогона
         endTime: 0,         // Date.now() конца прогона (0 — пока идёт)
-        timer: null         // id setInterval живого таймера
+        timer: null,        // id setInterval живого таймера
+        // issue #3527: авто-регулировка числа потоков по скорости пачки
+        autoConcurrency: true, // вкл/выкл авто-регулировку (по умолчанию вкл)
+        prevSpeed: null,    // скорость (строк/сек) предыдущей пачки
+        lastTuneUp: false,  // увеличивали ли потоки ПЕРЕД последней пачкой (оценка пробы)
+        tuneCooldown: 0     // сколько пачек ждать до следующей пробы повышения
     };
 
     function trimValue(value) {
@@ -558,6 +568,67 @@
         if (state.timer) { clearInterval(state.timer); state.timer = null; }
     }
 
+    // --- Авто-регулировка числа потоков по скорости пачки (issue #3527) ------
+
+    // Решение по числу потоков после очередной пачки. batchSpeed — строк/сек этой пачки.
+    // Правила: (1) пробуем +1 от текущего; (2) пока скорость растёт после повышения — повышаем
+    // дальше; (3) если прироста нет — возвращаем обратно и ждём TUNE_COOLDOWN_BATCHES пачек до
+    // следующей пробы; (4) если скорость упала ≥10% к прошлой пачке — понижаем.
+    // Возвращает { action, from, to } (для логов/тестов).
+    function tuneConcurrency(batchSpeed) {
+        var prev = state.prevSpeed;     // скорость предыдущей пачки (или null для первой)
+        var wasUp = state.lastTuneUp;   // повышали ли потоки ПЕРЕД этой пачкой
+        var before = state.concurrency;
+        var action;
+
+        if (prev != null && batchSpeed <= prev * SPEED_DROP_RATIO) {
+            // (4) скорость упала на 10% и больше — понижаем
+            state.concurrency = Math.max(MIN_CONCURRENCY, state.concurrency - 1);
+            state.lastTuneUp = false;
+            state.tuneCooldown = TUNE_COOLDOWN_BATCHES;
+            action = 'down';
+        } else if (wasUp) {
+            if (prev == null || batchSpeed > prev) {
+                // (2) повышение помогло — продолжаем повышать
+                state.concurrency = Math.min(MAX_CONCURRENCY, state.concurrency + 1);
+                state.lastTuneUp = true;
+                action = 'up';
+            } else {
+                // (3) прироста нет — возвращаем обратно и ждём перед следующей пробой
+                state.concurrency = Math.max(MIN_CONCURRENCY, state.concurrency - 1);
+                state.lastTuneUp = false;
+                state.tuneCooldown = TUNE_COOLDOWN_BATCHES;
+                action = 'revert';
+            }
+        } else if (state.tuneCooldown > 0) {
+            // ждём перед следующей пробой повышения
+            state.tuneCooldown -= 1;
+            state.lastTuneUp = false;
+            action = 'wait';
+        } else if (state.concurrency < MAX_CONCURRENCY) {
+            // (1) пробуем повысить на 1
+            state.concurrency = state.concurrency + 1;
+            state.lastTuneUp = true;
+            action = 'probe-up';
+        } else {
+            state.lastTuneUp = false;
+            action = 'max';
+        }
+
+        state.prevSpeed = batchSpeed;
+        return { action: action, from: before, to: state.concurrency };
+    }
+
+    // Отразить текущее число потоков в плитке статистики, селекторе и подсказке.
+    function renderConcurrency() {
+        setText('xcom-mass-stat-concurrency', String(state.concurrency));
+        var sel = document.getElementById('xcom-mass-concurrency');
+        if (sel && !sel.disabled) {
+            // при ручном режиме селектор — источник истины; в авто он отключён и лишь стартовое значение
+        }
+        updateBatchHint();
+    }
+
     function setControls(mode) {
         // mode: 'idle' | 'running' | 'loading'
         setDisabled('xcom-mass-reload', mode !== 'idle');
@@ -690,8 +761,13 @@
         state.outcomes = {};
         state.startTime = Date.now();
         state.endTime = 0;
+        // сброс авто-регулировки потоков на каждый прогон (issue #3527)
+        state.prevSpeed = null;
+        state.lastTuneUp = false;
+        state.tuneCooldown = 0;
         setHidden('xcom-mass-stats', false);
         renderStats();
+        renderConcurrency();
         startStatsTimer();
         setControls('running');
 
@@ -719,8 +795,19 @@
                 if (state.stopRequested) return;
                 if (!count || !state.records.length) return;   // пустой список → конец
                 state.records.forEach(function(r) { state.seenIds[r.id] = true; });
+                var batchStart = Date.now();
+                var batchStartCount = Object.keys(state.outcomes).length;
                 return processCurrentBatch().then(function() {
                     if (state.stopRequested) return;
+                    // замер скорости пачки и авто-регулировка числа потоков (issue #3527)
+                    if (state.autoConcurrency) {
+                        var elapsed = Date.now() - batchStart;
+                        var batchCount = Object.keys(state.outcomes).length - batchStartCount;
+                        if (batchCount > 0 && elapsed > 0) {
+                            tuneConcurrency(batchCount / (elapsed / 1000));
+                            renderConcurrency();
+                        }
+                    }
                     return iterate();
                 });
             });
@@ -840,11 +927,17 @@
         });
     }
 
-    // Подсказка о пачке/потоках (issue #3522: число потоков меняется на лету).
+    // Подсказка о пачке/потоках (issue #3522: число потоков; #3527: авто-регулировка).
     function updateBatchHint() {
         setText('xcom-mass-batch-hint', 'Пачка по ' + state.batchSize +
-            ', одновременно до ' + state.concurrency + ' запросов; «Старт» обрабатывает ' +
-            'пачки подряд до пустого списка или «Стоп»');
+            ', потоков ' + state.concurrency + (state.autoConcurrency ? ' (авто-регулировка по скорости)' : '') +
+            '; «Старт» обрабатывает пачки подряд до пустого списка или «Стоп»');
+    }
+
+    // Применить состояние авто-регулировки к UI: селектор потоков активен только в ручном режиме.
+    function applyAutoConcurrency() {
+        setDisabled('xcom-mass-concurrency', state.autoConcurrency);
+        renderConcurrency();
     }
 
     function bindEvents() {
@@ -852,6 +945,7 @@
         var start = document.getElementById('xcom-mass-start');
         var stop = document.getElementById('xcom-mass-stop');
         var concurrency = document.getElementById('xcom-mass-concurrency');
+        var auto = document.getElementById('xcom-mass-auto');
         var keyword = document.getElementById('xcom-mass-keyword');
 
         if (reload) reload.addEventListener('click', function() {
@@ -883,8 +977,13 @@
             var value = parseInt(concurrency.value, 10);
             if (!isNaN(value) && value > 0) {
                 state.concurrency = value;
-                updateBatchHint();
+                renderConcurrency();
             }
+        });
+        // Авто-регулировка потоков (issue #3527): в авто-режиме селектор — лишь стартовое значение.
+        if (auto) auto.addEventListener('change', function() {
+            state.autoConcurrency = !!auto.checked;
+            applyAutoConcurrency();
         });
     }
 
@@ -905,6 +1004,8 @@
         state.rfpFilter = str('data-rfp-filter', DEFAULT_RFP_FILTER);
         state.batchSize = num('data-batch-size', DEFAULT_BATCH_SIZE);
         state.concurrency = num('data-concurrency', DEFAULT_CONCURRENCY);
+        var autoAttr = trimValue(root.getAttribute('data-auto-concurrency')).toLowerCase();
+        state.autoConcurrency = !(autoAttr === '0' || autoAttr === 'false' || autoAttr === 'off');
         state.maxCandidates = num('data-max-candidates', DEFAULT_MAX_CANDIDATES);
         state.placeholderOurId = str('data-placeholder-our-id', DEFAULT_PLACEHOLDER_OUR_ID);
         state.skuIdKey = str('data-sku-id-field', DEFAULT_SKU_ID_KEY);
@@ -927,6 +1028,9 @@
         // синхронизировать переключатель потоков с конфигом (по умолчанию 5)
         var sel = document.getElementById('xcom-mass-concurrency');
         if (sel) sel.value = String(state.concurrency);
+        var auto = document.getElementById('xcom-mass-auto');
+        if (auto) auto.checked = state.autoConcurrency;
+        applyAutoConcurrency();   // селектор активен только в ручном режиме + плитка «потоков»
         updateBatchHint();
         loadMetadata();
     }
@@ -942,6 +1046,7 @@
         pickMatches: pickMatches,
         buildMatchUrl: buildMatchUrl,
         buildScanUrl: buildScanUrl,
+        tuneConcurrency: tuneConcurrency,
         _state: state,
         init: init
     };

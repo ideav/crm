@@ -21,7 +21,7 @@
                            placeholder="Ключевое слово в наименовании RFP" autocomplete="off">
                 </label>
                 <span id="xcom-mass-summary" class="xcom-mass-summary">Загрузка…</span>
-                <label class="xcom-mass-concurrency" title="Сколько строк обрабатывать одновременно">
+                <label class="xcom-mass-concurrency" title="Стартовое число одновременных запросов (в авто-режиме подстраивается по скорости)">
                     <span>Потоков</span>
                     <select id="xcom-mass-concurrency" class="xcom-mass-select">
                         <option value="3">3</option>
@@ -31,6 +31,10 @@
                         <option value="15">15</option>
                         <option value="20">20</option>
                     </select>
+                </label>
+                <label class="xcom-mass-auto" title="Авто-регулировка числа потоков по замеру скорости каждой пачки">
+                    <input id="xcom-mass-auto" type="checkbox" checked>
+                    <span>Авто</span>
                 </label>
                 <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button" title="Загрузить следующую пачку">
                     <i class="pi pi-refresh"></i>
@@ -59,6 +63,7 @@
             <div class="xcom-mass-stat"><b id="xcom-mass-stat-nomatch">0</b><span>без подбора</span></div>
             <div class="xcom-mass-stat xcom-mass-stat-err"><b id="xcom-mass-stat-errors">0</b><span>ошибки</span></div>
             <div class="xcom-mass-stat"><b id="xcom-mass-stat-speed">0</b><span>строк/мин</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-concurrency">5</b><span>потоков</span></div>
         </div>
     </section>
 

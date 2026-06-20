@@ -135,6 +135,26 @@
     border-color: var(--button-primary, #2563eb);
 }
 
+.xcom-mass-select:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Чекбокс авто-регулировки числа потоков (issue #3527) */
+.xcom-mass-auto {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.xcom-mass-auto input {
+    cursor: pointer;
+}
+
 /* Панель статистики и времени выполнения (issue #3522) */
 .xcom-mass-stats {
     display: flex;
