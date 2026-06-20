@@ -538,9 +538,9 @@
         });
     }
 
-    // Записать результат в строку RFP по ID артикулов (SKUID):
-    // «Наш артикул» — первый (верхний) SKUID одной ссылкой (или заглушка для несопоставленных);
-    // «Кандидаты» — остальные SKUID через запятую одним значением (мульти-ссылка).
+    // Записать результат в строку RFP по ID артикулов (SKUID). Обе колонки — текстовые:
+    // «Наш артикул» (type 3, ref=null) — первый (верхний) SKUID как текст (или заглушка для несопоставленных);
+    // «Кандидаты» (type 8, строка) — остальные SKUID одной строкой через запятую с пробелом.
     function writeBack(record) {
         var steps = [];
         var fields = state.fields;
@@ -556,7 +556,7 @@
             }).filter(Boolean);
             if (candidateIds.length) {
                 steps.push(function() {
-                    return postSet(record.id, fields.candidates.id, candidateIds.join(','));
+                    return postSet(record.id, fields.candidates.id, candidateIds.join(', '));
                 });
             }
         }
