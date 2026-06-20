@@ -76,22 +76,16 @@
         return matches || [];
     }
 
+    // Длина «склеенных» токенов наименования (все алфавитно-цифровые символы без разделителей).
     function alnumLength(value) {
         return tokenize(value).reduce(function(sum, token) {
             return sum + token.length;
         }, 0);
     }
 
-    // Точность подбора в процентах. Связана с длиной алфавитно-цифровых символов и числом
-    // совпавших токенов: доля длины строки RFP, покрытой токенами артикула SKU.
-    // 100% — длина всех токенов SKU равна длине строки RFP (полное покрытие) или TMA=1.
-    // 0% — ни один токен SKU не встретился в строке RFP.
-    function computeAccuracy(rfpString, skuString, tmaFlag) {
-        if (trimValue(tmaFlag) === '1') return 100;
-
-        var denom = alnumLength(rfpString);
-        if (!denom) return 0;
-
+    // Длина совпавших токенов: токены, встречающиеся и в RFP, и в SKU (по мультимножеству),
+    // склеиваются в одну строку — её длина и есть числитель точности.
+    function matchedAlnumLength(rfpString, skuString) {
         var pool = {};
         tokenize(rfpString).forEach(function(token) {
             pool[token] = (pool[token] || 0) + 1;
@@ -104,8 +98,26 @@
                 matchedLength += token.length;
             }
         });
+        return matchedLength;
+    }
 
-        return Math.max(0, Math.min(100, Math.round((matchedLength / denom) * 100)));
+    // Вес флага TMA в оценке точности (≈50%); остальное — текстовое совпадение токенов.
+    var TMA_WEIGHT = 0.5;
+
+    // Точность подбора в процентах — взвешенная сумма двух составляющих:
+    //   • текстовое совпадение: длина склеенных совпавших токенов, делённая на полусумму
+    //     длин «Наименование SKU» и «Наименование из RFP» (длины — по склеенным токенам);
+    //   • флаг TMA (точное совпадение артикула): вес ≈50%.
+    // 100% — полное совпадение токенов И TMA=1. 50% — только одно из двух. 0% — ни того, ни другого.
+    function computeAccuracy(rfpString, skuString, tmaFlag) {
+        var denom = (alnumLength(skuString) + alnumLength(rfpString)) / 2;
+        var lengthScore = denom > 0
+            ? Math.min(1, matchedAlnumLength(rfpString, skuString) / denom)
+            : 0;
+        var tmaScore = trimValue(tmaFlag) === '1' ? 1 : 0;
+
+        var accuracy = TMA_WEIGHT * tmaScore + (1 - TMA_WEIGHT) * lengthScore;
+        return Math.max(0, Math.min(100, Math.round(accuracy * 100)));
     }
 
     // --- Метаданные таблицы RFP ---------------------------------------------
