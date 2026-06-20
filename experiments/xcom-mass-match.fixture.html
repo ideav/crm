@@ -58,8 +58,12 @@ var META = {
     ]
 };
 
-// Строки RFP (пустой «токен» → попадают в пачку). r = [код, Наименование, Бренд, токен, ...].
+// Строки RFP. r = [код, Наименование, Бренд, токен, Наш артикул(r[4]), Кандидаты, Точность].
+// Непустой «Наш артикул» (r[4]) = уже сопоставлено. Сервер по фильтру F_6334033=!% такие НЕ
+// отдаёт. Первые две строки — обработанные (r[4] заполнен), остальные три — необработанные.
 var SCAN = [
+    { i: 5780400, u: 1, o: 1, r: ['10466000-1', 'Уже сопоставленная строка №1', 'Canon', '3193348:Canon', '4126386:Картридж Canon', '', '88'] },
+    { i: 5780401, u: 1, o: 1, r: ['10466001-1', 'Уже сопоставленная строка №2', 'HP', '3193377:HP', '4140077:Ракель HP', '', '73'] },
     { i: 5780502, u: 1, o: 1, r: ['10466417-1', 'Печь в сборе для печатного устройства konica minolta bizhub PRESS C1085 ГК', 'Konica Minolta', '', '', '', ''] },
     { i: 5780510, u: 1, o: 1, r: ['10466500-2', 'Тонер картридж Canon C-EXV33 черный для imageRUNNER 2520 2525 2530', 'Canon', '', '', '', ''] },
     { i: 5780521, u: 1, o: 1, r: ['10466622-1', 'Ракель wiper blade Hi-Black для HP LaserJet P1005 P1006 P1505', 'Hi-Black', '', '', '', ''] }
@@ -80,15 +84,29 @@ var REPORT = {
     ]
 };
 
+window.__scanRequests = 0; // счётчик запросов отбора пачки (демонстрация: один на пачку)
+
 var realFetch = window.fetch;
 window.fetch = function(url, opts) {
     var u = String(url);
+    var ud = decodeURIComponent(u);
     function json(data) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata\//.test(u)) return json(META);
-    if (/\/object\/2032189\//.test(u)) return json(SCAN);
-    var mRep = u.match(/FR_RFPID=(\d+)/);
+    if (/\/object\/2032189\//.test(u)) {
+        window.__scanRequests++;
+        var rows = SCAN;
+        // серверный фильтр «Наш артикул пуст» (F_6334033=!%) — обработанные строки не отдаём
+        if (/F_6334033=!%/.test(ud)) {
+            rows = SCAN.filter(function(x) { return (x.r[4] || '') === ''; });
+        }
+        var mLim = ud.match(/LIMIT=\d+,(\d+)/);
+        if (mLim) rows = rows.slice(0, parseInt(mLim[1], 10));
+        console.log('[mock] scan #' + window.__scanRequests + ' ' + ud + ' → ' + rows.length + ' строк');
+        return json(rows);
+    }
+    var mRep = ud.match(/FR_RFPID=(\d+)/);
     if (/\/report\/mass_match/.test(u)) return json(REPORT[mRep ? mRep[1] : ''] || []);
     if (/\/_m_set\//.test(u)) return json({ ok: 1 });
     return realFetch(url, opts);
