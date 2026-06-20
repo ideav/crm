@@ -420,23 +420,19 @@
         }
     }
 
-    // Колонка «Наш артикул» — ID SKU (issue #3512), наименование в подсказке (title).
+    // Колонка «Наш артикул» — только ID SKU (issue #3519: текст/наименование SKU не выводим).
     function ourCell(record) {
         if (!record.our || !record.our.id) return '';
-        return '<span title="' + escapeHtml(record.our.label || '') + '">' +
-            escapeHtml(record.our.id) + '</span>';
+        return escapeHtml(record.our.id);
     }
 
-    // Колонка «Кандидаты» — список ID SKU через запятую (issue #3512), наименования в title.
+    // Колонка «Кандидаты» — только список ID SKU через запятую (issue #3519: без наименований SKU,
+    // по списку ID видно их количество).
     function candidatesCell(record) {
         if (!record.candidates || !record.candidates.length) return '';
-        var ids = record.candidates.map(function(item) {
-            return escapeHtml(item.id);
-        }).join(', ');
-        var labels = record.candidates.map(function(item) {
-            return item.label;
-        }).join(', ');
-        return '<span title="' + escapeHtml(labels) + '">' + ids + '</span>';
+        return record.candidates.map(function(item) {
+            return item.id;
+        }).filter(Boolean).map(escapeHtml).join(', ');
     }
 
     function renderList() {
