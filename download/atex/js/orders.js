@@ -8,14 +8,14 @@
  *
  * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
  * object id и t{reqId} — id зависят от сборки базы:
- *   «Заказ»            — up=1
- *   «Позиция заказа»   — up={orderId} (подчинённая Заказу)
+ *   «Заказ»                 — up=1
+ *   «Заказанное количество» — up={orderId} (подчинённая Заказу)
  *   «Клиент», «Вид сырья», «Диаметр втулки» — ссылки.
  */
 (function(window, document) {
     'use strict';
 
-    var TABLE = { order: 'Заказ', position: 'Позиция заказа' };
+    var TABLE = { order: 'Заказ', position: ['Заказанное количество', 'Позиция заказа'] };
     var REF_OPTIONS_LIMIT = 500;
     var REF_SEARCH_LIMIT = 50;
     var REF_DROPDOWN_LIMIT = 80;
@@ -39,12 +39,12 @@
         { key: 'status', label: 'Статус', names: ['Статус заказа', 'Статус'], ref: true },
         { key: 'lead', label: 'Лидер', names: ['Лидер'] },
         { key: 'notes', label: 'Примечания', names: ['Примечания'] },
-        // Счётчик подчинённых позиций (ROLLUP-колонка «Позиция заказа») — приходит
-        // в записи заказа сразу, до ленивой загрузки самих позиций.
-        { key: 'posCount', label: 'Позиций', names: ['Позиция заказа'] }
+        // Счётчик подчинённых позиций (ROLLUP-колонка «Заказанное количество») —
+        // приходит в записи заказа сразу, до ленивой загрузки самих позиций.
+        { key: 'posCount', label: 'Позиций', names: ['Заказанное количество', 'Позиция заказа'] }
     ];
 
-    // Карта полей подчинённой таблицы «Позиция заказа».
+    // Карта полей подчинённой таблицы «Заказанное количество».
     var POSITION_FIELDS = [
         { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
         { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
@@ -418,11 +418,11 @@
     }
 
     function findMetadataByName(all, name) {
-        var wanted = normalizeFieldName(name);
+        var wanted = (Array.isArray(name) ? name : [name]).map(normalizeFieldName);
         for (var i = 0; i < (all || []).length; i++) {
             var meta = all[i];
-            if (normalizeFieldName(meta.val) === wanted) return meta;
-            if (meta.alias && normalizeFieldName(meta.alias) === wanted) return meta;
+            if (wanted.indexOf(normalizeFieldName(meta.val)) !== -1) return meta;
+            if (meta.alias && wanted.indexOf(normalizeFieldName(meta.alias)) !== -1) return meta;
         }
         return null;
     }
@@ -433,7 +433,8 @@
             var override = trimValue(overrides && overrides[key]);
             var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
             if (!meta) {
-                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                var nameForMsg = Array.isArray(tableNames[key]) ? tableNames[key].join('»/«') : tableNames[key];
+                throw new Error('В метаданных не найдена таблица «' + nameForMsg + '»' +
                     (override ? ' (id ' + override + ')' : ''));
             }
             resolved[key] = meta;
@@ -905,7 +906,7 @@
         var rows = orders.map(function(order) {
             var loadedPositions = state.positionsByOrder[order.id];
             // Пока позиции не догружены (заказ не раскрыт) — берём счётчик из самой
-            // записи заказа (ROLLUP «Позиция заказа»); после загрузки считаем по факту.
+            // записи заказа (ROLLUP «Заказанное количество»); после загрузки считаем по факту.
             var positionCount = loadedPositions
                 ? loadedPositions.length
                 : (parseInt(order.values.posCount, 10) || 0);

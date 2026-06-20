@@ -51,7 +51,7 @@
         material: 'Вид сырья',
         actualWidth: 'Фактическая ширина резки',
         order: 'Заказ',
-        position: 'Позиция заказа',
+        position: ['Заказанное количество', 'Позиция заказа'],
         sleeve: 'Диаметр втулки',
         client: 'Клиент'
     };
@@ -59,7 +59,7 @@
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
     // «Ширина в заказе» — номинал, «Код» — условие применения.
     var ACTUAL_WIDTH_REQ = { order: 'Ширина в заказе', code: 'Код' };
-    // Реквизиты «Заказа» и «Позиции заказа» — резолвятся по любому из имён.
+    // Реквизиты «Заказа» и «Заказанного количества» — резолвятся по любому из имён.
     var ORDER_REQ = {
         client: ['Клиент'], manager: ['Менеджер', 'Пользователь'],
         created: ['Дата создания'], status: ['Статус заказа', 'Статус'],
@@ -545,8 +545,11 @@
         return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
+                var names = (Array.isArray(name) ? name : [name]).map(function(n) {
+                    return String(n).trim().toLowerCase();
+                });
                 return list.filter(function(t) {
-                    return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
+                    return names.indexOf(String(t.val).trim().toLowerCase()) !== -1;
                 })[0] || null;
             }
             self.meta.material = byName(TABLE.material);
@@ -782,7 +785,7 @@
             if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
             row.appendChild(el('span', { class: 'atex-co-batch-no', text: formatBatchTimestamp(b.no) || ('#' + b.id) }));
             row.appendChild(el('span', { class: 'atex-co-batch-rem', text: b.remainderM2 + ' м²' }));
-            row.appendChild(el('span', { class: 'atex-co-batch-flag', text: 'В работе' }));
+            row.appendChild(el('span', { class: 'atex-co-batch-wh', text: b.warehouse || '—' }));
             box.appendChild(row);
         });
         if (neededM2 > 0) {
@@ -1006,7 +1009,7 @@
         table.appendChild(el('div', { class: 'atex-co-table-head' }, [
             el('span', { text: 'Ширина (факт), мм' }),
             el('span', { text: 'В заказе' }),
-            el('span', { text: 'Желаемо' }),
+            el('span', { text: 'Желаемое' }),
             el('span', { text: 'Получится' }),
             el('span', { text: 'Δ к желаемому' })
         ]));
@@ -1089,7 +1092,7 @@
         var p = this.plan;
         if (!p || !p.feasible || !p.results.length) return;
         if (!this.meta.order || !this.meta.position) {
-            this.notify('Не найдены таблицы «Заказ»/«Позиция заказа» — запись невозможна.', 'error');
+            this.notify('Не найдены таблицы «Заказ»/«Заказанное количество» — запись невозможна.', 'error');
             return;
         }
         if (!this.materialId) { this.notify('Сначала выберите Вид сырья.', 'error'); return; }
@@ -1245,7 +1248,7 @@
             p.results.forEach(function(r) {
                 chain = chain.then(function() {
                     var fields = {};
-                    // «Позиция заказа» хранит НОМИНАЛ («Ширина в заказе»); планирование
+                    // «Заказанное количество» хранит НОМИНАЛ («Ширина в заказе»); планирование
                     // само переводит его в фактическую (annotatePositionsCutWidth, #3372).
                     var orderWidth = (r.nominalWidth != null) ? r.nominalWidth : r.actualWidth;
                     // Кол-во рулонов — главное значение записи «Заказанное количество»

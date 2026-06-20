@@ -13,7 +13,7 @@
 // (правило: docs/integram-reports.md).
 //
 // Справочник позиций заказа (для привязки обеспечения) берётся отчётом
-// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
+// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): «Заказанное количество» —
 // подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
 // формы создания резки берутся отчётом `report/material_batches?JSON_KV`
 // (`rowsToBatches`). Справочник станков читается по имени из метаданных
@@ -536,6 +536,30 @@
             return s && cutIds[String(s.cutId)] === true;
         });
         return { cuts: dayCuts, supplies: daySupplies };
+    }
+
+    // #3486: строки отчёта 81463 (cut → fulfillment, JSON_KV) → массив id «Обеспечений»
+    // удаляемой резки. Отчёт фильтруется серверно (FR_cutID), но если cutId передан —
+    // подстраховываемся и отбрасываем чужие строки. Берём колонку fulfillmentID,
+    // дедуплицируем и пропускаем пустые. Чистая функция — покрывается тестами.
+    function fulfillmentIdsFromRows(rows, cutId) {
+        var want = (cutId == null || cutId === '') ? null : String(cutId);
+        var seen = {};
+        var out = [];
+        (rows || []).forEach(function(row) {
+            if (!row) return;
+            if (want != null) {
+                var rc = row.cutID != null ? row.cutID : (row.cut_id != null ? row.cut_id : row.cutId);
+                if (rc != null && rc !== '' && String(rc) !== want) return;
+            }
+            var fid = row.fulfillmentID != null ? row.fulfillmentID
+                    : (row.fulfillment_id != null ? row.fulfillment_id : row.fulfillmentId);
+            fid = (fid == null) ? '' : String(fid).trim();
+            if (fid === '' || fid === 'null' || seen[fid]) return;
+            seen[fid] = true;
+            out.push(fid);
+        });
+        return out;
     }
 
     // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
@@ -3100,6 +3124,7 @@
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
         dayDeletionTargets: dayDeletionTargets,
+        fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         planDateDayKey: planDateDayKey,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
@@ -4418,6 +4443,89 @@
             // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка удаления заданий дня: ' + (err && err.message || err), 'error');
+        });
+    };
+
+    // #3486: подпись резки для подтверждения/тоста удаления. Берём сырьё и плановую
+    // дату (если есть), иначе — id. Без обращения к сети.
+    function cutTaskLabel(cut) {
+        if (!cut) return '';
+        var name = String(cut.materialName || '').trim();
+        var day = formatPlanDayLabel(String(cut.planDate || '').trim());
+        if (name && day) return name + ' · ' + day;
+        return name || day || ('#' + cut.id);
+    }
+
+    // #3486: id всех «Обеспечений» резки отчётом 81463 (cut → fulfillment). Они
+    // ссылаются на «Партии ГП» резки; пока ссылки живы, _m_del резки вернёт 409
+    // (DeleteTreeRefsCount в index.php), поэтому удалять их нужно ДО самой резки.
+    // Возвращает Promise<массив id>. LIMIT с запасом — резок с тысячами связей нет.
+    AtexProductionPlanning.prototype.loadCutFulfillments = function(cutId) {
+        return this.getJson('report/81463?JSON_KV&LIMIT=0,1000&FR_cutID=' + encodeURIComponent(cutId))
+            .then(function(rows) { return fulfillmentIdsFromRows(rows, cutId); });
+    };
+
+    // #3486: кнопка «🗑» в карточке резки. Сначала тянем id «Обеспечений» резки
+    // (report/81463), показываем подтверждение с их числом, по согласию — удаляем.
+    AtexProductionPlanning.prototype.deleteCutTask = function(cut, cardEl) {
+        var self = this;
+        if (this.busy || !cut) return;
+        var cutId = String(cut.id);
+        var label = cutTaskLabel(cut);
+        this.setBusy(true);
+        this.loadCutFulfillments(cutId).then(function(fulfillmentIds) {
+            self.setBusy(false);
+            var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+                'Удалить задание «' + label + '»? Будет удалено обеспечений — ' +
+                fulfillmentIds.length + '. Действие необратимо.' });
+            self.confirmAction(msg, cardEl, [
+                { label: 'Удалить', warning: true, onConfirm: function() {
+                    self.runDeleteCutTask(cutId, fulfillmentIds, label);
+                } }
+            ]);
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Не удалось получить обеспечения резки: ' + (err && err.message || err), 'error');
+        });
+    };
+
+    // #3486: удаление одной резки. Порядок как у заданий дня (#3475): сперва все
+    // «Обеспечение» (снимаем ссылки на «Партии ГП»), затем сама «Производственная
+    // резка» — backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход.
+    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutId, fulfillmentIds, label) {
+        var self = this;
+        if (this.busy) return;
+        var ids = (fulfillmentIds || []).map(function(x) { return String(x); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var total = ids.length + 1;   // обеспечения + сама резка
+
+        this.setBusy(true);
+        this.showProgress('Удаление задания «' + label + '»…', total);
+        var done = 0;
+        function del(id) {
+            return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
+                self.updateProgress(++done);
+            });
+        }
+        // Цепочка: сначала обеспечения, потом резка (см. комментарий выше).
+        var chain = Promise.resolve();
+        ids.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+        chain = chain.then(function() { return del(cutId); });
+
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress();
+            self.setBusy(false);
+            if (String(self.selectedCutId) === String(cutId)) self.selectedCutId = null;
+            self.render();
+            self.notify('Задание удалено: обеспечений — ' + ids.length, 'success');
+        }).catch(function(err) {
+            self.hideProgress();
+            self.setBusy(false);
+            // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка удаления задания: ' + (err && err.message || err), 'error');
         });
     };
 
@@ -6181,7 +6289,7 @@
             return;
         }
 
-        // Позиция заказа (один выбор).
+        // Заказанное количество — позиция заказа (один выбор).
         var posSelect = el('select', { class: 'atex-pp-input' });
         posSelect.appendChild(el('option', { value: '', text: '— выберите позицию —' }));
         options.forEach(function(o) {
@@ -6196,7 +6304,7 @@
             d.qty = sel ? String(sel.remaining) : '';
             self.renderForm();
         });
-        form.appendChild(field('Позиция заказа', posSelect));
+        form.appendChild(field('Заказанное количество', posSelect));
 
         var selOpt = options.filter(function(o) { return o.id === String(d.positionId); })[0];
         var maxQty = selOpt ? selOpt.remaining : 0;
@@ -6618,9 +6726,19 @@
                 if (self.busy) return;
                 self.openStrips(c, cardPanel);
             });
+            // #3486: «🗑» — удалить задание (резку) с её «Обеспечениями». stopPropagation,
+            // чтобы клик по кнопке не выбирал резку (см. #3149: клики по контролам не
+            // выбирают карточку). Подтверждение и удаление — в deleteCutTask.
+            var del = el('button', { class: 'atex-pp-cut-del', type: 'button', text: '🗑', title: 'Удалить задание' });
+            del.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy) return;
+                self.deleteCutTask(c, cardPanel);
+            });
             controls.appendChild(up);
             controls.appendChild(down);
             controls.appendChild(strips);
+            controls.appendChild(del);
             cardPanel.appendChild(controls);
 
             groupEl.appendChild(cardPanel);

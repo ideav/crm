@@ -184,22 +184,13 @@
 }
 .atex-co-batch-no { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .atex-co-batch-rem { color: var(--co-muted); white-space: nowrap; }
-.atex-co-batch-flag {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--co-ok);
-    border: 1px solid var(--co-ok);
-    border-radius: 999px;
-    padding: 1px 8px;
-    white-space: nowrap;
-}
+.atex-co-batch-wh { font-size: 12px; color: var(--co-muted); white-space: nowrap; text-align: right; }
 /* Остатка не хватает — партия неактивна (предложить клиенту) */
 .atex-co-batch.is-insufficient {
     opacity: .5;
     background: var(--co-surface);
     pointer-events: none;
 }
-.atex-co-batch.is-insufficient .atex-co-batch-flag { color: var(--co-muted); border-color: var(--co-border); }
 
 /* Правая колонка — результат */
 .atex-co-view {
