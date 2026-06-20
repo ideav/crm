@@ -7084,7 +7084,7 @@
         addBtn.addEventListener('click', function() { self.openForm(); });
         // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня
         // (все станки). Между «Добавить вручную» и «Удалить».
-        var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать' });
+        var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать', title: 'Зафиксировать все задания этого дня' });
         fixBtn.addEventListener('click', function() { self.fixDayTasks(); });
         // #3475: «Удалить» (warning, жёлтая) — удаляет все задания выбранного дня:
         // сначала «Обеспечение» (снимаем ссылки на «Партии ГП»), затем «Производственную
@@ -7186,4 +7186,4 @@
 
  
  
-// @version 2026-06-20-issue-3508
+// @version 2026-06-20-issue-3516
