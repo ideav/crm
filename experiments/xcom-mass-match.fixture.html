@@ -45,6 +45,10 @@
                         <option value="20">20</option>
                     </select>
                 </label>
+                <label class="xcom-mass-auto" title="Авто-регулировка числа потоков по замеру скорости каждой пачки">
+                    <input id="xcom-mass-auto" type="checkbox" checked>
+                    <span>Авто</span>
+                </label>
                 <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>
                 <button id="xcom-mass-start" class="xcom-mass-btn xcom-mass-btn-primary" type="button" disabled><i class="pi pi-play"></i><span>Старт</span></button>
                 <button id="xcom-mass-stop" class="xcom-mass-btn xcom-mass-btn-danger" type="button" hidden><i class="pi pi-stop"></i><span>Стоп</span></button>
@@ -61,6 +65,7 @@
             <div class="xcom-mass-stat"><b id="xcom-mass-stat-nomatch">0</b><span>без подбора</span></div>
             <div class="xcom-mass-stat xcom-mass-stat-err"><b id="xcom-mass-stat-errors">0</b><span>ошибки</span></div>
             <div class="xcom-mass-stat"><b id="xcom-mass-stat-speed">0</b><span>строк/мин</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-concurrency">5</b><span>потоков</span></div>
         </div>
     </section>
     <section class="xcom-mass-pane">
