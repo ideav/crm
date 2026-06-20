@@ -66,14 +66,16 @@ var SCAN = [
     { i: 5780401, u: 1, o: 1, r: ['10466001-1', 'Уже сопоставленная строка №2', 'HP', '3193377:HP', '4140077:Ракель HP', '', '73'] },
     { i: 5780502, u: 1, o: 1, r: ['10466417-1', 'Печь в сборе для печатного устройства konica minolta bizhub PRESS C1085 ГК', 'Konica Minolta', '', '', '', ''] },
     { i: 5780510, u: 1, o: 1, r: ['10466500-2', 'Тонер картридж Canon C-EXV33 черный для imageRUNNER 2520 2525 2530', 'Canon', '', '', '', ''] },
-    { i: 5780521, u: 1, o: 1, r: ['10466622-1', 'Ракель wiper blade Hi-Black для HP LaserJet P1005 P1006 P1505', 'Hi-Black', '', '', '', ''] }
+    { i: 5780521, u: 1, o: 1, r: ['10466622-1', 'Ракель wiper blade Hi-Black для HP LaserJet P1005 P1006 P1505', 'Hi-Black', '', '', '', ''] },
+    { i: 5780530, u: 1, o: 1, r: ['10466700-9', 'Экзотическая позиция без аналогов в каталоге', '', '', '', '', ''] }
 ];
 
 // Ответы отчёта mass_match по FR_RFPID. Первая строка = «Наш артикул», остальные — кандидаты.
 var REPORT = {
     '5780502': [
         { RFP: '10466417-1', 'Наименование SKU': 'Запчасть Konica Minolta A5AWR70E11 Ролик bizhub Press C1085/AccurioPress C6085', 'токены': '1085,BizHub,C,Konica,Minolta,Press', 'Вес': '9', 'ТММ': '0', 'Артикул': 'A5AWR70E11', SKUID: '4126386' },
-        { RFP: '10466417-1', 'Наименование SKU': 'Ролик Konica Minolta bizhub Press C1085', 'токены': '1085,BizHub,Konica,Minolta,Press', 'Вес': '7', 'ТММ': '0', 'Артикул': 'A5AWR70E12', SKUID: '4126390' }
+        { RFP: '10466417-1', 'Наименование SKU': 'Ролик Konica Minolta bizhub Press C1085', 'токены': '1085,BizHub,Konica,Minolta,Press', 'Вес': '7', 'ТММ': '0', 'Артикул': 'A5AWR70E12', SKUID: '4126390' },
+        { RFP: '10466417-1', 'Наименование SKU': 'Ролик подачи Konica Minolta AccurioPress C6085', 'токены': 'AccurioPress,C,Konica,Minolta,Ролик', 'Вес': '6', 'ТММ': '0', 'Артикул': 'A5AWR70E13', SKUID: '4126391' }
     ],
     '5780510': [
         { RFP: '10466500-2', 'Наименование SKU': 'Тонер-картридж Canon C-EXV33 черный imageRUNNER 2520 2525 2530', 'токены': '2520,2525,2530,Canon,EXV33,imageRUNNER,картридж,Тонер,черный', 'Вес': '14', 'ТММ': '1', 'Артикул': 'C-EXV33', SKUID: '4130011' },
@@ -108,7 +110,16 @@ window.fetch = function(url, opts) {
     }
     var mRep = ud.match(/FR_RFPID=(\d+)/);
     if (/\/report\/mass_match/.test(u)) return json(REPORT[mRep ? mRep[1] : ''] || []);
-    if (/\/_m_set\//.test(u)) return json({ ok: 1 });
+    if (/\/_m_set\//.test(u)) {
+        // захват записей: t6334033=Наш артикул, t6334032=Кандидаты, t6333968=Точность
+        window.__sets = window.__sets || [];
+        var rid = (ud.match(/_m_set\/(\d+)/) || [])[1];
+        var body = new URLSearchParams((opts && opts.body) || '');
+        body.forEach(function(val, key) {
+            if (key.charAt(0) === 't') window.__sets.push({ record: rid, field: key, value: val });
+        });
+        return json({ ok: 1 });
+    }
     return realFetch(url, opts);
 };
 </script>

@@ -13,6 +13,10 @@
     var DEFAULT_BATCH_SIZE = 50;
     var DEFAULT_CONCURRENCY = 3;
     var DEFAULT_MAX_CANDIDATES = 20;
+    // Запись-заглушка «Наш артикул» для строк без совпадений или с ошибкой — чтобы они вышли
+    // из выборки необработанных (фильтр пустого «Наш артикул») и не возвращались в каждую пачку.
+    // «Наш артикул» (type 3, ref=null) хранит сырое значение как текст → '0' делает val непустым.
+    var DEFAULT_PLACEHOLDER_OUR_ID = '0';
 
     // Имена полей в таблице RFP (резолвятся по метаданным; можно переопределить data-атрибутами).
     var DEFAULT_RFP_NAME_NAME = 'Наименование';   // «Наименование из RFP» — для оценки точности
@@ -35,6 +39,7 @@
         batchSize: DEFAULT_BATCH_SIZE,
         concurrency: DEFAULT_CONCURRENCY,
         maxCandidates: DEFAULT_MAX_CANDIDATES,
+        placeholderOurId: DEFAULT_PLACEHOLDER_OUR_ID,
         skuIdKey: DEFAULT_SKU_ID_KEY,
         skuLabelKey: DEFAULT_SKU_LABEL_KEY,
         tokensKey: DEFAULT_TOKENS_KEY,
@@ -488,6 +493,11 @@
 
     // --- Обработка одной строки ---------------------------------------------
 
+    // Заглушка «Наш артикул» (без совпадений / ошибка) — чтобы строка вышла из выборки.
+    function placeholderOur(label) {
+        return { id: state.placeholderOurId, label: label || '', placeholder: true };
+    }
+
     function processRecord(record) {
         record.status = 'processing';
         record.message = '';
@@ -495,27 +505,42 @@
         updateProgress();
 
         return fetchJson(buildMatchUrl(record.id)).then(function(json) {
-            var picked = pickMatches(normalizeQueryRows(json));
-            record.our = picked.our;
-            record.candidates = picked.candidates;
-            record.accuracy = picked.our
-                ? computeAccuracy(record.rfpName || record.label, picked.our.label, picked.tokens, picked.tma)
-                : 0;
+            return pickMatches(normalizeQueryRows(json));
+        }).catch(function(error) {
+            // ошибка запроса/отчёта — дальше поставим заглушку, чтобы строка не зависла
+            record.message = error && error.message ? error.message : 'Не удалось обработать строку.';
+            return null;
+        }).then(function(picked) {
+            if (picked && picked.our) {
+                record.our = picked.our;
+                record.candidates = picked.candidates;
+                record.accuracy = computeAccuracy(record.rfpName || record.label, picked.our.label, picked.tokens, picked.tma);
+            } else {
+                // нет совпадений (picked.our пуст) или ошибка отчёта (picked === null) —
+                // пишем заглушку «Наш артикул», иначе строка зависнет в пустом состоянии
+                // и будет попадать в каждую следующую пачку.
+                record.our = placeholderOur(picked ? 'нет совпадений' : '');
+                record.candidates = [];
+                record.accuracy = 0;
+            }
 
             return writeBack(record).then(function() {
-                record.status = 'done';
+                record.status = (picked === null) ? 'error' : 'done';
                 updateRecordRow(record);
                 updateProgress();
             });
         }).catch(function(error) {
+            // ошибка записи результата — не зацикливаемся, просто помечаем строку ошибкой
             record.status = 'error';
-            record.message = error && error.message ? error.message : 'Не удалось обработать строку.';
+            record.message = record.message || (error && error.message) || 'Не удалось записать результат.';
             updateRecordRow(record);
             updateProgress();
         });
     }
 
-    // Записать результат в таблицу RFP: «Наш артикул», «Кандидаты» (по одной ссылке), «Точность».
+    // Записать результат в строку RFP по ID артикулов (SKUID). Обе колонки — текстовые:
+    // «Наш артикул» (type 3, ref=null) — первый (верхний) SKUID как текст (или заглушка для несопоставленных);
+    // «Кандидаты» (type 8, строка) — остальные SKUID одной строкой через запятую с пробелом.
     function writeBack(record) {
         var steps = [];
         var fields = state.fields;
@@ -526,12 +551,14 @@
             });
         }
         if (fields.candidates && record.candidates && record.candidates.length) {
-            record.candidates.forEach(function(item) {
-                if (!item.id) return;
+            var candidateIds = record.candidates.map(function(item) {
+                return item.id;
+            }).filter(Boolean);
+            if (candidateIds.length) {
                 steps.push(function() {
-                    return postSet(record.id, fields.candidates.id, item.id);
+                    return postSet(record.id, fields.candidates.id, candidateIds.join(', '));
                 });
-            });
+            }
         }
         if (fields.accuracy && record.accuracy != null) {
             steps.push(function() {
@@ -539,7 +566,6 @@
             });
         }
 
-        // Последовательно, чтобы записи в мульти-ссылку «Кандидаты» добавлялись по порядку.
         return steps.reduce(function(chain, step) {
             return chain.then(step);
         }, Promise.resolve());
@@ -717,6 +743,7 @@
         state.batchSize = num('data-batch-size', DEFAULT_BATCH_SIZE);
         state.concurrency = num('data-concurrency', DEFAULT_CONCURRENCY);
         state.maxCandidates = num('data-max-candidates', DEFAULT_MAX_CANDIDATES);
+        state.placeholderOurId = str('data-placeholder-our-id', DEFAULT_PLACEHOLDER_OUR_ID);
         state.skuIdKey = str('data-sku-id-field', DEFAULT_SKU_ID_KEY);
         state.skuLabelKey = str('data-sku-field', DEFAULT_SKU_LABEL_KEY);
         state.tokensKey = str('data-tokens-field', DEFAULT_TOKENS_KEY);
