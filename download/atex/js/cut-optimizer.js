@@ -17,7 +17,7 @@
 //   • НИЧЕГО НА СКЛАД: каждая карта режет только заказанные ширины, остаток
 //     джамбо — это «Отход» (необрезаемый край), а не складские полосы;
 //   • «Отход, мм» одной карты = W − Σ(ширина × ножей); общий отход (м²) считается
-//     по всем картам с учётом числа проходов и длины рулона
+//     по всем картам с учётом числа проходов и длины рулона.
 //
 // Кнопка «В заказ» создаёт под выбранным (или новым) Заказом по одной Позиции
 // заказа на каждую ширину — это единственная запись данных. Номер нового заказа
@@ -785,8 +785,8 @@
             var row = el('div', { class: 'atex-co-batch' + (insufficient ? ' is-insufficient' : '') });
             if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
             row.appendChild(el('span', { class: 'atex-co-batch-no', text: formatBatchTimestamp(b.no) || ('#' + b.id) }));
-            row.appendChild(el('span', { class: 'atex-co-batch-rem', text: Math.floor(b.remainderM2) + ' м²' }));
             row.appendChild(el('span', { class: 'atex-co-batch-wh', text: b.warehouse || '—' }));
+            row.appendChild(el('span', { class: 'atex-co-batch-rem', text: Math.floor(b.remainderM2) + ' м²' }));
             box.appendChild(row);
         });
         if (neededM2 > 0) {
