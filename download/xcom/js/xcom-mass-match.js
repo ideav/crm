@@ -2,9 +2,10 @@
     'use strict';
 
     // Рабочее место массового подбора SKU для строк каталога контрагента (таблица RFP).
-    // Пачками выбирает строки RFP с пустым полem «токен», для каждой строки запускает
-    // запрос mass_match (фильтр FR_RFPID={id строки}) и записывает обратно в RFP три поля:
-    // «Наш артикул» (ссылка на SKU), «Кандидаты» (мульти-ссылка на SKU) и «Точность подбора».
+    // Пачками выбирает необработанные строки RFP (серверный фильтр: пустое «Наш артикул»),
+    // для каждой строки запускает запрос mass_match (фильтр FR_RFPID={id строки}) и записывает
+    // обратно в RFP три поля: «Наш артикул» (ссылка на SKU), «Кандидаты» (мульти-ссылка на SKU)
+    // и «Точность подбора». Обработанные строки выпадают из выборки — пачка всегда «свежая».
 
     var DEFAULT_RFP_TABLE = '2032189';
     var DEFAULT_QUERY = 'mass_match';
@@ -12,11 +13,8 @@
     var DEFAULT_BATCH_SIZE = 50;
     var DEFAULT_CONCURRENCY = 3;
     var DEFAULT_MAX_CANDIDATES = 20;
-    var SCAN_PAGE = 200;          // сколько строк RFP читаем за один запрос при отборе пачки
-    var SCAN_PAGE_LIMIT = 60;     // потолок числа страниц сканирования (защита от прохода всей таблицы)
 
     // Имена полей в таблице RFP (резолвятся по метаданным; можно переопределить data-атрибутами).
-    var DEFAULT_TOKEN_NAME = 'токен';
     var DEFAULT_RFP_NAME_NAME = 'Наименование';   // «Наименование из RFP» — для оценки точности
     var DEFAULT_OUR_NAME = 'Наш артикул';
     var DEFAULT_CANDIDATES_NAME = 'Кандидаты';
@@ -42,7 +40,7 @@
         tokensKey: DEFAULT_TOKENS_KEY,
         tmaKey: DEFAULT_TMA_KEY,
         names: {},
-        fields: {},          // { token, our, candidates, accuracy } -> { id, index }
+        fields: {},          // { rfpName, our, candidates, accuracy } -> { id, index }
         columns: [],
         records: [],
         running: false,
@@ -253,10 +251,16 @@
         return '/' + encodePathSegment(state.db) + '/metadata/' + encodePathSegment(state.rfpTable);
     }
 
-    function buildScanUrl(offset) {
+    // Запрос пачки необработанных строк RFP: серверный фильтр «Наш артикул» пуст (F_{id}=!%).
+    // Обработанные (с заполненным «Наш артикул») сервер не возвращает — пачка всегда «свежая»,
+    // без клиентского сканирования таблицы.
+    function buildScanUrl(limit) {
         var params = new URLSearchParams();
         params.set('JSON_OBJ', '');
-        params.set('LIMIT', offset + ',' + SCAN_PAGE);
+        if (state.fields.our && state.fields.our.id) {
+            params.set('F_' + state.fields.our.id, '!%');
+        }
+        params.set('LIMIT', '0,' + limit);
         return '/' + encodePathSegment(state.db) + '/object/' +
             encodePathSegment(state.rfpTable) + '/?' + params.toString();
     }
@@ -416,7 +420,8 @@
         if (!container) return;
 
         if (!state.records.length) {
-            renderMessage('Строки RFP с пустым полем «' + state.names.token + '» не найдены.', 'empty');
+            renderMessage('Несопоставленных строк RFP не осталось — поле «' + state.names.our +
+                '» заполнено у всех.', 'empty');
             return;
         }
 
@@ -591,12 +596,17 @@
 
     // --- Загрузка пачки ------------------------------------------------------
 
-    function emptyTokenValue(record) {
-        var index = state.fields.token ? state.fields.token.index : -1;
+    // Необработанная строка — пустое поле «Наш артикул» (его заполняет writeBack при обработке).
+    // Уже обработанные пропускаем: иначе повторно дублировались бы «Кандидаты» (мульти-ссылка).
+    function isUnprocessed(record) {
+        var index = state.fields.our ? state.fields.our.index : -1;
         if (index < 0) return true;
         return trimValue(record.values[index]) === '';
     }
 
+    // Пачка = один запрос. Сервер сам отдаёт только необработанные строки (фильтр в buildScanUrl),
+    // поэтому ни клиентского сканирования таблицы, ни курсора не нужно: по мере обработки строки
+    // получают «Наш артикул» и выпадают из выборки — следующее «Обновить» вернёт новую пачку.
     function loadBatch() {
         var token = ++state.loadToken;
         state.records = [];
@@ -604,43 +614,31 @@
         renderMessage('Загрузка строк RFP…', 'loading');
         setText('xcom-mass-summary', 'Загрузка…');
 
-        var collected = [];
-
-        function scan(page) {
-            if (token !== state.loadToken) return Promise.resolve();
-            if (collected.length >= state.batchSize || page >= SCAN_PAGE_LIMIT) {
-                return Promise.resolve();
-            }
-            return fetchJson(buildScanUrl(page * SCAN_PAGE)).then(function(json) {
-                var rows = normalizeRows(json);
-                if (!rows.length) return;
-                rows.forEach(function(row) {
-                    if (collected.length >= state.batchSize) return;
-                    if (!emptyTokenValue(row)) return;
-                    var nameField = state.fields.rfpName;
-                    var nameIndex = nameField ? nameField.index : -1;
-                    collected.push({
-                        id: row.id,
-                        label: trimValue(row.values[0]),
-                        rfpName: nameIndex >= 0 ? trimValue(row.values[nameIndex]) : trimValue(row.values[0]),
-                        values: row.values,
-                        status: 'pending',
-                        our: null,
-                        candidates: [],
-                        accuracy: null,
-                        message: ''
-                    });
-                });
-                if (rows.length < SCAN_PAGE) return; // достигнут конец таблицы
-                return scan(page + 1);
-            });
-        }
-
-        return scan(0).then(function() {
+        return fetchJson(buildScanUrl(state.batchSize)).then(function(json) {
             if (token !== state.loadToken) return;
+            var rows = normalizeRows(json);
+
+            var nameField = state.fields.rfpName;
+            var nameIndex = nameField ? nameField.index : -1;
+            // подстраховка: даже если сервер вернёт строку с «Наш артикул», не обрабатываем её
+            // повторно (иначе дублировались бы «Кандидаты»).
+            var collected = rows.filter(isUnprocessed).map(function(row) {
+                return {
+                    id: row.id,
+                    label: trimValue(row.values[0]),
+                    rfpName: nameIndex >= 0 ? trimValue(row.values[nameIndex]) : trimValue(row.values[0]),
+                    values: row.values,
+                    status: 'pending',
+                    our: null,
+                    candidates: [],
+                    accuracy: null,
+                    message: ''
+                };
+            });
+
             state.records = collected;
             renderList();
-            setText('xcom-mass-summary', collected.length + ' из ' + state.batchSize);
+            setText('xcom-mass-summary', collected.length + ' необработанных');
             setControls('idle');
             updateProgress();
         }).catch(function(error) {
@@ -661,7 +659,6 @@
             state.columns = buildColumns(metadata);
 
             var attr = function(name) { return state.root.getAttribute(name); };
-            state.fields.token = findField(state.names.token, attr('data-token-field-id'));
             state.fields.rfpName = findField(state.names.rfpName, attr('data-rfp-name-field-id'));
             state.fields.our = findField(state.names.our, attr('data-our-field-id'));
             state.fields.candidates = findField(state.names.candidates, attr('data-candidates-field-id'));
@@ -725,7 +722,6 @@
         state.tokensKey = str('data-tokens-field', DEFAULT_TOKENS_KEY);
         state.tmaKey = str('data-tma-field', DEFAULT_TMA_KEY);
         state.names = {
-            token: str('data-token-name', DEFAULT_TOKEN_NAME),
             rfpName: str('data-rfp-name', DEFAULT_RFP_NAME_NAME),
             our: str('data-our-name', DEFAULT_OUR_NAME),
             candidates: str('data-candidates-name', DEFAULT_CANDIDATES_NAME),
