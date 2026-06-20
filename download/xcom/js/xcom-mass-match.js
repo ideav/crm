@@ -424,6 +424,7 @@
             return '<tr data-record-id="' + escapeHtml(record.id) + '">' +
                 '<td class="xcom-mass-num">' + (index + 1) + '</td>' +
                 '<td>' + escapeHtml(record.label) + '</td>' +
+                '<td class="xcom-mass-rfp-name">' + escapeHtml(record.rfpName || '') + '</td>' +
                 '<td class="xcom-mass-status-col">' + statusCell(record) + '</td>' +
                 '<td>' + escapeHtml(record.our ? record.our.label : '') + '</td>' +
                 '<td>' + candidatesCell(record) + '</td>' +
@@ -435,6 +436,7 @@
             '<thead><tr>' +
             '<th class="xcom-mass-num">#</th>' +
             '<th>Строка RFP</th>' +
+            '<th class="xcom-mass-rfp-name">Наименование из RFP</th>' +
             '<th class="xcom-mass-status-col">Статус</th>' +
             '<th>Наш артикул</th>' +
             '<th>Кандидаты</th>' +
@@ -448,11 +450,11 @@
         var row = container.querySelector('tr[data-record-id="' + record.id + '"]');
         if (!row) return;
         var cells = row.cells;
-        if (cells.length < 6) return;
-        cells[2].innerHTML = statusCell(record);
-        cells[3].textContent = record.our ? record.our.label : '';
-        cells[4].innerHTML = candidatesCell(record);
-        cells[5].textContent = record.accuracy == null ? '' : record.accuracy + '%';
+        if (cells.length < 7) return;
+        cells[3].innerHTML = statusCell(record);
+        cells[4].textContent = record.our ? record.our.label : '';
+        cells[5].innerHTML = candidatesCell(record);
+        cells[6].textContent = record.accuracy == null ? '' : record.accuracy + '%';
     }
 
     function updateProgress() {
