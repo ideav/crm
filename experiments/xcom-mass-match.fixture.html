@@ -20,15 +20,26 @@
      data-query="mass_match"
      data-rfp-filter="RFPID"
      data-batch-size="2"
-     data-concurrency="3">
+     data-concurrency="5">
     <section class="xcom-mass-panel">
         <div class="xcom-mass-head">
             <div>
                 <h1>Массовый подбор SKU</h1>
-                <p id="xcom-mass-batch-hint">Пачка по 50, одновременно не более 3 запросов</p>
+                <p id="xcom-mass-batch-hint">Пачка по 50, одновременно до 5 запросов</p>
             </div>
             <div class="xcom-mass-actions">
                 <span id="xcom-mass-summary" class="xcom-mass-summary">Загрузка…</span>
+                <label class="xcom-mass-concurrency" title="Сколько строк обрабатывать одновременно">
+                    <span>Потоков</span>
+                    <select id="xcom-mass-concurrency" class="xcom-mass-select">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="7">7</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="20">20</option>
+                    </select>
+                </label>
                 <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>
                 <button id="xcom-mass-start" class="xcom-mass-btn xcom-mass-btn-primary" type="button" disabled><i class="pi pi-play"></i><span>Старт</span></button>
                 <button id="xcom-mass-stop" class="xcom-mass-btn xcom-mass-btn-danger" type="button" hidden><i class="pi pi-stop"></i><span>Стоп</span></button>
@@ -37,6 +48,14 @@
         <div id="xcom-mass-progress" class="xcom-mass-progress" hidden>
             <div class="xcom-mass-progress-track"><div id="xcom-mass-progress-bar" class="xcom-mass-progress-bar"></div></div>
             <span id="xcom-mass-progress-label" class="xcom-mass-summary">Обработано 0 из 0</span>
+        </div>
+        <div id="xcom-mass-stats" class="xcom-mass-stats" hidden>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-time">0:00</b><span>время</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-total">0</b><span>обработано</span></div>
+            <div class="xcom-mass-stat xcom-mass-stat-ok"><b id="xcom-mass-stat-matched">0</b><span>с подбором</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-nomatch">0</b><span>без подбора</span></div>
+            <div class="xcom-mass-stat xcom-mass-stat-err"><b id="xcom-mass-stat-errors">0</b><span>ошибки</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-speed">0</b><span>строк/мин</span></div>
         </div>
     </section>
     <section class="xcom-mass-pane">

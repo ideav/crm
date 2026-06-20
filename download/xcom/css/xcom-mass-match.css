@@ -83,6 +83,72 @@
     transition: width 0.2s ease;
 }
 
+/* Переключатель числа одновременных запросов (issue #3522) */
+.xcom-mass-concurrency {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #64748b);
+    white-space: nowrap;
+}
+
+.xcom-mass-select {
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--border-color, #cfd8e3);
+    background: var(--card-bg, #ffffff);
+    color: var(--text-primary, #1f2937);
+    cursor: pointer;
+}
+
+.xcom-mass-select:hover {
+    border-color: var(--button-primary, #2563eb);
+}
+
+/* Панель статистики и времени выполнения (issue #3522) */
+.xcom-mass-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.xcom-mass-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 5rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 0.5rem;
+    background: var(--bg-secondary, #f6f8fb);
+    border: 1px solid var(--border-color, #e5ebf2);
+}
+
+.xcom-mass-stat b {
+    font-size: 1.15rem;
+    line-height: 1.2;
+    color: var(--text-primary, #1f2937);
+    font-variant-numeric: tabular-nums;
+}
+
+.xcom-mass-stat span {
+    font-size: 0.72rem;
+    color: var(--text-secondary, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.xcom-mass-stat-ok b {
+    color: var(--success, #15803d);
+}
+
+.xcom-mass-stat-err b {
+    color: var(--danger, #b91c1c);
+}
+
 .xcom-mass-pane {
     display: flex;
     flex-direction: column;

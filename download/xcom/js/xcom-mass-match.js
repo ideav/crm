@@ -13,7 +13,8 @@
     var DEFAULT_QUERY = 'mass_match';
     var DEFAULT_RFP_FILTER = 'RFPID';
     var DEFAULT_BATCH_SIZE = 50;
-    var DEFAULT_CONCURRENCY = 3;
+    var DEFAULT_CONCURRENCY = 5;                       // одновременных запросов (issue #3522)
+    var CONCURRENCY_OPTIONS = [3, 5, 7, 10, 15, 20];  // допустимые значения переключателя (issue #3522)
     var DEFAULT_MAX_CANDIDATES = 20;
     // Запись-заглушка «Наш артикул» для строк без совпадений или с ошибкой — чтобы они вышли
     // из выборки необработанных (фильтр пустого «Наш артикул») и не возвращались в каждую пачку.
@@ -53,8 +54,12 @@
         running: false,
         stopRequested: false,
         loadToken: 0,
-        sessionCount: 0,    // обработано строк за текущий авто-прогон (issue #3512)
-        seenIds: {}         // id строк, уже взятых в работу в этом прогоне — защита от зацикливания
+        seenIds: {},        // id строк, уже взятых в работу в этом прогоне — защита от зацикливания
+        // issue #3522: статистика и время выполнения авто-прогона
+        outcomes: {},       // { recordId: 'matched'|'noMatch'|'error' } — итог по строке для статистики
+        startTime: 0,       // Date.now() начала прогона
+        endTime: 0,         // Date.now() конца прогона (0 — пока идёт)
+        timer: null         // id setInterval живого таймера
     };
 
     function trimValue(value) {
@@ -497,6 +502,56 @@
         if (bar) bar.style.width = (total ? Math.round((done / total) * 100) : 0) + '%';
     }
 
+    // --- Статистика и время выполнения (issue #3522) -------------------------
+
+    // Зафиксировать итог строки для статистики (перезапись при ретрае — без двойного счёта).
+    function recordOutcome(record) {
+        state.outcomes[record.id] = record.status === 'error' ? 'error'
+            : (record.our && record.our.placeholder ? 'noMatch' : 'matched');
+        renderStats();
+    }
+
+    function formatDuration(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000));
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return (h > 0 ? h + ':' + pad(m) : m) + ':' + pad(sec);
+    }
+
+    // Обновить панель статистики: время прогона, всего обработано, с подбором / без подбора /
+    // ошибки и скорость (строк/мин). Считаем по state.outcomes (итог по каждой строке прогона).
+    function renderStats() {
+        var matched = 0, noMatch = 0, errors = 0, total = 0;
+        for (var id in state.outcomes) {
+            if (!Object.prototype.hasOwnProperty.call(state.outcomes, id)) continue;
+            total++;
+            var o = state.outcomes[id];
+            if (o === 'matched') matched++;
+            else if (o === 'noMatch') noMatch++;
+            else if (o === 'error') errors++;
+        }
+        var elapsed = state.startTime ? ((state.endTime || Date.now()) - state.startTime) : 0;
+        var speed = elapsed > 0 ? Math.round(total / (elapsed / 60000)) : 0;
+
+        setText('xcom-mass-stat-time', formatDuration(elapsed));
+        setText('xcom-mass-stat-total', String(total));
+        setText('xcom-mass-stat-matched', String(matched));
+        setText('xcom-mass-stat-nomatch', String(noMatch));
+        setText('xcom-mass-stat-errors', String(errors));
+        setText('xcom-mass-stat-speed', String(speed));
+    }
+
+    function startStatsTimer() {
+        stopStatsTimer();
+        state.timer = setInterval(renderStats, 1000);
+    }
+
+    function stopStatsTimer() {
+        if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    }
+
     function setControls(mode) {
         // mode: 'idle' | 'running' | 'loading'
         setDisabled('xcom-mass-reload', mode !== 'idle');
@@ -543,6 +598,7 @@
                 record.status = (picked === null) ? 'error' : 'done';
                 updateRecordRow(record);
                 updateProgress();
+                recordOutcome(record);
             });
         }).catch(function(error) {
             // ошибка записи результата — не зацикливаемся, просто помечаем строку ошибкой
@@ -550,6 +606,7 @@
             record.message = record.message || (error && error.message) || 'Не удалось записать результат.';
             updateRecordRow(record);
             updateProgress();
+            recordOutcome(record);
         });
     }
 
@@ -622,8 +679,13 @@
         if (state.running || !state.records.length) return;
         state.running = true;
         state.stopRequested = false;
-        state.sessionCount = 0;
         state.seenIds = {};
+        state.outcomes = {};
+        state.startTime = Date.now();
+        state.endTime = 0;
+        setHidden('xcom-mass-stats', false);
+        renderStats();
+        startStatsTimer();
         setControls('running');
 
         function iterate() {
@@ -652,9 +714,6 @@
                 state.records.forEach(function(r) { state.seenIds[r.id] = true; });
                 return processCurrentBatch().then(function() {
                     if (state.stopRequested) return;
-                    state.sessionCount += state.records.filter(function(r) {
-                        return r.status === 'done' || r.status === 'error';
-                    }).length;
                     return iterate();
                 });
             });
@@ -662,10 +721,14 @@
 
         return iterate().then(function() {
             state.running = false;
+            state.endTime = Date.now();
+            stopStatsTimer();
+            renderStats();
             setControls('idle');
             updateProgress();
+            var processed = Object.keys(state.outcomes).length;
             setText('xcom-mass-summary', (state.stopRequested ? 'Остановлено' : 'Готово') +
-                ' · обработано за прогон: ' + state.sessionCount);
+                ' · обработано за прогон: ' + processed + ' за ' + formatDuration(state.endTime - state.startTime));
             if (!state.records.length) renderList();
         });
     }
@@ -770,10 +833,18 @@
         });
     }
 
+    // Подсказка о пачке/потоках (issue #3522: число потоков меняется на лету).
+    function updateBatchHint() {
+        setText('xcom-mass-batch-hint', 'Пачка по ' + state.batchSize +
+            ', одновременно до ' + state.concurrency + ' запросов; «Старт» обрабатывает ' +
+            'пачки подряд до пустого списка или «Стоп»');
+    }
+
     function bindEvents() {
         var reload = document.getElementById('xcom-mass-reload');
         var start = document.getElementById('xcom-mass-start');
         var stop = document.getElementById('xcom-mass-stop');
+        var concurrency = document.getElementById('xcom-mass-concurrency');
 
         if (reload) reload.addEventListener('click', function() {
             if (state.running) return;
@@ -784,6 +855,15 @@
         });
         if (stop) stop.addEventListener('click', function() {
             stopBatch();
+        });
+        // Число одновременных запросов можно менять в любой момент — пул читает state.concurrency
+        // на каждом шаге, поэтому увеличение подхватывается по мере завершения строк.
+        if (concurrency) concurrency.addEventListener('change', function() {
+            var value = parseInt(concurrency.value, 10);
+            if (!isNaN(value) && value > 0) {
+                state.concurrency = value;
+                updateBatchHint();
+            }
         });
     }
 
@@ -823,9 +903,10 @@
         if (!state.root) return;
         readConfig();
         bindEvents();
-        setText('xcom-mass-batch-hint', 'Пачка по ' + state.batchSize +
-            ', одновременно не более ' + state.concurrency + ' запросов; «Старт» обрабатывает ' +
-            'пачки подряд до пустого списка или «Стоп»');
+        // синхронизировать переключатель потоков с конфигом (по умолчанию 5)
+        var sel = document.getElementById('xcom-mass-concurrency');
+        if (sel) sel.value = String(state.concurrency);
+        updateBatchHint();
         loadMetadata();
     }
 
