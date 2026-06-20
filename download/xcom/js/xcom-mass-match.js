@@ -4,8 +4,10 @@
     // Рабочее место массового подбора SKU для строк каталога контрагента (таблица RFP).
     // Пачками выбирает необработанные строки RFP (серверный фильтр: пустое «Наш артикул»),
     // для каждой строки запускает запрос mass_match (фильтр FR_RFPID={id строки}) и записывает
-    // обратно в RFP три поля: «Наш артикул» (ссылка на SKU), «Кандидаты» (мульти-ссылка на SKU)
-    // и «Точность подбора». Обработанные строки выпадают из выборки — пачка всегда «свежая».
+    // обратно в RFP три поля ОДНИМ запросом _m_set: «Наш артикул» (ID SKU), «Кандидаты»
+    // (список ID SKU через запятую) и «Точность подбора». Обработанные строки выпадают из
+    // выборки. «Старт» обрабатывает пачки подряд (по batchSize), автоматически подгружая
+    // следующие, пока не нажмут «Стоп» или сервер не вернёт пустой список (issue #3512).
 
     var DEFAULT_RFP_TABLE = '2032189';
     var DEFAULT_QUERY = 'mass_match';
@@ -50,7 +52,9 @@
         records: [],
         running: false,
         stopRequested: false,
-        loadToken: 0
+        loadToken: 0,
+        sessionCount: 0,    // обработано строк за текущий авто-прогон (issue #3512)
+        seenIds: {}         // id строк, уже взятых в работу в этом прогоне — защита от зацикливания
     };
 
     function trimValue(value) {
@@ -230,11 +234,14 @@
         return (typeof window !== 'undefined' && window.xsrf) ? window.xsrf : '';
     }
 
-    // POST _m_set/{recordId} с одним значением реквизита (t{reqId}=value).
-    function postSet(recordId, reqId, value) {
+    // POST _m_set/{recordId} с несколькими реквизитами ОДНИМ запросом (issue #3512):
+    // тело = _xsrf + t{reqId}=value для каждого поля. fieldValues — { reqId: value, … }.
+    function postSetMany(recordId, fieldValues) {
         var url = '/' + encodePathSegment(state.db) + '/_m_set/' + encodePathSegment(recordId) + '?JSON';
-        var body = '_xsrf=' + encodeURIComponent(getXsrf()) +
-            '&t' + encodeURIComponent(reqId) + '=' + encodeURIComponent(value);
+        var body = '_xsrf=' + encodeURIComponent(getXsrf());
+        Object.keys(fieldValues).forEach(function(reqId) {
+            body += '&t' + encodeURIComponent(reqId) + '=' + encodeURIComponent(fieldValues[reqId]);
+        });
         return fetch(url, {
             method: 'POST',
             credentials: 'same-origin',
@@ -413,11 +420,23 @@
         }
     }
 
+    // Колонка «Наш артикул» — ID SKU (issue #3512), наименование в подсказке (title).
+    function ourCell(record) {
+        if (!record.our || !record.our.id) return '';
+        return '<span title="' + escapeHtml(record.our.label || '') + '">' +
+            escapeHtml(record.our.id) + '</span>';
+    }
+
+    // Колонка «Кандидаты» — список ID SKU через запятую (issue #3512), наименования в title.
     function candidatesCell(record) {
         if (!record.candidates || !record.candidates.length) return '';
-        return record.candidates.map(function(item) {
-            return escapeHtml(item.label);
+        var ids = record.candidates.map(function(item) {
+            return escapeHtml(item.id);
         }).join(', ');
+        var labels = record.candidates.map(function(item) {
+            return item.label;
+        }).join(', ');
+        return '<span title="' + escapeHtml(labels) + '">' + ids + '</span>';
     }
 
     function renderList() {
@@ -436,7 +455,7 @@
                 '<td>' + escapeHtml(record.label) + '</td>' +
                 '<td class="xcom-mass-rfp-name">' + escapeHtml(record.rfpName || '') + '</td>' +
                 '<td class="xcom-mass-status-col">' + statusCell(record) + '</td>' +
-                '<td>' + escapeHtml(record.our ? record.our.label : '') + '</td>' +
+                '<td>' + ourCell(record) + '</td>' +
                 '<td>' + candidatesCell(record) + '</td>' +
                 '<td class="xcom-mass-accuracy">' + (record.accuracy == null ? '' : record.accuracy + '%') + '</td>' +
                 '</tr>';
@@ -462,7 +481,7 @@
         var cells = row.cells;
         if (cells.length < 7) return;
         cells[3].innerHTML = statusCell(record);
-        cells[4].textContent = record.our ? record.our.label : '';
+        cells[4].innerHTML = ourCell(record);
         cells[5].innerHTML = candidatesCell(record);
         cells[6].textContent = record.accuracy == null ? '' : record.accuracy + '%';
     }
@@ -538,47 +557,38 @@
         });
     }
 
-    // Записать результат в строку RFP по ID артикулов (SKUID). Обе колонки — текстовые:
-    // «Наш артикул» (type 3, ref=null) — первый (верхний) SKUID как текст (или заглушка для несопоставленных);
+    // Записать результат в строку RFP ОДНИМ запросом _m_set (issue #3512): «Наш артикул»,
+    // «Кандидаты», «Точность подбора» — все три поля сразу, а не по одному. Обе колонки текстовые:
+    // «Наш артикул» (type 3, ref=null) — первый SKUID как текст (или заглушка для несопоставленных);
     // «Кандидаты» (type 8, строка) — остальные SKUID одной строкой через запятую с пробелом.
     function writeBack(record) {
-        var steps = [];
         var fields = state.fields;
+        var values = {};
 
         if (fields.our && record.our && record.our.id) {
-            steps.push(function() {
-                return postSet(record.id, fields.our.id, record.our.id);
-            });
+            values[fields.our.id] = record.our.id;
         }
         if (fields.candidates && record.candidates && record.candidates.length) {
             var candidateIds = record.candidates.map(function(item) {
                 return item.id;
             }).filter(Boolean);
             if (candidateIds.length) {
-                steps.push(function() {
-                    return postSet(record.id, fields.candidates.id, candidateIds.join(', '));
-                });
+                values[fields.candidates.id] = candidateIds.join(', ');
             }
         }
         if (fields.accuracy && record.accuracy != null) {
-            steps.push(function() {
-                return postSet(record.id, fields.accuracy.id, record.accuracy);
-            });
+            values[fields.accuracy.id] = record.accuracy;
         }
 
-        return steps.reduce(function(chain, step) {
-            return chain.then(step);
-        }, Promise.resolve());
+        if (!Object.keys(values).length) return Promise.resolve();
+        return postSetMany(record.id, values);
     }
 
     // --- Пул обработки (не более N одновременно) -----------------------------
 
-    function runBatch() {
-        if (state.running || !state.records.length) return;
-        state.running = true;
-        state.stopRequested = false;
-        setControls('running');
-
+    // Обработать все необработанные строки ТЕКУЩЕЙ пачки пулом (не более concurrency сразу).
+    // Возвращает Promise, который резолвится по завершении пачки или по запросу «Стоп».
+    function processCurrentBatch() {
         var queue = state.records.filter(function(record) {
             return record.status === 'pending' || record.status === 'error';
         });
@@ -607,10 +617,60 @@
                 }
             }
             pump();
-        }).then(function() {
+        });
+    }
+
+    // Авто-обработка (issue #3512): обработать пачку, затем автоматически подгрузить следующие
+    // batchSize строк и так далее, пока не нажмут «Стоп» или сервер не вернёт пустой список.
+    function runAuto() {
+        if (state.running || !state.records.length) return;
+        state.running = true;
+        state.stopRequested = false;
+        state.sessionCount = 0;
+        state.seenIds = {};
+        setControls('running');
+
+        function iterate() {
+            if (state.stopRequested) return Promise.resolve();
+
+            // если в текущей пачке остались необработанные — доедаем её; иначе грузим следующую
+            var hasPending = state.records.some(function(r) { return r.status === 'pending'; });
+            var prepared;
+            if (hasPending) {
+                prepared = Promise.resolve(state.records.length);
+            } else {
+                setText('xcom-mass-summary', 'Загрузка следующей пачки…');
+                prepared = fetchBatch().then(function(count) {
+                    if (count < 0) return 0;          // запрос устарел
+                    renderList();
+                    // защита от зацикливания: если ни одной новой строки (все уже пытались
+                    // обработать в этом прогоне) — дальше нет смысла, останавливаемся
+                    var fresh = state.records.some(function(r) { return !state.seenIds[r.id]; });
+                    return fresh ? count : 0;
+                });
+            }
+
+            return prepared.then(function(count) {
+                if (state.stopRequested) return;
+                if (!count || !state.records.length) return;   // пустой список → конец
+                state.records.forEach(function(r) { state.seenIds[r.id] = true; });
+                return processCurrentBatch().then(function() {
+                    if (state.stopRequested) return;
+                    state.sessionCount += state.records.filter(function(r) {
+                        return r.status === 'done' || r.status === 'error';
+                    }).length;
+                    return iterate();
+                });
+            });
+        }
+
+        return iterate().then(function() {
             state.running = false;
             setControls('idle');
             updateProgress();
+            setText('xcom-mass-summary', (state.stopRequested ? 'Остановлено' : 'Готово') +
+                ' · обработано за прогон: ' + state.sessionCount);
+            if (!state.records.length) renderList();
         });
     }
 
@@ -623,27 +683,22 @@
     // --- Загрузка пачки ------------------------------------------------------
 
     // Необработанная строка — пустое поле «Наш артикул» (его заполняет writeBack при обработке).
-    // Уже обработанные пропускаем: иначе повторно дублировались бы «Кандидаты» (мульти-ссылка).
+    // Уже обработанные пропускаем: иначе повторно дублировались бы «Кандидаты».
     function isUnprocessed(record) {
         var index = state.fields.our ? state.fields.our.index : -1;
         if (index < 0) return true;
         return trimValue(record.values[index]) === '';
     }
 
-    // Пачка = один запрос. Сервер сам отдаёт только необработанные строки (фильтр в buildScanUrl),
-    // поэтому ни клиентского сканирования таблицы, ни курсора не нужно: по мере обработки строки
-    // получают «Наш артикул» и выпадают из выборки — следующее «Обновить» вернёт новую пачку.
-    function loadBatch() {
+    // Запросить одну пачку необработанных строк RFP в state.records (один запрос; серверный
+    // фильтр в buildScanUrl сам отдаёт только строки с пустым «Наш артикул»). Возвращает их
+    // число, либо -1 если запрос устарел (стартовала более новая загрузка по loadToken).
+    function fetchBatch() {
         var token = ++state.loadToken;
         state.records = [];
-        setControls('loading');
-        renderMessage('Загрузка строк RFP…', 'loading');
-        setText('xcom-mass-summary', 'Загрузка…');
-
         return fetchJson(buildScanUrl(state.batchSize)).then(function(json) {
-            if (token !== state.loadToken) return;
+            if (token !== state.loadToken) return -1;
             var rows = normalizeRows(json);
-
             var nameField = state.fields.rfpName;
             var nameIndex = nameField ? nameField.index : -1;
             // подстраховка: даже если сервер вернёт строку с «Наш артикул», не обрабатываем её
@@ -661,14 +716,25 @@
                     message: ''
                 };
             });
-
             state.records = collected;
+            return collected.length;
+        });
+    }
+
+    // Ручная загрузка пачки (кнопка «Обновить» и первичная загрузка). По мере обработки строки
+    // получают «Наш артикул» и выпадают из выборки — следующее «Обновить» вернёт новую пачку.
+    function loadBatch() {
+        setControls('loading');
+        renderMessage('Загрузка строк RFP…', 'loading');
+        setText('xcom-mass-summary', 'Загрузка…');
+
+        return fetchBatch().then(function(count) {
+            if (count < 0) return;
             renderList();
-            setText('xcom-mass-summary', collected.length + ' необработанных');
+            setText('xcom-mass-summary', count + ' необработанных');
             setControls('idle');
             updateProgress();
         }).catch(function(error) {
-            if (token !== state.loadToken) return;
             renderMessage(error && error.message ? error.message : 'Не удалось загрузить строки RFP.', 'error');
             setText('xcom-mass-summary', 'Ошибка');
             setControls('idle');
@@ -718,7 +784,7 @@
             loadBatch();
         });
         if (start) start.addEventListener('click', function() {
-            runBatch();
+            runAuto();
         });
         if (stop) stop.addEventListener('click', function() {
             stopBatch();
@@ -762,7 +828,8 @@
         readConfig();
         bindEvents();
         setText('xcom-mass-batch-hint', 'Пачка по ' + state.batchSize +
-            ', одновременно не более ' + state.concurrency + ' запросов');
+            ', одновременно не более ' + state.concurrency + ' запросов; «Старт» обрабатывает ' +
+            'пачки подряд до пустого списка или «Стоп»');
         loadMetadata();
     }
 
