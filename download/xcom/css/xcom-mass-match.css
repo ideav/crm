@@ -83,6 +83,33 @@
     transition: width 0.2s ease;
 }
 
+/* Поле ключевого слова для фильтра по наименованию RFP (issue #3523) */
+.xcom-mass-keyword {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--border-color, #cfd8e3);
+    background: var(--card-bg, #ffffff);
+    color: var(--text-secondary, #94a3b8);
+}
+
+.xcom-mass-keyword:focus-within {
+    border-color: var(--button-primary, #2563eb);
+}
+
+.xcom-mass-keyword-input {
+    font: inherit;
+    font-size: 0.85rem;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary, #1f2937);
+    width: 14rem;
+    max-width: 40vw;
+}
+
 /* Переключатель числа одновременных запросов (issue #3522) */
 .xcom-mass-concurrency {
     display: inline-flex;

@@ -28,6 +28,11 @@
                 <p id="xcom-mass-batch-hint">Пачка по 50, одновременно до 5 запросов</p>
             </div>
             <div class="xcom-mass-actions">
+                <label class="xcom-mass-keyword" title="Ограничить выборку строками RFP, чьё наименование содержит это слово">
+                    <i class="pi pi-search"></i>
+                    <input id="xcom-mass-keyword" class="xcom-mass-keyword-input" type="search"
+                           placeholder="Ключевое слово в наименовании RFP" autocomplete="off">
+                </label>
                 <span id="xcom-mass-summary" class="xcom-mass-summary">Загрузка…</span>
                 <label class="xcom-mass-concurrency" title="Сколько строк обрабатывать одновременно">
                     <span>Потоков</span>
@@ -123,6 +128,13 @@ window.fetch = function(url, opts) {
         // серверный фильтр «Наш артикул пуст» (F_6334033=!%) — обработанные строки не отдаём
         if (/F_6334033=!%/.test(ud)) {
             rows = SCAN.filter(function(x) { return (x.r[4] || '') === ''; });
+        }
+        // #3523: фильтр по «Наименованию» (F_2032307=%слово%) — оставляем строки, чьё r[1] содержит слово
+        var mKw = ud.match(/F_2032307=%([^%&]*)%/);
+        if (mKw && mKw[1]) {
+            var kw = mKw[1].toLowerCase();
+            rows = rows.filter(function(x) { return String(x.r[1] || '').toLowerCase().indexOf(kw) !== -1; });
+            console.log('[mock] фильтр по наименованию «' + mKw[1] + '» → ' + rows.length + ' строк');
         }
         var mLim = ud.match(/LIMIT=\d+,(\d+)/);
         if (mLim) rows = rows.slice(0, parseInt(mLim[1], 10));
