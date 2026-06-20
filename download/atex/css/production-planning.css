@@ -331,6 +331,21 @@
 }
 .atex-pp-strips:hover { background: var(--pp-surface); }
 
+/* #3486: «🗑» — удалить задание (резку). В одном ряду с ↑↓/Полосы; акцент-цвет
+   только на ховере, чтобы случайно не притягивать клик. Клик не выбирает резку. */
+.atex-pp-cut-del {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 5px 11px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-del:hover { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); }
+.atex-pp.is-busy .atex-pp-cut-del { pointer-events: none; opacity: .4; }
+
 /* Инлайн-редактор полос резки */
 .atex-pp-strip-panel {
     border: 1px solid var(--pp-accent);
