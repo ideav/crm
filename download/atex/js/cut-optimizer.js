@@ -782,7 +782,7 @@
             if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
             row.appendChild(el('span', { class: 'atex-co-batch-no', text: formatBatchTimestamp(b.no) || ('#' + b.id) }));
             row.appendChild(el('span', { class: 'atex-co-batch-rem', text: b.remainderM2 + ' м²' }));
-            row.appendChild(el('span', { class: 'atex-co-batch-flag', text: 'В работе' }));
+            row.appendChild(el('span', { class: 'atex-co-batch-wh', text: b.warehouse || '—' }));
             box.appendChild(row);
         });
         if (neededM2 > 0) {
@@ -1006,7 +1006,7 @@
         table.appendChild(el('div', { class: 'atex-co-table-head' }, [
             el('span', { text: 'Ширина (факт), мм' }),
             el('span', { text: 'В заказе' }),
-            el('span', { text: 'Желаемо' }),
+            el('span', { text: 'Желаемое' }),
             el('span', { text: 'Получится' }),
             el('span', { text: 'Δ к желаемому' })
         ]));
