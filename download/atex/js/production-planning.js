@@ -5538,7 +5538,7 @@
             // (FATIGUE) по route-score давала ножи по ВОЗРАСТАНИЮ (6,16,16), вопреки
             // #3130 (ideav/crm#3421). inline:true — именованная inline-кнопка, без модалки.
             self.confirmAction(msg, actionsEl, [
-                { label: 'Сгенерировать', primary: true, inline: true, onConfirm: function() {
+                { label: 'Создать', primary: true, inline: true, onConfirm: function() {
                     self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
                 } }
             ]);
