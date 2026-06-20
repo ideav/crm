@@ -2,7 +2,9 @@
 <!-- Браузерный стенд рабочего места «Массовый подбор SKU» (xcom).
      Мокает fetch: metadata таблицы RFP, object/{id} (скан строк), report/mass_match, _m_set.
      Использует те же js/css, что и продакшн-шаблон templates/xcom/mass_match.html.
-     Проверяет колонку «Наименование из RFP» в таблице (#3503) и расчёт Точности (#3501). -->
+     Проверяет колонку «Наименование из RFP» (#3503), расчёт Точности (#3501) и #3512:
+     запись 3 полей одним _m_set (__setRequests = число записей), список ID в колонках,
+     авто-цикл пачек (data-batch-size=2 → несколько сканов до пустой пачки). -->
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -17,7 +19,7 @@
      data-rfp-table="2032189"
      data-query="mass_match"
      data-rfp-filter="RFPID"
-     data-batch-size="50"
+     data-batch-size="2"
      data-concurrency="3">
     <section class="xcom-mass-panel">
         <div class="xcom-mass-head">
@@ -111,13 +113,27 @@ window.fetch = function(url, opts) {
     var mRep = ud.match(/FR_RFPID=(\d+)/);
     if (/\/report\/mass_match/.test(u)) return json(REPORT[mRep ? mRep[1] : ''] || []);
     if (/\/_m_set\//.test(u)) {
-        // захват записей: t6334033=Наш артикул, t6334032=Кандидаты, t6333968=Точность
+        // захват записей: t6334033=Наш артикул, t6334032=Кандидаты, t6333968=Точность.
+        // #3512: одна команда _m_set на запись содержит все 3 поля — считаем число POST-запросов
+        // (__setRequests) отдельно от числа полей (__sets), чтобы доказать «3 поля одним запросом».
         window.__sets = window.__sets || [];
+        window.__setRequests = (window.__setRequests || 0) + 1;
         var rid = (ud.match(/_m_set\/(\d+)/) || [])[1];
+        var fieldsInThisRequest = 0;
         var body = new URLSearchParams((opts && opts.body) || '');
         body.forEach(function(val, key) {
-            if (key.charAt(0) === 't') window.__sets.push({ record: rid, field: key, value: val });
+            if (key.charAt(0) !== 't') return;
+            fieldsInThisRequest++;
+            window.__sets.push({ record: rid, field: key, value: val });
+            // #3512: имитируем серверный side-effect — записанный «Наш артикул» (t6334033)
+            // делает строку «обработанной», и следующий скан (F_6334033=!%) её не вернёт →
+            // авто-цикл естественно завершается пустой пачкой.
+            if (key === 't6334033') {
+                SCAN.forEach(function(x) { if (String(x.i) === String(rid)) x.r[4] = val; });
+            }
         });
+        console.log('[mock] _m_set #' + window.__setRequests + ' запись ' + rid +
+            ' — полей в запросе: ' + fieldsInThisRequest);
         return json({ ok: 1 });
     }
     return realFetch(url, opts);
