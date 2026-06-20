@@ -259,23 +259,6 @@
 .atex-sl-batch-metric { font-weight: 700; color: var(--sl-accent-d); }
 .atex-sl-batch-warn { color: var(--sl-warn); font-size: 12px; font-weight: 600; }
 
-/* Строки расхода сырья */
-.atex-sl-rows { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
-.atex-sl-row {
-    display: grid;
-    grid-template-columns: 2fr 1fr auto;
-    gap: 12px;
-    align-items: end;
-    border: 1px solid var(--sl-border-soft);
-    border-radius: 8px;
-    padding: 12px;
-    background: var(--sl-surface);
-}
-@media (max-width: 560px) {
-    .atex-sl-row { grid-template-columns: 1fr; }
-}
-.atex-sl-row-actions { display: flex; gap: 8px; }
-
 /* События смены */
 .atex-sl-event-form {
     display: grid;
@@ -322,14 +305,6 @@
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
 .atex-sl-btn-advance { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); font-weight: 600; }
 .atex-sl-btn-advance:hover { background: var(--sl-success-hover-bg); }
-.atex-sl-btn-add { color: var(--sl-accent); border-color: var(--sl-add-border); }
-.atex-sl-btn-del {
-    padding: 8px 13px;
-    line-height: 1;
-    font-size: 18px;
-    color: var(--sl-warn);
-    border-color: var(--sl-danger-border);
-}
 .atex-sl-btn-secondary { background: var(--sl-surface); }
 .atex-sl-photo { display: flex; align-items: center; gap: 8px; }
 

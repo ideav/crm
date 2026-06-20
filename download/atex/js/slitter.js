@@ -8,8 +8,7 @@
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.5.
 //
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): статус/счётчики/погонаж/брак — `_m_set/{резкаId}`; расход —
-// `_m_new/{Расход сырья}` с `up={резкаId}` (и `_m_set` остатка партии); событие —
+// (#2903): статус/счётчики/погонаж/брак — `_m_set/{резкаId}`; событие —
 // `_m_new/{Событие смены}`; список резок строится из `object/{Задание в производство}/`
 // с фильтром по выбранным слиттеру/дате. ID таблиц и реквизитов не хардкодятся: они
 // берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
@@ -43,7 +42,6 @@
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
         cut: 'Задание в производство',   // #3504: таблица «Производственная резка» переименована
-        consumption: 'Расход сырья',
         event: 'Событие смены',
         batch: 'Партия сырья',
         material: 'Вид сырья',
@@ -76,8 +74,7 @@
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
     var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
-    var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
-    var EVENT_REQ = { type: 'Тип события', cut: 'Задание в производство', user: 'Пользователь', value: 'Значение', notes: 'Примечания' }; // #3504: реквизит «Событие смены» переименован вслед за таблицей
+    var EVENT_REQ ={ type: 'Тип события', cut: 'Задание в производство', user: 'Пользователь', value: 'Значение', notes: 'Примечания' }; // #3504: реквизит «Событие смены» переименован вслед за таблицей
     var BATCH_REQ = {
         kind: 'Вид сырья',
         date: 'Дата прихода',
@@ -743,7 +740,7 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
-        this.meta = { cut: null, consumption: null, event: null, batch: null, material: null, slitter: null, finishedBatch: null };
+        this.meta = { cut: null, event: null, batch: null, material: null, slitter: null, finishedBatch: null };
         this.slitters = [];
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder, materialId }]
         this.materialWidths = {}; // { materialId: widthMm }
@@ -756,7 +753,6 @@
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
         this.currentStrips = [];  // #3460: полосы выбранной резки (раскладка ножей)
-        this.consumptions = [];   // расход сырья выбранной резки
         this.events = [];         // события смены выбранной резки
         this.shiftEvents = [];    // события смены оператора за выбранную дату
         this.selectedBatchIds = [];
@@ -880,7 +876,6 @@
                 })[0] || null;
             }
             self.meta.cut = byName(TABLE.cut) || byName('Производственная резка'); // #3504: старое имя запасным
-            self.meta.consumption = byName(TABLE.consumption);
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
             self.meta.material = byName(TABLE.material);
@@ -888,7 +883,6 @@
             // #3433: необязательна (старое окружение без «Партии ГП» → факт не пишем).
             self.meta.finishedBatch = byName(TABLE.finishedBatch);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
-            if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
         });
     };
 
@@ -1109,32 +1103,6 @@
     };
 
     // ── Чтение расхода сырья (подчинён резке) ──
-
-    AtexSlitter.prototype.loadConsumptions = function(cutId) {
-        var self = this;
-        var meta = this.meta.consumption;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,1000').then(function(rows) {
-            var amountIdx = colIndex(meta, CONS_REQ.amount);
-            var batchIdx = colIndex(meta, CONS_REQ.batch);
-            self.consumptions = (rows || []).map(function(rec) {
-                var r = rec.r || [];
-                var batchRef = batchIdx >= 0 ? parseRef(r[batchIdx]) : { id: null };
-                var amount = amountIdx >= 0 ? (r[amountIdx] || '') : '';
-                return {
-                    id: String(rec.i),
-                    name: r[0] || '',
-                    batchId: batchRef.id,
-                    amount: amount,
-                    savedAmount: core.toNumber(amount) // для дельты остатка при правке
-                };
-            });
-        });
-    };
-
-    AtexSlitter.prototype.blankConsumption = function() {
-        var fifo = core.availableBatchesForCut(this.batches, this.currentCut).filter(function(b) { return !b.foreign; })[0] || core.pickFifoBatch(this.batches);
-        return { id: null, name: '', batchId: fifo ? fifo.id : null, amount: '', savedAmount: 0 };
-    };
 
     // ── Чтение событий смены. В старой схеме событие ссылалось на резку, в
     // новой может быть подчинено ей; поэтому `cutId` берём либо из реквизита,
@@ -1363,7 +1331,6 @@
         host.appendChild(this.renderStatusBar());
         host.appendChild(this.renderBatchSelection());
         host.appendChild(this.renderReadings());
-        host.appendChild(this.renderConsumption());
         host.appendChild(this.renderEvents());
     };
 
@@ -1720,62 +1687,6 @@
         }
     };
 
-    // Расход сырья: список строк, FIFO-подсказка партии, списание остатка.
-    AtexSlitter.prototype.renderConsumption = function() {
-        var self = this;
-        var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Расход сырья (FIFO)' })
-        ]);
-
-        var total = core.sumConsumption(this.consumptions);
-        section.appendChild(el('div', { class: 'atex-sl-muted', text: 'Списано всего: ' + total + ' м²' }));
-
-        var listWrap = el('div', { class: 'atex-sl-rows' });
-        if (!this.consumptions.length) {
-            listWrap.appendChild(el('div', { class: 'atex-sl-empty', text: 'Расхода пока нет — добавьте списание.' }));
-        } else {
-            this.consumptions.forEach(function(row, idx) { listWrap.appendChild(self.renderConsumptionRow(row, idx)); });
-        }
-        section.appendChild(listWrap);
-
-        var addBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-add', type: 'button', text: '+ Списать партию' });
-        addBtn.addEventListener('click', function() { self.consumptions.push(self.blankConsumption()); self.renderMain(); });
-        section.appendChild(addBtn);
-        return section;
-    };
-
-    AtexSlitter.prototype.renderConsumptionRow = function(row, idx) {
-        var self = this;
-        var card = el('div', { class: 'atex-sl-row' });
-
-        // #3460: партии склада «Атех» (foreign) списывать нельзя — на другом складе.
-        var batchOptions = core.sortFifo(this.batches).filter(function(b) { return !b.foreign; }).map(function(b) {
-            return { id: b.id, label: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' };
-        });
-        var batchRef = this.refSelect({
-            options: batchOptions,
-            value: row.batchId,
-            placeholder: '— партия сырья —',
-            reqId: reqIdByName(this.meta.consumption, CONS_REQ.batch),
-            onChange: function(value) { row.batchId = value || null; }
-        });
-        card.appendChild(field('Партия сырья', batchRef));
-
-        var amount = numInput(row.amount, '0');
-        amount.addEventListener('input', function() { row.amount = amount.value; });
-        card.appendChild(field('Израсходовано, м²', amount));
-
-        var actions = el('div', { class: 'atex-sl-row-actions' });
-        var saveBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Списать' });
-        saveBtn.addEventListener('click', function() { self.saveConsumption(row); });
-        actions.appendChild(saveBtn);
-        var delBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-del', type: 'button', title: 'Удалить списание', text: '×' });
-        delBtn.addEventListener('click', function() { self.deleteConsumption(row, idx); });
-        actions.appendChild(delBtn);
-        card.appendChild(actions);
-        return card;
-    };
-
     // #3459: События смены — только список событий + кнопки быстрых действий.
     // Поля ввода (значение, примечания) убраны — события пишутся без доп. полей.
     AtexSlitter.prototype.renderEvents = function() {
@@ -2113,99 +2024,6 @@
         });
     };
 
-    // Списание расхода: создаёт/обновляет «Расход сырья» и уменьшает остаток
-    // партии на разницу (дельту) израсходованного — критерий приёмки §3.5.
-    AtexSlitter.prototype.saveConsumption = function(row) {
-        var self = this;
-        if (this.busy) return;
-        if (!this.currentCutId) { this.notify('Сначала выберите резку', 'error'); return; }
-        if (!row.batchId) { this.notify('Выберите партию сырья', 'error'); return; }
-        var amount = core.toNumber(row.amount);
-        if (amount <= 0) { this.notify('Укажите израсходовано, м² (> 0)', 'error'); return; }
-
-        var meta = this.meta.consumption;
-        var batchMeta = this.meta.batch;
-        var amountReq = reqIdByName(meta, CONS_REQ.amount);
-        var batchReq = reqIdByName(meta, CONS_REQ.batch);
-        var delta = amount - core.toNumber(row.savedAmount); // сколько ещё списать с остатка
-        var batch = this.findBatch(row.batchId);
-
-        this.setBusy(true);
-        var fields = {};
-        if (amountReq) fields['t' + amountReq] = amount;
-        if (batchReq) fields['t' + batchReq] = row.batchId;
-
-        var save;
-        if (row.id) {
-            save = this.post('_m_set/' + row.id + '?JSON', fields).then(function() { return row.id; });
-        } else {
-            var createParams = {};
-            Object.keys(fields).forEach(function(k) { createParams[k] = fields[k]; });
-            createParams['t' + meta.id] = 'Расход ' + (this.consumptions.indexOf(row) + 1);
-            save = this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(this.currentCutId), createParams)
-                .then(function(res) {
-                    var id = res && (res.obj || res.id || res.i);
-                    if (!id) throw new Error('Сервер не вернул id записи расхода');
-                    row.id = String(id);
-                    return row.id;
-                });
-        }
-
-        save.then(function() {
-            // Списываем дельту с остатка партии (если есть метаданные партии).
-            if (!batch || !batchMeta || delta === 0) return null;
-            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
-            if (!remReq) return null;
-            var newRem = delta > 0
-                ? core.applyConsumption(batch.remainder, delta)
-                : core.restoreConsumption(batch.remainder, -delta);
-            var bf = {};
-            bf['t' + remReq] = newRem;
-            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() { batch.remainder = newRem; });
-        }).then(function() {
-            row.savedAmount = amount;
-            return self.loadBatches();
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Списано ' + amount + ' м²; остаток партии уменьшен', 'success');
-            self.renderMain();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка списания: ' + err.message, 'error');
-        });
-    };
-
-    AtexSlitter.prototype.deleteConsumption = function(row, idx) {
-        var self = this;
-        if (this.busy) return;
-        // Новая (несохранённая) строка — просто убираем из формы.
-        if (!row.id) { this.consumptions.splice(idx, 1); this.renderMain(); return; }
-
-        var batchMeta = this.meta.batch;
-        var batch = this.findBatch(row.batchId);
-        var restore = core.toNumber(row.savedAmount); // вернуть на остаток
-        this.setBusy(true);
-        this.post('_m_del/' + row.id + '?JSON', {}).then(function() {
-            // Возвращаем списанное на остаток партии.
-            if (!batch || !batchMeta || restore <= 0) return null;
-            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
-            if (!remReq) return null;
-            var newRem = core.restoreConsumption(batch.remainder, restore);
-            var bf = {};
-            bf['t' + remReq] = newRem;
-            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() { batch.remainder = newRem; });
-        }).then(function() {
-            return Promise.all([self.loadConsumptions(self.currentCutId), self.loadBatches()]);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Списание отменено, остаток партии возвращён', 'success');
-            self.renderMain();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка удаления: ' + err.message, 'error');
-        });
-    };
-
     AtexSlitter.prototype.findBatch = function(batchId) {
         return this.batches.filter(function(b) { return String(b.id) === String(batchId); })[0] || null;
     };
@@ -2304,7 +2122,6 @@
                 return Promise.all([
                     self.loadStrips(cutId),       // #3460: полосы для метрик и раскладки
                     self.loadCutMaterial(),       // #3460: вид сырья для шапки
-                    self.loadConsumptions(cutId),
                     self.loadEvents(cutId)
                 ]);
             }).then(function() {
