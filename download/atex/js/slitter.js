@@ -10,7 +10,7 @@
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
 // (#2903): статус/счётчики/погонаж/брак — `_m_set/{резкаId}`; расход —
 // `_m_new/{Расход сырья}` с `up={резкаId}` (и `_m_set` остатка партии); событие —
-// `_m_new/{Событие смены}`; список резок строится из `object/{Производственная резка}/`
+// `_m_new/{Событие смены}`; список резок строится из `object/{Задание в производство}/`
 // с фильтром по выбранным слиттеру/дате. ID таблиц и реквизитов не хардкодятся: они
 // берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
 // разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
@@ -42,7 +42,7 @@
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
-        cut: 'Производственная резка',
+        cut: 'Задание в производство',   // #3504: таблица «Производственная резка» переименована
         consumption: 'Расход сырья',
         event: 'Событие смены',
         batch: 'Партия сырья',
@@ -77,7 +77,7 @@
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
     var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
-    var EVENT_REQ = { type: 'Тип события', cut: 'Производственная резка', user: 'Пользователь', value: 'Значение', notes: 'Примечания' };
+    var EVENT_REQ = { type: 'Тип события', cut: 'Задание в производство', user: 'Пользователь', value: 'Значение', notes: 'Примечания' }; // #3504: реквизит «Событие смены» переименован вслед за таблицей
     var BATCH_REQ = {
         kind: 'Вид сырья',
         date: 'Дата прихода',
@@ -879,7 +879,7 @@
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
                 })[0] || null;
             }
-            self.meta.cut = byName(TABLE.cut);
+            self.meta.cut = byName(TABLE.cut) || byName('Производственная резка'); // #3504: старое имя запасным
             self.meta.consumption = byName(TABLE.consumption);
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
@@ -1144,7 +1144,7 @@
         var meta = this.meta.event;
         if (!meta) return [];
         var typeIdx = colIndex(meta, EVENT_REQ.type);
-        var cutIdx = colIndex(meta, EVENT_REQ.cut);
+        var cutIdx = colIndexAny(meta, [EVENT_REQ.cut, 'Производственная резка']); // #3504: старое имя запасным
         var userIdx = colIndex(meta, EVENT_REQ.user);
         var valIdx = colIndex(meta, EVENT_REQ.value);
         var notesIdx = colIndex(meta, EVENT_REQ.notes);
@@ -2220,7 +2220,7 @@
         var params = {};
         params['t' + meta.id] = when; // главное значение — дата/время (хронология)
         var typeReq = reqIdByName(meta, EVENT_REQ.type);
-        var cutReq = reqIdByName(meta, EVENT_REQ.cut);
+        var cutReq = reqIdByAnyName(meta, [EVENT_REQ.cut, 'Производственная резка']); // #3504: старое имя запасным
         var userReq = reqIdByName(meta, EVENT_REQ.user);
         var valReq = reqIdByName(meta, EVENT_REQ.value);
         var notesReq = reqIdByName(meta, EVENT_REQ.notes);

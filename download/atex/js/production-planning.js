@@ -20,9 +20,10 @@
 // (`object/{table}?JSON_OBJ`, записей мало).
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
-// `_m_new/{Производственная резка}` с главным значением `t{tableId}` (#3225).
+// `_m_new/{Задание в производство}` с главным значением `t{tableId}` (#3225).
 // Резка снова является самостоятельной таблицей (#3185), а «Обеспечение»
-// ссылается на неё реквизитом «Производственная резка».
+// ссылается на неё реквизитом «Задание в производство» (#3504: таблица
+// «Производственная резка» переименована в «Задание в производство»).
 // ID таблиц и реквизитов для записи не хардкодятся: берутся по именам из
 // `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
@@ -52,7 +53,7 @@
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
-        cut: 'Производственная резка',
+        cut: 'Задание в производство',   // #3504: таблица «Производственная резка» переименована
         supply: 'Обеспечение',
         slitter: 'Слиттер',
         materialBatch: 'Партия сырья',
@@ -124,7 +125,7 @@
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
         footage: 'Метраж, м',
-        cut: 'Производственная резка',
+        cut: 'Задание в производство',   // #3504: реквизит-ссылка переименован вслед за таблицей
         finishedBatch: 'Партия ГП',
         rolls: 'Кол-во рулонов',
         active: 'В работе',   // #3242: «Активно» переименовано в «В работе»
@@ -248,7 +249,7 @@
     // reference — поле-ссылка. Child-array из временной схемы #3180 не используем:
     // по #3185 резка снова самостоятельная таблица.
     function supplyCutRelation(supplyMeta, cutMeta) {
-        var req = reqByName(supplyMeta, SUPPLY_REQ.cut);
+        var req = reqByName(supplyMeta, SUPPLY_REQ.cut) || reqByName(supplyMeta, 'Производственная резка'); // #3504: старое имя запасным
         if (!req) return { mode: 'none', reqId: null, arrId: null };
         var arrId = req.arr_id == null ? null : String(req.arr_id);
         if (arrId) return { mode: 'none', reqId: null, arrId: arrId };
@@ -3321,7 +3322,7 @@
         this.filter = { slitter: '', status: '', date: todayISO(), query: '' };  // дата плана по умолчанию — сегодня; query — быстрый поиск (#3411)
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
-        this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
+        this.lastCutMainValue = 0;  // последний t{Задание в производство}, выданный клиентом
         this.busy = false;
         this.progressEl = null;     // окно прогресса генерации резок (#3148)
         this.progressTotal = 0;
@@ -3386,7 +3387,7 @@
             function byName(name) {
                 return tableByName(list, name);
             }
-            self.meta.cut = byName(TABLE.cut);
+            self.meta.cut = byName(TABLE.cut) || byName('Производственная резка'); // #3504: старое имя запасным
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.materialBatch = byName(TABLE.materialBatch);
@@ -3671,7 +3672,7 @@
         });
     };
 
-    // Прямая карта очередности из object/ «Производственная резка». Нужна как источник
+    // Прямая карта очередности из object/ «Задание в производство». Нужна как источник
     // истины после _m_set: отчёт cut_planning может отставать или отдать старый alias.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
