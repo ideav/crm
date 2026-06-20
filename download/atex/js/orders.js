@@ -449,6 +449,16 @@
         return null;
     }
 
+    // Ключ записи для колонки позиции (буфер fields → buildFormBody добавит «t»).
+    // Обычная колонка → её reqId. «Кол-во» у «Заказанного количества» реквизита
+    // не имеет — это главное значение записи, ключ = id таблицы (t{tableId}).
+    // На старой схеме «Позиция заказа» «Кол-во» был реквизитом — тогда вернётся reqId.
+    function positionWriteKey(col, tableId) {
+        if (col && col.reqId) return col.reqId;
+        if (col && col.key === 'qty' && tableId) return String(tableId);
+        return null;
+    }
+
     // Нормализация компактного формата JSON_DATA ([{i,u,o,r}]) в записи.
     function normalizeObjects(json, columns) {
         if (!Array.isArray(json)) return [];
@@ -547,8 +557,8 @@
         var cols = opts.columns || [];
         function put(key, value) {
             if (value == null || value === '') return;
-            var col = getColumn(cols, key);
-            if (col && col.reqId) fields[col.reqId] = value;
+            var wkey = positionWriteKey(getColumn(cols, key), opts.tableId);
+            if (wkey) fields[wkey] = value;
         }
         put('qty', opts.qty);
         put('raw', opts.rawId);
@@ -570,8 +580,8 @@
         var cols = opts.columns || [];
         var values = opts.values || {};
         function put(key, value) {
-            var col = getColumn(cols, key);
-            if (col && col.reqId) fields[col.reqId] = value == null ? '' : value;
+            var wkey = positionWriteKey(getColumn(cols, key), opts.tableId);
+            if (wkey) fields[wkey] = value == null ? '' : value;
         }
         put('qty', values.qty);
         put('raw', values.raw);
@@ -1063,9 +1073,10 @@
         var fields = {};
         var any = false;
         state.positionColumns.forEach(function(col) {
-            if (!col || !col.reqId) return;
+            var wkey = positionWriteKey(col, state.positionTable);
+            if (!wkey) return;
             var val = col.ref ? (draft.refs[col.key] || '') : (draft.values[col.key] || '');
-            if (val !== '' && val != null) { fields[col.reqId] = val; any = true; }
+            if (val !== '' && val != null) { fields[wkey] = val; any = true; }
         });
         state.draftOrderId = null;
         state.draftPos = null;
@@ -1299,9 +1310,10 @@
         var posId = td.getAttribute('data-position-id');
         var col = getColumn(state.positionColumns, key);
         var found = posId ? findPositionById(posId) : null;
+        var writeKey = positionWriteKey(col, state.positionTable);
         state.editingCell = null;
         td.classList.remove('is-editing');
-        if (!found || !col || !col.reqId) {
+        if (!found || !col || !writeKey) {
             if (found) td.textContent = positionCellText(found.position, key);
             return;
         }
@@ -1336,7 +1348,7 @@
             return;
         }
         var fields = {};
-        fields[col.reqId] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
+        fields[writeKey] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
         var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
         var body = buildFormBody(fields, getXsrf());
         setMessage('Сохранение…', 'info');

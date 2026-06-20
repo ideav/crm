@@ -1251,7 +1251,12 @@
                     // «Заказанное количество» хранит НОМИНАЛ («Ширина в заказе»); планирование
                     // само переводит его в фактическую (annotatePositionsCutWidth, #3372).
                     var orderWidth = (r.nominalWidth != null) ? r.nominalWidth : r.actualWidth;
-                    put(fields, posMeta, POSITION_REQ.qty, r.desiredQty);
+                    // Кол-во рулонов — главное значение записи «Заказанное количество»
+                    // (у таблицы нет реквизита «Кол-во»). На старой схеме «Позиция
+                    // заказа» это был реквизит — пишем туда, если он есть.
+                    var qtyReq = reqIdByNames(posMeta, POSITION_REQ.qty);
+                    if (qtyReq) fields[qtyReq] = r.desiredQty;
+                    else fields[String(posMeta.id)] = r.desiredQty;
                     put(fields, posMeta, POSITION_REQ.raw, self.materialId);
                     put(fields, posMeta, POSITION_REQ.width, orderWidth);
                     if (rollLength > 0) put(fields, posMeta, POSITION_REQ.length, rollLength);
