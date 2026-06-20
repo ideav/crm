@@ -17,14 +17,16 @@
 
     // Имена полей в таблице RFP (резолвятся по метаданным; можно переопределить data-атрибутами).
     var DEFAULT_TOKEN_NAME = 'токен';
+    var DEFAULT_RFP_NAME_NAME = 'Наименование';   // «Наименование из RFP» — для оценки точности
     var DEFAULT_OUR_NAME = 'Наш артикул';
     var DEFAULT_CANDIDATES_NAME = 'Кандидаты';
     var DEFAULT_ACCURACY_NAME = 'Точность подбора';
 
-    // Имена колонок запроса mass_match (JSON_KV — ключи = «Имя в отчёте» t100).
-    var DEFAULT_SKU_ID_KEY = 'sku_id';
-    var DEFAULT_SKU_LABEL_KEY = 'sku';
-    var DEFAULT_TMA_KEY = 'TMA';
+    // Имена колонок запроса mass_match (JSON_KV — ключи = «Имя в отчёте»).
+    var DEFAULT_SKU_ID_KEY = 'SKUID';
+    var DEFAULT_SKU_LABEL_KEY = 'Наименование SKU';
+    var DEFAULT_TOKENS_KEY = 'токены';            // совпавшие токены (числитель точности)
+    var DEFAULT_TMA_KEY = 'ТММ';                  // флаг точного совпадения артикула
 
     var state = {
         root: null,
@@ -37,6 +39,7 @@
         maxCandidates: DEFAULT_MAX_CANDIDATES,
         skuIdKey: DEFAULT_SKU_ID_KEY,
         skuLabelKey: DEFAULT_SKU_LABEL_KEY,
+        tokensKey: DEFAULT_TOKENS_KEY,
         tmaKey: DEFAULT_TMA_KEY,
         names: {},
         fields: {},          // { token, our, candidates, accuracy } -> { id, index }
@@ -76,22 +79,16 @@
         return matches || [];
     }
 
+    // Длина «склеенных» токенов наименования (все алфавитно-цифровые символы без разделителей).
     function alnumLength(value) {
         return tokenize(value).reduce(function(sum, token) {
             return sum + token.length;
         }, 0);
     }
 
-    // Точность подбора в процентах. Связана с длиной алфавитно-цифровых символов и числом
-    // совпавших токенов: доля длины строки RFP, покрытой токенами артикула SKU.
-    // 100% — длина всех токенов SKU равна длине строки RFP (полное покрытие) или TMA=1.
-    // 0% — ни один токен SKU не встретился в строке RFP.
-    function computeAccuracy(rfpString, skuString, tmaFlag) {
-        if (trimValue(tmaFlag) === '1') return 100;
-
-        var denom = alnumLength(rfpString);
-        if (!denom) return 0;
-
+    // Длина совпавших токенов: токены, встречающиеся и в RFP, и в SKU (по мультимножеству),
+    // склеиваются в одну строку — её длина и есть числитель точности.
+    function matchedAlnumLength(rfpString, skuString) {
         var pool = {};
         tokenize(rfpString).forEach(function(token) {
             pool[token] = (pool[token] || 0) + 1;
@@ -104,8 +101,29 @@
                 matchedLength += token.length;
             }
         });
+        return matchedLength;
+    }
 
-        return Math.max(0, Math.min(100, Math.round((matchedLength / denom) * 100)));
+    // Вес флага TMA в оценке точности (≈50%); остальное — текстовое совпадение токенов.
+    var TMA_WEIGHT = 0.5;
+
+    // Точность подбора в процентах — взвешенная сумма двух составляющих:
+    //   • текстовое совпадение: длина склеенных совпавших токенов, делённая на полусумму
+    //     длин «Наименование SKU» и «Наименование из RFP» (длины — по склеенным токенам);
+    //   • флаг ТММ (точное совпадение артикула): вес ≈50%.
+    // 100% — полное совпадение токенов И ТММ=1. 50% — только одно из двух. 0% — ни того, ни другого.
+    // matchedTokens — список совпавших токенов из отчёта (колонка «токены»); если пуст,
+    // совпадение считается пересечением токенов «Наименование из RFP» и «Наименование SKU».
+    function computeAccuracy(rfpName, skuName, matchedTokens, tmaFlag) {
+        var denom = (alnumLength(skuName) + alnumLength(rfpName)) / 2;
+        var matchedLength = trimValue(matchedTokens)
+            ? alnumLength(matchedTokens)
+            : matchedAlnumLength(rfpName, skuName);
+        var lengthScore = denom > 0 ? Math.min(1, matchedLength / denom) : 0;
+        var tmaScore = trimValue(tmaFlag) === '1' ? 1 : 0;
+
+        var accuracy = TMA_WEIGHT * tmaScore + (1 - TMA_WEIGHT) * lengthScore;
+        return Math.max(0, Math.min(100, Math.round(accuracy * 100)));
     }
 
     // --- Метаданные таблицы RFP ---------------------------------------------
@@ -309,7 +327,7 @@
 
     // Из строк запроса собрать первый артикул (Наш артикул) и кандидатов (остальные).
     function pickMatches(rows) {
-        if (!rows.length) return { our: null, candidates: [], tma: '' };
+        if (!rows.length) return { our: null, candidates: [], tokens: '', tma: '' };
 
         var first = rows[0];
         var idKey = detectKey(first, state.skuIdKey, function(key) {
@@ -338,6 +356,7 @@
         return {
             our: our.id ? our : null,
             candidates: candidates,
+            tokens: state.tokensKey && first[state.tokensKey] != null ? trimValue(first[state.tokensKey]) : '',
             tma: state.tmaKey && first[state.tmaKey] != null ? trimValue(first[state.tmaKey]) : ''
         };
     }
@@ -472,7 +491,9 @@
             var picked = pickMatches(normalizeQueryRows(json));
             record.our = picked.our;
             record.candidates = picked.candidates;
-            record.accuracy = picked.our ? computeAccuracy(record.label, picked.our.label, picked.tma) : 0;
+            record.accuracy = picked.our
+                ? computeAccuracy(record.rfpName || record.label, picked.our.label, picked.tokens, picked.tma)
+                : 0;
 
             return writeBack(record).then(function() {
                 record.status = 'done';
@@ -594,9 +615,12 @@
                 rows.forEach(function(row) {
                     if (collected.length >= state.batchSize) return;
                     if (!emptyTokenValue(row)) return;
+                    var nameField = state.fields.rfpName;
+                    var nameIndex = nameField ? nameField.index : -1;
                     collected.push({
                         id: row.id,
                         label: trimValue(row.values[0]),
+                        rfpName: nameIndex >= 0 ? trimValue(row.values[nameIndex]) : trimValue(row.values[0]),
                         values: row.values,
                         status: 'pending',
                         our: null,
@@ -636,6 +660,7 @@
 
             var attr = function(name) { return state.root.getAttribute(name); };
             state.fields.token = findField(state.names.token, attr('data-token-field-id'));
+            state.fields.rfpName = findField(state.names.rfpName, attr('data-rfp-name-field-id'));
             state.fields.our = findField(state.names.our, attr('data-our-field-id'));
             state.fields.candidates = findField(state.names.candidates, attr('data-candidates-field-id'));
             state.fields.accuracy = findField(state.names.accuracy, attr('data-accuracy-field-id'));
@@ -695,9 +720,11 @@
         state.maxCandidates = num('data-max-candidates', DEFAULT_MAX_CANDIDATES);
         state.skuIdKey = str('data-sku-id-field', DEFAULT_SKU_ID_KEY);
         state.skuLabelKey = str('data-sku-field', DEFAULT_SKU_LABEL_KEY);
+        state.tokensKey = str('data-tokens-field', DEFAULT_TOKENS_KEY);
         state.tmaKey = str('data-tma-field', DEFAULT_TMA_KEY);
         state.names = {
             token: str('data-token-name', DEFAULT_TOKEN_NAME),
+            rfpName: str('data-rfp-name', DEFAULT_RFP_NAME_NAME),
             our: str('data-our-name', DEFAULT_OUR_NAME),
             candidates: str('data-candidates-name', DEFAULT_CANDIDATES_NAME),
             accuracy: str('data-accuracy-name', DEFAULT_ACCURACY_NAME)
