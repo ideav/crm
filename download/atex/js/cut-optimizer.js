@@ -785,7 +785,7 @@
             var row = el('div', { class: 'atex-co-batch' + (insufficient ? ' is-insufficient' : '') });
             if (insufficient) row.title = 'Остатка не хватает на резку (нужно ' + neededM2 + ' м²) — предложить клиенту.';
             row.appendChild(el('span', { class: 'atex-co-batch-no', text: formatBatchTimestamp(b.no) || ('#' + b.id) }));
-            row.appendChild(el('span', { class: 'atex-co-batch-rem', text: b.remainderM2 + ' м²' }));
+            row.appendChild(el('span', { class: 'atex-co-batch-rem', text: Math.floor(b.remainderM2) + ' м²' }));
             row.appendChild(el('span', { class: 'atex-co-batch-wh', text: b.warehouse || '—' }));
             box.appendChild(row);
         });
