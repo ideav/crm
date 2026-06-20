@@ -358,13 +358,26 @@
         return eventUserId(event) === uid;
     }
 
-    function hasOpenShift(events, userId, date) {
+    // #3522: станок события смены. «Начало/Конец смены» пишут «Примечания» вида
+    // «{станок} · {дата}» — станок = первый сегмент до « · ». Пусто, если метки нет.
+    function shiftEventSlitterLabel(event) {
+        var notes = String(event && event.notes != null ? event.notes : '').trim();
+        if (!notes) return '';
+        return notes.split('·')[0].trim();
+    }
+
+    // #3522: смена считается ОТДЕЛЬНО для каждого станка. Если slitterLabel задан —
+    // учитываем только события смены этого станка (по метке в «Примечаниях»);
+    // без него (старые вызовы/тесты) фильтр по станку не применяется.
+    function hasOpenShift(events, userId, date, slitterLabel) {
         var targetDay = dateKey(date || todayISO());
+        var sl = String(slitterLabel == null ? '' : slitterLabel).trim();
         var last = null;
         (events || []).forEach(function(event, i) {
             if (!eventMatchesUser(event, userId)) return;
             if (dateKey(event.when) !== targetDay) return;
             if (!isShiftStartType(event.type) && !isShiftEndType(event.type)) return;
+            if (sl && shiftEventSlitterLabel(event) !== sl) return;
             var order = String(event.when || '') + '#' + i;
             if (!last || order > last.order) last = { event: event, order: order };
         });
@@ -652,6 +665,7 @@
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
         hasOpenShift: hasOpenShift,
+        shiftEventSlitterLabel: shiftEventSlitterLabel,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
         batchPasses: batchPasses,
@@ -1169,7 +1183,9 @@
     };
 
     AtexSlitter.prototype.isShiftOpen = function() {
-        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate);
+        // #3522: смена — на конкретный станок. Без выбранного станка смены нет.
+        if (!this.selectedSlitterId) return false;
+        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate, this.selectedSlitterLabel());
     };
 
     AtexSlitter.prototype.eventDateTime = function() {
