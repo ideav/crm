@@ -14,14 +14,14 @@
  *
  * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
  * object id и t{reqId} — id зависят от сборки базы:
- *   «Заказ»          — ссылка «Клиент» → «Клиент»
- *   «Позиция заказа» — up={orderId} (подчинённая Заказу)
- *   «Клиент»         — реквизит «Логин» для сопоставления с пользователем.
+ *   «Заказ»                 — ссылка «Клиент» → «Клиент»
+ *   «Заказанное количество» — up={orderId} (подчинённая Заказу)
+ *   «Клиент»                — реквизит «Логин» для сопоставления с пользователем.
  */
 (function(window, document) {
     'use strict';
 
-    var TABLE = { order: 'Заказ', position: 'Позиция заказа', client: 'Клиент' };
+    var TABLE = { order: 'Заказ', position: ['Заказанное количество', 'Позиция заказа'], client: 'Клиент' };
     var LIST_LIMIT = 5000;
 
     // Статусы заказа — свободный текст (тип 3). Набор для фильтра можно
@@ -37,7 +37,7 @@
         { key: 'notes', label: 'Примечания', names: ['Примечания'] }
     ];
 
-    // Карта полей подчинённой таблицы «Позиция заказа».
+    // Карта полей подчинённой таблицы «Заказанное количество».
     var POSITION_FIELDS = [
         { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
         { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
@@ -179,9 +179,9 @@
     }
 
     function findMetadataByName(all, name) {
-        var wanted = normalizeFieldName(name);
+        var wanted = (Array.isArray(name) ? name : [name]).map(normalizeFieldName);
         for (var i = 0; i < (all || []).length; i++) {
-            if (normalizeFieldName(all[i].val) === wanted) return all[i];
+            if (wanted.indexOf(normalizeFieldName(all[i].val)) !== -1) return all[i];
         }
         return null;
     }
@@ -192,7 +192,8 @@
             var override = trimValue(overrides && overrides[key]);
             var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
             if (!meta) {
-                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                var nameForMsg = Array.isArray(tableNames[key]) ? tableNames[key].join('»/«') : tableNames[key];
+                throw new Error('В метаданных не найдена таблица «' + nameForMsg + '»' +
                     (override ? ' (id ' + override + ')' : ''));
             }
             resolved[key] = meta;

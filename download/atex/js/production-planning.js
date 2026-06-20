@@ -13,7 +13,7 @@
 // (правило: docs/integram-reports.md).
 //
 // Справочник позиций заказа (для привязки обеспечения) берётся отчётом
-// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
+// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): «Заказанное количество» —
 // подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
 // формы создания резки берутся отчётом `report/material_batches?JSON_KV`
 // (`rowsToBatches`). Справочник станков читается по имени из метаданных
@@ -6289,7 +6289,7 @@
             return;
         }
 
-        // Позиция заказа (один выбор).
+        // Заказанное количество — позиция заказа (один выбор).
         var posSelect = el('select', { class: 'atex-pp-input' });
         posSelect.appendChild(el('option', { value: '', text: '— выберите позицию —' }));
         options.forEach(function(o) {
@@ -6304,7 +6304,7 @@
             d.qty = sel ? String(sel.remaining) : '';
             self.renderForm();
         });
-        form.appendChild(field('Позиция заказа', posSelect));
+        form.appendChild(field('Заказанное количество', posSelect));
 
         var selOpt = options.filter(function(o) { return o.id === String(d.positionId); })[0];
         var maxQty = selOpt ? selOpt.remaining : 0;
