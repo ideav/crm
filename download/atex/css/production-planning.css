@@ -161,6 +161,22 @@
 .atex-pp-filters .atex-pp-field { margin-bottom: 0; }
 /* #3411: быстрый поиск занимает ту же ширину, что и остальные фильтры. */
 .atex-pp-search { width: 100%; }
+/* #3508 п.1: поле «Дата плана» со стрелками листания ‹/› по бокам (±1 день). */
+.atex-pp-date-field { display: flex; align-items: stretch; gap: 6px; }
+.atex-pp-date-field .atex-pp-input { flex: 1 1 auto; min-width: 0; }
+.atex-pp-date-nav {
+    flex: 0 0 auto;
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    color: inherit;
+    cursor: pointer;
+    padding: 0 11px;
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+}
+.atex-pp-date-nav:hover { background: var(--pp-surface); }
 
 .atex-pp-queue-group { margin-bottom: 16px; }
 
@@ -174,6 +190,10 @@
     cursor: pointer; /* клик по всей карточке выбирает резку (#3149) */
 }
 .atex-pp-cut:hover { background: var(--pp-surface); }
+/* #3508 п.5: зафиксированное задание — серая кайма (видно, что менять нельзя). Объявлено
+   ДО .is-active, чтобы у выбранной зафиксированной карточки выделение-акцент перекрывало. */
+.atex-pp-cut.is-fixed { border-color: #9ca3af; background: rgba(107, 114, 128, .06); box-shadow: inset 0 0 0 1px #cbd1d9; }
+.atex-pp-cut.is-fixed:hover { background: rgba(107, 114, 128, .1); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 /* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
 .atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); border-color: var(--pp-warn); }
@@ -337,7 +357,7 @@
     border: 1px solid var(--pp-border);
     border-radius: 6px;
     background: var(--pp-bg);
-    padding: 5px 11px;
+    padding: 6px 12px;   /* #3508 п.4: размер как у кнопки «Полосы» — иконки в ряду ровные */
     cursor: pointer;
     font: inherit;
     color: inherit;
@@ -345,6 +365,37 @@
 }
 .atex-pp-cut-del:hover { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); }
 .atex-pp.is-busy .atex-pp-cut-del { pointer-events: none; opacity: .4; }
+/* #3508 п.3: зафиксированное задание удалить нельзя — кнопка приглушена и не реагирует. */
+.atex-pp-cut-del.is-disabled,
+.atex-pp-cut-del:disabled { opacity: .4; cursor: default; }
+.atex-pp-cut-del:disabled:hover { background: var(--pp-bg); border-color: var(--pp-border); }
+
+/* #3508 п.4: «🔒» — зафиксировать/снять фиксацию ОДНОГО задания. Тот же размер, что у
+   «Полосы»/«🗑». is-active — задание уже зафиксировано (подсветка-«замок»). */
+.atex-pp-cut-fix {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-fix:hover { background: var(--pp-surface); }
+.atex-pp-cut-fix.is-active { background: rgba(107, 114, 128, .14); border-color: #9ca3af; }
+.atex-pp.is-busy .atex-pp-cut-fix { pointer-events: none; opacity: .4; }
+
+/* #3508 п.3: пометка «только просмотр» в панели полос зафиксированного задания. */
+.atex-pp-strip-locked-note {
+    margin: 6px 0 4px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(107, 114, 128, .1);
+    color: var(--pp-muted, #6b7280);
+    font-size: 13px;
+}
+.atex-pp-strip-panel.is-readonly .atex-pp-strip-table { opacity: .75; }
 
 /* Инлайн-редактор полос резки */
 .atex-pp-strip-panel {
