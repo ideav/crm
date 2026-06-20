@@ -142,6 +142,11 @@
     white-space: nowrap;
 }
 
+.xcom-mass-rfp-name {
+    max-width: 22rem;
+    color: var(--text-secondary, #475569);
+}
+
 .xcom-mass-status {
     display: inline-flex;
     align-items: center;
@@ -265,6 +270,6 @@
     }
 
     .xcom-mass-table {
-        min-width: 720px;
+        min-width: 860px;
     }
 }

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд рабочего места «Массовый подбор SKU» (xcom).
+     Мокает fetch: metadata таблицы RFP, object/{id} (скан строк), report/mass_match, _m_set.
+     Использует те же js/css, что и продакшн-шаблон templates/xcom/mass_match.html.
+     Проверяет колонку «Наименование из RFP» в таблице (#3503) и расчёт Точности (#3501). -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>xcom · Массовый подбор SKU — стенд</title>
+<link rel="stylesheet" href="../download/xcom/css/xcom-mass-match.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="xcom-mass-match-app"
+     class="xcom-mass"
+     data-db="xcom"
+     data-rfp-table="2032189"
+     data-query="mass_match"
+     data-rfp-filter="RFPID"
+     data-batch-size="50"
+     data-concurrency="3">
+    <section class="xcom-mass-panel">
+        <div class="xcom-mass-head">
+            <div>
+                <h1>Массовый подбор SKU</h1>
+                <p id="xcom-mass-batch-hint">Пачка по 50, одновременно не более 3 запросов</p>
+            </div>
+            <div class="xcom-mass-actions">
+                <span id="xcom-mass-summary" class="xcom-mass-summary">Загрузка…</span>
+                <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>
+                <button id="xcom-mass-start" class="xcom-mass-btn xcom-mass-btn-primary" type="button" disabled><i class="pi pi-play"></i><span>Старт</span></button>
+                <button id="xcom-mass-stop" class="xcom-mass-btn xcom-mass-btn-danger" type="button" hidden><i class="pi pi-stop"></i><span>Стоп</span></button>
+            </div>
+        </div>
+        <div id="xcom-mass-progress" class="xcom-mass-progress" hidden>
+            <div class="xcom-mass-progress-track"><div id="xcom-mass-progress-bar" class="xcom-mass-progress-bar"></div></div>
+            <span id="xcom-mass-progress-label" class="xcom-mass-summary">Обработано 0 из 0</span>
+        </div>
+    </section>
+    <section class="xcom-mass-pane">
+        <div id="xcom-mass-list" class="xcom-mass-table-wrap"><div class="xcom-mass-loading"><span class="xcom-mass-spinner"></span><span>Загрузка строк RFP…</span></div></div>
+    </section>
+</div>
+
+<script>
+window.xsrf = 'test-token';
+
+// Метаданные таблицы RFP (2032189): главное значение = код, реквизиты по порядку.
+var META = {
+    id: '2032189', val: 'RFP', type: '3',
+    reqs: [
+        { num: 1, id: '2032307', val: 'Наименование', type: '8' },
+        { num: 2, id: '2033352', val: 'Бренд', type: '3' },
+        { num: 3, id: '2123052', val: 'токен', type: '3', attrs: '{"multi":true}' },
+        { num: 4, id: '6334033', val: 'Наш артикул', type: '3' },
+        { num: 5, id: '6334032', val: 'Кандидаты', type: '8' },
+        { num: 6, id: '6333968', val: 'Точность подбора', type: '14' }
+    ]
+};
+
+// Строки RFP (пустой «токен» → попадают в пачку). r = [код, Наименование, Бренд, токен, ...].
+var SCAN = [
+    { i: 5780502, u: 1, o: 1, r: ['10466417-1', 'Печь в сборе для печатного устройства konica minolta bizhub PRESS C1085 ГК', 'Konica Minolta', '', '', '', ''] },
+    { i: 5780510, u: 1, o: 1, r: ['10466500-2', 'Тонер картридж Canon C-EXV33 черный для imageRUNNER 2520 2525 2530', 'Canon', '', '', '', ''] },
+    { i: 5780521, u: 1, o: 1, r: ['10466622-1', 'Ракель wiper blade Hi-Black для HP LaserJet P1005 P1006 P1505', 'Hi-Black', '', '', '', ''] }
+];
+
+// Ответы отчёта mass_match по FR_RFPID. Первая строка = «Наш артикул», остальные — кандидаты.
+var REPORT = {
+    '5780502': [
+        { RFP: '10466417-1', 'Наименование SKU': 'Запчасть Konica Minolta A5AWR70E11 Ролик bizhub Press C1085/AccurioPress C6085', 'токены': '1085,BizHub,C,Konica,Minolta,Press', 'Вес': '9', 'ТММ': '0', 'Артикул': 'A5AWR70E11', SKUID: '4126386' },
+        { RFP: '10466417-1', 'Наименование SKU': 'Ролик Konica Minolta bizhub Press C1085', 'токены': '1085,BizHub,Konica,Minolta,Press', 'Вес': '7', 'ТММ': '0', 'Артикул': 'A5AWR70E12', SKUID: '4126390' }
+    ],
+    '5780510': [
+        { RFP: '10466500-2', 'Наименование SKU': 'Тонер-картридж Canon C-EXV33 черный imageRUNNER 2520 2525 2530', 'токены': '2520,2525,2530,Canon,EXV33,imageRUNNER,картридж,Тонер,черный', 'Вес': '14', 'ТММ': '1', 'Артикул': 'C-EXV33', SKUID: '4130011' },
+        { RFP: '10466500-2', 'Наименование SKU': 'Тонер Canon C-EXV33 для iR 2520', 'токены': '2520,Canon,EXV33,Тонер', 'Вес': '6', 'ТММ': '0', 'Артикул': 'EXV33', SKUID: '4130015' }
+    ],
+    '5780521': [
+        { RFP: '10466622-1', 'Наименование SKU': 'Ракель Hi-Black для HP LaserJet P1005', 'токены': 'Black,Hi,HP,LaserJet,P1005,Ракель', 'Вес': '8', 'ТММ': '0', 'Артикул': 'HB-P1005', SKUID: '4140077' }
+    ]
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\//.test(u)) return json(META);
+    if (/\/object\/2032189\//.test(u)) return json(SCAN);
+    var mRep = u.match(/FR_RFPID=(\d+)/);
+    if (/\/report\/mass_match/.test(u)) return json(REPORT[mRep ? mRep[1] : ''] || []);
+    if (/\/_m_set\//.test(u)) return json({ ok: 1 });
+    return realFetch(url, opts);
+};
+</script>
+<script src="../download/xcom/js/xcom-mass-match.js"></script>
+</body>
+</html>
