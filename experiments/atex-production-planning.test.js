@@ -1365,10 +1365,6 @@ assertEqual(planning.pinTimestampSeconds({ planDate: '' }), null, 'pinTimestampS
 assertEqual(planning.pinnedStartMinByCut(
     [ { id:'A', fixed:true, planDate:String(pinTs3508) }, { id:'B', fixed:false, planDate:String(pinTs3508) } ], pinBase3508),
     { A: 540 }, 'pinnedStartMinByCut: только зафиксированные → окно-старт 09:00 = 540 мин');
-// clampPinnedStart: окно [natural, natural+90].
-assertEqual(planning.clampPinnedStart(540, 600, 90), 600, 'clampPinnedStart: 600 ∈ [540,630]');
-assertEqual(planning.clampPinnedStart(540, 500, 90), 540, 'clampPinnedStart: раньше natural → natural');
-assertEqual(planning.clampPinnedStart(540, 700, 90), 630, 'clampPinnedStart: позже natural+90 → natural+90');
 
 // ── #3342: плавающий обед (LUNCH_START / LUNCH_DURATION) ──
 var wwLunch = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'16:40', LUNCH_START:'12:20', LUNCH_DURATION:'40' }, 30);

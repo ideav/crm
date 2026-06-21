@@ -2168,11 +2168,6 @@
         return out;
     }
 
-    // #3508 п.6: на сколько максимум можно отодвинуть плановый старт зафиксированного
-    // задания от «естественного» (90 мин) и шаг кнопок сдвига ◀▶ (15 мин).
-    var PIN_MAX_DELAY_MIN = 90;
-    var PIN_STEP_MIN = 15;
-
     // #3508 п.6: плановый старт (главное значение «Задания в производство», t1078) как
     // unix-штамп в СЕКУНДАХ. planDate приходит штампом (сек или мс) — нормализуем к сек.
     // null, если не штамп.
@@ -2198,18 +2193,6 @@
             map[String(c.id)] = (ts * 1000 - base) / 60000;
         });
         return map;
-    }
-
-    // #3508 п.6: ограничить желаемый плановый старт зафиксированного задания окном
-    // [natural, natural + maxDelay]: не раньше «естественного» (упакованного) старта —
-    // иначе наложение на предыдущее — и не позже него более чем на maxDelay минут (90).
-    function clampPinnedStart(naturalMin, desiredMin, maxDelayMin) {
-        var nat = Number(naturalMin);
-        var d = Number(desiredMin);
-        if (!isFinite(nat)) return d;
-        if (!isFinite(d)) return nat;
-        var hi = nat + (isFinite(Number(maxDelayMin)) ? Number(maxDelayMin) : 0);
-        return Math.max(nat, Math.min(hi, d));
     }
 
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
@@ -3342,7 +3325,6 @@
         buildSchedule: buildSchedule,
         pinnedStartMinByCut: pinnedStartMinByCut,
         pinTimestampSeconds: pinTimestampSeconds,
-        clampPinnedStart: clampPinnedStart,
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -4508,38 +4490,6 @@
             });
         });
         return tsByCut;
-    };
-
-    // #3508 п.6: сдвинуть плановый старт зафиксированного задания на deltaMin минут,
-    // в пределах [natural, natural + 90] (natural — окно-старт без пина, передаёт карточка).
-    // Пишем t1078 (главное значение). На границе ничего не пишем.
-    AtexProductionPlanning.prototype.nudgeCutStart = function(cut, deltaMin, naturalWindowStartMin) {
-        var self = this;
-        if (this.busy || !cut || !cut.fixed) return;
-        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
-        if (!mainKey) { this.notify('Не найдена таблица «' + TABLE.cut + '»', 'error'); return; }
-        var nat = Number(naturalWindowStartMin);
-        if (!isFinite(nat)) return;
-        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var ts = pinTimestampSeconds(cut);
-        var curMin = (ts != null) ? (ts * 1000 - planBaseMidnightMs) / 60000 : nat;
-        var clamped = clampPinnedStart(nat, curMin + Number(deltaMin || 0), PIN_MAX_DELAY_MIN);
-        if (Math.abs(clamped - curMin) < 1e-6) return;   // упёрлись в границу
-        var newTs = scheduleStartTimestamp(planBaseMidnightMs, clamped);
-        var fields = {}; fields[mainKey] = String(newTs);
-        this.setBusy(true);
-        this.showProgress('Сдвиг планового старта…', 1);
-        this.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields).then(function() {
-            self.updateProgress(1);
-            return self.reload();
-        }).then(function() {
-            self.hideProgress(); self.setBusy(false); self.render();
-            self.notify('Плановый старт сдвинут на ' + (deltaMin > 0 ? '+' : '') + deltaMin + ' мин', 'info');
-        }).catch(function(err) {
-            self.hideProgress(); self.setBusy(false);
-            self.reload().then(function() { self.render(); }).catch(function() {});
-            self.notify('Ошибка сдвига старта: ' + (err && err.message || err), 'error');
-        });
     };
 
     // #3508 п.2/п.4: проставить/снять флаг «Зафиксировано» у набора заданий. Пишем булев
@@ -6845,12 +6795,6 @@
         var pinnedMinByCut = pinnedStartMinByCut(activeGroup.cuts, planBaseMidnightMs);
         var schedule = buildSchedule(activeGroup.cuts, Object.assign({ pinnedStartMinByCut: pinnedMinByCut }, schedOpts));
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
-        // #3508 п.6: расписание БЕЗ пинов даёт «естественный» окно-старт каждого задания —
-        // нижняя граница сдвига зафиксированного (верхняя = natural + 90 мин).
-        var natWindowStartByCut = {};
-        buildSchedule(activeGroup.cuts, schedOpts).forEach(function(sc) {
-            natWindowStartByCut[String(sc.cutId)] = sc.startMin - sc.setupMin;
-        });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         var dayCutsByKey = {};
         activeGroup.cuts.forEach(function(c) {
@@ -7059,21 +7003,9 @@
             controls.appendChild(down);
             controls.appendChild(strips);
             controls.appendChild(fix);
-            // #3508 п.6: у зафиксированного — кнопка ◀ сдвига планового старта на 15 мин
-            // раньше, в пределах [естественный старт, +90 мин]. Полезна, когда перед
-            // заданием освободилось окно (удалили другое) — встроить в это пустое место.
-            // #3540: кнопку ▶ («позже на 15 мин, в пределах 90 мин») убрали — ручная
-            // задержка планового старта не нужна.
-            if (c.fixed) {
-                var natWS = natWindowStartByCut[String(c.id)];
-                var pinTs = pinTimestampSeconds(c);
-                var curWS = (pinTs != null && isFinite(natWS)) ? (pinTs * 1000 - planBaseMidnightMs) / 60000 : natWS;
-                var canEarlier = isFinite(natWS) && isFinite(curWS) && curWS > natWS + 1e-6;
-                var earlier = el('button', { class: 'atex-pp-cut-nudge', type: 'button', text: '◀', title: 'Сдвинуть старт раньше на ' + PIN_STEP_MIN + ' мин (в освободившееся окно)' });
-                if (!canEarlier) earlier.disabled = true;
-                earlier.addEventListener('click', function(e) { if (e && e.stopPropagation) e.stopPropagation(); if (self.busy) return; self.nudgeCutStart(c, -PIN_STEP_MIN, natWS); });
-                controls.appendChild(earlier);
-            }
+            // #3540: кнопки ◀▶ ручного сдвига планового старта зафиксированного задания
+            // (#3508 п.6) убраны — двигать время вручную не требуется. Фиксация по-прежнему
+            // прикалывает задание к его плановому старту в расписании (pinnedStartMinByCut).
             controls.appendChild(del);
             cardPanel.appendChild(controls);
 
