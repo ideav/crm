@@ -196,7 +196,10 @@
 .atex-pp-cut.is-fixed:hover { background: rgba(107, 114, 128, .1); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 /* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
-.atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); border-color: var(--pp-warn); }
+.atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); }
+/* #3545: красный бордюр «нет обеспечения» — только у НЕзафиксированного задания.
+   У зафиксированного бордюр остаётся серым (.is-fixed), сигнал даёт красный фон. */
+.atex-pp-cut.is-unreserved:not(.is-fixed) { border-color: var(--pp-warn); }
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
