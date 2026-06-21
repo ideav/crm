@@ -35,6 +35,7 @@
     // Имена колонок запроса mass_match (JSON_KV — ключи = «Имя в отчёте»).
     var DEFAULT_SKU_ID_KEY = 'SKUID';
     var DEFAULT_SKU_LABEL_KEY = 'Наименование SKU';
+    var DEFAULT_SKU_ARTICLE_KEY = 'Артикул';      // артикул SKU — показываем в таблице вместо ID (issue #3532)
     var DEFAULT_TOKENS_KEY = 'токены';            // совпавшие токены (числитель точности)
     var DEFAULT_TMA_KEY = 'ТММ';                  // флаг точного совпадения артикула
 
@@ -50,6 +51,7 @@
         placeholderOurId: DEFAULT_PLACEHOLDER_OUR_ID,
         skuIdKey: DEFAULT_SKU_ID_KEY,
         skuLabelKey: DEFAULT_SKU_LABEL_KEY,
+        skuArticleKey: DEFAULT_SKU_ARTICLE_KEY,
         tokensKey: DEFAULT_TOKENS_KEY,
         tmaKey: DEFAULT_TMA_KEY,
         names: {},
@@ -373,15 +375,20 @@
         var labelKey = detectKey(first, state.skuLabelKey, function(key) {
             return key !== idKey && !/id$/i.test(key);
         });
+        // Артикул SKU — отдельная колонка отчёта; показываем её в таблице вместо ID (issue #3532).
+        var articleKey = detectKey(first, state.skuArticleKey, function(key) {
+            return /артикул/i.test(key);
+        });
 
         function toItem(row) {
             var id = idKey ? trimValue(row[idKey]) : '';
             var label = labelKey ? trimValue(row[labelKey]) : '';
+            var article = articleKey ? trimValue(row[articleKey]) : '';
             if (!id) {
                 var parsed = parseRefValue(label);
                 if (parsed.refId) { id = parsed.refId; label = parsed.label; }
             }
-            return { id: id, label: label || id };
+            return { id: id, label: label || id, article: article };
         }
 
         var our = toItem(first);
@@ -441,19 +448,25 @@
         }
     }
 
-    // Колонка «Наш артикул» — только ID SKU (issue #3519: текст/наименование SKU не выводим).
-    function ourCell(record) {
-        if (!record.our || !record.our.id) return '';
-        return escapeHtml(record.our.id);
+    // Ячейка SKU: показываем артикул, ID кладём в title для трассировки (issue #3532).
+    // В строку RFP по-прежнему записывается ID (см. writeBack) — артикул только для отображения.
+    function skuCell(item) {
+        var text = item.article || item.id;
+        return '<span title="ID ' + escapeHtml(item.id) + '">' + escapeHtml(text) + '</span>';
     }
 
-    // Колонка «Кандидаты» — только список ID SKU через запятую (issue #3519: без наименований SKU,
-    // по списку ID видно их количество).
+    // Колонка «Наш артикул» — артикул SKU вместо ID (issue #3532; до этого выводился ID, #3519).
+    function ourCell(record) {
+        if (!record.our || !record.our.id) return '';
+        return skuCell(record.our);
+    }
+
+    // Колонка «Кандидаты» — список артикулов SKU через запятую (issue #3532; ранее список ID, #3519).
     function candidatesCell(record) {
         if (!record.candidates || !record.candidates.length) return '';
-        return record.candidates.map(function(item) {
+        return record.candidates.filter(function(item) {
             return item.id;
-        }).filter(Boolean).map(escapeHtml).join(', ');
+        }).map(skuCell).join(', ');
     }
 
     function renderList() {
@@ -1010,6 +1023,7 @@
         state.placeholderOurId = str('data-placeholder-our-id', DEFAULT_PLACEHOLDER_OUR_ID);
         state.skuIdKey = str('data-sku-id-field', DEFAULT_SKU_ID_KEY);
         state.skuLabelKey = str('data-sku-field', DEFAULT_SKU_LABEL_KEY);
+        state.skuArticleKey = str('data-sku-article-field', DEFAULT_SKU_ARTICLE_KEY);
         state.tokensKey = str('data-tokens-field', DEFAULT_TOKENS_KEY);
         state.tmaKey = str('data-tma-field', DEFAULT_TMA_KEY);
         state.names = {
@@ -1044,6 +1058,8 @@
         normalizeRows: normalizeRows,
         normalizeQueryRows: normalizeQueryRows,
         pickMatches: pickMatches,
+        ourCell: ourCell,
+        candidatesCell: candidatesCell,
         buildMatchUrl: buildMatchUrl,
         buildScanUrl: buildScanUrl,
         tuneConcurrency: tuneConcurrency,
