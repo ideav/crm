@@ -65,7 +65,7 @@ let p = run(t.columns[0], { type: '@', value: '5' });
 assert.strictEqual(p.get('FR_100'), '@5', '@ один ID → FR_100=@5');
 
 p = run(t.columns[0], { type: '@', value: '5, 6, abc' });
-assert.strictEqual(p.get('FR_100'), '@(5,6)', '@ несколько ID → FR_100=@(5,6) (нечисловые отброшены)');
+assert.strictEqual(p.get('FR_100'), '@IN(5,6)', '@ несколько ID → FR_100=@IN(5,6) (формат IN, нечисловые отброшены)');
 
 p = run(t.columns[0], { type: '!@', value: '7' });
 assert.strictEqual(p.get('FR_100'), '!@7', '!@ → FR_100=!@7');

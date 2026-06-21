@@ -1583,11 +1583,13 @@ class IntegramTable{
             if (type === '@' || type === '!@') {
                 // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819).
                 // Available on reference columns and on the first column of any type (issue #3542).
+                // Multiple IDs use the IN(...) form — the bare @(id,id) form is NOT understood by
+                // the backend (verified on live: returns nothing for both REF and first columns) (issue #3542).
                 const ids = value.split(',').map(v => v.trim()).filter(v => /^\d+$/.test(v));
                 if (ids.length === 0) return;
                 const formatted = ids.length === 1
                     ? `${type}${ids[0]}`
-                    : `${type}(${ids.join(',')})`;
+                    : `${type}IN(${ids.join(',')})`;
                 params.append(`FR_${ colId }`, formatted);
             } else if (type === '...') {
                 // Range: two separate values from/to (issue #3542). Either side may be empty
