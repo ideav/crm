@@ -137,6 +137,40 @@ td:has(.inline-edit) {
 [data-theme="dark"] svg path[stroke="#1a1a1a"] {
     stroke: var(--text-primary);
 }
+.sq-export-container{
+    vertical-align: middle;
+}
+.sq-export-toggle{
+    cursor: pointer;
+}
+.sq-export-menu{
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1050;
+    min-width: 210px;
+    margin-top: 4px;
+    padding: 4px 0;
+    text-align: left;
+    background-color: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.sq-export-item{
+    display: block;
+    padding: 6px 16px;
+    font-size: 1rem;
+    font-weight: 400;
+    white-space: nowrap;
+    color: var(--text-primary, #333);
+    cursor: pointer;
+}
+.sq-export-item:hover{
+    background-color: var(--bg-secondary, #f5f5f5);
+    color: var(--text-primary, #333);
+    text-decoration: none;
+}
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
@@ -171,6 +205,17 @@ td:has(.inline-edit) {
     <path d="M14 17C15.6569 17 17 15.6569 17 14C17 12.3431 15.6569 11 14 11C12.3431 11 11 12.3431 11 14C11 15.6569 12.3431 17 14 17Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M21.4 17C21.2669 17.3016 21.2272 17.6362 21.286 17.9606C21.3448 18.285 21.4995 18.5843 21.73 18.82L21.79 18.88C21.976 19.0657 22.1235 19.2863 22.2241 19.5291C22.3248 19.7719 22.3766 20.0322 22.3766 20.295C22.3766 20.5578 22.3248 20.8181 22.2241 21.0609C22.1235 21.3037 21.976 21.5243 21.79 21.71C21.6043 21.896 21.3837 22.0435 21.1409 22.1441C20.8981 22.2448 20.6378 22.2966 20.375 22.2966C20.1122 22.2966 19.8519 22.2448 19.6091 22.1441C19.3663 22.0435 19.1457 21.896 18.96 21.71L18.9 21.65C18.6643 21.4195 18.365 21.2648 18.0406 21.206C17.7162 21.1472 17.3816 21.1869 17.08 21.32C16.7842 21.4468 16.532 21.6572 16.3543 21.9255C16.1766 22.1938 16.0813 22.5082 16.08 22.83V23C16.08 23.5304 15.8693 24.0391 15.4942 24.4142C15.1191 24.7893 14.6104 25 14.08 25C13.5496 25 13.0409 24.7893 12.6658 24.4142C12.2907 24.0391 12.08 23.5304 12.08 23V22.91C12.0723 22.579 11.9651 22.258 11.7725 21.9887C11.5799 21.7194 11.3107 21.5143 11 21.4C10.6984 21.2669 10.3638 21.2272 10.0394 21.286C9.71502 21.3448 9.41568 21.4995 9.18 21.73L9.12 21.79C8.93425 21.976 8.71368 22.1235 8.47088 22.2241C8.22808 22.3248 7.96783 22.3766 7.705 22.3766C7.44217 22.3766 7.18192 22.3248 6.93912 22.2241C6.69632 22.1235 6.47575 21.976 6.29 21.79C6.10405 21.6043 5.95653 21.3837 5.85588 21.1409C5.75523 20.8981 5.70343 20.6378 5.70343 20.375C5.70343 20.1122 5.75523 19.8519 5.85588 19.6091C5.95653 19.3663 6.10405 19.1457 6.29 18.96L6.35 18.9C6.58054 18.6643 6.73519 18.365 6.794 18.0406C6.85282 17.7162 6.81312 17.3816 6.68 17.08C6.55324 16.7842 6.34276 16.532 6.07447 16.3543C5.80618 16.1766 5.49179 16.0813 5.17 16.08H5C4.46957 16.08 3.96086 15.8693 3.58579 15.4942C3.21071 15.1191 3 14.6104 3 14.08C3 13.5496 3.21071 13.0409 3.58579 12.6658C3.96086 12.2907 4.46957 12.08 5 12.08H5.09C5.42099 12.0723 5.742 11.9651 6.0113 11.7725C6.28059 11.5799 6.48572 11.3107 6.6 11C6.73312 10.6984 6.77282 10.3638 6.714 10.0394C6.65519 9.71502 6.50054 9.41568 6.27 9.18L6.21 9.12C6.02405 8.93425 5.87653 8.71368 5.77588 8.47088C5.67523 8.22808 5.62343 7.96783 5.62343 7.705C5.62343 7.44217 5.67523 7.18192 5.77588 6.93912C5.87653 6.69632 6.02405 6.47575 6.21 6.29C6.39575 6.10405 6.61632 5.95653 6.85912 5.85588C7.10192 5.75523 7.36217 5.70343 7.625 5.70343C7.88783 5.70343 8.14808 5.75523 8.39088 5.85588C8.63368 5.95653 8.85425 6.10405 9.04 6.29L9.1 6.35C9.33568 6.58054 9.63502 6.73519 9.95941 6.794C10.2838 6.85282 10.6184 6.81312 10.92 6.68H11C11.2958 6.55324 11.548 6.34276 11.7257 6.07447C11.9034 5.80618 11.9987 5.49179 12 5.17V5C12 4.46957 12.2107 3.96086 12.5858 3.58579C12.9609 3.21071 13.4696 3 14 3C14.5304 3 15.0391 3.21071 15.4142 3.58579C15.7893 3.96086 16 4.46957 16 5V5.09C16.0013 5.41179 16.0966 5.72618 16.2743 5.99447C16.452 6.26276 16.7042 6.47324 17 6.6C17.3016 6.73312 17.6362 6.77282 17.9606 6.714C18.285 6.65519 18.5843 6.50054 18.82 6.27L18.88 6.21C19.0657 6.02405 19.2863 5.87653 19.5291 5.77588C19.7719 5.67523 20.0322 5.62343 20.295 5.62343C20.5578 5.62343 20.8181 5.67523 21.0609 5.77588C21.3037 5.87653 21.5243 6.02405 21.71 6.21C21.896 6.39575 22.0435 6.61632 22.1441 6.85912C22.2448 7.10192 22.2966 7.36217 22.2966 7.625C22.2966 7.88783 22.2448 8.14808 22.1441 8.39088C22.0435 8.63368 21.896 8.85425 21.71 9.04L21.65 9.1C21.4195 9.33568 21.2648 9.63502 21.206 9.95941C21.1472 10.2838 21.1869 10.6184 21.32 10.92V11C21.4468 11.2958 21.6572 11.548 21.9255 11.7257C22.1938 11.9034 22.5082 11.9987 22.83 12H23C23.5304 12 24.0391 12.2107 24.4142 12.5858C24.7893 12.9609 25 13.4696 25 14C25 14.5304 24.7893 15.0391 24.4142 15.4142C24.0391 15.7893 23.5304 16 23 16H22.91C22.5882 16.0013 22.2738 16.0966 22.0055 16.2743C21.7372 16.452 21.5268 16.7042 21.4 17Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
     </svg></a>
+    <span class="sq-export-container position-relative d-inline-block">
+    <a class="sq-export-toggle" onclick="sqToggleExportMenu(event)" title="Экспорт"><svg class="ml-2" width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6 18.5V21.5C6 22.0304 6.21071 22.5391 6.58579 22.9142C6.96086 23.2893 7.46957 23.5 8 23.5H20C20.5304 23.5 21.0391 23.2893 21.4142 22.9142C21.7893 22.5391 22 22.0304 22 21.5V18.5M9 13L14 18L19 13M14 18V4.5" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg></a>
+    <div class="sq-export-menu" style="display:none">
+        <a class="sq-export-item" onclick="sqExport('xlsx')">XLSX (Excel)</a>
+        <a class="sq-export-item" onclick="sqExport('xls')">XLS (Excel 97-2003)</a>
+        <a class="sq-export-item" onclick="sqExport('csv')">CSV</a>
+        <a class="sq-export-item" onclick="sqExport('buffer')">В буфер</a>
+    </div>
+    </span>
 </h3>
 </center>
 <table class="table table-sm table-bordered sq-table"><thead><tr class="tr-sticky"><tbody></table>
@@ -1212,27 +1257,7 @@ function doApplyFilters(p){
 	var fd=new FormData();
 	filters={};
 	lastK='';
-    $('.filters input').each(function(){
-        if(this.value!==''){
-            $('.clear-filters').show();
-            $('.refr').removeClass('ml-2');
-            if(this.value==='%'||this.value==='!%'||this.value.substr(0,1)==='@'||this.value.substr(0,2)==='!@')
-            	val=this.value;
-            else
-                switch($(this).attr('base')){
-                    case "NUMBER":
-                    case "SIGNED":
-                    case "DATE":
-                    case "DATETIME":
-                    case "BOOLEAN":
-                    	val=this.value;
-                        break;
-                    default:
-                    	val=this.value.indexOf('%')===-1?'%'+this.value.replace(/ /g,'%')+'%':this.value;
-                }
-        	fd.append($(this).attr('name'),val);
-        }
-    });
+    sqCollectFilters(fd);
     if(p==='RECORD_COUNT')
         newApi('POST','report/'+id+'?JSON&RECORD_COUNT','getCountDone',fd);
     else if(p==='TOTALS'){
@@ -1327,6 +1352,201 @@ function markDown(el){
 		el.innerHTML=el.innerHTML.replace(/\*\*(.+?)\*\*(?!\*)/g,'<b>$1</b>')
 		                        .replace(/__(.+?)__(?!\_)/g,'<i>$1</i>')
 		                        .replace(/~~(.+?)~~(?!\~)/g,'<s>$1</s>');
+}
+// === Экспорт таблицы (issue #3559): XLSX/XLS/CSV/буфер, по образцу .integram-export-menu в js/integram-table.js ===
+function sqCollectFilters(fd){ // собрать значения активных фильтров из полей шапки
+    $('.filters input').each(function(){
+        if(this.value!==''){
+            $('.clear-filters').show();
+            $('.refr').removeClass('ml-2');
+            var val;
+            if(this.value==='%'||this.value==='!%'||this.value.substr(0,1)==='@'||this.value.substr(0,2)==='!@')
+                val=this.value;
+            else
+                switch($(this).attr('base')){
+                    case "NUMBER":
+                    case "SIGNED":
+                    case "DATE":
+                    case "DATETIME":
+                    case "BOOLEAN":
+                        val=this.value;
+                        break;
+                    default:
+                        val=this.value.indexOf('%')===-1?'%'+this.value.replace(/ /g,'%')+'%':this.value;
+                }
+            fd.append($(this).attr('name'),val);
+        }
+    });
+    return fd;
+}
+function sqToggleExportMenu(event){
+    if(event)
+        event.stopPropagation();
+    var $menu=$('.sq-export-menu');
+    var visible=$menu.is(':visible');
+    $('.sq-export-menu').hide();
+    if(!visible){
+        $menu.show();
+        setTimeout(function(){
+            var closeHandler=function(e){
+                if(!$(e.target).closest('.sq-export-container').length){
+                    $('.sq-export-menu').hide();
+                    document.removeEventListener('click',closeHandler);
+                }
+            };
+            document.addEventListener('click',closeHandler);
+        },0);
+    }
+}
+function sqExport(format){ // загрузить ВСЕ строки по текущим фильтрам и порядку, затем выгрузить
+    $('.sq-export-menu').hide();
+    var fd=new FormData();
+    sqCollectFilters(fd);
+    var urlParams=getFilterParams();
+    for(var key in urlParams)
+        fd.append(key,urlParams[key]);
+    $('.ajax-wait').show();
+    newApi('POST','report/'+id+'?JSON&LIMIT=0,1000000'+collectOrder(),'sqExportLoaded',fd,{format:format});
+}
+function sqExportLoaded(json,ctx){
+    $('.ajax-wait').hide();
+    try{
+        if(!json||!json.columns)
+            return errMsgCard(t9n('[RU]Нет данных для экспорта[EN]No data to export'));
+        var fields=sqExportFields(json);
+        if(fields.length===0)
+            return errMsgCard(t9n('[RU]Нет колонок для экспорта[EN]No columns to export'));
+        var rows=sqExportRows(json,fields);
+        if(rows.length===0)
+            return errMsgCard(t9n('[RU]Нет данных для экспорта[EN]No data to export'));
+        var format=ctx&&ctx.format;
+        if(format==='csv')
+            sqExportCsv(fields,rows);
+        else if(format==='buffer')
+            sqExportBuffer(rows);
+        else
+            sqExportExcel(fields,rows,format);
+    }
+    catch(e){
+        errMsgCard(t9n('[RU]Ошибка экспорта: [EN]Export error: ')+(e&&e.message||e));
+    }
+}
+function sqExportFields(json){ // видимые колонки в порядке таблицы (как в getRep/drawLine)
+    var has={},f=[],i,col,name;
+    for(i in json.columns)
+        has[json.columns[i].name]=true;
+    for(i in json.columns){
+        col=json.columns[i];
+        if(!col.id)
+            continue;
+        name=col.name;
+        if(name.substr(-2)==='ID'&&has[name.substr(0,name.length-2)])
+            continue; // скрытая колонка ID объекта
+        f.push({col:i,name:name,format:col.format});
+    }
+    return f;
+}
+function sqExportRows(json,fields){
+    var rows=[],i,k,f,n=(json.data&&json.data[0])?json.data[0].length:0;
+    for(i=0;i<n;i++){
+        var row=[];
+        for(k=0;k<fields.length;k++){
+            f=fields[k];
+            row.push(sqExportCell(json.data[f.col][i],f.format));
+        }
+        rows.push(row);
+    }
+    return rows;
+}
+function sqExportCell(raw,format){ // привести значение к тексту как в таблице
+    if(raw===null||raw===undefined)
+        return '';
+    if(isNumeric(format))
+        return formatNum(raw,format);
+    var v=String(raw);
+    if(format==='HTML'||format==='BUTTON'){
+        var tmp=document.createElement('div');
+        tmp.innerHTML=v;
+        v=tmp.textContent||tmp.innerText||'';
+    }
+    return v;
+}
+function sqExportFilename(ext){
+    var title=($('.rep-header').text()||'').trim()||'smartq';
+    return title+'_'+new Date().toISOString().slice(0,10)+'.'+ext;
+}
+function sqDownloadBlob(blob,filename){
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+function sqExportCsv(fields,rows){
+    var headers=fields.map(function(f){return f.name;});
+    var all=[headers].concat(rows);
+    var content=all.map(function(row){
+        return row.map(function(cell){
+            var s=String(cell==null?'':cell);
+            if(s.indexOf(',')!==-1||s.indexOf('\n')!==-1||s.indexOf('"')!==-1)
+                return '"'+s.replace(/"/g,'""')+'"';
+            return s;
+        }).join(',');
+    }).join('\n');
+    var blob=new Blob(['﻿'+content],{type:'text/csv;charset=utf-8;'});
+    sqDownloadBlob(blob,sqExportFilename('csv'));
+    errMsgCard(t9n('[RU]CSV экспортирован[EN]CSV exported'));
+}
+function sqExportExcel(fields,rows,format){
+    sqLoadXlsx(function(){
+        var headers=fields.map(function(f){return f.name;});
+        var wb=XLSX.utils.book_new();
+        var ws=XLSX.utils.aoa_to_sheet([headers].concat(rows));
+        ws['!cols']=headers.map(function(h,idx){
+            var max=h.length,r,l;
+            for(r=0;r<rows.length;r++){
+                l=String(rows[r][idx]==null?'':rows[r][idx]).length;
+                if(l>max)
+                    max=l;
+            }
+            return {wch:Math.min(max+2,50)};
+        });
+        XLSX.utils.book_append_sheet(wb,ws,'Data');
+        var ext=format.toLowerCase()==='xls'?'xls':'xlsx';
+        XLSX.writeFile(wb,sqExportFilename(ext),{bookType:ext});
+        errMsgCard(ext.toUpperCase()+t9n('[RU] экспортирован[EN] exported'));
+    });
+}
+function sqExportBuffer(rows){ // TAB-разделённый текст в буфер обмена (как copyToBuffer в integram-table)
+    var text=rows.map(function(row){return row.join('\t');}).join('\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(text).then(function(){
+            errMsgCard(t9n('[RU]Скопировано записей в буфер: [EN]Copied records to clipboard: ')+rows.length);
+        },function(){
+            errMsgCard(t9n('[RU]Ошибка копирования в буфер[EN]Failed to copy to clipboard'));
+        });
+    else
+        errMsgCard(t9n('[RU]Буфер обмена недоступен[EN]Clipboard is unavailable'));
+}
+function sqLoadXlsx(cb){
+    if(typeof XLSX!=='undefined')
+        return cb();
+    errMsgCard(t9n('[RU]Загрузка библиотеки экспорта...[EN]Loading export library...'));
+    var existing=document.querySelector('script[src="/js/xlsx.full.min.js"]');
+    if(existing){
+        existing.addEventListener('load',cb);
+        existing.addEventListener('error',function(){errMsgCard(t9n('[RU]Ошибка загрузки библиотеки экспорта[EN]Failed to load export library'));});
+        return;
+    }
+    var s=document.createElement('script');
+    s.src='/js/xlsx.full.min.js';
+    s.async=true;
+    s.onload=cb;
+    s.onerror=function(){errMsgCard(t9n('[RU]Ошибка загрузки библиотеки экспорта[EN]Failed to load export library'));};
+    document.head.appendChild(s);
 }
 if(id>0)
     newApi('GET','edit_obj/'+id+'?JSON','getSmart');
