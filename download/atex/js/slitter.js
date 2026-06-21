@@ -695,6 +695,9 @@
     function el(tag, attrs, children) {
         var node = document.createElement(tag);
         if (attrs) Object.keys(attrs).forEach(function(k) {
+            // null/undefined → атрибут не ставим: иначе setAttribute('disabled', undefined)
+            // даёт disabled="undefined" (булев атрибут блокирует элемент). #3553
+            if (attrs[k] == null) return;
             if (k === 'class') node.className = attrs[k];
             else if (k === 'text') node.textContent = attrs[k];
             else if (k === 'html') node.innerHTML = attrs[k];
