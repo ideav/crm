@@ -7040,23 +7040,20 @@
             controls.appendChild(down);
             controls.appendChild(strips);
             controls.appendChild(fix);
-            // #3508 п.6: у зафиксированного — кнопки ◀▶ сдвига планового старта на ±15 мин
-            // в пределах [естественный старт, +90 мин]. «◀» (раньше) полезна, когда перед
+            // #3508 п.6: у зафиксированного — кнопка ◀ сдвига планового старта на 15 мин
+            // раньше, в пределах [естественный старт, +90 мин]. Полезна, когда перед
             // заданием освободилось окно (удалили другое) — встроить в это пустое место.
+            // #3540: кнопку ▶ («позже на 15 мин, в пределах 90 мин») убрали — ручная
+            // задержка планового старта не нужна.
             if (c.fixed) {
                 var natWS = natWindowStartByCut[String(c.id)];
                 var pinTs = pinTimestampSeconds(c);
                 var curWS = (pinTs != null && isFinite(natWS)) ? (pinTs * 1000 - planBaseMidnightMs) / 60000 : natWS;
                 var canEarlier = isFinite(natWS) && isFinite(curWS) && curWS > natWS + 1e-6;
-                var canLater = isFinite(natWS) && isFinite(curWS) && curWS < natWS + PIN_MAX_DELAY_MIN - 1e-6;
                 var earlier = el('button', { class: 'atex-pp-cut-nudge', type: 'button', text: '◀', title: 'Сдвинуть старт раньше на ' + PIN_STEP_MIN + ' мин (в освободившееся окно)' });
-                var later = el('button', { class: 'atex-pp-cut-nudge', type: 'button', text: '▶', title: 'Сдвинуть старт позже на ' + PIN_STEP_MIN + ' мин (в пределах 90 мин)' });
                 if (!canEarlier) earlier.disabled = true;
-                if (!canLater) later.disabled = true;
                 earlier.addEventListener('click', function(e) { if (e && e.stopPropagation) e.stopPropagation(); if (self.busy) return; self.nudgeCutStart(c, -PIN_STEP_MIN, natWS); });
-                later.addEventListener('click', function(e) { if (e && e.stopPropagation) e.stopPropagation(); if (self.busy) return; self.nudgeCutStart(c, PIN_STEP_MIN, natWS); });
                 controls.appendChild(earlier);
-                controls.appendChild(later);
             }
             controls.appendChild(del);
             cardPanel.appendChild(controls);
