@@ -24,9 +24,11 @@ assert(api && typeof api.tuneConcurrency === 'function', 'tuneConcurrency is exp
 const state = api._state;
 const tune = api.tuneConcurrency;
 
-function reset(concurrency, prevSpeed, lastTuneUp, cooldown) {
+function reset(concurrency, prevSpeed, lastTuneUp, cooldown, maxSpeed) {
     state.concurrency = concurrency;
     state.prevSpeed = prevSpeed === undefined ? null : prevSpeed;
+    // issue #3549: исторический максимум — отдельная база; в этих сценариях по умолчанию = prevSpeed.
+    state.maxSpeed = maxSpeed === undefined ? state.prevSpeed : maxSpeed;
     state.lastTuneUp = !!lastTuneUp;
     state.tuneCooldown = cooldown || 0;
 }
