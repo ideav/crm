@@ -829,7 +829,6 @@
             if (hasPending) {
                 prepared = Promise.resolve(state.records.length);
             } else {
-                setText('xcom-mass-summary', 'Загрузка следующей пачки…');
                 prepared = fetchBatch().then(function(count) {
                     if (count < 0) return 0;          // запрос устарел
                     renderList();
@@ -869,9 +868,6 @@
             renderStats();
             setControls('idle');
             updateProgress();
-            var processed = Object.keys(state.outcomes).length;
-            setText('xcom-mass-summary', (state.stopRequested ? 'Остановлено' : 'Готово') +
-                ' · обработано за прогон: ' + processed + ' за ' + formatDuration(state.endTime - state.startTime));
             if (!state.records.length) renderList();
         });
     }
@@ -928,17 +924,14 @@
     function loadBatch() {
         setControls('loading');
         renderMessage('Загрузка строк RFP…', 'loading');
-        setText('xcom-mass-summary', 'Загрузка…');
 
         return fetchBatch().then(function(count) {
             if (count < 0) return;
             renderList();
-            setText('xcom-mass-summary', count + ' необработанных');
             setControls('idle');
             updateProgress();
         }).catch(function(error) {
             renderMessage(error && error.message ? error.message : 'Не удалось загрузить строки RFP.', 'error');
-            setText('xcom-mass-summary', 'Ошибка');
             setControls('idle');
         });
     }
@@ -970,7 +963,6 @@
             return loadBatch();
         }).catch(function(error) {
             renderMessage(error && error.message ? error.message : 'Не удалось загрузить метаданные RFP.', 'error');
-            setText('xcom-mass-summary', 'Ошибка');
             setControls('loading');
             setDisabled('xcom-mass-reload', false);
         });

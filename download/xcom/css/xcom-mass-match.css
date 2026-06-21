@@ -41,8 +41,7 @@
     font-weight: 650;
 }
 
-.xcom-mass-head p,
-.xcom-mass-summary {
+.xcom-mass-head p {
     margin: 0.25rem 0 0;
     color: var(--text-secondary, #64748b);
     font-size: 0.85rem;
@@ -54,10 +53,6 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     justify-content: flex-end;
-}
-
-.xcom-mass-actions .xcom-mass-summary {
-    margin: 0;
 }
 
 .xcom-mass-progress {
@@ -81,6 +76,12 @@
     border-radius: 999px;
     background: var(--button-primary, #2563eb);
     transition: width 0.2s ease;
+}
+
+.xcom-mass-progress-label {
+    margin: 0;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.85rem;
 }
 
 /* Поле ключевого слова для фильтра по наименованию RFP (issue #3523) */
