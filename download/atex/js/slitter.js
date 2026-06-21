@@ -69,6 +69,8 @@
         plannedRuns: 'Кол-во план',
         runLength: 'Метраж, м',
         startedAt: 'Начато',
+        inWork: 'В работе',      // #3557: булев реквизит (1162) — резка открыта/занимает станок
+        finishedAt: 'Закончено',  // #3557: DATETIME (16411) — момент завершения
         notes: 'Примечания'
     };
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
@@ -86,13 +88,19 @@
     };
     var MATERIAL_REQ = { width: 'Ширина, мм' };
 
-    // Статусы резки по дизайн-спеке atex (§3.5): упрощённая цепочка (#3459).
-    // Ожидает → В работе → Завершена (Наладка убрана, оператор запускает резку сразу).
+    // Статусы резки. Базовая цепочка для очереди (Ожидает → В работе → Завершена);
+    // фактический статус резки выводится из последнего события смены (#3557).
     var STATUSES = ['Ожидает', 'В работе', 'Завершена'];
     var DONE_STATUSES = ['Завершена', 'Завершён', 'Готова'];
     var WAIT_STATUSES = ['Ожидает', 'Запланирована', 'В очереди'];
-    // Типы событий смены (дизайн-спека atex, «Событие смены»).
-    var EVENT_TYPES = ['Начало смены', 'Запуск резки', 'Пауза', 'Обед', 'Переналадка', 'Счётчик', 'Брак', 'Завершение резки', 'Пропуск', 'Отмена', 'Конец смены'];
+    // #3557: типы событий, управляющие статусом резки (справочник «Тип события», 1193).
+    var EV = {
+        startCut: 'Начало резки', setup: 'Наладка', brk: 'Перерыв',
+        resume: 'Возобновить', finish: 'Завершить', abort: 'Прекратить',
+        shiftStart: 'Начало смены', shiftEnd: 'Конец смены'
+    };
+    // Типы событий смены (справочник «Тип события» базы ateh, 1193).
+    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.finish, EV.abort, EV.shiftEnd];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -639,9 +647,58 @@
         });
     }
 
+    // #3557: статус резки выводится из последнего её события смены (приоритет) и
+    // подкрепляется атрибутами «Начато»/«В работе»(bool)/«Закончено». Возвращает
+    // один из: Ожидает | В работе | Наладка | Перерыв | Завершена.
+    function deriveCutStatus(lastEventType, attrs) {
+        var t = String(lastEventType == null ? '' : lastEventType).trim();
+        var a = attrs || {};
+        if (t === EV.finish || t === EV.abort) return 'Завершена';
+        if (t === EV.setup) return 'Наладка';
+        if (t === EV.brk) return 'Перерыв';
+        if (t === EV.startCut || t === EV.resume) return 'В работе';
+        // Нет решающего события — опираемся на атрибуты резки.
+        if (a.finishedAt && String(a.finishedAt).trim() !== '') return 'Завершена';
+        if (truthyFlag(a.inWork) || (a.startedAt && String(a.startedAt).trim() !== '')) return 'В работе';
+        return 'Ожидает';
+    }
+
+    // #3557: «when» события — unix-секунды (тип DATETIME отдаётся числом) → секунды.
+    function eventWhenSeconds(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (isTimestampSeconds(s)) return Number(s);
+        var p = Date.parse(s.replace(' ', 'T'));
+        return isNaN(p) ? NaN : Math.round(p / 1000);
+    }
+
+    // #3557: «when» события → «ДД.ММ.ГГГГ ЧЧ:ММ» (а не сырой таймштамп).
+    function formatEventWhen(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (isTimestampSeconds(s)) return formatDate(s) + ' ' + formatClock(s);
+        var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+        if (m) return m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5];
+        return s;
+    }
+
+    // #3557: длительность (секунды) → «Ч ч М мин» / «М мин». Пусто/отрицательно → ''.
+    function formatDuration(seconds) {
+        var s = Number(seconds);
+        if (!isFinite(s) || s < 0) return '';
+        var m = Math.round(s / 60);
+        if (m < 1) return 'меньше минуты';
+        if (m < 60) return m + ' мин';
+        var h = Math.floor(m / 60), mm = m % 60;
+        return h + ' ч' + (mm ? ' ' + mm + ' мин' : '');
+    }
+
     var core = {
         STATUSES: STATUSES,
         EVENT_TYPES: EVENT_TYPES,
+        EV: EV,
+        deriveCutStatus: deriveCutStatus,
+        eventWhenSeconds: eventWhenSeconds,
+        formatEventWhen: formatEventWhen,
+        formatDuration: formatDuration,
         toNumber: toNumber,
         round3: round3,
         normalizeStatus: normalizeStatus,
@@ -995,7 +1052,6 @@
         var self = this;
         var meta = this.meta.cut;
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var statusIdx = colIndex(meta, CUT_REQ.status);
             var slitterIdx = colIndex(meta, CUT_REQ.slitter);
             var batchIdx = colIndex(meta, CUT_REQ.batch);
             var planDateIdx = colIndex(meta, CUT_REQ.planDate);
@@ -1003,6 +1059,8 @@
             var plannedRunsIdx = colIndexAny(meta, CUT_PLANNED_RUNS_NAMES);
             var runLengthIdx = colIndexAny(meta, CUT_RUN_LENGTH_NAMES);
             var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
+            var inWorkIdx = colIndex(meta, CUT_REQ.inWork);      // #3557
+            var finishedIdx = colIndex(meta, CUT_REQ.finishedAt); // #3557
             self.cuts = (rows || []).map(function(r) {
                 var row = r.r || [];
                 var slitterRef = slitterIdx >= 0 ? parseRef(row[slitterIdx]) : { id: null, label: '' };
@@ -1012,7 +1070,11 @@
                     // #3460: главное значение резки — плановое время старта (штамп);
                     // показываем «Резка ЧЧ:ММ», а не сырой номер.
                     label: core.cutTitle(row[0] || r.i),
-                    status: statusIdx >= 0 ? core.normalizeStatus(row[statusIdx]) : STATUSES[0],
+                    // #3557: статус выводится из событий (applyEventStatuses); до их
+                    // загрузки — из атрибутов через deriveCutStatus.
+                    status: STATUSES[0],
+                    inWork: inWorkIdx >= 0 ? (row[inWorkIdx] || '') : '',
+                    finishedAt: finishedIdx >= 0 ? (row[finishedIdx] || '') : '',
                     slitterId: slitterRef.id,
                     slitter: slitterRef.label,
                     batchId: batchRef.id,
@@ -1052,7 +1114,6 @@
                 batchId: batchRef.id,
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 planDate: val(CUT_REQ.planDate),
-                status: core.normalizeStatus(val(CUT_REQ.status)),
                 counterStart: val(CUT_REQ.counterStart),
                 counterEnd: val(CUT_REQ.counterEnd),
                 meterage: val(CUT_REQ.meterage),
@@ -1063,6 +1124,9 @@
                 plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
                 runLength: valAny(CUT_RUN_LENGTH_NAMES),
                 startedAt: valAny(CUT_STARTED_NAMES),
+                inWork: val(CUT_REQ.inWork),         // #3557: булев «В работе» (1162)
+                finishedAt: val(CUT_REQ.finishedAt), // #3557: «Закончено» (16411)
+                status: STATUSES[0],
                 notes: val(CUT_REQ.notes)
             };
         });
@@ -1168,11 +1232,31 @@
         if (!meta) { this.shiftEvents = []; this.events = []; return Promise.resolve(); }
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
             var all = self.parseEventRows(rows);
+            self.allEvents = all; // #3557: все события (для вывода статуса резок)
             self.shiftEvents = self.filterShiftEvents(all);
             self.events = self.currentCutId
                 ? self.shiftEvents.filter(function(ev) { return String(ev.cutId || '') === String(self.currentCutId); })
                 : [];
+            self.applyEventStatuses();
         });
+    };
+
+    // #3557: статус каждой резки = из последнего её события смены (+ атрибуты).
+    // parseEventRows уже отсортировал события по убыванию времени, поэтому первое
+    // событие резки в списке — самое свежее.
+    AtexSlitter.prototype.applyEventStatuses = function() {
+        var lastType = {};
+        (this.allEvents || []).forEach(function(ev) {
+            var cid = String(ev.cutId || '');
+            if (!cid) return;
+            if (!(cid in lastType)) lastType[cid] = ev.type; // первое = самое свежее
+        });
+        (this.cuts || []).forEach(function(cut) {
+            cut.status = core.deriveCutStatus(lastType[String(cut.id)], cut);
+        });
+        if (this.currentCut) {
+            this.currentCut.status = core.deriveCutStatus(lastType[String(this.currentCut.id)], this.currentCut);
+        }
     };
 
     AtexSlitter.prototype.loadEvents = function(cutId) {
@@ -1266,6 +1350,13 @@
 
         box.appendChild(field('Дата', dateInp));
         box.appendChild(field('Станок', select));
+
+        // #3557 #1: «Закрыть смену» перенесена сюда из секции «События смены».
+        if (this.isShiftOpen()) {
+            var closeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Закрыть смену' });
+            closeBtn.addEventListener('click', function() { self.closeShift(); });
+            box.appendChild(closeBtn);
+        }
     };
 
     AtexSlitter.prototype.renderCuts = function() {
@@ -1287,41 +1378,49 @@
             return;
         }
         var firstOpenId = this.currentQueue().firstOpenCutId;
-        // #3459: только первая резка в «Ожидает» доступна; остальные disabled.
-        // Резка в работе или на паузе остаётся доступной для своего оператора.
-        list.forEach(function(cut) {
+        var total = list.length;
+        // #3459: только первая резка в «Ожидает» доступна для управления; остальные
+        // «Ожидает» заблокированы очередью. #3557 #8: заблокированную резку всё
+        // равно можно открыть и посмотреть детали, но кнопки в ней деактивированы.
+        list.forEach(function(cut, idx) {
             var active = String(self.currentCutId) === String(cut.id);
             var isFirstOpen = firstOpenId && String(firstOpenId) === String(cut.id);
-            var isWaiting = core.normalizeStatus(cut.status) === 'Ожидает';
-            var isInProgress = core.normalizeStatus(cut.status) === 'В работе' || core.isPauseStatus(cut.status);
-            // Блокируем «Ожидает»-резки кроме первой в очереди
-            var disabled = isWaiting && !isFirstOpen && !active;
+            var locked = self.isCutLocked(cut);
             var item = el('button', {
-                class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (disabled ? ' is-disabled' : ''),
-                type: 'button',
-                disabled: disabled ? 'disabled' : undefined
+                class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (locked ? ' is-disabled' : ''),
+                type: 'button'
             }, [
                 el('div', { class: 'atex-sl-cut-main' }, [
-                    el('span', { class: 'atex-sl-cut-label', text: cut.label }),
+                    // #3557 #4: «Резка N из M» (позиция в очереди станка).
+                    el('span', { class: 'atex-sl-cut-label', text: 'Резка ' + (idx + 1) + ' из ' + total }),
+                    // #3557 #7: дату из подписи убрали — «Начато» показываем временем.
                     el('span', { class: 'atex-sl-cut-sub', text: [
-                        core.humanizeLabel(cut.batch),
-                        cut.startedAt ? ('Начато: ' + core.humanizeLabel(cut.startedAt)) : 'Начато: —',
-                        disabled ? 'ожидает предыдущую' : ''
+                        cut.startedAt ? ('Начато: ' + core.formatClock(cut.startedAt)) : 'Начато: —',
+                        locked ? 'ожидает предыдущую' : ''
                     ].filter(Boolean).join(' · ') })
                 ]),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]);
-            if (!disabled) {
-                item.addEventListener('click', function() { self.openCut(cut.id); });
-            }
+            // #3557 #8: клик доступен всегда (просмотр деталей даже у заблокированной).
+            item.addEventListener('click', function() { self.openCut(cut.id); });
             box.appendChild(item);
         });
     };
 
+    // #3557: резка заблокирована очередью, если она «Ожидает» и НЕ первая открытая
+    // в очереди станка. Такую можно открыть для просмотра, но не управлять (#8).
+    AtexSlitter.prototype.isCutLocked = function(cut) {
+        if (!cut) return false;
+        if (core.normalizeStatus(cut.status) !== 'Ожидает') return false;
+        var firstOpenId = this.currentQueue().firstOpenCutId;
+        return !(firstOpenId && String(firstOpenId) === String(cut.id));
+    };
+
     function badgeClass(status) {
         if (core.isDone(status)) return 'atex-sl-badge-done';
-        if (core.normalizeStatus(status) === 'В работе') return 'atex-sl-badge-run';
-        if (core.isPauseStatus(status)) return 'atex-sl-badge-setup';
+        var s = String(status == null ? '' : status).trim();
+        if (s === 'В работе') return 'atex-sl-badge-run';
+        if (s === 'Наладка' || s === 'Перерыв' || core.isPauseStatus(status)) return 'atex-sl-badge-setup';
         return 'atex-sl-badge-wait';
     }
 
@@ -1345,9 +1444,9 @@
             return;
         }
 
+        // #3557: статус и кнопки управления — в шапке (renderHead); секции «Статус резки» больше нет.
         host.appendChild(this.renderHead());
         host.appendChild(this.renderCutMap());
-        host.appendChild(this.renderStatusBar());
         host.appendChild(this.renderBatchSelection());
         host.appendChild(this.renderReadings());
         host.appendChild(this.renderEvents());
@@ -1367,16 +1466,18 @@
 
     AtexSlitter.prototype.renderHead = function() {
         var cut = this.currentCut;
-        var meta = [];
-        if (cut.slitter) meta.push('Слиттер: ' + cut.slitter);
-        if (cut.batch) meta.push('Партия: ' + core.humanizeLabel(cut.batch));
-        if (cut.planDate) meta.push('План: ' + this.formatPlanDateTime(cut.planDate));
+        // #3557 #4: заголовок «Резка N из M» — позиция текущей резки в очереди станка.
+        var list = this.visibleCuts();
+        var pos = 0;
+        for (var i = 0; i < list.length; i++) { if (String(list[i].id) === String(cut.id)) { pos = i + 1; break; } }
+        var title = pos ? ('Резка ' + pos + ' из ' + list.length) : cut.label;
+        // #3557 #5: строку .atex-sl-head-meta убрали (Слиттер/Партия/План видно в тулбаре/метриках).
         var head = el('div', { class: 'atex-sl-head' }, [
-            el('div', {}, [
-                el('h2', { class: 'atex-sl-head-title', text: cut.label }),
-                el('div', { class: 'atex-sl-head-meta', text: meta.join('   •   ') })
+            el('div', { class: 'atex-sl-head-main' }, [
+                el('h2', { class: 'atex-sl-head-title', text: title }),
+                el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]),
-            el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
+            this.renderCutControls(cut)
         ]);
         var wrap = el('div');
         wrap.appendChild(head);
@@ -1384,11 +1485,58 @@
         return wrap;
     };
 
-    // #3460: плановое время старта (штамп) → «ДД.ММ.ГГГГ ЧЧ:ММ»; иначе как есть.
-    AtexSlitter.prototype.formatPlanDateTime = function(value) {
-        if (!core.isTimestampSeconds(value)) return String(value == null ? '' : value);
-        return core.formatDate(value) + ' ' + core.formatClock(value);
+    // #3557 #4: кнопки управления статусом — в шапке (вместо секции «Статус резки»).
+    // Доступные кнопки зависят от текущего (выведенного из событий) статуса. Для
+    // заблокированной очередью резки (#8) кнопки показаны, но деактивированы.
+    AtexSlitter.prototype.renderCutControls = function(cut) {
+        var self = this;
+        var locked = this.isCutLocked(cut);
+        // Текущий (выведенный из событий) статус: 'Ожидает'|'В работе'|'Наладка'|'Перерыв'|'Завершена'.
+        var s = String(cut.status == null ? '' : cut.status).trim();
+        var defs;
+        if (core.isDone(s)) {
+            defs = [['Возобновить', 'secondary', function() { self.resumeCut(); }]];
+        } else if (s === 'Наладка') {
+            defs = [
+                ['Возобновить', 'primary', function() { self.resumeCut(); }],
+                ['Перерыв', 'secondary', function() { self.breakCut(); }],
+                ['Прекратить', 'secondary', function() { self.abortCut(); }],
+                ['Завершить', 'advance', function() { self.finishCut(); }]
+            ];
+        } else if (s === 'Перерыв') {
+            defs = [
+                ['Возобновить', 'primary', function() { self.resumeCut(); }],
+                ['Наладка', 'secondary', function() { self.setupCut(); }],
+                ['Прекратить', 'secondary', function() { self.abortCut(); }],
+                ['Завершить', 'advance', function() { self.finishCut(); }]
+            ];
+        } else if (s === 'В работе') {
+            defs = [
+                ['Наладка', 'secondary', function() { self.setupCut(); }],
+                ['Перерыв', 'secondary', function() { self.breakCut(); }],
+                ['Прекратить', 'secondary', function() { self.abortCut(); }],
+                ['Завершить', 'advance', function() { self.finishCut(); }]
+            ];
+        } else {
+            // Ожидает
+            defs = [
+                ['Начать', 'primary', function() { self.startCut(); }],
+                ['Наладка', 'secondary', function() { self.setupCut(); }]
+            ];
+        }
+        var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
+        defs.forEach(function(def) {
+            var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-' + def[1], type: 'button', text: def[0] });
+            if (locked) btn.disabled = true;
+            else btn.addEventListener('click', def[2]);
+            actions.appendChild(btn);
+        });
+        if (locked) {
+            actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка ожидает предыдущую в очереди' }));
+        }
+        return actions;
     };
+
 
     // #3460: сводка резки — название сырья, метраж, число полос/ножей и резок.
     // «Ножей» = «полос за проход» = Σ(кол-во полос) (см. cut-map/#3431); «Полос
@@ -1403,7 +1551,7 @@
         var cells = [
             ['Вид сырья', material || '—'],
             ['Метраж, м', runLength > 0 ? String(core.round3(runLength)) : '—'],
-            ['Ножей (полос за проход)', knives > 0 ? String(knives) : '—'],
+            ['Полос', knives > 0 ? String(knives) : '—'],
             ['Резок', String(runs)],
             ['Полос всего', knives > 0 ? String(core.round3(knives * runs)) : '—']
         ];
@@ -1483,61 +1631,6 @@
         return section;
     };
 
-    // Полоса статусов: цепочка-степпер + кнопки действий по статусу (#3459).
-    AtexSlitter.prototype.renderStatusBar = function() {
-        var self = this;
-        var cut = this.currentCut;
-        var bar = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Статус резки' })
-        ]);
-
-        // Степпер: визуальная цепочка Ожидает → В работе → Завершена
-        var steps = el('div', { class: 'atex-sl-steps' });
-        var curIdx = core.STATUSES.indexOf(core.normalizeStatus(cut.status));
-        core.STATUSES.forEach(function(st, i) {
-            var cls = 'atex-sl-step';
-            if (i < curIdx) cls += ' is-past';
-            else if (i === curIdx) cls += ' is-current';
-            var btn = el('button', { class: cls, type: 'button', text: st });
-            btn.addEventListener('click', function() { self.setStatus(st); });
-            steps.appendChild(btn);
-        });
-        bar.appendChild(steps);
-
-        var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
-        if (core.isDone(cut.status)) {
-            actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка завершена' }));
-        } else if (core.normalizeStatus(cut.status) === 'Ожидает') {
-            // Ожидает → «В работу» / «Пропустить»
-            var startBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'В работу' });
-            startBtn.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
-            actions.appendChild(startBtn);
-
-            var skipBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пропустить' });
-            skipBtn.addEventListener('click', function() { self.skipCut(); });
-            actions.appendChild(skipBtn);
-        } else if (core.normalizeStatus(cut.status) === 'В работе') {
-            // В работе → «Пауза» / «Завершить» / «Отменить»
-            var pauseBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Пауза' });
-            pauseBtn.addEventListener('click', function() { self.addQuickEvent('Пауза'); });
-            actions.appendChild(pauseBtn);
-
-            var doneBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-advance', type: 'button', text: 'Завершить' });
-            doneBtn.addEventListener('click', function() { self.finishCut(); });
-            actions.appendChild(doneBtn);
-
-            var cancelBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отменить' });
-            cancelBtn.addEventListener('click', function() { self.cancelCut(); });
-            actions.appendChild(cancelBtn);
-        } else if (core.isPauseStatus(cut.status)) {
-            // Пауза → «Возобновить»
-            var resumeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Возобновить' });
-            resumeBtn.addEventListener('click', function() { self.setStatus('В работе', 'Запуск резки'); });
-            actions.appendChild(resumeBtn);
-        }
-        bar.appendChild(actions);
-        return bar;
-    };
 
     AtexSlitter.prototype.syncInitialBatchSelection = function() {
         var cut = this.currentCut;
@@ -1708,37 +1801,51 @@
         }
     };
 
-    // #3459: События смены — только список событий + кнопки быстрых действий.
-    // Поля ввода (значение, примечания) убраны — события пишутся без доп. полей.
+    // #3557 #2: события смены выбранного станка. Событие резки относится к станку
+    // через её слиттер; событие без резки (Начало/Конец смены) — по метке станка в
+    // «Примечаниях». Возвращает по убыванию времени, с длительностью до следующего
+    // (более позднего) события этого станка.
+    AtexSlitter.prototype.eventsForSelectedSlitter = function() {
+        var slLabel = this.selectedSlitterLabel();
+        var slId = String(this.selectedSlitterId || '');
+        var cutSlitter = {};
+        (this.cuts || []).forEach(function(c) { cutSlitter[String(c.id)] = String(c.slitterId || ''); });
+        var list = (this.shiftEvents || []).filter(function(ev) {
+            if (ev.cutId) return cutSlitter[String(ev.cutId)] === slId;
+            return core.shiftEventSlitterLabel(ev) === slLabel;
+        });
+        var asc = list.slice().sort(function(a, b) { return core.eventWhenSeconds(a.when) - core.eventWhenSeconds(b.when); });
+        var durById = {};
+        for (var i = 0; i < asc.length; i++) {
+            var cur = core.eventWhenSeconds(asc[i].when);
+            var nxt = i + 1 < asc.length ? core.eventWhenSeconds(asc[i + 1].when) : NaN;
+            durById[asc[i].id] = (isFinite(nxt) && isFinite(cur)) ? (nxt - cur) : NaN;
+        }
+        return list.slice()
+            .sort(function(a, b) { return core.eventWhenSeconds(b.when) - core.eventWhenSeconds(a.when); })
+            .map(function(ev) { return { ev: ev, durationSec: durById[ev.id] }; });
+    };
+
+    // #3557 #1: только список событий (быстрые кнопки и «Закрыть смену» убраны —
+    // закрытие смены перенесено в тулбар). #2: время — дата+время; примечание —
+    // длительность до следующего события станка (без дублирования даты/станка).
     AtexSlitter.prototype.renderEvents = function() {
-        var self = this;
         var section = el('section', { class: 'atex-sl-section' }, [
             el('h3', { class: 'atex-sl-section-title', text: 'События смены' })
         ]);
-
-        // Кнопки быстрых событий (без полей ввода)
-        var buttons = el('div', { class: 'atex-sl-event-buttons' });
-        ['Обед', 'Переналадка', 'Счётчик', 'Брак'].forEach(function(type) {
-            var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: type });
-            btn.addEventListener('click', function() { self.addQuickEvent(type); });
-            buttons.appendChild(btn);
-        });
-        var closeBtn = el('button', { class: 'atex-sl-btn', type: 'button', text: 'Закрыть смену' });
-        closeBtn.addEventListener('click', function() { self.closeShift(); });
-        buttons.appendChild(closeBtn);
-        section.appendChild(buttons);
-
-        // Хронология событий смены
+        var rows = this.eventsForSelectedSlitter();
         var list = el('div', { class: 'atex-sl-events' });
-        if (!this.shiftEvents.length) {
+        if (!rows.length) {
             list.appendChild(el('div', { class: 'atex-sl-empty', text: 'Событий смены ещё нет.' }));
         } else {
-            this.shiftEvents.slice(0, 16).forEach(function(ev) {
+            rows.slice(0, 16).forEach(function(row) {
+                var ev = row.ev;
+                var dur = core.formatDuration(row.durationSec);
                 list.appendChild(el('div', { class: 'atex-sl-event' }, [
-                    el('span', { class: 'atex-sl-event-when', text: ev.when }),
+                    el('span', { class: 'atex-sl-event-when', text: core.formatEventWhen(ev.when) }),
                     el('span', { class: 'atex-sl-event-type', text: ev.type }),
-                    el('span', { class: 'atex-sl-event-val', text: ev.value !== '' ? String(ev.value) : (ev.cutId ? ('Резка ' + ev.cutId) : '') }),
-                    el('span', { class: 'atex-sl-event-note', text: ev.notes || '' })
+                    el('span', { class: 'atex-sl-event-val', text: ev.value !== '' && ev.value != null ? String(ev.value) : '' }),
+                    el('span', { class: 'atex-sl-event-note', text: dur ? ('длительность: ' + dur) : 'идёт' })
                 ]));
             });
         }
@@ -1757,7 +1864,7 @@
             if (rid) fields['t' + rid] = value;
         }
         function num(v) { return (v === '' || v == null) ? '' : core.toNumber(v); }
-        set(CUT_REQ.status, core.normalizeStatus(cut.status));
+        // #3557: статус резки не хранится отдельным реквизитом — выводится из событий.
         set(CUT_REQ.counterStart, num(cut.counterStart));
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
         // #3459: погонаж вычисляемый, в БД не пишется
@@ -1799,40 +1906,44 @@
     };
 
     // #3459: Быстрое событие без дополнительных полей (Пауза, Обед, Переналадка...).
-    AtexSlitter.prototype.addQuickEvent = function(type) {
-        var self = this;
-        if (this.busy || !this.currentCutId) return;
-        this.setBusy(true);
-        this.createEvent({ type: type }, this.currentCutId).then(function() {
-            return self.loadEvents(self.currentCutId);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Событие «' + type + '» зафиксировано', 'success');
-            self.renderMain();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось записать событие: ' + err.message, 'error');
-        });
-    };
-
-    // #3459: Пропустить резку (Ожидает → остаётся Ожидает, пишется событие «Пропуск» с примечанием).
-    AtexSlitter.prototype.skipCut = function() {
+    // #3557: общее действие управления статусом — записать атрибуты резки
+    // (Начато/В работе/Закончено) и зафиксировать событие смены. Статус резки
+    // после перезагрузки событий выводится из последнего события (applyEventStatuses).
+    //   opts.setStarted   — проставить «Начато»=now, если ещё пусто
+    //   opts.setInWork    — true: «В работе»=1; false: «В работе»=''
+    //   opts.setFinished  — проставить «Закончено»=now
+    //   opts.clearFinished— очистить «Закончено»
+    AtexSlitter.prototype.cutAction = function(eventType, opts) {
         var self = this;
         var cut = this.currentCut;
-        if (this.busy || !cut) return;
-        var reason = (typeof window !== 'undefined' && window.prompt)
-            ? window.prompt('Причина пропуска (обязательно):', '')
-            : '';
-        if (!reason || !String(reason).trim()) {
-            this.notify('Укажите причину пропуска', 'error');
-            return;
-        }
+        if (this.busy || !cut) return Promise.resolve();
+        if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return Promise.resolve(); }
+        opts = opts || {};
         this.setBusy(true);
-        this.createEvent({ type: 'Пропуск', notes: String(reason).trim() }, cut.id).then(function() {
-            return self.loadEvents(cut.id);
+        var meta = this.meta.cut;
+        var startedRid = reqIdByAnyName(meta, CUT_STARTED_NAMES);
+        var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
+        var finishedRid = reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
+        var when = this.eventDateTime();
+        var fields = {};
+        if (opts.setStarted && startedRid && !cut.startedAt) { cut.startedAt = when; fields['t' + startedRid] = when; }
+        if (opts.setInWork === true && inWorkRid) { cut.inWork = '1'; fields['t' + inWorkRid] = '1'; }
+        if (opts.setInWork === false && inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = ''; }
+        if (opts.setFinished && finishedRid) { cut.finishedAt = when; fields['t' + finishedRid] = when; }
+        if (opts.clearFinished && finishedRid) { cut.finishedAt = ''; fields['t' + finishedRid] = ''; }
+        var write = Object.keys(fields).length ? this.post('_m_set/' + cut.id + '?JSON', fields) : Promise.resolve();
+        return write.then(function() {
+            return self.createEvent({ type: eventType, value: opts.value, notes: opts.notes }, cut.id);
+        }).then(function() {
+            return self.loadEvents(cut.id); // статус резки переустановится из событий
+        }).then(function() {
+            return self.loadCuts(); // обновить атрибуты резок в списке (Начато/В работе/Закончено)
+        }).then(function() {
+            self.applyEventStatuses();
+            return opts.after ? opts.after() : null;
         }).then(function() {
             self.setBusy(false);
-            self.notify('Резка пропущена: ' + reason, 'success');
+            self.notify(opts.message || ('Событие «' + eventType + '» зафиксировано'), 'success');
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
@@ -1840,52 +1951,35 @@
         });
     };
 
-    // #3459: Отменить резку (В работе → Ожидает, пишется событие «Отмена» с примечанием).
-    AtexSlitter.prototype.cancelCut = function() {
-        var self = this;
-        var cut = this.currentCut;
-        if (this.busy || !cut) return;
-        var reason = (typeof window !== 'undefined' && window.prompt)
-            ? window.prompt('Причина отмены (обязательно):', '')
-            : '';
-        if (!reason || !String(reason).trim()) {
-            this.notify('Укажите причину отмены', 'error');
-            return;
-        }
-        this.setBusy(true);
-        var rid = reqIdByName(this.meta.cut, CUT_REQ.status);
-        if (!rid) {
-            this.setBusy(false);
-            this.notify('Реквизит «Статус» не найден', 'error');
-            return;
-        }
-        var fields = {};
-        fields['t' + rid] = 'Ожидает';
-        this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
-            cut.status = 'Ожидает';
-            self.cuts.forEach(function(c) {
-                if (String(c.id) === String(cut.id)) c.status = 'Ожидает';
-            });
-            return self.createEvent({ type: 'Отмена', notes: String(reason).trim() }, cut.id);
-        }).then(function() {
-            return self.loadEvents(cut.id);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Резка отменена: ' + reason, 'success');
-            self.render();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка отмены: ' + err.message, 'error');
-        });
+    // #3557: Начать резку (Ожидает → В работе): «Начато»=now, «В работе»=1.
+    AtexSlitter.prototype.startCut = function() {
+        return this.cutAction(EV.startCut, { setStarted: true, setInWork: true, message: 'Резка запущена' });
+    };
+    // #3557: Наладка — открывает резку (если ещё не начата) и переводит в «Наладка».
+    // Флаг «В работе» не снимается (снимается только при завершении).
+    AtexSlitter.prototype.setupCut = function() {
+        return this.cutAction(EV.setup, { setStarted: true, setInWork: true, message: 'Наладка' });
+    };
+    // #3557: Перерыв — статус «Перерыв», флаг «В работе» остаётся.
+    AtexSlitter.prototype.breakCut = function() {
+        return this.cutAction(EV.brk, { message: 'Перерыв' });
+    };
+    // #3557: Возобновить — вернуть в «В работе» (в т.ч. из «Завершена»: снять «Закончено»).
+    AtexSlitter.prototype.resumeCut = function() {
+        return this.cutAction(EV.resume, { setStarted: true, setInWork: true, clearFinished: true, message: 'Резка возобновлена' });
+    };
+    // #3557: Прекратить — досрочно завершить: «Закончено»=now, «В работе»=0.
+    AtexSlitter.prototype.abortCut = function() {
+        return this.cutAction(EV.abort, { setFinished: true, setInWork: false, message: 'Резка прекращена' });
     };
 
-    // #3459: Завершить резку с проверками и обновлением партии.
-    // Проверяет: счётчик нач., счётчик кон., погонаж факт заполнены.
-    // Счётчик кон. → «Остаток, м» партии. Ставит «Закончено», сбрасывает «В работе».
+    // #3557: Завершить резку — проверки счётчиков, погонаж в партию, «Закончено»=now,
+    // «В работе»=0, событие «Завершить», фиксация факта рулонов в «Партиях ГП» (#3433).
     AtexSlitter.prototype.finishCut = function() {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
+        if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return; }
 
         // Проверки заполнения
         var cStart = core.toNumber(cut.counterStart);
@@ -1897,28 +1991,20 @@
 
         this.setBusy(true);
 
-        // 1. Обновить статус резки на «Завершена» + заполнить погонаж и Закончено
+        // 1. Погонаж + «Закончено»=now + снять «В работе»
         var meta = this.meta.cut;
-        var statusRid = reqIdByName(meta, CUT_REQ.status);
         var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
-        var finishedReqName = 'Закончено';
-        var finishedRid = reqIdByName(meta, finishedReqName) || reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
-        var activeReqName = 'В работе';
-        var activeRid = reqIdByAnyName(meta, [activeReqName, 'Активно', 'Действует']);
+        var finishedRid = reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
+        var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
 
         var fields = {};
-        if (statusRid) fields['t' + statusRid] = 'Завершена';
         if (meterageRid) fields['t' + meterageRid] = meterage;
-        if (finishedRid) fields['t' + finishedRid] = this.eventDateTime();
+        if (finishedRid) { cut.finishedAt = this.eventDateTime(); fields['t' + finishedRid] = cut.finishedAt; }
+        if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = ''; }
 
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
-            cut.status = 'Завершена';
             cut.meterage = String(meterage);
-            self.cuts.forEach(function(c) {
-                if (String(c.id) === String(cut.id)) {
-                    c.status = 'Завершена';
-                }
-            });
+            cut.status = 'Завершена';
 
             // 2. Счётчик кон. → «Остаток, м» партии сырья резки
             var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
@@ -1930,17 +2016,15 @@
             var bf = {};
             bf['t' + remReq] = newRem;
             // Сброс флага «В работе» у партии
-            if (activeRid && batchMeta) {
-                var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
-                if (batchActiveReq) bf['t' + batchActiveReq] = '';
-            }
+            var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
+            if (batchActiveReq) bf['t' + batchActiveReq] = '';
             return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
                 batch.remainderM = newRem;
                 if (typeof batch.active !== 'undefined') batch.active = '';
             });
         }).then(function() {
-            // 3. Событие «Завершение резки»
-            return self.createEvent({ type: 'Завершение резки', value: String(meterage) }, cut.id);
+            // 3. Событие «Завершить»
+            return self.createEvent({ type: EV.finish, value: String(meterage) }, cut.id);
         }).then(function() {
             return self.loadEvents(cut.id);
         }).then(function() {
@@ -1949,60 +2033,15 @@
         }).then(function() {
             return self.loadBatches();
         }).then(function() {
+            return self.loadCuts(); // #3557: обновить атрибуты резок в списке
+        }).then(function() {
+            self.applyEventStatuses();
             self.setBusy(false);
             self.notify('Резка завершена. Погонаж: ' + meterage + ' м. Остаток партии: ' + (cut.batchId ? self.findBatch(cut.batchId) : {}).remainderM + ' м', 'success');
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка завершения: ' + err.message, 'error');
-        });
-    };
-
-    // Установка статуса (не финального) — для переходов Ожидает→В работе и кликов по степперу.
-    // Завершение резки — через finishCut() с проверками и обновлением партии (#3459).
-    AtexSlitter.prototype.setStatus = function(status, eventType) {
-        var self = this;
-        var cut = this.currentCut;
-        if (this.busy || !cut) return;
-        var newStatus = core.normalizeStatus(status);
-        // Финальный статус — только через finishCut
-        if (core.isDone(newStatus)) {
-            this.notify('Для завершения резки используйте кнопку «Завершить»', 'error');
-            return;
-        }
-        cut.status = newStatus;
-        this.setBusy(true);
-        var rid = reqIdByName(this.meta.cut, CUT_REQ.status);
-        if (!rid) {
-            this.setBusy(false);
-            this.notify('Реквизит «Статус» не найден', 'error');
-            return;
-        }
-        var fields = {};
-        fields['t' + rid] = cut.status;
-        var startedReq = reqIdByAnyName(this.meta.cut, CUT_STARTED_NAMES);
-        if (startedReq && cut.status === 'В работе' && !cut.startedAt) {
-            cut.startedAt = this.eventDateTime();
-            fields['t' + startedReq] = cut.startedAt;
-        }
-        this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
-            self.cuts.forEach(function(c) {
-                if (String(c.id) === String(cut.id)) {
-                    c.status = cut.status;
-                    if (cut.startedAt) c.startedAt = cut.startedAt;
-                }
-            });
-            if (eventType) return self.createEvent({ type: eventType }, cut.id);
-            return null;
-        }).then(function() {
-            return self.loadEvents(cut.id);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Статус: ' + cut.status, 'success');
-            self.render();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось сменить статус: ' + err.message, 'error');
         });
     };
 
@@ -2069,24 +2108,6 @@
         if (valReq && data.value !== '' && data.value != null) params['t' + valReq] = core.toNumber(data.value);
         if (notesReq && data.notes) params['t' + notesReq] = data.notes;
         return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(cutId || 1), params);
-    };
-
-    AtexSlitter.prototype.addEvent = function(data) {
-        var self = this;
-        if (this.busy) return;
-        if (!this.currentCutId) { this.notify('Сначала выберите резку', 'error'); return; }
-
-        this.setBusy(true);
-        this.createEvent(data, this.currentCutId).then(function() {
-            return self.loadEvents(self.currentCutId);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Событие «' + (data.type || 'смены') + '» зафиксировано', 'success');
-            self.renderMain();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось записать событие: ' + err.message, 'error');
-        });
     };
 
     AtexSlitter.prototype.openShift = function() {
@@ -2199,7 +2220,7 @@
         var layout = el('div', { class: 'atex-sl-layout' });
 
         var aside = el('aside', { class: 'atex-sl-sidebar' });
-        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ el('h2', { text: 'Резки станка' }) ]);
+        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ el('h2', { text: 'Задание в производство' }) ]);
         var filter = el('label', { class: 'atex-sl-filter' });
         var cb = el('input', { type: 'checkbox' });
         cb.addEventListener('change', function() { self.includeDone = cb.checked; self.renderCuts(); });

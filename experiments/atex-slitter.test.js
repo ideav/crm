@@ -303,4 +303,27 @@ assertEqual(core.widthPercent(300, layout), 30, 'widthPercent: 300 из 1000 →
 var overflowLayout = core.computeLayout(700, strips, null);
 assertEqual(overflowLayout.overflow, true, 'computeLayout: полосы шире входа → overflow');
 
+// ── #3557: статус резки из последнего события смены + атрибуты ──
+assertEqual(core.deriveCutStatus('', {}), 'Ожидает', 'deriveCutStatus: нет событий → Ожидает');
+assertEqual(core.deriveCutStatus('Начало резки', {}), 'В работе', 'deriveCutStatus: Начало резки → В работе');
+assertEqual(core.deriveCutStatus('Наладка', { inWork: '1' }), 'Наладка', 'deriveCutStatus: Наладка → Наладка');
+assertEqual(core.deriveCutStatus('Перерыв', { inWork: '1' }), 'Перерыв', 'deriveCutStatus: Перерыв → Перерыв');
+assertEqual(core.deriveCutStatus('Возобновить', { inWork: '1' }), 'В работе', 'deriveCutStatus: Возобновить → В работе');
+assertEqual(core.deriveCutStatus('Завершить', {}), 'Завершена', 'deriveCutStatus: Завершить → Завершена');
+assertEqual(core.deriveCutStatus('Прекратить', {}), 'Завершена', 'deriveCutStatus: Прекратить → Завершена');
+// Флаг «В работе» снят только завершением: Наладка/Перерыв его не трогают (опора на атрибут)
+assertEqual(core.deriveCutStatus('', { inWork: '1' }), 'В работе', 'deriveCutStatus: атрибут В работе=1 без события → В работе');
+assertEqual(core.deriveCutStatus('', { finishedAt: '1782000000' }), 'Завершена', 'deriveCutStatus: атрибут Закончено → Завершена');
+assertEqual(core.deriveCutStatus('', { startedAt: '1782000000' }), 'В работе', 'deriveCutStatus: атрибут Начато → В работе');
+
+// ── #3557: формат времени события и длительности ──
+// (строковый ввод — без зависимости от таймзоны хоста)
+assertEqual(core.formatEventWhen('2026-05-03 14:30:05'), '03.05.2026 14:30', 'formatEventWhen: строка datetime → дата+время');
+assertEqual(core.eventWhenSeconds('1777756058'), 1777756058, 'eventWhenSeconds: таймштамп → секунды');
+assertEqual(core.formatDuration(0), 'меньше минуты', 'formatDuration: 0 → меньше минуты');
+assertEqual(core.formatDuration(45 * 60), '45 мин', 'formatDuration: 45 мин');
+assertEqual(core.formatDuration(125 * 60), '2 ч 5 мин', 'formatDuration: 2 ч 5 мин');
+assertEqual(core.formatDuration(120 * 60), '2 ч', 'formatDuration: ровно 2 ч');
+assertEqual(core.formatDuration(NaN), '', 'formatDuration: NaN → пусто');
+
 console.log('\n' + passed + ' assertions passed');

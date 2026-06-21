@@ -63,13 +63,15 @@
 
 .atex-sl-toolbar {
     display: grid;
-    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px);
+    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px) 1fr;
     gap: 12px;
     padding: 16px 16px 0;
     align-items: end;
 }
+.atex-sl-toolbar-close { justify-self: end; }  /* #3557 #1: «Закрыть смену» в тулбаре */
 @media (max-width: 640px) {
     .atex-sl-toolbar { grid-template-columns: 1fr; }
+    .atex-sl-toolbar-close { justify-self: stretch; }
 }
 
 .atex-sl-layout {
@@ -128,9 +130,12 @@
     padding: 18px 20px;
     min-height: 200px;
 }
-.atex-sl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-.atex-sl-head-title { margin: 0 0 4px; font-size: 20px; }
+/* #3557 #4/#5: в шапке — «Резка N из M» + бейдж статуса и кнопки управления (без строки-меты). */
+.atex-sl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.atex-sl-head-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.atex-sl-head-title { margin: 0; font-size: 20px; }
 .atex-sl-head-meta { font-size: 13px; color: var(--sl-muted); }
+.atex-sl-head .atex-sl-life-actions { margin-top: 0; justify-content: flex-end; }
 
 .atex-sl-badge {
     display: inline-block;
