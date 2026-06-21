@@ -386,23 +386,6 @@
 .atex-pp-cut-fix.is-active { background: rgba(107, 114, 128, .14); border-color: #9ca3af; }
 .atex-pp.is-busy .atex-pp-cut-fix { pointer-events: none; opacity: .4; }
 
-/* #3508 п.6: ◀▶ — сдвиг планового старта зафиксированного задания на ±15 мин
-   (в пределах 90 мин от естественного старта). Компактные, как стрелки очереди. */
-.atex-pp-cut-nudge {
-    border: 1px solid var(--pp-border);
-    border-radius: 6px;
-    background: var(--pp-bg);
-    padding: 5px 9px;
-    cursor: pointer;
-    font: inherit;
-    color: inherit;
-    line-height: 1;
-}
-.atex-pp-cut-nudge:hover { background: var(--pp-surface); }
-.atex-pp-cut-nudge:disabled { opacity: .4; cursor: default; }
-.atex-pp-cut-nudge:disabled:hover { background: var(--pp-bg); }
-.atex-pp.is-busy .atex-pp-cut-nudge { pointer-events: none; opacity: .4; }
-
 /* #3508 п.3: пометка «только просмотр» в панели полос зафиксированного задания. */
 .atex-pp-strip-locked-note {
     margin: 6px 0 4px;
