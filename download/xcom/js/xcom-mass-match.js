@@ -4,8 +4,8 @@
     // Рабочее место массового подбора SKU для строк каталога контрагента (таблица RFP).
     // Пачками выбирает необработанные строки RFP (серверный фильтр: пустое «Наш артикул»),
     // для каждой строки запускает запрос mass_match (фильтр FR_RFPID={id строки}) и записывает
-    // обратно в RFP три поля ОДНИМ запросом _m_set: «Наш артикул» (ID SKU), «Кандидаты»
-    // (список ID SKU через запятую) и «Точность подбора». Обработанные строки выпадают из
+    // обратно в RFP три поля ОДНИМ запросом _m_set: «Наш артикул» (артикул SKU), «Кандидаты»
+    // (список артикулов SKU через запятую) и «Точность подбора». Обработанные строки выпадают из
     // выборки. «Старт» обрабатывает пачки подряд (по batchSize), автоматически подгружая
     // следующие, пока не нажмут «Стоп» или сервер не вернёт пустой список (issue #3512).
 
@@ -463,7 +463,7 @@
     }
 
     // Ячейка SKU: показываем артикул, ID кладём в title для трассировки (issue #3532).
-    // В строку RFP по-прежнему записывается ID (см. writeBack) — артикул только для отображения.
+    // В строку RFP теперь тоже записывается артикул (см. writeBack, issue #3547).
     function skuCell(item) {
         var text = item.article || item.id;
         return '<span title="ID ' + escapeHtml(item.id) + '">' + escapeHtml(text) + '</span>';
@@ -715,29 +715,43 @@
         });
     }
 
-    // Записать результат в строку RFP ОДНИМ запросом _m_set (issue #3512): «Наш артикул»,
-    // «Кандидаты», «Точность подбора» — все три поля сразу, а не по одному. Обе колонки текстовые:
-    // «Наш артикул» (type 3, ref=null) — первый SKUID как текст (или заглушка для несопоставленных);
-    // «Кандидаты» (type 8, строка) — остальные SKUID одной строкой через запятую с пробелом.
-    function writeBack(record) {
+    // Значение SKU для записи в строку RFP: артикул, фоллбэк на ID, если артикул пуст (issue #3547).
+    // Тот же выбор, что и в отображении (skuCell: item.article || item.id) — храним то, что видно.
+    // У заглушки «нет совпадений» артикула нет, поэтому пишется её id ('0') — маркер обработанной строки.
+    function skuStoredValue(item) {
+        if (!item) return '';
+        return trimValue(item.article) || trimValue(item.id);
+    }
+
+    // Собрать значения для _m_set по строке RFP: «Наш артикул», «Кандидаты», «Точность подбора».
+    // Выделено из writeBack для тестируемости (issue #3547) — чистая функция без сетевых запросов.
+    function buildWriteValues(record) {
         var fields = state.fields;
         var values = {};
 
-        if (fields.our && record.our && record.our.id) {
-            values[fields.our.id] = record.our.id;
+        if (fields.our && record.our) {
+            var ourValue = skuStoredValue(record.our);
+            if (ourValue) values[fields.our.id] = ourValue;
         }
         if (fields.candidates && record.candidates && record.candidates.length) {
-            var candidateIds = record.candidates.map(function(item) {
-                return item.id;
-            }).filter(Boolean);
-            if (candidateIds.length) {
-                values[fields.candidates.id] = candidateIds.join(', ');
+            var candidateValues = record.candidates.map(skuStoredValue).filter(Boolean);
+            if (candidateValues.length) {
+                values[fields.candidates.id] = candidateValues.join(', ');
             }
         }
         if (fields.accuracy && record.accuracy != null) {
             values[fields.accuracy.id] = record.accuracy;
         }
+        return values;
+    }
 
+    // Записать результат в строку RFP ОДНИМ запросом _m_set (issue #3512): «Наш артикул»,
+    // «Кандидаты», «Точность подбора» — все три поля сразу, а не по одному. Обе колонки текстовые:
+    // «Наш артикул» (type 3, ref=null) — артикул первого SKU (или заглушка '0' для несопоставленных);
+    // «Кандидаты» (type 8, строка) — артикулы остальных SKU через запятую с пробелом (issue #3547,
+    // раньше хранились SKUID — #3519).
+    function writeBack(record) {
+        var values = buildWriteValues(record);
         if (!Object.keys(values).length) return Promise.resolve();
         return postSetMany(record.id, values);
     }
@@ -1074,6 +1088,8 @@
         pickMatches: pickMatches,
         ourCell: ourCell,
         candidatesCell: candidatesCell,
+        skuStoredValue: skuStoredValue,
+        buildWriteValues: buildWriteValues,
         buildMatchUrl: buildMatchUrl,
         buildScanUrl: buildScanUrl,
         tuneConcurrency: tuneConcurrency,
