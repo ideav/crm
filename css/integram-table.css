@@ -685,6 +685,23 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: var(--md-text-hint);
 }
 
+/* Range filter: two from/to fields side by side instead of one comma input (issue #3542) */
+.filter-range-wrapper .filter-range-input {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+}
+/* The right ("to") field has no icon, so it doesn't need the icon's left padding */
+.filter-range-wrapper .filter-range-input[data-range-part="to"] {
+    padding-left: 4px;
+}
+.filter-range-sep {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    color: var(--md-text-secondary);
+    font-size: 0.875rem;
+}
+
 /* Reference field filter dropdown trigger button (issue #795, #797) */
 .filter-ref-trigger {
     flex: 1;
