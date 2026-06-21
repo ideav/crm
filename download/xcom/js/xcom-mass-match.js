@@ -70,7 +70,8 @@
         timer: null,        // id setInterval живого таймера
         // issue #3527: авто-регулировка числа потоков по скорости пачки
         autoConcurrency: true, // вкл/выкл авто-регулировку (по умолчанию вкл)
-        prevSpeed: null,    // скорость (строк/сек) предыдущей пачки
+        prevSpeed: null,    // скорость (строк/сек) предыдущей пачки — база для оценки ПАДЕНИЯ
+        maxSpeed: null,     // исторический максимум скорости за прогон — база для оценки ПРИРОСТА (issue #3549)
         lastTuneUp: false,  // увеличивали ли потоки ПЕРЕД последней пачкой (оценка пробы)
         tuneCooldown: 0     // сколько пачек ждать до следующей пробы повышения
     };
@@ -598,30 +599,34 @@
     // --- Авто-регулировка числа потоков по скорости пачки (issue #3527) ------
 
     // Решение по числу потоков после очередной пачки. batchSpeed — строк/сек этой пачки.
-    // Правила: (1) пробуем +1 от текущего; (2) пока скорость растёт после повышения — повышаем
-    // дальше; (3) если прироста нет — возвращаем обратно и ждём TUNE_COOLDOWN_BATCHES пачек до
-    // следующей пробы; (4) если скорость упала ≥10% к прошлой пачке — понижаем.
+    // Правила: (1) пробуем +1 от текущего; (2) пока повышение даёт НОВЫЙ исторический максимум —
+    // повышаем дальше; (3) если максимум не побит — возвращаем обратно и ждём TUNE_COOLDOWN_BATCHES
+    // пачек до следующей пробы; (4) если скорость упала ≥10% к ПОСЛЕДНЕЙ пачке — понижаем.
+    // issue #3549: прирост меряем относительно исторического максимума (maxSpeed), а падение —
+    // относительно последней пачки (prevSpeed). Иначе после revert/wait на сниженных потоках
+    // следующая проба сравнивалась бы с деградированной базой и «прирост» засчитывался ложно.
     // Возвращает { action, from, to } (для логов/тестов).
     function tuneConcurrency(batchSpeed) {
-        var prev = state.prevSpeed;     // скорость предыдущей пачки (или null для первой)
+        var prev = state.prevSpeed;     // скорость предыдущей пачки (или null для первой) — для падения
+        var max = state.maxSpeed;       // исторический максимум за прогон (или null) — для прироста (issue #3549)
         var wasUp = state.lastTuneUp;   // повышали ли потоки ПЕРЕД этой пачкой
         var before = state.concurrency;
         var action;
 
         if (prev != null && batchSpeed <= prev * SPEED_DROP_RATIO) {
-            // (4) скорость упала на 10% и больше — понижаем
+            // (4) скорость упала на 10% и больше ОТНОСИТЕЛЬНО ПОСЛЕДНЕЙ пачки — понижаем
             state.concurrency = Math.max(MIN_CONCURRENCY, state.concurrency - 1);
             state.lastTuneUp = false;
             state.tuneCooldown = TUNE_COOLDOWN_BATCHES;
             action = 'down';
         } else if (wasUp) {
-            if (prev == null || batchSpeed > prev) {
-                // (2) повышение помогло — продолжаем повышать
+            if (max == null || batchSpeed > max) {
+                // (2) повышение дало НОВЫЙ исторический максимум — продолжаем повышать (issue #3549)
                 state.concurrency = Math.min(MAX_CONCURRENCY, state.concurrency + 1);
                 state.lastTuneUp = true;
                 action = 'up';
             } else {
-                // (3) прироста нет — возвращаем обратно и ждём перед следующей пробой
+                // (3) исторический максимум не побит — возвращаем обратно и ждём перед следующей пробой
                 state.concurrency = Math.max(MIN_CONCURRENCY, state.concurrency - 1);
                 state.lastTuneUp = false;
                 state.tuneCooldown = TUNE_COOLDOWN_BATCHES;
@@ -643,6 +648,8 @@
         }
 
         state.prevSpeed = batchSpeed;
+        // обновляем исторический максимум ПОСЛЕ оценки (сравнивали с максимумом до этой пачки)
+        state.maxSpeed = (max == null || batchSpeed > max) ? batchSpeed : max;
         return { action: action, from: before, to: state.concurrency };
     }
 
@@ -802,8 +809,9 @@
         state.outcomes = {};
         state.startTime = Date.now();
         state.endTime = 0;
-        // сброс авто-регулировки потоков на каждый прогон (issue #3527)
+        // сброс авто-регулировки потоков на каждый прогон (issue #3527, #3549)
         state.prevSpeed = null;
+        state.maxSpeed = null;
         state.lastTuneUp = false;
         state.tuneCooldown = 0;
         setHidden('xcom-mass-stats', false);
