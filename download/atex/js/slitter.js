@@ -1450,8 +1450,10 @@
                 dataset: { width: String(seg.width) }
             });
             segNode.style.width = pct + '%';
-            // Подпись ширины — прямо на полосе (требование #3460).
-            if (pct >= 4) segNode.appendChild(el('span', { class: 'atex-sl-cm-seg-label', text: String(seg.width) }));
+            // Подпись ширины — прямо на полосе для всех полос, без порога (#3555).
+            // Узкие сегменты обрезаются по ширине ячейки (overflow:hidden);
+            // полную ширину дублируют title-подсказка и легенда ниже.
+            segNode.appendChild(el('span', { class: 'atex-sl-cm-seg-label', text: String(seg.width) }));
             bar.appendChild(segNode);
         });
         if (lay.remainder > 0) {
