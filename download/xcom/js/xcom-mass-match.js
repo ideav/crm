@@ -391,6 +391,7 @@
             return {
                 id: id,
                 label: label || id,
+                article: article,   // показываем в таблице вместо ID (issue #3532); потерян при merge #3536, восстановлен в #3537
                 tokens: state.tokensKey && row[state.tokensKey] != null ? trimValue(row[state.tokensKey]) : '',
                 tma: state.tmaKey && row[state.tmaKey] != null ? trimValue(row[state.tmaKey]) : ''
             };
