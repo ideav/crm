@@ -440,6 +440,33 @@
             });
     }
 
+    // #3535: вкладки очереди по станкам. Возвращает [{ slitter:{id,label}, cuts }]
+    // для КАЖДОГО станка справочника (slitters) в порядке справочника — даже если
+    // у станка нет резок в этот день (тогда cuts:[]). Иначе вкладки «съезжают» и
+    // человек принимает первую вкладку за первый станок. Группы groupBySlitter с
+    // резками без станка (id=null) или с удалённым из справочника станком
+    // дописываются в конце в порядке groupBySlitter, чтобы не потерять задания.
+    //   slitters — справочник [{ id, label, ... }];
+    //   groups   — результат groupBySlitter(filtered).
+    function mergeStationTabs(slitters, groups) {
+        // id станков — числовые строки, поэтому строковый sentinel для «без станка»
+        // (id=null) с ними не коллизит; ключ внутренний, наружу не уходит.
+        function key(g) { return g.slitter.id == null ? 'no-station' : String(g.slitter.id); }
+        var byKey = {};
+        (groups || []).forEach(function(g) { byKey[key(g)] = g; });
+        var tabs = [];
+        var seen = {};
+        (slitters || []).forEach(function(s) {
+            var k = String(s.id);
+            seen[k] = true;
+            tabs.push(byKey[k] || { slitter: { id: s.id, label: s.label }, cuts: [] });
+        });
+        (groups || []).forEach(function(g) {
+            if (!seen[key(g)]) tabs.push(g);
+        });
+        return tabs;
+    }
+
     // Фильтр очереди по слиттеру и статусу (пустой фильтр = «все»).
     function filterCuts(cuts, filters) {
         var f = filters || {};
@@ -3191,6 +3218,7 @@
         resolveNominalWidth: resolveNominalWidth,        // #3408
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
+        mergeStationTabs: mergeStationTabs,
         filterCuts: filterCuts,
         cutSearchHaystack: cutSearchHaystack,
         cutMatchesQuery: cutMatchesQuery,
@@ -6748,39 +6776,30 @@
         var filtered = filterCuts(visible, this.filter);
         var groups = groupBySlitter(filtered);
 
-        if (!groups.length) {
-            // Показываем вкладки всех станков, даже если резок нет (#3168).
-            if (this.slitters.length) {
-                var allKeys = this.slitters.map(function(s) { return String(s.id); });
-                if (allKeys.indexOf(self.activeSlitter) === -1) self.activeSlitter = allKeys[0];
-                var tabs = el('div', { class: 'atex-pp-tabs' });
-                this.slitters.forEach(function(s) {
-                    var key = String(s.id);
-                    var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : ''), type: 'button' }, [
-                        el('span', { class: 'atex-pp-tab-label', text: s.label }),
-                        el('span', { class: 'atex-pp-tab-count', text: '0' })
-                    ]);
-                    // #3411: переключение станка очищает панель «Связанные позиции».
-                    tab.addEventListener('click', function() { self.activeSlitter = key; self.selectedCutId = null; self.renderQueue(); self.renderLink(); });
-                    tabs.appendChild(tab);
-                });
-                box.appendChild(tabs);
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
-            } else {
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
-            }
+        // #3535: вкладку показываем для КАЖДОГО станка справочника — даже если в
+        // этот день у него нет резок (счётчик 0, пустой список). Иначе вкладки
+        // «съезжают», и человек принимает первую вкладку за первый станок, хотя
+        // станка без резок в ней нет. Порядок вкладок = порядок справочника
+        // станков (this.slitters); группы с резками без станка / с удалённым из
+        // справочника станком дописываем в конце в порядке groupBySlitter,
+        // чтобы не потерять задания. (Раньше вкладки всех станков показывались
+        // только при полностью пустой очереди — #3168.)
+        var tabGroups = mergeStationTabs(this.slitters, groups);
+
+        if (!tabGroups.length) {
+            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
             return;
         }
 
         // Закладки по станкам (#3116 п.2): один таб на станок, контент — резки
         // только активного станка. Активный таб в this.activeSlitter (ключ как в
-        // groupBySlitter); если выбранного среди групп нет — берём первый.
+        // groupBySlitter); если выбранного среди вкладок нет — берём первую.
         function groupKey(g) { return g.slitter.id == null ? '\u0000none' : String(g.slitter.id); }
-        var keys = groups.map(groupKey);
+        var keys = tabGroups.map(groupKey);
         if (keys.indexOf(self.activeSlitter) === -1) self.activeSlitter = keys[0];
 
         var tabs = el('div', { class: 'atex-pp-tabs' });
-        groups.forEach(function(g) {
+        tabGroups.forEach(function(g) {
             var key = groupKey(g);
             // #3411: при активном поиске счётчик показывает число совпавших позиций станка.
             var count = groupMatchCount(g);
@@ -6794,7 +6813,7 @@
         });
         box.appendChild(tabs);
 
-        var activeGroup = groups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || groups[0];
+        var activeGroup = tabGroups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || tabGroups[0];
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
 
         // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
@@ -7084,6 +7103,9 @@
         // (счётчики на закладках подскажут, где совпадения есть).
         if (hasQuery && !groupEl.childNodes.length) {
             groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'В этом станке нет позиций по запросу «' + query + '».' }));
+        } else if (!groupEl.childNodes.length) {
+            // #3535: активный станок без резок в этот день — явная подсказка вместо пустоты.
+            groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
         }
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
