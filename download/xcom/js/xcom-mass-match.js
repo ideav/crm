@@ -381,20 +381,33 @@
                 var parsed = parseRefValue(label);
                 if (parsed.refId) { id = parsed.refId; label = parsed.label; }
             }
-            return { id: id, label: label || id };
+            return {
+                id: id,
+                label: label || id,
+                tokens: state.tokensKey && row[state.tokensKey] != null ? trimValue(row[state.tokensKey]) : '',
+                tma: state.tmaKey && row[state.tmaKey] != null ? trimValue(row[state.tmaKey]) : ''
+            };
         }
 
-        var our = toItem(first);
-        var candidates = rows.slice(1).map(toItem).filter(function(item) {
+        // Берём только строки с реальным SKU (непустой SKUID). Отчёт mass_match иногда возвращает
+        // ведущую служебную строку без SKU (пустые SKUID/Артикул/Наименование, в «токенах» —
+        // требования RFP): раньше она становилась «Наш артикул», our → null, и в строку RFP
+        // писалась заглушка «0», хотя кандидаты были (issue #3534). Теперь её пропускаем:
+        // «Наш артикул» = первый настоящий SKU, точность считаем по ЕГО токенам, а не по служебной строке.
+        var items = rows.map(toItem).filter(function(item) {
             return item.id;
         });
+        if (!items.length) return { our: null, candidates: [], tokens: '', tma: '' };
+
+        var our = items[0];
+        var candidates = items.slice(1);
         if (state.maxCandidates > 0) candidates = candidates.slice(0, state.maxCandidates);
 
         return {
-            our: our.id ? our : null,
+            our: our,
             candidates: candidates,
-            tokens: state.tokensKey && first[state.tokensKey] != null ? trimValue(first[state.tokensKey]) : '',
-            tma: state.tmaKey && first[state.tmaKey] != null ? trimValue(first[state.tmaKey]) : ''
+            tokens: our.tokens,
+            tma: our.tma
         };
     }
 
