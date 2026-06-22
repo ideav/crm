@@ -1903,7 +1903,34 @@
             if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0 });
         });
         pts.sort(function(a, b){ return a.m - b.m; });
+        // #3606: фольга наматывается медленнее — отдельная серия WIND_FOIL_<метры>
+        // (в данных только WIND_FOIL_305=4). Прикрепляем её к набору, чтобы выбирать
+        // для резок-фольги (cut.isFoil по position_material_type), не меняя сигнатуры.
+        pts.foil = foilWindingPointsFromTimes(opTimes);
         return pts;
+    }
+
+    // #3606: точки намотки ФОЛЬГИ из кодов WIND_FOIL_<метры>. Андрей: «4 мин за каждые
+    // 305 м» — пропорционально и БЕЗ клампа выше точки (122м→1.6, 305→4, 610→8). Чтобы
+    // windingMinutes давал линейную ставку через ноль и при одной точке, добавляем
+    // опорную (0,0). Помечаем foil:true для подписи нормы. Нет кодов WIND_FOIL_ → [].
+    function foilWindingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_FOIL_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0, foil: true });
+        });
+        if (!pts.length) return [];
+        pts.push({ m: 0, min: 0, foil: true });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // #3606: точки намотки для конкретной резки — фольговые при cut.isFoil (если серия
+    // WIND_FOIL_ задана), иначе обычные. windPoints.foil прикреплён в windingPointsFromTimes.
+    function windPointsForCut(isFoil, windPoints){
+        if (isFoil && windPoints && windPoints.foil && windPoints.foil.length) return windPoints.foil;
+        return windPoints || [];
     }
 
     // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
@@ -1926,10 +1953,11 @@
         return round3(b.min + slope * (x - b.m));
     }
 
-    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes) {
+    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes, isFoil) {
         var runs = Number(plannedRuns) || 0;
         if (runs <= 0) return 0;
-        return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
+        var pts = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
+        return round3(windingMinutes(runMeters, pts) * runs);
     }
 
     // Норма(ы) намотки, реально применённые для метража runMeters (зеркало windingMinutes,
@@ -1950,7 +1978,8 @@
     // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
     // WIND_600=4 мин; WIND_900=5 мин (интерполяция)» (две). Пусто → ''.
     function formatWindingNorms(norms){
-        var items = (norms || []).map(function(n){ return 'WIND_' + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
+        var items = (norms || []).filter(function(n){ return Number(n.m) > 0; }) // #3606: скрыть опорную точку (0,0) фольги
+            .map(function(n){ return (n.foil ? 'WIND_FOIL_' : 'WIND_') + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
         if (!items.length) return '';
         if (items.length === 1) return 'Норма намотки: ' + items[0];
         return 'Нормы намотки: ' + items.join('; ') + ' (интерполяция)';
@@ -1960,11 +1989,11 @@
         return String(round3(Number(value) || 0));
     }
 
-    function cutTimingDetails(runMeters, plannedRuns, opTimes) {
+    function cutTimingDetails(runMeters, plannedRuns, opTimes, isFoil) {
         var length = stripNum(runMeters);
         var runs = stripNum(plannedRuns);
         if (!(length > 0) || !(runs > 0)) return '';
-        var points = windingPointsFromTimes(opTimes || {});
+        var points = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
         if (!points.length) return '';
         var oneRun = windingMinutes(length, points);
         var total = round3(oneRun * runs);
@@ -2045,7 +2074,8 @@
     function buildCutTimingCtx(cut, prevCut, sc, runMeters, windPoints, times) {
         var length = stripNum(runMeters);
         var runs = stripNum(cut && cut.plannedRuns);
-        var oneRun = windingMinutes(length, windPoints || []);
+        var pts = windPointsForCut(cut && cut.isFoil, windPoints); // #3606: фольга — своя норма намотки
+        var oneRun = windingMinutes(length, pts);
         var total = runs > 0 ? round3(oneRun * runs) : oneRun;
         return {
             length: length,
@@ -2053,14 +2083,14 @@
             oneRun: round3(oneRun),
             total: round3(total),
             setupParts: setupBreakdown(prevCut, cut, times),
-            norms: relevantWindingNorms(length, windPoints || []),
+            norms: relevantWindingNorms(length, pts),
             startMin: sc ? sc.startMin : null,
             finishMin: sc ? sc.finishMin : null
         };
     }
 
     function scheduleDurationMinutes(cut, runMeters, windPoints) {
-        var oneRun = windingMinutes(runMeters, windPoints || []);
+        var oneRun = windingMinutes(runMeters, windPointsForCut(cut && cut.isFoil, windPoints)); // #3606: фольга — своя норма
         var runs = stripNum(cut && cut.plannedRuns);
         var computed = runs > 0 ? round3(oneRun * runs) : oneRun;
         if (computed > 0) return computed;
@@ -3303,6 +3333,8 @@
         fifoBatchesForMaterial: fifoBatchesForMaterial,
         materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
+        foilWindingPointsFromTimes: foilWindingPointsFromTimes,
+        windPointsForCut: windPointsForCut,
         windingMinutes: windingMinutes,
         relevantWindingNorms: relevantWindingNorms,
         formatWindingNorms: formatWindingNorms,
@@ -4148,8 +4180,8 @@
             notes: reqIdByName(meta, CUT_REQ.notes),
             sequence: reqIdByName(meta, CUT_REQ.sequence)
         };
-        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
-        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes);
+        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, d.isFoil); // #3606
+        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, d.isFoil);
         var cutMainState = { last: this.lastCutMainValue };
         var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
         this.lastCutMainValue = cutMainState.last;
@@ -4258,8 +4290,8 @@
                 forKey: String(positionId) + '|' + qty,
                 positionId: String(position.id), position: position, qty: qty,
                 materialId: mat, layout: lay, plannedRuns: plannedRuns, runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, position.isFoil), // #3606
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, position.isFoil),
                 batches: batches, posWidth: position.width, stripsPerPass: stripsPerPass,
                 producedPosRolls: producedPosRolls, supplyRolls: qty,
                 stockRolls: round3(Math.max(0, producedPosRolls - qty)),
@@ -5643,8 +5675,8 @@
                 planDate: descriptor.planDate,
                 plannedRuns: plannedRuns,
                 runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, descriptor.isFoil), // #3606
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
                 sequence: '',
@@ -5721,7 +5753,7 @@
                 var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
                 var perPassByCut = {}, runsByCut = {};
                 plans.forEach(function(p) {
-                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPoints);
+                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPointsForCut(p.isFoil, windPoints)); // #3606
                     runsByCut[String(p.id)] = p.plannedRuns;
                 });
                 var segs = splitMachineQueue(plans, {
@@ -5743,7 +5775,7 @@
                             cutMainValue: ts > 0 ? ts : p.cutMainValue,
                             runLength: p.runLength,
                             duration: round3(perPass * sg.runs),
-                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes),
+                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes, p.isFoil), // #3606
                             batchId: p.batchId,
                             slitterId: p.slitterId,
                             fullPlannedRuns: p.plannedRuns,
@@ -6318,7 +6350,7 @@
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var perPassByCut = {};
         self.cuts.forEach(function(c) {
-            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
+            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
         });
         var ops = planCutOperations(self.cuts, {
             weights: planOptions,
