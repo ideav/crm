@@ -1341,30 +1341,22 @@ assertEqual(planning.resolveWorkingWindow({ DAY_START_HOUR:'9:15', DAY_END_HOUR:
     { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45, lunchStartMin:null, lunchDurationMin:0 },
     'resolveWorkingWindow #3215: произвольное окно и CLEANUP_SHIFT');
 
-// ── #3508 п.6: «пины» зафиксированных заданий в buildSchedule ──
+// ── #3562: зафиксированные задания больше не «прикалываются» — buildSchedule пакует встык ──
 // Очередь A,B,C по 60 мин, без лидера/переналадки (BETWEEN_CUTS:0): встык 480/540/600.
-var pinCuts3508 = [ { id:'A', duration:60 }, { id:'B', duration:60 }, { id:'C', duration:60 } ];
-var pinOpts3508 = { windPoints: pts, runLengthByCut: {}, times: { BETWEEN_CUTS: 0 }, shiftStartMin: 480 };
-var pinNone = planning.buildSchedule(pinCuts3508, pinOpts3508);
-assertEqual(pinNone.map(function(s){ return [s.startMin, s.finishMin]; }), [[480,540],[540,600],[600,660]],
-    'buildSchedule #3508: без пинов — встык 480/540/600');
-// Пин B позже cursor (580 > 540) → зазор 40 мин перед B, C сдвигается за B.
-var pinDelay = planning.buildSchedule(pinCuts3508, Object.assign({ pinnedStartMinByCut: { B: 580 } }, pinOpts3508));
-assertEqual(pinDelay.map(function(s){ return [s.startMin, s.finishMin]; }), [[480,540],[580,640],[640,700]],
-    'buildSchedule #3508: пин B=580 → зазор перед B (то самое пустое место), C за ним');
-// Пин B раньше cursor (500 < 540) → clamp к естественному старту (наложения нет).
-var pinClamp = planning.buildSchedule(pinCuts3508, Object.assign({ pinnedStartMinByCut: { B: 500 } }, pinOpts3508));
-assertEqual([pinClamp[1].startMin, pinClamp[1].finishMin], [540,600],
-    'buildSchedule #3508: пин раньше cursor → clamp к естественному (без наложения)');
-// pinTimestampSeconds / pinnedStartMinByCut: штамп → окно-старт в минутах от полуночи дня 0.
-var pinBase3508 = Date.UTC(2026, 5, 20);                 // полночь 2026-06-20 (в тестах TZ=UTC)
-var pinTs3508 = Math.floor((pinBase3508 + 540 * 60000) / 1000);   // 09:00 в секундах
-assertEqual(planning.pinTimestampSeconds({ planDate: String(pinTs3508) }), pinTs3508, 'pinTimestampSeconds: unix-сек как есть');
-assertEqual(planning.pinTimestampSeconds({ planDate: String(pinTs3508 * 1000) }), pinTs3508, 'pinTimestampSeconds: мс → сек');
-assertEqual(planning.pinTimestampSeconds({ planDate: '' }), null, 'pinTimestampSeconds: пусто → null');
-assertEqual(planning.pinnedStartMinByCut(
-    [ { id:'A', fixed:true, planDate:String(pinTs3508) }, { id:'B', fixed:false, planDate:String(pinTs3508) } ], pinBase3508),
-    { A: 540 }, 'pinnedStartMinByCut: только зафиксированные → окно-старт 09:00 = 540 мин');
+// B зафиксирована — слот под неё НЕ резервируется (автогенерация двигает её по времени/очереди).
+var packCuts3562 = [ { id:'A', duration:60 }, { id:'B', duration:60, fixed:true }, { id:'C', duration:60 } ];
+var packOpts3562 = { windPoints: pts, runLengthByCut: {}, times: { BETWEEN_CUTS: 0 }, shiftStartMin: 480 };
+assertEqual(planning.buildSchedule(packCuts3562, packOpts3562).map(function(s){ return [s.startMin, s.finishMin]; }),
+    [[480,540],[540,600],[600,660]],
+    'buildSchedule #3562: зафиксированное B пакуется встык (слот не резервируется)');
+// Прежняя опция пинов (#3508 п.6) больше не влияет на расписание — игнорируется.
+assertEqual(planning.buildSchedule(packCuts3562, Object.assign({ pinnedStartMinByCut: { B: 580 } }, packOpts3562))
+    .map(function(s){ return [s.startMin, s.finishMin]; }),
+    [[480,540],[540,600],[600,660]],
+    'buildSchedule #3562: опция pinnedStartMinByCut игнорируется (пины убраны)');
+// Пин-хелперы удалены из API.
+assertEqual(typeof planning.pinnedStartMinByCut, 'undefined', '#3562: pinnedStartMinByCut удалён из API');
+assertEqual(typeof planning.pinTimestampSeconds, 'undefined', '#3562: pinTimestampSeconds удалён из API');
 
 // ── #3342: плавающий обед (LUNCH_START / LUNCH_DURATION) ──
 var wwLunch = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'16:40', LUNCH_START:'12:20', LUNCH_DURATION:'40' }, 30);

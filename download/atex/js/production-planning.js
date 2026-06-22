@@ -2121,7 +2121,6 @@
         var times = opts.times || DEFAULT_OP_TIMES;
         var leader = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
         var runLen = opts.runLengthByCut || {};
-        var pins = opts.pinnedStartMinByCut || {};   // #3508 п.6: окно-старт (мин от полуночи дня 0) зафиксированных
         var shiftStart = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
         var shiftEnd = Number(opts.shiftEndMin != null ? opts.shiftEndMin : SHIFT_END_MIN) || 0;
         var hasWindow = shiftEnd > shiftStart;
@@ -2135,14 +2134,10 @@
             // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
             var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
             var dur = scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
-            // #3508 п.6: зафиксированное задание может быть «приколото» к плановому старту
-            // (pin — окно-старт в минутах от полуночи дня 0). Встать раньше финиша предыдущего
-            // нельзя → windowStart = max(pin, cursor); пин позже cursor оставляет пустое окно
-            // (то самое «пустое место»). Без пина пакуем встык: windowStart = cursor.
-            var pin = pins[String(c.id)];
-            var hasPin = pin != null && isFinite(Number(pin));
-            var windowStart = hasPin ? Math.max(Number(pin), t) : t;
-            var start = windowStart + setup;
+            // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
+            // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
+            // очередность (пины #3508 п.6 убраны).
+            var start = t + setup;
             var day = Math.floor(start / 1440);
             if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
             // #3342: резка стартует в/после LUNCH_START и обед ещё не был → пауза перед ней.
@@ -2166,33 +2161,6 @@
             t = finish;
         });
         return out;
-    }
-
-    // #3508 п.6: плановый старт (главное значение «Задания в производство», t1078) как
-    // unix-штамп в СЕКУНДАХ. planDate приходит штампом (сек или мс) — нормализуем к сек.
-    // null, если не штамп.
-    function pinTimestampSeconds(cut) {
-        var s = String((cut && (cut.planDate != null ? cut.planDate : cut.number)) || '').trim();
-        if (!/^\d{9,13}$/.test(s)) return null;
-        var num = Number(s);
-        if (!isFinite(num) || num <= 0) return null;
-        return num >= 1e12 ? Math.floor(num / 1000) : num;   // мс → сек
-    }
-
-    // #3508 п.6: карта «пинов» для buildSchedule — окно-старт зафиксированных заданий в
-    // минутах от полуночи дня 0 (planBaseMidnightMs). Берётся из их планового старта
-    // (t1078). Незафиксированные и записи без валидного штампа пропускаются.
-    function pinnedStartMinByCut(cuts, planBaseMidnightMs) {
-        var base = Number(planBaseMidnightMs);
-        var map = {};
-        if (!isFinite(base)) return map;
-        (cuts || []).forEach(function(c) {
-            if (!c || !c.fixed) return;
-            var ts = pinTimestampSeconds(c);
-            if (ts == null) return;
-            map[String(c.id)] = (ts * 1000 - base) / 60000;
-        });
-        return map;
     }
 
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
@@ -3323,8 +3291,6 @@
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
-        pinnedStartMinByCut: pinnedStartMinByCut,
-        pinTimestampSeconds: pinTimestampSeconds,
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -4465,37 +4431,10 @@
         });
     };
 
-    // #3508 п.6: текущий плановый окно-старт (Unix сек, формат t1078) каждого ВИДИМОГО
-    // задания по действующему расписанию — для «захвата» пина при фиксации. Считаем по
-    // каждому станку тем же расписанием, что и renderQueue (учитывая уже зафиксированные).
-    AtexProductionPlanning.prototype.scheduleWindowStartTsByCut = function() {
-        var self = this;
-        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        if (!isFinite(planBaseMidnightMs)) return {};
-        var windPoints = windingPointsFromTimes(this.opTimes || {});
-        var dayWindow = this.workingWindow();
-        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
-        var runLenByCut = {};
-        visible.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
-        var schedOpts = {
-            windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
-            shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin
-        };
-        var tsByCut = {};
-        groupBySlitter(visible).forEach(function(g) {
-            var pins = pinnedStartMinByCut(g.cuts, planBaseMidnightMs);
-            buildSchedule(g.cuts, Object.assign({ pinnedStartMinByCut: pins }, schedOpts)).forEach(function(sc) {
-                tsByCut[String(sc.cutId)] = scheduleStartTimestamp(planBaseMidnightMs, sc.startMin - sc.setupMin);
-            });
-        });
-        return tsByCut;
-    };
-
     // #3508 п.2/п.4: проставить/снять флаг «Зафиксировано» у набора заданий. Пишем булев
-    // реквизит (t{id}='1'/'0') командой _m_set; при фиксации захватываем плановый старт в
-    // t1078 (п.6, opts.startTsByCut), затем перечитываем очередь — серая кайма/блокировки
-    // (п.3/п.5) обновятся по источнику истины.
+    // реквизит (t{id}='1'/'0') командой _m_set, затем перечитываем очередь — серая кайма/
+    // блокировки (п.3/п.5) обновятся по источнику истины. #3562: плановый старт при фиксации
+    // больше не «захватывается» — автогенерация вольна двигать задание по времени и очереди.
     AtexProductionPlanning.prototype.setCutsFixed = function(cutIds, value, opts) {
         var self = this;
         var o = opts || {};
@@ -4513,11 +4452,6 @@
         }
         var fieldKey = 't' + fixedReqId;
         var flag = value ? '1' : '0';
-        // #3508 п.6: при фиксации «захватываем» текущий плановый старт в t1078 (главное
-        // значение «Задания в производство»), чтобы пин совпал с видимой позицией и
-        // карточка не прыгнула. tsByCut — Unix-сек окна-старта по текущему расписанию.
-        var tsByCut = o.startTsByCut || {};
-        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         this.setBusy(true);
         this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
         var done = 0;
@@ -4525,8 +4459,6 @@
         ids.forEach(function(id) {
             chain = chain.then(function() {
                 var fields = {}; fields[fieldKey] = flag;
-                var ts = Number(tsByCut[id]);
-                if (value && mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
                 return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
                     .then(function() { self.updateProgress(++done); });
             });
@@ -4565,8 +4497,7 @@
         if (!dayCuts.length) { this.notify('Нет заданий за ' + dateLabel + ' для фиксации', 'info'); return; }
         if (!toFix.length) { this.notify('Все задания за ' + dateLabel + ' уже зафиксированы', 'info'); return; }
         self.setCutsFixed(toFix.map(function(c) { return c.id; }), true, {
-            successMessage: 'Зафиксированы задания за ' + dateLabel + ': ' + toFix.length,
-            startTsByCut: self.scheduleWindowStartTsByCut()   // #3508 п.6: захват текущего старта в пин
+            successMessage: 'Зафиксированы задания за ' + dateLabel + ': ' + toFix.length
         });
     };
 
@@ -4574,10 +4505,7 @@
     // (зафиксировано ↔ снято), чтобы можно было и поставить, и снять флаг.
     AtexProductionPlanning.prototype.toggleCutFixed = function(cut) {
         if (!cut) return;
-        // #3508 п.6: при фиксации захватываем текущий плановый старт в пин (чтобы карточка
-        // не прыгнула); при снятии — не нужно.
         var o = { successMessage: (cut.fixed ? 'Снята фиксация задания' : 'Задание зафиксировано') };
-        if (!cut.fixed) o.startTsByCut = this.scheduleWindowStartTsByCut();
         this.setCutsFixed([cut.id], !cut.fixed, o);
     };
 
@@ -6790,10 +6718,9 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin
         };
-        // #3508 п.6: зафиксированные задания «прикалываются» к плановому старту (t1078) —
-        // расписание их пинует, остальные обтекают.
-        var pinnedMinByCut = pinnedStartMinByCut(activeGroup.cuts, planBaseMidnightMs);
-        var schedule = buildSchedule(activeGroup.cuts, Object.assign({ pinnedStartMinByCut: pinnedMinByCut }, schedOpts));
+        // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
+        // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
+        var schedule = buildSchedule(activeGroup.cuts, schedOpts);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         var dayCutsByKey = {};
@@ -7003,9 +6930,9 @@
             controls.appendChild(down);
             controls.appendChild(strips);
             controls.appendChild(fix);
-            // #3540: кнопки ◀▶ ручного сдвига планового старта зафиксированного задания
-            // (#3508 п.6) убраны — двигать время вручную не требуется. Фиксация по-прежнему
-            // прикалывает задание к его плановому старту в расписании (pinnedStartMinByCut).
+            // #3540: кнопки ◀▶ ручного сдвига планового старта убраны — двигать время вручную
+            // не требуется. #3562: пин планового старта тоже убран — автогенерация двигает
+            // зафиксированное задание по времени в течение дня и меняет его очередность.
             controls.appendChild(del);
             cardPanel.appendChild(controls);
 
