@@ -1715,7 +1715,9 @@
                 (selected[String(batch.id)] ? ' is-selected' : '') +
                 (foreign ? ' is-disabled' : '');
             var cells = [
-                el('span', { class: 'atex-sl-batch-title', text: batch.label }),
+                // Заголовок партии = «Дата прихода» (DATETIME-штамп) → «ДД.ММ.ГГГГ ЧЧ:ММ»,
+                // а не сырой таймштамп. Не-штамп (штрих-код/имя) остаётся как есть.
+                el('span', { class: 'atex-sl-batch-title', text: core.formatEventWhen(batch.label) }),
                 el('span', { class: 'atex-sl-batch-meta', text: 'Приход: ' + (batch.date || '—') }),
                 el('span', { class: 'atex-sl-batch-metric', text: 'Остаток, м: ' + core.round3(batch.remainderM || 0) }),
                 el('span', { class: 'atex-sl-batch-meta', text: 'Штрих-код: ' + (batch.barcode || '—') }),
