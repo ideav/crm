@@ -161,8 +161,9 @@
     background: rgba(134, 239, 172, 0.38);
 }
 
-.xcom-match-action-col {
-    width: 8.75rem;
+/* #3588: подбор по клику в строке — колонка «Действие» убрана, строки кликабельны. */
+#xcom-match-sku-results .xcom-match-table tbody tr {
+    cursor: pointer;
 }
 
 .xcom-match-btn {
@@ -203,10 +204,6 @@
 
 .xcom-match-btn-secondary:hover:not(:disabled) {
     border-color: var(--button-primary, #2563eb);
-}
-
-.xcom-match-btn-select {
-    width: 100%;
 }
 
 .xcom-match-empty,

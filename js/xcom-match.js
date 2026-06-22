@@ -362,15 +362,13 @@
                 return td + escapeHtml(parsed.label) + '</td>';
             }).join('');
 
-            return '<tr data-row-index="' + index + '">' + cells +
-                '<td class="xcom-match-action-col">' +
-                '<button class="xcom-match-btn xcom-match-btn-primary xcom-match-btn-select" type="button" data-row-index="' + index + '" title="Подобрать">' +
-                '<i class="pi pi-check"></i><span>Подобрать</span></button>' +
-                '</td></tr>';
+            // #3588: колонка «Действие» и кнопка «Подобрать» убраны — подбор запускается
+            // кликом по строке (обработчик ниже ловит data-row-index у <tr>).
+            return '<tr class="xcom-match-row" data-row-index="' + index + '" title="Подобрать SKU для этой строки">' + cells + '</tr>';
         }).join('');
 
         container.innerHTML = '<table class="xcom-match-table">' +
-            '<thead><tr>' + headers + '<th class="xcom-match-action-col">Действие</th></tr></thead>' +
+            '<thead><tr>' + headers + '</tr></thead>' +
             '<tbody>' + body + '</tbody></table>';
         setSummary('xcom-match-sku-summary', state.rows.length + ' из ' + DEFAULT_LIMIT);
     }
@@ -489,9 +487,10 @@
 
         if (skuResults) {
             skuResults.addEventListener('click', function(event) {
-                var button = event.target.closest ? event.target.closest('[data-row-index]') : null;
-                if (!button) return;
-                var index = Number(button.getAttribute('data-row-index'));
+                // #3588: подбор по клику в любом месте строки (data-row-index у <tr>).
+                var rowEl = event.target.closest ? event.target.closest('[data-row-index]') : null;
+                if (!rowEl) return;
+                var index = Number(rowEl.getAttribute('data-row-index'));
                 var row = state.rows[index];
                 if (!row) return;
                 skuResults.querySelectorAll('tr.xcom-match-row-selected').forEach(function(tr) {
