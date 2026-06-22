@@ -1161,6 +1161,25 @@ assertEqual(planning.windingMinutes(150, pts), 0.6, 'windingMinutes: 150 м → 
 assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 4.5 (между 600 и 900)');
 assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
 assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
+// #3606: фольга наматывается медленнее — серия WIND_FOIL_<метры>, «4 мин за каждые 305 м».
+var opTF = { WIND_300: 1.2, WIND_600: 4.0, WIND_FOIL_305: 4.0 };
+var ptsF = planning.windingPointsFromTimes(opTF);
+assertEqual(planning.foilWindingPointsFromTimes(opTF), [{m:0,min:0,foil:true},{m:305,min:4,foil:true}],
+    'foilWindingPointsFromTimes: WIND_FOIL_305 + опорная (0,0)');
+assertEqual(JSON.stringify(ptsF.foil), JSON.stringify([{m:0,min:0,foil:true},{m:305,min:4,foil:true}]),
+    'windingPointsFromTimes прикрепляет .foil');
+assertEqual(planning.windingMinutes(122, ptsF.foil), 1.6, 'фольга 122 м → 1.6 (4×122/305, пропорция)');
+assertEqual(planning.windingMinutes(305, ptsF.foil), 4, 'фольга 305 м → 4');
+assertEqual(planning.windingMinutes(610, ptsF.foil), 8, 'фольга 610 м → 8 (4 мин за каждые 305 м, без клампа)');
+assertEqual(planning.windPointsForCut(true, ptsF), ptsF.foil, 'windPointsForCut: фольга → фолье-точки');
+assertEqual(planning.windPointsForCut(false, ptsF) === ptsF, true, 'windPointsForCut: не фольга → обычные');
+assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, true), 1.6, 'plannedCutDuration: фольга 122 м × 1 = 1.6');
+assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, false), 0.488, 'plannedCutDuration: НЕ фольга 122 м = 0.488 (обычная WIND_300)');
+assertEqual(planning.foilWindingPointsFromTimes({ WIND_300: 1.2 }), [], 'foilWindingPointsFromTimes: нет WIND_FOIL_ → []');
+assertEqual(planning.windPointsForCut(true, planning.windingPointsFromTimes({ WIND_300: 1.2 })),
+    planning.windingPointsFromTimes({ WIND_300: 1.2 }), 'windPointsForCut: фольга без WIND_FOIL_ → обычные (фолбэк)');
+assertEqual(planning.formatWindingNorms([{m:0,min:0,foil:true},{m:305,min:4,foil:true}]),
+    'Норма намотки: WIND_FOIL_305=4 мин', 'formatWindingNorms: WIND_FOIL_ + опорная (0,0) скрыта');
 var plannedCutDuration = typeof planning.plannedCutDurationMinutes === 'function'
     ? planning.plannedCutDurationMinutes
     : function() { return undefined; };
