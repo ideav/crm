@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!-- Визуальный стенд #3616: нумерация заданий с 1 на каждый день расписания +
+     дата-заголовок рабочего дня после блока уборки. Реальный production-planning.css. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>#3616 — нумерация с 1 по дням + дата после уборки</title>
+<link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#eef1f5}
+  .atex-pp-queue-group{max-width:620px}</style>
+</head>
+<body>
+<div class="atex-pp atex-brand">
+  <div class="atex-pp-queue-group" id="q"></div>
+</div>
+<script>
+// Мини-рендер тех же DOM-классов, что и renderQueue, для проверки вёрстки.
+function el(t, a, kids){ var n=document.createElement(t); a=a||{}; Object.keys(a).forEach(function(k){ k==='class'?n.className=a[k]:k==='text'?n.textContent=a[k]:n.setAttribute(k,a[k]); }); (kids||[]).forEach(function(c){ n.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return n; }
+function card(seq, time, mins, name, wind, dims, leader, links, dis){
+  var info=el('div',{class:'atex-pp-cut-info'},[
+    el('span',{class:'atex-pp-cut-seq'},['№ '+seq]),
+    el('span',{class:'atex-pp-cut-time'},['⏱ '+time+' · '+mins+' мин']),
+    el('span',{class:'atex-pp-cut-name'},[name]),
+    el('span',{class:'atex-pp-cut-winding'},[wind]),
+    el('span',{class:'atex-pp-cut-dash'},['—']),
+    el('span',{class:'atex-pp-cut-runs'},[dims]),
+    el('span',{class:'atex-pp-cut-leader'},['лидер: '+leader]),
+    el('span',{class:'atex-pp-cut-supplies'},['связей: '+links])
+  ]);
+  var ctrls=el('div',{class:'atex-pp-cut-controls'},[
+    el('button',{class:'atex-pp-move'+(dis==='up'?' ':''),type:'button'},['↑']),
+    el('button',{class:'atex-pp-move',type:'button'},['↓']),
+    el('button',{class:'atex-pp-strips',type:'button'},['Полосы (16)']),
+    el('button',{class:'atex-pp-cut-fix',type:'button'},['🔒']),
+    el('button',{class:'atex-pp-cut-del',type:'button'},['🗑'])
+  ]);
+  return el('div',{class:'atex-pp-cut'},[info, ctrls]);
+}
+function cleanup(){ return el('div',{class:'atex-pp-cleanup'},['🧹 Уборка после смены · 16:30 – 17:00 · 30 мин']); }
+function dayDate(t){ return el('div',{class:'atex-pp-day-date'},[t]); }
+
+var q=document.getElementById('q');
+// День расписания 0 (фильтр 23.06): задания нумеруются 1..4.
+q.appendChild(dayDate('Вт, 23.06.2026'));
+q.appendChild(card(1,'08:00 – 09:03','63','MWR113L','OUT','500 x 8','MONOCHROME',1));
+q.appendChild(card(2,'09:03 – 09:40','36.264','MWR113L','OUT','500 x 8','MONOCHROME',1));
+q.appendChild(card(3,'09:40 – 10:17','37.6','MWR113L','OUT','450 x 2','MONOCHROME',1));
+q.appendChild(card(4,'10:17 – 10:39','21.888','MR194','OUT','74 x 3','MONOCHROME',1));
+q.appendChild(cleanup());
+// День 1 (24.06): бывший «№5» теперь №1 своего дня, дата — после уборки.
+q.appendChild(dayDate('Ср, 24.06.2026'));
+q.appendChild(card(1,'08:00 – 13:17','317.319','MWR113L','IN','700 x 43','MONOCHROME',3));
+q.appendChild(cleanup());
+// День 2 (25.06): снова нумерация с 1.
+q.appendChild(dayDate('Чт, 25.06.2026'));
+q.appendChild(card(1,'08:00 – 10:38','158.325','MWR113L','IN','700 x 25','MONOCHROME',3));
+q.appendChild(card(2,'10:38 – 13:12','154','MWR113L','IN','900 x 22','MONOCHROME',1));
+q.appendChild(card(3,'13:52 – 14:37','44.848','MW308','OUT','74 x 13','Софмикс',1));
+</script>
+</body>
+</html>

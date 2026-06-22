@@ -348,6 +348,19 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* #3616: дата рабочего дня — заголовок перед первой карточкой каждого дня расписания
+   (после блока уборки предыдущего дня). Нумерация заданий начинается с 1 на каждый день. */
+.atex-pp-day-date {
+    margin: 14px 0 8px;
+    padding: 4px 2px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--pp-accent);
+    border-bottom: 2px solid var(--pp-border, #d9dee5);
+    font-variant-numeric: tabular-nums;
+}
+.atex-pp-day-date:first-child { margin-top: 2px; }
+
 /* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). Клик по ним не
    выбирает резку (#3149) — поэтому курсор-стрелка, а не «указатель» карточки. */
 .atex-pp-cut-controls {
