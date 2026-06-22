@@ -40,7 +40,10 @@ define("ROLE", 42);
 define("ADMINROLE", 145);
 define("ACTIVITY", 124);
 define("PASSWORD", 20);
-define("RETRIES", 300);
+define("RETRIES", 301); # #3581: счётчик попыток входа должен совпадать с реквизитом
+                        # «Retries» у типа USER (в боевых базах его id=301). Раньше код
+                        # читал/писал t=300 — отдельный, невидимый в админке узел, который
+                        # залипал на лимите и давал «превышено» при «пустом» Retries.
 define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
@@ -10153,6 +10156,24 @@ switch($a)  # Check actions, which don't require authentication
 									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
 								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD;
 		$data_set = Exec_sql($sql, "Authenticate user");
+		# #3576/#3581: «превышено при пустом Retries» вызвано НЕ дублями пользователя, а
+		# рассинхроном типа счётчика (исправлено RETRIES=301 выше). Этот гард оставлен как
+		# защита по аналогии с входом по коду: если в битой базе окажется несколько узлов
+		# одного логина, не блокировать вход по протухшей строке. Считаем РАЗНЫЕ u.id (а не
+		# строки: LEFT JOIN tok/act/xsrf/retries может дать несколько строк на одного юзера).
+		$dupUids = [];
+		while($probe = mysqli_fetch_array($data_set))
+			$dupUids[$probe["uid"]] = true;
+		mysqli_data_seek($data_set, 0);
+		if(count($dupUids) > 1){
+			$dupMsg = t9n("[RU]Найдено несколько пользователей с таким логином — обратитесь к администратору.[EN]Multiple users found with this login — contact your administrator.");
+			wlog("Authenticate user: duplicate logins '$u' -> uids ".implode(",", array_keys($dupUids)), "log");
+			if(isApi()){
+				header("HTTP/1.0 409 Conflict");
+				api_dump(json_encode(["error" => $dupMsg], JSON_UNESCAPED_UNICODE));
+			}
+			my_die($dupMsg);
+		}
 		if($row = mysqli_fetch_array($data_set)){
 			if($row["pwd"] !== $pwd){
 				if((int)$row["retries"] >= RETRIES_LIMIT){
@@ -10196,6 +10217,12 @@ switch($a)  # Check actions, which don't require authentication
 				wlog(" Failed", "log");
 		}
 		if($row){
+			# #3576: успешный вход обнуляет счётчик неудачных попыток. Раньше retries
+			# только инкрементился (и паролем, и кодом — счётчик общий) и НИГДЕ не
+			# сбрасывался, поэтому, единожды достигнув RETRIES_LIMIT, «превышено попыток»
+			# залипало навсегда — на каждую опечатку, даже после успешных входов.
+			if(!empty($row["retries_id"]) && (int)$row["retries"] > 0)
+				Update_Val($row["retries_id"], 0);
 			$GLOBALS["GLOBAL_VARS"]["user"] = $row["val"];
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = $row["uid"];
 			if(isset($_POST["change"]))
@@ -10314,6 +10341,9 @@ switch($a)  # Check actions, which don't require authentication
 						die(json_encode(["error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password.")], JSON_UNESCAPED_UNICODE));
 					die(json_encode(["error" => t9n("[RU]Неверный код[EN]Invalid code")], JSON_UNESCAPED_UNICODE));
 				}
+				# #3576: верный код обнуляет общий счётчик неудачных попыток (см. парольный вход).
+				if(!empty($row["retries_id"]) && (int)$row["retries"] > 0)
+					Update_Val($row["retries_id"], 0);
     			$token = secureToken();
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
