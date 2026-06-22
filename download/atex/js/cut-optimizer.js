@@ -725,13 +725,11 @@
         ]));
         form.appendChild(dims);
 
-        // Допуск на отход, мм — автоподстановка из Вида сырья («Допуск, мм»),
-        // редактируемый. По нему красится отход каждой карты раскроя.
-        this.tolInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
-            placeholder: 'напр. 20', value: this.tolValue || '' });
-        this.tolInput.addEventListener('input', function() { self.tolValue = self.tolInput.value; self.maybeRecalc(); });
+        // #3597: «Допуск, мм» — только вывод значения (не редактируется). Берётся из
+        // Вида сырья («Допуск, мм»); если не задан — 21 мм (#3573). По нему красится отход.
+        this.tolDisplay = el('div', { class: 'atex-co-readonly', text: this.tolValue || String(DEFAULT_TOLERANCE) });
         form.appendChild(el('div', { class: 'atex-co-field' }, [
-            el('label', { class: 'atex-co-label', text: 'Допуск, мм' }), this.tolInput
+            el('label', { class: 'atex-co-label', text: 'Допуск, мм' }), this.tolDisplay
         ]));
 
         // Желаемые полосы (ширина + количество), редактируемый список.
@@ -877,11 +875,10 @@
             // (по умолчанию 450, выбор из списка стандартных длин), материал её не диктует.
             if (this.widthInput) this.widthInput.value = String(m.width || '');
             this.widthValue = String(m.width || '');
-            // Допуск на отход — из выбранного материала («Допуск, мм»); если не задан,
-            // действует значение по умолчанию 21 мм (#3573). Поле редактируемое.
+            // Допуск на отход — из выбранного материала («Допуск, мм»); если не задан, 21 мм (#3573).
             var matTol = toNumber(m.tolerance) > 0 ? String(m.tolerance) : String(DEFAULT_TOLERANCE);
-            if (this.tolInput) this.tolInput.value = matTol;
             this.tolValue = matTol;
+            if (this.tolDisplay) this.tolDisplay.textContent = matTol;  // #3597: только вывод
         }
         this.renderBatches();
         this.maybeRecalc();
@@ -952,8 +949,8 @@
     // Несколько карт раскроя (по одной на ширину, объединённые ради отхода).
     AtexCutOptimizer.prototype.renderMaps = function(p) {
         var wrap = el('div', { class: 'atex-co-maps' });
-        // Допуск на отход (Вид сырья → «Допуск, мм»), редактируемый. Пусто/0 → 21 мм (#3573).
-        var tol = this.tolInput ? toNumber(this.tolInput.value) : 0;
+        // #3597: допуск только из Вида сырья (this.tolValue), не редактируется. Пусто/0 → 21 мм.
+        var tol = toNumber(this.tolValue);
         if (!(tol > 0)) tol = DEFAULT_TOLERANCE;
         p.maps.forEach(function(m) {
             var card = el('div', { class: 'atex-co-map' });
