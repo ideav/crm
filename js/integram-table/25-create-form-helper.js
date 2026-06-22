@@ -655,7 +655,10 @@ class IntegramCreateFormHelper {
                         const option = document.createElement('option');
                         option.value = optId;
                         option.textContent = optVal;
-                        if (String(optId) === String(currentValue)) {
+                        // Issue #3572: матчим по id ИЛИ по метке — подчинённый объект
+                        // («Заказ -> Заказанное количество») может прийти меткой без «id:».
+                        if (String(optId) === String(currentValue) ||
+                            (currentValue !== '' && String(optVal) === String(currentValue))) {
                             option.selected = true;
                         }
                         select.appendChild(option);
@@ -2199,7 +2202,11 @@ class IntegramCreateFormHelper {
         // Main value field
         const typeName = this.getMetadataName(metadata);
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
-        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+        // Issue #3572: подчинённый объект «Объекты» может прийти меткой без term-префикса
+        // «id:» — тогда отдаём метку (опции грантов матчатся по id ИЛИ по метке).
+        const mainTermValue = (recordData && recordData.obj && recordData.obj.term !== undefined && recordData.obj.term !== '')
+            ? recordData.obj.term
+            : mainValue;
         const mainFieldType = this.normalizeFormat(metadata.type);
 
         // Build main field HTML based on its type
