@@ -11434,7 +11434,7 @@ if(Validate_Token())
 				my_die(t9n("[RU]У вас нет прав на изменение структуры таблицы[EN]You don't have permission to change the table structure"));
 			// The first column of a table is the term's own value, so its attrs are kept in a
 			// "self-descriptor" req (up=table, t=table, ord=0). Find it or create it on demand.
-			if($desc = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$id AND t=$id LIMIT 1", "Get table self-descriptor")))
+			if($desc = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$id AND t=$id AND ord=0 LIMIT 1", "Get table self-descriptor"))) // #3587: ord=0 — именно self-descriptor; самоссылающаяся подчинённая таблица (ord>0) сюда попасть не должна
 				Update_Val($desc["id"], FieldAttrsSetAlias($desc["val"], $val));
 			else
 				Insert($id, 0, $id, FieldAttrsSetAlias("", $val), "Create table self-descriptor");
@@ -11679,7 +11679,7 @@ if(Validate_Token())
         	while($row = mysqli_fetch_array($data_set)){
                 if($meta === "{")
         	        $meta .= "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\"";
-                if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // issue #2967: skip the table self-descriptor row
+                if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]) // issue #2967: skip the table self-descriptor row (ord=0). #3587: самоссылающаяся подчинённая таблица (ord>0) — настоящий реквизит, не пропускать
                     continue;
                 if(!isset($reqs))
                     $reqs = ",\"reqs\":{";
@@ -11718,7 +11718,7 @@ if(Validate_Token())
 			$refs = Array();
 			$tableAttrs = Array(); // issue #2967: table alias stored in a self-descriptor req
         	foreach($data as $row) // Collect all the reqs to skip them later
-        	    if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // Self-descriptor: req.t == own table id, holds the first-column attrs/alias
+        	    if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]) // Self-descriptor (ord=0): req.t == own table id, holds the first-column attrs/alias. #3587: ord>0 — это самоссылающаяся подчинённая таблица (напр. «Меню→Меню»), а не self-descriptor
         	        $tableAttrs[$row["id"]] = $row["attrs"];
         	    elseif(!is_null($row["ref_id"]))
         	        $reqs[$row["ref_id"]] = $row["id"];
@@ -11729,7 +11729,7 @@ if(Validate_Token())
         	foreach($data as $row){
     		    if(($row["id"] === $row["t"]) || ($row["up"] !== "0"))
     		        die("Invalid Term id $id");
-				$selfDesc = !is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]; // issue #2967: table self-descriptor row
+				$selfDesc = !is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]; // issue #2967: table self-descriptor row (ord=0). #3587: у самоссылающейся подчинённой таблицы ord>0 — это настоящий реквизит, не self-descriptor
                 if(!$selfDesc && !$row["ord"] && isset($reqs[$row["id"]])) // Skip reqs with no reqs
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
@@ -11787,7 +11787,7 @@ if(Validate_Token())
 		    break;
 		    
 		case "terms":
-			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
+			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val, reqs.ord reqs_ord FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
 					WHERE a.up=0 AND a.id!=a.t AND a.val!='' AND a.t!=0 ORDER BY a.val";
 			$data_set = Exec_sql($sql, "Get all independent Terms");
 
@@ -11801,8 +11801,9 @@ if(Validate_Token())
 				if(($GLOBALS["REV_BT"][$row["t"]] != "CALCULATABLE") && ($GLOBALS["REV_BT"][$row["t"]] != "BUTTON")) {
 					$base[$row["id"]] = $row["t"];
 
-					if($row["reqs_t"] === $row["id"]) { // Self-descriptor: the table's first-column attrs/alias, not a real Req
-						$aliasByTerm[$row["id"]] = FieldAttrsAlias($row["reqs_val"], "");
+					if($row["reqs_t"] === $row["id"]) { // Самоссылка: self-descriptor (ord=0, псевдоним 1-й колонки) ЛИБО самоссылающаяся подчинённая таблица (ord>0). В обоих случаях таблица остаётся независимой — НЕ убираем её из $typ.
+						if(!$row["reqs_ord"]) // #3587: псевдоним 1-й колонки держит только self-descriptor (ord=0); у подчинённой таблицы (ord>0) reqs_val — это её атрибуты, не псевдоним
+							$aliasByTerm[$row["id"]] = FieldAttrsAlias($row["reqs_val"], "");
 						if(!isset($req[$row["id"]])) // Keep the table listed even if it has no other columns
 							$typ[$row["id"]] = $row["val"];
 						continue;
