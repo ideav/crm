@@ -53,7 +53,8 @@
         order: 'Заказ',
         position: ['Заказанное количество', 'Позиция заказа'],
         sleeve: 'Диаметр втулки',
-        client: 'Клиент'
+        client: 'Клиент',
+        leader: 'Лидер'   // #3592: справочник «Лидер» (table/1132) — список для поля формы «В заказ»
     };
     var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм' };
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
@@ -69,7 +70,7 @@
         qty: ['Кол-во', 'Количество'], raw: ['Вид сырья'],
         width: ['Ширина, мм', 'Ширина'], length: ['Длина, м', 'Длина'],
         sleeve: ['Диаметр втулки'], winding: ['Тип намотки'],
-        status: ['Статус позиции', 'Статус']
+        lead: ['Лидер'], status: ['Статус позиции', 'Статус']
     };
     var DEFAULT_ORDER_STATUS = 'Новый';
     var DEFAULT_POSITION_STATUS = 'Новая';
@@ -492,10 +493,11 @@
         this.root = root;
         this.db = (typeof window !== 'undefined' && window.db) || root.getAttribute('data-db') || '';
         this.xsrf = root.getAttribute('data-xsrf') || (typeof window !== 'undefined' && window.xsrf) || '';
-        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null };
+        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null };
         this.materials = [];      // [{ id, label, width, length }]
         this.sleeves = [];        // [{ id, label }]
         this.clients = [];        // [{ id, label }]
+        this.leaders = [];        // [{ id, label }] — справочник «Лидер» (table/1132), #3592
         this.orders = [];         // [{ id, number }]
         this.actualWidthIndex = {};
         this.materialId = '';
@@ -563,6 +565,7 @@
             self.meta.position = byName(TABLE.position);
             self.meta.sleeve = byName(TABLE.sleeve);
             self.meta.client = byName(TABLE.client);
+            self.meta.leader = byName(TABLE.leader);  // #3592
             if (!self.meta.material) throw new Error('В метаданных не найдена таблица «' + TABLE.material + '»');
         });
     };
@@ -665,6 +668,7 @@
                     self.loadActualWidths(),
                     self.loadRefList(self.meta.sleeve).then(function(l) { self.sleeves = l; }),
                     self.loadRefList(self.meta.client).then(function(l) { self.clients = l; }),
+                    self.loadRefList(self.meta.leader).then(function(l) { self.leaders = l; }),  // #3592
                     self.loadRefList(self.meta.order).then(function(l) {
                         self.orders = l.map(function(o) { return { id: o.id, number: o.label }; });
                     }),
@@ -1120,10 +1124,11 @@
 
         // Поля нового заказа (показываются, если номер не из списка).
         var clientSel = this.refSelect('atex-co-client', this.clients, 'Клиент (для нового заказа)');
-        var leadInput = el('input', { class: 'atex-co-input', type: 'text', placeholder: 'лидер' });
+        // #3592: «Лидер» — выбор из справочника «Лидер» (table/1132), а не свободный текст.
+        var leadSel = this.refSelect('atex-co-lead', this.leaders, 'Лидер');
         var newOrderBox = el('div', { class: 'atex-co-modal-neworder' }, [
             field('Клиент', clientSel.node),
-            field('Лидер', leadInput)
+            field('Лидер', leadSel.node)
         ]);
         modal.appendChild(newOrderBox);
 
@@ -1180,7 +1185,7 @@
                 number: number,
                 existing: orderByNumber(number),
                 clientId: clientSel.value(),
-                lead: String(leadInput.value).trim(),
+                lead: leadSel.value(),
                 sleeveId: sleeveId,
                 winding: windingSel.value
             }).then(function(res) {
@@ -1267,6 +1272,7 @@
                     if (rollLength > 0) put(fields, posMeta, POSITION_REQ.length, rollLength);
                     put(fields, posMeta, POSITION_REQ.sleeve, opts.sleeveId);
                     put(fields, posMeta, POSITION_REQ.winding, normalizeWinding(opts.winding));
+                    put(fields, posMeta, POSITION_REQ.lead, opts.lead);  // #3592: лидер позиции (ссылка на «Лидер» 1132)
                     put(fields, posMeta, POSITION_REQ.status, DEFAULT_POSITION_STATUS);
                     return self.post('_m_new/' + posMeta.id + '?JSON&up=' + encodeURIComponent(orderId), fields)
                         .then(function() { created++; });
