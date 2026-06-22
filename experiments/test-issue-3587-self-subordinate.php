@@ -92,13 +92,18 @@ check("two rows have up==t (descriptor AND self-subordinate), got $bothUpT", $bo
 check("exactly one is the true descriptor (up==t AND ord=0)", $trueDesc === 1);
 check("the self-subordinate column is id 300 (ord>0)", (int)$selfSub === 300);
 
-echo "=== 3. requisite-LISTING guard: t!=up has the #3587 blind spot ===\n";
+echo "=== 3. requisite-LISTING guard (object view: index.php 6650 / GetObjectReqs 7941) ===\n";
+// #3596: the object view built its columns/record-reqs with the same `t!=up`
+// guard, so after #3589 metadata listed the self-subordinate column but the
+// object view did NOT — the column/data counts diverged and the sub-table
+// «открывается криво»/пустая. The fix switches those listing queries to
+// `NOT (t=up AND ord=0)`, the same discriminator as the metadata fix.
 // Columns of the table = children up=151. Three variants:
 $noGuard  = (int)one($db, "SELECT COUNT(*) FROM z WHERE up=$T");                       // + descriptor = phantom
-$tNeUp    = (int)one($db, "SELECT COUNT(*) FROM z WHERE up=$T AND t!=up");             // #2984 guard — drops self-subordinate too
-$correct  = (int)one($db, "SELECT COUNT(*) FROM z WHERE up=$T AND NOT (t=up AND ord=0)"); // keeps self-subordinate
+$tNeUp    = (int)one($db, "SELECT COUNT(*) FROM z WHERE up=$T AND t!=up");             // old object-view guard — drops self-subordinate too
+$correct  = (int)one($db, "SELECT COUNT(*) FROM z WHERE up=$T AND NOT (t=up AND ord=0)"); // #3596 fix — keeps self-subordinate
 check("no-guard listing includes the descriptor as a phantom column (got $noGuard, real is 4)", $noGuard === 5);
-check("t!=up guard WRONGLY drops the self-subordinate column (got $tNeUp, should be 4)", $tNeUp === 3);
+check("old t!=up guard WRONGLY dropped the self-subordinate column (got $tNeUp, should be 4)", $tNeUp === 3);
 check("correct guard keeps all 4 real columns, drops only the descriptor", $correct === 4);
 
 echo "=== 4. instance counting: t!=up is still correct here ===\n";
