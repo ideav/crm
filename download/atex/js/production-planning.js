@@ -2981,7 +2981,13 @@
     function sequenceForStrategy(cuts, options){
         var opts = options || {};
         if (planningStrategy(opts) === PLANNING_STRATEGY_FATIGUE) return fatigueAwareSequence(cuts, opts);
-        return greedySequence(cuts, planningChangeTimes(opts));
+        // SETUP (#3568): «ножи по убыванию к концу дня» (#3130) — ПЕРВИЧНЫЙ критерий, а не
+        // мягкий тай-брейк. byKnifeCountDesc стабильно сортирует жадную (минимум переналадки)
+        // цепочку по knifeCount↓; среди резок с равным числом ножей сохраняется greedy-порядок
+        // (переналадка остаётся вторичной). Без этого враппера cmpKnifeDescSeq внутри greedy
+        // срабатывал лишь при РАВНОЙ стоимости цепочек, а после позиционной стоимости ножей
+        // (#3472) равенство почти не встречается → очередь шла по ВОЗРАСТАНИЮ ножей (#3568).
+        return byKnifeCountDesc(greedySequence(cuts, planningChangeTimes(opts)));
     }
 
     // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
