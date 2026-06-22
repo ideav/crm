@@ -2439,6 +2439,31 @@
         ].join('|');
     }
 
+    // #3613: две соседние карточки очереди — один и тот же логический «задание»,
+    // физически разрезанный по рабочим дням (задание не влезло в день — нормально
+    // дробить). Объединяющий признак: идентичная конфигурация резки (станок|сырьё|
+    // намотка|ножи — continuationSignature) и единый номер заказа (orderId). По нему
+    // renderQueue рисует значок смежности «←»/«→» на первой/последней карточке дня.
+    function isDaySplitSibling(a, b){
+        if (!a || !b) return false;
+        if (continuationSignature(a) !== continuationSignature(b)) return false;
+        return String((a && a.orderId) || '') === String((b && b.orderId) || '');
+    }
+
+    // #3613: какие значки смежности дня показать на карточке очереди. Карточка —
+    // первая в своём рабочем дне, если сосед слева (prev) попал в другой день; последняя —
+    // если сосед справа (next) в другом дне. Значок ставим только когда соседний сегмент
+    // через границу дня — тот же логический задание (isDaySplitSibling): задание не влезло
+    // в день и его раздробили. Дни берём из расписания (schedDay) — те же, что разделяют
+    // дни блоком уборки. → { fromPrev, toNext }. Чистая (без DOM) → проверяется тестом.
+    function daySplitBadges(prevCut, prevDay, cut, myDay, nextCut, nextDay){
+        if (myDay == null) return { fromPrev: false, toNext: false };
+        return {
+            fromPrev: prevDay != null && prevDay !== myDay && isDaySplitSibling(prevCut, cut),
+            toNext: nextDay != null && nextDay !== myDay && isDaySplitSibling(cut, nextCut)
+        };
+    }
+
     // #3280: слить записи-продолжения обратно в логические резки перед пере-разбиением.
     // Эвристика (без маркера): одинаковая сигнатура continuationSignature + смежные
     // календарные дни (разница 1) → одна цепочка; выживает самая ранняя запись (её id),
@@ -3239,6 +3264,8 @@
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
         continuationSignature: continuationSignature,
+        isDaySplitSibling: isDaySplitSibling,
+        daySplitBadges: daySplitBadges,
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
         splitSupplyShares: splitSupplyShares,
@@ -7055,6 +7082,30 @@
             var nextCut = activeGroup.cuts[idx + 1];
             var nextSc = nextCut ? schedById[String(nextCut.id)] : null;
             var nextDay = nextSc ? schedDay(nextSc) : null;
+            // #3613: задание, не влезшее в рабочий день, нормально дробить по дням. На
+            // первой и последней карточке такой цепочки — значок справа внизу: «←» начало
+            // в предыдущем дне, «→» продолжение в следующем. Смежные сегменты опознаём по
+            // идентичной конфигурации резки и единому номеру заказа (isDaySplitSibling),
+            // взятые у соседей очереди через границу рабочего дня (по schedDay расписания —
+            // тому же, что разделяет дни блоком уборки).
+            var prevCut = activeGroup.cuts[idx - 1];
+            var prevSc = prevCut ? schedById[String(prevCut.id)] : null;
+            var prevDay = prevSc ? schedDay(prevSc) : null;
+            var spans = daySplitBadges(prevCut, prevDay, c, myDay, nextCut, nextDay);
+            if (spans.fromPrev || spans.toNext) {
+                var spanBadges = [];
+                if (spans.fromPrev) spanBadges.push(el('span', {
+                    class: 'atex-pp-cut-span atex-pp-cut-span-prev',
+                    title: 'Начало задания — в предыдущем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                    text: '←'
+                }));
+                if (spans.toNext) spanBadges.push(el('span', {
+                    class: 'atex-pp-cut-span atex-pp-cut-span-next',
+                    title: 'Задание продолжается в следующем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                    text: '→'
+                }));
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-spans' }, spanBadges));
+            }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
                 var cl = cleanupByDay[myDay];
@@ -7329,4 +7380,4 @@
 
  
  
-// @version 2026-06-20-issue-3516
+// @version 2026-06-22-issue-3613
