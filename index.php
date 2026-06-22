@@ -40,7 +40,10 @@ define("ROLE", 42);
 define("ADMINROLE", 145);
 define("ACTIVITY", 124);
 define("PASSWORD", 20);
-define("RETRIES", 300);
+define("RETRIES", 301); # #3581: счётчик попыток входа должен совпадать с реквизитом
+                        # «Retries» у типа USER (в боевых базах его id=301). Раньше код
+                        # читал/писал t=300 — отдельный, невидимый в админке узел, который
+                        # залипал на лимите и давал «превышено» при «пустом» Retries.
 define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
@@ -10153,12 +10156,11 @@ switch($a)  # Check actions, which don't require authentication
 									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
 								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD;
 		$data_set = Exec_sql($sql, "Authenticate user");
-		# #3576: парольный вход не имел защиты от дублей логина (в отличие от входа по
-		# коду ниже). При нескольких узлах пользователя с одним логином fetch_array брал
-		# ПЕРВУЮ строку — в т.ч. протухший узел со счётчиком retries≥лимита, из-за чего
-		# показывалось «превышено попыток», хотя у видимого пользователя retries пуст.
-		# Считаем РАЗНЫЕ u.id (а не строки: LEFT JOIN tok/act/xsrf/retries может дать
-		# несколько строк на одного пользователя), чтобы не блокировать легитимный вход.
+		# #3576/#3581: «превышено при пустом Retries» вызвано НЕ дублями пользователя, а
+		# рассинхроном типа счётчика (исправлено RETRIES=301 выше). Этот гард оставлен как
+		# защита по аналогии с входом по коду: если в битой базе окажется несколько узлов
+		# одного логина, не блокировать вход по протухшей строке. Считаем РАЗНЫЕ u.id (а не
+		# строки: LEFT JOIN tok/act/xsrf/retries может дать несколько строк на одного юзера).
 		$dupUids = [];
 		while($probe = mysqli_fetch_array($data_set))
 			$dupUids[$probe["uid"]] = true;
