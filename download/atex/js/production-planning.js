@@ -1297,20 +1297,20 @@
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
-        var moveCost = Number(t.KNIFE_MOVE != null ? t.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE) || 0;
+        var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0; // #3600: фикс. время любой смены ножей (по умолч. 30 мин), независимо от числа ножей
         var parts = [];
         if (!prev || !next) return parts;
         var matWindChange = String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
             || String(prev.batchId) !== String(next.batchId);
         if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
-        // #3472: стоимость ножей = KNIFE_MOVE × число переставленных ножей (позиционно;
-        // нож с сохранённой шириной не двигаем — приоритет неизменности полос). Сужение
-        // ролика требует переустановки края → минимум одно перемещение.
+        // #3600: любая смена набора ножей ИЛИ сужение ролика → ФИКСИРОВАННО KNIFE (30 мин)
+        // «на всё вместе», независимо от числа переставленных ножей (раньше #3472: стоимость =
+        // KNIFE_MOVE × число перестановок). Смена сырья/намотки считается отдельно (выше).
+        // Бинарно: изменился набор ножей (knifeMoves>0) ИЛИ сузился ролик → одна переналадка ножей.
         var moves = knifeMoves(effKnifeWidths(prev), effKnifeWidths(next));
-        if ((Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0)) moves = Math.max(moves, 1);
-        var knifeMin = round3(moveCost * moves);
-        if (knifeMin > 0) parts.push({ code: 'KNIFE', label: 'перестановка ножей / сужение ролика', minutes: knifeMin });
+        var knifeChanged = moves > 0 || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
+        if (knifeChanged && knifeTime > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knifeTime) });
         return parts;
     }
 
