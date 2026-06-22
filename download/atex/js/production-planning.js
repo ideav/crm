@@ -535,16 +535,22 @@
         return batchDateKey(s);
     }
 
-    function isCutVisible(cut, selectedDate) {
+    // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
+    // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
+    // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
+    function isCutVisible(cut, dateFrom, dateTo) {
         if (!cut) return false;
         if (String(cut.status || '').trim() === 'Завершён') return false;
         var pd = String(cut.planDate || '').trim();
         if (pd === '') return true;
-        var sd = String(selectedDate == null ? '' : selectedDate).trim();
-        if (sd === '') return true;
-        // #3249: сравниваем по календарному дню (planDate — unix-штамп DATETIME,
-        // selectedDate — «ГГГГ-ММ-ДД»); раньше batchDateKey давал несравнимые шкалы.
-        return planDateDayKey(pd) === planDateDayKey(sd);
+        var fromStr = String(dateFrom == null ? '' : dateFrom).trim();
+        var toStr = String(dateTo == null ? '' : dateTo).trim();
+        if (fromStr === '' && toStr === '') return true;
+        var pk = planDateDayKey(pd);
+        var fromK = fromStr === '' ? -Infinity : planDateDayKey(fromStr);
+        var toK = toStr === '' ? Infinity : planDateDayKey(toStr);
+        if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }  // «По» раньше «С» → меняем местами
+        return pk >= fromK && pk <= toK;
     }
 
     // #3475: задания и обеспечения выбранного дня — мишени кнопки «Удалить». Берём резки
@@ -1001,7 +1007,11 @@
                 // #3433: заказ позиции — для «ID заказа» создаваемой «Партии ГП». Если
                 // отчёт positions_list ещё не отдаёт order_id, остаётся пусто (в запас).
                 orderId: row.order_id == null ? '' : String(row.order_id).trim(),
-                approved: orderApproved || itemApproved
+                approved: orderApproved || itemApproved,
+                // #3599: тип сырья из отчёта (Вид сырья → «Тип сырья»). «Фольга» — грязное
+                // сырьё, его ставим в конец смены (после неё сложная уборка).
+                materialType: rowFirstValue(row, ['position_material_type']),
+                isFoil: /фольг/i.test(rowFirstValue(row, ['position_material_type']))
             };
         });
     }
@@ -1060,6 +1070,7 @@
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
+                    isFoil: !!(p && p.isFoil),   // #3599: фольга (тип сырья) — в конец смены
                     positions: []
                 };
                 order.push(groupKey);
@@ -2093,7 +2104,12 @@
         if (end <= start) end = DAY_END_MIN > start ? DAY_END_MIN : start + 1;
         var cleanup = Number(cleanupMin != null ? cleanupMin : DEFAULT_OP_TIMES.CLEANUP_SHIFT);
         if (!isFinite(cleanup) || cleanup < 0) cleanup = DEFAULT_OP_TIMES.CLEANUP_SHIFT;
-        var cutEnd = end - cleanup;
+        // #3599: резку планируем вплотную до DAY_END_HOUR − TOTAL_INTERVALS (буфер из
+        // Настройки), а блок уборки идёт ПОСЛЕ DAY_END_HOUR (см. dayCleanups). Нет
+        // TOTAL_INTERVALS → прежнее поведение (буфер = длительность уборки).
+        var totalIntervals = parseDurationMinutes(cfg.TOTAL_INTERVALS);
+        if (!(totalIntervals > 0)) totalIntervals = cleanup;
+        var cutEnd = end - totalIntervals;
         if (cutEnd < start) cutEnd = start;
         // #3342: плавающий обед. LUNCH_START задан (HH:MM) → minutes, иначе null (обед выкл).
         var lunchDur = parseDurationMinutes(cfg.LUNCH_DURATION);
@@ -3378,7 +3394,9 @@
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
         this.draft = this.blankDraft();
-        this.filter = { slitter: '', status: '', date: todayISO(), query: '' };  // дата плана по умолчанию — сегодня; query — быстрый поиск (#3411)
+        // #3599: дата плана диапазоном [date; dateTo] — фильтр отображения очереди; date
+        // («С») остаётся базой генерации/планирования. По умолчанию оба = сегодня (один день).
+        this.filter = { slitter: '', status: '', date: todayISO(), dateTo: todayISO(), query: '' };  // query — быстрый поиск (#3411)
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.lastCutMainValue = 0;  // последний t{Задание в производство}, выданный клиентом
@@ -3474,7 +3492,8 @@
                 var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
                 // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
-                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION') return;
+                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
+                    key !== 'TOTAL_INTERVALS') return;   // #3599: буфер перед уборкой (мин)
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -5441,6 +5460,7 @@
                         lay.windDir = group.windDir;
                         lay.windLength = group.windLength;
                         lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
+                        lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
@@ -6631,25 +6651,28 @@
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
-        var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
-        dateFilter.addEventListener('change', function() {
-            self.filter.date = dateFilter.value;
+        // #3599 п.2: дата плана ДИАПАЗОНОМ «С — По» (два поля, между ними дефис). Диапазон
+        // фильтрует отображение очереди; «С» (filter.date) остаётся базой генерации/планирования.
+        var dateFrom = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date', value: this.filter.date || '', title: 'С (дата плана, от)' });
+        var dateTo = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date', value: this.filter.dateTo || '', title: 'По (дата плана, до)' });
+        function applyDateRange() {
             self.selectedCutId = null;   // #3349: очищать панель «Связанные позиции»
             self.renderQueue();
             self.renderLink();
-        });
-        // #3508 п.1: стрелки ‹/› по бокам поля «Дата плана» — листание на ±1 день.
+        }
+        dateFrom.addEventListener('change', function() { self.filter.date = dateFrom.value; applyDateRange(); });
+        dateTo.addEventListener('change', function() { self.filter.dateTo = dateTo.value; applyDateRange(); });
+        // #3508 п.1 / #3599: стрелки ‹/› двигают ВЕСЬ диапазон на ±1 день (ширина окна сохраняется).
         function shiftFilterDate(delta) {
             self.filter.date = shiftPlanDate(self.filter.date || todayISO(), delta);
-            self.selectedCutId = null;   // как и при ручной смене даты
-            self.renderQueue();
-            self.renderLink();
+            self.filter.dateTo = shiftPlanDate(self.filter.dateTo || self.filter.date || todayISO(), delta);
+            applyDateRange();
         }
-        var datePrev = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '‹', title: 'Предыдущий день' });
-        var dateNext = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '›', title: 'Следующий день' });
+        var datePrev = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '‹', title: 'Сдвинуть диапазон на день назад' });
+        var dateNext = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '›', title: 'Сдвинуть диапазон на день вперёд' });
         datePrev.addEventListener('click', function() { if (!self.busy) shiftFilterDate(-1); });
         dateNext.addEventListener('click', function() { if (!self.busy) shiftFilterDate(1); });
-        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFilter, dateNext]);
+        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFrom, el('span', { class: 'atex-pp-date-sep', text: '–' }), dateTo, dateNext]);
         // #3411: быстрый поиск между «Дата плана» и «Статус». Фильтрует карточки очереди
         // и пересчитывает счётчики на закладках станков (видно, в каком станке сколько
         // совпавших позиций). Поиск идёт по сырью/намотке/статусу и подписям связанных
@@ -6701,7 +6724,7 @@
         }
 
         // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.
-        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
+        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date, self.filter.dateTo); });
         var filtered = filterCuts(visible, this.filter);
         var groups = groupBySlitter(filtered);
 
@@ -6782,7 +6805,7 @@
         });
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
-        dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.cutEndMin })
+        dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
             .forEach(function(cl) { cleanupByDay[cl.day] = cl; });
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
 

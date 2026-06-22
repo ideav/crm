@@ -162,12 +162,21 @@
 /* #3411: быстрый поиск занимает ту же ширину, что и остальные фильтры. */
 .atex-pp-search { width: 100%; }
 /* #3508 п.1: поле «Дата плана» со стрелками листания ‹/› по бокам (±1 день). */
-.atex-pp-date-field { display: flex; align-items: stretch; gap: 6px; }
-.atex-pp-date-field .atex-pp-input { flex: 1 1 auto; min-width: 0; }
+/* #3599 п.1/п.2: «С — По» со стрелками ‹/› — единый прилеплённый блок (без зазоров,
+   смежные границы схлопнуты, скруглены только внешние углы). */
+.atex-pp-date-field { display: flex; align-items: stretch; gap: 0; }
+.atex-pp-date-field .atex-pp-date-input { flex: 1 1 auto; min-width: 0; border-radius: 0; }
+.atex-pp-date-field > * + * { margin-left: -1px; }   /* схлопнуть смежные границы */
+.atex-pp-date-sep {
+    display: flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; padding: 0 6px;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+}
 .atex-pp-date-nav {
     flex: 0 0 auto;
     border: 1px solid var(--pp-border);
-    border-radius: 6px;
+    border-radius: 0;
     background: var(--pp-bg);
     color: inherit;
     cursor: pointer;
@@ -176,6 +185,8 @@
     font-size: 18px;
     line-height: 1;
 }
+.atex-pp-date-field > .atex-pp-date-nav:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.atex-pp-date-field > .atex-pp-date-nav:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .atex-pp-date-nav:hover { background: var(--pp-surface); }
 
 .atex-pp-queue-group { margin-bottom: 16px; }
