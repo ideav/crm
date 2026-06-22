@@ -88,6 +88,8 @@
     border-color: var(--co-accent);
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
+/* #3597: «Допуск, мм» — только вывод значения, без поля ввода. */
+.atex-co-readonly { padding: 8px 10px; font: inherit; font-weight: 600; }
 
 /* Комбобокс «Длина рулона» (#3482): свой ввод + полный нефильтруемый список */
 .atex-co-combo { position: relative; }
