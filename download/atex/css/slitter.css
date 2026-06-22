@@ -137,6 +137,25 @@
 .atex-sl-head-meta { font-size: 13px; color: var(--sl-muted); }
 .atex-sl-head .atex-sl-life-actions { margin-top: 0; justify-content: flex-end; }
 
+/* #3583: кнопки отметки проходов правее .atex-sl-head-title. */
+.atex-sl-head-pass { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atex-sl-btn-pass { font-weight: 600; }
+.atex-sl-btn-pass-all { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); }
+.atex-sl-btn-pass-all:hover:not(:disabled) { background: var(--sl-success-hover-bg, var(--sl-success-bg)); }
+
+/* #3583: модалка подтверждения «Готовы все» (без confirm()). */
+.atex-sl-confirm-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.atex-sl-confirm {
+    background: #fff; border-radius: 12px; padding: 20px 22px;
+    max-width: 420px; width: 100%; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.atex-sl-confirm-msg { font-size: 15px; line-height: 1.4; margin-bottom: 16px; }
+.atex-sl-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 .atex-sl-badge {
     display: inline-block;
     padding: 3px 11px;

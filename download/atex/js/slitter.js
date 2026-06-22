@@ -99,10 +99,11 @@
     var EV = {
         startCut: 'Начало резки', setup: 'Наладка', brk: 'Перерыв',
         resume: 'Возобновить', finish: 'Завершить', abort: 'Прекратить',
-        shiftStart: 'Начало смены', shiftEnd: 'Конец смены'
+        shiftStart: 'Начало смены', shiftEnd: 'Конец смены',
+        pass: 'Резка'  // #3583: отметка выполненного прохода (значение справочника «Тип события» 1193)
     };
     // Типы событий смены (справочник «Тип события» базы ateh, 1193).
-    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.finish, EV.abort, EV.shiftEnd];
+    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.finish, EV.abort, EV.shiftEnd];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -1505,6 +1506,7 @@
         var head = el('div', { class: 'atex-sl-head' }, [
             el('div', { class: 'atex-sl-head-main' }, [
                 el('h2', { class: 'atex-sl-head-title', text: title }),
+                this.renderPassButtons(cut),  // #3583: «Готово» / «Готовы все» правее заголовка
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]),
             this.renderCutControls(cut)
@@ -1513,6 +1515,23 @@
         wrap.appendChild(head);
         wrap.appendChild(this.renderCutMetrics());
         return wrap;
+    };
+
+    // #3583: кнопки отметки проходов правее .atex-sl-head-title. «Готово» — один
+    // проход, «Готовы все» — все (с подтверждением). Доступны на активной резке
+    // (не заблокированной очередью и не завершённой).
+    AtexSlitter.prototype.renderPassButtons = function(cut) {
+        var self = this;
+        var canMark = !this.isCutLocked(cut) && !core.isDone(cut.status);
+        var one = el('button', { class: 'atex-sl-btn atex-sl-btn-pass', type: 'button', text: '✓ Готово',
+            title: 'Отметить один проход выполненным: номер прохода +1, пересчитать «Счётчик кон.» и «Погонаж факт»' });
+        var all = el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-all', type: 'button', text: '✓✓ Готовы все',
+            title: 'Отметить все проходы выполненными и завершить задание (с подтверждением)' });
+        if (canMark) {
+            one.addEventListener('click', function() { self.markPassDone(false); });
+            all.addEventListener('click', function() { self.markPassDone(true); });
+        } else { one.disabled = true; all.disabled = true; }
+        return el('div', { class: 'atex-sl-head-pass' }, [one, all]);
     };
 
     // #3557 #4: кнопки управления статусом — в шапке (вместо секции «Статус резки»).
@@ -2070,11 +2089,99 @@
             self.applyEventStatuses();
             self.setBusy(false);
             self.notify('Резка завершена. Погонаж: ' + meterage + ' м. Остаток партии: ' + (cut.batchId ? self.findBatch(cut.batchId) : {}).remainderM + ' м', 'success');
-            self.render();
+            self.advanceToNextCut(); // #3583: переключить на следующее задание
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка завершения: ' + err.message, 'error');
         });
+    };
+
+    // #3583: отметить выполненные проходы. «Готово» (markAll=false) — один проход,
+    // «Готовы все» (markAll=true) — все (с подтверждением). Увеличивает номер прохода,
+    // пересчитывает «Счётчик кон.» = «Счётчик нач.» + проходы×метраж и «Погонаж факт»,
+    // пишет событие «Резка» (значение = номер прохода). Когда отмечены все проходы —
+    // завершает задание (finishCut) и переключает на следующее.
+    AtexSlitter.prototype.markPassDone = function(markAll) {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+        if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return; }
+        if (core.isDone(cut.status)) { this.notify('Задание уже завершено', 'info'); return; }
+        var runLength = core.runLengthForCut(cut);
+        if (!(runLength > 0)) { this.notify('У задания не задан «Метраж, м» — не могу пересчитать проходы', 'error'); return; }
+        var total = core.plannedRunsForCut(cut);
+        var done = Math.floor(core.toNumber(cut.meterage) / runLength);
+        var target = markAll ? total : Math.min(done + 1, total);
+        if (target <= done) { this.notify('Все проходы уже отмечены', 'info'); return; }
+
+        var run = function() {
+            // Завершение задания требует «Счётчик нач.» (как finishCut) — проверяем до записи.
+            if (target >= total && !(core.toNumber(cut.counterStart) > 0)) {
+                self.notify('Заполните «Счётчик нач.» перед завершением задания', 'error');
+                return;
+            }
+            self.setBusy(true);
+            var meterage = core.round3(target * runLength);
+            var counterEnd = core.round3(core.toNumber(cut.counterStart) + meterage);
+            cut.meterage = String(meterage);
+            cut.counterEnd = String(counterEnd);
+            var meta = self.meta.cut;
+            var fields = {};
+            var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
+            var counterEndRid = reqIdByName(meta, CUT_REQ.counterEnd);
+            var startedRid = reqIdByAnyName(meta, CUT_STARTED_NAMES);
+            var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
+            if (meterageRid) fields['t' + meterageRid] = meterage;
+            if (counterEndRid) fields['t' + counterEndRid] = counterEnd;
+            if (startedRid && !cut.startedAt) { cut.startedAt = self.eventDateTime(); fields['t' + startedRid] = cut.startedAt; }
+            if (inWorkRid) { cut.inWork = '1'; fields['t' + inWorkRid] = '1'; }
+            self.post('_m_set/' + cut.id + '?JSON', fields)
+                .then(function() { return self.createEvent({ type: EV.pass, value: String(target) }, cut.id); })
+                .then(function() {
+                    if (target >= total) { self.setBusy(false); self.finishCut(); return null; }
+                    return self.loadEvents(cut.id)
+                        .then(function() { return self.loadCuts(); })
+                        .then(function() {
+                            self.applyEventStatuses();
+                            self.setBusy(false);
+                            self.notify('Отмечен проход ' + target + ' из ' + total, 'success');
+                            self.render();
+                        });
+                }).catch(function(err) {
+                    self.setBusy(false);
+                    self.notify('Ошибка отметки прохода: ' + err.message, 'error');
+                });
+        };
+
+        if (markAll) {
+            this.confirmModal('Отметить все ' + total + ' проходов выполненными и завершить задание?', run);
+        } else {
+            run();
+        }
+    };
+
+    // #3583: переключить на следующее задание в очереди (первое незавершённое после
+    // завершения текущего). Нет следующего — просто перерисовать.
+    AtexSlitter.prototype.advanceToNextCut = function() {
+        var nextId = this.currentQueue().firstOpenCutId;
+        if (nextId && String(nextId) !== String(this.currentCutId)) this.openCut(nextId);
+        else this.render();
+    };
+
+    // #3583: подтверждение без confirm() (раздел 8 гайда) — встроенная модалка.
+    AtexSlitter.prototype.confirmModal = function(message, onYes) {
+        var overlay = el('div', { class: 'atex-sl-confirm-overlay' });
+        var yes = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Да, завершить' });
+        var no = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отмена' });
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        yes.addEventListener('click', function() { close(); onYes(); });
+        no.addEventListener('click', close);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        overlay.appendChild(el('div', { class: 'atex-sl-confirm' }, [
+            el('div', { class: 'atex-sl-confirm-msg', text: message }),
+            el('div', { class: 'atex-sl-confirm-actions' }, [no, yes])
+        ]));
+        (this.root || document.body).appendChild(overlay);
     };
 
     // #3459: Сохраняет показания (счётчики, брак, примечания) в резку. Погонаж вычисляемый,
