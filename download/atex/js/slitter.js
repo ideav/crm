@@ -71,7 +71,9 @@
         startedAt: 'Начато',
         inWork: 'В работе',      // #3557: булев реквизит (1162) — резка открыта/занимает станок
         finishedAt: 'Закончено',  // #3557: DATETIME (16411) — момент завершения
-        notes: 'Примечания'
+        notes: 'Примечания',
+        winding: 'Тип намотки',  // #3566 #2: направление намотки (28144)
+        leader: 'Лидер'          // #3566 #2: лидер (82519, ссылка) — реквизит задания
     };
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
@@ -401,6 +403,24 @@
         return runs > 0 ? Math.ceil(runs) : 1;
     }
 
+    // #3566 #1: текущий проход задания (1..M) для заголовка «Резка N из M».
+    // Отрезано проходов = погонаж факт (или счётчик кон. − нач.) ÷ метраж прохода;
+    // текущий = отрезано + 1, в пределах [1, M]. До старта = 1, по завершении = M.
+    function currentPassForCut(cut) {
+        var total = plannedRunsForCut(cut);
+        var runLength = runLengthForCut(cut);
+        if (!(runLength > 0)) return 1;
+        var done = coreToNumber(cut && cut.meterage);
+        if (!(done > 0)) {
+            var cs = coreToNumber(cut && cut.counterStart), ce = coreToNumber(cut && cut.counterEnd);
+            if (ce > cs) done = ce - cs;
+        }
+        var pass = Math.floor(done / runLength) + 1;
+        if (pass < 1) pass = 1;
+        if (pass > total) pass = total;
+        return pass;
+    }
+
     // Internal alias to avoid function-hoisting surprises in minifiers and keep
     // these helpers readable before `core` is assembled.
     function coreToNumber(value) {
@@ -725,6 +745,7 @@
         shiftEventSlitterLabel: shiftEventSlitterLabel,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
+        currentPassForCut: currentPassForCut,
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
         availableBatchesForCut: availableBatchesForCut,
@@ -1020,6 +1041,20 @@
         });
     };
 
+    // #3566 #5: отчёт material_batches отдаёт «Остаток, м²», но не «Остаток, м».
+    // Без погонных метров batchPasses=0 и список партий сырья выходит пустым.
+    // Досчитываем остаток в метрах из площади и ширины вида сырья:
+    // L(м) = S(м²) × 1000 / Ширина(мм). Вызывается после загрузки партий и ширин.
+    AtexSlitter.prototype.fillBatchRemainderM = function() {
+        var widths = this.materialWidths || {};
+        (this.batches || []).forEach(function(b) {
+            if (core.toNumber(b.remainderM) > 0) return;
+            var area = core.toNumber(b.remainder);
+            var width = core.toNumber(widths[String(b.materialId)]);
+            if (area > 0 && width > 0) b.remainderM = core.round3(area * 1000 / width);
+        });
+    };
+
     // Карта ширин видов сырья: { id: Ширина,мм }. Для пересчёта брака,м → м².
     AtexSlitter.prototype.loadMaterialWidths = function() {
         var self = this;
@@ -1127,7 +1162,9 @@
                 inWork: val(CUT_REQ.inWork),         // #3557: булев «В работе» (1162)
                 finishedAt: val(CUT_REQ.finishedAt), // #3557: «Закончено» (16411)
                 status: STATUSES[0],
-                notes: val(CUT_REQ.notes)
+                notes: val(CUT_REQ.notes),
+                winding: val(CUT_REQ.winding), // #3566 #2: направление (тип) намотки
+                leader: parseRef(val(CUT_REQ.leader)).label // #3566 #2: лидер (ссылка)
             };
         });
     };
@@ -1466,11 +1503,10 @@
 
     AtexSlitter.prototype.renderHead = function() {
         var cut = this.currentCut;
-        // #3557 #4: заголовок «Резка N из M» — позиция текущей резки в очереди станка.
-        var list = this.visibleCuts();
-        var pos = 0;
-        for (var i = 0; i < list.length; i++) { if (String(list[i].id) === String(cut.id)) { pos = i + 1; break; } }
-        var title = pos ? ('Резка ' + pos + ' из ' + list.length) : cut.label;
+        // #3566 #1: «Резка N из M» — проход N из M проходов ТЕКУЩЕГО задания (а не
+        // позиция задания в очереди). M = «Кол-во резок план»; N = текущий проход.
+        var total = core.plannedRunsForCut(cut);
+        var title = 'Резка ' + core.currentPassForCut(cut) + ' из ' + total;
         // #3557 #5: строку .atex-sl-head-meta убрали (Слиттер/Партия/План видно в тулбаре/метриках).
         var head = el('div', { class: 'atex-sl-head' }, [
             el('div', { class: 'atex-sl-head-main' }, [
@@ -1538,22 +1574,20 @@
     };
 
 
-    // #3460: сводка резки — название сырья, метраж, число полос/ножей и резок.
-    // «Ножей» = «полос за проход» = Σ(кол-во полос) (см. cut-map/#3431); «Полос
-    // всего» = ножей × резок; «Резок» = план. число проходов.
+    // #3460: сводка резки — вид сырья, метраж, число резок (проходов) и направление
+    // намотки. #3566 #3: метрики «Полос»/«Полос всего» убраны — число полос теперь
+    // в заголовке секции «Раскладка ножей». #3566 #2: добавлено направление намотки.
     AtexSlitter.prototype.renderCutMetrics = function() {
         var cut = this.currentCut;
-        var strips = this.currentStrips || [];
-        var knives = core.totalKnives(strips);
         var runs = core.plannedRunsForCut(cut);
         var runLength = core.runLengthForCut(cut);
         var material = cut.material || cut.materialLabel || cut.batch || '—';
         var cells = [
             ['Вид сырья', material || '—'],
             ['Метраж, м', runLength > 0 ? String(core.round3(runLength)) : '—'],
-            ['Полос', knives > 0 ? String(knives) : '—'],
             ['Резок', String(runs)],
-            ['Полос всего', knives > 0 ? String(core.round3(knives * runs)) : '—']
+            ['Направление намотки', cut.winding || '—'],
+            ['Лидер', cut.leader || '—']
         ];
         var grid = el('div', { class: 'atex-sl-metrics' });
         cells.forEach(function(pair) {
@@ -1571,8 +1605,10 @@
     AtexSlitter.prototype.renderCutMap = function() {
         var cut = this.currentCut;
         var strips = this.currentStrips || [];
+        // #3566 #4: число полос (Σ кол-во) — в заголовке «Раскладка ножей (K полос)».
+        var knives = core.totalKnives(strips);
         var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Раскладка ножей' })
+            el('h3', { class: 'atex-sl-section-title', text: 'Раскладка ножей' + (knives > 0 ? ' (' + knives + ' полос)' : '') })
         ]);
         if (!strips.length) {
             section.appendChild(el('div', { class: 'atex-sl-empty', text: 'У резки нет полос — раскраивать нечего.' }));
@@ -2247,7 +2283,7 @@
 
         return this.loadMetadata()
             .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
-            .then(function() { self.validateStoredSlitter(); return self.loadShiftEvents(); })
+            .then(function() { self.fillBatchRemainderM(); self.validateStoredSlitter(); return self.loadShiftEvents(); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
