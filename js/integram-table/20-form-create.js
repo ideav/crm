@@ -1442,7 +1442,10 @@
                             const option = document.createElement('option');
                             option.value = optId;
                             option.textContent = optVal;
-                            if (String(optId) === String(currentValue)) {
+                            // Issue #3572: матчим по id ИЛИ по метке (подчинённый объект
+                            // может прийти меткой «Родитель -> Подчинённая» без «id:»).
+                            if (String(optId) === String(currentValue) ||
+                                (currentValue !== '' && String(optVal) === String(currentValue))) {
                                 option.selected = true;
                             }
                             select.appendChild(option);

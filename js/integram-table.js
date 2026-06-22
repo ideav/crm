@@ -1541,64 +1541,31 @@ class IntegramTable{
             return equalDefaultFormats.includes(format) ? '=' : '^';
         }
 
-        /**
-         * Is this the first (main value) column of the table?
-         * The first built column carries the record's own identity (id === metadata.id),
-         * so it can be filtered by record ID like a reference column (issue #3542).
-         */
-        isFirstColumn(column) {
-            return !!(column && Array.isArray(this.columns) && this.columns.length > 0 &&
-                column.id === this.columns[0].id);
-        }
-
-        /**
-         * Filter operators available for a column.
-         * Base set comes from the column format; the first column of ANY type additionally
-         * gets ID-based search (@ / !@), the same way reference columns do (issue #3542).
-         * REF already includes @ / !@, so it is not augmented.
-         */
-        getColumnFilterTypes(column) {
-            const format = column.format || 'SHORT';
-            const baseTypes = this.filterTypes[format] || this.filterTypes['SHORT'];
-            if (this.isFirstColumn(column) && format !== 'REF') {
-                return baseTypes.concat([
-                    { symbol: '@', name: 'по ID: включая', format: 'FR_{ T }=@{ X }' },
-                    { symbol: '!@', name: 'по ID: исключая', format: 'FR_{ T }=!@{ X }' }
-                ]);
-            }
-            return baseTypes;
-        }
-
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
             const colId = column.id;
 
             const format = column.format || 'SHORT';
-            const filterGroup = this.getColumnFilterTypes(column);
+            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
             const filterDef = filterGroup.find(f => f.symbol === type);
 
             if (!filterDef) return;
 
             if (type === '@' || type === '!@') {
-                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819).
-                // Available on reference columns and on the first column of any type (issue #3542).
-                // Multiple IDs use the IN(...) form — the bare @(id,id) form is NOT understood by
-                // the backend (verified on live: returns nothing for both REF and first columns) (issue #3542).
+                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819)
                 const ids = value.split(',').map(v => v.trim()).filter(v => /^\d+$/.test(v));
                 if (ids.length === 0) return;
                 const formatted = ids.length === 1
                     ? `${type}${ids[0]}`
-                    : `${type}IN(${ids.join(',')})`;
+                    : `${type}(${ids.join(',')})`;
                 params.append(`FR_${ colId }`, formatted);
             } else if (type === '...') {
-                // Range: two separate values from/to (issue #3542). Either side may be empty
-                // for an open-ended range — append only the bounds that were filled in.
-                const values = value.split(',');
-                const from = (values[0] || '').trim();
-                const to = (values[1] || '').trim();
-                if (from) params.append(`FR_${ colId }`, from);
-                if (to) params.append(`TO_${ colId }`, to);
+                const values = value.split(',').map(v => v.trim());
+                if (values.length >= 2) {
+                    params.append(`FR_${ colId }`, values[0]);
+                    params.append(`TO_${ colId }`, values[1]);
+                }
             } else if (type === '%' || type === '!%') {
                 params.append(`FR_${ colId }`, type === '%' ? '%' : '!%');
             } else {
@@ -1692,8 +1659,6 @@ class IntegramTable{
             if (focusedElement && focusedElement.classList.contains('filter-input-with-icon')) {
                 focusState = {
                     columnId: focusedElement.dataset.columnId,
-                    // Range cells have two inputs sharing a columnId — remember which one (issue #3542)
-                    rangePart: focusedElement.dataset.rangePart || null,
                     selectionStart: focusedElement.selectionStart,
                     selectionEnd: focusedElement.selectionEnd
                 };
@@ -1938,10 +1903,7 @@ class IntegramTable{
             // position when a filter input lives outside the visible scroll viewport
             // (issue #2744).
             if (focusState) {
-                const selector = focusState.rangePart
-                    ? `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`
-                    : `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
-                const newInput = this.container.querySelector(selector);
+                const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
                 if (newInput) {
                     newInput.focus({ preventScroll: true });
                     // Restore cursor position (only for text inputs, not date pickers)
@@ -2061,49 +2023,6 @@ class IntegramTable{
                                    data-column-id="${ column.id }"
                                    data-is-datetime="${ isDateTime ? '1' : '0' }"
                                    value="${ html5Value }">
-                        </div>
-                    </td>
-                `;
-            }
-
-            // Range filter ('...'): two separate from/to fields instead of one comma-separated
-            // input — the comma syntax was unclear (issue #3542). Stored value stays "from,to".
-            if (currentFilter.type === '...') {
-                const isDate = dateFormats.includes(format);
-                const isDateTime = format === 'DATETIME';
-                let inputType = 'text';
-                if (isDate) inputType = isDateTime ? 'datetime-local' : 'date';
-                else if (format === 'NUMBER' || format === 'SIGNED') inputType = 'number';
-
-                const parts = (currentFilter.value || '').split(',');
-                const rawFrom = (parts[0] || '').trim();
-                const rawTo = (parts[1] || '').trim();
-                const fromVal = isDate ? (rawFrom ? this.formatDateForHtml5(rawFrom, isDateTime) : '') : rawFrom;
-                const toVal = isDate ? (rawTo ? this.formatDateForHtml5(rawTo, isDateTime) : '') : rawTo;
-                const dtAttr = isDate ? ` data-is-datetime="${ isDateTime ? '1' : '0' }"` : '';
-                const escAttr = v => String(v).replace(/"/g, '&quot;');
-
-                return `
-                    <td>
-                        <div class="filter-cell-wrapper filter-range-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
-                            <input type="${ inputType }"
-                                   class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
-                                   data-range-part="from"${ dtAttr }
-                                   value="${ escAttr(fromVal) }"
-                                   placeholder="от"
-                                   autocomplete="off">
-                            <span class="filter-range-sep">—</span>
-                            <input type="${ inputType }"
-                                   class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
-                                   data-range-part="to"${ dtAttr }
-                                   value="${ escAttr(toVal) }"
-                                   placeholder="до"
-                                   autocomplete="off">
                         </div>
                     </td>
                 `;
@@ -4096,8 +4015,6 @@ class IntegramTable{
             filterInputs.forEach(input => {
                 // Skip date pickers — they are handled separately via 'change' event (issue #1008)
                 if (input.classList.contains('filter-date-picker')) return;
-                // Skip range from/to inputs — handled separately below (issue #3542)
-                if (input.classList.contains('filter-range-input')) return;
                 // Use 'input' event to apply filter on text change
                 input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
@@ -4151,44 +4068,6 @@ class IntegramTable{
                     delete this.filters[colId].displayValue;
 
                     this.handleFilterOverride(colId, displayValue);
-
-                    clearTimeout(this.filterTimeout);
-                    this.filterTimeout = setTimeout(() => {
-                        this.data = [];
-                        this.loadedRecords = 0;
-                        this.hasMore = true;
-                        this.totalRows = null;
-                        this.loadData(false);
-                    }, 500);
-                });
-            });
-
-            // Range filter from/to inputs (issue #3542): combine both halves into the stored
-            // "from,to" value. Date inputs fire 'change'; number/text inputs fire 'input'.
-            const filterRangeInputs = this.container.querySelectorAll('.filter-range-input');
-            filterRangeInputs.forEach(input => {
-                const evtName = (input.type === 'date' || input.type === 'datetime-local') ? 'change' : 'input';
-                input.addEventListener(evtName, () => {
-                    const colId = input.dataset.columnId;
-                    if (!this.filters[colId]) {
-                        this.filters[colId] = { type: '...', value: '' };
-                    }
-                    const wrapper = input.closest('.filter-cell-wrapper');
-                    const readPart = part => {
-                        const el = wrapper && wrapper.querySelector(`.filter-range-input[data-range-part="${ part }"]`);
-                        if (!el || !el.value) return '';
-                        // Date inputs carry data-is-datetime → convert HTML5 value to display format
-                        if (el.dataset.isDatetime === '1' || el.dataset.isDatetime === '0') {
-                            return this.convertHtml5DateToDisplay(el.value, el.dataset.isDatetime === '1');
-                        }
-                        return el.value.trim();
-                    };
-                    const from = readPart('from');
-                    const to = readPart('to');
-                    this.filters[colId].value = `${ from },${ to }`;
-                    delete this.filters[colId].displayValue;
-
-                    this.handleFilterOverride(colId, this.filters[colId].value);
 
                     clearTimeout(this.filterTimeout);
                     this.filterTimeout = setTimeout(() => {
@@ -7521,7 +7400,7 @@ class IntegramTable{
         showFilterTypeMenu(target, columnId) {
             const column = this.columns.find(c => c.id === columnId);
             const format = column.format || 'SHORT';
-            const filterGroup = this.getColumnFilterTypes(column);
+            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
 
             document.querySelectorAll('.filter-type-menu').forEach(m => m.remove());
 
@@ -7585,14 +7464,6 @@ class IntegramTable{
                             this.render();
                             return;
                         }
-                    }
-
-                    // Switching to/from range ('...') changes the cell from one input to two
-                    // from/to fields (issue #3542) — clear the value and re-render to swap inputs.
-                    if ((symbol === '...') !== (oldType === '...')) {
-                        this.filters[columnId].value = '';
-                        this.render();
-                        return;
                     }
 
                     // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately
@@ -12388,7 +12259,12 @@ class IntegramTable{
             const typeName = this.getMetadataName(metadata);
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
             // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
-            const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+            // Issue #3572: для подчинённой таблицы значение «Объекты» может прийти меткой
+            // («Заказ -> Заказанное количество») без term-префикса «id:» — тогда отдаём метку
+            // как текущее значение, а опции матчатся по id ИЛИ по метке (как в inline-редакторе).
+            const mainTermValue = (recordData && recordData.obj && recordData.obj.term !== undefined && recordData.obj.term !== '')
+                ? recordData.obj.term
+                : mainValue;
             const mainFieldType = this.normalizeFormat(metadata.type);
 
             // Build main field HTML based on its type
@@ -15502,7 +15378,10 @@ class IntegramTable{
                             const option = document.createElement('option');
                             option.value = optId;
                             option.textContent = optVal;
-                            if (String(optId) === String(currentValue)) {
+                            // Issue #3572: матчим по id ИЛИ по метке (подчинённый объект
+                            // может прийти меткой «Родитель -> Подчинённая» без «id:»).
+                            if (String(optId) === String(currentValue) ||
+                                (currentValue !== '' && String(optVal) === String(currentValue))) {
                                 option.selected = true;
                             }
                             select.appendChild(option);
@@ -19661,7 +19540,10 @@ class IntegramCreateFormHelper {
                         const option = document.createElement('option');
                         option.value = optId;
                         option.textContent = optVal;
-                        if (String(optId) === String(currentValue)) {
+                        // Issue #3572: матчим по id ИЛИ по метке — подчинённый объект
+                        // («Заказ -> Заказанное количество») может прийти меткой без «id:».
+                        if (String(optId) === String(currentValue) ||
+                            (currentValue !== '' && String(optVal) === String(currentValue))) {
                             option.selected = true;
                         }
                         select.appendChild(option);
@@ -21205,7 +21087,11 @@ class IntegramCreateFormHelper {
         // Main value field
         const typeName = this.getMetadataName(metadata);
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
-        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+        // Issue #3572: подчинённый объект «Объекты» может прийти меткой без term-префикса
+        // «id:» — тогда отдаём метку (опции грантов матчатся по id ИЛИ по метке).
+        const mainTermValue = (recordData && recordData.obj && recordData.obj.term !== undefined && recordData.obj.term !== '')
+            ? recordData.obj.term
+            : mainValue;
         const mainFieldType = this.normalizeFormat(metadata.type);
 
         // Build main field HTML based on its type

@@ -338,7 +338,12 @@
             const typeName = this.getMetadataName(metadata);
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
             // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
-            const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+            // Issue #3572: для подчинённой таблицы значение «Объекты» может прийти меткой
+            // («Заказ -> Заказанное количество») без term-префикса «id:» — тогда отдаём метку
+            // как текущее значение, а опции матчатся по id ИЛИ по метке (как в inline-редакторе).
+            const mainTermValue = (recordData && recordData.obj && recordData.obj.term !== undefined && recordData.obj.term !== '')
+                ? recordData.obj.term
+                : mainValue;
             const mainFieldType = this.normalizeFormat(metadata.type);
 
             // Build main field HTML based on its type
