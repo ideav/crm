@@ -356,4 +356,27 @@ assertEqual(core.formatDuration(NaN), '', 'formatDuration: NaN → пусто');
         '#3560 createEvent: цель — таблица «Событие смены» (1082)');
 })();
 
+// ── #3609: бесшовное продолжение смены ──
+assertEqual(core.knifeLayoutKey([{width:55,qty:10},{width:32.5,qty:10}]),
+            core.knifeLayoutKey([{width:32.5,qty:10},{width:55,qty:10}]),
+            'knifeLayoutKey: порядок полос не влияет');
+assertEqual(core.knifeLayoutKey([{width:55,qty:10}]) === core.knifeLayoutKey([{width:55,qty:9}]), false,
+            'knifeLayoutKey: разное кол-во → разный ключ');
+assertEqual(core.knifeLayoutKey([{width:0,qty:0},{width:110,qty:8}]), '110x8', 'knifeLayoutKey: 0×0 отброшены');
+assertEqual(core.knifeLayoutKey([]), '', 'knifeLayoutKey: нет полос → пусто');
+var scCuts = [
+    { id:'A', slitterId:'1', planDate:'2026-05-29', sequence:'1' },
+    { id:'B', slitterId:'1', planDate:'2026-05-29', sequence:'2' },   // последняя 29-го на ст.1
+    { id:'C', slitterId:'1', planDate:'2026-05-30', sequence:'1' },   // первая 30-го на ст.1
+    { id:'D', slitterId:'1', planDate:'2026-05-30', sequence:'2' },
+    { id:'E', slitterId:'2', planDate:'2026-05-30', sequence:'1' }    // другой станок — игнор
+];
+var scB = core.shiftContinuation(scCuts, scCuts[1]);
+assertEqual(scB.isLast, true, 'shiftContinuation: B — последняя в смене 29-го (ст.1)');
+assertEqual(scB.nextCut && scB.nextCut.id, 'C', 'shiftContinuation: первая 30-го на ст.1 = C (не E, не D)');
+assertEqual(core.shiftContinuation(scCuts, scCuts[0]).isLast, false, 'shiftContinuation: A не последняя в смене');
+var scD = core.shiftContinuation(scCuts, scCuts[3]);
+assertEqual(scD.isLast, true, 'shiftContinuation: D — последняя 30-го');
+assertEqual(scD.nextCut, null, 'shiftContinuation: нет следующего дня → nextCut null');
+
 console.log('\n' + passed + ' assertions passed');

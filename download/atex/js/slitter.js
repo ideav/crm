@@ -333,6 +333,36 @@
         return { cuts: list, firstOpenCutId: firstOpen ? String(firstOpen.id) : null };
     }
 
+    // #3609: канонический ключ раскладки ножей резки (полосы «ширина×кол-во», порядок-
+    // независимо; пустые 0×0 отбрасываем). Совпадение ключей = одинаковая конфигурация ножей.
+    function knifeLayoutKey(strips) {
+        return (strips || []).map(function(s) {
+            return round3(toNumber(s.width)) + 'x' + Math.round(toNumber(s.qty) || 0);
+        }).filter(function(x) { return x !== '0x0'; }).sort().join('|');
+    }
+
+    // #3609: для выбранной резки — последняя ли она в смене (день+станок) и первая резка
+    // СЛЕДУЮЩЕГО дня на этом же станке (ближайший день с резками > текущего). Порядок
+    // внутри дня — по «Очередности» (sequence), затем id. → { isLast, nextCut|null }.
+    function shiftContinuation(cuts, cut) {
+        var out = { isLast: false, nextCut: null };
+        if (!cut) return out;
+        var sl = cutSlitterId(cut), dk = dateKey(cut.planDate);
+        function ord(a, b) {
+            return (sequenceKey(a) - sequenceKey(b)) || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
+        }
+        var same = (cuts || []).filter(function(c) { return cutSlitterId(c) === sl; });
+        var today = same.filter(function(c) { return dateKey(c.planDate) === dk; }).slice().sort(ord);
+        out.isLast = today.length > 0 && String(today[today.length - 1].id) === String(cut.id);
+        var nextDk = Infinity;
+        same.forEach(function(c) { var k = dateKey(c.planDate); if (k > dk && k < nextDk) nextDk = k; });
+        if (nextDk !== Infinity) {
+            var nd = same.filter(function(c) { return dateKey(c.planDate) === nextDk; }).slice().sort(ord);
+            out.nextCut = nd[0] || null;
+        }
+        return out;
+    }
+
     function eventUserId(event) {
         if (!event) return '';
         if (event.userId != null) return String(event.userId);
@@ -731,6 +761,8 @@
         todayISO: todayISO,
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
+        knifeLayoutKey: knifeLayoutKey,
+        shiftContinuation: shiftContinuation,
         hasOpenShift: hasOpenShift,
         shiftEventSlitterLabel: shiftEventSlitterLabel,
         runLengthForCut: runLengthForCut,
@@ -1162,15 +1194,16 @@
     // #3460: состав резки — полосы (подчинённая «Партия ГП»). Нужны для метрик
     // (число полос/ножей) и цветной раскладки ножей. Ширину/кол-во/назначение
     // берём по именам реквизитов (как в cut-map.html).
-    AtexSlitter.prototype.loadStrips = function(cutId) {
-        var self = this;
+    // #3609: чтение полос (раскладки ножей) ЛЮБОЙ резки без затирания currentStrips —
+    // нужно для сравнения с первой резкой следующего дня. → Promise<strips[]>.
+    AtexSlitter.prototype.fetchStrips = function(cutId) {
         var meta = this.meta.finishedBatch;
-        if (!meta) { this.currentStrips = []; return Promise.resolve(); }
+        if (!meta) return Promise.resolve([]);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,1000').then(function(rows) {
             var widthIdx = colIndex(meta, STRIP_REQ.width);
             var qtyIdx = colIndex(meta, STRIP_REQ.qty);
             var purposeIdx = colIndex(meta, STRIP_REQ.purpose);
-            self.currentStrips = (rows || []).map(function(rec) {
+            return (rows || []).map(function(rec) {
                 var r = rec.r || [];
                 return {
                     id: String(rec.i),
@@ -1180,7 +1213,34 @@
                     purpose: purposeIdx >= 0 ? (r[purposeIdx] || '') : ''
                 };
             });
-        }).catch(function() { self.currentStrips = []; });
+        }).catch(function() { return []; });
+    };
+
+    AtexSlitter.prototype.loadStrips = function(cutId) {
+        var self = this;
+        return this.fetchStrips(cutId).then(function(strips) { self.currentStrips = strips; });
+    };
+
+    // #3609: если выбранная резка — последняя в смене, а первая резка следующего дня
+    // на этом станке совпадает по ножам и/или сырью — предупреждаем оператора (не убирать
+    // сырьё / не трогать ножи). Результат в this.seamlessNotice, рендерит renderSeamless.
+    AtexSlitter.prototype.computeSeamless = function() {
+        var self = this;
+        this.seamlessNotice = null;
+        var cut = this.currentCut;
+        var cont = core.shiftContinuation(this.cuts, cut);
+        if (!cut || !cont.isLast || !cont.nextCut) return Promise.resolve();
+        var nextCut = cont.nextCut;
+        var nb = nextCut.batchId ? this.findBatch(nextCut.batchId) : null;
+        var nextMatId = (nb && nb.materialId) || nextCut.materialId || '';
+        var curMatId = cut.materialId || '';
+        return this.fetchStrips(nextCut.id).then(function(nextStrips) {
+            var curKey = core.knifeLayoutKey(self.currentStrips);
+            var sameKnives = curKey !== '' && curKey === core.knifeLayoutKey(nextStrips);
+            var sameMaterial = String(curMatId) !== '' && String(curMatId) === String(nextMatId);
+            if (!sameKnives && !sameMaterial) return;
+            self.seamlessNotice = { nextCut: nextCut, sameKnives: sameKnives, sameMaterial: sameMaterial };
+        }).catch(function() {});
     };
 
     // #3460: вид сырья резки для шапки. У резки нет прямого поля «Вид сырья» —
@@ -1314,7 +1374,28 @@
     AtexSlitter.prototype.render = function() {
         this.renderToolbar();
         this.renderCuts();
+        this.renderSeamless();  // #3609: предупреждения о бесшовном продолжении смены
         this.renderMain();
+    };
+
+    // #3609: предупреждения под списком резок (.atex-sl-sidebar). Показываются, когда
+    // выбранная резка — последняя в смене, а первая резка следующего дня на этом станке
+    // совпадает по сырью и/или ножам (см. computeSeamless).
+    AtexSlitter.prototype.renderSeamless = function() {
+        var box = this.seamlessEl;
+        if (!box) return;
+        box.innerHTML = '';
+        var n = this.seamlessNotice;
+        if (!n) return;
+        var nextLabel = (n.nextCut && (n.nextCut.label || n.nextCut.id)) || '';
+        if (n.sameMaterial) {
+            box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
+                '⚠ Сырьё совпадает с первой резкой следующего дня (' + nextLabel + ') — не убирайте сырьё, смена продолжится бесшовно.' }));
+        }
+        if (n.sameKnives) {
+            box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
+                '⚠ Конфигурация ножей совпадает с первой резкой следующего дня (' + nextLabel + ') — не трогайте ножи, смена продолжится бесшовно.' }));
+        }
     };
 
     AtexSlitter.prototype.slitterOptions = function() {
@@ -1708,14 +1789,7 @@
             el('h3', { class: 'atex-sl-section-title', text: 'Партии сырья' })
         ]);
         var available = core.availableBatchesForCut(this.batches, cut);
-        var coverage = core.batchCoverage(this.batches, this.selectedBatchIds, cut);
-        var summary = 'Покрыто: ' + coverage.coveredMeters + ' м';
-        if (coverage.neededMeters > 0) summary += ' из ' + coverage.neededMeters + ' м';
-        summary += ' · проходов: ' + coverage.coveredRuns + '/' + coverage.neededRuns;
-        section.appendChild(el('div', {
-            class: 'atex-sl-coverage' + (coverage.complete ? ' is-complete' : ''),
-            text: summary
-        }));
+        // #3609: блок «Покрыто … м · проходов» (.atex-sl-coverage) убран по требованию.
 
         if (!available.length) {
             section.appendChild(el('div', { class: 'atex-sl-empty', text: 'Нет партий в работе с остатком минимум на один проход.' }));
@@ -2312,6 +2386,8 @@
                 ]);
             }).then(function() {
                 self.resolveCutWidth();  // #3460: уточнить ширину входа после loadCutMaterial
+                return self.computeSeamless();  // #3609: бесшовное продолжение смены
+            }).then(function() {
                 self.setBusy(false);
                 self.render();
             }).catch(function(err) {
@@ -2376,6 +2452,8 @@
         aside.appendChild(head);
         this.cutsEl = el('div', { class: 'atex-sl-cuts' });
         aside.appendChild(this.cutsEl);
+        this.seamlessEl = el('div', { class: 'atex-sl-seamless' }); // #3609: предупреждения «бесшовная смена» под списком резок
+        aside.appendChild(this.seamlessEl);
 
         this.mainEl = el('section', { class: 'atex-sl-main' });
         layout.appendChild(aside);
