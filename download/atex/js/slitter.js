@@ -2089,7 +2089,7 @@
     };
 
     // Событие смены: пишется с датой/временем (главное значение), типом,
-    // оператором и, если применимо, ссылкой/родителем резки.
+    // оператором и ссылкой на резку (реквизит «Задание в производство»).
     AtexSlitter.prototype.createEvent = function(data, cutId) {
         var meta = this.meta.event;
         if (!meta) return Promise.reject(new Error('Таблица «' + TABLE.event + '» не найдена'));
@@ -2107,7 +2107,12 @@
         if (userReq && this.userId) params['t' + userReq] = this.userId;
         if (valReq && data.value !== '' && data.value != null) params['t' + valReq] = core.toNumber(data.value);
         if (notesReq && data.notes) params['t' + notesReq] = data.notes;
-        return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(cutId || 1), params);
+        // #3560: «Событие смены» — корневой объект (up=1). Резку НЕ ставим
+        // родителем: роль Оператора не имеет доступа на запись в поддерево
+        // объекта-резки, и Integram отвечает «нет доступа к реквизиту объекта…
+        // или его родителю». Связь с резкой держится реквизитом cutReq (выше);
+        // чтение выбирает события по нему же (parseEventRows → cutId).
+        return this.post('_m_new/' + meta.id + '?JSON&up=1', params);
     };
 
     AtexSlitter.prototype.openShift = function() {
