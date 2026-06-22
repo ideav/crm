@@ -300,12 +300,11 @@
         return isFinite(n) ? n : Infinity;
     }
 
+    // #3565 #3: порядок резок — строго по «Очередности», без всплытия незапущенных
+    // над начатыми (раньше факт старта тасовал список «по времени»). Завершённые — в конце.
     function compareCutsForQueue(a, b) {
         var ad = isDone(a && a.status), bd = isDone(b && b.status);
         if (ad !== bd) return ad ? 1 : -1;
-        var aw = isWaitingStatus(a && a.status) && !cutStartedValue(a);
-        var bw = isWaitingStatus(b && b.status) && !cutStartedValue(b);
-        if (aw !== bw) return aw ? -1 : 1;
         var as = sequenceKey(a), bs = sequenceKey(b);
         if (as !== bs) return as - bs;
         var ak = dateKey(a && a.planDate), bk = dateKey(b && b.planDate);
@@ -1365,20 +1364,22 @@
         if (!box) return;
         box.innerHTML = '';
         if (!this.selectedSlitterId) {
+            this.updateSidebarTitle(null);
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Сначала выберите станок.' }));
             return;
         }
         if (!this.isShiftOpen()) {
+            this.updateSidebarTitle(null);
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Откройте смену, чтобы выбрать резку.' }));
             return;
         }
         var list = this.visibleCuts();
+        this.updateSidebarTitle(list.length);
         if (!list.length) {
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Резок пока нет' }));
             return;
         }
         var firstOpenId = this.currentQueue().firstOpenCutId;
-        var total = list.length;
         // #3459: только первая резка в «Ожидает» доступна для управления; остальные
         // «Ожидает» заблокированы очередью. #3557 #8: заблокированную резку всё
         // равно можно открыть и посмотреть детали, но кнопки в ней деактивированы.
@@ -1386,25 +1387,28 @@
             var active = String(self.currentCutId) === String(cut.id);
             var isFirstOpen = firstOpenId && String(firstOpenId) === String(cut.id);
             var locked = self.isCutLocked(cut);
+            // #3565 #2: подпись «N (время старта)», напр. «1 (08:30)»; у незапущенной — просто «N».
+            var cutMain = [
+                el('span', { class: 'atex-sl-cut-label', text: (idx + 1) + (cut.startedAt ? ' (' + core.formatClock(cut.startedAt) + ')' : '') })
+            ];
+            if (locked) cutMain.push(el('span', { class: 'atex-sl-cut-sub', text: 'ожидает предыдущую' }));
             var item = el('button', {
                 class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (locked ? ' is-disabled' : ''),
                 type: 'button'
             }, [
-                el('div', { class: 'atex-sl-cut-main' }, [
-                    // #3557 #4: «Резка N из M» (позиция в очереди станка).
-                    el('span', { class: 'atex-sl-cut-label', text: 'Резка ' + (idx + 1) + ' из ' + total }),
-                    // #3557 #7: дату из подписи убрали — «Начато» показываем временем.
-                    el('span', { class: 'atex-sl-cut-sub', text: [
-                        cut.startedAt ? ('Начато: ' + core.formatClock(cut.startedAt)) : 'Начато: —',
-                        locked ? 'ожидает предыдущую' : ''
-                    ].filter(Boolean).join(' · ') })
-                ]),
+                el('div', { class: 'atex-sl-cut-main' }, cutMain),
                 el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
             ]);
             // #3557 #8: клик доступен всегда (просмотр деталей даже у заблокированной).
             item.addEventListener('click', function() { self.openCut(cut.id); });
             box.appendChild(item);
         });
+    };
+
+    // #3565 #1: «Задание в производство (N)» — N резок в списке; null → без счётчика.
+    AtexSlitter.prototype.updateSidebarTitle = function(count) {
+        if (!this.sidebarTitleEl) return;
+        this.sidebarTitleEl.textContent = 'Задание в производство' + (count == null ? '' : ' (' + count + ')');
     };
 
     // #3557: резка заблокирована очередью, если она «Ожидает» и НЕ первая открытая
@@ -2225,7 +2229,9 @@
         var layout = el('div', { class: 'atex-sl-layout' });
 
         var aside = el('aside', { class: 'atex-sl-sidebar' });
-        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ el('h2', { text: 'Задание в производство' }) ]);
+        // #3565 #1: счётчик резок в заголовке обновляется в renderCuts (updateSidebarTitle).
+        this.sidebarTitleEl = el('h2', { text: 'Задание в производство' });
+        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ this.sidebarTitleEl ]);
         var filter = el('label', { class: 'atex-sl-filter' });
         var cb = el('input', { type: 'checkbox' });
         cb.addEventListener('change', function() { self.includeDone = cb.checked; self.renderCuts(); });
