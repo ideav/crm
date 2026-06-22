@@ -628,6 +628,20 @@
         return m ? (m[3] + '.' + m[2] + '.' + m[1]) : s;
     }
 
+    // #3616: дата-заголовок рабочего дня очереди. baseMidnightMs — полночь дня 0 расписания
+    // (planBaseMidnightFrom: день фильтра), dayOffset — номер дня расписания (schedDay).
+    // → «Пн, 23.06.2026». Пусто при нечисловой базе. Чистая → покрывается тестом.
+    function formatPlanDayHeading(baseMidnightMs, dayOffset) {
+        if (baseMidnightMs == null || baseMidnightMs === '') return '';
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return '';
+        var d = new Date(base + (Number(dayOffset) || 0) * 86400000);
+        if (isNaN(d.getTime())) return '';
+        var wd = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()];
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return wd + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+    }
+
     // Полночь (мс) базовой даты планирования: дата из фильтра «.atex-pp-input»
     // («ГГГГ-ММ-ДД»), даже если в прошлом; без выбранной даты — сегодня (nowMs).
     function planBaseMidnightFrom(dateStr, nowMs) {
@@ -3257,6 +3271,7 @@
         dayDeletionTargets: dayDeletionTargets,
         fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         planDateDayKey: planDateDayKey,
+        formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
@@ -6860,17 +6875,23 @@
         var schedule = buildSchedule(activeGroup.cuts, schedOpts);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
-        var dayCutsByKey = {};
+        function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
+        // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
+        // тому же, что разделяет дни блоком уборки и датой-заголовком, — а НЕ по хранимой
+        // «Дате план». Иначе резки одной хранимой даты, переехавшие расписанием на следующий
+        // день (не влезли в текущий), продолжали сквозную нумерацию (№5 на новом дне вместо №1).
+        function cutSchedDayKey(c) { var d = schedDay(schedById[String(c.id)]); return d == null ? ' ' : String(d); }
+        var dayCutsBySched = {};
         activeGroup.cuts.forEach(function(c) {
-            var key = cutPlanDayKey(c);
-            if (!dayCutsByKey[key]) dayCutsByKey[key] = [];
-            dayCutsByKey[key].push(c);
+            var key = cutSchedDayKey(c);
+            if (!dayCutsBySched[key]) dayCutsBySched[key] = [];
+            dayCutsBySched[key].push(c);
         });
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
             .forEach(function(cl) { cleanupByDay[cl.day] = cl; });
-        function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
+        var lastDayDateRendered = null;   // #3616: дата-заголовок дня вставляется один раз на рабочий день
 
         activeGroup.cuts.forEach(function(c, idx) {
             // #3411: при поиске показываем только совпавшие карточки. Расписание/индексы
@@ -6950,11 +6971,11 @@
             // #3354 п.1: первая строка карточки —
             // {номер по порядку} {время} {название сырья} {тип намотки} — {длина} х {резок};
             // справа прижата сводка связей (.atex-pp-cut-supplies).
-            // #3508 п.7: «Очередность» в карточке = позиция задания в очереди станка за день
-            // (1..N по dayCutsByKey), а НЕ хранимое значение «Очередности»: хранимые могли
-            // задвоиться (два «первых» и т.п.), позиционная нумерация всегда сплошная и
-            // уникальная. Хранимые значения дочищаются при перестановке ↑↓ / генерации.
-            var sameDayCuts = dayCutsByKey[cutPlanDayKey(c)] || activeGroup.cuts;
+            // #3508 п.7 / #3616: «Очередность» в карточке = позиция задания в очереди станка
+            // за РАБОЧИЙ ДЕНЬ РАСПИСАНИЯ (1..N по dayCutsBySched), а НЕ хранимое значение
+            // «Очередности» (могли задвоиться) и не сквозной номер по хранимой дате. Нумерация
+            // всегда начинается с 1 на каждый видимый день (тот же день, что у уборки/даты).
+            var sameDayCuts = dayCutsBySched[cutSchedDayKey(c)] || activeGroup.cuts;
             var dayIdx = sameDayCuts.indexOf(c);
             var seqText = String((dayIdx >= 0 ? dayIdx : idx) + 1);
             var windingText = normWinding(c.winding) || String(c.winding == null ? '' : c.winding).trim() || '—';
@@ -7072,6 +7093,17 @@
             // зафиксированное задание по времени в течение дня и меняет его очередность.
             controls.appendChild(del);
             cardPanel.appendChild(controls);
+
+            // #3616: дата рабочего дня — заголовком перед первой (видимой) карточкой каждого
+            // дня расписания. Для дней 2+ он встаёт сразу ПОСЛЕ блока уборки предыдущего дня
+            // («дату после записи об уборке»); для первого дня — в начале очереди. Дата =
+            // база планирования (день фильтра) + смещение дня расписания.
+            var cardSchedDay = sc ? schedDay(sc) : null;
+            if (cardSchedDay != null && cardSchedDay !== lastDayDateRendered) {
+                groupEl.appendChild(el('div', { class: 'atex-pp-day-date',
+                    text: formatPlanDayHeading(planBaseMidnightMs, cardSchedDay) }));
+                lastDayDateRendered = cardSchedDay;
+            }
 
             groupEl.appendChild(cardPanel);
 
@@ -7380,4 +7412,4 @@
 
  
  
-// @version 2026-06-22-issue-3613
+// @version 2026-06-23-issue-3616
