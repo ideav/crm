@@ -5974,10 +5974,13 @@
     // не смог построить раскладку). Данные считаются на клиенте при генерации.
     AtexProductionPlanning.prototype.openSkippedReport = function(skipped) {
         var posById = positionMap(this.genPositions);
+        var matNames = this.materialNameById || {};   // #3608: карта materialId → название сырья
         var rows = (skipped || []).map(function(s) {
             var p = posById[String(s.positionId)] || {};
+            var matId = p.materialId == null ? '' : String(p.materialId);
             return {
                 id: s.positionId == null ? '' : s.positionId,
+                material: matNames[matId] || (matId !== '' ? '#' + matId : ''),  // #3608: название сырья
                 width: (p.orderWidth != null ? p.orderWidth : p.width) || '',  // #3372: заказанная ширина (не фактическая)
                 qty: p.qty || '',
                 length: p.length || '',
@@ -5989,10 +5992,11 @@
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
             });
         }
-        var base = '/' + encodeURIComponent(this.db) + '/object/';
+        var base = '/' + encodeURIComponent(this.db) + '/edit_obj/';   // #3608: ссылка на форму правки (edit_obj), а не object/
         var trs = rows.map(function(r, i) {
             return '<tr><td>' + (i + 1) + '</td>' +
                 '<td><a href="' + base + esc(r.id) + '" target="_blank" rel="noopener">' + esc(r.id) + '</a></td>' +
+                '<td>' + esc(r.material) + '</td>' +
                 '<td>' + esc(r.width) + '</td>' +
                 '<td>' + esc(r.qty) + '</td>' +
                 '<td>' + esc(r.length) + '</td>' +
@@ -6009,8 +6013,8 @@
             '<h1>Пропущенные позиции — ' + rows.length + '</h1>' +
             '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку и не создал производственные задания. ' +
             'Проверьте параметры (ширина джамбо, сырьё) и повторите генерацию.</p>' +
-            '<table><thead><tr><th>№</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
-            '<tbody>' + (trs || '<tr><td colspan="6">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
+            '<table><thead><tr><th>№</th><th>ID позиции</th><th>Сырьё</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
+            '<tbody>' + (trs || '<tr><td colspan="7">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
         var w = window.open('', '_blank');
         if (!w) { this.notify('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.', 'error'); return; }
         w.document.open();
