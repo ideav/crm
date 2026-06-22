@@ -193,6 +193,7 @@
 
 /* Карточка резки — панель (#3120 п.1): информация + контролы + панель полос внутри. */
 .atex-pp-cut {
+    position: relative; /* #3613: якорь для значка смежности дня (.atex-pp-cut-spans) */
     padding: 9px 12px;
     margin-bottom: 8px;
     border: 1px solid var(--pp-border);
@@ -211,6 +212,34 @@
 /* #3545: красный бордюр «нет обеспечения» — только у НЕзафиксированного задания.
    У зафиксированного бордюр остаётся серым (.is-fixed), сигнал даёт красный фон. */
 .atex-pp-cut.is-unreserved:not(.is-fixed) { border-color: var(--pp-warn); }
+
+/* #3613: задание, не влезшее в рабочий день, дробится по дням. На первой/последней
+   карточке цепочки — значок справа внизу (контролы прижаты влево, угол свободен):
+   «←» начало в предыдущем дне, «→» продолжение в следующем. Подсказка — в title. */
+.atex-pp-cut-spans {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    gap: 4px;
+    pointer-events: none; /* индикатор, не контрол; не перехватывает клики карточки */
+}
+.atex-pp-cut-span {
+    pointer-events: auto; /* вернуть наведение для подсказки title */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--pp-accent);
+    background: rgba(19, 65, 116, .12);
+    cursor: help;
+}
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
