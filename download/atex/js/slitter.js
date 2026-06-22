@@ -292,11 +292,6 @@
         return '';
     }
 
-    function cutStartedValue(cut) {
-        if (!cut) return '';
-        return String(cut.startedAt || cut.started || cut.actualStart || '').trim();
-    }
-
     function sequenceKey(cut) {
         var n = Number(cut && cut.sequence);
         return isFinite(n) ? n : Infinity;
@@ -327,17 +322,12 @@
             return compareCutsForQueue(a.cut, b.cut) || a.i - b.i;
         }).map(function(x) { return x.cut; });
 
+        // #3579: «первая открытая» в очереди = первая НЕ завершённая резка. Пока она не
+        // завершена (в работе/наладке/перерыве/ожидает), все следующие «Ожидает» заблокированы
+        // (isCutLocked) — нельзя запускать следующее задание, пока предыдущее не завершено.
         var firstOpen = null;
         for (var i = 0; i < list.length; i++) {
-            if (!isDone(list[i].status) && isWaitingStatus(list[i].status) && !cutStartedValue(list[i])) {
-                firstOpen = list[i];
-                break;
-            }
-        }
-        if (!firstOpen) {
-            for (var j = 0; j < list.length; j++) {
-                if (!isDone(list[j].status)) { firstOpen = list[j]; break; }
-            }
+            if (!isDone(list[i].status)) { firstOpen = list[i]; break; }
         }
         return { cuts: list, firstOpenCutId: firstOpen ? String(firstOpen.id) : null };
     }
