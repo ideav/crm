@@ -234,19 +234,18 @@
 }
 
 /* Партии сырья */
-.atex-sl-coverage {
-    margin-bottom: 10px;
+/* #3609: предупреждения о бесшовном продолжении смены (под списком резок) */
+.atex-sl-seamless { display: flex; flex-direction: column; gap: 8px; }
+.atex-sl-seamless:not(:empty) { margin: 10px 0 4px; }
+.atex-sl-warn-note {
     padding: 9px 11px;
-    border: 1px solid var(--sl-border-soft);
+    border: 1px solid var(--sl-warning-text);
     border-radius: 6px;
-    background: var(--sl-surface);
-    color: var(--sl-muted);
+    background: var(--sl-warning-bg);
+    color: var(--sl-warning-text);
     font-size: 13px;
-}
-.atex-sl-coverage.is-complete {
-    border-color: var(--sl-success-border);
-    background: var(--sl-success-bg);
-    color: var(--sl-ok);
+    font-weight: 600;
+    line-height: 1.35;
 }
 .atex-sl-batch-grid {
     display: grid;
