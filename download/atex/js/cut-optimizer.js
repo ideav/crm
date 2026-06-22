@@ -79,6 +79,9 @@
     // и включает значение по умолчанию (#3482).
     var DEFAULT_LENGTH = 450;
     var LENGTH_PRESETS = [300, 450, 600, 700, 900, 1000];
+    // #3573: допуск на отход по умолчанию (мм). Берётся из Вида сырья («Допуск, мм»),
+    // а если у материала он не задан — действует это значение. По нему красится отход.
+    var DEFAULT_TOLERANCE = 21;
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
 
@@ -499,6 +502,7 @@
         this.batches = [];        // [{ id, no, materialId, remainderM2, active, … }]
         this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние)
         this.lengthValue = String(DEFAULT_LENGTH); // длина рулона по умолчанию (#3474-fix)
+        this.tolValue = String(DEFAULT_TOLERANCE); // допуск на отход по умолчанию 21 мм (#3573)
         this.plan = null;
         this.busy = false;
     }
@@ -869,9 +873,11 @@
             // (по умолчанию 450, выбор из списка стандартных длин), материал её не диктует.
             if (this.widthInput) this.widthInput.value = String(m.width || '');
             this.widthValue = String(m.width || '');
-            // Допуск на отход — из выбранного материала (поле редактируемое).
-            if (this.tolInput) this.tolInput.value = String(m.tolerance || '');
-            this.tolValue = String(m.tolerance || '');
+            // Допуск на отход — из выбранного материала («Допуск, мм»); если не задан,
+            // действует значение по умолчанию 21 мм (#3573). Поле редактируемое.
+            var matTol = toNumber(m.tolerance) > 0 ? String(m.tolerance) : String(DEFAULT_TOLERANCE);
+            if (this.tolInput) this.tolInput.value = matTol;
+            this.tolValue = matTol;
         }
         this.renderBatches();
         this.maybeRecalc();
@@ -942,8 +948,9 @@
     // Несколько карт раскроя (по одной на ширину, объединённые ради отхода).
     AtexCutOptimizer.prototype.renderMaps = function(p) {
         var wrap = el('div', { class: 'atex-co-maps' });
-        // Допуск на отход материала (Вид сырья → «Допуск, мм»), редактируемый.
+        // Допуск на отход (Вид сырья → «Допуск, мм»), редактируемый. Пусто/0 → 21 мм (#3573).
         var tol = this.tolInput ? toNumber(this.tolInput.value) : 0;
+        if (!(tol > 0)) tol = DEFAULT_TOLERANCE;
         p.maps.forEach(function(m) {
             var card = el('div', { class: 'atex-co-map' });
             var widthsLabel = m.pattern.map(function(s) { return s.width + '×' + s.knives; }).join(' + ');
@@ -970,13 +977,10 @@
                 bar.appendChild(rem);
             }
             card.appendChild(bar);
-            // Цвет отхода по допуску материала: ≤ допуска — норма (зелёный),
-            // больше — превышение (красный). Без допуска — нейтрально (0 = зелёный).
-            var wasteCls = 'atex-co-map-waste';
-            if (tol > 0) wasteCls += (m.trimWidth <= tol ? ' is-ok' : ' is-warn');
-            else if (m.trimWidth === 0) wasteCls += ' is-ok';
-            var wasteText = 'Отход: ' + m.trimWidth + ' мм (' + m.trimPct + '%)'
-                + (tol > 0 ? ' · допуск ' + round3(tol) + ' мм' : '');
+            // Цвет отхода по допуску: ≤ допуска — норма (зелёный), больше — превышение
+            // (красный). Допуск всегда задан: из материала или дефолт 21 мм (#3573).
+            var wasteCls = 'atex-co-map-waste' + (m.trimWidth <= tol ? ' is-ok' : ' is-warn');
+            var wasteText = 'Отход: ' + m.trimWidth + ' мм (' + m.trimPct + '%) · допуск ' + round3(tol) + ' мм';
             card.appendChild(el('div', { class: 'atex-co-map-foot' }, [
                 el('span', { text: 'Полос/резку: ' + m.knivesTotal }),
                 el('span', { class: wasteCls, text: wasteText })
