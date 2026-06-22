@@ -61,7 +61,8 @@
         finishedBatch: 'Партия ГП',
         sleeveTask: 'Задание на втулки',
         settings: 'Настройка',
-        maxStock: 'Максимальный запас'   // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
+        maxStock: 'Максимальный запас',  // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
+        leader: 'Лидер'                  // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
     };
     // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
     // максимально допустимый запас (число); реквизиты задают комбинацию параметров
@@ -95,6 +96,7 @@
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м',
         winding: 'Тип намотки',
+        leader: 'Лидер',         // #3569: ссылка на «Лидер» (82519); при планировании копируется из позиции
         fixed: 'Зафиксировано'   // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
     };
     var CUT_PLANNED_RUN_COLUMNS = [
@@ -121,7 +123,8 @@
         status: CUT_REQ.status,
         notes: CUT_REQ.notes,
         sequence: CUT_REQ.sequence,
-        winding: CUT_REQ.winding
+        winding: CUT_REQ.winding,
+        leader: CUT_REQ.leader   // #3569: лидер задания (ссылка)
     };
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
@@ -3446,6 +3449,7 @@
             self.meta.sleeveTask = byName(TABLE.sleeveTask);
             self.meta.settings = byName(TABLE.settings);
             self.meta.maxStock = byName(TABLE.maxStock);   // #3391: необязательная — фича включается её наличием
+            self.meta.leader = byName(TABLE.leader);        // #3569: справочник «Лидер» (резолв метки → id)
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -3560,6 +3564,37 @@
             console.warn('[pp] 📦 loadMaxStock: не удалось прочитать «Максимальный запас»:', err && err.message);
             self.maxStockIndex = planning.buildMaxStockIndex([], meta);
         });
+    };
+
+    // #3569: справочник «Лидер» (1132) → карта { метка(lower) → id }. Отчёт
+    // positions_list отдаёт лидера позиции меткой («Глобал Принтинг»), а реквизит
+    // «Лидер» задания — ссылка: при записи нужен id записи справочника, а не метка
+    // (docs/kb/crud.md: ref-поле = id). Таблица необязательна — нет её → карта пуста.
+    AtexProductionPlanning.prototype.loadLeaders = function() {
+        var self = this;
+        this.leaderIdByLabel = {};
+        var meta = this.meta.leader;
+        if (!meta) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(r) {
+                var label = ((r.r || [])[0] == null ? '' : String((r.r || [])[0])).trim();
+                if (label) map[label.toLowerCase()] = String(r.i);
+            });
+            self.leaderIdByLabel = map;
+            console.log('[pp] 🏷️ loadLeaders: лидеров в справочнике:', Object.keys(map).length);
+        }).catch(function(err) {
+            console.warn('[pp] 🏷️ loadLeaders: не удалось прочитать «Лидер»:', err && err.message);
+            self.leaderIdByLabel = {};
+        });
+    };
+
+    // #3569: id записи справочника «Лидер» по метке (для записи ссылки в задание).
+    // Нет справочника / метки / совпадения → '' (buildFields опустит пустой реквизит).
+    AtexProductionPlanning.prototype.resolveLeaderId = function(label) {
+        var key = (label == null ? '' : String(label)).trim().toLowerCase();
+        if (!key) return '';
+        return (this.leaderIdByLabel || {})[key] || '';
     };
 
     // ── Загрузчики для генерации резок ──
@@ -4280,6 +4315,8 @@
             }
             var slot = self.freeSlotForCut(d.slitterId, plan.scheduleCut);
             var planDayTs = slot && slot.startTs > 0 ? String(slot.startTs) : '';
+            // #3569: лидер берём из покрываемой позиции (метку резолвим в id справочника).
+            var leaderPos = (self.genPositions || []).filter(function(p) { return String(p.id) === String(d.positionId); })[0];
             var cutReqIds = {
                 slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
                 plannedRuns: reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES),
@@ -4287,6 +4324,7 @@
                 timing: reqIdByName(cutMeta, CUT_REQ.timing),
                 length: reqIdByName(cutMeta, CUT_REQ.length),
                 winding: reqIdByName(cutMeta, CUT_REQ.winding),
+                leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
                 active: activeReqId(cutMeta),
                 notes: reqIdByName(cutMeta, CUT_REQ.notes),
                 sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
@@ -4301,6 +4339,7 @@
                 timing: plan.timing,
                 length: plan.runLength > 0 ? plan.runLength : '',
                 winding: normWinding(plan.layout && plan.layout.windDir),
+                leader: self.resolveLeaderId(leaderPos && leaderPos.leader), // #3569: лидер позиции → id
                 active: (d.active === false) ? '0' : '1',
                 notes: d.notes,
                 sequence: nextSequenceForCuts(self.cuts, d.slitterId, planDayTs)
@@ -5395,6 +5434,7 @@
                         lay.mat = mat;
                         lay.windDir = group.windDir;
                         lay.windLength = group.windLength;
+                        lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
@@ -5473,6 +5513,7 @@
             timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
+            leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
         };
@@ -5732,6 +5773,7 @@
                     timing: timing,
                     length: runLength > 0 ? runLength : '',
                     winding: normWinding(lay && lay.windDir),
+                    leader: self.resolveLeaderId(lay && lay.leader), // #3569: лидер позиции → id справочника
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
@@ -6073,7 +6115,8 @@
             plannedRuns: runsReqId,
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: seqReqId,
-            winding: reqIdByName(cutMeta, CUT_REQ.winding)
+            winding: reqIdByName(cutMeta, CUT_REQ.winding),
+            leader: reqIdByName(cutMeta, CUT_REQ.leader)   // #3569: лидер копируется в запись-продолжение
         };
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
@@ -6160,7 +6203,9 @@
                             materialBatch: parentCut && parentCut.batchId,
                             plannedRuns: cr.plannedRuns,
                             sequence: cr.sequence,
-                            winding: normWinding(parentCut && parentCut.winding)
+                            winding: normWinding(parentCut && parentCut.winding),
+                            // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
+                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : '')
                         });
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
@@ -7183,6 +7228,7 @@
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
+                    self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     self.loadGenBatches(), // FIFO-партии для генерации резок + карта batchMaterialById (стоп-лист)
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
