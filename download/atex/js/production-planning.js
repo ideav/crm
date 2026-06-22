@@ -601,6 +601,19 @@
         return out;
     }
 
+    // Сообщение об ошибке из ответа API. Команды `_m_*` и отчёты при отказе отдают
+    // `[{"error":"…"}]` (массив; см. my_die/api_dump в index.php) с HTTP-кодом 4xx,
+    // успех — данные без ключа `error`. Разворачиваем обе формы (массив-обёртку и
+    // объект), `err` поддерживаем синонимом. Пусто — ошибки нет. Вызывать только при
+    // !resp.ok, чтобы строки данных с колонкой «error» не принять за сбой. Чистая —
+    // покрывается тестом.
+    function extractApiError(result) {
+        var obj = Array.isArray(result) ? result[0] : result;
+        if (!obj || typeof obj !== 'object') return '';
+        var msg = obj.error != null ? obj.error : (obj.err != null ? obj.err : '');
+        return msg == null ? '' : String(msg).trim();
+    }
+
     // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
     function todayISO() {
         var d = new Date();
@@ -3270,6 +3283,7 @@
         isCutVisible: isCutVisible,
         dayDeletionTargets: dayDeletionTargets,
         fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
+        extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
@@ -3496,8 +3510,15 @@
     AtexProductionPlanning.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
             return resp.text().then(function(text) {
-                try { return text ? JSON.parse(text) : null; }
-                catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
+                var data;
+                try { data = text ? JSON.parse(text) : null; }
+                catch (e) {
+                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
+                    throw new Error('Некорректный JSON: ' + text.slice(0, 200));
+                }
+                // Сервер сигналит отказ кодом 4xx и телом `[{"error":"…"}]` (my_die).
+                if (!resp.ok) throw new Error(extractApiError(data) || ('Сервер вернул ошибку ' + resp.status));
+                return data;
             });
         });
     };
@@ -3521,8 +3542,16 @@
         }).then(function(resp) {
             return resp.text().then(function(text) {
                 var result;
-                try { result = text ? JSON.parse(text) : {}; } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
-                if (result && (result.error || result.err)) throw new Error(result.error || result.err);
+                try { result = text ? JSON.parse(text) : {}; }
+                catch (e) {
+                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
+                    throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
+                }
+                // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
+                // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
+                // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
+                // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
+                if (!resp.ok) throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status));
                 return result;
             });
         });
