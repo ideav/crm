@@ -6650,7 +6650,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, arrs.id arr_id, a.val attrs, a.id
 					FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1 LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 							LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-					WHERE a.up=$id AND a.t!=a.up ORDER BY a.ord";
+					WHERE a.up=$id AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord"; // #3596: пропускаем только ord=0 self-descriptor; самоссылающуюся подтаблицу (ord>0) оставляем — иначе колонки вида объекта расходятся с metadata (#3589) и подтаблица «открывается криво»/пустая
 			$data_set = Exec_sql($sql, "Get all Names of Reqs of the Typ");
 			$GLOBALS["no_reqs"] = mysqli_num_rows($data_set) == 0; # Check if the Type has any Reqs
 			$ord = 0;
@@ -7941,7 +7941,7 @@ function GetObjectReqs($typ, $id)
 			FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1
 				LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 				LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-			WHERE a.up=$typ AND a.t!=a.up ORDER BY a.ord";
+			WHERE a.up=$typ AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord"; // #3596: см. выше — самоссылающаяся подтаблица (up==t, ord>0) это реквизит записи, не self-descriptor; нужна для формы/реквизитов записи
 	$data_set = Exec_sql($sql, "Get the Reqs meta");
 	while($row = mysqli_fetch_array($data_set)){
 		if($row["ref_id"]){
