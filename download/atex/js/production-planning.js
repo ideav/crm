@@ -2159,6 +2159,29 @@
         return stored > 0 ? round3(stored) : 0;
     }
 
+    // #3635 п.5: id сегментов НАСТРОЙКИ — резки с 0 проходов, у которых в ТОЙ ЖЕ цепочке
+    // дневного разрыва (та же continuationSignature + станок) есть запись с проходами > 0.
+    // Это голова разбиения «настройка в конце дня N → намотка с дня N+1»: у неё намотки нет,
+    // поэтому в расписании её длительность 0 (а не оценка «1 проход» из scheduleDurationMinutes),
+    // и карточка показывает «Настройка». Обычные резки без проходов (легаси-оценка) не трогаем.
+    function setupTaskIdSet(cuts) {
+        var byChain = {};
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var sid = c.slitter && c.slitter.id;
+            var key = continuationSignature(c) + '|' + String(sid == null ? '' : sid);
+            (byChain[key] = byChain[key] || []).push(c);
+        });
+        var ids = {};
+        Object.keys(byChain).forEach(function(key) {
+            var grp = byChain[key];
+            var hasRuns = grp.some(function(c) { return (Number(c.plannedRuns) || 0) > 0; });
+            if (!hasRuns) return;   // нет «настоящей» резки в цепочке → это не разрыв настройки
+            grp.forEach(function(c) { if ((Number(c.plannedRuns) || 0) <= 0) ids[String(c.id)] = true; });
+        });
+        return ids;
+    }
+
     var DAY_START_MIN = 8 * 60;          // DAY_START_HOUR по умолчанию: 08:00
     var DAY_END_MIN = 17 * 60;           // DAY_END_HOUR по умолчанию: 17:00
     var SHIFT_START_MIN = DAY_START_MIN; // старый экспорт: начало окна резок
@@ -2240,10 +2263,11 @@
         var lunchDone = {};
         var t = shiftStart;   // день 0, начало смены
         var out = [];
+        var setupIds = opts.setupTaskIds || {};   // #3635 п.5: сегменты настройки — намотка 0
         (cuts || []).forEach(function(c, i){
             // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
             var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
-            var dur = scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
+            var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
             // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
             // очередность (пины #3508 п.6 убраны).
@@ -3487,6 +3511,7 @@
         cutTimingTimelineLines: cutTimingTimelineLines,
         buildCutTimingCtx: buildCutTimingCtx,
         scheduleDurationMinutes: scheduleDurationMinutes,
+        setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
@@ -6542,6 +6567,11 @@
                     var fields = {};
                     if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
                     if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
+                    // #3635 п.5: сегмент НАСТРОЙКИ (0 проходов) — обнуляем сохранённую
+                    // «Длительность, минут», иначе остаётся старая (намотка целой резки) и
+                    // расписание считает настройку длинной резкой, ломая раскладку по дням.
+                    var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
+                    if (Number(u.plannedRuns) === 0 && durReqId) fields['t' + durReqId] = '0';
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -7163,6 +7193,10 @@
         // День 0 = дата фильтра (.atex-pp-input), на которую отфильтрована очередь, а не
         // «сегодня»; иначе title показывал текущую дату вместо плановой (напр. 10.06 вместо 01.06).
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
+        // #3635 п.5: сегменты НАСТРОЙКИ (0 проходов + продолжение с проходами в цепочке) —
+        // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
+        // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
+        var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
         var schedOpts = {
             windPoints: windPoints,
             times: self.changeTimes,
@@ -7170,7 +7204,8 @@
             shiftStartMin: dayWindow.startMin,
             shiftEndMin: dayWindow.cutEndMin,
             lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin
+            lunchDurationMin: dayWindow.lunchDurationMin,
+            setupTaskIds: setupTaskIds
         };
         // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
         // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
@@ -7226,8 +7261,11 @@
                     if (resLin + 1e-6 < needLin) unreserved = true;
                 }
             }
+            // #3635 п.5: сегмент НАСТРОЙКИ (хвост дня N перед намоткой дня N+1) — карточка
+            // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
+            var isSetupTask = !!setupTaskIds[String(c.id)];
             // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : ''), dataset: { cutId: String(c.id) } });
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : ''), dataset: { cutId: String(c.id) } });
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
@@ -7246,8 +7284,12 @@
             // отдельным рядом ниже. Клик открывает тайминг и (всплытием) выбирает резку.
             var timeEl = null;
             if (sc) {
-                var scheduleText = formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
-                if (stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
+                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · N мин»
+                // (окно = переналадка, минуты вверх), а не строку расписания резки.
+                var scheduleText = isSetupTask
+                    ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
+                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
+                if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
                         cutId: String(c.id),
                         plannedRuns: c.plannedRuns,
@@ -7294,7 +7336,10 @@
             // #3406 п.3: дефис — отдельный элемент между намоткой и размерами, чтобы
             // он стоял по центру (равный flex-gap слева и справа): «MR194 IN — 600 х 7».
             infoChildren.push(el('span', { class: 'atex-pp-cut-dash', text: '—' }));
-            infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: formatCutDimensions(c, runLengthForCut) }));
+            // #3635 п.5: у настройки проходов нет — вместо «длина х 0 резок» показываем
+            // число настраиваемых ножей (сама намотка с этими размерами идёт на след. дне).
+            infoChildren.push(el('span', { class: 'atex-pp-cut-runs',
+                text: isSetupTask ? ('ножей: ' + (Number(c.knifeCount) || 0)) : formatCutDimensions(c, runLengthForCut) }));
             // #3472: лидер резки — после размеров (перед связями, которые прижаты вправо).
             // Один лидер — обычная плашка; несколько (легаси-смешение до ограничения по
             // лидеру) — выделяем предупреждением.
