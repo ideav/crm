@@ -1257,6 +1257,43 @@ var sbSched = planning.buildSchedule([toBase, toClone({materialId:'2'})], { wind
 assertEqual(sbSched[1].setupMin, planning.setupBreakdown(toBase, toClone({materialId:'2'}), null).reduce(function(s,p){return s+p.minutes;},0),
     'setupBreakdown #3240: Σ minutes == setupMin расписания');
 
+// ── #3669 п.2: настройка ножей первой задачи очереди (флаг firstCutSetup) ──
+// Первая задача каждого дня, кроме первого, считает переналадку с последней задачей
+// предыдущего дня (changeoverParts). У самой первой задачи предыдущего дня нет — настройку
+// ножей резервируем по флагу. firstSetupParts: резка с ножами → KNIFE, иначе [].
+assertEqual(planning.firstSetupParts({ knifeCount:4, knifeWidths:[60] }, null),
+    [{code:'KNIFE', label:'настройка ножей', minutes:30}],
+    'firstSetupParts #3669: резка с ножами → настройка ножей 30');
+assertEqual(planning.firstSetupParts({ knifeCount:0, knifeWidths:[] }, null), [],
+    'firstSetupParts #3669: без ножей → нет настройки');
+assertEqual(planning.firstSetupParts({ knifeCount:4 }, { KNIFE:0 }), [],
+    'firstSetupParts #3669: KNIFE=0 → нет настройки');
+// setupBreakdown без флага — поведение прежнее (только лидер); с флагом — лидер + настройка ножей.
+assertEqual(planning.setupBreakdown(null, toBase, null),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}],
+    'setupBreakdown #3669: первая задача без флага — только лидер (обратная совместимость)');
+assertEqual(planning.setupBreakdown(null, toBase, null, { firstCutSetup:true }),
+    [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}, {code:'KNIFE', label:'настройка ножей', minutes:30}],
+    'setupBreakdown #3669: первая задача с флагом → лидер + настройка ножей');
+// buildSchedule с firstCutSetup: первая резка резервирует настройку ножей; вторая (та же
+// конфигурация) — без повторной настройки (только лидер).
+var fsSched = planning.buildSchedule([toBase, toClone()],
+    { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480, firstCutSetup: true });
+assertEqual(fsSched[0].setupMin, 32, 'buildSchedule #3669: первая резка — лидер 2 + настройка ножей 30 = 32');
+assertEqual(planning.setupBreakdown(null, toBase, null, { firstCutSetup:true }).reduce(function(s,p){return s+p.minutes;},0),
+    fsSched[0].setupMin, 'buildSchedule #3669: Σ setupBreakdown(первая, флаг) == setupMin расписания');
+assertEqual(fsSched[1].setupMin, 2, 'buildSchedule #3669: вторая (та же конфигурация) — только лидер, настройка не повторяется');
+// Без флага первая резка настройку ножей НЕ резервирует (как прежде).
+assertEqual(planning.buildSchedule([toBase], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 })[0].setupMin, 2,
+    'buildSchedule #3669: без флага первая резка — только лидер (обратная совместимость)');
+// splitMachineQueue с firstCutSetup: первый сегмент резервирует настройку ножей.
+assertEqual(planning.splitMachineQueue([{ id:'a', knifeWidths:[100], knifeCount:1, plannedRuns:1 }],
+    { dayStartMin:0, dayEndMin:1000, times:{ BETWEEN_CUTS:0 }, perPassByCut:{ a:10 }, runsByCut:{ a:1 }, firstCutSetup:true })[0].setupMin,
+    30, 'splitMachineQueue #3669: первый сегмент — настройка ножей 30');
+assertEqual(planning.splitMachineQueue([{ id:'a', knifeWidths:[100], knifeCount:1, plannedRuns:1 }],
+    { dayStartMin:0, dayEndMin:1000, times:{ BETWEEN_CUTS:0 }, perPassByCut:{ a:10 }, runsByCut:{ a:1 } })[0].setupMin,
+    0, 'splitMachineQueue #3669: без флага первый сегмент — без настройки (обратная совместимость)');
+
 // #3240: заголовок модалки не показывает авто-номер (timestamp), а показывает сырьё/намотку.
 assertEqual(planning.cutTimingModalTitle({ number:'1749375420', materialName:'MW308', winding:'IN' }),
     'Тайминг резки · MW308 · намотка IN',
