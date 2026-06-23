@@ -139,9 +139,10 @@
 
 /* #3583: кнопки отметки проходов правее .atex-sl-head-title. */
 .atex-sl-head-pass { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.atex-sl-btn-pass { font-weight: 600; }
-.atex-sl-btn-pass-all { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); }
-.atex-sl-btn-pass-all:hover:not(:disabled) { background: var(--sl-success-hover-bg, var(--sl-success-bg)); }
+/* #3621: «Готово» и «Готовы все» — зелёные (вместо убранной кнопки «Завершить»).
+   Обе кнопки несут класс .atex-sl-btn-pass, поэтому одного правила достаточно. */
+.atex-sl-btn-pass { font-weight: 600; background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); }
+.atex-sl-btn-pass:hover:not(:disabled) { background: var(--sl-success-hover-bg, var(--sl-success-bg)); }
 
 /* #3583: модалка подтверждения «Готовы все» (без confirm()). */
 .atex-sl-confirm-overlay {
@@ -326,8 +327,6 @@
 .atex-sl-btn:hover { background: var(--sl-surface); }
 .atex-sl-btn-primary { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; }
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
-.atex-sl-btn-advance { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); font-weight: 600; }
-.atex-sl-btn-advance:hover { background: var(--sl-success-hover-bg); }
 .atex-sl-btn-secondary { background: var(--sl-surface); }
 .atex-sl-photo { display: flex; align-items: center; gap: 8px; }
 
