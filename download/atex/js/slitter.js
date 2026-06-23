@@ -93,17 +93,18 @@
     // Статусы резки. Базовая цепочка для очереди (Ожидает → В работе → Завершена);
     // фактический статус резки выводится из последнего события смены (#3557).
     var STATUSES = ['Ожидает', 'В работе', 'Завершена'];
-    var DONE_STATUSES = ['Завершена', 'Завершён', 'Готова'];
+    var DONE_STATUSES = ['Завершена', 'Завершён', 'Готова', 'Пропущена']; // #3646: «Пропущена» — терминальный (вышло из активной очереди, можно «Возобновить»)
     var WAIT_STATUSES = ['Ожидает', 'Запланирована', 'В очереди'];
     // #3557: типы событий, управляющие статусом резки (справочник «Тип события», 1193).
     var EV = {
         startCut: 'Начало резки', setup: 'Наладка', brk: 'Перерыв',
         resume: 'Возобновить', finish: 'Завершить', abort: 'Прекратить',
         shiftStart: 'Начало смены', shiftEnd: 'Конец смены',
-        pass: 'Резка'  // #3583: отметка выполненного прохода (значение справочника «Тип события» 1193)
+        pass: 'Резка',  // #3583: отметка выполненного прохода (значение справочника «Тип события» 1193)
+        skip: 'Пропуск' // #3646: пропуск задания (значение справочника «Тип события» 1193, id 89834)
     };
     // Типы событий смены (справочник «Тип события» базы ateh, 1193).
-    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.finish, EV.abort, EV.shiftEnd];
+    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.skip, EV.finish, EV.abort, EV.shiftEnd];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -685,6 +686,7 @@
         var t = String(lastEventType == null ? '' : lastEventType).trim();
         var a = attrs || {};
         if (t === EV.finish || t === EV.abort) return 'Завершена';
+        if (t === EV.skip) return 'Пропущена'; // #3646: пропущенное задание — отдельный терминальный статус
         if (t === EV.setup) return 'Наладка';
         if (t === EV.brk) return 'Перерыв';
         if (t === EV.startCut || t === EV.resume) return 'В работе';
@@ -1646,7 +1648,8 @@
             defs = [
                 ['Наладка', 'primary', function() { self.setupCut(); }],
                 ['Перерыв', 'secondary', function() { self.breakCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }]
+                ['Прекратить', 'secondary', function() { self.abortCut(); }],
+                ['Пропуск', 'secondary', function() { self.skipCut(); }] // #3646: пропустить задание
             ];
         }
         var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
@@ -2101,6 +2104,11 @@
     // #3557: Прекратить — досрочно завершить: «Закончено»=now, «В работе»=0.
     AtexSlitter.prototype.abortCut = function() {
         return this.cutAction(EV.abort, { setFinished: true, setInWork: false, message: 'Резка прекращена' });
+    };
+    // #3646: Пропуск — пропустить задание (его не режем): событие «Пропуск», «Закончено»=now,
+    // «В работе»=0 → статус «Пропущена» (терминальный, очередь идёт дальше; можно «Возобновить»).
+    AtexSlitter.prototype.skipCut = function() {
+        return this.cutAction(EV.skip, { setFinished: true, setInWork: false, message: 'Задание пропущено' });
     };
 
     // #3557: Завершить резку — проверки счётчиков, погонаж в партию, «Закончено»=now,

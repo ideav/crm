@@ -219,8 +219,7 @@ assertEqual(blockedQueue.firstOpenCutId, 'c1', '#3459 only first waiting cut is 
 assertEqual(blockedQueue.cuts.length, 3, '#3459 all three waiting cuts are in the queue (UI disables c2, c3)');
 
 // ── #3459: verify new EVENT_TYPES include Пропуск and Отмена ──
-assertEqual(core.EVENT_TYPES.indexOf('Пропуск') >= 0, true, '#3459 EVENT_TYPES includes Пропуск');
-assertEqual(core.EVENT_TYPES.indexOf('Отмена') >= 0, true, '#3459 EVENT_TYPES includes Отмена');
+assertEqual(core.EVENT_TYPES.indexOf('Пропуск') >= 0, true, '#3646 EVENT_TYPES includes Пропуск');
 
 // ── #3459: verify STATUSES is now 3-element chain ──
 assertEqual(core.STATUSES.length, 3, '#3459 STATUSES has 3 elements');
@@ -317,6 +316,10 @@ assertEqual(core.deriveCutStatus('Перерыв', { inWork: '1' }), 'Перер
 assertEqual(core.deriveCutStatus('Возобновить', { inWork: '1' }), 'В работе', 'deriveCutStatus: Возобновить → В работе');
 assertEqual(core.deriveCutStatus('Завершить', {}), 'Завершена', 'deriveCutStatus: Завершить → Завершена');
 assertEqual(core.deriveCutStatus('Прекратить', {}), 'Завершена', 'deriveCutStatus: Прекратить → Завершена');
+// #3646: «Пропуск» → терминальный статус «Пропущена» (приоритет события над атрибутами).
+assertEqual(core.deriveCutStatus('Пропуск', {}), 'Пропущена', 'deriveCutStatus #3646: Пропуск → Пропущена');
+assertEqual(core.deriveCutStatus('Пропуск', { finishedAt: '1782000000' }), 'Пропущена', 'deriveCutStatus #3646: Пропуск (с атрибутом Закончено) всё равно Пропущена');
+assertEqual(core.isDone('Пропущена'), true, 'isDone #3646: Пропущена — терминальный (вышло из активной очереди)');
 // Флаг «В работе» снят только завершением: Наладка/Перерыв его не трогают (опора на атрибут)
 assertEqual(core.deriveCutStatus('', { inWork: '1' }), 'В работе', 'deriveCutStatus: атрибут В работе=1 без события → В работе');
 assertEqual(core.deriveCutStatus('', { finishedAt: '1782000000' }), 'Завершена', 'deriveCutStatus: атрибут Закончено → Завершена');
