@@ -3326,7 +3326,27 @@
         return !target.closest('.atex-pp-strip-panel');
     }
 
+    // #3638: разбор deep-link из строки запроса (?cut=..&date=..&slitter=..). Ганта
+    // (cut-gantt) шлёт сюда дату/станок/задание, чтобы открыть очередь на нужной
+    // резке. Чистая → проверяется тестом. Возвращает {cut,date,slitter} (строки).
+    function parseDeepLink(search) {
+        var s = String(search == null ? '' : search);
+        var qm = s.indexOf('?');
+        if (qm >= 0) s = s.slice(qm + 1);
+        var out = { cut: '', date: '', slitter: '' };
+        s.split('&').forEach(function(pair) {
+            if (!pair) return;
+            var eq = pair.indexOf('=');
+            var key = eq >= 0 ? pair.slice(0, eq) : pair;
+            var val = eq >= 0 ? pair.slice(eq + 1) : '';
+            try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (e) {}
+            if (key === 'cut' || key === 'date' || key === 'slitter') out[key] = val;
+        });
+        return out;
+    }
+
     var planning = {
+        parseDeepLink: parseDeepLink,
         cutClickSelectsCut: cutClickSelectsCut,
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -6759,6 +6779,26 @@
         this.renderLink();
     };
 
+    // #3638: применить deep-link из cut-gantt: выставить день (фильтр дат), активный
+    // станок и сфокусировать задание (подсветка + прокрутка к карточке). Вызывается
+    // после первичного рендера. Параметры — { cut, date, slitter } (строки, любой пуст).
+    AtexProductionPlanning.prototype.applyDeepLink = function(params) {
+        var p = params || {};
+        if (!p.cut && !p.date && !p.slitter) return;
+        if (p.date) { this.filter.date = p.date; this.filter.dateTo = p.date; }
+        if (p.slitter) this.activeSlitter = String(p.slitter);
+        this.renderQueue();   // пересобрать вкладки/очередь под новый день/станок
+        if (p.cut) {
+            this.selectCut(p.cut);
+            var card = this.queueEl && this.queueEl.querySelector('.atex-pp-cut[data-cut-id="' + String(p.cut).replace(/"/g, '\\"') + '"]');
+            if (card) {
+                card.classList.add('is-deeplink');
+                if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'center' });
+            }
+        }
+        this.renderLink();
+    };
+
     // Открыть модалку формы новой резки (#3116 п.1). Содержимое уже отрисовано
     // renderForm; здесь только показываем оверлей.
     AtexProductionPlanning.prototype.openForm = function() {
@@ -7710,7 +7750,14 @@
         console.log('[pp] 🟢 init: запуск production-planning, db=', (root.getAttribute('data-db') || '?'));
         var controller = new AtexProductionPlanning(root);
         root._atexProductionPlanning = controller;
-        controller.start();
+        // #3638: deep-link из cut-gantt (?cut=..&date=..&slitter=..) — после загрузки
+        // данных открыть очередь на нужном дне/станке и подсветить задание.
+        var deepLink = (typeof window !== 'undefined' && window.location)
+            ? parseDeepLink(window.location.search) : null;
+        var started = controller.start();
+        if (deepLink && (deepLink.cut || deepLink.date || deepLink.slitter) && started && typeof started.then === 'function') {
+            started.then(function() { controller.applyDeepLink(deepLink); });
+        }
     }
 
     return { planning: planning, Controller: AtexProductionPlanning, init: init };

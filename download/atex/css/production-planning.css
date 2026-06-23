@@ -207,6 +207,12 @@
 .atex-pp-cut.is-fixed { border-color: #9ca3af; background: rgba(107, 114, 128, .06); box-shadow: inset 0 0 0 1px #cbd1d9; }
 .atex-pp-cut.is-fixed:hover { background: rgba(107, 114, 128, .1); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+/* #3638: задание, открытое по ссылке из диаграммы Ганта — кратковременная подсветка. */
+.atex-pp-cut.is-deeplink { animation: atex-pp-deeplink 2.4s ease-out 1; }
+@keyframes atex-pp-deeplink {
+    0%, 30% { box-shadow: 0 0 0 3px rgba(19, 65, 116, .5); }
+    100% { box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+}
 /* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
 .atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); }
 /* #3545: красный бордюр «нет обеспечения» — только у НЕзафиксированного задания.

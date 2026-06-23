@@ -1,0 +1,183 @@
+/* Рабочее место atex «Диаграмма Ганта (задания)» (ideav/crm#3638).
+   Task-Гант: одна строка = одно «Задание в производство», бар-ссылка на «Планирование
+   производства». Стили скоупятся под #atex-cut-gantt / .atex-cg, чтобы не пересекаться
+   с другими РМ в main.html. Палитра статусов и тёмная тема — как в machine-calendar. */
+
+.atex-cg {
+    --cg-border: var(--input-border, #d9dee5);
+    --cg-border-soft: var(--border-color, #eef1f5);
+    --cg-bg: var(--input-bg, #ffffff);
+    --cg-surface: var(--bg-secondary, #f8fafc);
+    --cg-muted: var(--text-secondary, #6b7280);
+    --cg-accent: var(--atex-navy, #134174);
+    --cg-warn: var(--color-error, #b91c1c);
+    --cg-track: #f8fafc;
+    --cg-grid: #e5e7eb;
+    --cg-planned: #2563eb;
+    --cg-running: #0891b2;
+    --cg-unfinished: #d97706;
+    --cg-ok: #15803d;
+    --cg-late: #b91c1c;
+    --cg-unknown: #64748b;
+    --cg-label-w: 240px;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 64px);
+    padding: 16px;
+    gap: 12px;
+    color: var(--text-primary, #1f2933);
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-cg {
+    --cg-track: rgba(15, 23, 42, .45);
+    --cg-grid: rgba(148, 163, 184, .28);
+    --cg-planned: #60a5fa;
+    --cg-running: #22d3ee;
+    --cg-unfinished: #f59e0b;
+    --cg-ok: #22c55e;
+    --cg-late: #f87171;
+    --cg-unknown: #94a3b8;
+}
+
+.atex-cg *,
+.atex-cg *::before,
+.atex-cg *::after { box-sizing: border-box; }
+
+.atex-cg.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-cg-loading,
+.atex-cg-fatal { padding: 24px; color: var(--cg-muted); }
+.atex-cg-fatal { color: var(--cg-warn); }
+
+/* ── Тулбар ── */
+.atex-cg-input,
+.atex-cg-btn,
+.atex-cg-arrow,
+.atex-cg-mode {
+    height: 32px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-bg);
+    color: inherit;
+    font: inherit;
+    padding: 0 10px;
+    cursor: pointer;
+}
+.atex-cg-input { cursor: auto; }
+.atex-cg-btn:hover,
+.atex-cg-arrow:hover,
+.atex-cg-mode:hover { background: var(--cg-surface); }
+
+.atex-cg-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+}
+.atex-cg-title { font-weight: 600; font-size: 16px; color: var(--cg-accent); margin-right: auto; }
+.atex-cg-period { display: flex; align-items: center; gap: 8px; }
+.atex-cg-range { min-width: 150px; text-align: center; font-weight: 600; }
+.atex-cg-arrow { width: 32px; padding: 0; font-size: 18px; line-height: 1; }
+.atex-cg-modes { display: inline-flex; }
+.atex-cg-mode { border-radius: 0; border-left-width: 0; }
+.atex-cg-mode:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; border-left-width: 1px; }
+.atex-cg-mode:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.atex-cg-mode.is-active { background: var(--cg-accent); color: #fff; border-color: var(--cg-accent); }
+.atex-cg-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* ── Легенда ── */
+.atex-cg-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--cg-muted); }
+.atex-cg-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.atex-cg-legend-item::before { content: ""; width: 14px; height: 14px; border-radius: 3px; background: var(--cg-unknown); }
+.atex-cg-legend-item.is-planned::before { background: var(--cg-planned); }
+.atex-cg-legend-item.is-running::before { background: var(--cg-running); }
+.atex-cg-legend-item.is-unfinished::before { background: var(--cg-unfinished); }
+.atex-cg-legend-item.is-on-time::before { background: var(--cg-ok); }
+.atex-cg-legend-item.is-late::before { background: var(--cg-late); }
+
+/* ── Тело ── */
+.atex-cg-scroll { overflow-x: auto; flex: 1; }
+.atex-cg-body {
+    min-width: 720px;
+    border: 1px solid var(--cg-border-soft);
+    border-radius: 8px;
+    background: var(--cg-bg);
+    overflow: hidden;
+}
+
+.atex-cg-row { display: grid; grid-template-columns: var(--cg-label-w) 1fr; border-top: 1px solid var(--cg-border-soft); }
+.atex-cg-row:first-child { border-top: 0; }
+
+.atex-cg-label {
+    padding: 8px 10px;
+    border-right: 1px solid var(--cg-border-soft);
+    background: var(--cg-surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+}
+.atex-cg-label-main { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atex-cg-label-sub { color: var(--cg-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Шкала дат (sticky сверху) */
+.atex-cg-scale-row { position: sticky; top: 0; z-index: 3; background: var(--cg-surface); }
+.atex-cg-label--scale { font-weight: 600; color: var(--cg-muted); }
+
+.atex-cg-track {
+    position: relative;
+    min-height: 40px;
+    background: var(--cg-track);
+}
+.atex-cg-scale { min-height: 28px; }
+
+/* Сетка дней */
+.atex-cg-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--cg-grid); }
+.atex-cg-tick.is-end { border-left: 0; }
+.atex-cg-tick.is-scale { border-left-color: var(--cg-border); }
+.atex-cg-tick-label {
+    position: absolute;
+    top: 5px;
+    left: 4px;
+    font-size: 12px;
+    color: var(--cg-muted);
+    white-space: nowrap;
+}
+.atex-cg-tick-label.is-minor { opacity: 0; }
+
+/* Бар-ссылка */
+.atex-cg-bar {
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    min-width: 6px;
+    border-radius: 5px;
+    padding: 0 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    text-decoration: none;
+    color: #fff;
+    background: var(--cg-unknown);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+    cursor: pointer;
+}
+.atex-cg-bar:hover { filter: brightness(1.06); box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
+.atex-cg-bar:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 1px; }
+.atex-cg-bar-main { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atex-cg-bar-status { font-size: 11px; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.atex-cg-bar.is-planned { background: var(--cg-planned); }
+.atex-cg-bar.is-running { background: var(--cg-running); }
+.atex-cg-bar.is-unfinished { background: var(--cg-unfinished); }
+.atex-cg-bar.is-on-time,
+.atex-cg-bar.is-done { background: var(--cg-ok); }
+.atex-cg-bar.is-late,
+.atex-cg-bar.is-late-start { background: var(--cg-late); }
+.atex-cg-bar.is-unknown { background: var(--cg-unknown); }
+
+.atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }
