@@ -1712,6 +1712,134 @@
         });
     }
 
+    // ───────── Лимит запаса (#3445): остаток склада + capping ─────────
+    // PR #3395/#3391 решал ЧЛЕНСТВО (Склад vs Отходы). #3445 добавляет КОЛИЧЕСТВЕННЫЙ
+    // лимит: на склад по номенклатуре нельзя нарезать больше «Максимального запаса»
+    // (первая колонка) с учётом того, что уже лежит на складе.
+
+    // Текущий остаток ГП: суммарные рулоны «Партий ГП», физически лежащих на складе
+    // (статус не «Отгружен»), по номенклатуре. batches: [{ material, width, length,
+    // winding, rolls, shipped }]; ключ — тот же maxStockKey (сырьё|ширина|длина|намотка).
+    function buildStockBalanceIndex(batches) {
+        var byKey = {};
+        (batches || []).forEach(function(b) {
+            if (!b || b.shipped) return;
+            var rolls = stripNum(b.rolls);
+            if (!(rolls > 0)) return;
+            var k = maxStockKey(b);
+            byKey[k] = round3((byKey[k] || 0) + rolls);
+        });
+        return { byKey: byKey };
+    }
+
+    // Текущий остаток (рулонов) по номенклатуре nom; 0, если на складе ничего нет.
+    function currentStock(balanceIndex, nom) {
+        if (!balanceIndex || !balanceIndex.byKey) return 0;
+        var v = balanceIndex.byKey[maxStockKey(nom)];
+        return v > 0 ? v : 0;
+    }
+
+    // Свободный остаток лимита (рулонов) — на сколько ещё можно нарезать впрок:
+    // maxStockLimit − текущий остаток (не отрицателен). null — если номенклатуры нет
+    // в «Максимальном запасе» (количественного лимита нет; членство решает #3391).
+    function stockHeadroom(maxStockIndex, balanceIndex, nom) {
+        var limit = maxStockLimit(maxStockIndex, nom);
+        if (limit == null) return null;
+        var head = round3(limit - currentStock(balanceIndex, nom));
+        return head > 0 ? head : 0;
+    }
+
+    // Обрезать планируемые НА СКЛАД рулоны по «Максимальному запасу» (#3445, capping).
+    // Складские рулоны = перепроизводство заказных ширин (qty×проходов − спрос) + добор
+    // ходовыми (полосы «Склад»). По каждой номенклатуре их суммарно (по всем раскладкам)
+    // ≤ headroom (свободный остаток лимита). Заказное покрытие НЕ трогаем — режем только
+    // излишек впрок; добор режем раньше перепроизводства (ходовые наиболее спекулятивны).
+    // Лишнее не нарезается (уходит в остаток джамбо). МУТИРУЕТ strip.qty и убирает
+    // обнулённые складские полосы. ctx:
+    //   runsForLayout(layout)          → число проходов (≥1);
+    //   demandRollsForWidth(layout, w) → рулонов заказа по ширине w в этой раскладке;
+    //   headroomForNom(nom)            → рулонов | null (null = без лимита, ширину пропускаем).
+    // → { trimmed: [{ key, width, kind:'добор'|'перепроизводство', droppedRolls }] }.
+    function capStockToHeadroom(layouts, ctx) {
+        var remaining = {};   // key → остаток лимита (рулонов), копится по раскладкам
+        var trimmed = [];
+        function ensure(key, head) {
+            if (!(key in remaining)) remaining[key] = head > 0 ? head : 0;
+            return remaining[key];
+        }
+        (layouts || []).forEach(function(layout) {
+            var runs = Math.ceil(Number(ctx.runsForLayout(layout)) || 1);
+            if (!(runs >= 1)) runs = 1;
+            var strips = (layout && layout.strips) || [];
+            // Сгруппировать полосы раскладки по ширине: заказная + складская.
+            var byWidth = {};
+            var order = [];
+            strips.forEach(function(s) {
+                var w = round3(Number(s.width) || 0);
+                if (w <= 0) return;
+                var key = String(w);
+                if (!byWidth[key]) { byWidth[key] = { width: w, order: null, stock: null }; order.push(key); }
+                if (isStockStrip(s)) byWidth[key].stock = s; else byWidth[key].order = s;
+            });
+            order.forEach(function(wKey) {
+                var g = byWidth[wKey];
+                var nom = { material: layout.mat, width: g.width, length: layout.windLength, winding: layout.windDir };
+                var head = ctx.headroomForNom(nom);
+                if (head == null) return;   // нет количественного лимита — ширину не трогаем
+                var key = maxStockKey(nom);
+                ensure(key, head);
+                // 1) добор (полосы «Склад»): весь объём — впрок, режем первым.
+                if (g.stock) {
+                    var producedS = round3((Number(g.stock.qty) || 0) * runs);
+                    if (producedS > remaining[key]) {
+                        var allowedQtyS = Math.floor(remaining[key] / runs);
+                        if (allowedQtyS < 0) allowedQtyS = 0;
+                        var droppedS = round3((Number(g.stock.qty) || 0) * runs - allowedQtyS * runs);
+                        g.stock.qty = allowedQtyS;
+                        if (droppedS > 0) trimmed.push({ key: key, width: g.width, kind: 'добор', droppedRolls: droppedS });
+                        remaining[key] = round3(remaining[key] - allowedQtyS * runs);
+                    } else {
+                        remaining[key] = round3(remaining[key] - producedS);
+                    }
+                }
+                // 2) перепроизводство заказной ширины (qty×проходов − спрос): режем до
+                //    минимума, покрывающего заказ (ceil(спрос/проходов)).
+                if (g.order) {
+                    var demand = round3(Number(ctx.demandRollsForWidth(layout, g.width)) || 0);
+                    var qtyO = Number(g.order.qty) || 0;
+                    var producedO = round3(qtyO * runs);
+                    var excess = round3(producedO - demand);
+                    if (excess > 0) {
+                        if (excess > remaining[key]) {
+                            var minQty = Math.ceil(demand / runs);
+                            if (!(minQty >= 1)) minQty = (demand > 0 ? 1 : 0);
+                            var allowedQtyO = minQty + Math.floor(remaining[key] / runs);
+                            if (allowedQtyO < minQty) allowedQtyO = minQty;
+                            if (allowedQtyO > qtyO) allowedQtyO = qtyO;
+                            var droppedO = round3((qtyO - allowedQtyO) * runs);
+                            if (droppedO > 0) {
+                                g.order.qty = allowedQtyO;
+                                trimmed.push({ key: key, width: g.width, kind: 'перепроизводство', droppedRolls: droppedO });
+                            }
+                            var newExcess = round3(Math.max(0, allowedQtyO * runs - demand));
+                            remaining[key] = round3(remaining[key] - newExcess);
+                        } else {
+                            remaining[key] = round3(remaining[key] - excess);
+                        }
+                    }
+                }
+                if (remaining[key] < 0) remaining[key] = 0;
+            });
+            // Убрать обнулённые складские полосы (заказные с qty≥1 сохраняем).
+            if (layout && layout.strips) {
+                layout.strips = layout.strips.filter(function(s) {
+                    return !(isStockStrip(s) && (Number(s.qty) || 0) <= 0);
+                });
+            }
+        });
+        return { trimmed: trimmed };
+    }
+
     function positionMap(positions) {
         if (!positions) return {};
         if (!Array.isArray(positions)) return positions;
@@ -3530,6 +3658,10 @@
         isStockableNomenclature: isStockableNomenclature,
         stockStripPurpose: stockStripPurpose,
         filterStockableWidths: filterStockableWidths,
+        buildStockBalanceIndex: buildStockBalanceIndex,
+        currentStock: currentStock,
+        stockHeadroom: stockHeadroom,
+        capStockToHeadroom: capStockToHeadroom,
         plannedRunsForLayout: plannedRunsForLayout,
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
@@ -3640,6 +3772,7 @@
         this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
+        this.stockBalanceIndex = planning.buildStockBalanceIndex([]); // #3445: текущий остаток ГП по номенклатуре (пуст до загрузки)
         this.draft = this.blankDraft();
         // #3599: дата плана диапазоном [date; dateTo] — фильтр отображения очереди; date
         // («С») остаётся базой генерации/планирования. По умолчанию оба = сегодня (один день).
@@ -3850,6 +3983,77 @@
         }).catch(function(err) {
             console.warn('[pp] 📦 loadMaxStock: не удалось прочитать «Максимальный запас»:', err && err.message);
             self.maxStockIndex = planning.buildMaxStockIndex([], meta);
+        });
+    };
+
+    // #3445: текущий остаток ГП по номенклатуре — суммарные рулоны «Партий ГП»,
+    // физически лежащих на складе (статус не «Отгружен»). Номенклатуру берём из
+    // родительской «Производственной резки» (up): сырьё через batchMaterialById
+    // (Партия сырья → Вид сырья), намотка/длина — поля резки; ширина — у партии.
+    // Кол-во рулонов: «Кол-во факт» → «Кол-во рулонов» → «Кол-во план» (как в
+    // warehouse.js: факт реален, иначе план/спрос). Нужен ПОСЛЕ loadGenBatches
+    // (batchMaterialById). Graceful: ошибка чтения → пустой остаток (фича не блокирует).
+    AtexProductionPlanning.prototype.loadStockBalance = function() {
+        var self = this;
+        this.stockBalanceIndex = planning.buildStockBalanceIndex([]);
+        var fbMeta = this.meta.finishedBatch;
+        var cutMeta = this.meta.cut;
+        // Фича выключена без таблицы «Максимальный запас» — остаток не нужен (лишние запросы).
+        if (!fbMeta || !cutMeta || !this.meta.maxStock) return Promise.resolve();
+        var iWidth = columnIndex(fbMeta, FINISHED_BATCH_REQ.width);
+        var iActual = columnIndex(fbMeta, FINISHED_BATCH_REQ.actual);
+        var iRolls = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var iPlanned = columnIndex(fbMeta, FINISHED_BATCH_REQ.planned);
+        var iStatus = columnIndex(fbMeta, CUT_REQ.status);   // «Статус»
+        var iCutMat = columnIndex(cutMeta, CUT_REQ.materialBatch);
+        var iCutWind = columnIndex(cutMeta, CUT_REQ.winding);
+        var iCutLen = columnIndex(cutMeta, CUT_REQ.length);
+        return Promise.all([
+            this.getJson('object/' + fbMeta.id + '/?JSON_OBJ&LIMIT=0,5000'),
+            this.getJson('object/' + cutMeta.id + '/?JSON_OBJ&LIMIT=0,5000')
+        ]).then(function(res) {
+            var fbRows = res[0] || [];
+            var cutRows = res[1] || [];
+            var matById = self.batchMaterialById || {};
+            // Карта резки → { material, winding, length }.
+            var cutById = {};
+            cutRows.forEach(function(rec) {
+                var r = rec.r || [];
+                var matBatch = iCutMat >= 0 ? parseRef(r[iCutMat]) : { id: null };
+                var matBatchId = matBatch.id ? String(matBatch.id) : '';
+                cutById[String(rec.i)] = {
+                    material: matById[matBatchId] || '',
+                    winding: iCutWind >= 0 ? r[iCutWind] : '',
+                    length: iCutLen >= 0 ? r[iCutLen] : 0
+                };
+            });
+            var batches = fbRows.map(function(rec) {
+                var r = rec.r || [];
+                var cut = cutById[String(rec.u)] || { material: '', winding: '', length: 0 };
+                // Рулоны: факт → рулоны (спрос) → план (см. warehouse.js:286-288).
+                var rolls = 0;
+                [iActual, iRolls, iPlanned].some(function(idx) {
+                    if (idx < 0) return false;
+                    var v = stripNum(r[idx]);
+                    if (v > 0) { rolls = v; return true; }
+                    return false;
+                });
+                var status = iStatus >= 0 ? String(r[iStatus] == null ? '' : r[iStatus]) : '';
+                return {
+                    material: cut.material,
+                    width: iWidth >= 0 ? r[iWidth] : 0,
+                    length: cut.length,
+                    winding: cut.winding,
+                    rolls: rolls,
+                    shipped: /отгру/i.test(status)
+                };
+            });
+            self.stockBalanceIndex = planning.buildStockBalanceIndex(batches);
+            console.log('[pp] 📦 loadStockBalance: номенклатур на складе:',
+                Object.keys(self.stockBalanceIndex.byKey).length);
+        }).catch(function(err) {
+            console.warn('[pp] 📦 loadStockBalance: не удалось прочитать остаток ГП:', err && err.message);
+            self.stockBalanceIndex = planning.buildStockBalanceIndex([]);
         });
     };
 
@@ -5511,12 +5715,26 @@
 
                 var q = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: '1', placeholder: '0' });
                 q.value = s.qty;
+                var lastGoodQty = s.qty;   // #3445: откат при превышении «Максимального запаса»
                 q.addEventListener('input', function() {
                     s.qty = q.value;
                     rollsCell.textContent = String(round3((stripNum(s.qty) || 0) * passes));
                     recalc();
                 });
-                q.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
+                q.addEventListener('change', function() {
+                    // #3445: не дать ручным вводом превысить «Максимальный запас» (остаток + впрок).
+                    var bad = self.stockLimitExceededForCut(cut, strips, passes, orderedBatchIds);
+                    if (bad) {
+                        s.qty = lastGoodQty; q.value = lastGoodQty;
+                        rollsCell.textContent = String(round3((stripNum(s.qty) || 0) * passes));
+                        recalc();
+                        self.notify('Превышен «Максимальный запас» по ' + bad.width + ' мм: на складе ' + bad.current +
+                            ' + впрок ' + bad.adding + ' = ' + bad.projected + ' > лимит ' + bad.limit + ' рул. Не сохранено.', 'error');
+                        return;
+                    }
+                    lastGoodQty = s.qty;
+                    self.persistStrip(cut.id, s);   // авто-сейв (#3127)
+                });
                 row.appendChild(q);
 
                 row.appendChild(rollsCell);   // #3253: вычисляемое поле «Рулонов», read-only
@@ -5639,6 +5857,13 @@
                     text: p.width + ' мм · Популярность ' + p.popularity });
                 b.addEventListener('click', function() {
                     var ns = { id: null, width: String(p.width), qty: '1' };   // #3242: «Партия ГП»
+                    // #3445: не добирать ходовую, если она выведет склад за «Максимальный запас».
+                    var bad = self.stockLimitExceededForCut(cut, strips.concat([ns]), passes, orderedBatchIds);
+                    if (bad) {
+                        self.notify('Нельзя добрать ' + p.width + ' мм: «Максимальный запас» будет превышен (на складе ' +
+                            bad.current + ' + впрок ' + bad.adding + ' = ' + bad.projected + ' > лимит ' + bad.limit + ' рул.).', 'error');
+                        return;
+                    }
                     strips.push(ns);
                     renderRows();
                     recalc();
@@ -5674,6 +5899,40 @@
     AtexProductionPlanning.prototype.cutPlannedRunsById = function(cutId) {
         var c = (this.cuts || []).filter(function(x) { return String(x.id) === String(cutId); })[0];
         return c ? stripNum(c.plannedRuns) : 0;
+    };
+
+    // #3445: лимит запаса при ручном редактировании состава. Суммирует планируемые НА
+    // СКЛАД рулоны этой резки по каждой номенклатуре (полосы не «Заказ» × проходов) и
+    // сравнивает с лимитом «Максимального запаса» за вычетом текущего остатка склада.
+    // null — всё в пределах; иначе { width, limit, current, adding, projected }.
+    // Балансовый снимок грузится при старте РМ и не учитывает несохранённые правки этой
+    // сессии — для свежесгенерированной резки это даёт корректную абсолютную проверку.
+    AtexProductionPlanning.prototype.stockLimitExceededForCut = function(cut, strips, passes, orderedBatchIds) {
+        var self = this;
+        var runs = stripNum(passes);
+        if (!(runs > 0) || !cut) return null;
+        var addByKey = {}, nomByKey = {}, widthByKey = {};
+        (strips || []).forEach(function(s) {
+            if (s && s.id != null && orderedBatchIds && orderedBatchIds[String(s.id)]) return; // заказное покрытие — не запас
+            var w = stripNum(s && s.width), qty = stripNum(s && s.qty);
+            if (!(w > 0) || !(qty > 0)) return;
+            var nom = { material: cut.materialId, width: w, length: cut.length, winding: cut.winding };
+            if (planning.stockHeadroom(self.maxStockIndex, self.stockBalanceIndex, nom) == null) return; // нет количественного лимита
+            var key = planning.maxStockKey(nom);
+            addByKey[key] = round3((addByKey[key] || 0) + qty * runs);
+            nomByKey[key] = nom; widthByKey[key] = w;
+        });
+        var bad = null;
+        Object.keys(addByKey).forEach(function(key) {
+            if (bad) return;
+            var nom = nomByKey[key];
+            var limit = planning.maxStockLimit(self.maxStockIndex, nom);
+            if (limit == null) return;
+            var current = planning.currentStock(self.stockBalanceIndex, nom);
+            var projected = round3(current + addByKey[key]);
+            if (projected > limit) bad = { width: widthByKey[key], limit: limit, current: current, adding: round3(addByKey[key]), projected: projected };
+        });
+        return bad;
     };
 
     // Авто-сейв одной полосы по мере редактирования (#3127). Есть id → _m_set;
@@ -5914,6 +6173,31 @@
                 self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
                 return;
             }
+
+            // #3445: capping по «Максимальному запасу» — на склад по каждой номенклатуре
+            // нельзя нарезать больше лимита (с учётом текущего остатка). Урезаем добор и
+            // перепроизводство впрок; заказное покрытие не трогаем. Лишнее не нарезается.
+            var capPosById = positionMap(self.genPositions);
+            var capResult = capStockToHeadroom(allLayouts, {
+                runsForLayout: function(lay) { return plannedRunsForLayout(lay, capPosById); },
+                demandRollsForWidth: function(lay, w) {
+                    var sum = 0;
+                    (lay.positionsCovered || []).forEach(function(pid) {
+                        var p = capPosById[String(pid)];
+                        if (!p) return;
+                        if (round3(Number(p.width) || 0) !== round3(Number(w) || 0)) return;
+                        sum += Number(p.qty) || 0;
+                    });
+                    return sum;
+                },
+                headroomForNom: function(nom) { return stockHeadroom(self.maxStockIndex, self.stockBalanceIndex, nom); }
+            });
+            if (capResult.trimmed.length) {
+                var cappedRolls = capResult.trimmed.reduce(function(a, t) { return a + (Number(t.droppedRolls) || 0); }, 0);
+                console.log('[pp] ⚙️ generateCuts: #3445 capping — урезано впрок (рулонов):', round3(cappedRolls),
+                    'позиций раскладки:', capResult.trimmed.length, capResult.trimmed.slice(0, 5));
+            }
+
             var timingDiagnostics = cutGenerationTimingDiagnostics(allLayouts, self.genPositions, self.opTimes);
             if (timingDiagnostics.length) {
                 console.error('[pp] ❌ generateCuts: ошибка подготовки полей резки — ' + cutWriteDiagnosticSummary(timingDiagnostics), {
@@ -5942,6 +6226,13 @@
             } else {
                 msg.appendChild(document.createTextNode('Пропущено 0. '));
             }
+            // #3445: отчёт об урезании впрок по «Максимальному запасу» (если было).
+            if (capResult.trimmed.length) {
+                var cappedTotal = capResult.trimmed.reduce(function(a, t) { return a + (Number(t.droppedRolls) || 0); }, 0);
+                msg.appendChild(document.createTextNode(
+                    'Урезано впрок по «Максимальному запасу»: ' + round3(cappedTotal) + ' рул. '));
+            }
+            // #3470: текст «Создать производственные задания?» (без счётчика, термин «задания»).
             msg.appendChild(document.createTextNode('Создать производственные задания?'));
 
             // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
@@ -7816,7 +8107,8 @@
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
                     self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
-                    self.loadGenBatches(), // FIFO-партии для генерации резок + карта batchMaterialById (стоп-лист)
+                    // #3445: loadStockBalance после loadGenBatches — нужен batchMaterialById (сырьё резки).
+                    self.loadGenBatches().then(function() { return self.loadStockBalance(); }),
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
                     self.loadDaySettings(),    // DAY_START_HOUR/DAY_END_HOUR для рабочего окна
