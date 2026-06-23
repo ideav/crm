@@ -423,6 +423,15 @@
         return runs > 0 ? Math.ceil(runs) : 1;
     }
 
+    // #3635 п.5: задание-«настройка» — хвост дня N перед намоткой дня N+1. Это запись с
+    // «Кол-во резок план» ЯВНО «0» (день-разрыв оставил настройку ножей/сырья в конце дня).
+    // Намотки у неё нет; в пульте показываем «Настройка ножей и сырья», оператор отмечает
+    // «Наладка» → «Готово» (обычный статус-флоу, без проходов/обязательной партии).
+    // Реальные резки всегда с проходами >0, поэтому явный «0» однозначно опознаёт настройку.
+    function isSetupTask(cut) {
+        return String(cut && cut.plannedRuns == null ? '' : cut.plannedRuns).trim() === '0';
+    }
+
     // Internal alias to avoid function-hoisting surprises in minifiers and keep
     // these helpers readable before `core` is assembled.
     function coreToNumber(value) {
@@ -749,6 +758,7 @@
         shiftEventSlitterLabel: shiftEventSlitterLabel,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
+        isSetupTask: isSetupTask,   // #3635 п.5
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
         availableBatchesForCut: availableBatchesForCut,
@@ -1564,10 +1574,14 @@
         // позиция задания в очереди). M = «Кол-во резок план».
         // #3621: N (текущий проход) выводим из числа отметок «Готово» — событий
         // «Резка» этой резки + 1, в пределах [1, M] (раньше — из метража, #3566).
+        // #3635 п.5: задание-«настройка» (хвост дня N) — заголовок «Настройка ножей и сырья»
+        // вместо «Резка N из M». Кнопки статуса (Наладка) и «Готово/Готовы все» остаются —
+        // оператор отмечает наладку обычным статус-флоу, событие пишется как у резки.
+        var setup = core.isSetupTask(cut);
         var total = core.plannedRunsForCut(cut);
         var pass = Math.min(this.donePassCount(cut) + 1, total);
         if (pass < 1) pass = 1;
-        var title = 'Резка ' + pass + ' из ' + total;
+        var title = setup ? '⚙ Настройка ножей и сырья' : ('Резка ' + pass + ' из ' + total);
         // #3557 #5: строку .atex-sl-head-meta убрали (Слиттер/Партия/План видно в тулбаре/метриках).
         var head = el('div', { class: 'atex-sl-head' }, [
             el('div', { class: 'atex-sl-head-main' }, [

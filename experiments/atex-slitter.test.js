@@ -30,6 +30,12 @@ assertEqual(core.toNumber(' 1 000 '), 1000, 'toNumber strips spaces');
 assertEqual(core.toNumber(''), 0, 'toNumber empty → 0');
 assertEqual(core.toNumber('abc'), 0, 'toNumber garbage → 0');
 
+// ── #3635 п.5: isSetupTask — задание-«настройка» (явный «0» проходов) ──
+assertEqual(core.isSetupTask({ plannedRuns: '0' }), true, 'isSetupTask: «Кол-во план» = «0» → настройка');
+assertEqual(core.isSetupTask({ plannedRuns: '2' }), false, 'isSetupTask: проходы > 0 → резка');
+assertEqual(core.isSetupTask({ plannedRuns: '' }), false, 'isSetupTask: пусто (не задано) → не настройка');
+assertEqual(core.isSetupTask({}), false, 'isSetupTask: нет поля → не настройка');
+
 // ── normalizeStatus: приведение к известным, пустое → первый статус ──
 assertEqual(core.normalizeStatus(''), 'Ожидает', 'empty status → Ожидает');
 assertEqual(core.normalizeStatus('  наладка '), 'наладка', 'normalizes spaces (Наладка убрана из цепочки, сохраняется как есть)');
