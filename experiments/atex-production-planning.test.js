@@ -572,6 +572,22 @@ assertEqual(planning.orderedChangeoverCost(cuts3412), planning.orderedChangeover
     'orderCuts #3412: стоимость переналадки не зависит от исходного порядка (детерминированный минимум)');
 assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (#3600: 15 сырьё + 30 ножи фикс = 45)');
 
+// ── #3666: одинаковый набор ширин ножей → на ТОТ ЖЕ станок, не разносим по разным ──
+assertEqual(planning.knifeWidthSig({ knifeWidths: [55, 33] }), '33,55', 'knifeWidthSig #3666: уникальные ширины ↑');
+assertEqual(planning.knifeWidthSig({ knifeWidths: [55, 55, 33, 33] }), '33,55', 'knifeWidthSig #3666: дубликаты схлопываются (тот же набор)');
+assertEqual(planning.knifeWidthSig({ knifeWidths: [] }), '', 'knifeWidthSig #3666: ширин нет → пусто');
+var s3666 = [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }];
+// Станок 4 уже режет 55+33 (OUT). Новая резка 55+33 (IN, другое число ножей) — на станок 4.
+var g3666 = { '4': [{ id: 'A', materialId: 'MWR116L', winding: 'OUT', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 600 }] };
+var l3666 = { '1': 0, '2': 0, '3': 0, '4': 1 };
+assertEqual(
+    planning.chooseSlitterBySetup({ id: 'B', materialId: 'MWR116L', winding: 'IN', batchId: 'b1', knifeCount: 4, knifeWidths: [55, 55, 33, 33], rollerWidth: 600 }, s3666, g3666, l3666, null),
+    '4', 'chooseSlitterBySetup #3666: тот же набор ширин (55+33) — на занятый станок 4, а не на пустой');
+// Контроль: другой набор ширин → на пустой станок (без регресса разнесения чужих конфигов).
+assertEqual(
+    planning.chooseSlitterBySetup({ id: 'C', materialId: 'MWR116L', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [40, 40], rollerWidth: 600 }, s3666, g3666, l3666, null),
+    '1', 'chooseSlitterBySetup #3666: другой набор ширин — на пустой станок (не пихаем к чужому набору)');
+
 // #3421: генерация хардкодила стратегию FATIGUE («сложные раньше»), которая по
 // route-score выдаёт ножи по ВОЗРАСТАНИЮ (6,16,16) на данных скриншота — вопреки
 // #3130. Фиксы #3412/#3415 правили SETUP-путь, до генерации не доходили. Поэтому
@@ -1887,8 +1903,12 @@ function runGenerateCutsSlitterAffinityTest() {
     ], []).then(function() {
         var slitters = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; })
             .map(function(p) { return p.fields.t1156; });
-        assertEqual(slitters, ['10', '10', '20', '10'],
-            'runGenerateCuts #3268: одинаковое сырьё+намотка остаётся на setup-совместимом станке, даже если метраж другой');
+        // #3666: все 4 резки режут ОДИН набор ширин ножей (25) → один станок, даже если
+        // намотка (IN у p3) и метраж (450 у p4) отличаются. Намотка — не часть конфигурации
+        // ножей, поэтому не разносим одинаковый набор ножей по станкам (раньше p3 IN уезжала
+        // на станок 20 ради меньшей переналадки, хотя там пришлось бы ставить те же ножи с нуля).
+        assertEqual(slitters, ['10', '10', '10', '10'],
+            'runGenerateCuts #3268/#3666: один набор ширин ножей — один станок (намотка/метраж не разносят)');
     });
 }
 

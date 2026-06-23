@@ -1384,6 +1384,17 @@
         return keys;
     }
 
+    // #3666: подпись НАБОРА ШИРИН ножей резки (уникальные ширины ↑, через запятую) — «та же
+    // конфигурация ножей» в терминах оператора. Нужна для выбора станка: резки с одинаковым
+    // набором ширин кладём на ОДИН станок (оператор работает тем же набором ножей, а не
+    // настраивает их с нуля на другом станке), даже если число ножей/намотка отличаются.
+    // Ширин нет (неизвестны) → '' (без группировки по ножам).
+    function knifeWidthSig(cut){
+        var set = {};
+        ((cut && cut.knifeWidths) || []).forEach(function(x){ var n = Number(x); if (isFinite(n) && n > 0) set[String(n)] = 1; });
+        return Object.keys(set).map(Number).sort(function(a, b){ return a - b; }).join(',');
+    }
+
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
@@ -3426,9 +3437,12 @@
     }
 
     // Выбрать станок для новой резки по приросту минут переналадки (#3268).
-    // Пустой станок выигрывает у несовместимого занятого (delta меньше), но при
-    // равном delta предпочитаем уже занятый setup-совместимый станок, а не
-    // разбрасываем одинаковые профили только ради баланса.
+    // #3666: ГЛАВНЫЙ критерий — станок, который уже режет ТОТ ЖЕ набор ширин ножей
+    // (knifeWidthSig). Одинаковую конфигурацию ножей не разносим по разным станкам: на
+    // пустом станке прирост переналадки = 0 (у одиночной резки нет переходов), и прежде он
+    // обыгрывал занятый совместимый (delta которого = переналадка), хотя физически пустой
+    // станок тоже требует настройки ножей с нуля. Поэтому совпавший набор ножей — первым,
+    // дальше прежний порядок: delta ↑, affinity ↑, загрузка ↑, id.
     function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
@@ -3440,20 +3454,25 @@
             if (b === Infinity) return -1;
             return a - b;
         }
+        var cutSig = knifeWidthSig(cut);
         var candidates = allowed.map(function(s) {
             var id = String(s.id);
             var group = groups[id] || [];
             var before = orderedChangeoverCost(group, weights);
             var after = orderedChangeoverCost(group.concat([cut]), weights);
+            // #3666: 0 — станок уже режет тот же набор ширин ножей (приоритет), иначе 1.
+            var sameKnives = (cutSig !== '' && group.some(function(g){ return knifeWidthSig(g) === cutSig; })) ? 0 : 1;
             return {
                 id: id,
+                sameKnives: sameKnives,
                 delta: round3(after - before),
                 affinity: bestExistingTransitionCost(group, cut, weights),
                 load: Number(load[id]) || 0
             };
         });
         candidates.sort(function(a, b) {
-            return cmpNumber(a.delta, b.delta)
+            return cmpNumber(a.sameKnives, b.sameKnives)   // #3666: тот же набор ножей — на тот же станок
+                || cmpNumber(a.delta, b.delta)
                 || cmpNumber(a.affinity, b.affinity)
                 || cmpNumber(a.load, b.load)
                 || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -3700,6 +3719,7 @@
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
+        knifeWidthSig: knifeWidthSig,   // #3666
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         moveInQueue: moveInQueue,
