@@ -423,24 +423,6 @@
         return runs > 0 ? Math.ceil(runs) : 1;
     }
 
-    // #3566 #1: текущий проход задания (1..M) для заголовка «Резка N из M».
-    // Отрезано проходов = погонаж факт (или счётчик кон. − нач.) ÷ метраж прохода;
-    // текущий = отрезано + 1, в пределах [1, M]. До старта = 1, по завершении = M.
-    function currentPassForCut(cut) {
-        var total = plannedRunsForCut(cut);
-        var runLength = runLengthForCut(cut);
-        if (!(runLength > 0)) return 1;
-        var done = coreToNumber(cut && cut.meterage);
-        if (!(done > 0)) {
-            var cs = coreToNumber(cut && cut.counterStart), ce = coreToNumber(cut && cut.counterEnd);
-            if (ce > cs) done = ce - cs;
-        }
-        var pass = Math.floor(done / runLength) + 1;
-        if (pass < 1) pass = 1;
-        if (pass > total) pass = total;
-        return pass;
-    }
-
     // Internal alias to avoid function-hoisting surprises in minifiers and keep
     // these helpers readable before `core` is assembled.
     function coreToNumber(value) {
@@ -767,7 +749,6 @@
         shiftEventSlitterLabel: shiftEventSlitterLabel,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
-        currentPassForCut: currentPassForCut,
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
         availableBatchesForCut: availableBatchesForCut,
@@ -1580,9 +1561,13 @@
     AtexSlitter.prototype.renderHead = function() {
         var cut = this.currentCut;
         // #3566 #1: «Резка N из M» — проход N из M проходов ТЕКУЩЕГО задания (а не
-        // позиция задания в очереди). M = «Кол-во резок план»; N = текущий проход.
+        // позиция задания в очереди). M = «Кол-во резок план».
+        // #3621: N (текущий проход) выводим из числа отметок «Готово» — событий
+        // «Резка» этой резки + 1, в пределах [1, M] (раньше — из метража, #3566).
         var total = core.plannedRunsForCut(cut);
-        var title = 'Резка ' + core.currentPassForCut(cut) + ' из ' + total;
+        var pass = Math.min(this.donePassCount(cut) + 1, total);
+        if (pass < 1) pass = 1;
+        var title = 'Резка ' + pass + ' из ' + total;
         // #3557 #5: строку .atex-sl-head-meta убрали (Слиттер/Партия/План видно в тулбаре/метриках).
         var head = el('div', { class: 'atex-sl-head' }, [
             el('div', { class: 'atex-sl-head-main' }, [
@@ -1596,6 +1581,17 @@
         wrap.appendChild(head);
         wrap.appendChild(this.renderCutMetrics());
         return wrap;
+    };
+
+    // #3621: число выполненных проходов текущей резки = число событий «Резка»
+    // (EV.pass) среди событий смены этой резки. Источник номера прохода в шапке —
+    // надёжнее метража: каждое «Готово» пишет одно событие «Резка».
+    AtexSlitter.prototype.donePassCount = function(cut) {
+        var cutId = cut ? String(cut.id) : '';
+        if (!cutId) return 0;
+        return (this.shiftEvents || []).filter(function(ev) {
+            return ev.type === EV.pass && String(ev.cutId || '') === cutId;
+        }).length;
     };
 
     // #3583: кнопки отметки проходов правее .atex-sl-head-title. «Готово» — один
@@ -1618,6 +1614,8 @@
     // #3557 #4: кнопки управления статусом — в шапке (вместо секции «Статус резки»).
     // Доступные кнопки зависят от текущего (выведенного из событий) статуса. Для
     // заблокированной очередью резки (#8) кнопки показаны, но деактивированы.
+    // #3621: кнопка «Завершить» убрана — завершение теперь через зелёные кнопки
+    // «Готово»/«Готовы все» (markPassDone → finishCut на последнем проходе).
     AtexSlitter.prototype.renderCutControls = function(cut) {
         var self = this;
         var locked = this.isCutLocked(cut);
@@ -1630,22 +1628,19 @@
             defs = [
                 ['Возобновить', 'primary', function() { self.resumeCut(); }],
                 ['Перерыв', 'secondary', function() { self.breakCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }],
-                ['Завершить', 'advance', function() { self.finishCut(); }]
+                ['Прекратить', 'secondary', function() { self.abortCut(); }]
             ];
         } else if (s === 'Перерыв') {
             defs = [
                 ['Возобновить', 'primary', function() { self.resumeCut(); }],
                 ['Наладка', 'secondary', function() { self.setupCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }],
-                ['Завершить', 'advance', function() { self.finishCut(); }]
+                ['Прекратить', 'secondary', function() { self.abortCut(); }]
             ];
         } else if (s === 'В работе') {
             defs = [
                 ['Наладка', 'secondary', function() { self.setupCut(); }],
                 ['Перерыв', 'secondary', function() { self.breakCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }],
-                ['Завершить', 'advance', function() { self.finishCut(); }]
+                ['Прекратить', 'secondary', function() { self.abortCut(); }]
             ];
         } else {
             // Ожидает
@@ -1680,7 +1675,7 @@
             ['Вид сырья', material || '—'],
             ['Метраж, м', runLength > 0 ? String(core.round3(runLength)) : '—'],
             ['Резок', String(runs)],
-            ['Направление намотки', cut.winding || '—'],
+            ['Намотка', cut.winding || '—'],
             ['Лидер', cut.leader || '—']
         ];
         var grid = el('div', { class: 'atex-sl-metrics' });

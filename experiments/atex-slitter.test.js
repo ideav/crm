@@ -356,6 +356,32 @@ assertEqual(core.formatDuration(NaN), '', 'formatDuration: NaN → пусто');
         '#3560 createEvent: цель — таблица «Событие смены» (1082)');
 })();
 
+// ── #3621: donePassCount — число выполненных проходов = число событий «Резка» этой резки ──
+// Заголовок «Резка N из M»: N = donePassCount + 1 (текущий проход), в пределах [1, M].
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.shiftEvents = [
+        { type: 'Начало смены', cutId: null },
+        { type: 'Начало резки', cutId: '81663' },
+        { type: 'Резка', cutId: '81663', value: '1' },
+        { type: 'Резка', cutId: '81663', value: '2' },
+        { type: 'Резка', cutId: '99999', value: '1' }, // другая резка — не считаем
+        { type: 'Наладка', cutId: '81663' }
+    ];
+    assertEqual(inst.donePassCount({ id: '81663' }), 2,
+        '#3621 donePassCount: считает только события «Резка» этой резки');
+    assertEqual(inst.donePassCount({ id: '99999' }), 1,
+        '#3621 donePassCount: фильтр по cutId');
+    assertEqual(inst.donePassCount({ id: '00000' }), 0,
+        '#3621 donePassCount: нет событий «Резка» → 0');
+    assertEqual(inst.donePassCount(null), 0,
+        '#3621 donePassCount: без резки → 0');
+    var empty = Object.create(Controller.prototype);
+    assertEqual(empty.donePassCount({ id: '81663' }), 0,
+        '#3621 donePassCount: shiftEvents не загружены → 0');
+})();
+
 // ── #3609: бесшовное продолжение смены ──
 assertEqual(core.knifeLayoutKey([{width:55,qty:10},{width:32.5,qty:10}]),
             core.knifeLayoutKey([{width:32.5,qty:10},{width:55,qty:10}]),
