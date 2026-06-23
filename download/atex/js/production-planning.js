@@ -1431,6 +1431,25 @@
         return round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
     }
 
+    // #3669 п.2: первая задача дня требует НАСТРОЙКИ НОЖЕЙ (их ставят с нуля). Для первой
+    // задачи каждого дня, кроме первого, настройка уже считается переналадкой с последней
+    // задачей предыдущего дня (changeoverParts) — «той же конфигурацией → 0». А у самой
+    // первой задачи загруженной очереди предыдущего дня нет (история не подгружена), поэтому
+    // настройку планируем консервативно (лучше учесть время, чем потерять). Включается флагом
+    // firstCutSetup (см. buildSchedule/splitMachineQueue/setupBreakdown); возвращает компонент
+    // KNIFE как у changeoverParts. [] — если у резки нет ножей или время KNIFE = 0.
+    function firstSetupParts(next, times){
+        var t = times || DEFAULT_OP_TIMES;
+        var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
+        if (!next || !(knifeTime > 0)) return [];
+        var hasKnives = (Number(next.knifeCount) || 0) > 0 || ((next.knifeWidths || []).length > 0);
+        return hasKnives ? [{ code: 'KNIFE', label: 'настройка ножей', minutes: round3(knifeTime) }] : [];
+    }
+
+    function firstSetupCost(next, times){
+        return round3(firstSetupParts(next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
+    }
+
     // #3401: число резок в цуге (в терминологии заказчика общая «резка» состоит из
     // множества резок — бывших «проходов», см. «Кол-во резок план»). Лидер BETWEEN_CUTS
     // («лидер между резками») заправляется ПЕРЕД КАЖДОЙ резкой, поэтому его множим на это
@@ -1444,13 +1463,19 @@
     // резок цуга, #3401) + переналадка с предыдущей (changeoverParts). prev=null (первая
     // резка очереди/дня) → только лидер. Σ minutes == setupMin расписания buildSchedule.
     // → [{ code, label, minutes }].
-    function setupBreakdown(prev, next, times){
+    function setupBreakdown(prev, next, times, opts){
         var t = times || DEFAULT_OP_TIMES;
         // #3401: лидер на каждую резку цуга, а не один раз на весь цуг.
         var leader = (Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0) * cutLeaderRuns(next);
         var parts = [];
         if (leader > 0) parts.push({ code: 'BETWEEN_CUTS', label: 'лидер между резками', minutes: round3(leader) });
-        Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
+        // #3669 п.2: первая задача (нет предыдущей) с флагом firstCutSetup → настройка ножей с
+        // нуля; иначе — переналадка с предыдущей резкой (changeoverParts, [] для первой).
+        if (!prev && opts && opts.firstCutSetup) {
+            Array.prototype.push.apply(parts, firstSetupParts(next, times));
+        } else {
+            Array.prototype.push.apply(parts, changeoverParts(prev, next, times));
+        }
         return parts;
     }
 
@@ -2310,7 +2335,7 @@
     // Контекст тайминга одной резки для модалки (#3240): метраж/проходы/намотка, разбивка
     // setup (prevCut — предыдущая резка очереди или null для первой), релевантные нормы и
     // старт/финиш из расписания sc. → объект для cutTimingTimelineLines.
-    function buildCutTimingCtx(cut, prevCut, sc, runMeters, windPoints, times) {
+    function buildCutTimingCtx(cut, prevCut, sc, runMeters, windPoints, times, opts) {
         var length = stripNum(runMeters);
         var runs = stripNum(cut && cut.plannedRuns);
         var pts = windPointsForCut(cut && cut.isFoil, windPoints); // #3606: фольга — своя норма намотки
@@ -2321,7 +2346,7 @@
             runs: runs,
             oneRun: round3(oneRun),
             total: round3(total),
-            setupParts: setupBreakdown(prevCut, cut, times),
+            setupParts: setupBreakdown(prevCut, cut, times, opts),   // #3669 п.2: opts.firstCutSetup
             norms: relevantWindingNorms(length, pts),
             startMin: sc ? sc.startMin : null,
             finishMin: sc ? sc.finishMin : null
@@ -2453,7 +2478,10 @@
                 t = anchorDay * 1440 + shiftStart;
             }
             // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
-            var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
+            // #3669 п.2: первая задача очереди (i===0) с флагом firstCutSetup получает настройку
+            // ножей с нуля (предыдущий день неизвестен); прочим переналадка считается с предыдущей.
+            var setup = leader * cutLeaderRuns(c) +
+                (i > 0 ? changeoverCost(cuts[i-1], c, times) : (opts.firstCutSetup ? firstSetupCost(c, times) : 0));
             var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
             // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
@@ -2581,7 +2609,7 @@
             insertLunchBefore();  // #3342: обед перед началом этой резки
             // Резка без проходов/длительности — один сегментик без раскладки по проходам.
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
-                var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
+                var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times) : (opts.firstCutSetup ? firstSetupCost(c, times) : 0));
                 var ws0 = day * 1440 + dayStart + clock;
                 segments.push({ cutId: String(cid), dayOffset: day, runs: runs, windowStartMin: round3(ws0),
                     startMin: round3(ws0 + setup0), setupMin: round3(setup0),
@@ -2595,7 +2623,7 @@
             var perPassEff = perPass + leader;
             while (remaining > 0) {
                 // #3401: setup сегмента — только переналадка с предыдущей резкой; лидер уже в perPassEff.
-                var setup = isCont ? 0 : (prevPhysical ? changeoverCost(prevPhysical, c, times) : 0);
+                var setup = isCont ? 0 : (prevPhysical ? changeoverCost(prevPhysical, c, times) : (opts.firstCutSetup ? firstSetupCost(c, times) : 0));
                 var avail = effCapacity(day) - clock;
                 var maxPasses = Math.floor((avail - setup) / perPassEff);
                 if (maxPasses < 1) {
@@ -2671,7 +2699,8 @@
                 shiftStartMin: opts.dayStartMin,
                 shiftEndMin: opts.dayEndMin,
                 lunchStartMin: opts.lunchStartMin,
-                lunchDurationMin: opts.lunchDurationMin
+                lunchDurationMin: opts.lunchDurationMin,
+                firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
             });
             sched.forEach(function(sc){
                 var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
@@ -2704,7 +2733,8 @@
             shiftStartMin: opts.shiftStartMin,
             shiftEndMin: opts.shiftEndMin,
             lunchStartMin: opts.lunchStartMin,
-            lunchDurationMin: opts.lunchDurationMin
+            lunchDurationMin: opts.lunchDurationMin,
+            firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
         });
         var sc = sched.length ? sched[sched.length - 1] : null;
         if (!sc) return null;
@@ -2887,7 +2917,8 @@
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: opts.dayAnchorByCut   // #3658: привязка к дню «Даты план»
+                dayAnchorByCut: opts.dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+                firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
             });
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
@@ -3706,6 +3737,8 @@
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
+        firstSetupParts: firstSetupParts,
+        firstSetupCost: firstSetupCost,
         setupBreakdown: setupBreakdown,
         planningStrategy: planningStrategy,
         planningStrategyLabel: planningStrategyLabel,
@@ -4835,7 +4868,8 @@
         var slot = freeSlotForQueue(stationCuts, prospect, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin
+            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
+            firstCutSetup: true   // #3669 п.2: очередь учитывает настройку ножей первой задачи
         });
         if (!slot) return null;
         // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
@@ -5167,6 +5201,23 @@
             el('span', { class: 'atex-pp-move-label', text: 'День' }), dayInput
         ]));
 
+        // #3669 п.1: опционально — другой станок (по умолчанию текущий). Список из справочника;
+        // если справочник пуст, селектор не показываем (станок не меняем).
+        var curSid = String(cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
+        var slitSelect = null;
+        if ((this.slitters || []).length) {
+            slitSelect = el('select', { class: 'atex-pp-input atex-pp-move-slitter', title: 'Станок' });
+            this.slitters.forEach(function(s) {
+                var opt = el('option', { value: String(s.id), text: s.label || ('#' + s.id) });
+                if (String(s.id) === curSid) opt.setAttribute('selected', 'selected');
+                slitSelect.appendChild(opt);
+            });
+            slitSelect.value = curSid;
+            content.appendChild(el('label', { class: 'atex-pp-move-field' }, [
+                el('span', { class: 'atex-pp-move-label', text: 'Станок' }), slitSelect
+            ]));
+        }
+
         // Положение в дне: в начало / в конец.
         var posStart = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
         posStart.value = 'start'; posStart.checked = true;
@@ -5197,8 +5248,9 @@
             if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { self.notify('Выберите день для переноса', 'error'); return; }
             var position = posEnd.checked ? 'end' : 'start';
             var fix = !!fixCb.checked;
+            var targetSlitterId = slitSelect ? String(slitSelect.value || '') : '';   // #3669 п.1
             close();
-            self.moveCutToDay(cut, dateStr, position, fix);
+            self.moveCutToDay(cut, dateStr, position, fix, targetSlitterId);
         });
         actions.appendChild(cancel);
         actions.appendChild(ok);
@@ -5214,7 +5266,7 @@
     // «Очередность» (только изменившиеся). Фиксация (если отмечена) пишется тем же _m_set.
     // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
-    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix) {
+    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId) {
         var self = this;
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
@@ -5222,6 +5274,7 @@
         if (!cutMeta) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
         var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
+        var slitterReqId = reqIdByName(cutMeta, CUT_REQ.slitter);   // #3669 п.1: ссылка «Слиттер»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
         if (!seqReqId || !mainKey) {
             this.notify('Не найдены реквизиты резки («' + CUT_REQ.sequence + '»/дата)', 'error');
@@ -5237,9 +5290,15 @@
         var targetDayKey = planDateDayKey(targetTs);
         var dateLabel = formatPlanDayHeading(targetMidnightMs, 0);
 
-        // Задания того же станка на целевом дне (по хранимой «Дате план»), без перемещаемого.
-        var slitterId = cut.slitter && cut.slitter.id;
-        var sidStr = String(slitterId == null ? '' : slitterId);
+        // #3669 п.1: целевой станок — выбранный в диалоге (по умолчанию текущий). Очередь и
+        // соседи для пересчёта «Очередности» берём на станке-ПОЛУЧАТЕЛЕ; смену станка пишем
+        // ссылкой «Слиттер» на самом задании (старый станок пересобирать не нужно — пропуск в
+        // его «Очередности» безвреден, пересчитывается при следующей генерации).
+        var curSidStr = String(cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
+        var targetSidStr = String(targetSlitterId == null ? '' : targetSlitterId).trim();
+        var sidStr = targetSidStr !== '' ? targetSidStr : curSidStr;
+        var slitterChanged = !!slitterReqId && sidStr !== '' && sidStr !== curSidStr;
+        // Задания станка-получателя на целевом дне (по хранимой «Дате план»), без перемещаемого.
         var dayCuts = (this.cuts || []).filter(function(c) {
             if (!c || String(c.id) === String(cut.id)) return false;
             var csid = c.slitter && c.slitter.id;
@@ -5263,6 +5322,7 @@
             var fields = {};
             fields['t' + seqReqId] = String(seqByCut[String(cut.id)] || 1);
             if (fixFieldKey) fields[fixFieldKey] = '1';
+            if (slitterChanged) fields['t' + slitterReqId] = sidStr;   // #3669 п.1: смена станка
             return self.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields);
         }).then(function() { self.updateProgress(++done); });
         // 2) Прочие задания целевого дня — пересчитанная «Очередность» (только изменившиеся).
@@ -5286,8 +5346,14 @@
             if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
             if (toStr !== '' && planDateDayKey(toStr) < targetDayKey) self.filter.dateTo = dateStr;
             self.hideProgress(); self.setBusy(false); self.render();
+            // #3669 п.1: если станок сменился — называем его в сообщении.
+            var slitLabel = '';
+            if (slitterChanged) {
+                var ts = (self.slitters || []).filter(function(s) { return String(s.id) === sidStr; })[0];
+                slitLabel = ' · станок ' + ((ts && ts.label) || ('#' + sidStr));
+            }
             self.notify('Задание перенесено на ' + dateLabel +
-                (position === 'end' ? ' (в конец дня)' : ' (в начало дня)'), 'success');
+                (position === 'end' ? ' (в конец дня)' : ' (в начало дня)') + slitLabel, 'success');
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -6542,7 +6608,8 @@
                 var segs = splitMachineQueue(plans, {
                     dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
                     times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut,
-                    lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin
+                    lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
+                    firstCutSetup: true   // #3669 п.2: первая задача очереди — настройка ножей
                 });
                 var byPlanId = {};
                 segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
@@ -7180,7 +7247,8 @@
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
-            scopeToKey: toStr === '' ? null : planDateDayKey(toStr)
+            scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
+            firstCutSetup: true   // #3669 п.2: первая задача очереди резервирует настройку ножей
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
@@ -7690,7 +7758,8 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             setupTaskIds: setupTaskIds,
-            dayAnchorByCut: dayAnchorByCut
+            dayAnchorByCut: dayAnchorByCut,
+            firstCutSetup: true   // #3669 п.2: первая задача очереди — настройка ножей с нуля
         };
         // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
         // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
@@ -7752,9 +7821,10 @@
             var sc = schedById[String(c.id)];
             var runLengthForCut = runLenByCut[String(c.id)];
             // #3240: контекст тайминга резки для модалки (setup с предыдущей + нормы + старт).
+            // #3669 п.2: для первой задачи очереди — настройка ножей с нуля (firstCutSetup).
             self._timingByCut[String(c.id)] = buildCutTimingCtx(
                 c, idx > 0 ? activeGroup.cuts[idx - 1] : null, sc,
-                runLengthForCut, windPoints, self.changeTimes
+                runLengthForCut, windPoints, self.changeTimes, { firstCutSetup: true }
             );
             var cutNumberTitle = 'Задание № ' + (formatCutNumber(c.number) || c.id);
             // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.

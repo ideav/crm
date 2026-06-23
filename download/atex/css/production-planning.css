@@ -676,6 +676,7 @@
 .atex-pp-move-field { display: flex; flex-direction: column; gap: 6px; }
 .atex-pp-move-label { color: var(--pp-muted); font-size: 13px; }
 .atex-pp-move-day { width: 100%; }
+.atex-pp-move-slitter { width: 100%; }   /* #3669 п.1: селектор станка в диалоге переноса */
 .atex-pp-move-pos { display: flex; gap: 16px; flex-wrap: wrap; }
 .atex-pp-move-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .atex-pp-move-fix { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
