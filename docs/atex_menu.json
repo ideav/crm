@@ -7,6 +7,7 @@
         { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" },
         { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" },
         { "name": "Календарь занятости станков", "href": "machine-calendar", "icon": "<i class=\"pi pi-calendar-clock\"></i>" },
+        { "name": "Диаграмма Ганта (задания)", "href": "cut-gantt", "icon": "<i class=\"pi pi-bars\"></i>" },
         { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
         { "name": "Пульт слиттера", "href": "slitter", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
         { "name": "Пульт втулкореза", "href": "sleeve-cutter", "icon": "<i class=\"pi pi-cog\"></i>" },
@@ -28,6 +29,7 @@
       "menus": [
         { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" },
         { "name": "Календарь занятости станков", "href": "machine-calendar", "icon": "<i class=\"pi pi-calendar-clock\"></i>" },
+        { "name": "Диаграмма Ганта (задания)", "href": "cut-gantt", "icon": "<i class=\"pi pi-bars\"></i>" },
         { "name": "Расчёт оптимальной резки", "href": "cut-optimizer", "icon": "<i class=\"pi pi-calculator\"></i>" }
       ]
     },
@@ -45,7 +47,8 @@
       "role": "Руководитель",
       "menus": [
         { "name": "Дашборды и отчёты", "href": "dashboards", "icon": "<i class=\"pi pi-chart-bar\"></i>" },
-        { "name": "Календарь занятости станков", "href": "machine-calendar", "icon": "<i class=\"pi pi-calendar-clock\"></i>" }
+        { "name": "Календарь занятости станков", "href": "machine-calendar", "icon": "<i class=\"pi pi-calendar-clock\"></i>" },
+        { "name": "Диаграмма Ганта (задания)", "href": "cut-gantt", "icon": "<i class=\"pi pi-bars\"></i>" }
       ]
     },
     {
