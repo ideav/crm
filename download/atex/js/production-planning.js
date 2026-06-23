@@ -2609,8 +2609,18 @@
             // очереди (сортировка по «Очередности»), а не пересобирая её по стратегии
             // (orderCuts). Нужно, чтобы автозаполнение дней после генерации не перетасовывало
             // ручной порядок оператора (#3449). Без флага — обычная пересборка по весам (#3421).
+            // #3635 п.1/п.2: сортируем СПЕРВА по дню «Даты план», затем по «Очередности» —
+            // как groupBySlitter (#3616) и planQueues. «Очередность» сбрасывается на каждый
+            // день, поэтому сортировка только по ней перемешивала дни: задание дня D+1 с
+            // очередью 1 вставало перед фольгой дня D с очередью 2 → splitMachineQueue
+            // переупаковывал перемешанную очередь, фольга всплывала в начало дня и ломала
+            // порядок ножей (#3130/#3568), а вид «сразу после планирования» расходился с
+            // видом после перезагрузки (groupBySlitter сортирует день-первым).
             var ordered = opts.preserveOrder
-                ? byMachine[key].slice().sort(function(a, b){ return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); })
+                ? byMachine[key].slice().sort(function(a, b){
+                      return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
+                          || ((Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+                  })
                 : orderCuts(byMachine[key], opts.weights);
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
@@ -2750,7 +2760,9 @@
         // равно первому шагу тайминга окна, а не старту самой резки.
         var setup = stripNum(sc.setupMin);
         var windowStart = stripNum(sc.startMin) - setup;
-        return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(sc.finishMin) + ' · ' + round3(setup + dur) + ' мин';
+        // #3635 п.4: минуты окна показываем ЦЕЛЫМ числом, округляя ВВЕРХ (36.264 → 37) —
+        // совпадает с диапазоном по часам (09:03–09:40 ≈ 37 мин), без дробного «хвоста».
+        return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(sc.finishMin) + ' · ' + Math.ceil(setup + dur) + ' мин';
     }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
@@ -4330,7 +4342,7 @@
             slitter: d.slitterId,
             materialBatch: d.materialBatchId,
             plannedRuns: d.plannedRuns,
-            duration: duration > 0 ? duration : '',
+            duration: duration > 0 ? Math.ceil(duration) : '',   // #3635 п.4: «Длительность, минут» сохраняем целой (вверх)
             timing: timing,
             length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
@@ -4533,7 +4545,7 @@
             var fields = buildFields(cutReqIds, {
                 slitter: d.slitterId,
                 plannedRuns: plan.plannedRuns,
-                duration: plan.duration > 0 ? plan.duration : '',
+                duration: plan.duration > 0 ? Math.ceil(plan.duration) : '',   // #3635 п.4: «Длительность, минут» — целой (вверх)
                 timing: plan.timing,
                 length: plan.runLength > 0 ? plan.runLength : '',
                 winding: normWinding(plan.layout && plan.layout.windDir),
@@ -6144,7 +6156,7 @@
                     slitter: slitterId,
                     materialBatch: batchId,
                     plannedRuns: plannedRuns,
-                    duration: duration > 0 ? duration : '',
+                    duration: duration > 0 ? Math.ceil(duration) : '',   // #3635 п.4: «Длительность, минут» сохраняем целой (вверх)
                     timing: timing,
                     length: runLength > 0 ? runLength : '',
                     winding: normWinding(lay && lay.windDir),
@@ -6507,7 +6519,13 @@
         var updateByCut = {};
         (ops.updates || []).forEach(function(u) { updateByCut[u.cutId] = u; });
 
+        // #3635 п.3: сохранение плана резок (день-заполнение) пишет десятки записей —
+        // показываем форму ожидания с прогрессом, а не «зависшую» заблокированную страницу.
+        var splitTotal = (ops.updates || []).length + Object.keys(createsByParent).length + (ops.deletes || []).length;
+        var splitDone = 0;
+        function splitBump() { self.updateProgress(++splitDone); }
         this.setBusy(true);
+        if (splitTotal > 0) this.showProgress('Сохранение плана резок…', splitTotal);
         var chain = Promise.resolve();
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
@@ -6529,7 +6547,7 @@
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
-            });
+            }).then(splitBump);
         });
 
         // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
@@ -6638,18 +6656,18 @@
                     });
                 });
                 return cChain;
-            });
+            }).then(splitBump);
         });
 
         // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
         (ops.deletes || []).forEach(function(id) {
-            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); });
+            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); }).then(splitBump);
         });
 
         return chain.then(function() { return self.reload(); }).then(function() {
-            self.setBusy(false); self.render(); return true;
+            self.hideProgress(); self.setBusy(false); self.render(); return true;
         }).catch(function(err) {
-            self.setBusy(false);
+            self.hideProgress(); self.setBusy(false);
             self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
         });
