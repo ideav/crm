@@ -535,6 +535,29 @@
         return batchDateKey(s);
     }
 
+    // #3652: смещение РАБОЧЕГО ДНЯ резки относительно базы расписания (планБаза = день
+    // фильтра «С»), в днях. Нужно, чтобы buildSchedule привязывал резку к её «Дате план», а
+    // не паковал встык от дня «С»: при ДИАПАЗОНЕ дат задания 30.05 не должны ложиться под
+    // 20.05. Пустая «Дата план» → null (без якоря: день 0, как раньше). Считаем по полуночи
+    // календарного дня (как planDateDayKey), чтобы час старта не сбивал день.
+    function dayOffsetFromBase(planDate, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return null;
+        var s = String(planDate == null ? '' : planDate).trim();
+        if (s === '') return null;
+        var ms;
+        if (/^\d{9,13}$/.test(s)) { var num = Number(s); ms = num >= 1e12 ? num : num * 1000; }
+        else {
+            var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+            if (!m) return null;
+            ms = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0).getTime();
+        }
+        var d = new Date(ms);
+        if (isNaN(d.getTime())) return null;
+        var cutMid = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+        return Math.round((cutMid - base) / 86400000);
+    }
+
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
@@ -2408,7 +2431,16 @@
         var t = shiftStart;   // день 0, начало смены
         var out = [];
         var setupIds = opts.setupTaskIds || {};   // #3635 п.5: сегменты настройки — намотка 0
+        var anchorByCut = opts.dayAnchorByCut || {};   // #3652: якорь дня по «Дате план»
         (cuts || []).forEach(function(c, i){
+            // #3652: привязать резку к её рабочему дню «Даты план» — если очередь не дотянула
+            // до этого дня, прыгаем вперёд к его началу (08:00). Иначе при ДИАПАЗОНЕ дат «С–По»
+            // задания одного дня (напр. 30.05) ложились под дату «С» (напр. 20.05). Назад не
+            // двигаем (переполнение предыдущих сохраняется); резки без «Даты план» — без якоря.
+            var anchorDay = anchorByCut[String(c && c.id)];
+            if (anchorDay != null && anchorDay > Math.floor(t / 1440)) {
+                t = anchorDay * 1440 + shiftStart;
+            }
             // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
             var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
             var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
@@ -3570,6 +3602,7 @@
         fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
+        dayOffsetFromBase: dayOffsetFromBase,   // #3652
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
@@ -7563,6 +7596,15 @@
         // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
         // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
         var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
+        // #3652: якорь дня по «Дате план» каждой резки (смещение от базы=день фильтра «С»).
+        // Без него при ДИАПАЗОНЕ дат «С–По» buildSchedule паковал все видимые задания встык
+        // от дня «С» → задания 30.05 показывались под датой «С» (напр. 20.05). Привязываем
+        // каждое задание к его рабочему дню; пустая «Дата план» — без якоря (день 0).
+        var dayAnchorByCut = {};
+        activeGroup.cuts.forEach(function(c) {
+            var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
+            if (off != null && off > 0) dayAnchorByCut[String(c.id)] = off;
+        });
         var schedOpts = {
             windPoints: windPoints,
             times: self.changeTimes,
@@ -7571,7 +7613,8 @@
             shiftEndMin: dayWindow.cutEndMin,
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
-            setupTaskIds: setupTaskIds
+            setupTaskIds: setupTaskIds,
+            dayAnchorByCut: dayAnchorByCut
         };
         // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
         // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
