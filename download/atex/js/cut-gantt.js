@@ -313,7 +313,40 @@
     // соответствует «прошло от GANTT_DAY_START_HOUR»: x=0 → 08:00, далее каждый час.
     // Деления каждый час пунктиром, пожирнее в GANTT_BOLD_HOURS (старт/обед/конец смены).
     var GANTT_DAY_START_HOUR = 8;
+    var GANTT_DAY_END_HOUR = 18;   // #3657: конец смены. Сетка часов всегда покрывает
+                                   // 08:00–18:00, даже если упакованной работы меньше часа.
     var GANTT_BOLD_HOURS = { 8: true, 12: true, 18: true };
+
+    // #3657: ширина дорожки = max(упаковка, полная смена). При суммарной длительности
+    // заданий < 1 ч упаковка короче часа, и сетка рисует только деление 08:00 («нет
+    // вертикальных полос каждый час»), а бары не с чем соотнести по масштабу. Растягиваем
+    // дорожку минимум на всю смену, чтобы деления 8…18 были всегда и масштаб был читаем.
+    function ganttTrackPx(packedPx, opts) {
+        var o = opts || {};
+        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
+        var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
+        var endHour = o.endHour != null ? Number(o.endHour) : GANTT_DAY_END_HOUR;
+        var shiftPx = Math.max(endHour - startHour, 0) * pxPerMin * 60;
+        return Math.max(Number(packedPx) || 0, shiftPx, 1);
+    }
+
+    // #3654/#3657: деления часовой сетки для дорожки шириной trackPx. x=0 → начало смены,
+    // каждый час = pxPerMin×60. Покрывает всю ширину (≥ полная смена). bold — для часов из
+    // GANTT_BOLD_HOURS (старт/обед/конец смены). Чистая функция — рендер и тесты общие.
+    function hourTicks(trackPx, opts) {
+        var o = opts || {};
+        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
+        var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
+        var pxPerHour = pxPerMin * 60;
+        var width = Math.max(Number(trackPx) || 0, 0);
+        var ticks = [];
+        var hour = startHour;
+        for (var x = 0; x <= width + 0.5; x += pxPerHour) {
+            ticks.push({ hour: hour, leftPx: round3(x), bold: !!GANTT_BOLD_HOURS[hour], label: String(hour) });
+            hour++;
+        }
+        return ticks;
+    }
 
     // Текст внутри бара — номер заказа (полные детали — в title/подписи строки).
     function cutBarText(cut) {
@@ -527,6 +560,8 @@
         rowsToCuts: rowsToCuts,
         orderCutsInGroup: orderCutsInGroup,
         packGroups: packGroups,
+        ganttTrackPx: ganttTrackPx,
+        hourTicks: hourTicks,
         planningLink: planningLink,
         slittersFromCuts: slittersFromCuts,
         parseDeepLink: parseDeepLink,
@@ -700,22 +735,21 @@
             body.appendChild(el('div', { class: 'atex-cg-empty', text: 'На выбранном интервале заданий нет' }));
             return body;
         }
-        var trackPx = Math.max(data.trackPx, 1);
+        // #3657: дорожка покрывает всю смену (08:00–18:00), а не только упаковку, иначе
+        // при работе < 1 ч сетка рисует лишь деление 08:00 и масштаб не читается.
+        var trackPx = ganttTrackPx(data.trackPx);
         body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
-        // #3654: часовые деления/подписи на дорожке шириной trackPx (x=0 → начало смены,
-        // далее каждый час). pxPerHour согласован с упаковкой (GANTT_PX_PER_MIN).
-        var pxPerHour = GANTT_PX_PER_MIN * 60;
+        // #3654/#3657: часовые деления/подписи на дорожке шириной trackPx (x=0 → начало
+        // смены, далее каждый час, деления 8…18 всегда). Геометрия — в чистой hourTicks.
+        var ticks = hourTicks(trackPx);
         function appendHours(track, withLabels) {
-            var hour = GANTT_DAY_START_HOUR;
-            for (var x = 0; x <= trackPx + 0.5; x += pxPerHour) {
-                var bold = !!GANTT_BOLD_HOURS[hour];
-                var node = el('span', { class: (withLabels ? 'atex-cg-hour-label' : 'atex-cg-hour') + (bold ? ' is-bold' : '') });
-                if (withLabels) node.textContent = String(hour);
-                node.style.left = x + 'px';
+            ticks.forEach(function(t) {
+                var node = el('span', { class: (withLabels ? 'atex-cg-hour-label' : 'atex-cg-hour') + (t.bold ? ' is-bold' : '') });
+                if (withLabels) node.textContent = t.label;
+                node.style.left = t.leftPx + 'px';
                 track.appendChild(node);
-                hour++;
-            }
+            });
         }
 
         // Верхняя шкала часов (подписи); деления выровнены с сеткой в дорожках заданий.
