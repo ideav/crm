@@ -169,29 +169,42 @@
     pointer-events: none;
 }
 
-/* Бар-ссылка (позиция/ширина в px задаются инлайн — реальное время задания). */
+/* Бар-ссылка (позиция/ширина в px задаются инлайн — реальное время задания).
+   #3675 п.3: бар — flex-контейнер сегментов [наладка ножей][смена сырья][резка]; цвет статуса
+   едет переменной --cg-bar-color, сегменты наладки светлее (opacity), границ между ними нет. */
 .atex-cg-bar {
+    --cg-bar-color: var(--cg-unknown);
     position: absolute;
     top: 2px;
     bottom: 2px;
     min-width: 4px;
+    display: flex;
+    align-items: stretch;
     border-radius: 3px;
     overflow: visible;          /* #3668 п.4: текст выходит за рамки закрашенного бара */
     text-decoration: none;
-    background: var(--cg-unknown);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
     cursor: pointer;
 }
+/* #3675 п.3: сегменты бара. Резка — главный цвет (flex заполняет остаток), наладка — тот же
+   цвет, но светлее (смена сырья чуть светлее, настройка ножей ещё светлее). Без границ между. */
+.atex-cg-seg { background: var(--cg-bar-color); flex: 0 0 auto; min-width: 0; }
+.atex-cg-seg--cut { flex: 1 1 auto; }
+.atex-cg-seg--material { opacity: .58; }
+.atex-cg-seg--knife { opacity: .34; }
+.atex-cg-bar > .atex-cg-seg:first-child { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
+.atex-cg-seg--cut { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
 .atex-cg-bar:hover { filter: brightness(1.08); z-index: 2; }
 .atex-cg-bar:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 1px; z-index: 2; }
-/* #3668 п.4: диапазон времени обычным шрифтом, начинается у бара и выходит правее;
-   тёмный текст с гало под цвет фона — читается и поверх бара, и поверх дорожки. */
+/* #3675 п.4: диапазон времени — СПРАВА от бара (left:100%), всегда на светлой дорожке.
+   Раньше текст начинался у левого края бара (left:0) и поверх широких баров тёмный текст
+   на насыщенном цвете не читался. Тёмный текст с белым гало под цвет дорожки читается. */
 .atex-cg-bar-main {
     position: absolute;
-    left: 0;
+    left: 100%;
     top: 50%;
     transform: translateY(-50%);
-    padding-left: 4px;
+    padding-left: 5px;
     font-weight: 400;
     font-size: 11px;
     line-height: 1.1;
@@ -201,13 +214,13 @@
     pointer-events: none;
 }
 
-.atex-cg-bar.is-planned { background: var(--cg-planned); }
-.atex-cg-bar.is-running { background: var(--cg-running); }
-.atex-cg-bar.is-unfinished { background: var(--cg-unfinished); }
+.atex-cg-bar.is-planned { --cg-bar-color: var(--cg-planned); }
+.atex-cg-bar.is-running { --cg-bar-color: var(--cg-running); }
+.atex-cg-bar.is-unfinished { --cg-bar-color: var(--cg-unfinished); }
 .atex-cg-bar.is-on-time,
-.atex-cg-bar.is-done { background: var(--cg-ok); }
+.atex-cg-bar.is-done { --cg-bar-color: var(--cg-ok); }
 .atex-cg-bar.is-late,
-.atex-cg-bar.is-late-start { background: var(--cg-late); }
-.atex-cg-bar.is-unknown { background: var(--cg-unknown); }
+.atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-late); }
+.atex-cg-bar.is-unknown { --cg-bar-color: var(--cg-unknown); }
 
 .atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }

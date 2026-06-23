@@ -345,8 +345,10 @@
         (cuts || []).forEach(function(cut) {
             var tr = cutTimeRange(cut);
             if (!tr) return;
+            // #3675 п.3: бар = [наладка][резка]; правый край сдвинут на время наладки.
+            var barEndMs = tr.endMs + cutSetupMin(cut).total * 60000;
             if (minMs == null || tr.startMs < minMs) minMs = tr.startMs;
-            if (maxMs == null || tr.endMs > maxMs) maxMs = tr.endMs;
+            if (maxMs == null || barEndMs > maxMs) maxMs = barEndMs;
         });
         if (minMs == null || maxMs == null) {
             var dayMs = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
@@ -404,12 +406,48 @@
         return ticks;
     }
 
-    // Текст бара (#3668 п.4): диапазон времени задания, например «11:19-11:23 (4 мин)».
-    function cutBarTime(cut) {
+    // #3675 п.3: минуты наладки ПЕРЕД резкой (для сегментов бара). Только для запланированных
+    // (без фактического старта) — у начатых/завершённых наладка уже позади, показываем факт.
+    // { knife, material, total } в минутах; отрицательные/пустые входы → 0.
+    function cutSetupMin(cut) {
+        var tr = cutTimeRange(cut);
+        if (tr && tr.actualStartMs != null) return { knife: 0, material: 0, total: 0 };
+        var knife = Math.max(0, stripNum(cut && cut.setupKnifeMin));
+        var material = Math.max(0, stripNum(cut && cut.setupMaterialMin));
+        return { knife: knife, material: material, total: round3(knife + material) };
+    }
+
+    // Текст бара (#3668 п.4): диапазон времени РЕЗКИ, например «11:19-11:23 (4 мин)».
+    // #3675 п.3: startOffsetMin сдвигает окно вправо на время наладки — резка идёт ПОСЛЕ
+    // сегментов наладки, поэтому подпись показывает фактическое окно резки, а не наладки.
+    function cutBarTime(cut, startOffsetMin) {
         var tr = cutTimeRange(cut);
         if (!tr) return '';
-        var mins = Math.max(1, Math.round((tr.endMs - tr.startMs) / 60000));
-        return formatTime(tr.startMs) + '-' + formatTime(tr.endMs) + ' (' + mins + ' мин)';
+        var off = (Number(startOffsetMin) || 0) * 60000;
+        var startMs = tr.startMs + off, endMs = tr.endMs + off;
+        var mins = Math.max(1, Math.round((endMs - startMs) / 60000));
+        return formatTime(startMs) + '-' + formatTime(endMs) + ' (' + mins + ' мин)';
+    }
+
+    // #3675 п.3: ширины сегментов бара (px) при масштабе pxPerMin: [наладка ножей][смена сырья][резка].
+    // Наладка слева (раньше по времени), резка справа (главный цвет статуса). Резка — floor до minPx
+    // (виден бар и текст). Сегменты наладки с минутами > 0 — floor до 3px, чтобы тонкие были заметны.
+    // Нет минут наладки (старый отчёт/начатая резка) → 0, сегменты не рисуются. Чистая — тест.
+    function cutBarSegments(cut, pxPerMin, minPx) {
+        var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
+        var floor = minPx > 0 ? minPx : GANTT_MIN_BAR_PX;
+        var tr = cutTimeRange(cut);
+        var cutMin = tr ? (tr.endMs - tr.startMs) / 60000 : 0;
+        var cutPx = Math.max(round3(cutMin * ppm), floor);
+        var setup = cutSetupMin(cut);
+        function segPx(min) { return min > 0 ? Math.max(round3(min * ppm), 3) : 0; }
+        var knifePx = segPx(setup.knife);
+        var materialPx = segPx(setup.material);
+        return {
+            knifePx: knifePx, materialPx: materialPx, cutPx: cutPx,
+            totalPx: round3(knifePx + materialPx + cutPx),
+            knifeMin: setup.knife, materialMin: setup.material, setupMin: setup.total
+        };
     }
 
     // Задание попадает в видимый период (по плановой дате, иначе по фактическому старту)?
@@ -428,6 +466,10 @@
         if (cut && cut.slitter && cut.slitter.label) lines.push('Станок: ' + cut.slitter.label);
         if (cut && cut.materialName) lines.push('Сырьё: ' + cut.materialName);
         if (cut && cut.leader) lines.push('Лидер: ' + cut.leader);
+        // #3675 п.3: наладка перед резкой (если отчёт отдал минуты).
+        var setup = cutSetupMin(cut);
+        if (setup.knife > 0) lines.push('Наладка ножей: ' + setup.knife + ' мин');
+        if (setup.material > 0) lines.push('Смена сырья: ' + setup.material + ' мин');
         if (tr.planMs != null) lines.push('План: ' + formatDateTimeMinute(new Date(tr.planMs)));
         if (tr.actualStartMs != null) lines.push('Старт факт: ' + formatDateTimeMinute(new Date(tr.actualStartMs)));
         if (tr.actualEndMs != null) lines.push('Финиш факт: ' + formatDateTimeMinute(new Date(tr.actualEndMs)));
@@ -437,15 +479,28 @@
         return lines.join('\n');
     }
 
-    // Подпись строки в одну строку без слова «Заказ»: «{заказ} / {сырьё} · {намотка} · {метраж}»,
-    // например «3351 / MWR116L · OUT · 450» (#3668 п.2). Станок в подпись не входит — он
-    // выводится заголовком группы.
+    // #3675 п.2: сырьё в подписи строки обрезаем до первого пробела — длинные имена
+    // («Фольга горячего тиснения МВ …») не влезают в колонку. Полное имя остаётся в
+    // тултипе бара (cutBarTitle, «Сырьё: …»).
+    function shortMaterialName(name) {
+        var s = String(name == null ? '' : name).trim();
+        var sp = s.indexOf(' ');
+        return sp > 0 ? s.slice(0, sp) : s;
+    }
+
+    // Подпись строки в одну строку без слова «Заказ»: «{заказ} / {сырьё} · {намотка} · {метраж} x {резок}»,
+    // например «3738 / MWR113L · OUT · 700 x 6» (#3668 п.2, #3675 п.1/п.2). Станок в подпись
+    // не входит — он выводится заголовком группы. Сырьё обрезано до первого пробела; «x N» —
+    // «Кол-во резок план» (cut_planned_runs), приписывается к метражу прохода.
     function cutRowLabel(cut) {
         var head = (cut && cut.orderNo) ? String(cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
         var s = head;
-        if (cut && cut.materialName) s += ' / ' + cut.materialName;
+        if (cut && cut.materialName) s += ' / ' + shortMaterialName(cut.materialName);
         if (cut && cut.winding) s += ' · ' + cut.winding;
-        if (cut && cut.length > 0) s += ' · ' + cut.length;
+        if (cut && cut.length > 0) {
+            var runs = stripNum(cut.plannedRuns);
+            s += ' · ' + cut.length + (runs > 0 ? ' x ' + runs : '');
+        }
         return s;
     }
 
@@ -474,6 +529,13 @@
                 endDate: str(row.cut_end_date),
                 duration: durationOf(row),
                 length: stripNum(row.cut_length),
+                plannedRuns: stripNum(row.cut_planned_runs),   // #3675 п.1: «Кол-во резок план» → «x N» в подписи
+                // #3675 п.3: вход для расчёта наладки ПЕРЕД резкой (см. attachSetupMinutes).
+                // rollerWidth — ширина ролика (сужение → смена ножей); knifeWidths/knifeCount —
+                // раскладка ножей из cut_strips (attachStrips), нужна для knifeMoves.
+                rollerWidth: stripNum(row.cut_roller_width),
+                knifeWidths: [],
+                knifeCount: 0,
                 sequence: row.cut_sequence == null || row.cut_sequence === '' ? null : stripNum(row.cut_sequence),
                 leader: str(row.cut_leader),
                 orderNo: str(row.order_no),
@@ -498,6 +560,97 @@
             var ma = ta ? ta.startMs : Infinity, mb = tb ? tb.startMs : Infinity;
             if (ma !== mb) return ma - mb;
             return String(a.id).localeCompare(String(b.id));
+        });
+        return cuts;
+    }
+
+    // #3675 п.3: op-времена наладки по умолчанию (как в таблице «Время операции, мин»:
+    // смена сырья 15 мин, смена ножей 30 мин). loadOpTimes переопределяет из базы, если иные.
+    var GANTT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30 };
+
+    function ganttNormWinding(v) {
+        var s = String(v == null ? '' : v).trim().toUpperCase();
+        return (s === 'IN' || s === 'OUT') ? s : '';
+    }
+
+    // Число ножей к перестановке prev→next: нож одинаковой ширины сохраняется (не двигается);
+    // moves = max(|prev|,|next|) − пересечение мультимножеств ширин (порт knifeMoves планировщика).
+    function ganttKnifeMoves(a, b) {
+        function tally(arr) { var m = {}; (arr || []).forEach(function(x) { var k = String(x); m[k] = (m[k] || 0) + 1; }); return m; }
+        var ta = tally(a || []), tb = tally(b || []), inter = 0;
+        Object.keys(ta).forEach(function(k) { if (tb[k]) inter += Math.min(ta[k], tb[k]); });
+        return Math.max((a || []).length, (b || []).length) - inter;
+    }
+
+    // Ширины ножей резки для knifeMoves; если не развёрнуты по числу ножей — добиваем сентинелом.
+    function ganttEffKnifeWidths(cut) {
+        var w = (cut && cut.knifeWidths) || [];
+        var keys = w.map(function(x) { return String(Number(x)); });
+        var n = Number(cut && cut.knifeCount) || 0;
+        while (keys.length < n) keys.push('·');
+        return keys;
+    }
+
+    // #3675 п.3: минуты наладки перехода prev→next (порт changeoverParts планировщика, БЕЗ лидера):
+    //   смена сырья ИЛИ намотки → MATERIAL_WINDING; смена набора ножей ИЛИ сужение ролика → KNIFE.
+    //   prev=null (первая резка станка) → 0. Партию сырья не сравниваем (нет в cut_planning) —
+    //   мелкое расхождение с планировщиком на «та же намотка, другая партия». → { knife, material } мин.
+    function cutChangeoverMinutes(prev, next, times) {
+        var t = times || GANTT_OP_TIMES;
+        var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : GANTT_OP_TIMES.MATERIAL_WINDING) || 0;
+        var knifeTime = Number(t.KNIFE != null ? t.KNIFE : GANTT_OP_TIMES.KNIFE) || 0;
+        if (!prev || !next) return { knife: 0, material: 0 };
+        var matChange = String(prev.materialId) !== String(next.materialId)
+            || ganttNormWinding(prev.winding) !== ganttNormWinding(next.winding);
+        var moves = ganttKnifeMoves(ganttEffKnifeWidths(prev), ganttEffKnifeWidths(next));
+        var knifeChanged = moves > 0 || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
+        return {
+            knife: knifeChanged && knifeTime > 0 ? round3(knifeTime) : 0,
+            material: matChange && matWind > 0 ? round3(matWind) : 0
+        };
+    }
+
+    // #3675 п.3: раскладка ножей из строк отчёта cut_strips (queryId 8656, JSON_KV:
+    // { cut_id, strip_width, strip_qty }) → knifeWidths (ширины, развёрнутые по числу ножей) и
+    // knifeCount (Σ strip_qty) на каждое задание. Мутирует cuts. Чистая — покрывается тестами.
+    function attachStrips(cuts, rows) {
+        var byCut = {};
+        (rows || []).forEach(function(row) {
+            if (!row) return;
+            var id = row.cut_id == null ? '' : String(row.cut_id);
+            if (id === '') return;
+            var width = stripNum(row.strip_width);
+            var qty = Math.max(0, Math.round(stripNum(row.strip_qty)));
+            var rec = byCut[id] || (byCut[id] = { widths: [], count: 0 });
+            for (var i = 0; i < qty; i++) rec.widths.push(width);
+            rec.count += qty;
+        });
+        (cuts || []).forEach(function(cut) {
+            var rec = cut && byCut[String(cut.id)];
+            if (rec) { cut.knifeWidths = rec.widths; cut.knifeCount = rec.count; }
+        });
+        return cuts;
+    }
+
+    // #3675 п.3: минуты наладки ПЕРЕД каждой резкой = переналадка с ПРЕДЫДУЩЕЙ резкой того же
+    // станка (порядок — по очерёдности/старту, как orderCutsInGroup). Первая резка станка → 0.
+    // Пишет cut.setupKnifeMin / cut.setupMaterialMin. Мутирует cuts. Чистая — покрывается тестами.
+    function attachSetupMinutes(cuts, times) {
+        var byMachine = {};
+        (cuts || []).forEach(function(cut) {
+            if (!cut) return;
+            var sid = cut.slitter && cut.slitter.id != null ? String(cut.slitter.id) : '';
+            (byMachine[sid] || (byMachine[sid] = [])).push(cut);
+        });
+        Object.keys(byMachine).forEach(function(sid) {
+            var arr = orderCutsInGroup(byMachine[sid]);   // тот же порядок, что в дорожке станка
+            var prev = null;
+            arr.forEach(function(cut) {
+                var ch = cutChangeoverMinutes(prev, cut, times);
+                cut.setupKnifeMin = ch.knife;
+                cut.setupMaterialMin = ch.material;
+                prev = cut;
+            });
         });
         return cuts;
     }
@@ -563,11 +716,14 @@
             g.tasks = g.cuts.map(function(cut) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var status = cutStatus(cut, nowMs);
+                // #3675 п.3: ширина бара = наладка + резка; подпись времени — окно РЕЗКИ (после наладки).
+                var seg = cutBarSegments(cut, pxPerMin, minPx);
                 return {
                     cut: cut, status: status,
                     leftPx: round3((tr.startMs - win.startMs) / 60000 * pxPerMin),
-                    widthPx: Math.max(round3((tr.endMs - tr.startMs) / 60000 * pxPerMin), minPx),
-                    label: cutRowLabel(cut), barText: cutBarTime(cut),
+                    widthPx: seg.totalPx,
+                    segments: seg,
+                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin),
                     title: cutBarTitle(cut, tr, status)
                 };
             });
@@ -623,6 +779,11 @@
         cutInRange: cutInRange,
         cutRowLabel: cutRowLabel,
         cutBarTime: cutBarTime,
+        cutSetupMin: cutSetupMin,
+        cutBarSegments: cutBarSegments,
+        cutChangeoverMinutes: cutChangeoverMinutes,
+        attachStrips: attachStrips,
+        attachSetupMinutes: attachSetupMinutes,
         rowsToCuts: rowsToCuts,
         orderCutsInGroup: orderCutsInGroup,
         layoutGroups: layoutGroups,
@@ -692,13 +853,49 @@
         }).catch(function() { return []; });
     };
 
+    // #3675 п.3: раскладка ножей резок отчётом cut_strips (для расчёта смены ножей). Ошибка/нет
+    // отчёта → пусто (наладка ножей деградирует до «сужение ролика», смена сырья считается всегда).
+    AtexCutGantt.prototype.loadStrips = function() {
+        return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,20000').catch(function() { return []; });
+    };
+
+    // #3675 п.3: op-времена наладки из таблицы «Время операции, мин» (как у планировщика). Код
+    // операции ищем по виду UPPER_SNAKE среди колонок (без метаданных), минуты — главное значение.
+    // Ошибка/нет таблицы → дефолты GANTT_OP_TIMES (смена сырья 15, ножи 30).
+    AtexCutGantt.prototype.loadOpTimes = function() {
+        return this.getJson('object/' + encodeURIComponent('Время операции, мин') + '/?JSON_OBJ&LIMIT=0,200')
+            .then(function(rows) {
+                var raw = {};
+                (rows || []).forEach(function(rec) {
+                    var r = (rec && rec.r) || [];
+                    var code = '';
+                    for (var i = 0; i < r.length; i++) {
+                        var v = String(r[i] == null ? '' : r[i]).trim();
+                        if (/^[A-Z][A-Z0-9_]+$/.test(v)) { code = v; break; }
+                    }
+                    if (code) raw[code] = Number(r[0]) || 0;   // r[0] — главное значение = минуты
+                });
+                return {
+                    MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : GANTT_OP_TIMES.MATERIAL_WINDING,
+                    KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || GANTT_OP_TIMES.KNIFE
+                };
+            })
+            .catch(function() { return Object.assign({}, GANTT_OP_TIMES); });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
             this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000'),
-            this.loadSlitters()
+            this.loadSlitters(),
+            this.loadStrips(),
+            this.loadOpTimes()
         ]).then(function(res) {
             self.cuts = rowsToCuts(res[0] || []);
+            // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
+            attachStrips(self.cuts, res[2] || []);
+            self.opTimes = res[3] || GANTT_OP_TIMES;
+            attachSetupMinutes(self.cuts, self.opTimes);
             var merged = {};
             var ordered = [];
             (res[1] || []).concat(slittersFromCuts(self.cuts)).forEach(function(s) {
@@ -851,15 +1048,31 @@
                 var track = el('div', { class: 'atex-cg-track' });
                 track.style.minWidth = trackPx + 'px';
                 appendHours(track);   // #3668 п.6: часовая сетка под баром
+                // #3675 п.3: бар-контейнер из сегментов [наладка ножей][смена сырья][резка] —
+                // наладка слева и светлее, резка справа главным цветом статуса; границ между
+                // сегментами нет (см. cut-gantt.css). Сегменты наладки рисуем, только если отчёт
+                // отдал минуты (seg.*Px > 0). Текст времени резки — справа от всего бара.
+                var seg = t.segments || {};
+                var children = [];
+                if (seg.knifePx > 0) {
+                    var knifeSeg = el('span', { class: 'atex-cg-seg atex-cg-seg--knife' });
+                    knifeSeg.style.width = seg.knifePx + 'px';
+                    children.push(knifeSeg);
+                }
+                if (seg.materialPx > 0) {
+                    var matSeg = el('span', { class: 'atex-cg-seg atex-cg-seg--material' });
+                    matSeg.style.width = seg.materialPx + 'px';
+                    children.push(matSeg);
+                }
+                var cutSeg = el('span', { class: 'atex-cg-seg atex-cg-seg--cut' });
+                children.push(cutSeg);   // ширина резки — остаток (flex: 1)
+                children.push(el('span', { class: 'atex-cg-bar-main', text: t.barText }));
                 var barLink = el('a', {
                     class: 'atex-cg-bar is-' + statusKey,
                     href: planningLink(t.cut, self.planningUrl),
                     title: t.title,
                     dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
-                }, [
-                    // #3668 п.4: диапазон времени, обычным шрифтом, выходит за рамки бара.
-                    el('span', { class: 'atex-cg-bar-main', text: t.barText })
-                ]);
+                }, children);
                 barLink.style.left = t.leftPx + 'px';
                 barLink.style.width = t.widthPx + 'px';
                 track.appendChild(barLink);

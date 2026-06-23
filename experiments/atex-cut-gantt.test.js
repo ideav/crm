@@ -39,7 +39,8 @@ var cuts = gantt.rowsToCuts([
     { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
       cut_plan_date: '06.05.2026', cut_material: 'MR194', cut_material_id: '5',
       cut_start_date: '06.05.2026 08:10', cut_end_date: '06.05.2026 09:20',
-      cut_duration: '70', cut_length: '600', cut_status: 'В работе', cut_sequence: '2',
+      cut_duration: '70', cut_length: '600', cut_planned_runs: '6', cut_roller_width: '88',
+      cut_status: 'В работе', cut_sequence: '2',
       cut_leader: 'MONOCHROME', cut_winding: 'OUT', order_no: '3700', supply_id: '900' },
     // вторая строка той же резки (join с обеспечением) — схлопывается
     { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101', supply_id: '901' },
@@ -49,19 +50,28 @@ var cuts = gantt.rowsToCuts([
 assertEqual(cuts, [
     { id: '10', number: '06.05.2026', planDate: '06.05.2026', status: 'В работе',
       startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', duration: 70, length: 600,
-      sequence: 2, leader: 'MONOCHROME', orderNo: '3700',
+      plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, sequence: 2, leader: 'MONOCHROME', orderNo: '3700',
       materialId: '5', materialName: 'MR194', winding: 'OUT', slitter: { id: '101', label: 'Станок 1' } },
     { id: '20', number: '27.05.2026', planDate: '27.05.2026', status: 'Ожидает',
-      startDate: '', endDate: '', duration: 0, length: 0, sequence: null, leader: '', orderNo: '3701',
+      startDate: '', endDate: '', duration: 0, length: 0, plannedRuns: 0, rollerWidth: 0, knifeWidths: [], knifeCount: 0,
+      sequence: null, leader: '', orderNo: '3701',
       materialId: '', materialName: '', winding: '', slitter: { id: null, label: '' } }
-], 'rowsToCuts: dedup, поля order/sequence/leader/намотка/length, длительность');
+], 'rowsToCuts: dedup, поля order/sequence/leader/намотка/length/резок/ролик, длительность');
 
-// ── cutRowLabel (#3668 п.2): «{заказ} / {сырьё} · {намотка} · {метраж}» без слова «Заказ» ──
+// ── cutRowLabel (#3668 п.2, #3675 п.1/п.2): «{заказ} / {сырьё} · {намотка} · {метраж} x {резок}» ──
 assertEqual(gantt.cutRowLabel({ orderNo: '3351', materialName: 'MWR116L', winding: 'OUT', length: 450 }),
     '3351 / MWR116L · OUT · 450', 'cutRowLabel: заказ / сырьё · намотка · метраж');
 assertEqual(gantt.cutRowLabel({ orderNo: '3700', materialName: 'MWR116L', length: 600 }),
     '3700 / MWR116L · 600', 'cutRowLabel: без намотки');
 assertEqual(gantt.cutRowLabel({ orderNo: '3701' }), '3701', 'cutRowLabel: только заказ');
+// #3675 п.1: «Кол-во резок план» → « x N» после метража
+assertEqual(gantt.cutRowLabel({ orderNo: '3738', materialName: 'MWR113L', winding: 'OUT', length: 700, plannedRuns: 6 }),
+    '3738 / MWR113L · OUT · 700 x 6', 'cutRowLabel: метраж × кол-во резок');
+assertEqual(gantt.cutRowLabel({ orderNo: '3738', materialName: 'MWR113L', winding: 'OUT', length: 700, plannedRuns: 0 }),
+    '3738 / MWR113L · OUT · 700', 'cutRowLabel: без «x N», если резок нет');
+// #3675 п.2: длинное имя сырья обрезаем до первого пробела
+assertEqual(gantt.cutRowLabel({ orderNo: '3310', materialName: 'Фольга горячего тиснения МВ 35', winding: 'OUT', length: 300 }),
+    '3310 / Фольга · OUT · 300', 'cutRowLabel: сырьё обрезано до первого пробела');
 
 // ── ganttRange: неделя с понедельника, 7 дней ──
 var weekRange = gantt.ganttRange('2026-06-11', 'week');
@@ -91,6 +101,71 @@ assertEqual(gantt.cutBarTime({ planDate: '2026-06-10 11:19', duration: 4 }),
     '11:19-11:23 (4 мин)', 'cutBarTime: «11:19-11:23 (4 мин)»');
 assertEqual(gantt.cutBarTime({ planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:05', endDate: '2026-06-10 09:05' }),
     '08:05-09:05 (60 мин)', 'cutBarTime: по факту старт/финиш');
+// #3675 п.3: сдвиг подписи на время наладки — окно резки начинается после наладки
+assertEqual(gantt.cutBarTime({ planDate: '2026-06-10 08:00', duration: 4 }, 45),
+    '08:45-08:49 (4 мин)', 'cutBarTime: со сдвигом наладки 45 мин');
+
+// ── cutSetupMin (#3675 п.3): минуты наладки только у запланированных (без факт. старта) ──
+assertEqual(gantt.cutSetupMin({ planDate: '2026-06-10 08:00', setupKnifeMin: 30, setupMaterialMin: 15 }),
+    { knife: 30, material: 15, total: 45 }, 'cutSetupMin: запланированная — ножи+сырьё');
+assertEqual(gantt.cutSetupMin({ planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:05',
+    endDate: '2026-06-10 09:05', setupKnifeMin: 30, setupMaterialMin: 15 }),
+    { knife: 0, material: 0, total: 0 }, 'cutSetupMin: начатая — наладка уже позади (0)');
+assertEqual(gantt.cutSetupMin({ planDate: '2026-06-10 08:00' }),
+    { knife: 0, material: 0, total: 0 }, 'cutSetupMin: нет минут (старый отчёт) → 0');
+
+// ── cutBarSegments (#3675 п.3): ширины [наладка ножей][смена сырья][резка] в px ──
+// 2 px/мин: резка 4 мин = 8px; наладка 30 мин = 60px, смена 15 мин = 30px.
+assertEqual(gantt.cutBarSegments({ planDate: '2026-06-10 08:00', duration: 4, setupKnifeMin: 30, setupMaterialMin: 15 }, 2, 8),
+    { knifePx: 60, materialPx: 30, cutPx: 8, totalPx: 98, knifeMin: 30, materialMin: 15, setupMin: 45 },
+    'cutBarSegments: наладка слева + резка справа');
+// Начатая резка — сегментов наладки нет (всё в резку).
+assertEqual(gantt.cutBarSegments({ planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:00',
+    endDate: '2026-06-10 08:30', setupKnifeMin: 30, setupMaterialMin: 15 }, 2, 8),
+    { knifePx: 0, materialPx: 0, cutPx: 60, totalPx: 60, knifeMin: 0, materialMin: 0, setupMin: 0 },
+    'cutBarSegments: начатая — без наладки');
+// Без минут наладки — один сегмент резки (первая резка станка / нет данных).
+assertEqual(gantt.cutBarSegments({ planDate: '2026-06-10 08:00', duration: 4 }, 2, 8),
+    { knifePx: 0, materialPx: 0, cutPx: 8, totalPx: 8, knifeMin: 0, materialMin: 0, setupMin: 0 },
+    'cutBarSegments: без наладки — один сегмент резки');
+
+// ── cutChangeoverMinutes (#3675 п.3): переналадка prev→next (порт changeoverParts) ──
+var TIMES = { MATERIAL_WINDING: 15, KNIFE: 30 };
+assertEqual(gantt.cutChangeoverMinutes(null, { materialId: '5' }, TIMES),
+    { knife: 0, material: 0 }, 'cutChangeoverMinutes: первая резка станка → 0');
+// Та же намотка/сырьё/ножи → 0; смена сырья → MATERIAL_WINDING; смена ножей → KNIFE.
+var cutA = { materialId: '5', winding: 'OUT', rollerWidth: 88, knifeWidths: [55, 33], knifeCount: 2 };
+assertEqual(gantt.cutChangeoverMinutes(cutA, { materialId: '5', winding: 'OUT', rollerWidth: 88, knifeWidths: [55, 33], knifeCount: 2 }, TIMES),
+    { knife: 0, material: 0 }, 'cutChangeoverMinutes: всё совпало → 0');
+assertEqual(gantt.cutChangeoverMinutes(cutA, { materialId: '7', winding: 'OUT', rollerWidth: 88, knifeWidths: [55, 33], knifeCount: 2 }, TIMES),
+    { knife: 0, material: 15 }, 'cutChangeoverMinutes: другое сырьё → смена сырья 15');
+assertEqual(gantt.cutChangeoverMinutes(cutA, { materialId: '5', winding: 'IN', rollerWidth: 88, knifeWidths: [55, 33], knifeCount: 2 }, TIMES),
+    { knife: 0, material: 15 }, 'cutChangeoverMinutes: другая намотка → смена сырья 15');
+assertEqual(gantt.cutChangeoverMinutes(cutA, { materialId: '5', winding: 'OUT', rollerWidth: 88, knifeWidths: [60, 40], knifeCount: 2 }, TIMES),
+    { knife: 30, material: 0 }, 'cutChangeoverMinutes: другой набор ножей → смена ножей 30');
+assertEqual(gantt.cutChangeoverMinutes(cutA, { materialId: '7', winding: 'OUT', rollerWidth: 70, knifeWidths: [55, 33], knifeCount: 2 }, TIMES),
+    { knife: 30, material: 15 }, 'cutChangeoverMinutes: сырьё+сужение ролика → 30 и 15');
+
+// ── attachStrips (#3675 п.3): cut_strips → knifeWidths/knifeCount ──
+var stripCuts = [{ id: '1' }, { id: '2' }];
+gantt.attachStrips(stripCuts, [
+    { cut_id: '1', strip_width: '55.00', strip_qty: '2' },
+    { cut_id: '1', strip_width: '33.00', strip_qty: '1' },
+    { cut_id: '2', strip_width: '110.00', strip_qty: '3' }
+]);
+assertEqual([stripCuts[0].knifeWidths, stripCuts[0].knifeCount], [[55, 55, 33], 3], 'attachStrips: ширины развёрнуты по qty');
+assertEqual([stripCuts[1].knifeWidths, stripCuts[1].knifeCount], [[110, 110, 110], 3], 'attachStrips: второе задание');
+
+// ── attachSetupMinutes (#3675 п.3): наладка по предыдущей резке станка ──
+var seqCuts = [
+    { id: 'a', sequence: 1, slitter: { id: '10' }, materialId: '5', winding: 'OUT', rollerWidth: 88, knifeWidths: [55], knifeCount: 1 },
+    { id: 'b', sequence: 2, slitter: { id: '10' }, materialId: '7', winding: 'OUT', rollerWidth: 88, knifeWidths: [55], knifeCount: 1 },
+    { id: 'c', sequence: 1, slitter: { id: '20' }, materialId: '5', winding: 'OUT', rollerWidth: 88, knifeWidths: [55], knifeCount: 1 }
+];
+gantt.attachSetupMinutes(seqCuts, TIMES);
+assertEqual([seqCuts[0].setupKnifeMin, seqCuts[0].setupMaterialMin], [0, 0], 'attachSetupMinutes: первая на станке 10 → 0');
+assertEqual([seqCuts[1].setupKnifeMin, seqCuts[1].setupMaterialMin], [0, 15], 'attachSetupMinutes: смена сырья у второй');
+assertEqual([seqCuts[2].setupKnifeMin, seqCuts[2].setupMaterialMin], [0, 0], 'attachSetupMinutes: первая на станке 20 → 0');
 
 // ── ganttWindow (#3668 п.1/п.7): окно = первое…последнее задание (снап до часа) ──
 assertEqual(
