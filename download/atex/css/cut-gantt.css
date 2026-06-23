@@ -98,33 +98,28 @@
 .atex-cg-legend-item.is-late::before { background: var(--cg-late); }
 
 /* ── Тело ── */
+/* #3668 п.5: горизонтальный скролл на .atex-cg-scroll; тело БЕЗ overflow, иначе оно
+   само становится контекстом прокрутки и position:sticky первой колонки не работает. */
 .atex-cg-scroll { overflow-x: auto; flex: 1; }
 .atex-cg-body {
     min-width: 720px;
     border: 1px solid var(--cg-border-soft);
     border-radius: 8px;
     background: var(--cg-bg);
-    overflow: hidden;
 }
 
-/* #3648 п.2: заголовок станка — отдельной строкой перед его заданиями. */
-.atex-cg-machine-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 4px 10px;
+/* #3668 п.3: заголовок станка — строка-грид (как строки заданий); имя+счётчик в первой
+   (фиксируемой) ячейке. #3668 п.5: ячейка sticky left:0 — видна при горизонтальном скролле. */
+.atex-cg-machine-head { border-top: 2px solid var(--cg-accent); }
+.atex-cg-machine-cell {
+    gap: 8px;
     font-weight: 700;
     color: var(--cg-accent);
-    background: var(--cg-surface);
-    border-top: 2px solid var(--cg-accent);
-    position: sticky;
-    left: 0;
 }
-.atex-cg-body > .atex-cg-machine-head:first-child { border-top: 0; }
+.atex-cg-machine-track { background: var(--cg-surface); }
 .atex-cg-machine-count { font-weight: 400; font-size: 12px; color: var(--cg-muted); }
 
-/* #3648 п.3: компактные строки задания (метка | дорожка). */
+/* Компактные строки задания (метка | дорожка). */
 .atex-cg-row { display: grid; grid-template-columns: var(--cg-label-w) 1fr; border-top: 1px solid var(--cg-border-soft); }
 
 .atex-cg-label {
@@ -134,9 +129,9 @@
     display: flex;
     align-items: center;
     min-width: 0;
-    position: sticky;
+    position: sticky;          /* #3668 п.5: первая колонка зафиксирована при h-скролле */
     left: 0;
-    z-index: 1;
+    z-index: 3;                /* выше баров и часовой сетки */
 }
 .atex-cg-label-main { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -146,21 +141,25 @@
     background: var(--cg-track);
 }
 
-/* #3654: верхняя шкала часов + часовые деления. Деления выровнены по px с упаковкой. */
-.atex-cg-scale-row { position: sticky; top: 0; z-index: 4; }
+/* Верхняя шкала времени + часовые деления (выровнены по px с барами). */
+.atex-cg-scale-row { position: sticky; top: 0; z-index: 5; }
+.atex-cg-scale-row .atex-cg-label { z-index: 6; }   /* угол: выше и sticky-top, и sticky-left */
 .atex-cg-label--scale { font-weight: 600; font-size: 12px; color: var(--cg-muted); }
-.atex-cg-scale { min-height: 20px; background: var(--cg-surface); }
+.atex-cg-scale { min-height: 30px; background: var(--cg-surface); }
 .atex-cg-hour-label {
     position: absolute;
-    top: 3px;
+    top: 2px;
     transform: translateX(3px);
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
     font-size: 11px;
     color: var(--cg-muted);
     white-space: nowrap;
     pointer-events: none;
 }
-.atex-cg-hour-label.is-bold { font-weight: 700; color: var(--cg-accent); }
-/* Часовые деления внутри дорожек заданий: пунктир каждый час, пожирнее в 8/12/18. */
+.atex-cg-hour-date { font-weight: 700; color: var(--cg-accent); }
+/* #3668 п.6: часовые деления — ВСЕ одинаковым пунктиром (без выделения). */
 .atex-cg-hour {
     position: absolute;
     top: 0;
@@ -169,29 +168,38 @@
     border-left: 1px dashed var(--cg-grid);
     pointer-events: none;
 }
-.atex-cg-hour.is-bold { border-left-width: 2px; border-left-color: var(--cg-muted); }
 
-/* Бар-ссылка (позиция/ширина в px задаются инлайн — упаковка встык). */
+/* Бар-ссылка (позиция/ширина в px задаются инлайн — реальное время задания). */
 .atex-cg-bar {
     position: absolute;
     top: 2px;
     bottom: 2px;
-    min-width: 6px;
+    min-width: 4px;
     border-radius: 3px;
-    padding: 0 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
+    overflow: visible;          /* #3668 п.4: текст выходит за рамки закрашенного бара */
     text-decoration: none;
-    color: #fff;
     background: var(--cg-unknown);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
     cursor: pointer;
 }
 .atex-cg-bar:hover { filter: brightness(1.08); z-index: 2; }
 .atex-cg-bar:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 1px; z-index: 2; }
-.atex-cg-bar-main { font-weight: 600; font-size: 11px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* #3668 п.4: диапазон времени обычным шрифтом, начинается у бара и выходит правее;
+   тёмный текст с гало под цвет фона — читается и поверх бара, и поверх дорожки. */
+.atex-cg-bar-main {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    padding-left: 4px;
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+    color: var(--text-primary, #1f2933);
+    text-shadow: 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg);
+    pointer-events: none;
+}
 
 .atex-cg-bar.is-planned { background: var(--cg-planned); }
 .atex-cg-bar.is-running { background: var(--cg-running); }
