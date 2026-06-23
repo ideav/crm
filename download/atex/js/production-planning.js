@@ -4752,17 +4752,21 @@
     };
 
     // #3602: кнопка «🗓» (между «🔒» и «🗑») — модалка переноса задания на другой день.
-    // Спрашиваем целевой день (рабочие дни расписания станка + один новый день после
-    // последнего), положение «в начало/в конец дня» и галку «Зафиксировать» (по умолчанию
-    // установлена). planBaseMidnightMs и maxSchedDay приходят из renderQueue (расписание
-    // активного станка уже посчитано — не пересчитываем).
-    AtexProductionPlanning.prototype.openMoveCut = function(cut, planBaseMidnightMs, maxSchedDay) {
+    // #3631: день выбирается ПРОИЗВОЛЬНО (input type=date), а не из ограниченного списка
+    // дней расписания. По умолчанию подставляем текущий день задания (иначе дату фильтра /
+    // сегодня). Ещё спрашиваем положение «в начало/в конец дня» и галку «Зафиксировать»
+    // (по умолчанию установлена).
+    AtexProductionPlanning.prototype.openMoveCut = function(cut) {
         var self = this;
         if (!cut) return;
         if (!this.meta.cut) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return; }
-        var base = Number(planBaseMidnightMs);
-        if (!isFinite(base)) base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var maxDay = Math.max(0, Number(maxSchedDay) || 0);
+
+        // Значение по умолчанию — текущий день задания (по хранимой «Дате план»).
+        var pd = String(cut.planDate == null ? '' : cut.planDate).trim();
+        var defISO = '';
+        if (/^\d{9,13}$/.test(pd)) { var n = Number(pd); defISO = isoDateFromMs(n >= 1e12 ? n : n * 1000); }
+        else if (/^\d{4}-\d{2}-\d{2}/.test(pd)) { defISO = pd.slice(0, 10); }
+        if (!defISO) defISO = String(this.filter && this.filter.date || '').trim() || todayISO();
 
         var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-move-dialog' });
         var overlay = el('div', { class: 'atex-pp-modal atex-pp-move-modal is-open' }, [dialog]);
@@ -4779,15 +4783,10 @@
             text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' +
                 (cut.materialName || (cut.materialId ? '#' + cut.materialId : '—')) }));
 
-        // Выбор дня: рабочие дни расписания (0..maxDay) + новый день после последнего.
-        var daySelect = el('select', { class: 'atex-pp-input atex-pp-move-day' });
-        for (var d = 0; d <= maxDay + 1; d++) {
-            var isNew = d > maxDay;
-            daySelect.appendChild(el('option', { value: String(d),
-                text: formatPlanDayHeading(base, d) + (isNew ? ' (новый день)' : '') }));
-        }
+        // #3631: произвольный день — обычный календарный input type=date (без ограничений).
+        var dayInput = el('input', { type: 'date', class: 'atex-pp-input atex-pp-move-day', value: defISO });
         content.appendChild(el('label', { class: 'atex-pp-move-field' }, [
-            el('span', { class: 'atex-pp-move-label', text: 'День' }), daySelect
+            el('span', { class: 'atex-pp-move-label', text: 'День' }), dayInput
         ]));
 
         // Положение в дне: в начало / в конец.
@@ -4816,11 +4815,12 @@
         var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Перенести' });
         ok.addEventListener('click', function() {
             if (self.busy) return;
-            var dayOffset = Number(daySelect.value) || 0;
+            var dateStr = String(dayInput.value || '').trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { self.notify('Выберите день для переноса', 'error'); return; }
             var position = posEnd.checked ? 'end' : 'start';
             var fix = !!fixCb.checked;
             close();
-            self.moveCutToDay(cut, dayOffset, position, fix, base);
+            self.moveCutToDay(cut, dateStr, position, fix);
         });
         actions.appendChild(cancel);
         actions.appendChild(ok);
@@ -4829,14 +4829,14 @@
         this.root.appendChild(overlay);
     };
 
-    // #3602: применить перенос. Целевой день — смещение dayOffset от базы планирования
-    // (день 0 = дата фильтра). Перемещаемому заданию пишем «Дату план» (главное значение —
-    // DATETIME-колонка → _m_save с t{tableId}, как в applySplitPlan; _m_set её НЕ задаёт,
-    // issue #775) на 08:00 целевого дня и «Очередность» в начало/конец дня, а прочим
-    // заданиям дня — пересчитанную «Очередность» (только изменившиеся). Фиксация (если
-    // отмечена) пишется тем же _m_set. Если цель за пределами фильтра «По» — расширяем его,
-    // чтобы перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
-    AtexProductionPlanning.prototype.moveCutToDay = function(cut, dayOffset, position, fix, planBaseMidnightMs) {
+    // #3602/#3631: применить перенос на ПРОИЗВОЛЬНЫЙ день targetDateStr («ГГГГ-ММ-ДД»).
+    // Перемещаемому заданию пишем «Дату план» (главное значение — DATETIME-колонка →
+    // _m_save с t{tableId}, как в applySplitPlan; _m_set её НЕ задаёт, issue #775) на 08:00
+    // целевого дня и «Очередность» в начало/конец дня, а прочим заданиям дня — пересчитанную
+    // «Очередность» (только изменившиеся). Фиксация (если отмечена) пишется тем же _m_set.
+    // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
+    // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
+    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix) {
         var self = this;
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
@@ -4849,16 +4849,15 @@
             this.notify('Не найдены реквизиты резки («' + CUT_REQ.sequence + '»/дата)', 'error');
             return Promise.resolve(false);
         }
+        var dateStr = String(targetDateStr || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { this.notify('Выберите день для переноса', 'error'); return Promise.resolve(false); }
 
         var win = this.workingWindow();
         var shiftStartMin = Number(win && win.startMin) || 0;
-        var base = Number(planBaseMidnightMs);
-        if (!isFinite(base)) base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var targetMidnightMs = base + (Number(dayOffset) || 0) * 86400000;
-        var targetTs = Math.floor(targetMidnightMs / 1000) + shiftStartMin * 60;   // 08:00 целевого дня
+        var targetMidnightMs = planBaseMidnightFrom(dateStr, controllerNowMs(this));   // полночь целевого дня
+        var targetTs = Math.floor(targetMidnightMs / 1000) + shiftStartMin * 60;       // 08:00 целевого дня
         var targetDayKey = planDateDayKey(targetTs);
-        var targetDateStr = isoDateFromMs(targetMidnightMs);
-        var dateLabel = formatPlanDayHeading(base, dayOffset);
+        var dateLabel = formatPlanDayHeading(targetMidnightMs, 0);
 
         // Задания того же станка на целевом дне (по хранимой «Дате план»), без перемещаемого.
         var slitterId = cut.slitter && cut.slitter.id;
@@ -4902,10 +4901,12 @@
         return chain.then(function() {
             return self.reload();
         }).then(function() {
-            // Цель за «По» фильтра → расширяем диапазон, чтобы задание осталось видимым.
+            // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
+            // перенесённое задание осталось видимым в очереди (пустой край не ограничивает).
+            var fromStr = String(self.filter && self.filter.date || '').trim();
             var toStr = String(self.filter && self.filter.dateTo || '').trim();
-            var toK = toStr === '' ? planDateDayKey(self.filter && self.filter.date) : planDateDayKey(toStr);
-            if (!(toK >= targetDayKey)) self.filter.dateTo = targetDateStr;
+            if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
+            if (toStr !== '' && planDateDayKey(toStr) < targetDayKey) self.filter.dateTo = dateStr;
             self.hideProgress(); self.setBusy(false); self.render();
             self.notify('Задание перенесено на ' + dateLabel +
                 (position === 'end' ? ' (в конец дня)' : ' (в начало дня)'), 'success');
@@ -7173,10 +7174,6 @@
             if (!dayCutsBySched[key]) dayCutsBySched[key] = [];
             dayCutsBySched[key].push(c);
         });
-        // #3602: наибольший рабочий день расписания станка — для списка дней в модалке
-        // переноса (предлагаем дни 0..maxSchedDay + один новый день после последнего).
-        var maxSchedDay = 0;
-        schedule.forEach(function(sc) { var dd = schedDay(sc); if (dd != null && dd > maxSchedDay) maxSchedDay = dd; });
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
@@ -7371,7 +7368,7 @@
             move.addEventListener('click', function(e) {
                 if (e && e.stopPropagation) e.stopPropagation();
                 if (self.busy) return;
-                self.openMoveCut(c, planBaseMidnightMs, maxSchedDay);
+                self.openMoveCut(c);
             });
             // #3486: «🗑» — удалить задание (резку) с её «Обеспечениями». stopPropagation,
             // чтобы клик по кнопке не выбирал резку (см. #3149: клики по контролам не
