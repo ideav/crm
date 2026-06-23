@@ -97,6 +97,23 @@ assertEqual(packed.trackPx, 180, 'packGroups: trackPx = ширина самог�
 assertEqual(gantt.packGroups(packCuts, weekRange, NOW, { slitter: '2' }, {}).groups.map(function(g) { return g.slitter.label; }),
     ['Станок 2'], 'packGroups: фильтр по станку');
 
+// ── ganttTrackPx (#3657): дорожка не короче полной смены 08:00–18:00 ──
+// pxPerMin=6 → час=360px, смена 8…18 = 10 ч = 3600px.
+assertEqual(gantt.ganttTrackPx(355), 3600, 'ganttTrackPx: упаковка < смены → растягиваем до полной смены');
+assertEqual(gantt.ganttTrackPx(5000), 5000, 'ganttTrackPx: упаковка длиннее смены → оставляем упаковку');
+assertEqual(gantt.ganttTrackPx(0), 3600, 'ganttTrackPx: пустой день — всё равно полная смена');
+assertEqual(gantt.ganttTrackPx(100, { pxPerMin: 2, startHour: 8, endHour: 18 }), 1200,
+    'ganttTrackPx: масштаб/часы смены настраиваются (10 ч × 2px/мин × 60)');
+
+// ── hourTicks (#3654/#3657): деления 8…18 всегда, bold на 8/12/18 ──
+var ticks = gantt.hourTicks(gantt.ganttTrackPx(355));
+assertEqual(ticks.map(function(t) { return t.hour; }), [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    'hourTicks: при работе < 1 ч всё равно деления 8…18 (а не только 08:00)');
+assertEqual(ticks.filter(function(t) { return t.bold; }).map(function(t) { return t.hour; }), [8, 12, 18],
+    'hourTicks: пожирнее на 8/12/18');
+assertEqual([ticks[0].leftPx, ticks[1].leftPx, ticks[10].leftPx], [0, 360, 3600],
+    'hourTicks: x=0→08:00, шаг 360px (6px/мин×60), 18:00→3600px');
+
 // ── planningLink: ссылка на планировщик с датой/станком/заданием ──
 assertEqual(gantt.planningLink({ id: '85472', planDate: '06.05.2026', slitter: { id: '1285' } }),
     '/atex/production-planning?cut=85472&date=2026-05-06&slitter=1285',
