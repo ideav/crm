@@ -442,6 +442,20 @@
 .atex-pp-cut-fix.is-active { background: rgba(107, 114, 128, .14); border-color: #9ca3af; }
 .atex-pp.is-busy .atex-pp-cut-fix { pointer-events: none; opacity: .4; }
 
+/* #3602: «🗓» — перенос задания на другой день. Тот же размер, что у «Полосы»/«🔒»/«🗑». */
+.atex-pp-cut-move {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-move:hover { background: var(--pp-surface); }
+.atex-pp.is-busy .atex-pp-cut-move { pointer-events: none; opacity: .4; }
+
 /* #3508 п.3: пометка «только просмотр» в панели полос зафиксированного задания. */
 .atex-pp-strip-locked-note {
     margin: 6px 0 4px;
@@ -645,6 +659,16 @@
 .atex-pp-supply-confirm-label { color: var(--pp-muted); }
 .atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
 .atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* #3602: модалка переноса задания на другой день — день, положение, фиксация. */
+.atex-pp-move-dialog { max-width: 460px; }
+.atex-pp-move-content { display: flex; flex-direction: column; gap: 12px; }
+.atex-pp-move-field { display: flex; flex-direction: column; gap: 6px; }
+.atex-pp-move-label { color: var(--pp-muted); font-size: 13px; }
+.atex-pp-move-day { width: 100%; }
+.atex-pp-move-pos { display: flex; gap: 16px; flex-wrap: wrap; }
+.atex-pp-move-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.atex-pp-move-fix { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;
