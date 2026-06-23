@@ -338,7 +338,9 @@
                     // Find the option whose ID matches the refId from the URL filter
                     const match = options.find(([id]) => String(id) === String(urlFilter.refId));
                     if (match) {
-                        const [, label] = match;
+                        // Issue #3454: справочник типа DATETIME → метку датой, не штампом.
+                        const refColumn = (this.columns || []).find(c => String(c.id) === String(colId)) || null;
+                        const label = this.formatReferenceOptionLabel(match[1], refColumn);
                         // Only update displayValue if the filter has not been overridden by the user
                         if (this.filters[colId] && this.filters[colId].value === urlFilter.value) {
                             this.filters[colId].displayValue = label;

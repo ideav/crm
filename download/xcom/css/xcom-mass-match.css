@@ -1,0 +1,389 @@
+.xcom-mass {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: calc(100vh - 90px);
+    padding: 1rem;
+    color: var(--text-primary, #1f2937);
+}
+
+/* Явный display у кнопок/прогресса перебивает UA-правило [hidden]{display:none} */
+.xcom-mass [hidden] {
+    display: none !important;
+}
+
+.xcom-mass-panel,
+.xcom-mass-pane {
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #d9e0ea);
+    border-radius: 8px;
+}
+
+.xcom-mass-panel {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.xcom-mass-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.xcom-mass-head h1 {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.25;
+    font-weight: 650;
+}
+
+.xcom-mass-head p {
+    margin: 0.25rem 0 0;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.85rem;
+}
+
+.xcom-mass-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.xcom-mass-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.xcom-mass-progress-track {
+    flex: 1;
+    min-width: 0;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--bg-secondary, #eef2f7);
+    overflow: hidden;
+}
+
+.xcom-mass-progress-bar {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: var(--button-primary, #2563eb);
+    transition: width 0.2s ease;
+}
+
+.xcom-mass-progress-label {
+    margin: 0;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.85rem;
+}
+
+/* Поле ключевого слова для фильтра по наименованию RFP (issue #3523) */
+.xcom-mass-keyword {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--border-color, #cfd8e3);
+    background: var(--card-bg, #ffffff);
+    color: var(--text-secondary, #94a3b8);
+}
+
+.xcom-mass-keyword:focus-within {
+    border-color: var(--button-primary, #2563eb);
+}
+
+.xcom-mass-keyword-input {
+    font: inherit;
+    font-size: 0.85rem;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary, #1f2937);
+    width: 14rem;
+    max-width: 40vw;
+}
+
+/* Переключатель числа одновременных запросов (issue #3522) */
+.xcom-mass-concurrency {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #64748b);
+    white-space: nowrap;
+}
+
+.xcom-mass-select {
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--border-color, #cfd8e3);
+    background: var(--card-bg, #ffffff);
+    color: var(--text-primary, #1f2937);
+    cursor: pointer;
+}
+
+.xcom-mass-select:hover {
+    border-color: var(--button-primary, #2563eb);
+}
+
+.xcom-mass-select:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Чекбокс авто-регулировки числа потоков (issue #3527) */
+.xcom-mass-auto {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.xcom-mass-auto input {
+    cursor: pointer;
+}
+
+/* Панель статистики и времени выполнения (issue #3522) */
+.xcom-mass-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.xcom-mass-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 5rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 0.5rem;
+    background: var(--bg-secondary, #f6f8fb);
+    border: 1px solid var(--border-color, #e5ebf2);
+}
+
+.xcom-mass-stat b {
+    font-size: 1.15rem;
+    line-height: 1.2;
+    color: var(--text-primary, #1f2937);
+    font-variant-numeric: tabular-nums;
+}
+
+.xcom-mass-stat span {
+    font-size: 0.72rem;
+    color: var(--text-secondary, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.xcom-mass-stat-ok b {
+    color: var(--success, #15803d);
+}
+
+.xcom-mass-stat-err b {
+    color: var(--danger, #b91c1c);
+}
+
+.xcom-mass-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 360px;
+    flex: 1;
+}
+
+.xcom-mass-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.xcom-mass-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+    font-size: 0.88rem;
+}
+
+.xcom-mass-table th,
+.xcom-mass-table td {
+    border-bottom: 1px solid var(--border-color, #e5ebf2);
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.xcom-mass-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-secondary, #f6f8fb);
+    color: var(--text-secondary, #475569);
+    font-weight: 650;
+}
+
+.xcom-mass-table tr:hover td {
+    background: var(--hover-bg, rgba(37, 99, 235, 0.06));
+}
+
+.xcom-mass-num {
+    width: 3rem;
+    color: var(--text-secondary, #94a3b8);
+    text-align: right;
+}
+
+.xcom-mass-status-col {
+    width: 9rem;
+}
+
+.xcom-mass-accuracy {
+    width: 6rem;
+    white-space: nowrap;
+}
+
+.xcom-mass-rfp-name {
+    max-width: 22rem;
+    color: var(--text-secondary, #475569);
+}
+
+.xcom-mass-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 0.82rem;
+}
+
+.xcom-mass-status-pending {
+    color: var(--text-secondary, #94a3b8);
+    font-weight: 400;
+}
+
+.xcom-mass-status-processing {
+    color: var(--button-primary, #2563eb);
+}
+
+.xcom-mass-status-done {
+    color: var(--success, #15803d);
+}
+
+.xcom-mass-status-error {
+    color: var(--danger, #b91c1c);
+    cursor: help;
+}
+
+.xcom-mass-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.25rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0.42rem 0.75rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.xcom-mass-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.xcom-mass-btn-primary {
+    background: var(--button-primary, #2563eb);
+    border-color: var(--button-primary, #2563eb);
+    color: #ffffff;
+}
+
+.xcom-mass-btn-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+.xcom-mass-btn-secondary {
+    background: var(--bg-secondary, #f6f8fb);
+    border-color: var(--border-color, #cfd8e3);
+    color: var(--text-primary, #1f2937);
+}
+
+.xcom-mass-btn-secondary:hover:not(:disabled) {
+    border-color: var(--button-primary, #2563eb);
+}
+
+.xcom-mass-btn-danger {
+    background: var(--danger, #b91c1c);
+    border-color: var(--danger, #b91c1c);
+    color: #ffffff;
+}
+
+.xcom-mass-btn-danger:hover:not(:disabled) {
+    background: #991b1b;
+}
+
+.xcom-mass-empty,
+.xcom-mass-error,
+.xcom-mass-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 7rem;
+    padding: 1rem;
+    color: var(--text-secondary, #64748b);
+}
+
+.xcom-mass-error {
+    color: var(--danger, #b91c1c);
+}
+
+.xcom-mass-spinner {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    border: 2px solid rgba(37, 99, 235, 0.2);
+    border-top-color: var(--button-primary, #2563eb);
+    animation: xcom-mass-spin 0.8s linear infinite;
+    flex: 0 0 auto;
+}
+
+@keyframes xcom-mass-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 760px) {
+    .xcom-mass {
+        padding: 0.75rem;
+    }
+
+    .xcom-mass-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .xcom-mass-actions,
+    .xcom-mass-actions .xcom-mass-btn {
+        width: 100%;
+    }
+
+    .xcom-mass-table {
+        min-width: 860px;
+    }
+}

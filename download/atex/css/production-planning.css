@@ -52,22 +52,20 @@
     .atex-pp-layout { grid-template-columns: 1fr; }
 }
 
-/* Шапка панели очереди: заголовок слева, действия справа (#3116 п.1, #3215). */
+/* Шапка панели очереди: заголовок, под ним — действия (#3116 п.1, #3215, #3475). */
 .atex-pp-panel-head {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;   /* #3475: действия под заголовком, не справа от него */
+    align-items: stretch;     /* действия на всю ширину — чтобы плашка подтверждения была видна */
+    gap: 8px;
     margin-bottom: 10px;
-    flex-wrap: wrap;
 }
 .atex-pp-panel-head .atex-pp-form-title { margin: 0; }
 .atex-pp-panel-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;   /* #3475: кнопки слева, под заголовком */
     gap: 8px;
-    margin-left: auto;
     flex-wrap: wrap;
 }
 .atex-pp-add { white-space: nowrap; }
@@ -129,6 +127,9 @@
 .atex-pp-btn:hover { background: var(--pp-surface); }
 .atex-pp-btn-primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
 .atex-pp-btn-primary:hover { background: var(--pp-accent-d); }
+/* #3475: «Удалить» — жёлтая кнопка-предупреждение (амбер-плашка подтверждения). */
+.atex-pp-btn-warning { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); color: var(--pp-attn-text); }
+.atex-pp-btn-warning:hover { background: var(--pp-attn-border); color: var(--pp-attn-text); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
 .atex-pp-confirm-bar {
     display: flex;
@@ -160,11 +161,39 @@
 .atex-pp-filters .atex-pp-field { margin-bottom: 0; }
 /* #3411: быстрый поиск занимает ту же ширину, что и остальные фильтры. */
 .atex-pp-search { width: 100%; }
+/* #3508 п.1: поле «Дата плана» со стрелками листания ‹/› по бокам (±1 день). */
+/* #3599 п.1/п.2: «С — По» со стрелками ‹/› — единый прилеплённый блок (без зазоров,
+   смежные границы схлопнуты, скруглены только внешние углы). */
+.atex-pp-date-field { display: flex; align-items: stretch; gap: 0; }
+.atex-pp-date-field .atex-pp-date-input { flex: 1 1 auto; min-width: 0; border-radius: 0; }
+.atex-pp-date-field > * + * { margin-left: -1px; }   /* схлопнуть смежные границы */
+.atex-pp-date-sep {
+    display: flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; padding: 0 6px;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+}
+.atex-pp-date-nav {
+    flex: 0 0 auto;
+    border: 1px solid var(--pp-border);
+    border-radius: 0;
+    background: var(--pp-bg);
+    color: inherit;
+    cursor: pointer;
+    padding: 0 11px;
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+}
+.atex-pp-date-field > .atex-pp-date-nav:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.atex-pp-date-field > .atex-pp-date-nav:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.atex-pp-date-nav:hover { background: var(--pp-surface); }
 
 .atex-pp-queue-group { margin-bottom: 16px; }
 
 /* Карточка резки — панель (#3120 п.1): информация + контролы + панель полос внутри. */
 .atex-pp-cut {
+    position: relative; /* #3613: якорь для значка смежности дня (.atex-pp-cut-spans) */
     padding: 9px 12px;
     margin-bottom: 8px;
     border: 1px solid var(--pp-border);
@@ -173,9 +202,54 @@
     cursor: pointer; /* клик по всей карточке выбирает резку (#3149) */
 }
 .atex-pp-cut:hover { background: var(--pp-surface); }
+/* #3508 п.5: зафиксированное задание — серая кайма (видно, что менять нельзя). Объявлено
+   ДО .is-active, чтобы у выбранной зафиксированной карточки выделение-акцент перекрывало. */
+.atex-pp-cut.is-fixed { border-color: #9ca3af; background: rgba(107, 114, 128, .06); box-shadow: inset 0 0 0 1px #cbd1d9; }
+.atex-pp-cut.is-fixed:hover { background: rgba(107, 114, 128, .1); }
 .atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+/* #3638: задание, открытое по ссылке из диаграммы Ганта — кратковременная подсветка. */
+.atex-pp-cut.is-deeplink { animation: atex-pp-deeplink 2.4s ease-out 1; }
+@keyframes atex-pp-deeplink {
+    0%, 30% { box-shadow: 0 0 0 3px rgba(19, 65, 116, .5); }
+    100% { box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+}
 /* Нет подходящей партии сырья — резку нельзя обеспечить (#3120 п.4, Фаза 1a). */
-.atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); border-color: var(--pp-warn); }
+.atex-pp-cut.is-unreserved { background: rgba(185, 28, 28, .07); }
+/* #3545: красный бордюр «нет обеспечения» — только у НЕзафиксированного задания.
+   У зафиксированного бордюр остаётся серым (.is-fixed), сигнал даёт красный фон. */
+.atex-pp-cut.is-unreserved:not(.is-fixed) { border-color: var(--pp-warn); }
+/* #3635 п.5: задание-«настройка» (хвост дня N перед намоткой дня N+1) — приглушённая
+   пунктирная кайма, чтобы оператор видел: это подготовка ножей/сырья, а не сама резка. */
+.atex-pp-cut.is-setup { border-style: dashed; background: rgba(37, 99, 235, .05); }
+.atex-pp-cut.is-setup .atex-pp-cut-time { color: var(--pp-accent); font-weight: 600; }
+
+/* #3613: задание, не влезшее в рабочий день, дробится по дням. На первой/последней
+   карточке цепочки — значок справа внизу (контролы прижаты влево, угол свободен):
+   «←» начало в предыдущем дне, «→» продолжение в следующем. Подсказка — в title. */
+.atex-pp-cut-spans {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    gap: 4px;
+    pointer-events: none; /* индикатор, не контрол; не перехватывает клики карточки */
+}
+.atex-pp-cut-span {
+    pointer-events: auto; /* вернуть наведение для подсказки title */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--pp-accent);
+    background: rgba(19, 65, 116, .12);
+    cursor: help;
+}
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
@@ -223,6 +297,17 @@
     color: var(--pp-muted);
     text-align: right;
     white-space: nowrap;
+}
+/* #3472: лидер резки. Смешанные лидеры (легаси) — предупреждающий стиль. */
+.atex-pp-cut-leader {
+    flex: 0 0 auto;
+    font-size: 12px;
+    color: var(--pp-muted);
+    white-space: nowrap;
+}
+.atex-pp-cut-leader-mixed {
+    color: var(--pp-danger, #c0392b);
+    font-weight: 600;
 }
 /* #3354 п.1: сводка полос по ширинам под первой строкой карточки. Контейнер —
    .atex-pp-cut-material (переиспользован), одна текстовая строка на ширину. */
@@ -273,6 +358,19 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* #3616: дата рабочего дня — заголовок перед первой карточкой каждого дня расписания
+   (после блока уборки предыдущего дня). Нумерация заданий начинается с 1 на каждый день. */
+.atex-pp-day-date {
+    margin: 14px 0 8px;
+    padding: 4px 2px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--pp-accent);
+    border-bottom: 2px solid var(--pp-border, #d9dee5);
+    font-variant-numeric: tabular-nums;
+}
+.atex-pp-day-date:first-child { margin-top: 2px; }
+
 /* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). Клик по ним не
    выбирает резку (#3149) — поэтому курсор-стрелка, а не «указатель» карточки. */
 .atex-pp-cut-controls {
@@ -318,6 +416,66 @@
     white-space: nowrap;
 }
 .atex-pp-strips:hover { background: var(--pp-surface); }
+
+/* #3486: «🗑» — удалить задание (резку). В одном ряду с ↑↓/Полосы; акцент-цвет
+   только на ховере, чтобы случайно не притягивать клик. Клик не выбирает резку. */
+.atex-pp-cut-del {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;   /* #3508 п.4: размер как у кнопки «Полосы» — иконки в ряду ровные */
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-del:hover { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); }
+.atex-pp.is-busy .atex-pp-cut-del { pointer-events: none; opacity: .4; }
+/* #3508 п.3: зафиксированное задание удалить нельзя — кнопка приглушена и не реагирует. */
+.atex-pp-cut-del.is-disabled,
+.atex-pp-cut-del:disabled { opacity: .4; cursor: default; }
+.atex-pp-cut-del:disabled:hover { background: var(--pp-bg); border-color: var(--pp-border); }
+
+/* #3508 п.4: «🔒» — зафиксировать/снять фиксацию ОДНОГО задания. Тот же размер, что у
+   «Полосы»/«🗑». is-active — задание уже зафиксировано (подсветка-«замок»). */
+.atex-pp-cut-fix {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-fix:hover { background: var(--pp-surface); }
+.atex-pp-cut-fix.is-active { background: rgba(107, 114, 128, .14); border-color: #9ca3af; }
+.atex-pp.is-busy .atex-pp-cut-fix { pointer-events: none; opacity: .4; }
+
+/* #3602: «🗓» — перенос задания на другой день. Тот же размер, что у «Полосы»/«🔒»/«🗑». */
+.atex-pp-cut-move {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-move:hover { background: var(--pp-surface); }
+.atex-pp.is-busy .atex-pp-cut-move { pointer-events: none; opacity: .4; }
+
+/* #3508 п.3: пометка «только просмотр» в панели полос зафиксированного задания. */
+.atex-pp-strip-locked-note {
+    margin: 6px 0 4px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(107, 114, 128, .1);
+    color: var(--pp-muted, #6b7280);
+    font-size: 13px;
+}
+.atex-pp-strip-panel.is-readonly .atex-pp-strip-table { opacity: .75; }
 
 /* Инлайн-редактор полос резки */
 .atex-pp-strip-panel {
@@ -511,6 +669,16 @@
 .atex-pp-supply-confirm-label { color: var(--pp-muted); }
 .atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
 .atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* #3602: модалка переноса задания на другой день — день, положение, фиксация. */
+.atex-pp-move-dialog { max-width: 460px; }
+.atex-pp-move-content { display: flex; flex-direction: column; gap: 12px; }
+.atex-pp-move-field { display: flex; flex-direction: column; gap: 6px; }
+.atex-pp-move-label { color: var(--pp-muted); font-size: 13px; }
+.atex-pp-move-day { width: 100%; }
+.atex-pp-move-pos { display: flex; gap: 16px; flex-wrap: wrap; }
+.atex-pp-move-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.atex-pp-move-fix { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;
@@ -725,4 +893,4 @@
     cursor: pointer;
 }
 .atex-pp-skipped-link:hover { text-decoration: none; }
-/* @version 2026-06-14-issue-3391 */
+/* @version 2026-06-19-issue-3475 */

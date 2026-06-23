@@ -89,6 +89,24 @@ class IntegramCreateFormHelper {
         return parseIntegramAttrs(attrs);
     }
 
+    // Issue #3454: метка опции в списке ссылок на справочник типа DATETIME должна быть
+    // датой, а не unix-штампом (как в IntegramTable.formatRecordTitleValue/#3211).
+    // baseType — тип ссылки (req.type): для DATETIME-цели = 4. Прочие справочники
+    // (SHORT/NUMBER) не трогаем; нечисловые/вне диапазона 2001–2100 значения остаются как есть.
+    formatRefOptionLabel(label, baseType) {
+        if (baseType == null || this.normalizeFormat(baseType) !== 'DATETIME') return label;
+        const raw = String(label == null ? '' : label).trim();
+        if (!/^\d{9,}(\.\d+)?$/.test(raw)) return label;
+        let n = parseFloat(raw);
+        if (!isFinite(n)) return label;
+        if (n >= 1e12) n = n / 1000;   // JS-штамп в миллисекундах → секунды
+        const d = new Date(n * 1000);
+        const year = d.getFullYear();
+        if (year < 2001 || year > 2100) return label;
+        const pad = (v) => String(v).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     normalizeFormat(baseTypeId) {
         const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
                               'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
@@ -637,7 +655,10 @@ class IntegramCreateFormHelper {
                         const option = document.createElement('option');
                         option.value = optId;
                         option.textContent = optVal;
-                        if (String(optId) === String(currentValue)) {
+                        // Issue #3572: матчим по id ИЛИ по метке — подчинённый объект
+                        // («Заказ -> Заказанное количество») может прийти меткой без «id:».
+                        if (String(optId) === String(currentValue) ||
+                            (currentValue !== '' && String(optVal) === String(currentValue))) {
                             option.selected = true;
                         }
                         select.appendChild(option);
@@ -700,7 +721,7 @@ class IntegramCreateFormHelper {
                     optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
                 } else {
                     entries.forEach(([id, text]) => {
-                        const decodedText = this.decodeHtmlEntities(text);
+                        const decodedText = this.formatRefOptionLabel(this.decodeHtmlEntities(text), req.type);
                         optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(decodedText)}</div>`;
                     });
                 }
@@ -710,7 +731,8 @@ class IntegramCreateFormHelper {
                 if (currentReference.id) {
                     hiddenInput.value = currentReference.id;
                     if (currentReference.text && searchInput) {
-                        searchInput.value = this.decodeHtmlEntities(currentReference.text);
+                        // Issue #3454: выбранное значение DATETIME-ссылки — датой, не штампом.
+                        searchInput.value = this.formatRefOptionLabel(this.decodeHtmlEntities(currentReference.text), req.type);
                     }
                 }
 
@@ -2180,7 +2202,11 @@ class IntegramCreateFormHelper {
         // Main value field
         const typeName = this.getMetadataName(metadata);
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
-        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+        // Issue #3572: подчинённый объект «Объекты» может прийти меткой без term-префикса
+        // «id:» — тогда отдаём метку (опции грантов матчатся по id ИЛИ по метке).
+        const mainTermValue = (recordData && recordData.obj && recordData.obj.term !== undefined && recordData.obj.term !== '')
+            ? recordData.obj.term
+            : mainValue;
         const mainFieldType = this.normalizeFormat(metadata.type);
 
         // Build main field HTML based on its type

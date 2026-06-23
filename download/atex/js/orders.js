@@ -8,14 +8,14 @@
  *
  * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
  * object id и t{reqId} — id зависят от сборки базы:
- *   «Заказ»            — up=1
- *   «Позиция заказа»   — up={orderId} (подчинённая Заказу)
+ *   «Заказ»                 — up=1
+ *   «Заказанное количество» — up={orderId} (подчинённая Заказу)
  *   «Клиент», «Вид сырья», «Диаметр втулки» — ссылки.
  */
 (function(window, document) {
     'use strict';
 
-    var TABLE = { order: 'Заказ', position: 'Позиция заказа' };
+    var TABLE = { order: 'Заказ', position: ['Заказанное количество', 'Позиция заказа'] };
     var REF_OPTIONS_LIMIT = 500;
     var REF_SEARCH_LIMIT = 50;
     var REF_DROPDOWN_LIMIT = 80;
@@ -39,12 +39,12 @@
         { key: 'status', label: 'Статус', names: ['Статус заказа', 'Статус'], ref: true },
         { key: 'lead', label: 'Лидер', names: ['Лидер'] },
         { key: 'notes', label: 'Примечания', names: ['Примечания'] },
-        // Счётчик подчинённых позиций (ROLLUP-колонка «Позиция заказа») — приходит
-        // в записи заказа сразу, до ленивой загрузки самих позиций.
-        { key: 'posCount', label: 'Позиций', names: ['Позиция заказа'] }
+        // Счётчик подчинённых позиций (ROLLUP-колонка «Заказанное количество») —
+        // приходит в записи заказа сразу, до ленивой загрузки самих позиций.
+        { key: 'posCount', label: 'Позиций', names: ['Заказанное количество', 'Позиция заказа'] }
     ];
 
-    // Карта полей подчинённой таблицы «Позиция заказа».
+    // Карта полей подчинённой таблицы «Заказанное количество».
     var POSITION_FIELDS = [
         { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
         { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
@@ -418,11 +418,11 @@
     }
 
     function findMetadataByName(all, name) {
-        var wanted = normalizeFieldName(name);
+        var wanted = (Array.isArray(name) ? name : [name]).map(normalizeFieldName);
         for (var i = 0; i < (all || []).length; i++) {
             var meta = all[i];
-            if (normalizeFieldName(meta.val) === wanted) return meta;
-            if (meta.alias && normalizeFieldName(meta.alias) === wanted) return meta;
+            if (wanted.indexOf(normalizeFieldName(meta.val)) !== -1) return meta;
+            if (meta.alias && wanted.indexOf(normalizeFieldName(meta.alias)) !== -1) return meta;
         }
         return null;
     }
@@ -433,7 +433,8 @@
             var override = trimValue(overrides && overrides[key]);
             var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
             if (!meta) {
-                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                var nameForMsg = Array.isArray(tableNames[key]) ? tableNames[key].join('»/«') : tableNames[key];
+                throw new Error('В метаданных не найдена таблица «' + nameForMsg + '»' +
                     (override ? ' (id ' + override + ')' : ''));
             }
             resolved[key] = meta;
@@ -445,6 +446,16 @@
         for (var i = 0; i < columns.length; i++) {
             if (columns[i].key === key) return columns[i];
         }
+        return null;
+    }
+
+    // Ключ записи для колонки позиции (буфер fields → buildFormBody добавит «t»).
+    // Обычная колонка → её reqId. «Кол-во» у «Заказанного количества» реквизита
+    // не имеет — это главное значение записи, ключ = id таблицы (t{tableId}).
+    // На старой схеме «Позиция заказа» «Кол-во» был реквизитом — тогда вернётся reqId.
+    function positionWriteKey(col, tableId) {
+        if (col && col.reqId) return col.reqId;
+        if (col && col.key === 'qty' && tableId) return String(tableId);
         return null;
     }
 
@@ -546,8 +557,8 @@
         var cols = opts.columns || [];
         function put(key, value) {
             if (value == null || value === '') return;
-            var col = getColumn(cols, key);
-            if (col && col.reqId) fields[col.reqId] = value;
+            var wkey = positionWriteKey(getColumn(cols, key), opts.tableId);
+            if (wkey) fields[wkey] = value;
         }
         put('qty', opts.qty);
         put('raw', opts.rawId);
@@ -569,8 +580,8 @@
         var cols = opts.columns || [];
         var values = opts.values || {};
         function put(key, value) {
-            var col = getColumn(cols, key);
-            if (col && col.reqId) fields[col.reqId] = value == null ? '' : value;
+            var wkey = positionWriteKey(getColumn(cols, key), opts.tableId);
+            if (wkey) fields[wkey] = value == null ? '' : value;
         }
         put('qty', values.qty);
         put('raw', values.raw);
@@ -895,7 +906,7 @@
         var rows = orders.map(function(order) {
             var loadedPositions = state.positionsByOrder[order.id];
             // Пока позиции не догружены (заказ не раскрыт) — берём счётчик из самой
-            // записи заказа (ROLLUP «Позиция заказа»); после загрузки считаем по факту.
+            // записи заказа (ROLLUP «Заказанное количество»); после загрузки считаем по факту.
             var positionCount = loadedPositions
                 ? loadedPositions.length
                 : (parseInt(order.values.posCount, 10) || 0);
@@ -1062,9 +1073,10 @@
         var fields = {};
         var any = false;
         state.positionColumns.forEach(function(col) {
-            if (!col || !col.reqId) return;
+            var wkey = positionWriteKey(col, state.positionTable);
+            if (!wkey) return;
             var val = col.ref ? (draft.refs[col.key] || '') : (draft.values[col.key] || '');
-            if (val !== '' && val != null) { fields[col.reqId] = val; any = true; }
+            if (val !== '' && val != null) { fields[wkey] = val; any = true; }
         });
         state.draftOrderId = null;
         state.draftPos = null;
@@ -1298,9 +1310,10 @@
         var posId = td.getAttribute('data-position-id');
         var col = getColumn(state.positionColumns, key);
         var found = posId ? findPositionById(posId) : null;
+        var writeKey = positionWriteKey(col, state.positionTable);
         state.editingCell = null;
         td.classList.remove('is-editing');
-        if (!found || !col || !col.reqId) {
+        if (!found || !col || !writeKey) {
             if (found) td.textContent = positionCellText(found.position, key);
             return;
         }
@@ -1335,7 +1348,7 @@
             return;
         }
         var fields = {};
-        fields[col.reqId] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
+        fields[writeKey] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
         var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
         var body = buildFormBody(fields, getXsrf());
         setMessage('Сохранение…', 'info');

@@ -10,9 +10,10 @@
  * object id и t{reqId} — id зависят от сборки базы:
  *   «Партия ГП»             — up=1; первая колонка — «Дата прихода» (DATETIME,
  *                             проставляется сервером = now при создании);
- *                             ссылка → «Производственная резка».
- *   «Производственная резка» — источник завершённых резок для оприходования.
- *   «Обеспечение» ⊂ «Позиция заказа» — ссылка → «Партия ГП»
+ *                             ссылка → «Задание в производство».
+ *   «Задание в производство» — источник завершённых резок для оприходования
+ *                             (#3504: таблица «Производственная резка» переименована).
+ *   «Обеспечение» ⊂ «Заказанное количество» — ссылка → «Партия ГП»
  *                             (FIFO-списание партии в обеспечение позиции).
  *
  * Действия (приёмочные критерии §3.8):
@@ -26,7 +27,8 @@
 (function(window, document) {
     'use strict';
 
-    var TABLE = { batch: 'Партия ГП', provision: 'Обеспечение', cutting: 'Производственная резка' };
+    // #3504: «cutting» — массив синонимов имени таблицы (новое имя + старое запасным).
+    var TABLE = { batch: 'Партия ГП', provision: 'Обеспечение', cutting: ['Задание в производство', 'Производственная резка'] };
     var LIST_LIMIT = 5000;
 
     // Статусы — свободный текст (тип 3). Наборы можно переопределить data-атрибутами
@@ -44,7 +46,7 @@
     // рулоны (заполняется при оприходовании/списании, может отличаться из-за брака).
     var BATCH_FIELDS = [
         { key: 'arrived', label: 'Дата прихода', main: true },
-        { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
+        { key: 'cutting', label: 'Задание в производство', names: ['Задание в производство', 'Производственная резка'], ref: true },
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'rolls', label: 'Кол-во рулонов', names: ['Кол-во рулонов', 'Количество рулонов'] },
         { key: 'planned', label: 'Кол-во план', names: ['Кол-во план'] },
@@ -60,13 +62,13 @@
     // Карта полей подчинённой таблицы «Обеспечение».
     var PROVISION_FIELDS = [
         { key: 'length', label: 'Метраж, м', names: ['Метраж, м', 'Метраж'] },
-        { key: 'cutting', label: 'Производственная резка', names: ['Производственная резка'], ref: true },
+        { key: 'cutting', label: 'Задание в производство', names: ['Задание в производство', 'Производственная резка'], ref: true },
         { key: 'batch', label: 'Партия ГП', names: ['Партия ГП'], ref: true },
         { key: 'rolls', label: 'Кол-во рулонов', names: ['Кол-во рулонов', 'Количество рулонов'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
-    // Карта полей таблицы «Производственная резка» — для подбора завершённых резок.
+    // Карта полей таблицы «Задание в производство» — для подбора завершённых резок.
     var CUTTING_FIELDS = [
         { key: 'number', label: 'Номер', main: true },
         { key: 'slitter', label: 'Слиттер', names: ['Слиттер'], ref: true },
@@ -216,9 +218,14 @@
         var resolved = {};
         Object.keys(tableNames || {}).forEach(function(key) {
             var override = trimValue(overrides && overrides[key]);
-            var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
+            // #3504: значение может быть строкой или массивом синонимов имени таблицы.
+            var names = [].concat(tableNames[key]);
+            var meta = override ? findMetadataById(all, override) : null;
+            for (var i = 0; !meta && i < names.length; i++) {
+                meta = findMetadataByName(all, names[i]);
+            }
             if (!meta) {
-                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                throw new Error('В метаданных не найдена таблица «' + names[0] + '»' +
                     (override ? ' (id ' + override + ')' : ''));
             }
             resolved[key] = meta;
@@ -684,7 +691,7 @@
         if (!panel) return;
         panel.innerHTML =
             '<div class="atex-wh-fields">' +
-            '<label>Производственная резка' + cuttingOptionsHtml('atex-wh-cutting') + '</label>' +
+            '<label>Задание в производство' + cuttingOptionsHtml('atex-wh-cutting') + '</label>' +
             '<label>Ширина, мм<input class="atex-wh-input" type="number" min="0" id="atex-wh-width"></label>' +
             '<label>Кол-во рулонов (факт)<input class="atex-wh-input" type="number" min="0" id="atex-wh-rolls"></label>' +
             '<label>Метраж, м<input class="atex-wh-input" type="number" min="0" step="any" id="atex-wh-length"></label>' +

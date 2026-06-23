@@ -1,0 +1,79 @@
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-mass-match.css?0{_global_.version}">
+
+<div id="xcom-mass-match-app"
+     class="xcom-mass"
+     data-db="{_global_.z}"
+     data-rfp-table="2032189"
+     data-query="mass_match"
+     data-rfp-filter="RFPID"
+     data-batch-size="50"
+     data-concurrency="5">
+    <section class="xcom-mass-panel">
+        <div class="xcom-mass-head">
+            <div>
+                <h1>Массовый подбор SKU</h1>
+                <p id="xcom-mass-batch-hint">Пачка по 50, одновременно до 5 запросов</p>
+            </div>
+            <div class="xcom-mass-actions">
+                <label class="xcom-mass-keyword" title="Ограничить выборку строками RFP, чьё наименование содержит это слово">
+                    <i class="pi pi-search"></i>
+                    <input id="xcom-mass-keyword" class="xcom-mass-keyword-input" type="search"
+                           placeholder="Ключевое слово в наименовании RFP" autocomplete="off">
+                </label>
+                <label class="xcom-mass-concurrency" title="Стартовое число одновременных запросов (в авто-режиме подстраивается по скорости)">
+                    <span>Потоков</span>
+                    <select id="xcom-mass-concurrency" class="xcom-mass-select">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="7">7</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="20">20</option>
+                    </select>
+                </label>
+                <label class="xcom-mass-auto" title="Авто-регулировка числа потоков по замеру скорости каждой пачки">
+                    <input id="xcom-mass-auto" type="checkbox" checked>
+                    <span>Авто</span>
+                </label>
+                <button id="xcom-mass-reload" class="xcom-mass-btn xcom-mass-btn-secondary" type="button" title="Загрузить следующую пачку">
+                    <i class="pi pi-refresh"></i>
+                    <span>Обновить</span>
+                </button>
+                <button id="xcom-mass-start" class="xcom-mass-btn xcom-mass-btn-primary" type="button" title="Обработать все пачки подряд — до пустого списка или «Стоп»" disabled>
+                    <i class="pi pi-play"></i>
+                    <span>Старт</span>
+                </button>
+                <button id="xcom-mass-stop" class="xcom-mass-btn xcom-mass-btn-danger" type="button" title="Остановить обработку" hidden>
+                    <i class="pi pi-stop"></i>
+                    <span>Стоп</span>
+                </button>
+            </div>
+        </div>
+        <div id="xcom-mass-progress" class="xcom-mass-progress" hidden>
+            <div class="xcom-mass-progress-track">
+                <div id="xcom-mass-progress-bar" class="xcom-mass-progress-bar"></div>
+            </div>
+            <span id="xcom-mass-progress-label" class="xcom-mass-progress-label">Обработано 0 из 0</span>
+        </div>
+        <div id="xcom-mass-stats" class="xcom-mass-stats" hidden>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-time">0:00</b><span>время</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-total">0</b><span>обработано</span></div>
+            <div class="xcom-mass-stat xcom-mass-stat-ok" title="Строки, для которых нашёлся хотя бы один SKU-кандидат — записаны «Кандидаты» и «Точность подбора»"><b id="xcom-mass-stat-matched">0</b><span>с подбором</span></div>
+            <div class="xcom-mass-stat" title="Строки, обработанные без ошибок, но без единого подходящего SKU — кандидатов не нашлось"><b id="xcom-mass-stat-nomatch">0</b><span>без подбора</span></div>
+            <div class="xcom-mass-stat xcom-mass-stat-err"><b id="xcom-mass-stat-errors">0</b><span>ошибки</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-speed">0</b><span>строк/мин</span></div>
+            <div class="xcom-mass-stat"><b id="xcom-mass-stat-concurrency">5</b><span>потоков</span></div>
+        </div>
+    </section>
+
+    <section class="xcom-mass-pane">
+        <div id="xcom-mass-list" class="xcom-mass-table-wrap">
+            <div class="xcom-mass-loading">
+                <span class="xcom-mass-spinner"></span>
+                <span>Загрузка строк RFP…</span>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script src="/download/{_global_.z}/js/xcom-mass-match.js?0{_global_.version}" defer></script>

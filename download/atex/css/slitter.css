@@ -23,6 +23,14 @@
     --sl-danger-border: #fecaca;
     --sl-warn: var(--color-error, #b91c1c);
     --sl-ok: var(--color-success, #15803d);
+    /* #3460: палитра цветной раскладки ножей (как в cut-map). */
+    --sl-cm-order: var(--atex-navy, #134174);
+    --sl-cm-stock: #0d9488;
+    --sl-cm-waste: #b45309;
+    --sl-cm-other: var(--text-secondary, #6b7280);
+    --sl-cm-remainder: #cbd5e1;
+    --sl-cm-stripe-a: #f1f5f9;
+    --sl-cm-stripe-b: #e2e8f0;
     color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
@@ -36,6 +44,9 @@
     --sl-info-text: #93c5fd;
     --sl-add-border: rgba(96, 165, 250, 0.45);
     --sl-danger-border: rgba(248, 113, 113, 0.45);
+    --sl-cm-remainder: #475569;
+    --sl-cm-stripe-a: rgba(148, 163, 184, 0.16);
+    --sl-cm-stripe-b: rgba(148, 163, 184, 0.28);
 }
 
 .atex-sl *,
@@ -52,13 +63,15 @@
 
 .atex-sl-toolbar {
     display: grid;
-    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px);
+    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px) 1fr;
     gap: 12px;
     padding: 16px 16px 0;
     align-items: end;
 }
+.atex-sl-toolbar-close { justify-self: end; }  /* #3557 #1: «Закрыть смену» в тулбаре */
 @media (max-width: 640px) {
     .atex-sl-toolbar { grid-template-columns: 1fr; }
+    .atex-sl-toolbar-close { justify-self: stretch; }
 }
 
 .atex-sl-layout {
@@ -107,6 +120,12 @@
 .atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .atex-sl-cut-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-sub { font-size: 12px; color: var(--sl-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* #3646: карточка списка — № (жирный) + «Вид сырья / Намотка / Метраж м * Резок»,
+   второй строкой — время начала–окончания. */
+.atex-sl-cut-line1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.atex-sl-cut-num { font-weight: 700; flex: none; }
+.atex-sl-cut-spec { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atex-sl-cut-time { font-size: 12px; color: var(--sl-muted); font-variant-numeric: tabular-nums; }
 .atex-sl-empty { padding: 14px; color: var(--sl-muted); }
 
 /* Главная область */
@@ -117,9 +136,32 @@
     padding: 18px 20px;
     min-height: 200px;
 }
-.atex-sl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-.atex-sl-head-title { margin: 0 0 4px; font-size: 20px; }
+/* #3557 #4/#5: в шапке — «Резка N из M» + бейдж статуса и кнопки управления (без строки-меты). */
+.atex-sl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.atex-sl-head-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.atex-sl-head-title { margin: 0; font-size: 20px; }
 .atex-sl-head-meta { font-size: 13px; color: var(--sl-muted); }
+.atex-sl-head .atex-sl-life-actions { margin-top: 0; justify-content: flex-end; }
+
+/* #3583: кнопки отметки проходов правее .atex-sl-head-title. */
+.atex-sl-head-pass { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* #3621: «Готово» и «Готовы все» — зелёные (вместо убранной кнопки «Завершить»).
+   Обе кнопки несут класс .atex-sl-btn-pass, поэтому одного правила достаточно. */
+.atex-sl-btn-pass { font-weight: 600; background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); }
+.atex-sl-btn-pass:hover:not(:disabled) { background: var(--sl-success-hover-bg, var(--sl-success-bg)); }
+
+/* #3583: модалка подтверждения «Готовы все» (без confirm()). */
+.atex-sl-confirm-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.atex-sl-confirm {
+    background: #fff; border-radius: 12px; padding: 20px 22px;
+    max-width: 420px; width: 100%; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.atex-sl-confirm-msg { font-size: 15px; line-height: 1.4; margin-bottom: 16px; }
+.atex-sl-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 .atex-sl-badge {
     display: inline-block;
@@ -199,19 +241,18 @@
 }
 
 /* Партии сырья */
-.atex-sl-coverage {
-    margin-bottom: 10px;
+/* #3609: предупреждения о бесшовном продолжении смены (под списком резок) */
+.atex-sl-seamless { display: flex; flex-direction: column; gap: 8px; }
+.atex-sl-seamless:not(:empty) { margin: 10px 0 4px; }
+.atex-sl-warn-note {
     padding: 9px 11px;
-    border: 1px solid var(--sl-border-soft);
+    border: 1px solid var(--sl-warning-text);
     border-radius: 6px;
-    background: var(--sl-surface);
-    color: var(--sl-muted);
+    background: var(--sl-warning-bg);
+    color: var(--sl-warning-text);
     font-size: 13px;
-}
-.atex-sl-coverage.is-complete {
-    border-color: var(--sl-success-border);
-    background: var(--sl-success-bg);
-    color: var(--sl-ok);
+    font-weight: 600;
+    line-height: 1.35;
 }
 .atex-sl-batch-grid {
     display: grid;
@@ -237,26 +278,16 @@
     border-color: var(--sl-accent);
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .12);
 }
+.atex-sl-batch-card.is-disabled {
+    cursor: not-allowed;
+    opacity: .55;
+    background: var(--sl-surface);
+}
+.atex-sl-batch-card.is-disabled:hover { background: var(--sl-surface); }
 .atex-sl-batch-title { font-weight: 700; }
 .atex-sl-batch-meta { color: var(--sl-muted); font-size: 12px; }
 .atex-sl-batch-metric { font-weight: 700; color: var(--sl-accent-d); }
-
-/* Строки расхода сырья */
-.atex-sl-rows { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
-.atex-sl-row {
-    display: grid;
-    grid-template-columns: 2fr 1fr auto;
-    gap: 12px;
-    align-items: end;
-    border: 1px solid var(--sl-border-soft);
-    border-radius: 8px;
-    padding: 12px;
-    background: var(--sl-surface);
-}
-@media (max-width: 560px) {
-    .atex-sl-row { grid-template-columns: 1fr; }
-}
-.atex-sl-row-actions { display: flex; gap: 8px; }
+.atex-sl-batch-warn { color: var(--sl-warn); font-size: 12px; font-weight: 600; }
 
 /* События смены */
 .atex-sl-event-form {
@@ -302,16 +333,6 @@
 .atex-sl-btn:hover { background: var(--sl-surface); }
 .atex-sl-btn-primary { background: var(--sl-accent); border-color: var(--sl-accent); color: #fff; }
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
-.atex-sl-btn-advance { background: var(--sl-success-bg); border-color: var(--sl-success-border); color: var(--sl-ok); font-weight: 600; }
-.atex-sl-btn-advance:hover { background: var(--sl-success-hover-bg); }
-.atex-sl-btn-add { color: var(--sl-accent); border-color: var(--sl-add-border); }
-.atex-sl-btn-del {
-    padding: 8px 13px;
-    line-height: 1;
-    font-size: 18px;
-    color: var(--sl-warn);
-    border-color: var(--sl-danger-border);
-}
 .atex-sl-btn-secondary { background: var(--sl-surface); }
 .atex-sl-photo { display: flex; align-items: center; gap: 8px; }
 
@@ -334,3 +355,115 @@
 .atex-sl-toast-success { background: #15803d; }
 .atex-sl-toast-error { background: #b91c1c; }
 .atex-sl-toast-info { background: #334155; }
+
+/* #3460: сводка резки (вид сырья, метраж, ножи, резки, полосы) */
+.atex-sl-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.atex-sl-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--sl-border-soft);
+    border-radius: 8px;
+    background: var(--sl-surface);
+}
+.atex-sl-metric-label {
+    font-size: 11px;
+    color: var(--sl-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.atex-sl-metric-value { font-size: 18px; font-weight: 700; color: var(--sl-accent-d); }
+
+/* #3460: цветная раскладка ножей (как cut-map, но в цвете и с подписями) */
+.atex-sl-cm-caption {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--sl-muted);
+    margin-bottom: 6px;
+}
+.atex-sl-cm-caption-used { font-weight: 600; }
+.atex-sl-cm-bar {
+    display: flex;
+    width: 100%;
+    height: 64px;
+    border: 1px solid var(--sl-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+        repeating-linear-gradient(45deg, var(--sl-cm-stripe-a), var(--sl-cm-stripe-a) 6px, var(--sl-cm-stripe-b) 6px, var(--sl-cm-stripe-b) 12px);
+}
+.atex-sl-cm-bar.is-overflow { box-shadow: 0 0 0 2px rgba(185, 28, 28, .35); }
+.atex-sl-cm-seg {
+    height: 100%;
+    border-right: 1px solid rgba(255, 255, 255, .65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-width: 1px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+}
+.atex-sl-cm-seg-label {
+    white-space: nowrap;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
+    pointer-events: none;
+}
+.atex-sl-cm-seg-order { background: var(--sl-cm-order); }
+.atex-sl-cm-seg-stock { background: var(--sl-cm-stock); }
+.atex-sl-cm-seg-waste { background: var(--sl-cm-waste); }
+.atex-sl-cm-seg-other { background: var(--sl-cm-other); }
+.atex-sl-cm-seg-remainder {
+    background: var(--sl-cm-remainder);
+    color: var(--text-secondary, #475569);
+    border-right: none;
+}
+.atex-sl-cm-warn { margin-top: 8px; color: var(--sl-warn); font-weight: 600; }
+/* #3643: легенда и «Остаток, мм» — в одном ряду (легенда слева, остаток справа,
+   по базовой линии). На узких экранах ряд переносит «Остаток» под легенду. */
+.atex-sl-cm-legend-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+/* #3639: остаток (обрезь) в мм — справа в ряду «Раскладка ножей». */
+.atex-sl-cm-waste {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    text-align: right;
+    font-size: 12px;
+    color: var(--sl-muted);
+}
+.atex-sl-cm-waste-value { font-weight: 600; color: var(--text-secondary, #475569); }
+.atex-sl-cm-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.atex-sl-cm-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--sl-muted);
+}
+.atex-sl-cm-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: none;
+    display: inline-block;
+}

@@ -13,16 +13,17 @@
 // (правило: docs/integram-reports.md).
 //
 // Справочник позиций заказа (для привязки обеспечения) берётся отчётом
-// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
+// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): «Заказанное количество» —
 // подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
 // формы создания резки берутся отчётом `report/material_batches?JSON_KV`
 // (`rowsToBatches`). Справочник станков читается по имени из метаданных
 // (`object/{table}?JSON_OBJ`, записей мало).
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
-// `_m_new/{Производственная резка}` с главным значением `t{tableId}` (#3225).
+// `_m_new/{Задание в производство}` с главным значением `t{tableId}` (#3225).
 // Резка снова является самостоятельной таблицей (#3185), а «Обеспечение»
-// ссылается на неё реквизитом «Производственная резка».
+// ссылается на неё реквизитом «Задание в производство» (#3504: таблица
+// «Производственная резка» переименована в «Задание в производство»).
 // ID таблиц и реквизитов для записи не хардкодятся: берутся по именам из
 // `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
@@ -52,7 +53,7 @@
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
-        cut: 'Производственная резка',
+        cut: 'Задание в производство',   // #3504: таблица «Производственная резка» переименована
         supply: 'Обеспечение',
         slitter: 'Слиттер',
         materialBatch: 'Партия сырья',
@@ -60,7 +61,8 @@
         finishedBatch: 'Партия ГП',
         sleeveTask: 'Задание на втулки',
         settings: 'Настройка',
-        maxStock: 'Максимальный запас'   // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
+        maxStock: 'Максимальный запас',  // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
+        leader: 'Лидер'                  // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
     };
     // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
     // максимально допустимый запас (число); реквизиты задают комбинацию параметров
@@ -93,7 +95,9 @@
         timing: 'Тайминг',
         actualRuns: 'Кол-во факт',
         length: 'Метраж, м',
-        winding: 'Тип намотки'
+        winding: 'Тип намотки',
+        leader: 'Лидер',         // #3569: ссылка на «Лидер» (82519); при планировании копируется из позиции
+        fixed: 'Зафиксировано'   // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -119,12 +123,13 @@
         status: CUT_REQ.status,
         notes: CUT_REQ.notes,
         sequence: CUT_REQ.sequence,
-        winding: CUT_REQ.winding
+        winding: CUT_REQ.winding,
+        leader: CUT_REQ.leader   // #3569: лидер задания (ссылка)
     };
     // Реквизиты «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
         footage: 'Метраж, м',
-        cut: 'Производственная резка',
+        cut: 'Задание в производство',   // #3504: реквизит-ссылка переименован вслед за таблицей
         finishedBatch: 'Партия ГП',
         rolls: 'Кол-во рулонов',
         active: 'В работе',   // #3242: «Активно» переименовано в «В работе»
@@ -248,7 +253,7 @@
     // reference — поле-ссылка. Child-array из временной схемы #3180 не используем:
     // по #3185 резка снова самостоятельная таблица.
     function supplyCutRelation(supplyMeta, cutMeta) {
-        var req = reqByName(supplyMeta, SUPPLY_REQ.cut);
+        var req = reqByName(supplyMeta, SUPPLY_REQ.cut) || reqByName(supplyMeta, 'Производственная резка'); // #3504: старое имя запасным
         if (!req) return { mode: 'none', reqId: null, arrId: null };
         var arrId = req.arr_id == null ? null : String(req.arr_id);
         if (arrId) return { mode: 'none', reqId: null, arrId: arrId };
@@ -438,6 +443,33 @@
             });
     }
 
+    // #3535: вкладки очереди по станкам. Возвращает [{ slitter:{id,label}, cuts }]
+    // для КАЖДОГО станка справочника (slitters) в порядке справочника — даже если
+    // у станка нет резок в этот день (тогда cuts:[]). Иначе вкладки «съезжают» и
+    // человек принимает первую вкладку за первый станок. Группы groupBySlitter с
+    // резками без станка (id=null) или с удалённым из справочника станком
+    // дописываются в конце в порядке groupBySlitter, чтобы не потерять задания.
+    //   slitters — справочник [{ id, label, ... }];
+    //   groups   — результат groupBySlitter(filtered).
+    function mergeStationTabs(slitters, groups) {
+        // id станков — числовые строки, поэтому строковый sentinel для «без станка»
+        // (id=null) с ними не коллизит; ключ внутренний, наружу не уходит.
+        function key(g) { return g.slitter.id == null ? 'no-station' : String(g.slitter.id); }
+        var byKey = {};
+        (groups || []).forEach(function(g) { byKey[key(g)] = g; });
+        var tabs = [];
+        var seen = {};
+        (slitters || []).forEach(function(s) {
+            var k = String(s.id);
+            seen[k] = true;
+            tabs.push(byKey[k] || { slitter: { id: s.id, label: s.label }, cuts: [] });
+        });
+        (groups || []).forEach(function(g) {
+            if (!seen[key(g)]) tabs.push(g);
+        });
+        return tabs;
+    }
+
     // Фильтр очереди по слиттеру и статусу (пустой фильтр = «все»).
     function filterCuts(cuts, filters) {
         var f = filters || {};
@@ -503,16 +535,86 @@
         return batchDateKey(s);
     }
 
-    function isCutVisible(cut, selectedDate) {
+    // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
+    // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
+    // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
+    function isCutVisible(cut, dateFrom, dateTo) {
         if (!cut) return false;
         if (String(cut.status || '').trim() === 'Завершён') return false;
         var pd = String(cut.planDate || '').trim();
         if (pd === '') return true;
-        var sd = String(selectedDate == null ? '' : selectedDate).trim();
-        if (sd === '') return true;
-        // #3249: сравниваем по календарному дню (planDate — unix-штамп DATETIME,
-        // selectedDate — «ГГГГ-ММ-ДД»); раньше batchDateKey давал несравнимые шкалы.
-        return planDateDayKey(pd) === planDateDayKey(sd);
+        var fromStr = String(dateFrom == null ? '' : dateFrom).trim();
+        var toStr = String(dateTo == null ? '' : dateTo).trim();
+        if (fromStr === '' && toStr === '') return true;
+        var pk = planDateDayKey(pd);
+        var fromK = fromStr === '' ? -Infinity : planDateDayKey(fromStr);
+        var toK = toStr === '' ? Infinity : planDateDayKey(toStr);
+        if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }  // «По» раньше «С» → меняем местами
+        return pk >= fromK && pk <= toK;
+    }
+
+    // #3475/#3622: задания и обеспечения для кнопки «Удалить». Берём резки с непустой
+    // плановой датой В ДИАПАЗОНЕ фильтра [dateFrom; dateTo] — тот же набор, что показан в
+    // очереди (isCutVisible, #3599). До #3622 отбирали только один день (dateFrom), из-за
+    // чего при выбранном диапазоне «Удалить» не находило видимых заданий, чья «Дата план»
+    // приходилась на другой день диапазона («нет заданий для удаления, хотя вот они»).
+    // Незавершённые, незафиксированные (#3508 п.3), датированные. Обеспечения — все, чьё
+    // cutId входит в набор. Чистая функция — покрывается тестами. dateTo пуст → один день
+    // dateFrom (без перелива в соседние).
+    function dayDeletionTargets(cuts, supplies, dateFrom, dateTo) {
+        var fromStr = String(dateFrom == null ? '' : dateFrom).trim();
+        var toStr = String(dateTo == null ? '' : dateTo).trim();
+        if (fromStr === '') return { cuts: [], supplies: [] };
+        if (toStr === '') toStr = fromStr;
+        var dayCuts = (cuts || []).filter(function(c) {
+            if (!c) return false;
+            if (c.fixed) return false;   // #3508 п.3: зафиксированные при удалении пропускаем
+            if (String(c.planDate || '').trim() === '') return false;   // недатированные к диапазону не относим
+            return isCutVisible(c, fromStr, toStr);   // #3599: тот же диапазон, что и видимость очереди (отсеивает «Завершён»)
+        });
+        var cutIds = {};
+        dayCuts.forEach(function(c) { cutIds[String(c.id)] = true; });
+        var daySupplies = (supplies || []).filter(function(s) {
+            return s && cutIds[String(s.cutId)] === true;
+        });
+        return { cuts: dayCuts, supplies: daySupplies };
+    }
+
+    // #3486: строки отчёта 81463 (cut → fulfillment, JSON_KV) → массив id «Обеспечений»
+    // удаляемой резки. Отчёт фильтруется серверно (FR_cutID), но если cutId передан —
+    // подстраховываемся и отбрасываем чужие строки. Берём колонку fulfillmentID,
+    // дедуплицируем и пропускаем пустые. Чистая функция — покрывается тестами.
+    function fulfillmentIdsFromRows(rows, cutId) {
+        var want = (cutId == null || cutId === '') ? null : String(cutId);
+        var seen = {};
+        var out = [];
+        (rows || []).forEach(function(row) {
+            if (!row) return;
+            if (want != null) {
+                var rc = row.cutID != null ? row.cutID : (row.cut_id != null ? row.cut_id : row.cutId);
+                if (rc != null && rc !== '' && String(rc) !== want) return;
+            }
+            var fid = row.fulfillmentID != null ? row.fulfillmentID
+                    : (row.fulfillment_id != null ? row.fulfillment_id : row.fulfillmentId);
+            fid = (fid == null) ? '' : String(fid).trim();
+            if (fid === '' || fid === 'null' || seen[fid]) return;
+            seen[fid] = true;
+            out.push(fid);
+        });
+        return out;
+    }
+
+    // Сообщение об ошибке из ответа API. Команды `_m_*` и отчёты при отказе отдают
+    // `[{"error":"…"}]` (массив; см. my_die/api_dump в index.php) с HTTP-кодом 4xx,
+    // успех — данные без ключа `error`. Разворачиваем обе формы (массив-обёртку и
+    // объект), `err` поддерживаем синонимом. Пусто — ошибки нет. Вызывать только при
+    // !resp.ok, чтобы строки данных с колонкой «error» не принять за сбой. Чистая —
+    // покрывается тестом.
+    function extractApiError(result) {
+        var obj = Array.isArray(result) ? result[0] : result;
+        if (!obj || typeof obj !== 'object') return '';
+        var msg = obj.error != null ? obj.error : (obj.err != null ? obj.err : '');
+        return msg == null ? '' : String(msg).trim();
     }
 
     // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
@@ -521,6 +623,58 @@
         var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
         var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
         return d.getFullYear() + '-' + m + '-' + day;
+    }
+
+    // #3602: миллисекунды → «ГГГГ-ММ-ДД» (локальный день) для значения фильтра дат.
+    function isoDateFromMs(ms) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return '';
+        var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+        var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
+        return d.getFullYear() + '-' + m + '-' + day;
+    }
+
+    // #3508 п.1: сдвиг даты фильтра «ГГГГ-ММ-ДД» на ±N дней (стрелки листания).
+    // Пустую/чужую дату трактуем как сегодня — первый клик задаёт конкретный день.
+    function shiftPlanDate(dateStr, deltaDays) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+        var d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0) : new Date();
+        d.setDate(d.getDate() + deltaDays);
+        var mm = String(d.getMonth() + 1); if (mm.length < 2) mm = '0' + mm;
+        var dd = String(d.getDate()); if (dd.length < 2) dd = '0' + dd;
+        return d.getFullYear() + '-' + mm + '-' + dd;
+    }
+
+    // #3475: «ГГГГ-ММ-ДД» → «ДД.ММ.ГГГГ» для подписей (подтверждение/тост удаления дня).
+    // Чужой формат не трогаем — возвращаем как есть.
+    function formatPlanDayLabel(dateStr) {
+        var s = String(dateStr == null ? '' : dateStr).trim();
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+        return m ? (m[3] + '.' + m[2] + '.' + m[1]) : s;
+    }
+
+    // #3622: подпись диапазона дат плана для тостов/подтверждений: «ДД.ММ.ГГГГ» для
+    // одного дня (или пустого «По»), «ДД.ММ.ГГГГ – ДД.ММ.ГГГГ» для диапазона.
+    function formatPlanDayRangeLabel(dateFrom, dateTo) {
+        var from = formatPlanDayLabel(dateFrom);
+        var to = formatPlanDayLabel(dateTo);
+        if (from === '') return to;
+        if (to === '' || to === from) return from;
+        return from + ' – ' + to;
+    }
+
+    // #3616: дата-заголовок рабочего дня очереди. baseMidnightMs — полночь дня 0 расписания
+    // (planBaseMidnightFrom: день фильтра), dayOffset — номер дня расписания (schedDay).
+    // → «Пн, 23.06.2026». Пусто при нечисловой базе. Чистая → покрывается тестом.
+    function formatPlanDayHeading(baseMidnightMs, dayOffset) {
+        if (baseMidnightMs == null || baseMidnightMs === '') return '';
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return '';
+        var d = new Date(base + (Number(dayOffset) || 0) * 86400000);
+        if (isNaN(d.getTime())) return '';
+        var wd = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()];
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return wd + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
     }
 
     // Полночь (мс) базовой даты планирования: дата из фильтра «.atex-pp-input»
@@ -729,6 +883,7 @@
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
                     sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    fixed: false,   // #3508: уточняется из object/ в loadPlanning (отчёт флаг не отдаёт)
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
                     batchId: '',
@@ -743,9 +898,16 @@
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
-                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date)
+                    orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
+                    // #3472: лидеры резки (из cut_leader по всем строкам). Новые резки —
+                    // один лидер; легаси (до ограничения по лидеру) могут мешать несколько.
+                    leaders: []
                 };
                 order.push(cutId);
+            }
+            if (cutId && cutsById[cutId]) {
+                var leaderVal = str(row.cut_leader).trim();
+                if (leaderVal && cutsById[cutId].leaders.indexOf(leaderVal) < 0) cutsById[cutId].leaders.push(leaderVal);
             }
             var supplyId = str(row.supply_id);
             if (supplyId) {
@@ -761,6 +923,16 @@
                     positionId: row.supply_position_id ? String(row.supply_position_id) : null,
                     cutId: cutId,
                     finishedBatchId: finishedBatchId,
+                    // #3624: номер заказа позиции прямо из cut_planning — нужен подписи
+                    // «Связанные позиции», когда позиция выпала из активного positions_list.
+                    orderNo: str(row.order_no),
+                    // #3633: габариты позиции обеспечения прямо из cut_planning — чтобы
+                    // подпись «Связанные позиции» для позиции вне активного positions_list
+                    // была полной («<заказ> · <ширина>мм * <длина>м»), а не id записи + метраж.
+                    // Ширина = cut_roller_width (Заказанное количество → Ширина, мм), длина —
+                    // добавленная колонка position_length (Заказанное количество → Длина, м).
+                    positionWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
+                    positionLength: (row.position_length == null || row.position_length === '') ? 0 : Number(row.position_length),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
                     rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
@@ -796,7 +968,12 @@
             var width = stripNum(row.position_width);
             var length = stripNum(rowFirstValue(row, ['position_length', 'position_length_m', 'position_wind_length', 'wind_length']));
             var qty = stripNum(row.position_qty);
-            var head = orderNo !== '' ? orderNo + '/' + no : '№' + no;
+            // #3633: positions_list не отдаёт номер позиции (no обычно пусто) — тогда не
+            // оставляем «висячий» слэш «<заказ>/», а показываем просто «<заказ>». Если номер
+            // когда-нибудь появится — подпись снова «<заказ>/<номер>».
+            var head = orderNo !== ''
+                ? (no !== '' ? orderNo + '/' + no : orderNo)
+                : (no !== '' ? '№' + no : '');
             var dims = positionDimensionsLabel(width, length);
             var label = head + (dims !== '' ? ' · ' + dims : '');
             return { id: id, label: label, width: width, length: length, qty: qty };
@@ -832,9 +1009,22 @@
     // её «Количество» (qty шт. — сколько рулонов в позиции заказа) + рулоны/метраж
     // обеспечения. position — объект из rowsToPositions (может отсутствовать →
     // fallbackId для «позиция #N»). Чистая (DOM не трогает), проверяется модульно.
-    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage) {
+    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage, fallbackOrderNo, fallbackWidth, fallbackLength) {
         var posId = position && position.id != null ? position.id : fallbackId;
-        var label = (position && position.label) || ('позиция #' + posId);
+        var label;
+        if (position && position.label) {
+            label = position.label;
+        } else {
+            // #3633: позиция выпала из активного positions_list (заказ закрыт/выполнен) —
+            // собираем полную подпись из данных обеспечения (cut_planning): номер заказа
+            // (order_no) + габариты позиции (cut_roller_width × position_length), т.е.
+            // «<заказ> · <ширина>мм * <длина>м», а НЕ id записи позиции. Нет order_no —
+            // прежний фолбэк «позиция #N»; нет габаритов — просто «<заказ>».
+            var on = String(fallbackOrderNo == null ? '' : fallbackOrderNo).trim();
+            var dims = positionDimensionsLabel(fallbackWidth, fallbackLength);
+            var base = on !== '' ? on : ('позиция #' + posId);
+            label = base + (dims !== '' ? ' · ' + dims : '');
+        }
         var qty = stripNum(position && position.qty);
         if (qty > 0) label += ' · ' + round3(qty) + ' шт.';
         var rolls = stripNum(supplyRolls);
@@ -881,6 +1071,11 @@
                 length: length,
                 windDir: normWinding(row.wind_dir || row.position_wind_dir || row.position_winding),
                 windLength: windLengthValue(windLengthRaw),
+                // #3472: «Лидер» заказа — отдельное измерение профиля планирования (заказы
+                // с разным лидером нельзя класть в одну резку, она заправляется одним
+                // лидером). Отчёт positions_list пока может не отдавать колонку — тогда
+                // пусто и разбиения по лидеру нет (как order_id в #3433).
+                leader: rowFirstValue(row, ['position_leader', 'order_leader']),
                 // #3340: тип втулки и готовность приходят прямо из positions_list:
                 // sleeve_id — id записи «Диаметр втулки»; sleeve_ready (непустое) — уже нарезано.
                 sleeveId: row.sleeve_id == null ? '' : String(row.sleeve_id).trim(),
@@ -889,7 +1084,11 @@
                 // #3433: заказ позиции — для «ID заказа» создаваемой «Партии ГП». Если
                 // отчёт positions_list ещё не отдаёт order_id, остаётся пусто (в запас).
                 orderId: row.order_id == null ? '' : String(row.order_id).trim(),
-                approved: orderApproved || itemApproved
+                approved: orderApproved || itemApproved,
+                // #3599: тип сырья из отчёта (Вид сырья → «Тип сырья»). «Фольга» — грязное
+                // сырьё, его ставим в конец смены (после неё сложная уборка).
+                materialType: rowFirstValue(row, ['position_material_type']),
+                isFoil: /фольг/i.test(rowFirstValue(row, ['position_material_type']))
             };
         });
     }
@@ -926,22 +1125,34 @@
         return true;
     }
 
+    function planningLeaderKey(p) {
+        return String(p && p.leader != null ? p.leader : '').trim();
+    }
+
+    // #3472: профиль планирования = сырьё + намотка + длина + ЛИДЕР. Лидер добавлен как
+    // отдельное измерение — заказы с разным лидером идут в разные резки (резка заправляется
+    // одним лидером). group.key (для добора ходовыми) остаётся БЕЗ лидера: ходовые ширины
+    // от лидера не зависят. Пустой лидер у всех (отчёт ещё не отдаёт колонку) → разбиения нет.
     function groupPositionsByPlanningProfile(positions) {
         var groups = {};
         var order = [];
         (positions || []).forEach(function(p) {
-            var key = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
-            if (!groups[key]) {
-                groups[key] = {
-                    key: key,
+            var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
+            var leader = planningLeaderKey(p);
+            var groupKey = prefKey + '|L=' + leader;
+            if (!groups[groupKey]) {
+                groups[groupKey] = {
+                    key: prefKey,
+                    leader: leader,
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
+                    isFoil: !!(p && p.isFoil),   // #3599: фольга (тип сырья) — в конец смены
                     positions: []
                 };
-                order.push(key);
+                order.push(groupKey);
             }
-            groups[key].positions.push(p);
+            groups[groupKey].positions.push(p);
         });
         return order.map(function(key) { return groups[key]; });
     }
@@ -972,7 +1183,7 @@
                     label: CUT_REQ.plannedRuns,
                     reason: 'value',
                     layoutIndex: index,
-                    message: 'Не рассчитано поле «' + CUT_REQ.plannedRuns + '» для резки ' + layoutNo
+                    message: 'Не рассчитано поле «' + CUT_REQ.plannedRuns + '» для задания ' + layoutNo
                 });
                 return;
             }
@@ -987,7 +1198,7 @@
                     reason: 'value',
                     layoutIndex: index,
                     positionIds: missingIds,
-                    message: 'Не рассчитано поле «' + CUT_REQ.length + '» для резки ' + layoutNo +
+                    message: 'Не рассчитано поле «' + CUT_REQ.length + '» для задания ' + layoutNo +
                         (missingIds.length ? ': нет длины у позиций ' + missingIds.join(', ') : ': нет длины прогона') +
                         '. Проверьте positions_list: position_length / wind_length'
                 });
@@ -1001,7 +1212,7 @@
                     layoutIndex: index,
                     runLength: runLength,
                     plannedRuns: plannedRuns,
-                    message: 'Не рассчитано поле «' + CUT_REQ.duration + '» для резки ' + layoutNo +
+                    message: 'Не рассчитано поле «' + CUT_REQ.duration + '» для задания ' + layoutNo +
                         (windPoints.length ? ': длительность 0 при метраже ' + runLength + ' м и проходах ' + plannedRuns : ': нет норм WIND_* в «Время операции, мин»')
                 });
             }
@@ -1096,10 +1307,14 @@
     // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
     // «Время операции, мин» (13588) по кодам (loadOperationTimes → this.changeTimes):
     //   MATERIAL_WINDING — смена сырья/намотки/партии/неудобный остаток (одна операция);
-    //   KNIFE — смена ножей / сужение ролика; BETWEEN_CUTS — лидер между резками (база);
+    //   KNIFE_MOVE — стоимость ОДНОГО перемещения ножа (#3472, позиционная модель: цена
+    //     ножей = KNIFE_MOVE × число переставленных ножей; идентичные полосы → 0);
+    //   KNIFE — устар.: прежняя плоская «смена ножей» (оставлен для совместимости настроек);
+    //   BETWEEN_CUTS — лидер между резками (база);
     //   CLEANUP_SHIFT — уборка в конце рабочего дня (#3155, ставится после последней резки дня).
-    // Так нож (30) дороже смены сырья (15) — приоритет «беречь ножи» (ideav/crm#3130).
-    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
+    // #3472: приоритет — неизменность полос (0), затем меньше перемещений (2×ножи),
+    // смена сырья (15); полная смена ~16 ножей ≈ 32 ≈ прежняя «смена ножей» 30.
+    var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
     var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
     var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
@@ -1121,6 +1336,31 @@
         return d;
     }
 
+    // #3472: число НОЖЕЙ для перестановки prev→next. Нож, чья ширина есть в ОБОИХ
+    // наборах, сохраняется (не двигается) — это приоритет неизменности полос. Поэтому
+    // moves = max(|prev|, |next|) − |пересечение мультимножеств ширин|: добавить/убрать
+    // нож = 1 перемещение, сменить ширину = 1, идентичный набор = 0. (Смена количества —
+    // частный случай перемещений, отдельно не штрафуем.)
+    function knifeMoves(prevWidths, nextWidths){
+        function tally(arr){ var m = {}; (arr || []).forEach(function(x){ var k = String(x); m[k] = (m[k] || 0) + 1; }); return m; }
+        var a = prevWidths || [], b = nextWidths || [];
+        var ta = tally(a), tb = tally(b), inter = 0;
+        Object.keys(ta).forEach(function(k){ if (tb[k]) inter += Math.min(ta[k], tb[k]); });
+        return Math.max(a.length, b.length) - inter;
+    }
+
+    // Ширины ножей резки для knifeMoves. В реальных данных knifeWidths развёрнут по числу
+    // ножей (длина == knifeCount, см. aggregateStrips). Если ширины не развёрнуты
+    // (placeholder/пусто), а число ножей задано — дополняем сентинелом «нож без известной
+    // ширины», чтобы перестановка считалась по числу ножей (фоллбэк совместимости).
+    function effKnifeWidths(cut){
+        var w = (cut && cut.knifeWidths) || [];
+        var keys = w.map(function(x){ return String(Number(x)); });
+        var n = Number(cut && cut.knifeCount) || 0;
+        while (keys.length < n) keys.push('·');
+        return keys;
+    }
+
     // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
     function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
@@ -1134,17 +1374,20 @@
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
-        var knife = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
+        var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0; // #3600: фикс. время любой смены ножей (по умолч. 30 мин), независимо от числа ножей
         var parts = [];
         if (!prev || !next) return parts;
         var matWindChange = String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
             || String(prev.batchId) !== String(next.batchId);
         if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
-        var knifeChange = (Number(prev.knifeCount) || 0) !== (Number(next.knifeCount) || 0)
-            || widthSetDistance(prev.knifeWidths, next.knifeWidths) > 0
-            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);   // сужение ролика
-        if (knifeChange && knife > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knife) });
+        // #3600: любая смена набора ножей ИЛИ сужение ролика → ФИКСИРОВАННО KNIFE (30 мин)
+        // «на всё вместе», независимо от числа переставленных ножей (раньше #3472: стоимость =
+        // KNIFE_MOVE × число перестановок). Смена сырья/намотки считается отдельно (выше).
+        // Бинарно: изменился набор ножей (knifeMoves>0) ИЛИ сузился ролик → одна переналадка ножей.
+        var moves = knifeMoves(effKnifeWidths(prev), effKnifeWidths(next));
+        var knifeChanged = moves > 0 || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
+        if (knifeChanged && knifeTime > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knifeTime) });
         return parts;
     }
 
@@ -1865,7 +2108,34 @@
             if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0 });
         });
         pts.sort(function(a, b){ return a.m - b.m; });
+        // #3606: фольга наматывается медленнее — отдельная серия WIND_FOIL_<метры>
+        // (в данных только WIND_FOIL_305=4). Прикрепляем её к набору, чтобы выбирать
+        // для резок-фольги (cut.isFoil по position_material_type), не меняя сигнатуры.
+        pts.foil = foilWindingPointsFromTimes(opTimes);
         return pts;
+    }
+
+    // #3606: точки намотки ФОЛЬГИ из кодов WIND_FOIL_<метры>. Андрей: «4 мин за каждые
+    // 305 м» — пропорционально и БЕЗ клампа выше точки (122м→1.6, 305→4, 610→8). Чтобы
+    // windingMinutes давал линейную ставку через ноль и при одной точке, добавляем
+    // опорную (0,0). Помечаем foil:true для подписи нормы. Нет кодов WIND_FOIL_ → [].
+    function foilWindingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_FOIL_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0, foil: true });
+        });
+        if (!pts.length) return [];
+        pts.push({ m: 0, min: 0, foil: true });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // #3606: точки намотки для конкретной резки — фольговые при cut.isFoil (если серия
+    // WIND_FOIL_ задана), иначе обычные. windPoints.foil прикреплён в windingPointsFromTimes.
+    function windPointsForCut(isFoil, windPoints){
+        if (isFoil && windPoints && windPoints.foil && windPoints.foil.length) return windPoints.foil;
+        return windPoints || [];
     }
 
     // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
@@ -1888,10 +2158,11 @@
         return round3(b.min + slope * (x - b.m));
     }
 
-    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes) {
+    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes, isFoil) {
         var runs = Number(plannedRuns) || 0;
         if (runs <= 0) return 0;
-        return round3(windingMinutes(runMeters, windingPointsFromTimes(opTimes || {})) * runs);
+        var pts = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
+        return round3(windingMinutes(runMeters, pts) * runs);
     }
 
     // Норма(ы) намотки, реально применённые для метража runMeters (зеркало windingMinutes,
@@ -1912,7 +2183,8 @@
     // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
     // WIND_600=4 мин; WIND_900=5 мин (интерполяция)» (две). Пусто → ''.
     function formatWindingNorms(norms){
-        var items = (norms || []).map(function(n){ return 'WIND_' + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
+        var items = (norms || []).filter(function(n){ return Number(n.m) > 0; }) // #3606: скрыть опорную точку (0,0) фольги
+            .map(function(n){ return (n.foil ? 'WIND_FOIL_' : 'WIND_') + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
         if (!items.length) return '';
         if (items.length === 1) return 'Норма намотки: ' + items[0];
         return 'Нормы намотки: ' + items.join('; ') + ' (интерполяция)';
@@ -1922,11 +2194,11 @@
         return String(round3(Number(value) || 0));
     }
 
-    function cutTimingDetails(runMeters, plannedRuns, opTimes) {
+    function cutTimingDetails(runMeters, plannedRuns, opTimes, isFoil) {
         var length = stripNum(runMeters);
         var runs = stripNum(plannedRuns);
         if (!(length > 0) || !(runs > 0)) return '';
-        var points = windingPointsFromTimes(opTimes || {});
+        var points = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
         if (!points.length) return '';
         var oneRun = windingMinutes(length, points);
         var total = round3(oneRun * runs);
@@ -2007,7 +2279,8 @@
     function buildCutTimingCtx(cut, prevCut, sc, runMeters, windPoints, times) {
         var length = stripNum(runMeters);
         var runs = stripNum(cut && cut.plannedRuns);
-        var oneRun = windingMinutes(length, windPoints || []);
+        var pts = windPointsForCut(cut && cut.isFoil, windPoints); // #3606: фольга — своя норма намотки
+        var oneRun = windingMinutes(length, pts);
         var total = runs > 0 ? round3(oneRun * runs) : oneRun;
         return {
             length: length,
@@ -2015,19 +2288,42 @@
             oneRun: round3(oneRun),
             total: round3(total),
             setupParts: setupBreakdown(prevCut, cut, times),
-            norms: relevantWindingNorms(length, windPoints || []),
+            norms: relevantWindingNorms(length, pts),
             startMin: sc ? sc.startMin : null,
             finishMin: sc ? sc.finishMin : null
         };
     }
 
     function scheduleDurationMinutes(cut, runMeters, windPoints) {
-        var oneRun = windingMinutes(runMeters, windPoints || []);
+        var oneRun = windingMinutes(runMeters, windPointsForCut(cut && cut.isFoil, windPoints)); // #3606: фольга — своя норма
         var runs = stripNum(cut && cut.plannedRuns);
         var computed = runs > 0 ? round3(oneRun * runs) : oneRun;
         if (computed > 0) return computed;
         var stored = stripNum(cut && cut.duration);
         return stored > 0 ? round3(stored) : 0;
+    }
+
+    // #3635 п.5: id сегментов НАСТРОЙКИ — резки с 0 проходов, у которых в ТОЙ ЖЕ цепочке
+    // дневного разрыва (та же continuationSignature + станок) есть запись с проходами > 0.
+    // Это голова разбиения «настройка в конце дня N → намотка с дня N+1»: у неё намотки нет,
+    // поэтому в расписании её длительность 0 (а не оценка «1 проход» из scheduleDurationMinutes),
+    // и карточка показывает «Настройка». Обычные резки без проходов (легаси-оценка) не трогаем.
+    function setupTaskIdSet(cuts) {
+        var byChain = {};
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var sid = c.slitter && c.slitter.id;
+            var key = continuationSignature(c) + '|' + String(sid == null ? '' : sid);
+            (byChain[key] = byChain[key] || []).push(c);
+        });
+        var ids = {};
+        Object.keys(byChain).forEach(function(key) {
+            var grp = byChain[key];
+            var hasRuns = grp.some(function(c) { return (Number(c.plannedRuns) || 0) > 0; });
+            if (!hasRuns) return;   // нет «настоящей» резки в цепочке → это не разрыв настройки
+            grp.forEach(function(c) { if ((Number(c.plannedRuns) || 0) <= 0) ids[String(c.id)] = true; });
+        });
+        return ids;
     }
 
     var DAY_START_MIN = 8 * 60;          // DAY_START_HOUR по умолчанию: 08:00
@@ -2066,7 +2362,12 @@
         if (end <= start) end = DAY_END_MIN > start ? DAY_END_MIN : start + 1;
         var cleanup = Number(cleanupMin != null ? cleanupMin : DEFAULT_OP_TIMES.CLEANUP_SHIFT);
         if (!isFinite(cleanup) || cleanup < 0) cleanup = DEFAULT_OP_TIMES.CLEANUP_SHIFT;
-        var cutEnd = end - cleanup;
+        // #3599: резку планируем вплотную до DAY_END_HOUR − TOTAL_INTERVALS (буфер из
+        // Настройки), а блок уборки идёт ПОСЛЕ DAY_END_HOUR (см. dayCleanups). Нет
+        // TOTAL_INTERVALS → прежнее поведение (буфер = длительность уборки).
+        var totalIntervals = parseDurationMinutes(cfg.TOTAL_INTERVALS);
+        if (!(totalIntervals > 0)) totalIntervals = cleanup;
+        var cutEnd = end - totalIntervals;
         if (cutEnd < start) cutEnd = start;
         // #3342: плавающий обед. LUNCH_START задан (HH:MM) → minutes, иначе null (обед выкл).
         var lunchDur = parseDurationMinutes(cfg.LUNCH_DURATION);
@@ -2106,10 +2407,14 @@
         var lunchDone = {};
         var t = shiftStart;   // день 0, начало смены
         var out = [];
+        var setupIds = opts.setupTaskIds || {};   // #3635 п.5: сегменты настройки — намотка 0
         (cuts || []).forEach(function(c, i){
             // #3401: лидер заправляют перед каждой резкой цуга → лидер × «Кол-во план».
             var setup = leader * cutLeaderRuns(c) + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
-            var dur = scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
+            var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
+            // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
+            // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
+            // очередность (пины #3508 п.6 убраны).
             var start = t + setup;
             var day = Math.floor(start / 1440);
             if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
@@ -2129,6 +2434,7 @@
                 }
             }
             var finish = start + dur;
+            // Форму sc не расширяем (её сверяют тесты целиком): окно-старт = startMin − setupMin.
             out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur });
             t = finish;
         });
@@ -2236,6 +2542,22 @@
                 var avail = effCapacity(day) - clock;
                 var maxPasses = Math.floor((avail - setup) / perPassEff);
                 if (maxPasses < 1) {
+                    // #3635 п.5: настройка (переналадка ножей/сырья) ВЛЕЗАЕТ в остаток дня, а
+                    // первый проход — уже нет → ставим отдельный сегмент НАСТРОЙКИ в конце дня N
+                    // (заполняем хвост дня), а намотку начинаем с дня N+1 без повторной настройки.
+                    // Только для первого сегмента резки (setup > 0, не продолжение) и только когда
+                    // настройка реально помещается; иначе — обычный перенос всего на след. день.
+                    if (clock > 0 && !isCont && setup > 0 && avail >= setup) {
+                        var wsSet = day * 1440 + dayStart + clock;
+                        segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
+                            windowStartMin: round3(wsSet), startMin: round3(wsSet + setup),
+                            setupMin: round3(setup), durationMin: 0,
+                            isContinuation: false, parentCutId: null, setupOnly: true });
+                        clock += setup;
+                        prevPhysical = c;
+                        isCont = true;   // настройка сделана → проходы дня N+1 идут как продолжение (без setup)
+                        day += 1; clock = 0; continue;
+                    }
                     if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
                     maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
                 }
@@ -2362,6 +2684,31 @@
         ].join('|');
     }
 
+    // #3613: две соседние карточки очереди — один и тот же логический «задание»,
+    // физически разрезанный по рабочим дням (задание не влезло в день — нормально
+    // дробить). Объединяющий признак: идентичная конфигурация резки (станок|сырьё|
+    // намотка|ножи — continuationSignature) и единый номер заказа (orderId). По нему
+    // renderQueue рисует значок смежности «←»/«→» на первой/последней карточке дня.
+    function isDaySplitSibling(a, b){
+        if (!a || !b) return false;
+        if (continuationSignature(a) !== continuationSignature(b)) return false;
+        return String((a && a.orderId) || '') === String((b && b.orderId) || '');
+    }
+
+    // #3613: какие значки смежности дня показать на карточке очереди. Карточка —
+    // первая в своём рабочем дне, если сосед слева (prev) попал в другой день; последняя —
+    // если сосед справа (next) в другом дне. Значок ставим только когда соседний сегмент
+    // через границу дня — тот же логический задание (isDaySplitSibling): задание не влезло
+    // в день и его раздробили. Дни берём из расписания (schedDay) — те же, что разделяют
+    // дни блоком уборки. → { fromPrev, toNext }. Чистая (без DOM) → проверяется тестом.
+    function daySplitBadges(prevCut, prevDay, cut, myDay, nextCut, nextDay){
+        if (myDay == null) return { fromPrev: false, toNext: false };
+        return {
+            fromPrev: prevDay != null && prevDay !== myDay && isDaySplitSibling(prevCut, cut),
+            toNext: nextDay != null && nextDay !== myDay && isDaySplitSibling(cut, nextCut)
+        };
+    }
+
     // #3280: слить записи-продолжения обратно в логические резки перед пере-разбиением.
     // Эвристика (без маркера): одинаковая сигнатура continuationSignature + смежные
     // календарные дни (разница 1) → одна цепочка; выживает самая ранняя запись (её id),
@@ -2442,7 +2789,23 @@
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
-            var ordered = orderCuts(byMachine[key], opts.weights);
+            // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
+            // очереди (сортировка по «Очередности»), а не пересобирая её по стратегии
+            // (orderCuts). Нужно, чтобы автозаполнение дней после генерации не перетасовывало
+            // ручной порядок оператора (#3449). Без флага — обычная пересборка по весам (#3421).
+            // #3635 п.1/п.2: сортируем СПЕРВА по дню «Даты план», затем по «Очередности» —
+            // как groupBySlitter (#3616) и planQueues. «Очередность» сбрасывается на каждый
+            // день, поэтому сортировка только по ней перемешивала дни: задание дня D+1 с
+            // очередью 1 вставало перед фольгой дня D с очередью 2 → splitMachineQueue
+            // переупаковывал перемешанную очередь, фольга всплывала в начало дня и ломала
+            // порядок ножей (#3130/#3568), а вид «сразу после планирования» расходился с
+            // видом после перезагрузки (groupBySlitter сортирует день-первым).
+            var ordered = opts.preserveOrder
+                ? byMachine[key].slice().sort(function(a, b){
+                      return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
+                          || ((Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+                  })
+                : orderCuts(byMachine[key], opts.weights);
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var segs = splitMachineQueue(ordered, {
@@ -2581,7 +2944,9 @@
         // равно первому шагу тайминга окна, а не старту самой резки.
         var setup = stripNum(sc.setupMin);
         var windowStart = stripNum(sc.startMin) - setup;
-        return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(sc.finishMin) + ' · ' + round3(setup + dur) + ' мин';
+        // #3635 п.4: минуты окна показываем ЦЕЛЫМ числом, округляя ВВЕРХ (36.264 → 37) —
+        // совпадает с диапазоном по часам (09:03–09:40 ≈ 37 мин), без дробного «хвоста».
+        return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(sc.finishMin) + ' · ' + Math.ceil(setup + dur) + ' мин';
     }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
@@ -2953,7 +3318,13 @@
     function sequenceForStrategy(cuts, options){
         var opts = options || {};
         if (planningStrategy(opts) === PLANNING_STRATEGY_FATIGUE) return fatigueAwareSequence(cuts, opts);
-        return greedySequence(cuts, planningChangeTimes(opts));
+        // SETUP (#3568): «ножи по убыванию к концу дня» (#3130) — ПЕРВИЧНЫЙ критерий, а не
+        // мягкий тай-брейк. byKnifeCountDesc стабильно сортирует жадную (минимум переналадки)
+        // цепочку по knifeCount↓; среди резок с равным числом ножей сохраняется greedy-порядок
+        // (переналадка остаётся вторичной). Без этого враппера cmpKnifeDescSeq внутри greedy
+        // срабатывал лишь при РАВНОЙ стоимости цепочек, а после позиционной стоимости ножей
+        // (#3472) равенство почти не встречается → очередь шла по ВОЗРАСТАНИЮ ножей (#3568).
+        return byKnifeCountDesc(greedySequence(cuts, planningChangeTimes(opts)));
     }
 
     // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
@@ -3033,10 +3404,41 @@
         var arr = (orderedCuts || []).slice();
         var target = index + dir;
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return [];
+        // #3508 п.3: зафиксированные задания — «стены». Нельзя двигать сам зафиксированный
+        // и нельзя перепрыгивать через зафиксированного соседа: их относительный порядок и
+        // «Очередность» неизменны, нумерация остальных 1..N остаётся сплошной (без дублей).
+        if ((arr[index] && arr[index].fixed) || (arr[target] && arr[target].fixed)) return [];
         var tmp = arr[index]; arr[index] = arr[target]; arr[target] = tmp;
         var changed = [];
         arr.forEach(function(c, i){ var seq = i + 1; if (Number(c.sequence) !== seq) changed.push({ cutId: c.id, sequence: seq }); });
         return changed;
+    }
+
+    // #3602: перенос задания на другой день. Целевой день — отдельный «бакет» очереди
+    // станка (groupBySlitter сортирует сперва по хранимой «Дате план», затем по
+    // «Очередности»). Чтобы поставить задание В НАЧАЛО/КОНЕЦ дня, достаточно положить его
+    // в этот бакет и пронумеровать «Очередность» 1..N: жадная упаковка buildSchedule сама
+    // сдвинет остальные позже и перельёт переполнение на следующий день (а те задания,
+    // что переехали, имеют меньшую «Дату план» и встают в начало следующего дня — каскад).
+    // Перенос имеет наивысший приоритет: фиксация заданий цели НЕ мешает (перенумеровываем
+    // и зафиксированные), в отличие от ↑↓ (moveInQueue).
+    //   cutId    — перемещаемое задание;
+    //   dayCuts  — задания того же станка на целевом дне (без перемещаемого), любой порядок;
+    //   position — 'start' (в начало) | 'end' (в конец).
+    // → { ordered:[id…], seqByCut:{ id: seq 1..N } }. Вход не мутирует.
+    function planMoveSequences(cutId, dayCuts, position) {
+        var sorted = (dayCuts || []).slice().sort(function(a, b) {
+            var an = Number(a && a.sequence), bn = Number(b && b.sequence);
+            if (!isFinite(an)) an = Infinity;
+            if (!isFinite(bn)) bn = Infinity;
+            return an - bn || ((Number(b && b.knifeCount) || 0) - (Number(a && a.knifeCount) || 0));
+        });
+        var ids = sorted.map(function(c) { return String(c.id); })
+            .filter(function(id) { return id !== String(cutId); });
+        var ordered = position === 'end' ? ids.concat([String(cutId)]) : [String(cutId)].concat(ids);
+        var seqByCut = {};
+        ordered.forEach(function(id, i) { seqByCut[id] = i + 1; });
+        return { ordered: ordered, seqByCut: seqByCut };
     }
 
     function cutPlanDayKey(c) {
@@ -3120,7 +3522,27 @@
         return !target.closest('.atex-pp-strip-panel');
     }
 
+    // #3638: разбор deep-link из строки запроса (?cut=..&date=..&slitter=..). Ганта
+    // (cut-gantt) шлёт сюда дату/станок/задание, чтобы открыть очередь на нужной
+    // резке. Чистая → проверяется тестом. Возвращает {cut,date,slitter} (строки).
+    function parseDeepLink(search) {
+        var s = String(search == null ? '' : search);
+        var qm = s.indexOf('?');
+        if (qm >= 0) s = s.slice(qm + 1);
+        var out = { cut: '', date: '', slitter: '' };
+        s.split('&').forEach(function(pair) {
+            if (!pair) return;
+            var eq = pair.indexOf('=');
+            var key = eq >= 0 ? pair.slice(0, eq) : pair;
+            var val = eq >= 0 ? pair.slice(eq + 1) : '';
+            try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (e) {}
+            if (key === 'cut' || key === 'date' || key === 'slitter') out[key] = val;
+        });
+        return out;
+    }
+
     var planning = {
+        parseDeepLink: parseDeepLink,
         cutClickSelectsCut: cutClickSelectsCut,
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -3137,11 +3559,18 @@
         resolveNominalWidth: resolveNominalWidth,        // #3408
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
+        mergeStationTabs: mergeStationTabs,
         filterCuts: filterCuts,
         cutSearchHaystack: cutSearchHaystack,
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
+        dayDeletionTargets: dayDeletionTargets,
+        formatPlanDayLabel: formatPlanDayLabel,
+        formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
+        fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
+        extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
+        formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
@@ -3149,6 +3578,8 @@
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
         continuationSignature: continuationSignature,
+        isDaySplitSibling: isDaySplitSibling,
+        daySplitBadges: daySplitBadges,
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
         splitSupplyShares: splitSupplyShares,
@@ -3187,6 +3618,7 @@
         PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
+        knifeMoves: knifeMoves,
         awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
@@ -3206,6 +3638,7 @@
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         moveInQueue: moveInQueue,
+        planMoveSequences: planMoveSequences,   // #3602
         unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
         uncoveredPositions: uncoveredPositions,
@@ -3246,6 +3679,8 @@
         fifoBatchesForMaterial: fifoBatchesForMaterial,
         materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
+        foilWindingPointsFromTimes: foilWindingPointsFromTimes,
+        windPointsForCut: windPointsForCut,
         windingMinutes: windingMinutes,
         relevantWindingNorms: relevantWindingNorms,
         formatWindingNorms: formatWindingNorms,
@@ -3256,6 +3691,7 @@
         cutTimingTimelineLines: cutTimingTimelineLines,
         buildCutTimingCtx: buildCutTimingCtx,
         scheduleDurationMinutes: scheduleDurationMinutes,
+        setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
@@ -3338,10 +3774,12 @@
         this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
         this.stockBalanceIndex = planning.buildStockBalanceIndex([]); // #3445: текущий остаток ГП по номенклатуре (пуст до загрузки)
         this.draft = this.blankDraft();
-        this.filter = { slitter: '', status: '', date: todayISO(), query: '' };  // дата плана по умолчанию — сегодня; query — быстрый поиск (#3411)
+        // #3599: дата плана диапазоном [date; dateTo] — фильтр отображения очереди; date
+        // («С») остаётся базой генерации/планирования. По умолчанию оба = сегодня (один день).
+        this.filter = { slitter: '', status: '', date: todayISO(), dateTo: todayISO(), query: '' };  // query — быстрый поиск (#3411)
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
-        this.lastCutMainValue = 0;  // последний t{Производственная резка}, выданный клиентом
+        this.lastCutMainValue = 0;  // последний t{Задание в производство}, выданный клиентом
         this.busy = false;
         this.progressEl = null;     // окно прогресса генерации резок (#3148)
         this.progressTotal = 0;
@@ -3364,8 +3802,15 @@
     AtexProductionPlanning.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
             return resp.text().then(function(text) {
-                try { return text ? JSON.parse(text) : null; }
-                catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
+                var data;
+                try { data = text ? JSON.parse(text) : null; }
+                catch (e) {
+                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
+                    throw new Error('Некорректный JSON: ' + text.slice(0, 200));
+                }
+                // Сервер сигналит отказ кодом 4xx и телом `[{"error":"…"}]` (my_die).
+                if (!resp.ok) throw new Error(extractApiError(data) || ('Сервер вернул ошибку ' + resp.status));
+                return data;
             });
         });
     };
@@ -3389,8 +3834,16 @@
         }).then(function(resp) {
             return resp.text().then(function(text) {
                 var result;
-                try { result = text ? JSON.parse(text) : {}; } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
-                if (result && (result.error || result.err)) throw new Error(result.error || result.err);
+                try { result = text ? JSON.parse(text) : {}; }
+                catch (e) {
+                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
+                    throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
+                }
+                // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
+                // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
+                // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
+                // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
+                if (!resp.ok) throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status));
                 return result;
             });
         });
@@ -3406,7 +3859,7 @@
             function byName(name) {
                 return tableByName(list, name);
             }
-            self.meta.cut = byName(TABLE.cut);
+            self.meta.cut = byName(TABLE.cut) || byName('Производственная резка'); // #3504: старое имя запасным
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.materialBatch = byName(TABLE.materialBatch);
@@ -3415,6 +3868,7 @@
             self.meta.sleeveTask = byName(TABLE.sleeveTask);
             self.meta.settings = byName(TABLE.settings);
             self.meta.maxStock = byName(TABLE.maxStock);   // #3391: необязательная — фича включается её наличием
+            self.meta.leader = byName(TABLE.leader);        // #3569: справочник «Лидер» (резолв метки → id)
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -3433,7 +3887,8 @@
                 var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
                 // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
-                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION') return;
+                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
+                    key !== 'TOTAL_INTERVALS') return;   // #3599: буфер перед уборкой (мин)
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -3602,6 +4057,37 @@
         });
     };
 
+    // #3569: справочник «Лидер» (1132) → карта { метка(lower) → id }. Отчёт
+    // positions_list отдаёт лидера позиции меткой («Глобал Принтинг»), а реквизит
+    // «Лидер» задания — ссылка: при записи нужен id записи справочника, а не метка
+    // (docs/kb/crud.md: ref-поле = id). Таблица необязательна — нет её → карта пуста.
+    AtexProductionPlanning.prototype.loadLeaders = function() {
+        var self = this;
+        this.leaderIdByLabel = {};
+        var meta = this.meta.leader;
+        if (!meta) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(r) {
+                var label = ((r.r || [])[0] == null ? '' : String((r.r || [])[0])).trim();
+                if (label) map[label.toLowerCase()] = String(r.i);
+            });
+            self.leaderIdByLabel = map;
+            console.log('[pp] 🏷️ loadLeaders: лидеров в справочнике:', Object.keys(map).length);
+        }).catch(function(err) {
+            console.warn('[pp] 🏷️ loadLeaders: не удалось прочитать «Лидер»:', err && err.message);
+            self.leaderIdByLabel = {};
+        });
+    };
+
+    // #3569: id записи справочника «Лидер» по метке (для записи ссылки в задание).
+    // Нет справочника / метки / совпадения → '' (buildFields опустит пустой реквизит).
+    AtexProductionPlanning.prototype.resolveLeaderId = function(label) {
+        var key = (label == null ? '' : String(label)).trim().toLowerCase();
+        if (!key) return '';
+        return (this.leaderIdByLabel || {})[key] || '';
+    };
+
     // ── Загрузчики для генерации резок ──
 
     // Загружает «Партия сырья» через object/ и заполняет this.genBatches.
@@ -3685,7 +4171,7 @@
         if (!meta || !cut) return Promise.resolve();
         if (this.busy) return Promise.resolve();
         var materialId = cut.materialId ? String(cut.materialId) : '';
-        if (materialId === '') { this.notify('У резки не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
+        if (materialId === '') { this.notify('У задания не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
         var widthM = (Number(this.jumboWidthByMaterial[materialId]) || 0) / 1000;
         var requiredLin = cutRunLength(cut, this.supplies, this.footageBySupply);
         // свободный остаток без учёта собственных прежних резервов этой резки (их перезапишем)
@@ -3762,23 +4248,31 @@
         });
     };
 
-    // Прямая карта очередности из object/ «Производственная резка». Нужна как источник
-    // истины после _m_set: отчёт cut_planning может отставать или отдать старый alias.
+    // Прямые карты очередности и флага «Зафиксировано» из object/ «Задание в
+    // производство». Нужны как источник истины после _m_set: отчёт cut_planning может
+    // отставать/отдать старый alias и вовсе НЕ содержит «Зафиксировано» (#3508).
+    // Возвращает { seq: { cutId: число|строка }, fixed: { cutId: bool } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
-        if (!meta) return Promise.resolve({});
+        if (!meta) return Promise.resolve({ seq: {}, fixed: {} });
         var seqIdx = columnIndex(meta, CUT_REQ.sequence);
-        if (seqIdx < 0) return Promise.resolve({});
+        var fixedIdx = columnIndex(meta, CUT_REQ.fixed);   // #3508
+        if (seqIdx < 0 && fixedIdx < 0) return Promise.resolve({ seq: {}, fixed: {} });
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {};
+            var seq = {}, fixed = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                var raw = r[seqIdx];
-                if (raw == null || String(raw).trim() === '') return;
-                var n = Number(raw);
-                map[String(rec.i)] = isFinite(n) ? n : String(raw);
+                var id = String(rec.i);
+                if (seqIdx >= 0) {
+                    var raw = r[seqIdx];
+                    if (raw != null && String(raw).trim() !== '') {
+                        var n = Number(raw);
+                        seq[id] = isFinite(n) ? n : String(raw);
+                    }
+                }
+                if (fixedIdx >= 0) fixed[id] = truthyFlag(r[fixedIdx]);   // #3508
             });
-            return map;
+            return { seq: seq, fixed: fixed };
         });
     };
 
@@ -3955,6 +4449,8 @@
             self.changeTimes = {
                 MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
                 KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || DEFAULT_OP_TIMES.KNIFE,
+                // #3472: стоимость одного перемещения ножа (код «KNIFE_MOVE»); дефолт 2 мин.
+                KNIFE_MOVE: raw.KNIFE_MOVE != null ? raw.KNIFE_MOVE : DEFAULT_OP_TIMES.KNIFE_MOVE,
                 BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS,
                 CLEANUP_SHIFT: raw.CLEANUP_SHIFT != null ? raw.CLEANUP_SHIFT : DEFAULT_OP_TIMES.CLEANUP_SHIFT
             };
@@ -4032,7 +4528,9 @@
             this.loadCutSequences()
         ]).then(function(results) {
             var rows = results[0];
-            var sequenceByCut = results[1] || {};
+            var seqResult = results[1] || {};
+            var sequenceByCut = seqResult.seq || {};
+            var fixedByCut = seqResult.fixed || {};   // #3508
             self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
@@ -4043,6 +4541,7 @@
                 if (Object.prototype.hasOwnProperty.call(sequenceByCut, String(cut.id))) {
                     cut.sequence = sequenceByCut[String(cut.id)];
                 }
+                cut.fixed = !!fixedByCut[String(cut.id)];   // #3508: флаг «Зафиксировано»
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -4115,8 +4614,8 @@
             notes: reqIdByName(meta, CUT_REQ.notes),
             sequence: reqIdByName(meta, CUT_REQ.sequence)
         };
-        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes);
-        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes);
+        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, d.isFoil); // #3606
+        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, d.isFoil);
         var cutMainState = { last: this.lastCutMainValue };
         var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
         this.lastCutMainValue = cutMainState.last;
@@ -4124,7 +4623,7 @@
             slitter: d.slitterId,
             materialBatch: d.materialBatchId,
             plannedRuns: d.plannedRuns,
-            duration: duration > 0 ? duration : '',
+            duration: duration > 0 ? Math.ceil(duration) : '',   // #3635 п.4: «Длительность, минут» сохраняем целой (вверх)
             timing: timing,
             length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
@@ -4139,12 +4638,12 @@
         }
         var payloadDiagnostics = traceCutCreatePayload('createCut', meta, reqIds, fields, this, requiredWriteKeys);
         if (payloadDiagnostics.length) {
-            this.notify('Не могу создать резку: ' + cutWriteDiagnosticSummary(payloadDiagnostics), 'error');
+            this.notify('Не могу создать производственное задание: ' + cutWriteDiagnosticSummary(payloadDiagnostics), 'error');
             return;
         }
 
         function finishCreatedCut(id) {
-            if (!id) throw new Error('Сервер не вернул id новой резки');
+            if (!id) throw new Error('Сервер не вернул id нового задания');
             // #3242: «Обеспечение» теперь ссылается на «Партию ГП», которой в ручном
             // создании резки ещё нет (состав добавляется отдельно). Поэтому здесь
             // обеспечения НЕ создаём — иначе вышли бы «сироты» без ссылки. Привязка
@@ -4156,7 +4655,7 @@
                 self.draft = self.blankDraft();
                 self.selectedCutId = String(id);
                 self.closeForm();
-                self.notify('Производственная резка #' + id + ' создана' +
+                self.notify('Производственное задание #' + id + ' создано' +
                     (selectedPositions.length ? ' (привязка позиций — через планирование)' : ''), 'success');
                 self.render();
             });
@@ -4168,7 +4667,7 @@
             return finishCreatedCut(res && (res.obj || res.id || res.i));
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка создания резки: ' + err.message, 'error');
+            self.notify('Ошибка создания производственного задания: ' + err.message, 'error');
         });
     };
 
@@ -4225,8 +4724,8 @@
                 forKey: String(positionId) + '|' + qty,
                 positionId: String(position.id), position: position, qty: qty,
                 materialId: mat, layout: lay, plannedRuns: plannedRuns, runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, position.isFoil), // #3606
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, position.isFoil),
                 batches: batches, posWidth: position.width, stripsPerPass: stripsPerPass,
                 producedPosRolls: producedPosRolls, supplyRolls: qty,
                 stockRolls: round3(Math.max(0, producedPosRolls - qty)),
@@ -4291,7 +4790,7 @@
         if (this.busy) return;
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supplyMeta = this.meta.supply;
-        if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц резки/Партии ГП/Обеспечения', 'error'); return; }
+        if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц задания/Партии ГП/Обеспечения', 'error'); return; }
         var key = String(d.positionId) + '|' + (Math.floor(Number(d.qty) || 0));
         var ensure = (d.prospect && !d.prospect.error && d.prospect.forKey === key)
             ? Promise.resolve(d.prospect)
@@ -4307,6 +4806,8 @@
             }
             var slot = self.freeSlotForCut(d.slitterId, plan.scheduleCut);
             var planDayTs = slot && slot.startTs > 0 ? String(slot.startTs) : '';
+            // #3569: лидер берём из покрываемой позиции (метку резолвим в id справочника).
+            var leaderPos = (self.genPositions || []).filter(function(p) { return String(p.id) === String(d.positionId); })[0];
             var cutReqIds = {
                 slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
                 plannedRuns: reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES),
@@ -4314,6 +4815,7 @@
                 timing: reqIdByName(cutMeta, CUT_REQ.timing),
                 length: reqIdByName(cutMeta, CUT_REQ.length),
                 winding: reqIdByName(cutMeta, CUT_REQ.winding),
+                leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
                 active: activeReqId(cutMeta),
                 notes: reqIdByName(cutMeta, CUT_REQ.notes),
                 sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
@@ -4324,10 +4826,11 @@
             var fields = buildFields(cutReqIds, {
                 slitter: d.slitterId,
                 plannedRuns: plan.plannedRuns,
-                duration: plan.duration > 0 ? plan.duration : '',
+                duration: plan.duration > 0 ? Math.ceil(plan.duration) : '',   // #3635 п.4: «Длительность, минут» — целой (вверх)
                 timing: plan.timing,
                 length: plan.runLength > 0 ? plan.runLength : '',
                 winding: normWinding(plan.layout && plan.layout.windDir),
+                leader: self.resolveLeaderId(leaderPos && leaderPos.leader), // #3569: лидер позиции → id
                 active: (d.active === false) ? '0' : '1',
                 notes: d.notes,
                 sequence: nextSequenceForCuts(self.cuts, d.slitterId, planDayTs)
@@ -4339,7 +4842,7 @@
 
             return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', fields).then(function(res) {
                 var cutId = res && (res.obj || res.id || res.i);
-                if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                if (!cutId) throw new Error('Сервер не вернул id нового задания');
                 var widthToBatchId = {};
                 var chain = Promise.resolve();
                 // 1) Партии ГП по ширинам (состав резки).
@@ -4389,13 +4892,13 @@
                     self.draft = self.blankDraft();
                     self.selectedCutId = String(cutId);
                     self.closeForm();
-                    self.notify('Резка #' + cutId + ' создана, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
+                    self.notify('Производственное задание #' + cutId + ' создано, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
                     self.render();
                 });
             });
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка создания резки: ' + err.message, 'error');
+            self.notify('Ошибка создания производственного задания: ' + err.message, 'error');
         });
     };
 
@@ -4405,13 +4908,13 @@
         if (this.busy) return;
         var meta = this.meta.supply;
         if (!opts.positionId) { this.notify('Выберите позицию заказа', 'error'); return; }
-        if (!opts.cutId) { this.notify('Не выбрана резка', 'error'); return; }
+        if (!opts.cutId) { this.notify('Не выбрано производственное задание', 'error'); return; }
 
         // #3242: «Обеспечение» теперь ссылается на «Партию ГП», а не на резку. Ручная
         // привязка «позиция → резка» без выбора конкретной Партии ГП создала бы
         // «сироту» без ссылки — поэтому временно заблокирована до доработки UI (#3242 PR3).
         if (!opts.finishedBatchId) {
-            this.notify('Ручная привязка к резке временно недоступна: обеспечение теперь ссылается на «Партию ГП». Используйте планирование.', 'error');
+            this.notify('Ручная привязка к производственному заданию временно недоступна: обеспечение теперь ссылается на «Партию ГП». Используйте планирование.', 'error');
             return;
         }
         var fields = buildSupplyFieldsForFinishedBatch(meta, {
@@ -4428,7 +4931,7 @@
             if (!id) throw new Error('Сервер не вернул id обеспечения');
             return self.loadPlanning().then(function() {
                 self.setBusy(false);
-                self.notify('Обеспечение создано: позиция связана с резкой', 'success');
+                self.notify('Обеспечение создано: позиция связана с производственным заданием', 'success');
                 self.render();
             });
         }).catch(function(err) {
@@ -4455,6 +4958,417 @@
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка удаления связи: ' + err.message, 'error');
+        });
+    };
+
+    // #3508 п.2/п.4: проставить/снять флаг «Зафиксировано» у набора заданий. Пишем булев
+    // реквизит (t{id}='1'/'0') командой _m_set, затем перечитываем очередь — серая кайма/
+    // блокировки (п.3/п.5) обновятся по источнику истины. #3562: плановый старт при фиксации
+    // больше не «захватывается» — автогенерация вольна двигать задание по времени и очереди.
+    AtexProductionPlanning.prototype.setCutsFixed = function(cutIds, value, opts) {
+        var self = this;
+        var o = opts || {};
+        if (this.busy) return Promise.resolve(false);
+        var ids = (cutIds || []).map(function(x) { return String(x); })
+            .filter(function(id) { return id && id !== 'null'; });
+        if (!ids.length) {
+            if (!o.silent) self.notify(o.emptyMessage || 'Нет заданий для фиксации', 'info');
+            return Promise.resolve(false);
+        }
+        var fixedReqId = reqIdByName(this.meta.cut, CUT_REQ.fixed);
+        if (!fixedReqId) {
+            self.notify('Реквизит «' + CUT_REQ.fixed + '» не найден в метаданных', 'error');
+            return Promise.resolve(false);
+        }
+        var fieldKey = 't' + fixedReqId;
+        var flag = value ? '1' : '0';
+        this.setBusy(true);
+        this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
+        var done = 0;
+        var chain = Promise.resolve();
+        ids.forEach(function(id) {
+            chain = chain.then(function() {
+                var fields = {}; fields[fieldKey] = flag;
+                return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
+                    .then(function() { self.updateProgress(++done); });
+            });
+        });
+        return chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress(); self.setBusy(false); self.render();
+            if (!o.silent) {
+                self.notify(o.successMessage ||
+                    ((value ? 'Зафиксировано заданий: ' : 'Снята фиксация заданий: ') + ids.length), 'success');
+            }
+            return true;
+        }).catch(function(err) {
+            self.hideProgress(); self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка фиксации заданий: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня (все
+    // станки). День берём из фильтра «Дата плана». Уже зафиксированные не трогаем.
+    AtexProductionPlanning.prototype.fixDayTasks = function() {
+        var self = this;
+        if (this.busy) return;
+        var fromStr = String(this.filter && this.filter.date || '').trim();
+        if (fromStr === '') {
+            this.notify('Выберите «Дату плана», чтобы зафиксировать задания дня', 'error');
+            return;
+        }
+        var toStr = String(this.filter && this.filter.dateTo || '').trim();
+        if (toStr === '') toStr = fromStr;
+        // #3622: фиксируем задания всего ВИДИМОГО диапазона [С; По], а не одного дня (как и
+        // удаление). Незавершённые/датированные — тот же набор, что в очереди (isCutVisible).
+        var dayCuts = (this.cuts || []).filter(function(c) {
+            return c && String(c.planDate || '').trim() !== '' && isCutVisible(c, fromStr, toStr);
+        });
+        var toFix = dayCuts.filter(function(c) { return !c.fixed; });
+        var dateLabel = formatPlanDayRangeLabel(fromStr, toStr);
+        if (!dayCuts.length) { this.notify('Нет заданий за ' + dateLabel + ' для фиксации', 'info'); return; }
+        if (!toFix.length) { this.notify('Все задания за ' + dateLabel + ' уже зафиксированы', 'info'); return; }
+        self.setCutsFixed(toFix.map(function(c) { return c.id; }), true, {
+            successMessage: 'Зафиксированы задания за ' + dateLabel + ': ' + toFix.length
+        });
+    };
+
+    // #3508 п.4: иконка «🔒» в карточке — переключить фиксацию одного задания
+    // (зафиксировано ↔ снято), чтобы можно было и поставить, и снять флаг.
+    AtexProductionPlanning.prototype.toggleCutFixed = function(cut) {
+        if (!cut) return;
+        var o = { successMessage: (cut.fixed ? 'Снята фиксация задания' : 'Задание зафиксировано') };
+        this.setCutsFixed([cut.id], !cut.fixed, o);
+    };
+
+    // #3602: кнопка «🗓» (между «🔒» и «🗑») — модалка переноса задания на другой день.
+    // #3631: день выбирается ПРОИЗВОЛЬНО (input type=date), а не из ограниченного списка
+    // дней расписания. По умолчанию подставляем текущий день задания (иначе дату фильтра /
+    // сегодня). Ещё спрашиваем положение «в начало/в конец дня» и галку «Зафиксировать»
+    // (по умолчанию установлена).
+    AtexProductionPlanning.prototype.openMoveCut = function(cut) {
+        var self = this;
+        if (!cut) return;
+        if (!this.meta.cut) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return; }
+
+        // Значение по умолчанию — текущий день задания (по хранимой «Дате план»).
+        var pd = String(cut.planDate == null ? '' : cut.planDate).trim();
+        var defISO = '';
+        if (/^\d{9,13}$/.test(pd)) { var n = Number(pd); defISO = isoDateFromMs(n >= 1e12 ? n : n * 1000); }
+        else if (/^\d{4}-\d{2}-\d{2}/.test(pd)) { defISO = pd.slice(0, 10); }
+        if (!defISO) defISO = String(this.filter && this.filter.date || '').trim() || todayISO();
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-move-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-move-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+
+        var content = el('div', { class: 'atex-pp-move-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Перенести задание на другой день' }));
+        content.appendChild(el('p', { class: 'atex-pp-hint',
+            text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' +
+                (cut.materialName || (cut.materialId ? '#' + cut.materialId : '—')) }));
+
+        // #3631: произвольный день — обычный календарный input type=date (без ограничений).
+        var dayInput = el('input', { type: 'date', class: 'atex-pp-input atex-pp-move-day', value: defISO });
+        content.appendChild(el('label', { class: 'atex-pp-move-field' }, [
+            el('span', { class: 'atex-pp-move-label', text: 'День' }), dayInput
+        ]));
+
+        // Положение в дне: в начало / в конец.
+        var posStart = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
+        posStart.value = 'start'; posStart.checked = true;
+        var posEnd = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
+        posEnd.value = 'end';
+        content.appendChild(el('div', { class: 'atex-pp-move-field' }, [
+            el('span', { class: 'atex-pp-move-label', text: 'Положение' }),
+            el('div', { class: 'atex-pp-move-pos' }, [
+                el('label', { class: 'atex-pp-move-radio' }, [posStart, el('span', { text: ' В начало дня' })]),
+                el('label', { class: 'atex-pp-move-radio' }, [posEnd, el('span', { text: ' В конец дня' })])
+            ])
+        ]));
+
+        // Зафиксировать — по умолчанию установлена.
+        var fixCb = el('input', { type: 'checkbox' });
+        fixCb.checked = true;
+        content.appendChild(el('label', { class: 'atex-pp-move-fix' }, [
+            fixCb, el('span', { text: ' Зафиксировать задание' })
+        ]));
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var cancel = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        cancel.addEventListener('click', close);
+        var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Перенести' });
+        ok.addEventListener('click', function() {
+            if (self.busy) return;
+            var dateStr = String(dayInput.value || '').trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { self.notify('Выберите день для переноса', 'error'); return; }
+            var position = posEnd.checked ? 'end' : 'start';
+            var fix = !!fixCb.checked;
+            close();
+            self.moveCutToDay(cut, dateStr, position, fix);
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(ok);
+        content.appendChild(actions);
+
+        this.root.appendChild(overlay);
+    };
+
+    // #3602/#3631: применить перенос на ПРОИЗВОЛЬНЫЙ день targetDateStr («ГГГГ-ММ-ДД»).
+    // Перемещаемому заданию пишем «Дату план» (главное значение — DATETIME-колонка →
+    // _m_save с t{tableId}, как в applySplitPlan; _m_set её НЕ задаёт, issue #775) на 08:00
+    // целевого дня и «Очередность» в начало/конец дня, а прочим заданиям дня — пересчитанную
+    // «Очередность» (только изменившиеся). Фиксация (если отмечена) пишется тем же _m_set.
+    // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
+    // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
+    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        if (!cut) return Promise.resolve(false);
+        var cutMeta = this.meta.cut;
+        if (!cutMeta) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
+        var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
+        var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
+        var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
+        if (!seqReqId || !mainKey) {
+            this.notify('Не найдены реквизиты резки («' + CUT_REQ.sequence + '»/дата)', 'error');
+            return Promise.resolve(false);
+        }
+        var dateStr = String(targetDateStr || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { this.notify('Выберите день для переноса', 'error'); return Promise.resolve(false); }
+
+        var win = this.workingWindow();
+        var shiftStartMin = Number(win && win.startMin) || 0;
+        var targetMidnightMs = planBaseMidnightFrom(dateStr, controllerNowMs(this));   // полночь целевого дня
+        var targetTs = Math.floor(targetMidnightMs / 1000) + shiftStartMin * 60;       // 08:00 целевого дня
+        var targetDayKey = planDateDayKey(targetTs);
+        var dateLabel = formatPlanDayHeading(targetMidnightMs, 0);
+
+        // Задания того же станка на целевом дне (по хранимой «Дате план»), без перемещаемого.
+        var slitterId = cut.slitter && cut.slitter.id;
+        var sidStr = String(slitterId == null ? '' : slitterId);
+        var dayCuts = (this.cuts || []).filter(function(c) {
+            if (!c || String(c.id) === String(cut.id)) return false;
+            var csid = c.slitter && c.slitter.id;
+            if (String(csid == null ? '' : csid) !== sidStr) return false;
+            return planDateDayKey(c.planDate) === targetDayKey;
+        });
+        var plan = planMoveSequences(cut.id, dayCuts, position);
+        var seqByCut = plan.seqByCut;
+
+        this.setBusy(true);
+        this.showProgress('Перенос задания…', 1 + dayCuts.length);
+        var done = 0;
+        var fixFieldKey = (fix && fixedReqId) ? 't' + fixedReqId : null;
+        var chain = Promise.resolve();
+        // 1) Перемещаемое задание: «Дата план» (главное значение) → _m_save, затем
+        //    «Очередность» (+ фиксация) → _m_set.
+        chain = chain.then(function() {
+            var mainFields = {}; mainFields[mainKey] = String(targetTs);
+            return self.post('_m_save/' + encodeURIComponent(cut.id) + '?JSON', mainFields);
+        }).then(function() {
+            var fields = {};
+            fields['t' + seqReqId] = String(seqByCut[String(cut.id)] || 1);
+            if (fixFieldKey) fields[fixFieldKey] = '1';
+            return self.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields);
+        }).then(function() { self.updateProgress(++done); });
+        // 2) Прочие задания целевого дня — пересчитанная «Очередность» (только изменившиеся).
+        dayCuts.forEach(function(c) {
+            var newSeq = seqByCut[String(c.id)];
+            chain = chain.then(function() {
+                if (Number(c.sequence) === Number(newSeq)) { self.updateProgress(++done); return; }
+                var fields = {}; fields['t' + seqReqId] = String(newSeq);
+                return self.post('_m_set/' + encodeURIComponent(c.id) + '?JSON', fields)
+                    .then(function() { self.updateProgress(++done); });
+            });
+        });
+
+        return chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
+            // перенесённое задание осталось видимым в очереди (пустой край не ограничивает).
+            var fromStr = String(self.filter && self.filter.date || '').trim();
+            var toStr = String(self.filter && self.filter.dateTo || '').trim();
+            if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
+            if (toStr !== '' && planDateDayKey(toStr) < targetDayKey) self.filter.dateTo = dateStr;
+            self.hideProgress(); self.setBusy(false); self.render();
+            self.notify('Задание перенесено на ' + dateLabel +
+                (position === 'end' ? ' (в конец дня)' : ' (в начало дня)'), 'success');
+            return true;
+        }).catch(function(err) {
+            self.hideProgress(); self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка переноса задания: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение
+    // (сколько резок/обеспечений будет удалено), затем зовёт runDeleteDayTasks. День —
+    // «Дата плана» из фильтра (this.filter.date); без даты удалять нечего (неоднозначно).
+    AtexProductionPlanning.prototype.deleteDayTasks = function(actionsEl) {
+        var self = this;
+        if (this.busy) return;
+        var dateStr = String(this.filter && this.filter.date || '').trim();
+        if (dateStr === '') {
+            this.notify('Выберите «Дату плана», чтобы удалить задания дня', 'error');
+            return;
+        }
+        var targets = dayDeletionTargets(this.cuts, this.supplies, this.filter.date, this.filter.dateTo);
+        var dateLabel = formatPlanDayRangeLabel(this.filter.date, this.filter.dateTo);
+        if (!targets.cuts.length) {
+            this.notify('Нет заданий за ' + dateLabel + ' для удаления', 'info');
+            return;
+        }
+        // Снять прежнюю плашку подтверждения (генерации/удаления), если висит.
+        var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
+        var oldBar = host && host.querySelector && host.querySelector('.atex-pp-confirm-bar');
+        if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
+
+        var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+            'Удалить все задания за ' + dateLabel + '? Будет удалено: заданий — ' + targets.cuts.length +
+            ', обеспечений — ' + targets.supplies.length + '. Действие необратимо.' });
+        this.confirmAction(msg, host, [
+            { label: 'Удалить', warning: true, inline: true, onConfirm: function() {
+                self.runDeleteDayTasks(targets.cuts, targets.supplies, dateLabel);
+            } }
+        ]);
+    };
+
+    // #3475: последовательное удаление заданий дня. Порядок принципиален: сперва все
+    // «Обеспечение» (они ссылаются на «Партии ГП» — подчинённые резки; пока ссылки живы,
+    // _m_del резки вернёт 409, см. DeleteTreeRefsCount в index.php), затем сами резки —
+    // backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход сырья.
+    AtexProductionPlanning.prototype.runDeleteDayTasks = function(cuts, supplies, dateLabel) {
+        var self = this;
+        if (this.busy) return;
+        var supplyIds = (supplies || []).map(function(s) { return String(s.id); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var cutIds = (cuts || []).map(function(c) { return String(c.id); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var total = supplyIds.length + cutIds.length;
+        if (!total) { this.notify('Нечего удалять', 'info'); return; }
+
+        this.setBusy(true);
+        this.showProgress('Удаление заданий за ' + dateLabel + '…', total);
+        var done = 0;
+        function del(id) {
+            return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
+                self.updateProgress(++done);
+            });
+        }
+        // Цепочка: сначала обеспечения, потом резки (см. комментарий выше).
+        var chain = Promise.resolve();
+        supplyIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+        cutIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress();
+            self.setBusy(false);
+            self.selectedCutId = null;   // панель «Связанные позиции» больше не на удалённую резку
+            self.render();
+            self.notify('Удалены задания за ' + dateLabel + ': резок — ' + cutIds.length +
+                ', обеспечений — ' + supplyIds.length, 'success');
+        }).catch(function(err) {
+            self.hideProgress();
+            self.setBusy(false);
+            // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка удаления заданий дня: ' + (err && err.message || err), 'error');
+        });
+    };
+
+    // #3486: подпись резки для подтверждения/тоста удаления. Берём сырьё и плановую
+    // дату (если есть), иначе — id. Без обращения к сети.
+    function cutTaskLabel(cut) {
+        if (!cut) return '';
+        var name = String(cut.materialName || '').trim();
+        var day = formatPlanDayLabel(String(cut.planDate || '').trim());
+        if (name && day) return name + ' · ' + day;
+        return name || day || ('#' + cut.id);
+    }
+
+    // #3486: id всех «Обеспечений» резки отчётом 81463 (cut → fulfillment). Они
+    // ссылаются на «Партии ГП» резки; пока ссылки живы, _m_del резки вернёт 409
+    // (DeleteTreeRefsCount в index.php), поэтому удалять их нужно ДО самой резки.
+    // Возвращает Promise<массив id>. LIMIT с запасом — резок с тысячами связей нет.
+    AtexProductionPlanning.prototype.loadCutFulfillments = function(cutId) {
+        return this.getJson('report/81463?JSON_KV&LIMIT=0,1000&FR_cutID=' + encodeURIComponent(cutId))
+            .then(function(rows) { return fulfillmentIdsFromRows(rows, cutId); });
+    };
+
+    // #3486: кнопка «🗑» в карточке резки. Сначала тянем id «Обеспечений» резки
+    // (report/81463), показываем подтверждение с их числом, по согласию — удаляем.
+    AtexProductionPlanning.prototype.deleteCutTask = function(cut, cardEl) {
+        var self = this;
+        if (this.busy || !cut) return;
+        var cutId = String(cut.id);
+        var label = cutTaskLabel(cut);
+        this.setBusy(true);
+        this.loadCutFulfillments(cutId).then(function(fulfillmentIds) {
+            self.setBusy(false);
+            var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+                'Удалить задание «' + label + '»? Будет удалено обеспечений — ' +
+                fulfillmentIds.length + '. Действие необратимо.' });
+            self.confirmAction(msg, cardEl, [
+                { label: 'Удалить', warning: true, onConfirm: function() {
+                    self.runDeleteCutTask(cutId, fulfillmentIds, label);
+                } }
+            ]);
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Не удалось получить обеспечения резки: ' + (err && err.message || err), 'error');
+        });
+    };
+
+    // #3486: удаление одной резки. Порядок как у заданий дня (#3475): сперва все
+    // «Обеспечение» (снимаем ссылки на «Партии ГП»), затем сама «Производственная
+    // резка» — backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход.
+    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutId, fulfillmentIds, label) {
+        var self = this;
+        if (this.busy) return;
+        var ids = (fulfillmentIds || []).map(function(x) { return String(x); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var total = ids.length + 1;   // обеспечения + сама резка
+
+        this.setBusy(true);
+        this.showProgress('Удаление задания «' + label + '»…', total);
+        var done = 0;
+        function del(id) {
+            return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
+                self.updateProgress(++done);
+            });
+        }
+        // Цепочка: сначала обеспечения, потом резка (см. комментарий выше).
+        var chain = Promise.resolve();
+        ids.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
+        chain = chain.then(function() { return del(cutId); });
+
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress();
+            self.setBusy(false);
+            if (String(self.selectedCutId) === String(cutId)) self.selectedCutId = null;
+            self.render();
+            self.notify('Задание удалено: обеспечений — ' + ids.length, 'success');
+        }).catch(function(err) {
+            self.hideProgress();
+            self.setBusy(false);
+            // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка удаления задания: ' + (err && err.message || err), 'error');
         });
     };
 
@@ -4674,12 +5588,30 @@
             var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
             var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty }; });
             self.renderStripPanel(panel, cut, strips, original);
+            if (cut.fixed) self.lockStripPanel(panel);   // #3508 п.3: зафиксированное — только просмотр
         }).catch(function(err) {
             if (panel.parentNode) {
                 panel.innerHTML = '';
                 panel.appendChild(el('div', { class: 'atex-pp-empty', text: 'Ошибка загрузки полос: ' + err.message }));
             }
         });
+    };
+
+    // #3508 п.3: панель полос зафиксированного задания — только просмотр. Глушим все
+    // инпуты/кнопки, кроме крестика закрытия, и показываем пометку. Изменения состава
+    // невозможны (как и удаление/перепланирование/смена очередности зафиксированного).
+    AtexProductionPlanning.prototype.lockStripPanel = function(panel) {
+        if (!panel) return;
+        panel.classList.add('is-readonly');
+        var nodes = panel.querySelectorAll('input, select, textarea, button');
+        Array.prototype.forEach.call(nodes, function(n) {
+            if (n.classList && n.classList.contains('atex-pp-strip-close')) return;
+            n.disabled = true;
+        });
+        var note = el('div', { class: 'atex-pp-strip-locked-note', text: '🔒 Задание зафиксировано — изменение полос недоступно' });
+        var header = panel.querySelector('.atex-pp-strip-header');
+        if (header && header.parentNode) header.parentNode.insertBefore(note, header.nextSibling);
+        else panel.appendChild(note);
     };
 
     // Рендер содержимого панели редактора полос (таблица + сводка + ходовые + кнопки).
@@ -5106,7 +6038,7 @@
         }
         if (!this.meta.cut || !this.meta.supply || !this.meta.finishedBatch) {
             console.error('[pp] ⚙️ generateCuts: не найдены метаданные', {cut:!!this.meta.cut, supply:!!this.meta.supply, finishedBatch:!!this.meta.finishedBatch});
-            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Партия ГП)', 'error');
+            this.notify('Не найдены метаданные таблиц (Задание/Обеспечение/Партия ГП)', 'error');
             return;
         }
 
@@ -5123,6 +6055,11 @@
         Promise.all([this.loadPositions(), this.reload()]).then(function() {
             self._genRefreshing = false;
             self.setGenBusy(false);
+            // #3457: loadPositions() пересоздал genPositions с НОМИНАЛЬНОЙ шириной заказа —
+            // заново проставляем фактическую ширину резки (#3372: справочник 66190), иначе
+            // планирование/раскладка/Партии ГП пойдут по номиналу (60мм вместо 59мм).
+            // Справочники (actualWidthIndex/jumboWidthByMaterial/sleeveInchesById) живут с start().
+            self.annotatePositionsCutWidth();
             self.render();
             self.planAndConfirmCuts(actionsEl);
         }).catch(function(err) {
@@ -5152,13 +6089,14 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
-            // Новых резок нет, но «Сгенерировать резки» всё равно приводит очередь в
-            // нормальный вид (#3421): пересобираем «Очередность» уже созданных резок
-            // (в т.ч. сохранённых старой генерацией как 6,16,16 → 16,16,6).
-            console.log('[pp] ⚙️ generateCuts: необеспеченных нет — пересобираю очередь существующих резок');
-            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP).then(function(changed) {
-                self.notify(changed ? 'Очередь резок пересобрана (минимум переналадок)'
-                                    : 'Нет необеспеченных позиций; очередь уже в нужном порядке', 'info');
+            // #3449: очередь по стратегии НЕ пересобираем (порядок оператора неприкосновенен).
+            // #3619: но всё равно заполняем дни до конца — расщепляем уже стоящие задания,
+            // переходящие границу рабочего дня, на по-дневные сегменты (preserveOrder=true
+            // сохраняет порядок). Идемпотентно (#3427): если расщеплять нечего — ничего не пишем.
+            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — заполняю дни существующих заданий');
+            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function(changed) {
+                self.notify(changed ? 'Дни заполнены: задания, переходящие границу дня, расщеплены по дням'
+                                    : 'Нет незапланированных позиций; дни уже заполнены', 'info');
             });
             return;
         }
@@ -5219,6 +6157,8 @@
                         lay.mat = mat;
                         lay.windDir = group.windDir;
                         lay.windLength = group.windLength;
+                        lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
+                        lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
@@ -5264,17 +6204,15 @@
                     diagnostics: timingDiagnostics,
                     layouts: allLayouts.slice(0, 5)
                 });
-                self.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+                self.notify('Ошибка подготовки заданий: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
                     (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
                 return;
             }
 
-            // #3253: в подтверждении не считаем полосы/ножи — только число резок.
-            var nCuts = allLayouts.length;
-            // #3444: вопрос «Создать N резок?» — в конце, после «Пропущено N».
+            // #3470: вопрос «Создать производственные задания?» — в конце, после «Пропущено N».
             var msg = el('span', { class: 'atex-pp-confirm-msg' });
             msg.appendChild(document.createTextNode(
-                'Не обеспечено резками и складом позиций: ' + unsup.length + '. '));
+                'Не обеспечено заданиями и складом позиций: ' + unsup.length + '. '));
             if (skipped.length) {
                 var skipLink = el('a', { class: 'atex-pp-skipped-link', href: '#',
                     text: 'Пропущено ' + skipped.length,
@@ -5288,19 +6226,21 @@
             } else {
                 msg.appendChild(document.createTextNode('Пропущено 0. '));
             }
+            // #3445: отчёт об урезании впрок по «Максимальному запасу» (если было).
             if (capResult.trimmed.length) {
                 var cappedTotal = capResult.trimmed.reduce(function(a, t) { return a + (Number(t.droppedRolls) || 0); }, 0);
                 msg.appendChild(document.createTextNode(
                     'Урезано впрок по «Максимальному запасу»: ' + round3(cappedTotal) + ' рул. '));
             }
-            msg.appendChild(document.createTextNode('Создать ' + nCuts + ' резок?'));
+            // #3470: текст «Создать производственные задания?» (без счётчика, термин «задания»).
+            msg.appendChild(document.createTextNode('Создать производственные задания?'));
 
             // Единая кнопка генерации. Очередь строим по минимуму переналадки (#3268)
             // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
             // (FATIGUE) по route-score давала ножи по ВОЗРАСТАНИЮ (6,16,16), вопреки
             // #3130 (ideav/crm#3421). inline:true — именованная inline-кнопка, без модалки.
             self.confirmAction(msg, actionsEl, [
-                { label: 'Сгенерировать', primary: true, inline: true, onConfirm: function() {
+                { label: 'Создать', primary: true, inline: true, onConfirm: function() {
                     self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
                 } }
             ]);
@@ -5329,6 +6269,7 @@
             timing: reqIdByName(cutMeta, CUT_REQ.timing),
             length: reqIdByName(cutMeta, CUT_REQ.length),
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
+            leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
         };
@@ -5375,7 +6316,7 @@
             console.error('[pp] ❌ runGenerateCuts: ошибка подготовки полей резки — ' + cutWriteDiagnosticSummary(timingDiagnostics), {
                 diagnostics: timingDiagnostics
             });
-            this.notify('Ошибка подготовки резок: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
+            this.notify('Ошибка подготовки заданий: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
                 (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
             return Promise.resolve();
         }
@@ -5385,6 +6326,16 @@
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
             var batchId = pickBatchFIFOForRun(self.genBatches, lay.mat, runLength, batchRemainingById);
+            // #3453: нет партии сырья (нет активной «Партии сырья» этого вида с остатком) —
+            // не создаём резку с пустой «Партией сырья», а помечаем позиции пропущенными.
+            // pickBatchFIFOForRun при отсутствии партии возвращает null без списания остатка.
+            if (!batchId) {
+                console.warn('[pp] 🔧 runGenerateCuts: раскладка без партии сырья (сырьё ' + lay.mat + ') — пропущена');
+                (lay.positionsCovered || []).forEach(function(pid) {
+                    skipped.push({ positionId: pid, reason: 'нет партии сырья' });
+                });
+                return;
+            }
             var cutMainValue = nextCutMainValue(sequenceCuts, controllerNowMs(self), cutMainState);
             var day = cutPlanDayKey({ planDate: cutMainValue });
             if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
@@ -5422,8 +6373,8 @@
                 planDate: descriptor.planDate,
                 plannedRuns: plannedRuns,
                 runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes),
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, descriptor.isFoil), // #3606
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
                 sequence: '',
@@ -5431,6 +6382,7 @@
             });
         });
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
+        nCuts = layoutPlans.length;   // #3453: раскладки без партии сырья отброшены — считаем по факту
 
         // Create requests stay in layout order, but queue numbers for same-day
         // generated cuts follow the operator-selected planner (#3272).
@@ -5499,7 +6451,7 @@
                 var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
                 var perPassByCut = {}, runsByCut = {};
                 plans.forEach(function(p) {
-                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPoints);
+                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPointsForCut(p.isFoil, windPoints)); // #3606
                     runsByCut[String(p.id)] = p.plannedRuns;
                 });
                 var segs = splitMachineQueue(plans, {
@@ -5521,7 +6473,7 @@
                             cutMainValue: ts > 0 ? ts : p.cutMainValue,
                             runLength: p.runLength,
                             duration: round3(perPass * sg.runs),
-                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes),
+                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes, p.isFoil), // #3606
                             batchId: p.batchId,
                             slitterId: p.slitterId,
                             fullPlannedRuns: p.plannedRuns,
@@ -5552,14 +6504,14 @@
         Object.keys(segmentsByLayout).forEach(function(k) { nRecords += segmentsByLayout[k].length; });
         if (!nRecords) nRecords = nCuts;
         console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nRecords + ' записей (' + nCuts + ' раскладок)...');
-        this.showProgress('Генерация резок…', nRecords);
+        this.showProgress('Генерация заданий…', nRecords);
         var chain = Promise.resolve();
         var startTime = Date.now();
         layouts.forEach(function(lay, layIdx) {
           var units = segmentsByLayout[layIdx] || [];
           units.forEach(function(unit) {
             chain = chain.then(function() {
-                self.updateProgress(doneCuts, 'Создаётся резка ' + (doneCuts + 1) + ' из ' + nRecords + '…');
+                self.updateProgress(doneCuts, 'Создаётся задание ' + (doneCuts + 1) + ' из ' + nRecords + '…');
                 var plannedRuns = unit.plannedRuns;
                 var runLength = unit.runLength;
                 var duration = unit.duration;
@@ -5573,16 +6525,17 @@
                     slitter: slitterId,
                     materialBatch: batchId,
                     plannedRuns: plannedRuns,
-                    duration: duration > 0 ? duration : '',
+                    duration: duration > 0 ? Math.ceil(duration) : '',   // #3635 п.4: «Длительность, минут» сохраняем целой (вверх)
                     timing: timing,
                     length: runLength > 0 ? runLength : '',
                     winding: normWinding(lay && lay.windDir),
+                    leader: self.resolveLeaderId(lay && lay.leader), // #3569: лидер позиции → id справочника
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
                 var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'timing', 'length']);
                 if (payloadDiagnostics.length) {
-                    throw new Error('Неполный payload резки ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
+                    throw new Error('Неполный payload задания ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
 
                 // #3242: состав резки — «Партия ГП» по каждой ширине. Запоминаем id по
@@ -5686,7 +6639,7 @@
                 // 1) корневая резка, 2) Партии ГП (состав), 3) втулки, 4) обеспечения→Партия ГП.
                 return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
-                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                    if (!cutId) throw new Error('Сервер не вернул id нового задания');
                     return createFinishedBatches(cutId)
                         .then(function() { return createSleeveTasks(); })
                         .then(function() { return createSupplies(); });
@@ -5719,20 +6672,23 @@
             var reasons = self.groupSkipReasons(skipped);
             var sleeveMin = sleeveMinutes(nSleeves, self.opTimes || {});
             console.log('[pp] 🔧 runGenerateCuts: ГОТОВО за ' + totalElapsed + 'с. резок:', layouts.length, 'полос:', nStrips, 'втулок:', nSleeveTasks, 'пропущено:', skipped.length);
-            self.notify('Создано ' + nRecords + ' резок (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
+            self.notify('Создано ' + nRecords + ' производственных заданий (' + planningStrategyLabel(planOptions.strategy) + '), полос ' + nStrips +
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
-            // #3421: свести новые резки с уже существующими в единую правильную очередь
-            // (перемежить по станко-дням, ножи по убыванию). Если порядок уже верный —
-            // no-op без записи. applySplitPlan сам делает reload+render.
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP);
+            // #3449: очередь по стратегии НЕ пересобираем — порядок оператора неприкосновенен.
+            // #3619: но заполняем дни до конца — расщепляем задания, переходящие границу
+            // рабочего дня, на по-дневные сегменты: под каждый день своё «Задание в
+            // производство» + «Партия ГП» + «Обеспечение», рекурсивно. preserveOrder=true
+            // сохраняет текущий порядок очереди; идемпотентно (#3427) — повторный прогон без
+            // изменений ничего не пишет. applySplitPlan сам делает reload+render.
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
             self.setGenBusy(false);
             console.error('[pp] 🔧 runGenerateCuts: ОШИБКА', err.message, err.stack);
-            self.notify('Ошибка генерации резок: ' + err.message, 'error');
+            self.notify('Ошибка генерации заданий: ' + err.message, 'error');
         });
     };
 
@@ -5752,10 +6708,13 @@
     // не смог построить раскладку). Данные считаются на клиенте при генерации.
     AtexProductionPlanning.prototype.openSkippedReport = function(skipped) {
         var posById = positionMap(this.genPositions);
+        var matNames = this.materialNameById || {};   // #3608: карта materialId → название сырья
         var rows = (skipped || []).map(function(s) {
             var p = posById[String(s.positionId)] || {};
+            var matId = p.materialId == null ? '' : String(p.materialId);
             return {
                 id: s.positionId == null ? '' : s.positionId,
+                material: matNames[matId] || (matId !== '' ? '#' + matId : ''),  // #3608: название сырья
                 width: (p.orderWidth != null ? p.orderWidth : p.width) || '',  // #3372: заказанная ширина (не фактическая)
                 qty: p.qty || '',
                 length: p.length || '',
@@ -5767,10 +6726,11 @@
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
             });
         }
-        var base = '/' + encodeURIComponent(this.db) + '/object/';
+        var base = '/' + encodeURIComponent(this.db) + '/edit_obj/';   // #3608: ссылка на форму правки (edit_obj), а не object/
         var trs = rows.map(function(r, i) {
             return '<tr><td>' + (i + 1) + '</td>' +
                 '<td><a href="' + base + esc(r.id) + '" target="_blank" rel="noopener">' + esc(r.id) + '</a></td>' +
+                '<td>' + esc(r.material) + '</td>' +
                 '<td>' + esc(r.width) + '</td>' +
                 '<td>' + esc(r.qty) + '</td>' +
                 '<td>' + esc(r.length) + '</td>' +
@@ -5785,10 +6745,10 @@
             'th{background:#f4f6fa}tr:nth-child(even) td{background:#fafbfc}' +
             'a{color:#1283da}</style></head><body>' +
             '<h1>Пропущенные позиции — ' + rows.length + '</h1>' +
-            '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку резки и не создал резки. ' +
+            '<p>Согласованные позиции заказов, для которых генератор не смог построить раскладку и не создал производственные задания. ' +
             'Проверьте параметры (ширина джамбо, сырьё) и повторите генерацию.</p>' +
-            '<table><thead><tr><th>№</th><th>ID позиции</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
-            '<tbody>' + (trs || '<tr><td colspan="6">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
+            '<table><thead><tr><th>№</th><th>ID позиции</th><th>Сырьё</th><th>Ширина</th><th>Кол-во</th><th>Длина, м</th><th>Причина пропуска</th></tr></thead>' +
+            '<tbody>' + (trs || '<tr><td colspan="7">Нет пропущенных позиций</td></tr>') + '</tbody></table></body></html>';
         var w = window.open('', '_blank');
         if (!w) { this.notify('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.', 'error'); return; }
         w.document.open();
@@ -5802,7 +6762,9 @@
                 var a = action || {};
                 return {
                     label: a.label || a.text || 'Да',
-                    primary: a.primary === true || i === 0,
+                    // #3475: warning-кнопка (жёлтая) не должна одновременно быть primary.
+                    warning: a.warning === true,
+                    primary: a.warning !== true && (a.primary === true || i === 0),
                     inline: a.inline === true,
                     onConfirm: a.onConfirm || a.action || a.handler
                 };
@@ -5830,7 +6792,7 @@
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
         function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
         actions.forEach(function(action) {
-            var cls = 'atex-pp-btn' + (action.primary ? ' atex-pp-btn-primary' : '');
+            var cls = 'atex-pp-btn' + (action.warning ? ' atex-pp-btn-warning' : (action.primary ? ' atex-pp-btn-primary' : ''));
             var btn = el('button', { class: cls, type: 'button', text: action.label });
             btn.addEventListener('click', function() { removeBar(); action.onConfirm(); });
             bar.appendChild(btn);
@@ -5917,7 +6879,8 @@
             plannedRuns: runsReqId,
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: seqReqId,
-            winding: reqIdByName(cutMeta, CUT_REQ.winding)
+            winding: reqIdByName(cutMeta, CUT_REQ.winding),
+            leader: reqIdByName(cutMeta, CUT_REQ.leader)   // #3569: лидер копируется в запись-продолжение
         };
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
@@ -5925,7 +6888,13 @@
         var updateByCut = {};
         (ops.updates || []).forEach(function(u) { updateByCut[u.cutId] = u; });
 
+        // #3635 п.3: сохранение плана резок (день-заполнение) пишет десятки записей —
+        // показываем форму ожидания с прогрессом, а не «зависшую» заблокированную страницу.
+        var splitTotal = (ops.updates || []).length + Object.keys(createsByParent).length + (ops.deletes || []).length;
+        var splitDone = 0;
+        function splitBump() { self.updateProgress(++splitDone); }
         this.setBusy(true);
+        if (splitTotal > 0) this.showProgress('Сохранение плана резок…', splitTotal);
         var chain = Promise.resolve();
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
@@ -5944,10 +6913,15 @@
                     var fields = {};
                     if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
                     if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
+                    // #3635 п.5: сегмент НАСТРОЙКИ (0 проходов) — обнуляем сохранённую
+                    // «Длительность, минут», иначе остаётся старая (намотка целой резки) и
+                    // расписание считает настройку длинной резкой, ломая раскладку по дням.
+                    var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
+                    if (Number(u.plannedRuns) === 0 && durReqId) fields['t' + durReqId] = '0';
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
-            });
+            }).then(splitBump);
         });
 
         // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
@@ -6004,12 +6978,14 @@
                             materialBatch: parentCut && parentCut.batchId,
                             plannedRuns: cr.plannedRuns,
                             sequence: cr.sequence,
-                            winding: normWinding(parentCut && parentCut.winding)
+                            winding: normWinding(parentCut && parentCut.winding),
+                            // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
+                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : '')
                         });
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
-                            if (!bId) throw new Error('Сервер не вернул id продолжения резки');
+                            if (!bId) throw new Error('Сервер не вернул id продолжения задания');
                             var stripMap = {};
                             // Главное значение B (плановое время старта) — _m_save с t{tableId}.
                             var bChain = Promise.resolve().then(function() {
@@ -6054,19 +7030,19 @@
                     });
                 });
                 return cChain;
-            });
+            }).then(splitBump);
         });
 
         // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
         (ops.deletes || []).forEach(function(id) {
-            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); });
+            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); }).then(splitBump);
         });
 
         return chain.then(function() { return self.reload(); }).then(function() {
-            self.setBusy(false); self.render(); return true;
+            self.hideProgress(); self.setBusy(false); self.render(); return true;
         }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка разбиения резок: ' + err.message, 'error');
+            self.hideProgress(); self.setBusy(false);
+            self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
         });
     };
@@ -6079,7 +7055,10 @@
     // и без уведомления — их даёт вызывающая генерация). Ручную перестановку (↑↓)
     // оператор делает ПОСЛЕ генерации. Ничего не изменилось → Promise<false> без записи.
     // → Promise<boolean> (true, если что-то применилось).
-    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy) {
+    // #3619: preserveOrder=true — НЕ пересобирать очередь по стратегии, а только расщепить
+    // задания, переходящие границу рабочего дня, на по-дневные сегменты, СОХРАНЯЯ текущий
+    // порядок очереди. Без флага (legacy #3421) — полная пересборка «Очередности» по SETUP/FATIGUE.
+    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder) {
         var self = this;
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
         var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes);
@@ -6091,7 +7070,7 @@
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var perPassByCut = {};
         self.cuts.forEach(function(c) {
-            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPoints);
+            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
         });
         var ops = planCutOperations(self.cuts, {
             weights: planOptions,
@@ -6101,7 +7080,8 @@
             perPassByCut: perPassByCut,
             planBaseMidnightMs: planBaseMidnightMs,
             lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin
+            lunchDurationMin: dayWindow.lunchDurationMin,
+            preserveOrder: preserveOrder   // #3619: только заполнить дни, не пересобирая порядок
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
@@ -6166,6 +7146,26 @@
                 var card = cards[i];
                 var same = card.dataset && String(card.dataset.cutId) === String(cutId);
                 card.classList.toggle('is-active', !!same);
+            }
+        }
+        this.renderLink();
+    };
+
+    // #3638: применить deep-link из cut-gantt: выставить день (фильтр дат), активный
+    // станок и сфокусировать задание (подсветка + прокрутка к карточке). Вызывается
+    // после первичного рендера. Параметры — { cut, date, slitter } (строки, любой пуст).
+    AtexProductionPlanning.prototype.applyDeepLink = function(params) {
+        var p = params || {};
+        if (!p.cut && !p.date && !p.slitter) return;
+        if (p.date) { this.filter.date = p.date; this.filter.dateTo = p.date; }
+        if (p.slitter) this.activeSlitter = String(p.slitter);
+        this.renderQueue();   // пересобрать вкладки/очередь под новый день/станок
+        if (p.cut) {
+            this.selectCut(p.cut);
+            var card = this.queueEl && this.queueEl.querySelector('.atex-pp-cut[data-cut-id="' + String(p.cut).replace(/"/g, '\\"') + '"]');
+            if (card) {
+                card.classList.add('is-deeplink');
+                if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'center' });
             }
         }
         this.renderLink();
@@ -6271,8 +7271,8 @@
         var d = this.draft;
         var form = this.formEl;
         form.innerHTML = '';
-        form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
-        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка под одну позицию заказа: выберите позицию и кол-во рулонов (≤ необеспеченного), затем станок — в списке станков показано ближайшее свободное окно.' }));
+        form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новое производственное задание' }));
+        form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Задание под одну позицию заказа: выберите позицию и кол-во рулонов (≤ необеспеченного), затем станок — в списке станков показано ближайшее свободное окно.' }));
 
         // Только согласованные, ещё не обеспеченные позиции с ненулевым остатком.
         var posLabelById = {};
@@ -6291,7 +7291,7 @@
             return;
         }
 
-        // Позиция заказа (один выбор).
+        // Заказанное количество — позиция заказа (один выбор).
         var posSelect = el('select', { class: 'atex-pp-input' });
         posSelect.appendChild(el('option', { value: '', text: '— выберите позицию —' }));
         options.forEach(function(o) {
@@ -6306,7 +7306,7 @@
             d.qty = sel ? String(sel.remaining) : '';
             self.renderForm();
         });
-        form.appendChild(field('Позиция заказа', posSelect));
+        form.appendChild(field('Заказанное количество', posSelect));
 
         var selOpt = options.filter(function(o) { return o.id === String(d.positionId); })[0];
         var maxQty = selOpt ? selOpt.remaining : 0;
@@ -6381,16 +7381,16 @@
                 'Произведём этой ширины: ' + round3(pl.producedPosRolls) + ' рул. · обеспечим: ' + round3(pl.supplyRolls) + ' · склад: ' + round3(pl.stockRolls),
                 'Длительность резки: ~' + round3(pl.duration) + ' мин'
             ];
-            if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько резок — создаётся первая.');
+            if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько заданий — создаётся первое.');
             lines.forEach(function(txt) { previewBox.appendChild(el('div', { class: 'atex-pp-cut-preview-line', text: txt })); });
         } else {
             previewBox.appendChild(el('div', { class: 'atex-pp-hint',
-                text: prospectReady ? 'Выберите станок — покажу состав резки.' : 'Заполните позицию и кол-во рулонов.' }));
+                text: prospectReady ? 'Выберите станок — покажу состав задания.' : 'Заполните позицию и кол-во рулонов.' }));
         }
         form.appendChild(previewBox);
 
         var actions = el('div', { class: 'atex-pp-actions' });
-        var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать резку' });
+        var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать задание' });
         createBtn.disabled = !canCreate;
         createBtn.addEventListener('click', function() { self.createCutForPosition(); });
         actions.appendChild(createBtn);
@@ -6424,13 +7424,28 @@
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
-        var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
-        dateFilter.addEventListener('change', function() {
-            self.filter.date = dateFilter.value;
+        // #3599 п.2: дата плана ДИАПАЗОНОМ «С — По» (два поля, между ними дефис). Диапазон
+        // фильтрует отображение очереди; «С» (filter.date) остаётся базой генерации/планирования.
+        var dateFrom = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date', value: this.filter.date || '', title: 'С (дата плана, от)' });
+        var dateTo = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date', value: this.filter.dateTo || '', title: 'По (дата плана, до)' });
+        function applyDateRange() {
             self.selectedCutId = null;   // #3349: очищать панель «Связанные позиции»
             self.renderQueue();
             self.renderLink();
-        });
+        }
+        dateFrom.addEventListener('change', function() { self.filter.date = dateFrom.value; applyDateRange(); });
+        dateTo.addEventListener('change', function() { self.filter.dateTo = dateTo.value; applyDateRange(); });
+        // #3508 п.1 / #3599: стрелки ‹/› двигают ВЕСЬ диапазон на ±1 день (ширина окна сохраняется).
+        function shiftFilterDate(delta) {
+            self.filter.date = shiftPlanDate(self.filter.date || todayISO(), delta);
+            self.filter.dateTo = shiftPlanDate(self.filter.dateTo || self.filter.date || todayISO(), delta);
+            applyDateRange();
+        }
+        var datePrev = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '‹', title: 'Сдвинуть диапазон на день назад' });
+        var dateNext = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '›', title: 'Сдвинуть диапазон на день вперёд' });
+        datePrev.addEventListener('click', function() { if (!self.busy) shiftFilterDate(-1); });
+        dateNext.addEventListener('click', function() { if (!self.busy) shiftFilterDate(1); });
+        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFrom, el('span', { class: 'atex-pp-date-sep', text: '–' }), dateTo, dateNext]);
         // #3411: быстрый поиск между «Дата плана» и «Статус». Фильтрует карточки очереди
         // и пересчитывает счётчики на закладках станков (видно, в каком станке сколько
         // совпавших позиций). Поиск идёт по сырью/намотке/статусу и подписям связанных
@@ -6449,7 +7464,7 @@
         });
         searchInput.addEventListener('focus', function() { self._searchFocused = true; });
         searchInput.addEventListener('blur', function() { self._searchFocused = false; });
-        filters.appendChild(field('Дата плана', dateFilter));
+        filters.appendChild(field('Дата плана', dateNav));
         filters.appendChild(field('Поиск', searchInput));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
@@ -6471,7 +7486,10 @@
         (this.supplies || []).forEach(function(s) {
             var cid = String(s.cutId);
             if (!linkedLabelsByCut[cid]) linkedLabelsByCut[cid] = [];
-            linkedLabelsByCut[cid].push(posLabelById[String(s.positionId)] || ('позиция #' + s.positionId));
+            // #3624: позиция вне активного positions_list — в haystack кладём «<заказ>/<позиция>»
+            // из cut_planning.order_no, чтобы поиск по номеру заказа находил такие резки.
+            linkedLabelsByCut[cid].push(posLabelById[String(s.positionId)] ||
+                (s.orderNo ? (s.orderNo + '/' + s.positionId) : ('позиция #' + s.positionId)));
         });
         function cutMatchesSearch(c) {
             return cutMatchesQuery(c, query, linkedLabelsByCut[String(c.id)]);
@@ -6482,43 +7500,34 @@
         }
 
         // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.
-        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
+        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date, self.filter.dateTo); });
         var filtered = filterCuts(visible, this.filter);
         var groups = groupBySlitter(filtered);
 
-        if (!groups.length) {
-            // Показываем вкладки всех станков, даже если резок нет (#3168).
-            if (this.slitters.length) {
-                var allKeys = this.slitters.map(function(s) { return String(s.id); });
-                if (allKeys.indexOf(self.activeSlitter) === -1) self.activeSlitter = allKeys[0];
-                var tabs = el('div', { class: 'atex-pp-tabs' });
-                this.slitters.forEach(function(s) {
-                    var key = String(s.id);
-                    var tab = el('button', { class: 'atex-pp-tab' + (key === self.activeSlitter ? ' is-active' : ''), type: 'button' }, [
-                        el('span', { class: 'atex-pp-tab-label', text: s.label }),
-                        el('span', { class: 'atex-pp-tab-count', text: '0' })
-                    ]);
-                    // #3411: переключение станка очищает панель «Связанные позиции».
-                    tab.addEventListener('click', function() { self.activeSlitter = key; self.selectedCutId = null; self.renderQueue(); self.renderLink(); });
-                    tabs.appendChild(tab);
-                });
-                box.appendChild(tabs);
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
-            } else {
-                box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Резок в очереди нет' }));
-            }
+        // #3535: вкладку показываем для КАЖДОГО станка справочника — даже если в
+        // этот день у него нет резок (счётчик 0, пустой список). Иначе вкладки
+        // «съезжают», и человек принимает первую вкладку за первый станок, хотя
+        // станка без резок в ней нет. Порядок вкладок = порядок справочника
+        // станков (this.slitters); группы с резками без станка / с удалённым из
+        // справочника станком дописываем в конце в порядке groupBySlitter,
+        // чтобы не потерять задания. (Раньше вкладки всех станков показывались
+        // только при полностью пустой очереди — #3168.)
+        var tabGroups = mergeStationTabs(this.slitters, groups);
+
+        if (!tabGroups.length) {
+            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
             return;
         }
 
         // Закладки по станкам (#3116 п.2): один таб на станок, контент — резки
         // только активного станка. Активный таб в this.activeSlitter (ключ как в
-        // groupBySlitter); если выбранного среди групп нет — берём первый.
+        // groupBySlitter); если выбранного среди вкладок нет — берём первую.
         function groupKey(g) { return g.slitter.id == null ? '\u0000none' : String(g.slitter.id); }
-        var keys = groups.map(groupKey);
+        var keys = tabGroups.map(groupKey);
         if (keys.indexOf(self.activeSlitter) === -1) self.activeSlitter = keys[0];
 
         var tabs = el('div', { class: 'atex-pp-tabs' });
-        groups.forEach(function(g) {
+        tabGroups.forEach(function(g) {
             var key = groupKey(g);
             // #3411: при активном поиске счётчик показывает число совпавших позиций станка.
             var count = groupMatchCount(g);
@@ -6532,7 +7541,7 @@
         });
         box.appendChild(tabs);
 
-        var activeGroup = groups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || groups[0];
+        var activeGroup = tabGroups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || tabGroups[0];
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
 
         // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
@@ -6550,28 +7559,42 @@
         // День 0 = дата фильтра (.atex-pp-input), на которую отфильтрована очередь, а не
         // «сегодня»; иначе title показывал текущую дату вместо плановой (напр. 10.06 вместо 01.06).
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
-        var schedule = buildSchedule(activeGroup.cuts, {
+        // #3635 п.5: сегменты НАСТРОЙКИ (0 проходов + продолжение с проходами в цепочке) —
+        // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
+        // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
+        var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
+        var schedOpts = {
             windPoints: windPoints,
             times: self.changeTimes,
             runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin,
             shiftEndMin: dayWindow.cutEndMin,
             lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin
-        });
+            lunchDurationMin: dayWindow.lunchDurationMin,
+            setupTaskIds: setupTaskIds
+        };
+        // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
+        // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
+        var schedule = buildSchedule(activeGroup.cuts, schedOpts);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
-        var dayCutsByKey = {};
+        function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
+        // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
+        // тому же, что разделяет дни блоком уборки и датой-заголовком, — а НЕ по хранимой
+        // «Дате план». Иначе резки одной хранимой даты, переехавшие расписанием на следующий
+        // день (не влезли в текущий), продолжали сквозную нумерацию (№5 на новом дне вместо №1).
+        function cutSchedDayKey(c) { var d = schedDay(schedById[String(c.id)]); return d == null ? ' ' : String(d); }
+        var dayCutsBySched = {};
         activeGroup.cuts.forEach(function(c) {
-            var key = cutPlanDayKey(c);
-            if (!dayCutsByKey[key]) dayCutsByKey[key] = [];
-            dayCutsByKey[key].push(c);
+            var key = cutSchedDayKey(c);
+            if (!dayCutsBySched[key]) dayCutsBySched[key] = [];
+            dayCutsBySched[key].push(c);
         });
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
-        dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.cutEndMin })
+        dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
             .forEach(function(cl) { cleanupByDay[cl.day] = cl; });
-        function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
+        var lastDayDateRendered = null;   // #3616: дата-заголовок дня вставляется один раз на рабочий день
 
         activeGroup.cuts.forEach(function(c, idx) {
             // #3411: при поиске показываем только совпавшие карточки. Расписание/индексы
@@ -6600,7 +7623,11 @@
                     if (resLin + 1e-6 < needLin) unreserved = true;
                 }
             }
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
+            // #3635 п.5: сегмент НАСТРОЙКИ (хвост дня N перед намоткой дня N+1) — карточка
+            // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
+            var isSetupTask = !!setupTaskIds[String(c.id)];
+            // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : ''), dataset: { cutId: String(c.id) } });
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
@@ -6610,7 +7637,7 @@
                 c, idx > 0 ? activeGroup.cuts[idx - 1] : null, sc,
                 runLengthForCut, windPoints, self.changeTimes
             );
-            var cutNumberTitle = 'Резка № ' + (formatCutNumber(c.number) || c.id);
+            var cutNumberTitle = 'Задание № ' + (formatCutNumber(c.number) || c.id);
             // #3280: title — плановая дата+время старта до минут (sc есть); иначе номер резки.
             var cutNumTitle = formatCutStartTitle(sc, planBaseMidnightMs) || cutNumberTitle;
 
@@ -6619,8 +7646,12 @@
             // отдельным рядом ниже. Клик открывает тайминг и (всплытием) выбирает резку.
             var timeEl = null;
             if (sc) {
-                var scheduleText = formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
-                if (stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
+                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · N мин»
+                // (окно = переналадка, минуты вверх), а не строку расписания резки.
+                var scheduleText = isSetupTask
+                    ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
+                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
+                if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
                         cutId: String(c.id),
                         plannedRuns: c.plannedRuns,
@@ -6650,7 +7681,13 @@
             // #3354 п.1: первая строка карточки —
             // {номер по порядку} {время} {название сырья} {тип намотки} — {длина} х {резок};
             // справа прижата сводка связей (.atex-pp-cut-supplies).
-            var seqText = (c.sequence != null && !isNaN(c.sequence)) ? String(c.sequence) : String(idx + 1);
+            // #3508 п.7 / #3616: «Очередность» в карточке = позиция задания в очереди станка
+            // за РАБОЧИЙ ДЕНЬ РАСПИСАНИЯ (1..N по dayCutsBySched), а НЕ хранимое значение
+            // «Очередности» (могли задвоиться) и не сквозной номер по хранимой дате. Нумерация
+            // всегда начинается с 1 на каждый видимый день (тот же день, что у уборки/даты).
+            var sameDayCuts = dayCutsBySched[cutSchedDayKey(c)] || activeGroup.cuts;
+            var dayIdx = sameDayCuts.indexOf(c);
+            var seqText = String((dayIdx >= 0 ? dayIdx : idx) + 1);
             var windingText = normWinding(c.winding) || String(c.winding == null ? '' : c.winding).trim() || '—';
             var infoChildren = [
                 el('span', { class: 'atex-pp-cut-seq', title: cutNumTitle, text: '№ ' + seqText })
@@ -6661,7 +7698,22 @@
             // #3406 п.3: дефис — отдельный элемент между намоткой и размерами, чтобы
             // он стоял по центру (равный flex-gap слева и справа): «MR194 IN — 600 х 7».
             infoChildren.push(el('span', { class: 'atex-pp-cut-dash', text: '—' }));
-            infoChildren.push(el('span', { class: 'atex-pp-cut-runs', text: formatCutDimensions(c, runLengthForCut) }));
+            // #3635 п.5: у настройки проходов нет — вместо «длина х 0 резок» показываем
+            // число настраиваемых ножей (сама намотка с этими размерами идёт на след. дне).
+            infoChildren.push(el('span', { class: 'atex-pp-cut-runs',
+                text: isSetupTask ? ('ножей: ' + (Number(c.knifeCount) || 0)) : formatCutDimensions(c, runLengthForCut) }));
+            // #3472: лидер резки — после размеров (перед связями, которые прижаты вправо).
+            // Один лидер — обычная плашка; несколько (легаси-смешение до ограничения по
+            // лидеру) — выделяем предупреждением.
+            var cutLeaders = (c.leaders || []).filter(function(s) { return s; });
+            if (cutLeaders.length) {
+                var mixed = cutLeaders.length > 1;
+                infoChildren.push(el('span', {
+                    class: 'atex-pp-cut-leader' + (mixed ? ' atex-pp-cut-leader-mixed' : ''),
+                    title: (mixed ? 'В резке смешаны разные лидеры: ' : 'Лидер: ') + cutLeaders.join(', '),
+                    text: 'лидер: ' + cutLeaders.join(', ')
+                }));
+            }
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
             cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
 
@@ -6697,29 +7749,90 @@
             var controls = el('div', { class: 'atex-pp-cut-controls' });
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
-            var sameDayCuts = dayCutsByKey[cutPlanDayKey(c)] || activeGroup.cuts;
-            var dayIdx = sameDayCuts.indexOf(c);
-            if (dayIdx === 0) up.disabled = true;
-            if (dayIdx === sameDayCuts.length - 1) down.disabled = true;
+            // sameDayCuts/dayIdx вычислены выше (для seqText #3508 п.7) — переиспользуем.
+            // #3508 п.3: зафиксированное задание нельзя двигать по очереди (↑↓ заблокированы).
+            if (dayIdx === 0 || c.fixed) up.disabled = true;
+            if (dayIdx === sameDayCuts.length - 1 || c.fixed) down.disabled = true;
             up.addEventListener('click', function() {
-                if (self.busy) return;
+                if (self.busy || c.fixed) return;
                 var p = moveInQueue(sameDayCuts, dayIdx, -1);
                 if (p.length) self.saveSequences(p);
             });
             down.addEventListener('click', function() {
-                if (self.busy) return;
+                if (self.busy || c.fixed) return;
                 var p = moveInQueue(sameDayCuts, dayIdx, 1);
                 if (p.length) self.saveSequences(p);
             });
             var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: stripsButtonLabel(c.knifeCount), title: 'Полосы резки (количество полос)' });
             strips.addEventListener('click', function() {
                 if (self.busy) return;
-                self.openStrips(c, cardPanel);
+                self.openStrips(c, cardPanel);   // #3508 п.3: для зафиксированных панель полос открывается только на просмотр
+            });
+            // #3508 п.4: «🔒» — переключить фиксацию ОДНОГО задания (зафиксировать ↔ снять).
+            // Левее «🗑». is-active — когда задание уже зафиксировано (визуальный замок).
+            var fix = el('button', {
+                class: 'atex-pp-cut-fix' + (c.fixed ? ' is-active' : ''),
+                type: 'button',
+                text: '🔒',
+                title: c.fixed ? 'Снять фиксацию задания' : 'Зафиксировать задание'
+            });
+            fix.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy) return;
+                self.toggleCutFixed(c);
+            });
+            // #3602: «🗓» — перенести задание на другой день (между «🔒» и «🗑»). Открывает
+            // модалку (день + в начало/конец + «Зафиксировать»). Перенос имеет наивысший
+            // приоритет — доступен и для зафиксированного задания. stopPropagation, чтобы
+            // клик по кнопке не выбирал карточку.
+            var move = el('button', {
+                class: 'atex-pp-cut-move',
+                type: 'button',
+                text: '🗓',
+                title: 'Перенести задание на другой день'
+            });
+            move.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy) return;
+                self.openMoveCut(c);
+            });
+            // #3486: «🗑» — удалить задание (резку) с её «Обеспечениями». stopPropagation,
+            // чтобы клик по кнопке не выбирал резку (см. #3149: клики по контролам не
+            // выбирают карточку). Подтверждение и удаление — в deleteCutTask.
+            // #3508 п.3: зафиксированное задание удалить нельзя — кнопка заблокирована.
+            var del = el('button', {
+                class: 'atex-pp-cut-del' + (c.fixed ? ' is-disabled' : ''),
+                type: 'button',
+                text: '🗑',
+                title: c.fixed ? 'Зафиксированное задание удалить нельзя (снимите фиксацию)' : 'Удалить задание'
+            });
+            if (c.fixed) del.disabled = true;
+            del.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy || c.fixed) return;
+                self.deleteCutTask(c, cardPanel);
             });
             controls.appendChild(up);
             controls.appendChild(down);
             controls.appendChild(strips);
+            controls.appendChild(fix);
+            controls.appendChild(move);   // #3602: «🗓» перенос на другой день — между «🔒» и «🗑»
+            // #3540: кнопки ◀▶ ручного сдвига планового старта убраны — двигать время вручную
+            // не требуется. #3562: пин планового старта тоже убран — автогенерация двигает
+            // зафиксированное задание по времени в течение дня и меняет его очередность.
+            controls.appendChild(del);
             cardPanel.appendChild(controls);
+
+            // #3616: дата рабочего дня — заголовком перед первой (видимой) карточкой каждого
+            // дня расписания. Для дней 2+ он встаёт сразу ПОСЛЕ блока уборки предыдущего дня
+            // («дату после записи об уборке»); для первого дня — в начале очереди. Дата =
+            // база планирования (день фильтра) + смещение дня расписания.
+            var cardSchedDay = sc ? schedDay(sc) : null;
+            if (cardSchedDay != null && cardSchedDay !== lastDayDateRendered) {
+                groupEl.appendChild(el('div', { class: 'atex-pp-day-date',
+                    text: formatPlanDayHeading(planBaseMidnightMs, cardSchedDay) }));
+                lastDayDateRendered = cardSchedDay;
+            }
 
             groupEl.appendChild(cardPanel);
 
@@ -6730,6 +7843,30 @@
             var nextCut = activeGroup.cuts[idx + 1];
             var nextSc = nextCut ? schedById[String(nextCut.id)] : null;
             var nextDay = nextSc ? schedDay(nextSc) : null;
+            // #3613: задание, не влезшее в рабочий день, нормально дробить по дням. На
+            // первой и последней карточке такой цепочки — значок справа внизу: «←» начало
+            // в предыдущем дне, «→» продолжение в следующем. Смежные сегменты опознаём по
+            // идентичной конфигурации резки и единому номеру заказа (isDaySplitSibling),
+            // взятые у соседей очереди через границу рабочего дня (по schedDay расписания —
+            // тому же, что разделяет дни блоком уборки).
+            var prevCut = activeGroup.cuts[idx - 1];
+            var prevSc = prevCut ? schedById[String(prevCut.id)] : null;
+            var prevDay = prevSc ? schedDay(prevSc) : null;
+            var spans = daySplitBadges(prevCut, prevDay, c, myDay, nextCut, nextDay);
+            if (spans.fromPrev || spans.toNext) {
+                var spanBadges = [];
+                if (spans.fromPrev) spanBadges.push(el('span', {
+                    class: 'atex-pp-cut-span atex-pp-cut-span-prev',
+                    title: 'Начало задания — в предыдущем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                    text: '←'
+                }));
+                if (spans.toNext) spanBadges.push(el('span', {
+                    class: 'atex-pp-cut-span atex-pp-cut-span-next',
+                    title: 'Задание продолжается в следующем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                    text: '→'
+                }));
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-spans' }, spanBadges));
+            }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
                 var cl = cleanupByDay[myDay];
@@ -6744,6 +7881,9 @@
         // (счётчики на закладках подскажут, где совпадения есть).
         if (hasQuery && !groupEl.childNodes.length) {
             groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'В этом станке нет позиций по запросу «' + query + '».' }));
+        } else if (!groupEl.childNodes.length) {
+            // #3535: активный станок без резок в этот день — явная подсказка вместо пустоты.
+            groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
         }
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
@@ -6759,7 +7899,7 @@
         var cut = this.cuts.filter(function(c) { return String(c.id) === String(this.selectedCutId); }, this)[0];
 
         if (!cut) {
-            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите резку в очереди, чтобы увидеть связанные позиции.' }));
+            box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Выберите задание в очереди, чтобы увидеть связанные позиции.' }));
             return;
         }
 
@@ -6775,9 +7915,9 @@
             linked.forEach(function(s) {
                 // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж обеспечения.
                 var foot = supplyFootage(s, self.footageBySupply);
-                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot);
+                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo, s.positionWidth, s.positionLength);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
-                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из резки' });
+                var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
                 children.push(del);
                 listWrap.appendChild(el('div', { class: 'atex-pp-linked-item' }, children));
@@ -6830,7 +7970,7 @@
         bar.appendChild(fill);
         var counter = el('div', { class: 'atex-pp-progress-count', text: '' });
         var dialog = el('div', { class: 'atex-pp-progress-dialog' }, [
-            el('div', { class: 'atex-pp-progress-title', text: title || 'Генерация резок…' }),
+            el('div', { class: 'atex-pp-progress-title', text: title || 'Генерация заданий…' }),
             bar,
             counter
         ]);
@@ -6879,23 +8019,39 @@
         // Форма новой резки живёт в модалке (#3116 п.1), открывается кнопкой «+».
         this.formEl = el('section', { class: 'atex-pp-form', 'data-submit-scope': '' });
 
-        // Шапка очереди: заголовок слева, затем кнопка «Сгенерировать резки» и «+ Новая резка» справа вверху.
+        // #3475: панель действий — под заголовком (.atex-pp-panel-head column в CSS).
+        // Порядок: «Сгенерировать» (основная) → «Добавить вручную» (второстепенная) →
+        // «Удалить» (warning, последняя). Названия укорочены, акценты переставлены.
         var queueActions = el('div', { class: 'atex-pp-panel-actions' });
-        var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация резок…' });
+        var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация заданий…' });
         genSpinner.style.display = 'none';
-        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-gen-btn', type: 'button', text: 'Сгенерировать резки' });
+        // #3475: «Сгенерировать» — основная кнопка (atex-pp-btn-primary).
+        var genBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-gen-btn', type: 'button', text: 'Сгенерировать' });
         genBtn.addEventListener('click', function() { self.generateCuts(queueActions); });
         this.genBtn = genBtn;
         this.genSpinner = genSpinner;
-        // Отдельной кнопки «Автопланирование» нет (#3421): «Сгенерировать резки» само
-        // приводит очередь в нормальный вид (autoSequenceQueue в generateCuts).
-        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-add', type: 'button', text: '+ Новая резка' });
+        // «Сгенерировать резки» только создаёт резки для незапланированных позиций и
+        // дописывает их в конец очереди (#3449); уже запланированные резки не трогает.
+        // Перестановку очереди оператор делает вручную (↑↓).
+        // #3475: «Добавить вручную» — второстепенная кнопка (без -primary).
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить вручную' });
         addBtn.addEventListener('click', function() { self.openForm(); });
+        // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня
+        // (все станки). Между «Добавить вручную» и «Удалить».
+        var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать', title: 'Зафиксировать все задания этого дня' });
+        fixBtn.addEventListener('click', function() { self.fixDayTasks(); });
+        // #3475: «Удалить» (warning, жёлтая) — удаляет все задания выбранного дня:
+        // сначала «Обеспечение» (снимаем ссылки на «Партии ГП»), затем «Производственную
+        // резку» (BatchDelete каскадом снимет подчинённые Партии ГП/Полосы/Расход).
+        var delBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-warning atex-pp-del-day', type: 'button', text: 'Удалить' });
+        delBtn.addEventListener('click', function() { self.deleteDayTasks(queueActions); });
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
+        queueActions.appendChild(fixBtn);
+        queueActions.appendChild(delBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
-            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' }),
+            el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
         ]);
         var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [queueHead]);
@@ -6949,6 +8105,7 @@
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
+                    self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     // #3445: loadStockBalance после loadGenBatches — нужен batchMaterialById (сырьё резки).
                     self.loadGenBatches().then(function() { return self.loadStockBalance(); }),
@@ -6977,7 +8134,14 @@
         console.log('[pp] 🟢 init: запуск production-planning, db=', (root.getAttribute('data-db') || '?'));
         var controller = new AtexProductionPlanning(root);
         root._atexProductionPlanning = controller;
-        controller.start();
+        // #3638: deep-link из cut-gantt (?cut=..&date=..&slitter=..) — после загрузки
+        // данных открыть очередь на нужном дне/станке и подсветить задание.
+        var deepLink = (typeof window !== 'undefined' && window.location)
+            ? parseDeepLink(window.location.search) : null;
+        var started = controller.start();
+        if (deepLink && (deepLink.cut || deepLink.date || deepLink.slitter) && started && typeof started.then === 'function') {
+            started.then(function() { controller.applyDeepLink(deepLink); });
+        }
     }
 
     return { planning: planning, Controller: AtexProductionPlanning, init: init };
@@ -6985,4 +8149,4 @@
 
  
  
-// @version 2026-06-15-issue-3411
+// @version 2026-06-23-issue-3616

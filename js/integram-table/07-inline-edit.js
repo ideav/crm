@@ -1121,7 +1121,7 @@
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
-                            ${this.renderReferenceOptions(options, currentValue)}
+                            ${this.renderReferenceOptions(options, currentValue, column)}
                         </div>
                     </div>
                 `;
@@ -1148,7 +1148,8 @@
                 // Issue #1518: Pre-fill search input with current value so user can see what is selected.
                 // Select all text so any keystroke immediately replaces it for a new search.
                 if (currentValue) {
-                    searchInput.value = currentValue;
+                    // Issue #3454: показать выбранное значение DATETIME-ссылки датой, не штампом.
+                    searchInput.value = this.formatReferenceOptionLabel(currentValue, column);
                     searchInput.select();
                 }
 
@@ -1187,18 +1188,18 @@
                     searchTimeout = setTimeout(async () => {
                         if (searchText === '') {
                             // Show original options
-                            dropdown.innerHTML = this.renderReferenceOptions(this.currentEditingCell.referenceOptions, currentValue);
+                            dropdown.innerHTML = this.renderReferenceOptions(this.currentEditingCell.referenceOptions, currentValue, column);
                         } else {
                             // Filter locally first
                             const filtered = this.filterReferenceOptions(this.currentEditingCell.referenceOptions, searchText, currentValue);
-                            dropdown.innerHTML = this.renderReferenceOptions(filtered, currentValue);
+                            dropdown.innerHTML = this.renderReferenceOptions(filtered, currentValue, column);
 
                             // If we have exactly 50 options (not all fetched), re-query from server
                             if (!this.currentEditingCell.allOptionsFetched) {
                                 try {
                                     const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     this.currentEditingCell.referenceOptions = serverOptions;
-                                    dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue);
+                                    dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue, column);
                                 } catch (error) {
                                     console.error('Error re-querying reference options:', error);
                                 }
@@ -2016,7 +2017,7 @@
             }
         }
 
-        renderReferenceOptions(options, currentValue) {
+        renderReferenceOptions(options, currentValue, column = null) {
             // options is an array of [id, text] tuples
             // Filter out current value from options
             const filteredOptions = options.filter(([id, text]) => text !== currentValue);
@@ -2026,7 +2027,8 @@
             }
 
             return filteredOptions.map(([id, text]) => {
-                const decodedText = this.decodeHtmlEntities(text);
+                // Issue #3454: справочник типа DATETIME → метку показываем датой, не штампом.
+                const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), column);
                 const escapedText = this.escapeHtml(decodedText);
                 return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');

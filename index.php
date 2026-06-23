@@ -40,12 +40,15 @@ define("ROLE", 42);
 define("ADMINROLE", 145);
 define("ACTIVITY", 124);
 define("PASSWORD", 20);
-define("RETRIES", 300);
+define("RETRIES", 301); # #3581: счётчик попыток входа должен совпадать с реквизитом
+                        # «Retries» у типа USER (в боевых базах его id=301). Раньше код
+                        # читал/писал t=300 — отдельный, невидимый в админке узел, который
+                        # залипал на лимите и давал «превышено» при «пустом» Retries.
 define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
 define("SECRET", 130);
-define("VERSION", 17);  # cache-bust версия ассетов (?0{_global_.version}); бить при правках js/css — #3418
+define("VERSION", 53);  # cache-bust версия ассетов (?0{_global_.version}); бить при правках js/css — #3418
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
@@ -6647,7 +6650,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, arrs.id arr_id, a.val attrs, a.id
 					FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1 LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 							LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-					WHERE a.up=$id AND a.t!=a.up ORDER BY a.ord";
+					WHERE a.up=$id AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord"; // #3596: пропускаем только ord=0 self-descriptor; самоссылающуюся подтаблицу (ord>0) оставляем — иначе колонки вида объекта расходятся с metadata (#3589) и подтаблица «открывается криво»/пустая
 			$data_set = Exec_sql($sql, "Get all Names of Reqs of the Typ");
 			$GLOBALS["no_reqs"] = mysqli_num_rows($data_set) == 0; # Check if the Type has any Reqs
 			$ord = 0;
@@ -7938,7 +7941,7 @@ function GetObjectReqs($typ, $id)
 			FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1
 				LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 				LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-			WHERE a.up=$typ AND a.t!=a.up ORDER BY a.ord";
+			WHERE a.up=$typ AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord"; // #3596: см. выше — самоссылающаяся подтаблица (up==t, ord>0) это реквизит записи, не self-descriptor; нужна для формы/реквизитов записи
 	$data_set = Exec_sql($sql, "Get the Reqs meta");
 	while($row = mysqli_fetch_array($data_set)){
 		if($row["ref_id"]){
@@ -10153,6 +10156,24 @@ switch($a)  # Check actions, which don't require authentication
 									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
 								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD;
 		$data_set = Exec_sql($sql, "Authenticate user");
+		# #3576/#3581: «превышено при пустом Retries» вызвано НЕ дублями пользователя, а
+		# рассинхроном типа счётчика (исправлено RETRIES=301 выше). Этот гард оставлен как
+		# защита по аналогии с входом по коду: если в битой базе окажется несколько узлов
+		# одного логина, не блокировать вход по протухшей строке. Считаем РАЗНЫЕ u.id (а не
+		# строки: LEFT JOIN tok/act/xsrf/retries может дать несколько строк на одного юзера).
+		$dupUids = [];
+		while($probe = mysqli_fetch_array($data_set))
+			$dupUids[$probe["uid"]] = true;
+		mysqli_data_seek($data_set, 0);
+		if(count($dupUids) > 1){
+			$dupMsg = t9n("[RU]Найдено несколько пользователей с таким логином — обратитесь к администратору.[EN]Multiple users found with this login — contact your administrator.");
+			wlog("Authenticate user: duplicate logins '$u' -> uids ".implode(",", array_keys($dupUids)), "log");
+			if(isApi()){
+				header("HTTP/1.0 409 Conflict");
+				api_dump(json_encode(["error" => $dupMsg], JSON_UNESCAPED_UNICODE));
+			}
+			my_die($dupMsg);
+		}
 		if($row = mysqli_fetch_array($data_set)){
 			if($row["pwd"] !== $pwd){
 				if((int)$row["retries"] >= RETRIES_LIMIT){
@@ -10196,6 +10217,12 @@ switch($a)  # Check actions, which don't require authentication
 				wlog(" Failed", "log");
 		}
 		if($row){
+			# #3576: успешный вход обнуляет счётчик неудачных попыток. Раньше retries
+			# только инкрементился (и паролем, и кодом — счётчик общий) и НИГДЕ не
+			# сбрасывался, поэтому, единожды достигнув RETRIES_LIMIT, «превышено попыток»
+			# залипало навсегда — на каждую опечатку, даже после успешных входов.
+			if(!empty($row["retries_id"]) && (int)$row["retries"] > 0)
+				Update_Val($row["retries_id"], 0);
 			$GLOBALS["GLOBAL_VARS"]["user"] = $row["val"];
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = $row["uid"];
 			if(isset($_POST["change"]))
@@ -10314,6 +10341,9 @@ switch($a)  # Check actions, which don't require authentication
 						die(json_encode(["error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password.")], JSON_UNESCAPED_UNICODE));
 					die(json_encode(["error" => t9n("[RU]Неверный код[EN]Invalid code")], JSON_UNESCAPED_UNICODE));
 				}
+				# #3576: верный код обнуляет общий счётчик неудачных попыток (см. парольный вход).
+				if(!empty($row["retries_id"]) && (int)$row["retries"] > 0)
+					Update_Val($row["retries_id"], 0);
     			$token = secureToken();
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
@@ -11434,7 +11464,7 @@ if(Validate_Token())
 				my_die(t9n("[RU]У вас нет прав на изменение структуры таблицы[EN]You don't have permission to change the table structure"));
 			// The first column of a table is the term's own value, so its attrs are kept in a
 			// "self-descriptor" req (up=table, t=table, ord=0). Find it or create it on demand.
-			if($desc = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$id AND t=$id LIMIT 1", "Get table self-descriptor")))
+			if($desc = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$id AND t=$id AND ord=0 LIMIT 1", "Get table self-descriptor"))) // #3587: ord=0 — именно self-descriptor; самоссылающаяся подчинённая таблица (ord>0) сюда попасть не должна
 				Update_Val($desc["id"], FieldAttrsSetAlias($desc["val"], $val));
 			else
 				Insert($id, 0, $id, FieldAttrsSetAlias("", $val), "Create table self-descriptor");
@@ -11679,7 +11709,7 @@ if(Validate_Token())
         	while($row = mysqli_fetch_array($data_set)){
                 if($meta === "{")
         	        $meta .= "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\"";
-                if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // issue #2967: skip the table self-descriptor row
+                if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]) // issue #2967: skip the table self-descriptor row (ord=0). #3587: самоссылающаяся подчинённая таблица (ord>0) — настоящий реквизит, не пропускать
                     continue;
                 if(!isset($reqs))
                     $reqs = ",\"reqs\":{";
@@ -11718,7 +11748,7 @@ if(Validate_Token())
 			$refs = Array();
 			$tableAttrs = Array(); // issue #2967: table alias stored in a self-descriptor req
         	foreach($data as $row) // Collect all the reqs to skip them later
-        	    if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // Self-descriptor: req.t == own table id, holds the first-column attrs/alias
+        	    if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]) // Self-descriptor (ord=0): req.t == own table id, holds the first-column attrs/alias. #3587: ord>0 — это самоссылающаяся подчинённая таблица (напр. «Меню→Меню»), а не self-descriptor
         	        $tableAttrs[$row["id"]] = $row["attrs"];
         	    elseif(!is_null($row["ref_id"]))
         	        $reqs[$row["ref_id"]] = $row["id"];
@@ -11729,7 +11759,7 @@ if(Validate_Token())
         	foreach($data as $row){
     		    if(($row["id"] === $row["t"]) || ($row["up"] !== "0"))
     		        die("Invalid Term id $id");
-				$selfDesc = !is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]; // issue #2967: table self-descriptor row
+				$selfDesc = !is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]; // issue #2967: table self-descriptor row (ord=0). #3587: у самоссылающейся подчинённой таблицы ord>0 — это настоящий реквизит, не self-descriptor
                 if(!$selfDesc && !$row["ord"] && isset($reqs[$row["id"]])) // Skip reqs with no reqs
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
@@ -11787,7 +11817,7 @@ if(Validate_Token())
 		    break;
 		    
 		case "terms":
-			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
+			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val, reqs.ord reqs_ord FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
 					WHERE a.up=0 AND a.id!=a.t AND a.val!='' AND a.t!=0 ORDER BY a.val";
 			$data_set = Exec_sql($sql, "Get all independent Terms");
 
@@ -11801,8 +11831,9 @@ if(Validate_Token())
 				if(($GLOBALS["REV_BT"][$row["t"]] != "CALCULATABLE") && ($GLOBALS["REV_BT"][$row["t"]] != "BUTTON")) {
 					$base[$row["id"]] = $row["t"];
 
-					if($row["reqs_t"] === $row["id"]) { // Self-descriptor: the table's first-column attrs/alias, not a real Req
-						$aliasByTerm[$row["id"]] = FieldAttrsAlias($row["reqs_val"], "");
+					if($row["reqs_t"] === $row["id"]) { // Самоссылка: self-descriptor (ord=0, псевдоним 1-й колонки) ЛИБО самоссылающаяся подчинённая таблица (ord>0). В обоих случаях таблица остаётся независимой — НЕ убираем её из $typ.
+						if(!$row["reqs_ord"]) // #3587: псевдоним 1-й колонки держит только self-descriptor (ord=0); у подчинённой таблицы (ord>0) reqs_val — это её атрибуты, не псевдоним
+							$aliasByTerm[$row["id"]] = FieldAttrsAlias($row["reqs_val"], "");
 						if(!isset($req[$row["id"]])) // Keep the table listed even if it has no other columns
 							$typ[$row["id"]] = $row["val"];
 						continue;

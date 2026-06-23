@@ -253,6 +253,7 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
                 <span id="xlsx-info" class="small" style="color:var(--text-secondary)"></span>
                 <button type="button" class="btn btn-sm btn-outline-secondary" onclick="xlsxClearLimits()">Сбросить границы</button>
             </div>
+            <div id="xlsx-sheets-note" class="small mb-2 p-2" style="display:none;border:1px solid var(--bs-warning,#ffc107);border-radius:4px;background:rgba(255,193,7,.12)"></div>
             <div id="xlsx-grid" class="xlsx-grid-wrap"></div>
             <div class="mt-2"><button type="button" class="btn btn-primary" onclick="applyXlsxRange()">Применить диапазон</button></div>
         </div>
@@ -1528,10 +1529,34 @@ function handleExcelFile(file){
                 // без сохранённого выбора панель всегда раскрыта — нужен ручной выбор диапазона.
                 xlsxSetAreaCollapsed(false);
             }
+            updateXlsxSheetsNote();
         };
         fr.onerror=function(){ $('#xlsx-area').hide(); xlsxShowError('Ошибка чтения файла'); };
         fr.readAsArrayBuffer(file);
     }).catch(function(err){ $('#xlsx-area').hide(); xlsxShowError(err.message); });
+}
+
+// issue #3584: импортёр берёт данные только с одного листа (по умолчанию — первого),
+// и при многолистовом файле легко не заметить, что нужные строки на другом листе
+// (симптом: «видно не все записи»). Показываем заметную подсказку со списком листов
+// и числом строк в каждом, чтобы пользователь выбрал нужный лист сам. Поведение по
+// умолчанию не меняем — только подсказка.
+function updateXlsxSheetsNote(){
+    var el=document.getElementById('xlsx-sheets-note');
+    if(!el||!xlsxWorkbook) return;
+    var names=xlsxWorkbook.SheetNames;
+    if(names.length<2){ el.style.display='none'; el.innerHTML=''; return; }
+    var sel=$('#xlsx-sheet').val();
+    var parts=names.map(function(n){
+        var ws=xlsxWorkbook.Sheets[n], ref=ws&&ws['!ref'];
+        var cnt=ref?(window.XLSX.utils.decode_range(ref).e.r+1):0;
+        var label=escape(n)+' — '+cnt+' '+'строк';
+        return (n===sel)?'<b>'+label+' (выбран)</b>':label;
+    });
+    el.innerHTML='&#9888; В файле листов: '+names.length+'. Импорт берёт данные только с одного'
+        +' листа — если строк меньше ожидаемого, выберите нужный лист в списке «Лист:» выше.<br>'
+        +parts.join(' · ');
+    el.style.display='';
 }
 
 function renderXlsxSheet(name,saved){
@@ -1647,7 +1672,7 @@ $(document).on('click','#xlsx-grid td[data-r]',function(e){
     if(e.shiftKey){ if(r>=xlsxSel.r0 && c>=xlsxSel.c0){ xlsxSel.r1=r; xlsxSel.c1=c; drawXlsxGrid(); } }
     else { xlsxSel.r0=r; xlsxSel.c0=c; xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
 });
-$(document).on('change','#xlsx-sheet',function(){ renderXlsxSheet(this.value); });
+$(document).on('change','#xlsx-sheet',function(){ renderXlsxSheet(this.value); updateXlsxSheetsNote(); });
 
 $(function(){
     $("#sortable").sortable({update:function(){gatherSet();importParse();}});

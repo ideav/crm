@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!-- Визуальный стенд #3613: значок смежности дня в правом нижнем углу карточки.
+     Использует реальный production-planning.css. Открыть в браузере/Playwright. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>#3613 — значок перехода задания по дням</title>
+<link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#eef1f5}
+  .atex-pp-queue-group{max-width:560px}</style>
+</head>
+<body>
+<div class="atex-pp atex-brand">
+  <div class="atex-pp-queue-group">
+
+    <!-- Последняя карточка дня 1: продолжается завтра (только «→»). -->
+    <div class="atex-pp-cut">
+      <div class="atex-pp-cut-info">
+        <span class="atex-pp-cut-seq">№ 3</span>
+        <span class="atex-pp-cut-time">08:00 – 16:30</span>
+        <span class="atex-pp-cut-name">MR194 сталь 0.5мм</span>
+        <span class="atex-pp-cut-winding">IN</span>
+        <span class="atex-pp-cut-dash">—</span>
+        <span class="atex-pp-cut-runs">600 х 7</span>
+        <span class="atex-pp-cut-supplies">связей: 2</span>
+      </div>
+      <div class="atex-pp-cut-controls">
+        <button class="atex-pp-move">↑</button>
+        <button class="atex-pp-move">↓</button>
+        <button class="atex-pp-strips">Полосы: 3</button>
+        <button class="atex-pp-cut-fix">🔒</button>
+        <button class="atex-pp-cut-del">🗑</button>
+      </div>
+      <div class="atex-pp-cut-spans">
+        <span class="atex-pp-cut-span atex-pp-cut-span-next" title="Задание продолжается в следующем рабочем дне (заказ 3690)">→</span>
+      </div>
+    </div>
+
+    <div class="atex-pp-cleanup">🧹 Уборка после смены · 16:30 – 17:00 · 30 мин</div>
+
+    <!-- Единственная карточка дня 2 (середина цепочки): и «←», и «→». -->
+    <div class="atex-pp-cut">
+      <div class="atex-pp-cut-info">
+        <span class="atex-pp-cut-seq">№ 1</span>
+        <span class="atex-pp-cut-time">08:00 – 16:30</span>
+        <span class="atex-pp-cut-name">MR194 сталь 0.5мм</span>
+        <span class="atex-pp-cut-winding">IN</span>
+        <span class="atex-pp-cut-dash">—</span>
+        <span class="atex-pp-cut-runs">600 х 7</span>
+        <span class="atex-pp-cut-supplies">связей: 2</span>
+      </div>
+      <div class="atex-pp-cut-controls">
+        <button class="atex-pp-move" disabled>↑</button>
+        <button class="atex-pp-move" disabled>↓</button>
+        <button class="atex-pp-strips">Полосы: 3</button>
+        <button class="atex-pp-cut-fix">🔒</button>
+        <button class="atex-pp-cut-del">🗑</button>
+      </div>
+      <div class="atex-pp-cut-spans">
+        <span class="atex-pp-cut-span atex-pp-cut-span-prev" title="Начало задания — в предыдущем рабочем дне (заказ 3690)">←</span>
+        <span class="atex-pp-cut-span atex-pp-cut-span-next" title="Задание продолжается в следующем рабочем дне (заказ 3690)">→</span>
+      </div>
+    </div>
+
+    <div class="atex-pp-cleanup">🧹 Уборка после смены · 16:30 – 17:00 · 30 мин</div>
+
+    <!-- Первая карточка дня 3 (конец цепочки): только «←». -->
+    <div class="atex-pp-cut">
+      <div class="atex-pp-cut-info">
+        <span class="atex-pp-cut-seq">№ 1</span>
+        <span class="atex-pp-cut-time">08:00 – 10:12</span>
+        <span class="atex-pp-cut-name">MR194 сталь 0.5мм</span>
+        <span class="atex-pp-cut-winding">IN</span>
+        <span class="atex-pp-cut-dash">—</span>
+        <span class="atex-pp-cut-runs">600 х 2</span>
+        <span class="atex-pp-cut-supplies">связей: 1</span>
+      </div>
+      <div class="atex-pp-cut-controls">
+        <button class="atex-pp-move" disabled>↑</button>
+        <button class="atex-pp-move">↓</button>
+        <button class="atex-pp-strips">Полосы: 3</button>
+        <button class="atex-pp-cut-fix">🔒</button>
+        <button class="atex-pp-cut-del">🗑</button>
+      </div>
+      <div class="atex-pp-cut-spans">
+        <span class="atex-pp-cut-span atex-pp-cut-span-prev" title="Начало задания — в предыдущем рабочем дне (заказ 3690)">←</span>
+      </div>
+    </div>
+
+    <!-- Обычная карточка (не разбита): значка нет. -->
+    <div class="atex-pp-cut">
+      <div class="atex-pp-cut-info">
+        <span class="atex-pp-cut-seq">№ 2</span>
+        <span class="atex-pp-cut-time">10:12 – 12:00</span>
+        <span class="atex-pp-cut-name">Алюминий 1.0мм</span>
+        <span class="atex-pp-cut-winding">OUT</span>
+        <span class="atex-pp-cut-dash">—</span>
+        <span class="atex-pp-cut-runs">400 х 3</span>
+        <span class="atex-pp-cut-supplies">связей: 1</span>
+      </div>
+      <div class="atex-pp-cut-controls">
+        <button class="atex-pp-move">↑</button>
+        <button class="atex-pp-move" disabled>↓</button>
+        <button class="atex-pp-strips">Полосы: 2</button>
+        <button class="atex-pp-cut-fix">🔒</button>
+        <button class="atex-pp-cut-del">🗑</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

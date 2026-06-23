@@ -202,20 +202,31 @@ var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
       materialBatch: { id: null, label: '' },
-      planDate: '06.05.2026', status: 'В работе', sequence: null,
+      planDate: '06.05.2026', status: 'В работе', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
-      orderId: '', orderApprovalDate: '' },
+      orderId: '', orderApprovalDate: '', leaders: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
-      planDate: '27.05.2026', status: 'Ожидает', sequence: null,
+      planDate: '27.05.2026', status: 'Ожидает', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
-      orderId: '', orderApprovalDate: '' }
+      orderId: '', orderApprovalDate: '', leaders: [] }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
+// #3472: cut_leader собирается в leaders[] (различные); легаси-смешение → несколько.
+var leadPlan = planning.rowsToPlanning([
+    { cut_id:'31', cut_plan_date:'x', supply_id:'s1', supply_position_id:'p1', cut_leader:'Софмикс' },
+    { cut_id:'31', cut_plan_date:'x', supply_id:'s2', supply_position_id:'p2', cut_leader:'Софмикс' },
+    { cut_id:'32', cut_plan_date:'y', supply_id:'s3', supply_position_id:'p3', cut_leader:'Этикетка37' },
+    { cut_id:'32', cut_plan_date:'y', supply_id:'s4', supply_position_id:'p4', cut_leader:'MONOCHROME' },
+    { cut_id:'33', cut_plan_date:'z', supply_id:'s5', supply_position_id:'p5' }
+]);
+assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
+    [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
+    'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
@@ -230,13 +241,13 @@ var issue3209Rows = [
       cut_plan_date: '1780837651', cut_status: '', supply_id: '23352', supply_position_id: '21101',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
-      order_approval_date: '', order_id: '17990', supply_footage: '800', supply_rolls: '6',
+      order_approval_date: '', order_id: '17990', order_no: '3690', supply_footage: '800', supply_rolls: '6',
       cut_length: '1200' },
     { cut_id: '23316', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
       cut_plan_date: '1780837651', cut_status: '', supply_id: '23353', supply_position_id: '21102',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
-      order_approval_date: '', order_id: '17990', supply_footage: '600', supply_rolls: '3',
+      order_approval_date: '', order_id: '17990', order_no: '3690', supply_footage: '600', supply_rolls: '3',
       cut_length: '1200' },
     { cut_id: '23370', cut_slitter: 'Станок 2', cut_slitter_id: '1279',
       cut_plan_date: '1780837653', cut_status: '', supply_id: '', supply_position_id: '',
@@ -251,9 +262,9 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
     { id: '23370', number: '1780837653', length: 700, visible: true }
 ], 'rowsToPlanning #3209/#3242: timestamp cut_plan_date, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
-    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', footage: 800, rolls: 6 },
-    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', footage: 600, rolls: 3 }
-], 'rowsToPlanning #3209: carries supply footage and roll count from report rows');
+    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 600, rolls: 3 }
+], 'rowsToPlanning #3209: carries supply footage/rolls + order_no (#3624) + position dims (#3633) from report rows');
 assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
     'cutRunLength #3209: cut_length is available as run-length fallback');
 assertEqual(planning.supplyFootage(issue3209Plan.supplies[0], { '23352': 0 }), 800,
@@ -304,6 +315,21 @@ assertEqual(planning.formatLinkedPositionLabel(
 assertEqual(planning.formatLinkedPositionLabel(undefined, '777', 3, 0),
     'позиция #777 · 3 рул.',
     'formatLinkedPositionLabel #3406: нет позиции в списке → fallback «позиция #N»');
+// #3633: позиция выпала из активного positions_list (другая дата/закрытый заказ) — подпись
+// собираем из данных обеспечения: номер заказа + габариты позиции, а НЕ id записи позиции.
+assertEqual(planning.formatLinkedPositionLabel(undefined, '84667', 0, 900, '3335', 25, 900),
+    '3335 · 25мм * 900м',
+    'formatLinkedPositionLabel #3633: позиции нет в списке → «<заказ> · <ширина>мм * <длина>м» (без id записи), метраж не дублируется');
+assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, '3690'),
+    '3690 · 450 м',
+    'formatLinkedPositionLabel #3633: есть order_no, но нет габаритов → «<заказ>» + метраж (без висячего id)');
+assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, ''),
+    'позиция #73636 · 450 м',
+    'formatLinkedPositionLabel #3633: нет ни позиции, ни order_no → прежний фолбэк «позиция #N»');
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1 · 25мм * 450м', qty: 70 }, 'p1', 12, 0, '9999'),
+    'АТХ-3002/1 · 25мм * 450м · 70 шт. · 12 рул.',
+    'formatLinkedPositionLabel #3624: позиция в списке есть → её подпись приоритетнее order_no обеспечения');
 
 // ── stripSupplyRolls (#3320): рулоны обеспечения полосы = min(рулоны полосы, 110% остатка) ──
 assertEqual(planning.stripSupplyRolls(8, 20), 8,
@@ -465,17 +491,21 @@ assertEqual(planning.awkwardRemainder(-5), false, 'awkward: отриц → false
 // DEFAULT_OP_TIMES экспортирован (минуты-фоллбэк из таблицы «Время операции»)
 assertEqual(planning.DEFAULT_OP_TIMES.MATERIAL_WINDING, 15, 'дефолт: смена сырья/намотки = 15 мин');
 assertEqual(planning.DEFAULT_OP_TIMES.KNIFE, 30, 'дефолт: смена ножей = 30 мин');
-// changeoverCost в минутах: сырьё/намотка/партия → MATERIAL_WINDING(15); ножи/сужение ролика → KNIFE(30)
+assertEqual(planning.DEFAULT_OP_TIMES.KNIFE_MOVE, 2, 'дефолт #3472: перемещение ножа = 2 мин');
+// #3600: changeoverCost в минутах: сырьё/намотка/партия → MATERIAL_WINDING(15);
+// любая смена ножей / сужение ролика → ФИКСИРОВАННО KNIFE(30), независимо от числа ножей.
 var base = { materialId:'1', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[60,60,60,60], rollerWidth:60 };
 function clone(o,patch){ var c={}; for(var k in o) c[k]=o[k]; for(var k in (patch||{})) c[k]=patch[k]; return c; }
 assertEqual(planning.changeoverCost(base, clone(base), null), 0, 'cost: идентичные → 0');
 assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), null), 15, 'cost: смена сырья = 15');
 assertEqual(planning.changeoverCost(base, clone(base,{winding:'OUT'}), null), 15, 'cost: смена намотки = 15 (та же операция)');
 assertEqual(planning.changeoverCost(base, clone(base,{batchId:'b2'}), null), 15, 'cost: смена партии = смена сырья = 15');
-assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null), 30, 'cost: смена ножей = 30');
-assertEqual(planning.changeoverCost(base, clone(base,{rollerWidth:40}), null), 30, 'cost: сужение ролика = смена ножей = 30');
-assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2', knifeCount:20, knifeWidths:[20,20,20]}), null), 45, 'cost: сырьё+ножи = 15+30 = 45');
-assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), { MATERIAL_WINDING:7, KNIFE:99 }), 7, 'cost: времена берутся из переданной таблицы');
+// #3600: 4 ножа[60] → набор 20 ножей[20] (общих ширин нет) — любая смена ножей = фикс. 30.
+assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null), 30, 'cost #3600: смена ножей = фикс. 30 (независимо от числа)');
+// #3600: ножи те же, ролик сужается → это смена ножей = фикс. 30.
+assertEqual(planning.changeoverCost(base, clone(base,{rollerWidth:40}), null), 30, 'cost #3600: сужение ролика = фикс. 30');
+assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2', knifeCount:20, knifeWidths:[20,20,20]}), null), 45, 'cost #3600: сырьё+ножи = 15+30 = 45');
+assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), { MATERIAL_WINDING:7, KNIFE_MOVE:99 }), 7, 'cost: времена берутся из переданной таблицы');
 
 // ── orderCuts: жадное упорядочивание, Фольга в конец, настройка весов ──
 function cut(id,o){ return { id:id, materialId:o.m, winding:o.w||'IN', batchId:o.b||('B'+id), jumboRemainingM:o.r==null?0:o.r, knifeCount:o.k||4, knifeWidths:o.kw||[60], isFoil:!!o.foil, rollerWidth:o.rw||60 }; }
@@ -486,24 +516,30 @@ var outMat = planning.orderCuts(inMat).map(function(c){return c.materialId;});
 // число границ смены сырья = (различных − 1) = 1
 var bnd = 0; for (var i=1;i<outMat.length;i++) if (outMat[i]!==outMat[i-1]) bnd++;
 assertEqual(bnd, 1, 'orderCuts: сырьё сгруппировано (1 граница)');
-// #3268: реальные минуты переналадки важнее механической сортировки по ножам.
-// A-high → A-low → B-mid = 30 + 45 = 75 мин; A-high → B-mid → A-low = 45 + 45 = 90 мин.
+// #3568: «ножи по убыванию» (#3130) — ПЕРВИЧНЫЙ критерий очереди, даже если это
+// разбивает группировку сырья (#3268). Ножи 8/7/6 различны → строгое убывание
+// A-high → B-mid → A-low, хотя сырьё A при этом перестаёт быть сгруппированным
+// (минимум переналадки дал бы A-high → A-low → B-mid = 4+17 мин, но он теперь
+// вторичен). Минимизация переналадки (#3268/#3472) остаётся тай-брейком ТОЛЬКО
+// среди резок с равным числом ножей. До #3568 правило ножей↓ было лишь мягким
+// тай-брейком внутри greedy и после позиционной стоимости ножей (#3472) не
+// срабатывало → очередь шла по возрастанию ножей.
 var setupMinuteCuts = [
     cut('A-high', { m:'A', b:'bA', k:8, kw:[60] }),
     cut('B-mid',  { m:'B', b:'bB', k:7, kw:[60] }),
     cut('A-low',  { m:'A', b:'bA', k:6, kw:[60] })
 ];
-assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
-    'orderCuts #3268: минимизирует минуты переналадки до сортировки по ножам');
-assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
-    'orderCuts #3272: явный вариант setup сохраняет минимизацию переналадки');
+assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'B-mid', 'A-low'],
+    'orderCuts #3568: ножи по убыванию первичны (8,7,6), переналадка вторична');
+assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.knifeCount; }), [8, 7, 6],
+    'orderCuts #3568: явный SETUP — число ножей строго убывает');
 // Фольга строго в конце
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
 assertEqual(outFoil[outFoil.length-1], '1', 'orderCuts: Фольга в конце');
-// нож (30) дороже смены сырья (15): смена набора ножей штрафуется сильнее, чем смена сырья.
+// #3600: смена набора ножей (фикс. 30) дороже смены сырья (15).
 assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null) >
-            planning.changeoverCost(base, clone(base,{materialId:'9'}), null), true, 'changeoverCost: смена ножей (30) дороже смены сырья (15)');
+            planning.changeoverCost(base, clone(base,{materialId:'9'}), null), true, 'changeoverCost #3600: смена ножей (30) дороже смены сырья (15)');
 // sequence 1..N и вход не мутируется
 var src = [ cut('1',{m:'A'}), cut('2',{m:'A'}) ];
 var res = planning.orderCuts(src);
@@ -534,7 +570,7 @@ assertEqual(planning.orderCuts(cuts3412).map(function(c){ return c.knifeCount; }
 // Минимизация переналадки (#3268) не страдает: цепочка по-прежнему оптимальна по минутам.
 assertEqual(planning.orderedChangeoverCost(cuts3412), planning.orderedChangeoverCost(cuts3412.slice().reverse()),
     'orderCuts #3412: стоимость переналадки не зависит от исходного порядка (детерминированный минимум)');
-assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (45 мин)');
+assertEqual(planning.orderedChangeoverCost(cuts3412), 45, 'orderCuts #3412: суммарная переналадка минимальна (#3600: 15 сырьё + 30 ножи фикс = 45)');
 
 // #3421: генерация хардкодила стратегию FATIGUE («сложные раньше»), которая по
 // route-score выдаёт ножи по ВОЗРАСТАНИЮ (6,16,16) на данных скриншота — вопреки
@@ -555,9 +591,11 @@ assertEqual(planning.fatiguePositionWeight(0, 3, 2), 1, 'fatiguePositionWeight #
 assertEqual(planning.fatiguePositionWeight(2, 3, 2), 3, 'fatiguePositionWeight #3272: последняя позиция = 1 + alpha');
 assertEqual(planning.estimatedKnifeCount({ rollerWidth: 25 }, 1600), 64, 'estimatedKnifeCount #3272: Wmax / width');
 assertEqual(planning.estimatedKnifeCount({ knifeCount: 7, rollerWidth: 25 }, 1600), 7, 'estimatedKnifeCount #3272: явное число ножей важнее оценки по ширине');
+// #3472: наборы ножей заданы явно (узкая = 30 ножей по 25, широкая = 4 по 200) — стоимость
+// маршрута теперь отражает реальные перестановки; estimatedKnifeCount по-прежнему от ширины ролика.
 var fatigueNarrowFirst = [
-    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: [] },
-    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: [] }
+    { id: 'narrow', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 25, knifeCount: 0, knifeWidths: w3412([[25, 30]]) },
+    { id: 'wide', materialId: 'M', winding: 'IN', batchId: 'b', rollerWidth: 200, knifeCount: 0, knifeWidths: w3412([[200, 4]]) }
 ];
 assertEqual(planning.fatigueRouteScore(fatigueNarrowFirst, { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }) <
             planning.fatigueRouteScore(fatigueNarrowFirst.slice().reverse(), { machineWidth: 1600, fatigueFactor: 2, startCost: 45 }),
@@ -903,9 +941,14 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'', sleeve_id:'8192', sleeve_ready:'X' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, leader:'', sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, leader:'', sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
 ], 'rowsToGenPositions #3340/#3433: sleeve_id/sleeve_ready + order_id («ID заказа»); пустые ширина/кол-во/длина → 0');
+// #3472: «Лидер» читается из колонки отчёта (order_leader/position_leader); нет колонки → пусто.
+assertEqual(planning.rowsToGenPositions([{ position_id:'1', order_leader:'Софмикс' }])[0].leader, 'Софмикс',
+    'rowsToGenPositions #3472: лидер из order_leader');
+assertEqual(planning.rowsToGenPositions([{ position_id:'2' }])[0].leader, '',
+    'rowsToGenPositions #3472: нет колонки лидера → пусто (без разбиения)');
 
 // rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
 var grpDue = planning.rowsToGenPositions([
@@ -942,6 +985,18 @@ assertEqual(planning.groupPositionsByPlanningProfile([
   { materialId:'3000', windDir:'OUT', windLength:600, ids:['p4'] },
   { materialId:'2086', windDir:'OUT', windLength:450, ids:['p5'] }
 ], 'groupPositionsByPlanningProfile #3219: сырьё+намотка+метраж должны совпадать');
+// #3472: лидер — отдельное измерение профиля. Совпадают сырьё/намотка/длина, но разный
+// лидер → разные группы (резка заправляется одним лидером). group.key (ходовые) без лидера.
+assertEqual(planning.groupPositionsByPlanningProfile([
+  { id:'l1', materialId:'2086', windDir:'OUT', windLength:600, leader:'Софмикс' },
+  { id:'l2', materialId:'2086', windDir:'OUT', windLength:600, leader:'Этикетка37' },
+  { id:'l3', materialId:'2086', windDir:'OUT', windLength:600, leader:'Софмикс' },
+  { id:'l4', materialId:'2086', windDir:'OUT', windLength:600 }
+]).map(function(g) { return { leader:g.leader, key:g.key, ids:g.positions.map(function(p) { return p.id; }) }; }), [
+  { leader:'Софмикс',    key:'2086|OUT|600', ids:['l1','l3'] },
+  { leader:'Этикетка37', key:'2086|OUT|600', ids:['l2'] },
+  { leader:'',           key:'2086|OUT|600', ids:['l4'] }
+], 'groupPositionsByPlanningProfile #3472: разный лидер → разные резки, key (ходовые) без лидера');
 assertEqual(planning.preferredWidthsKey('2086', 'out', '600.00'), '2086|OUT|600',
     'preferredWidthsKey #3219: cache key normalizes material/winding/length');
 
@@ -1121,6 +1176,25 @@ assertEqual(planning.windingMinutes(150, pts), 0.6, 'windingMinutes: 150 м → 
 assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 4.5 (между 600 и 900)');
 assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
 assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
+// #3606: фольга наматывается медленнее — серия WIND_FOIL_<метры>, «4 мин за каждые 305 м».
+var opTF = { WIND_300: 1.2, WIND_600: 4.0, WIND_FOIL_305: 4.0 };
+var ptsF = planning.windingPointsFromTimes(opTF);
+assertEqual(planning.foilWindingPointsFromTimes(opTF), [{m:0,min:0,foil:true},{m:305,min:4,foil:true}],
+    'foilWindingPointsFromTimes: WIND_FOIL_305 + опорная (0,0)');
+assertEqual(JSON.stringify(ptsF.foil), JSON.stringify([{m:0,min:0,foil:true},{m:305,min:4,foil:true}]),
+    'windingPointsFromTimes прикрепляет .foil');
+assertEqual(planning.windingMinutes(122, ptsF.foil), 1.6, 'фольга 122 м → 1.6 (4×122/305, пропорция)');
+assertEqual(planning.windingMinutes(305, ptsF.foil), 4, 'фольга 305 м → 4');
+assertEqual(planning.windingMinutes(610, ptsF.foil), 8, 'фольга 610 м → 8 (4 мин за каждые 305 м, без клампа)');
+assertEqual(planning.windPointsForCut(true, ptsF), ptsF.foil, 'windPointsForCut: фольга → фолье-точки');
+assertEqual(planning.windPointsForCut(false, ptsF) === ptsF, true, 'windPointsForCut: не фольга → обычные');
+assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, true), 1.6, 'plannedCutDuration: фольга 122 м × 1 = 1.6');
+assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, false), 0.488, 'plannedCutDuration: НЕ фольга 122 м = 0.488 (обычная WIND_300)');
+assertEqual(planning.foilWindingPointsFromTimes({ WIND_300: 1.2 }), [], 'foilWindingPointsFromTimes: нет WIND_FOIL_ → []');
+assertEqual(planning.windPointsForCut(true, planning.windingPointsFromTimes({ WIND_300: 1.2 })),
+    planning.windingPointsFromTimes({ WIND_300: 1.2 }), 'windPointsForCut: фольга без WIND_FOIL_ → обычные (фолбэк)');
+assertEqual(planning.formatWindingNorms([{m:0,min:0,foil:true},{m:305,min:4,foil:true}]),
+    'Норма намотки: WIND_FOIL_305=4 мин', 'formatWindingNorms: WIND_FOIL_ + опорная (0,0) скрыта');
 var plannedCutDuration = typeof planning.plannedCutDurationMinutes === 'function'
     ? planning.plannedCutDurationMinutes
     : function() { return undefined; };
@@ -1154,7 +1228,7 @@ assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2'}), null),
     'changeoverParts: смена сырья → MATERIAL_WINDING 15');
 assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2', knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null),
     [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}, {code:'KNIFE', label:'смена ножей / сужение ролика', minutes:30}],
-    'changeoverParts: сырьё+ножи → две операции (15+30)');
+    'changeoverParts #3600: сырьё+ножи → две операции (15 + фикс. 30)');
 assertEqual(planning.changeoverParts(null, toBase, null), [], 'changeoverParts: нет предыдущей → []');
 assertEqual(planning.setupBreakdown(null, toBase, null),
     [{code:'BETWEEN_CUTS', label:'лидер между резками', minutes:2}],
@@ -1255,11 +1329,39 @@ var segDays3401 = planning.splitMachineQueue([{ id:'A' }],
 assertEqual(segDays3401.map(function(s){ return { day:s.dayOffset, runs:s.runs }; }),
     [{ day:0, runs:3 }, { day:1, runs:2 }],
     'splitMachineQueue #3401: проход = 5+5=10 мин → в окно 30 мин влезает 3 прохода, остаток на след. день');
+// #3635 п.5: настройка резки ВЛЕЗАЕТ в хвост дня, а первый проход — нет → отдельный
+// сегмент настройки (runs 0, setupOnly) в конце дня N, проходы с дня N+1 (без повторной
+// настройки). A заполняет день 0 до 12 мин; B (смена сырья) — переналадка влезает в
+// остаток (18 мин), но проход 10 мин после неё уже нет → настройка B в хвосте дня 0.
+var segP5 = planning.splitMachineQueue([
+  { id:'A', materialId:'1', winding:'IN', knifeWidths:[60], knifeCount:1, plannedRuns:1 },
+  { id:'B', materialId:'2', winding:'IN', knifeWidths:[60], knifeCount:1, plannedRuns:2 }
+], { dayStartMin:0, dayEndMin:30, times:{ BETWEEN_CUTS:0 }, perPassByCut:{ A:12, B:10 }, runsByCut:{ A:1, B:2 } });
+assertEqual(segP5.map(function(s){ return { c:s.cutId, day:s.dayOffset, runs:s.runs, setupOnly:!!s.setupOnly }; }),
+  [{ c:'A', day:0, runs:1, setupOnly:false },
+   { c:'B', day:0, runs:0, setupOnly:true },
+   { c:'B', day:1, runs:2, setupOnly:false }],
+  'splitMachineQueue #3635 п.5: настройка B в хвосте дня 0 (отдельный сегмент), проходы B с дня 1');
+// #3635 п.5: setupTaskIdSet — голова разбиения «настройка» (0 проходов) опознаётся по
+// цепочке (та же подпись продолжения + станок), где есть запись с проходами > 0.
+function p5cut(id, mat, runs) {
+    return { id: id, slitter: { id: 'm1' }, materialId: mat, winding: 'IN',
+        knifeWidths: [60], knifeCount: 1, plannedRuns: runs };
+}
+assertEqual(planning.setupTaskIdSet([ p5cut('Bset', '2', 0), p5cut('Bcut', '2', 2), p5cut('A', '1', 1) ]),
+    { Bset: true },
+    'setupTaskIdSet #3635 п.5: 0-проходная голова с продолжением-резкой той же цепочки → настройка');
+assertEqual(planning.setupTaskIdSet([ p5cut('X', '9', 0) ]), {},
+    'setupTaskIdSet #3635 п.5: одинокая 0-проходная резка (нет резки в цепочке) — НЕ настройка');
+assertEqual(planning.setupTaskIdSet([ p5cut('P', '3', 2), p5cut('Q', '3', 3) ]), {},
+    'setupTaskIdSet #3635 п.5: цепочка без 0-проходных — пусто');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
 // длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
+// #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00).
+// #3635 п.4: минуты окна округляем ВВЕРХ — setup(2)+12.5 = 14.5 → 15 (как диапазон по часам).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
-    '⏱ 08:00 – 08:15 · 14.5 мин',
-    'formatScheduleLine #3262: окно от начала setup; длительность = setup + резка');
+    '⏱ 08:00 – 08:15 · 15 мин',
+    'formatScheduleLine #3262/#3635: окно от начала setup; минуты вверх (14.5 → 15)');
 assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationMin:0 }, 0, true),
     '⏱ ошибка: нет метража прохода; длительность не рассчитана',
     'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
@@ -1306,6 +1408,23 @@ assertEqual(planning.dayCleanups(sched3215, { cleanupMin: win3215.cleanupMin, sh
 assertEqual(planning.resolveWorkingWindow({ DAY_START_HOUR:'9:15', DAY_END_HOUR:'18:00' }, 45),
     { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45, lunchStartMin:null, lunchDurationMin:0 },
     'resolveWorkingWindow #3215: произвольное окно и CLEANUP_SHIFT');
+
+// ── #3562: зафиксированные задания больше не «прикалываются» — buildSchedule пакует встык ──
+// Очередь A,B,C по 60 мин, без лидера/переналадки (BETWEEN_CUTS:0): встык 480/540/600.
+// B зафиксирована — слот под неё НЕ резервируется (автогенерация двигает её по времени/очереди).
+var packCuts3562 = [ { id:'A', duration:60 }, { id:'B', duration:60, fixed:true }, { id:'C', duration:60 } ];
+var packOpts3562 = { windPoints: pts, runLengthByCut: {}, times: { BETWEEN_CUTS: 0 }, shiftStartMin: 480 };
+assertEqual(planning.buildSchedule(packCuts3562, packOpts3562).map(function(s){ return [s.startMin, s.finishMin]; }),
+    [[480,540],[540,600],[600,660]],
+    'buildSchedule #3562: зафиксированное B пакуется встык (слот не резервируется)');
+// Прежняя опция пинов (#3508 п.6) больше не влияет на расписание — игнорируется.
+assertEqual(planning.buildSchedule(packCuts3562, Object.assign({ pinnedStartMinByCut: { B: 580 } }, packOpts3562))
+    .map(function(s){ return [s.startMin, s.finishMin]; }),
+    [[480,540],[540,600],[600,660]],
+    'buildSchedule #3562: опция pinnedStartMinByCut игнорируется (пины убраны)');
+// Пин-хелперы удалены из API.
+assertEqual(typeof planning.pinnedStartMinByCut, 'undefined', '#3562: pinnedStartMinByCut удалён из API');
+assertEqual(typeof planning.pinTimestampSeconds, 'undefined', '#3562: pinTimestampSeconds удалён из API');
 
 // ── #3342: плавающий обед (LUNCH_START / LUNCH_DURATION) ──
 var wwLunch = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'16:40', LUNCH_START:'12:20', LUNCH_DURATION:'40' }, 30);
@@ -1665,8 +1784,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
             'runGenerateCuts #3215: t24308 пишет Очередность при создании');
-        assertEqual(cutPost.fields.t26584, 5.9,
-            'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
+        assertEqual(cutPost.fields.t26584, 6,
+            'runGenerateCuts #3223/#3635: t26584 пишет Длительность, минут целой ВВЕРХ (5.9 → 6)');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
             'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
         assertEqual(cutPost.fields.t27172, 'OUT',
@@ -2041,6 +2160,10 @@ function runApplySplitPlanTest() {
     controller.reload = function() { return Promise.resolve(); };
     controller.render = function() {};
     controller.notify = function() {};
+    // #3635 п.3: applySplitPlan теперь показывает прогресс — мокаем заглушками (без DOM).
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
     controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({ obj: 'newB' }); };
     var ops = {
         updates: [{ cutId: 'A', sequence: 1, planStartTs: 1000, plannedRuns: 10 }],
@@ -2215,6 +2338,31 @@ assertEqual(ops3421.updates.slice().sort(function(a, b) { return a.sequence - b.
 assertEqual(ops3421.creates, [], 'planCutOperations #3421: один день, без переноса');
 assertEqual(ops3421.deletes, [], 'planCutOperations #3421: без удалений');
 
+// ── #3635 п.1/п.2: preserveOrder сортирует ДЕНЬ-первым, затем по «Очередности» ──
+// «Очередность» сбрасывается на каждый день; сортировка ТОЛЬКО по ней перемешивала дни:
+// задание дня D+1 (очередь 1) вставало перед фольгой дня D (очередь 2), фольга всплывала
+// в начало дня и ломала порядок ножей (#1), а вид после генерации расходился с видом
+// после перезагрузки, где groupBySlitter сортирует день-первым (#2).
+function cut3635(id, dayTs, seq, isFoil) {
+    // materialId уникален у каждой резки — иначе mergeContinuationChains (#3280) сольёт их
+    // как сегменты одной логической резки (одинаковая «подпись продолжения»).
+    return { id: id, slitter: { id: 'm5' }, materialId: 'mat-' + id, winding: 'OUT',
+        knifeWidths: [100], knifeCount: 1, plannedRuns: 1, isFoil: !!isFoil,
+        sequence: seq, planDate: String(dayTs) };
+}
+var d1ts = 1780963200, d2ts = 1780963200 + 86400;
+var ops3635 = planning.planCutOperations(
+    // вход намеренно перемешан по дням (как могло прийти из groupBySlitter до фикса)
+    [ cut3635('d2a', d2ts, 1, false), cut3635('d1foil', d1ts, 2, true),
+      cut3635('d1a', d1ts, 1, false), cut3635('d2b', d2ts, 2, false) ],
+    { preserveOrder: true, perPassByCut: { d2a: 1, d1foil: 1, d1a: 1, d2b: 1 },
+      dayStartMin: 0, dayEndMin: 10000, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: d1ts * 1000 }
+);
+assertEqual(
+    ops3635.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
+    ['d1a', 'd1foil', 'd2a', 'd2b'],
+    'planCutOperations #3635: preserveOrder день-первым — день1 (вкл. фольгу очередь 2) ПЕРЕД днём2, без перемешивания');
+
 // ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
 // Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
 // Повторный planCutOperations должен ПЕРЕИСПОЛЬЗОВАТЬ запись B как update (а не
@@ -2263,6 +2411,40 @@ assertEqual(planning.splitSupplyShares(10, 90, [1, 1, 1]), [{ rolls: 4, footage:
 assertEqual(planning.splitSupplyShares(7, 700, []), [], 'splitSupplyShares: нет сегментов → []');
 assertEqual(planning.splitSupplyShares(7, 700, [0, 0]), [{ rolls: 7, footage: 700 }, { rolls: 0, footage: 0 }], 'splitSupplyShares: нулевые проходы → всё в сегмент 0');
 
+// #3457: generateCuts перезапрашивает позиции (loadPositions сбрасывает genPositions к
+// НОМИНАЛЬНОЙ ширине заказа). Раньше фактическая ширина резки (#3372, справочник 66190)
+// терялась, т.к. annotatePositionsCutWidth вызывался только в start(). Проверяем, что к
+// моменту планирования (planAndConfirmCuts) ширина уже фактическая (60 → 59).
+function runGenerateCutsReannotatesActualWidthTest() {
+    var prevWindow = global.window;
+    global.window = { AtexCutLayout: { layout: { planLayouts: function() {} } } };
+    var controller = Object.create(api.Controller.prototype);
+    controller.meta = { cut: {}, supply: {}, finishedBatch: {} };
+    controller.actualWidthIndex = planning.buildActualWidthIndex([{ order: 60, actual: 59, code: '' }]);
+    controller.jumboWidthByMaterial = {};
+    controller.sleeveInchesById = {};
+    controller.setGenBusy = function() {};
+    controller.render = function() {};
+    controller.reload = function() { return Promise.resolve(); };
+    // Как настоящий loadPositions: пересоздаёт genPositions с НОМИНАЛЬНОЙ шириной заказа.
+    controller.loadPositions = function() {
+        controller.genPositions = [{ id: 'p1', materialId: 'M', width: 60, qty: 1 }];
+        return Promise.resolve();
+    };
+    var widthsAtPlanning = null;
+    controller.planAndConfirmCuts = function() {
+        widthsAtPlanning = controller.genPositions.map(function(p) {
+            return { width: p.width, orderWidth: p.orderWidth };
+        });
+    };
+    controller.generateCuts({ querySelector: function() { return null; } });
+    return new Promise(function(resolve) { setTimeout(resolve, 0); }).then(function() {
+        assertEqual(widthsAtPlanning, [{ width: 59, orderWidth: 60 }],
+            'generateCuts #3457: после перезапроса позиций фактическая ширина (60→59) проставлена до планирования');
+        global.window = prevWindow;
+    });
+}
+
 runSaveSequencesT1078Test()
     .then(runApplySplitPlanTest)
     .then(runPreferredWidthsFilterTest)
@@ -2272,6 +2454,7 @@ runSaveSequencesT1078Test()
     .then(runGenerateCutsFatigueStrategyTest)
     .then(runCreateCutPayloadDiagnosticsTest)
     .then(runCreateCutMainValueTest)
+    .then(runGenerateCutsReannotatesActualWidthTest)
     .then(function() {
     console.log('\n' + passed + ' assertions passed');
 }).catch(function(err) {

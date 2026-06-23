@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Расчёт оптимальной резки» (#3465, #3474).
+     Мокает fetch: metadata, справочники (Вид сырья / Фактическая ширина резки /
+     Диаметр втулки / Клиент / Заказ), report/nextOrder и запись позиций (_m_new).
+     Использует те же js/css, что и продакшн-шаблон templates/atex/cut-optimizer.html.
+     Открывать локально в браузере. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Расчёт оптимальной резки — стенд</title>
+<link rel="stylesheet" href="../download/atex/css/cut-optimizer.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-cut-optimizer" class="atex-co" data-db="atex" data-xsrf="test-token" data-user="dispatcher">
+    <div class="atex-co-loading">Загрузка…</div>
+</div>
+
+<script>
+window.uid = '42';
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 100, val: 'Вид сырья', reqs: [
+        { id: 1001, val: 'Полное название' },
+        { id: 1003, val: 'Ширина, мм' },
+        { id: 1005, val: 'Длина рулона, м' },
+        { id: 1009, val: 'Допуск, мм' }
+    ]},
+    { id: 660, val: 'Фактическая ширина резки', reqs: [
+        { id: 6601, val: 'Ширина в заказе' },
+        { id: 6603, val: 'Код' }
+    ]},
+    { id: 107, val: 'Заказ', reqs: [
+        { id: 1052, val: 'Клиент' }, { id: 1054, val: 'Пользователь' },
+        { id: 1056, val: 'Дата создания' }, { id: 1060, val: 'Статус' }, { id: 1062, val: 'Лидер' }
+    ]},
+    // «Заказанное количество»: кол-во — главное значение записи (t{tableId}), реквизита «Кол-во» нет.
+    { id: 108, val: 'Позиция заказа', reqs: [
+        { id: 1069, val: 'Вид сырья' }, { id: 1073, val: 'Ширина, мм' },
+        { id: 1075, val: 'Длина, м' }, { id: 1077, val: 'Диаметр втулки' }, { id: 1151, val: 'Тип намотки' },
+        { id: 1079, val: 'Статус' }
+    ]},
+    { id: 200, val: 'Диаметр втулки', reqs: [] },
+    { id: 103, val: 'Клиент', reqs: [] }
+];
+
+// [Название, Полное название, Ширина, Длина рулона, Допуск мм]
+var MATERIALS = [
+    { i: 201, r: ['Сталь 0.5мм', 'Сталь холоднокатаная 0.5 мм', '880', '4000', '15'] },
+    { i: 202, r: ['Алюминий 1.0мм', 'Алюминий АД1 1.0 мм', '910', '3000', '20'] }
+];
+// Фактическая ширина: [факт, Ширина в заказе, Код]
+var ACTUAL = [
+    { i: 301, r: ['59', '60', ''] },        // номинал 60 → факт 59 (безусловно)
+    { i: 302, r: ['39', '40', 'j=880'] }    // номинал 40 → факт 39 при джамбо 880
+];
+var SLEEVES = [ { i: 401, r: ['76 мм'] }, { i: 402, r: ['152 мм'] } ];
+var CLIENTS = [ { i: 501, r: ['ООО «Ромашка»'] }, { i: 502, r: ['ИП Петров'] } ];
+var ORDERS = [ { i: 601, r: ['1001'] }, { i: 602, r: ['1002'] } ];
+// Партии сырья (report/material_batches как в ateh): is_active 'X' = «В работе».
+var BATCHES = [
+    { batch_id: '701', batch_no: '1781000001', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '12000', batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '702', batch_no: '1781000002', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '5000',  batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '703', batch_no: '1781000003', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '900',   batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' },
+    { batch_id: '704', batch_no: '1781000004', batch_material: 'Алюминий 1.0мм', batch_material_id: '202', batch_remainder_m2: '50',    batch_remainder_m: '', is_active: '',  'Склад': 'Производство' }, // не «В работе» — не показывается
+    { batch_id: '705', batch_no: '1781000005', batch_material: 'Сталь 0.5мм',    batch_material_id: '201', batch_remainder_m2: '8000',  batch_remainder_m: '', is_active: 'X', 'Склад': 'Производство' }
+];
+
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (opts && String(opts.method).toUpperCase() === 'POST') {
+        console.log('POST', u, opts.body);
+        return json({ obj: Math.floor(1000 + Math.random() * 9000) });
+    }
+    if (/\/metadata(?:$|\?)/.test(u)) return json(META);
+    if (/\/object\/100\//.test(u)) return json(MATERIALS);
+    if (/\/object\/660\//.test(u)) return json(ACTUAL);
+    if (/\/object\/200\//.test(u)) return json(SLEEVES);
+    if (/\/object\/103\//.test(u)) return json(CLIENTS);
+    if (/\/object\/107\//.test(u)) return json(ORDERS);
+    if (/\/report\/nextOrder/i.test(u)) return json([{ 'Заказ': '3690' }]); // как в БД ateh
+    if (/\/report\/material_batches/i.test(u)) return json(BATCHES);
+    return json([]);
+};
+</script>
+<script src="../download/atex/js/ref-search.js"></script>
+<script src="../download/atex/js/cut-optimizer.js"></script>
+</body>
+</html>
