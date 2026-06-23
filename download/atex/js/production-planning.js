@@ -2571,7 +2571,13 @@
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
-            var ordered = orderCuts(byMachine[key], opts.weights);
+            // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
+            // очереди (сортировка по «Очередности»), а не пересобирая её по стратегии
+            // (orderCuts). Нужно, чтобы автозаполнение дней после генерации не перетасовывало
+            // ручной порядок оператора (#3449). Без флага — обычная пересборка по весам (#3421).
+            var ordered = opts.preserveOrder
+                ? byMachine[key].slice().sort(function(a, b){ return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); })
+                : orderCuts(byMachine[key], opts.weights);
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var segs = splitMachineQueue(ordered, {
@@ -5498,11 +5504,15 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
-            // #3449: «Сгенерировать резки» только вытаскивает незапланированные позиции.
-            // Если таких нет — ничего не делаем: уже запланированные резки не трогаем и
-            // очередь не пересобираем (это оператор сделает сам, удалив резки и Партии ГП).
-            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — очередь не трогаем');
-            self.notify('Нет незапланированных позиций для генерации заданий', 'info');
+            // #3449: очередь по стратегии НЕ пересобираем (порядок оператора неприкосновенен).
+            // #3619: но всё равно заполняем дни до конца — расщепляем уже стоящие задания,
+            // переходящие границу рабочего дня, на по-дневные сегменты (preserveOrder=true
+            // сохраняет порядок). Идемпотентно (#3427): если расщеплять нечего — ничего не пишем.
+            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — заполняю дни существующих заданий');
+            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function(changed) {
+                self.notify(changed ? 'Дни заполнены: задания, переходящие границу дня, расщеплены по дням'
+                                    : 'Нет незапланированных позиций; дни уже заполнены', 'info');
+            });
             return;
         }
         var profiles = groupPositionsByPlanningProfile(unsup);
@@ -6049,9 +6059,13 @@
                 ', заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
-            // #3449: уже запланированные резки не трогаем и очередь не пересобираем.
-            // Новые резки получают «Очередность»/плановое время при создании (дописываются
-            // после существующих в своей группе слиттер/день), reload+render уже сделаны выше.
+            // #3449: очередь по стратегии НЕ пересобираем — порядок оператора неприкосновенен.
+            // #3619: но заполняем дни до конца — расщепляем задания, переходящие границу
+            // рабочего дня, на по-дневные сегменты: под каждый день своё «Задание в
+            // производство» + «Партия ГП» + «Обеспечение», рекурсивно. preserveOrder=true
+            // сохраняет текущий порядок очереди; идемпотентно (#3427) — повторный прогон без
+            // изменений ничего не пишет. applySplitPlan сам делает reload+render.
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -6413,7 +6427,10 @@
     // и без уведомления — их даёт вызывающая генерация). Ручную перестановку (↑↓)
     // оператор делает ПОСЛЕ генерации. Ничего не изменилось → Promise<false> без записи.
     // → Promise<boolean> (true, если что-то применилось).
-    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy) {
+    // #3619: preserveOrder=true — НЕ пересобирать очередь по стратегии, а только расщепить
+    // задания, переходящие границу рабочего дня, на по-дневные сегменты, СОХРАНЯЯ текущий
+    // порядок очереди. Без флага (legacy #3421) — полная пересборка «Очередности» по SETUP/FATIGUE.
+    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder) {
         var self = this;
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
         var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes);
@@ -6435,7 +6452,8 @@
             perPassByCut: perPassByCut,
             planBaseMidnightMs: planBaseMidnightMs,
             lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin
+            lunchDurationMin: dayWindow.lunchDurationMin,
+            preserveOrder: preserveOrder   // #3619: только заполнить дни, не пересобирая порядок
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
