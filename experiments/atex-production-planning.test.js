@@ -1326,6 +1326,19 @@ var segDays3401 = planning.splitMachineQueue([{ id:'A' }],
 assertEqual(segDays3401.map(function(s){ return { day:s.dayOffset, runs:s.runs }; }),
     [{ day:0, runs:3 }, { day:1, runs:2 }],
     'splitMachineQueue #3401: проход = 5+5=10 мин → в окно 30 мин влезает 3 прохода, остаток на след. день');
+// #3635 п.5: настройка резки ВЛЕЗАЕТ в хвост дня, а первый проход — нет → отдельный
+// сегмент настройки (runs 0, setupOnly) в конце дня N, проходы с дня N+1 (без повторной
+// настройки). A заполняет день 0 до 12 мин; B (смена сырья) — переналадка влезает в
+// остаток (18 мин), но проход 10 мин после неё уже нет → настройка B в хвосте дня 0.
+var segP5 = planning.splitMachineQueue([
+  { id:'A', materialId:'1', winding:'IN', knifeWidths:[60], knifeCount:1, plannedRuns:1 },
+  { id:'B', materialId:'2', winding:'IN', knifeWidths:[60], knifeCount:1, plannedRuns:2 }
+], { dayStartMin:0, dayEndMin:30, times:{ BETWEEN_CUTS:0 }, perPassByCut:{ A:12, B:10 }, runsByCut:{ A:1, B:2 } });
+assertEqual(segP5.map(function(s){ return { c:s.cutId, day:s.dayOffset, runs:s.runs, setupOnly:!!s.setupOnly }; }),
+  [{ c:'A', day:0, runs:1, setupOnly:false },
+   { c:'B', day:0, runs:0, setupOnly:true },
+   { c:'B', day:1, runs:2, setupOnly:false }],
+  'splitMachineQueue #3635 п.5: настройка B в хвосте дня 0 (отдельный сегмент), проходы B с дня 1');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
 // длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),

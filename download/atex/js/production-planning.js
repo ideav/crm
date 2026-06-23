@@ -2374,6 +2374,22 @@
                 var avail = effCapacity(day) - clock;
                 var maxPasses = Math.floor((avail - setup) / perPassEff);
                 if (maxPasses < 1) {
+                    // #3635 п.5: настройка (переналадка ножей/сырья) ВЛЕЗАЕТ в остаток дня, а
+                    // первый проход — уже нет → ставим отдельный сегмент НАСТРОЙКИ в конце дня N
+                    // (заполняем хвост дня), а намотку начинаем с дня N+1 без повторной настройки.
+                    // Только для первого сегмента резки (setup > 0, не продолжение) и только когда
+                    // настройка реально помещается; иначе — обычный перенос всего на след. день.
+                    if (clock > 0 && !isCont && setup > 0 && avail >= setup) {
+                        var wsSet = day * 1440 + dayStart + clock;
+                        segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
+                            windowStartMin: round3(wsSet), startMin: round3(wsSet + setup),
+                            setupMin: round3(setup), durationMin: 0,
+                            isContinuation: false, parentCutId: null, setupOnly: true });
+                        clock += setup;
+                        prevPhysical = c;
+                        isCont = true;   // настройка сделана → проходы дня N+1 идут как продолжение (без setup)
+                        day += 1; clock = 0; continue;
+                    }
                     if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
                     maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
                 }
