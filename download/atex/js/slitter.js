@@ -1752,15 +1752,16 @@
                     (s.purpose ? ' · ' + s.purpose : '') })
             ]));
         });
-        section.appendChild(legend);
 
-        // #3639: «Остаток, мм» справа внизу — сколько ширины входа уйдёт в отходы
-        // (обрезь). При переполнении (полосы шире входа) отхода нет → 0.
+        // #3639: «Остаток, мм» — сколько ширины входа уйдёт в отходы (обрезь). При
+        // переполнении (полосы шире входа) отхода нет → 0.
         var wasteMm = lay.remainder > 0 ? core.round3(lay.remainder) : 0;
-        section.appendChild(el('div', { class: 'atex-sl-cm-waste', title: 'Сколько ширины входа уйдёт в отходы (обрезь)' }, [
+        var waste = el('div', { class: 'atex-sl-cm-waste', title: 'Сколько ширины входа уйдёт в отходы (обрезь)' }, [
             el('span', { class: 'atex-sl-cm-waste-label', text: 'Остаток, мм: ' }),
             el('span', { class: 'atex-sl-cm-waste-value', text: String(wasteMm) })
-        ]));
+        ]);
+        // #3643: легенда и «Остаток, мм» — в ОДНОМ ряду (легенда слева, остаток справа).
+        section.appendChild(el('div', { class: 'atex-sl-cm-legend-row' }, [legend, waste]));
 
         return section;
     };

@@ -421,9 +421,20 @@
     border-right: none;
 }
 .atex-sl-cm-warn { margin-top: 8px; color: var(--sl-warn); font-weight: 600; }
-/* #3639: остаток (обрезь) в мм — справа внизу секции «Раскладка ножей». */
+/* #3643: легенда и «Остаток, мм» — в одном ряду (легенда слева, остаток справа,
+   по базовой линии). На узких экранах ряд переносит «Остаток» под легенду. */
+.atex-sl-cm-legend-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+/* #3639: остаток (обрезь) в мм — справа в ряду «Раскладка ножей». */
 .atex-sl-cm-waste {
-    margin-top: 8px;
+    flex: 0 0 auto;
+    white-space: nowrap;
     text-align: right;
     font-size: 12px;
     color: var(--sl-muted);
@@ -433,7 +444,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px 18px;
-    margin-top: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 .atex-sl-cm-legend-item {
     display: flex;
