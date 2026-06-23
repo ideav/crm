@@ -421,6 +421,14 @@
     border-right: none;
 }
 .atex-sl-cm-warn { margin-top: 8px; color: var(--sl-warn); font-weight: 600; }
+/* #3639: остаток (обрезь) в мм — справа внизу секции «Раскладка ножей». */
+.atex-sl-cm-waste {
+    margin-top: 8px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--sl-muted);
+}
+.atex-sl-cm-waste-value { font-weight: 600; color: var(--text-secondary, #475569); }
 .atex-sl-cm-legend {
     display: flex;
     flex-wrap: wrap;
