@@ -926,6 +926,13 @@
                     // #3624: номер заказа позиции прямо из cut_planning — нужен подписи
                     // «Связанные позиции», когда позиция выпала из активного positions_list.
                     orderNo: str(row.order_no),
+                    // #3633: габариты позиции обеспечения прямо из cut_planning — чтобы
+                    // подпись «Связанные позиции» для позиции вне активного positions_list
+                    // была полной («<заказ> · <ширина>мм * <длина>м»), а не id записи + метраж.
+                    // Ширина = cut_roller_width (Заказанное количество → Ширина, мм), длина —
+                    // добавленная колонка position_length (Заказанное количество → Длина, м).
+                    positionWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
+                    positionLength: (row.position_length == null || row.position_length === '') ? 0 : Number(row.position_length),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
                     rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
@@ -961,7 +968,12 @@
             var width = stripNum(row.position_width);
             var length = stripNum(rowFirstValue(row, ['position_length', 'position_length_m', 'position_wind_length', 'wind_length']));
             var qty = stripNum(row.position_qty);
-            var head = orderNo !== '' ? orderNo + '/' + no : '№' + no;
+            // #3633: positions_list не отдаёт номер позиции (no обычно пусто) — тогда не
+            // оставляем «висячий» слэш «<заказ>/», а показываем просто «<заказ>». Если номер
+            // когда-нибудь появится — подпись снова «<заказ>/<номер>».
+            var head = orderNo !== ''
+                ? (no !== '' ? orderNo + '/' + no : orderNo)
+                : (no !== '' ? '№' + no : '');
             var dims = positionDimensionsLabel(width, length);
             var label = head + (dims !== '' ? ' · ' + dims : '');
             return { id: id, label: label, width: width, length: length, qty: qty };
@@ -997,17 +1009,21 @@
     // её «Количество» (qty шт. — сколько рулонов в позиции заказа) + рулоны/метраж
     // обеспечения. position — объект из rowsToPositions (может отсутствовать →
     // fallbackId для «позиция #N»). Чистая (DOM не трогает), проверяется модульно.
-    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage, fallbackOrderNo) {
+    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage, fallbackOrderNo, fallbackWidth, fallbackLength) {
         var posId = position && position.id != null ? position.id : fallbackId;
         var label;
         if (position && position.label) {
             label = position.label;
         } else {
-            // #3624: позиция выпала из активного positions_list (заказ закрыт/выполнен) —
-            // номер заказа берём из обеспечения (cut_planning.order_no), чтобы подпись
-            // осталась «<заказ>/<позиция>», а не «позиция #N». Нет order_no → прежний фолбэк.
+            // #3633: позиция выпала из активного positions_list (заказ закрыт/выполнен) —
+            // собираем полную подпись из данных обеспечения (cut_planning): номер заказа
+            // (order_no) + габариты позиции (cut_roller_width × position_length), т.е.
+            // «<заказ> · <ширина>мм * <длина>м», а НЕ id записи позиции. Нет order_no —
+            // прежний фолбэк «позиция #N»; нет габаритов — просто «<заказ>».
             var on = String(fallbackOrderNo == null ? '' : fallbackOrderNo).trim();
-            label = on !== '' ? (on + '/' + posId) : ('позиция #' + posId);
+            var dims = positionDimensionsLabel(fallbackWidth, fallbackLength);
+            var base = on !== '' ? on : ('позиция #' + posId);
+            label = base + (dims !== '' ? ' · ' + dims : '');
         }
         var qty = stripNum(position && position.qty);
         if (qty > 0) label += ' · ' + round3(qty) + ' шт.';
@@ -7492,7 +7508,7 @@
             linked.forEach(function(s) {
                 // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж обеспечения.
                 var foot = supplyFootage(s, self.footageBySupply);
-                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo);
+                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo, s.positionWidth, s.positionLength);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
