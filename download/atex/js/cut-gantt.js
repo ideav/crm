@@ -305,52 +305,111 @@
         };
     }
 
-    // #3648: упаковка встык — позиция бара считается не по календарю, а кумулятивно
-    // по длительности в пределах станка (см. packGroups). Геометрия в px.
-    var GANTT_PX_PER_MIN = 6;   // ширина бара = длительность(мин) × это; …
-    var GANTT_MIN_BAR_PX = 26;  // …но не меньше минимума, чтобы крошечные задания было видно.
-    // #3654: часовая сетка. Упаковка идёт встык от начала смены, поэтому позиция в px
-    // соответствует «прошло от GANTT_DAY_START_HOUR»: x=0 → 08:00, далее каждый час.
-    // Деления каждый час пунктиром, пожирнее в GANTT_BOLD_HOURS (старт/обед/конец смены).
-    var GANTT_DAY_START_HOUR = 8;
-    var GANTT_DAY_END_HOUR = 18;   // #3657: конец смены. Сетка часов всегда покрывает
-                                   // 08:00–18:00, даже если упакованной работы меньше часа.
-    var GANTT_BOLD_HOURS = { 8: true, 12: true, 18: true };
+    // #3668: бары размещаются по РЕАЛЬНОМУ времени (план/факт): позиция и ширина бара
+    // считаются от начала видимого окна по часам, так разрывы между заданиями видны, а ось
+    // совпадает с часами. Геометрия в px. Масштаб (px на минуту) зависит от режима: чем шире
+    // период, тем мельче, чтобы общая ширина дорожки оставалась обозримой.
+    var MODE_PX_PER_MIN = { day: 2, three: 1, week: 0.4, month: 0.08 };
+    var GANTT_PX_PER_MIN = MODE_PX_PER_MIN.day;     // масштаб по умолчанию (режим «День»)
+    var GANTT_MIN_BAR_PX = 8;   // минимальная видимая ширина бара (текст выходит за его рамки)
+    var GANTT_DAY_START_HOUR = 8;   // окно по умолчанию (когда заданий нет) — смена 08:00–18:00
+    var GANTT_DAY_END_HOUR = 18;
+    // Часовая сетка: все деления одинаковым пунктиром; интервал в часах из набора
+    // {1,2,4,6,8,12,24}, подбирается так, чтобы деления были не уже 50px (#3668 п.6).
+    var GANTT_HOUR_STEPS = [1, 2, 4, 6, 8, 12, 24];
+    var GANTT_TICK_MIN_PX = 50;
+    var GANTT_HOUR_MS = 3600000;
 
-    // #3657: ширина дорожки = max(упаковка, полная смена). При суммарной длительности
-    // заданий < 1 ч упаковка короче часа, и сетка рисует только деление 08:00 («нет
-    // вертикальных полос каждый час»), а бары не с чем соотнести по масштабу. Растягиваем
-    // дорожку минимум на всю смену, чтобы деления 8…18 были всегда и масштаб был читаем.
-    function ganttTrackPx(packedPx, opts) {
-        var o = opts || {};
-        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
-        var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
-        var endHour = o.endHour != null ? Number(o.endHour) : GANTT_DAY_END_HOUR;
-        var shiftPx = Math.max(endHour - startHour, 0) * pxPerMin * 60;
-        return Math.max(Number(packedPx) || 0, shiftPx, 1);
+    function pxPerMinForMode(mode) {
+        var m = normalizeMode(mode);
+        return MODE_PX_PER_MIN[m] > 0 ? MODE_PX_PER_MIN[m] : GANTT_PX_PER_MIN;
     }
 
-    // #3654/#3657: деления часовой сетки для дорожки шириной trackPx. x=0 → начало смены,
-    // каждый час = pxPerMin×60. Покрывает всю ширину (≥ полная смена). bold — для часов из
-    // GANTT_BOLD_HOURS (старт/обед/конец смены). Чистая функция — рендер и тесты общие.
-    function hourTicks(trackPx, opts) {
+    function floorToHourMs(ms) {
+        var d = new Date(ms);
+        d.setMinutes(0, 0, 0);
+        return d.getTime();
+    }
+    function ceilToHourMs(ms) {
+        var f = floorToHourMs(ms);
+        return f === ms ? ms : f + GANTT_HOUR_MS;
+    }
+
+    // Видимое временнóе окно дорожки: от первого до последнего задания (по реальному
+    // времени, снап до целого часа). Заданий нет — смена startHour…endHour дня периода.
+    function ganttWindow(cuts, range, opts) {
         var o = opts || {};
-        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
         var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
-        var pxPerHour = pxPerMin * 60;
-        var width = Math.max(Number(trackPx) || 0, 0);
+        var endHour = o.endHour != null ? Number(o.endHour) : GANTT_DAY_END_HOUR;
+        var minMs = null, maxMs = null;
+        (cuts || []).forEach(function(cut) {
+            var tr = cutTimeRange(cut);
+            if (!tr) return;
+            if (minMs == null || tr.startMs < minMs) minMs = tr.startMs;
+            if (maxMs == null || tr.endMs > maxMs) maxMs = tr.endMs;
+        });
+        if (minMs == null || maxMs == null) {
+            var dayMs = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
+            minMs = dayMs + startHour * GANTT_HOUR_MS;
+            maxMs = dayMs + endHour * GANTT_HOUR_MS;
+        }
+        var startMs = floorToHourMs(minMs);
+        var endMs = ceilToHourMs(maxMs);
+        if (!(endMs > startMs)) endMs = startMs + GANTT_HOUR_MS;
+        return { startMs: startMs, endMs: endMs };
+    }
+
+    // Ширина дорожки = длительность окна × масштаб.
+    function ganttTrackPx(win, pxPerMin) {
+        var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
+        if (!win || win.endMs == null || win.startMs == null) return 1;
+        return Math.max(round3((win.endMs - win.startMs) / 60000 * ppm), 1);
+    }
+
+    // Интервал часовой сетки (в часах) для заданной плотности px/час: наименьший шаг из
+    // {1,2,4,6,8,12,24}, дающий деления не уже minPx. Шире 150px бывает только при шаге 1 ч
+    // и очень крупном масштабе — мельче часа не делим (#3668 п.6).
+    function chooseHourStep(pxPerHour, opts) {
+        var o = opts || {};
+        var minPx = o.minPx > 0 ? o.minPx : GANTT_TICK_MIN_PX;
+        var pph = Number(pxPerHour) || 0;
+        for (var i = 0; i < GANTT_HOUR_STEPS.length; i++) {
+            if (GANTT_HOUR_STEPS[i] * pph >= minPx) return GANTT_HOUR_STEPS[i];
+        }
+        return GANTT_HOUR_STEPS[GANTT_HOUR_STEPS.length - 1];
+    }
+
+    // Деления часовой сетки для окна [startMs;endMs) при масштабе pxPerMin. Все деления —
+    // одинаковым пунктиром. Метка — «HH:00»; на первом тике суток добавляется дата.
+    function hourTicks(win, pxPerMin, opts) {
+        var o = opts || {};
+        if (!win || win.startMs == null || win.endMs == null) return [];
+        var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
+        var stepMs = chooseHourStep(ppm * 60, o) * GANTT_HOUR_MS;
         var ticks = [];
-        var hour = startHour;
-        for (var x = 0; x <= width + 0.5; x += pxPerHour) {
-            ticks.push({ hour: hour, leftPx: round3(x), bold: !!GANTT_BOLD_HOURS[hour], label: String(hour) });
-            hour++;
+        var prevDay = null;
+        for (var ms = floorToHourMs(win.startMs); ms <= win.endMs + 0.5; ms += stepMs) {
+            var dayIso = localIsoDateFromMs(ms);
+            var newDay = dayIso !== prevDay;
+            prevDay = dayIso;
+            ticks.push({
+                ms: ms,
+                hour: new Date(ms).getHours(),
+                leftPx: round3((ms - win.startMs) / 60000 * ppm),
+                label: formatTime(ms),
+                dateLabel: newDay ? formatDateShort(ms) : '',
+                newDay: newDay
+            });
         }
         return ticks;
     }
 
-    // Текст внутри бара — номер заказа (полные детали — в title/подписи строки).
-    function cutBarText(cut) {
-        return (cut && cut.orderNo) ? String(cut.orderNo) : ('#' + ((cut && cut.id) || ''));
+    // Текст бара (#3668 п.4): диапазон времени задания, например «11:19-11:23 (4 мин)».
+    function cutBarTime(cut) {
+        var tr = cutTimeRange(cut);
+        if (!tr) return '';
+        var mins = Math.max(1, Math.round((tr.endMs - tr.startMs) / 60000));
+        return formatTime(tr.startMs) + '-' + formatTime(tr.endMs) + ' (' + mins + ' мин)';
     }
 
     // Задание попадает в видимый период (по плановой дате, иначе по фактическому старту)?
@@ -378,12 +437,14 @@
         return lines.join('\n');
     }
 
-    // #3648 п.1: подпись строки в ОДНУ строку без слова «Заказ»: «{заказ} / {сырьё} · {метраж}».
-    // Станок в подпись не входит — он выводится заголовком группы (п.2).
+    // Подпись строки в одну строку без слова «Заказ»: «{заказ} / {сырьё} · {намотка} · {метраж}»,
+    // например «3351 / MWR116L · OUT · 450» (#3668 п.2). Станок в подпись не входит — он
+    // выводится заголовком группы.
     function cutRowLabel(cut) {
         var head = (cut && cut.orderNo) ? String(cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
         var s = head;
         if (cut && cut.materialName) s += ' / ' + cut.materialName;
+        if (cut && cut.winding) s += ' · ' + cut.winding;
         if (cut && cut.length > 0) s += ' · ' + cut.length;
         return s;
     }
@@ -418,6 +479,7 @@
                 orderNo: str(row.order_no),
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
+                winding: str(row.cut_winding),
                 slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) }
             };
             order.push(id);
@@ -426,7 +488,7 @@
     }
 
     // Порядок заданий ВНУТРИ станка: по очередности (пусто — в конец), затем по
-    // визуальному старту, затем по id. Мутирует переданный массив (он локальный в packGroups).
+    // визуальному старту, затем по id. Мутирует переданный массив (он локальный в layoutGroups).
     function orderCutsInGroup(cuts) {
         cuts.sort(function(a, b) {
             var qa = a.sequence == null ? Infinity : a.sequence;
@@ -453,28 +515,36 @@
         return params.length ? base + '?' + params.join('&') : base;
     }
 
-    // #3648 п.2/п.3: группировка по станку + упаковка заданий встык по очерёдности.
-    // В каждом станке задания идут друг за другом: left = сумма ширин предыдущих,
-    // ширина = длительность×pxPerMin (но не меньше minPx) → бары стыкуются без зазоров.
-    // Геометрия в px; trackPx = ширина самого «длинного» станка (общий масштаб дорожек).
-    // Фильтры: дата (видимый период), станок, производный статус.
-    function packGroups(cuts, range, nowMs, filters, opts) {
+    // #3668: размещение баров по РЕАЛЬНОМУ времени. Группировка по станку (сортировка по
+    // метке), внутри станка — порядок строк по очерёдности/старту; каждое задание = отдельная
+    // строка, бар на общей шкале времени окна (left/width по плану-факту, разрывы видны).
+    // Фильтры: видимый период, станок, производный статус.
+    function layoutGroups(cuts, range, nowMs, filters, opts) {
         var f = filters || {};
         var o = opts || {};
-        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
-        var minPx = o.minPx > 0 ? o.minPx : GANTT_MIN_BAR_PX;
         var statusFilter = String(f.status == null ? '' : f.status).trim();
         var slitterFilter = String(f.slitter == null ? '' : f.slitter).trim();
 
-        var groupsMap = {};
-        var orderKeys = [];
-        (cuts || []).forEach(function(cut) {
+        var visible = (cuts || []).filter(function(cut) {
             var s = cut && cut.slitter || { id: null, label: '' };
             var sid = s.id == null ? '' : String(s.id);
-            if (slitterFilter && sid !== slitterFilter) return;
-            if (!cutInRange(cut, range)) return;
-            if (statusFilter && cutStatus(cut, nowMs).key !== statusFilter) return;
-            var key = sid === '' ? ' none' : sid;
+            if (slitterFilter && sid !== slitterFilter) return false;
+            if (!cutInRange(cut, range)) return false;
+            if (statusFilter && cutStatus(cut, nowMs).key !== statusFilter) return false;
+            return true;
+        });
+
+        var win = ganttWindow(visible, range, o);
+        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : pxPerMinForMode(range && range.mode);
+        var minPx = o.minPx > 0 ? o.minPx : GANTT_MIN_BAR_PX;
+        var trackPx = ganttTrackPx(win, pxPerMin);
+
+        var groupsMap = {};
+        var orderKeys = [];
+        visible.forEach(function(cut) {
+            var s = cut && cut.slitter || { id: null, label: '' };
+            var sid = s.id == null ? '' : String(s.id);
+            var key = sid === '' ? ' none' : sid;
             if (!groupsMap[key]) {
                 groupsMap[key] = { slitter: { id: sid === '' ? null : sid, label: s.label || (sid === '' ? 'Без станка' : '#' + sid) }, cuts: [] };
                 orderKeys.push(key);
@@ -488,26 +558,22 @@
             return String(a.slitter.label).localeCompare(String(b.slitter.label), 'ru');
         });
 
-        var trackPx = 0;
         groups.forEach(function(g) {
             orderCutsInGroup(g.cuts);
-            var cum = 0;
             g.tasks = g.cuts.map(function(cut) {
-                var w = Math.max(Math.round(stripNum(cut.duration) * pxPerMin), minPx);
+                var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var status = cutStatus(cut, nowMs);
-                var task = {
-                    cut: cut, status: status, leftPx: cum, widthPx: w,
-                    label: cutRowLabel(cut), barText: cutBarText(cut),
-                    title: cutBarTitle(cut, cutTimeRange(cut) || {}, status)
+                return {
+                    cut: cut, status: status,
+                    leftPx: round3((tr.startMs - win.startMs) / 60000 * pxPerMin),
+                    widthPx: Math.max(round3((tr.endMs - tr.startMs) / 60000 * pxPerMin), minPx),
+                    label: cutRowLabel(cut), barText: cutBarTime(cut),
+                    title: cutBarTitle(cut, tr, status)
                 };
-                cum += w;
-                return task;
             });
-            g.totalPx = cum;
-            if (cum > trackPx) trackPx = cum;
             delete g.cuts;
         });
-        return { groups: groups, trackPx: trackPx };
+        return { groups: groups, trackPx: trackPx, window: win, pxPerMin: pxPerMin };
     }
 
     function slittersFromCuts(cuts) {
@@ -556,12 +622,15 @@
         cutTimeRange: cutTimeRange,
         cutInRange: cutInRange,
         cutRowLabel: cutRowLabel,
-        cutBarText: cutBarText,
+        cutBarTime: cutBarTime,
         rowsToCuts: rowsToCuts,
         orderCutsInGroup: orderCutsInGroup,
-        packGroups: packGroups,
+        layoutGroups: layoutGroups,
+        ganttWindow: ganttWindow,
         ganttTrackPx: ganttTrackPx,
+        chooseHourStep: chooseHourStep,
         hourTicks: hourTicks,
+        pxPerMinForMode: pxPerMinForMode,
         planningLink: planningLink,
         slittersFromCuts: slittersFromCuts,
         parseDeepLink: parseDeepLink,
@@ -727,46 +796,52 @@
     AtexCutGantt.prototype._buildBody = function(range, nowMs) {
         var self = this;
         var st = this.state;
-        // #3648 п.2/п.3: группы по станку, задания упакованы встык по очерёдности.
-        var data = packGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter });
+        // #3668: задания размещаются по реальному времени на общей шкале окна.
+        var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter });
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
             body.appendChild(el('div', { class: 'atex-cg-empty', text: 'На выбранном интервале заданий нет' }));
             return body;
         }
-        // #3657: дорожка покрывает всю смену (08:00–18:00), а не только упаковку, иначе
-        // при работе < 1 ч сетка рисует лишь деление 08:00 и масштаб не читается.
-        var trackPx = ganttTrackPx(data.trackPx);
+        var trackPx = data.trackPx;
         body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
-        // #3654/#3657: часовые деления/подписи на дорожке шириной trackPx (x=0 → начало
-        // смены, далее каждый час, деления 8…18 всегда). Геометрия — в чистой hourTicks.
-        var ticks = hourTicks(trackPx);
-        function appendHours(track, withLabels) {
+        // #3668 п.6: часовые деления одинаковым пунктиром, шаг подобран по плотности окна.
+        var ticks = hourTicks(data.window, data.pxPerMin);
+        function appendHours(track) {
             ticks.forEach(function(t) {
-                var node = el('span', { class: (withLabels ? 'atex-cg-hour-label' : 'atex-cg-hour') + (t.bold ? ' is-bold' : '') });
-                if (withLabels) node.textContent = t.label;
+                var node = el('span', { class: 'atex-cg-hour' });
                 node.style.left = t.leftPx + 'px';
                 track.appendChild(node);
             });
         }
 
-        // Верхняя шкала часов (подписи); деления выровнены с сеткой в дорожках заданий.
+        // Верхняя шкала времени: метки «HH:00», на первом тике суток — дата.
         var scaleRow = el('div', { class: 'atex-cg-row atex-cg-scale-row' });
-        scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Время, ч' }));
+        scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Время' }));
         var scaleTrack = el('div', { class: 'atex-cg-track atex-cg-scale' });
         scaleTrack.style.minWidth = trackPx + 'px';
-        appendHours(scaleTrack, true);
+        ticks.forEach(function(t) {
+            var lbl = el('span', { class: 'atex-cg-hour-label' + (t.newDay ? ' is-day' : '') });
+            lbl.style.left = t.leftPx + 'px';
+            if (t.dateLabel) lbl.appendChild(el('span', { class: 'atex-cg-hour-date', text: t.dateLabel }));
+            lbl.appendChild(el('span', { class: 'atex-cg-hour-time', text: t.label }));
+            scaleTrack.appendChild(lbl);
+        });
         scaleRow.appendChild(scaleTrack);
         body.appendChild(scaleRow);
 
         data.groups.forEach(function(group) {
-            // Заголовок станка (п.2) — отдельной строкой перед его заданиями.
-            body.appendChild(el('div', { class: 'atex-cg-machine-head' }, [
+            // #3668 п.3/п.5: заголовок станка — строка-грид; первая ячейка (имя + число
+            // заданий нежирным) фиксируется при горизонтальном скролле.
+            var nameCell = el('div', { class: 'atex-cg-label atex-cg-machine-cell' }, [
                 el('span', { class: 'atex-cg-machine-name', text: group.slitter.label }),
-                el('span', { class: 'atex-cg-machine-count', text: group.tasks.length + ' зад.' })
-            ]));
+                el('span', { class: 'atex-cg-machine-count', text: String(group.tasks.length) })
+            ]);
+            var headTrack = el('div', { class: 'atex-cg-track atex-cg-machine-track' });
+            headTrack.style.minWidth = trackPx + 'px';
+            body.appendChild(el('div', { class: 'atex-cg-row atex-cg-machine-head' }, [nameCell, headTrack]));
 
             group.tasks.forEach(function(t) {
                 var statusKey = t.status && t.status.key || 'unknown';
@@ -775,13 +850,14 @@
                 ]);
                 var track = el('div', { class: 'atex-cg-track' });
                 track.style.minWidth = trackPx + 'px';
-                appendHours(track, false);   // #3654: часовая сетка под баром
+                appendHours(track);   // #3668 п.6: часовая сетка под баром
                 var barLink = el('a', {
                     class: 'atex-cg-bar is-' + statusKey,
                     href: planningLink(t.cut, self.planningUrl),
                     title: t.title,
                     dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
                 }, [
+                    // #3668 п.4: диапазон времени, обычным шрифтом, выходит за рамки бара.
                     el('span', { class: 'atex-cg-bar-main', text: t.barText })
                 ]);
                 barLink.style.left = t.leftPx + 'px';
