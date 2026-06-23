@@ -2382,6 +2382,32 @@ assertEqual(
     ['d1a', 'd1foil', 'd2a', 'd2b'],
     'planCutOperations #3635: preserveOrder день-первым — день1 (вкл. фольгу очередь 2) ПЕРЕД днём2, без перемешивания');
 
+// ── #3658: автозаполнение дней НЕ утаскивает историю в выбранную дату (якорь по «Дате план») ──
+// База = 4.06 (день фильтра «С»). Задание 30.05 (раньше базы) должно остаться на 30.05,
+// а не переехать в 4.06; новое задание 4.06 — на 4.06. Якорь может быть отрицательным.
+function cut3658(id, mat, ts) {
+    return { id: id, slitter: { id: 'm1' }, materialId: mat, winding: 'IN',
+        knifeWidths: [60], knifeCount: 1, plannedRuns: 1, planDate: ts };
+}
+var b3658 = Date.UTC(2026, 5, 4, 0, 0, 0); // 4.06.2026 00:00 UTC
+var ts3658May30 = String(Math.floor(Date.UTC(2026, 4, 30, 8, 0, 0) / 1000));
+var ts3658Jun4 = String(Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000));
+var anchor3658 = {
+    may30: planning.dayOffsetFromBase(ts3658May30, b3658),
+    jun4: planning.dayOffsetFromBase(ts3658Jun4, b3658)
+};
+assertEqual(anchor3658, { may30: -5, jun4: 0 }, 'dayOffsetFromBase #3658: 30.05 от базы 4.06 = −5 (раньше базы)');
+var ops3658 = planning.planCutOperations(
+    [ cut3658('may30', '1', ts3658May30), cut3658('jun4', '2', ts3658Jun4) ],
+    { preserveOrder: true, planBaseMidnightMs: b3658, dayAnchorByCut: anchor3658,
+      perPassByCut: { may30: 5, jun4: 5 }, dayStartMin: 480, dayEndMin: 990, times: { BETWEEN_CUTS: 0 } }
+);
+var u3658 = {}; ops3658.updates.forEach(function(u) { u3658[u.cutId] = u.planStartTs; });
+assertEqual(u3658.may30, Math.floor(Date.UTC(2026, 4, 30, 8, 0, 0) / 1000),
+    'planCutOperations #3658: задание 30.05 осталось на 30.05 08:00 (не уехало в 4.06)');
+assertEqual(u3658.jun4, Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000),
+    'planCutOperations #3658: задание 4.06 — на 4.06 08:00');
+
 // ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
 // Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
 // Повторный planCutOperations должен ПЕРЕИСПОЛЬЗОВАТЬ запись B как update (а не

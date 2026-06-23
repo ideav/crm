@@ -2536,8 +2536,18 @@
         // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
         // если обед не получится поставить паузой между резками, день закончится раньше.
         function effCapacity(d) { return (lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity; }
+        // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
+        // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
+        // planStartTs истории (задания 30.05 уезжали в выбранную 4.06). Якорь может быть
+        // отрицательным (день раньше базы=дня «С»), поэтому стартовый день = минимальный якорь.
+        var anchorByCut = opts.dayAnchorByCut || {};
+        var minAnchor = null;
+        (orderedCuts || []).forEach(function(c){
+            var a = anchorByCut[String(c && c.id)];
+            if (a != null && (minAnchor == null || a < minAnchor)) minAnchor = a;
+        });
         var segments = [];
-        var day = 0, clock = 0;                      // clock — минут занято в текущем дне (от dayStart)
+        var day = (minAnchor != null ? minAnchor : 0), clock = 0;   // clock — минут занято в текущем дне (от dayStart)
         var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
         // Обед как пауза перед НОВОЙ резкой: если в этот день он ещё не был и время дня
         // (dayStart+clock) дошло до LUNCH_START — вставляем паузу (clock += длительность).
@@ -2549,6 +2559,10 @@
         }
         (orderedCuts || []).forEach(function(c){
             var cid = c && c.id;
+            // #3658: если очередь не дотянула до рабочего дня этой резки — прыгаем вперёд к
+            // нему (08:00). Назад не двигаем (переполнение предыдущих дней сохраняется).
+            var anchorDay = anchorByCut[String(cid)];
+            if (anchorDay != null && anchorDay > day) { day = anchorDay; clock = 0; }
             var runs = Math.round(Number(runsByCut[String(cid)] != null ? runsByCut[String(cid)] : c && c.plannedRuns) || 0);
             var perPass = Number(perPassByCut[String(cid)] != null ? perPassByCut[String(cid)] : 0) || 0;
             var remaining = runs;
@@ -2844,7 +2858,8 @@
                 dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
-                lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin
+                lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
+                dayAnchorByCut: opts.dayAnchorByCut   // #3658: привязка к дню «Даты план»
             });
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
@@ -7102,8 +7117,15 @@
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var perPassByCut = {};
+        // #3658: якорь дня по «Дате план» каждого задания (смещение от базы=дня «С»). Без него
+        // автозаполнение дней переписывало planStartTs истории: генерация с 4.06 утаскивала
+        // задания 30.05 в 4.06. Привязываем каждое задание к ЕГО рабочему дню (может быть и
+        // раньше базы → отрицательное смещение). Пустая «Дата план» — без якоря.
+        var dayAnchorByCut = {};
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
+            var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
+            if (off != null) dayAnchorByCut[String(c.id)] = off;
         });
         var ops = planCutOperations(self.cuts, {
             weights: planOptions,
@@ -7114,7 +7136,8 @@
             planBaseMidnightMs: planBaseMidnightMs,
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
-            preserveOrder: preserveOrder   // #3619: только заполнить дни, не пересобирая порядок
+            preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
+            dayAnchorByCut: dayAnchorByCut   // #3658: привязка к дню «Даты план»
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
