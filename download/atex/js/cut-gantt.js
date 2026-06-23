@@ -305,27 +305,23 @@
         };
     }
 
-    // Бар задания на шкале периода: позиция/ширина в %. null — если задание вне
-    // видимого интервала (тогда строка не показывается).
-    function cutBar(cut, range, nowMs) {
-        if (!cut || !range || !(range.endMs > range.startMs)) return null;
-        var tr = cutTimeRange(cut);
-        if (!tr) return null;
-        if (tr.endMs <= range.startMs || tr.startMs >= range.endMs) return null;
-        var clippedStartMs = Math.max(tr.startMs, range.startMs);
-        var clippedEndMs = Math.min(tr.endMs, range.endMs);
-        var spanMs = range.endMs - range.startMs;
-        var status = cutStatus(cut, nowMs);
-        return {
-            cut: cut,
-            cutId: String(cut.id == null ? '' : cut.id),
-            startMs: tr.startMs, endMs: tr.endMs,
-            leftPct: round3(((clippedStartMs - range.startMs) / spanMs) * 100),
-            widthPct: round3(Math.max(((clippedEndMs - clippedStartMs) / spanMs) * 100, 0.6)),
-            status: status,
-            barLabel: formatTime(tr.startMs) + '–' + formatTime(tr.endMs),
-            title: cutBarTitle(cut, tr, status)
-        };
+    // #3648: упаковка встык — позиция бара считается не по календарю, а кумулятивно
+    // по длительности в пределах станка (см. packGroups). Геометрия в px.
+    var GANTT_PX_PER_MIN = 6;   // ширина бара = длительность(мин) × это; …
+    var GANTT_MIN_BAR_PX = 26;  // …но не меньше минимума, чтобы крошечные задания было видно.
+
+    // Текст внутри бара — номер заказа (полные детали — в title/подписи строки).
+    function cutBarText(cut) {
+        return (cut && cut.orderNo) ? String(cut.orderNo) : ('#' + ((cut && cut.id) || ''));
+    }
+
+    // Задание попадает в видимый период (по плановой дате, иначе по фактическому старту)?
+    function cutInRange(cut, range) {
+        if (!range) return true;
+        var ms = parseDateTimeMs(cut && cut.planDate);
+        if (ms == null) ms = parseDateTimeMs(cut && cut.startDate);
+        if (ms == null) return false;
+        return ms >= range.startMs && ms < range.endMs;
     }
 
     function cutBarTitle(cut, tr, status) {
@@ -344,14 +340,14 @@
         return lines.join('\n');
     }
 
-    // Подпись строки-задания: главное + детали (заказ/сырьё/станок/лидер).
+    // #3648 п.1: подпись строки в ОДНУ строку без слова «Заказ»: «{заказ} / {сырьё} · {метраж}».
+    // Станок в подпись не входит — он выводится заголовком группы (п.2).
     function cutRowLabel(cut) {
-        var main = (cut && cut.orderNo) ? ('Заказ ' + cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
-        var parts = [];
-        if (cut && cut.materialName) parts.push(cut.materialName);
-        if (cut && cut.slitter && cut.slitter.label) parts.push(cut.slitter.label);
-        if (cut && cut.leader) parts.push(cut.leader);
-        return { main: main, sub: parts.join(' · ') };
+        var head = (cut && cut.orderNo) ? String(cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
+        var s = head;
+        if (cut && cut.materialName) s += ' / ' + cut.materialName;
+        if (cut && cut.length > 0) s += ' · ' + cut.length;
+        return s;
     }
 
     // Строки отчёта cut_planning → задания (dedup по cut_id). Несколько строк на
@@ -378,6 +374,7 @@
                 startDate: str(row.cut_start_date),
                 endDate: str(row.cut_end_date),
                 duration: durationOf(row),
+                length: stripNum(row.cut_length),
                 sequence: row.cut_sequence == null || row.cut_sequence === '' ? null : stripNum(row.cut_sequence),
                 leader: str(row.cut_leader),
                 orderNo: str(row.order_no),
@@ -390,22 +387,19 @@
         return order.map(function(id) { return byId[id]; });
     }
 
-    // Порядок строк task-Ганта: по станку (метка), затем по визуальному старту,
-    // затем по очередности, затем по id. Вход не мутирует.
-    function orderCutsForGantt(cuts) {
-        return (cuts || []).slice().sort(function(a, b) {
-            var sa = String((a.slitter && a.slitter.label) || '~');
-            var sb = String((b.slitter && b.slitter.label) || '~');
-            var bySlitter = sa.localeCompare(sb, 'ru');
-            if (bySlitter) return bySlitter;
-            var ta = cutTimeRange(a), tb = cutTimeRange(b);
-            var ma = ta ? ta.startMs : Infinity, mb = tb ? tb.startMs : Infinity;
-            if (ma !== mb) return ma - mb;
+    // Порядок заданий ВНУТРИ станка: по очередности (пусто — в конец), затем по
+    // визуальному старту, затем по id. Мутирует переданный массив (он локальный в packGroups).
+    function orderCutsInGroup(cuts) {
+        cuts.sort(function(a, b) {
             var qa = a.sequence == null ? Infinity : a.sequence;
             var qb = b.sequence == null ? Infinity : b.sequence;
             if (qa !== qb) return qa - qb;
+            var ta = cutTimeRange(a), tb = cutTimeRange(b);
+            var ma = ta ? ta.startMs : Infinity, mb = tb ? tb.startMs : Infinity;
+            if (ma !== mb) return ma - mb;
             return String(a.id).localeCompare(String(b.id));
         });
+        return cuts;
     }
 
     // Ссылка на «Планирование производства» с зашитыми заданием/датой/станком.
@@ -421,21 +415,61 @@
         return params.length ? base + '?' + params.join('&') : base;
     }
 
-    // Видимые в периоде задания (бар != null) после фильтров статуса/станка, в порядке Ганта.
-    function ganttRows(cuts, range, nowMs, filters) {
+    // #3648 п.2/п.3: группировка по станку + упаковка заданий встык по очерёдности.
+    // В каждом станке задания идут друг за другом: left = сумма ширин предыдущих,
+    // ширина = длительность×pxPerMin (но не меньше minPx) → бары стыкуются без зазоров.
+    // Геометрия в px; trackPx = ширина самого «длинного» станка (общий масштаб дорожек).
+    // Фильтры: дата (видимый период), станок, производный статус.
+    function packGroups(cuts, range, nowMs, filters, opts) {
         var f = filters || {};
+        var o = opts || {};
+        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : GANTT_PX_PER_MIN;
+        var minPx = o.minPx > 0 ? o.minPx : GANTT_MIN_BAR_PX;
         var statusFilter = String(f.status == null ? '' : f.status).trim();
         var slitterFilter = String(f.slitter == null ? '' : f.slitter).trim();
-        var rows = [];
-        orderCutsForGantt(cuts).forEach(function(cut) {
+
+        var groupsMap = {};
+        var orderKeys = [];
+        (cuts || []).forEach(function(cut) {
             var s = cut && cut.slitter || { id: null, label: '' };
-            if (slitterFilter && String(s.id == null ? '' : s.id) !== slitterFilter) return;
-            var bar = cutBar(cut, range, nowMs);
-            if (!bar) return;
-            if (statusFilter && bar.status.key !== statusFilter) return;
-            rows.push({ cut: cut, bar: bar, label: cutRowLabel(cut) });
+            var sid = s.id == null ? '' : String(s.id);
+            if (slitterFilter && sid !== slitterFilter) return;
+            if (!cutInRange(cut, range)) return;
+            if (statusFilter && cutStatus(cut, nowMs).key !== statusFilter) return;
+            var key = sid === '' ? ' none' : sid;
+            if (!groupsMap[key]) {
+                groupsMap[key] = { slitter: { id: sid === '' ? null : sid, label: s.label || (sid === '' ? 'Без станка' : '#' + sid) }, cuts: [] };
+                orderKeys.push(key);
+            }
+            groupsMap[key].cuts.push(cut);
         });
-        return rows;
+
+        var groups = orderKeys.map(function(k) { return groupsMap[k]; }).sort(function(a, b) {
+            if (a.slitter.id == null) return 1;
+            if (b.slitter.id == null) return -1;
+            return String(a.slitter.label).localeCompare(String(b.slitter.label), 'ru');
+        });
+
+        var trackPx = 0;
+        groups.forEach(function(g) {
+            orderCutsInGroup(g.cuts);
+            var cum = 0;
+            g.tasks = g.cuts.map(function(cut) {
+                var w = Math.max(Math.round(stripNum(cut.duration) * pxPerMin), minPx);
+                var status = cutStatus(cut, nowMs);
+                var task = {
+                    cut: cut, status: status, leftPx: cum, widthPx: w,
+                    label: cutRowLabel(cut), barText: cutBarText(cut),
+                    title: cutBarTitle(cut, cutTimeRange(cut) || {}, status)
+                };
+                cum += w;
+                return task;
+            });
+            g.totalPx = cum;
+            if (cum > trackPx) trackPx = cum;
+            delete g.cuts;
+        });
+        return { groups: groups, trackPx: trackPx };
     }
 
     function slittersFromCuts(cuts) {
@@ -482,12 +516,13 @@
         shiftAnchor: shiftAnchor,
         cutStatus: cutStatus,
         cutTimeRange: cutTimeRange,
-        cutBar: cutBar,
+        cutInRange: cutInRange,
         cutRowLabel: cutRowLabel,
+        cutBarText: cutBarText,
         rowsToCuts: rowsToCuts,
-        orderCutsForGantt: orderCutsForGantt,
+        orderCutsInGroup: orderCutsInGroup,
+        packGroups: packGroups,
         planningLink: planningLink,
-        ganttRows: ganttRows,
         slittersFromCuts: slittersFromCuts,
         parseDeepLink: parseDeepLink,
         formatCutNumber: formatCutNumber,
@@ -652,65 +687,44 @@
     AtexCutGantt.prototype._buildBody = function(range, nowMs) {
         var self = this;
         var st = this.state;
-        var rows = ganttRows(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter });
+        // #3648 п.2/п.3: группы по станку, задания упакованы встык по очерёдности.
+        var data = packGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter });
 
-        function appendTicks(track, scale) {
-            range.days.forEach(function(day, idx) {
-                var tick = el('span', { class: 'atex-cg-tick' + (scale ? ' is-scale' : '') });
-                tick.style.left = day.leftPct + '%';
-                if (scale) {
-                    var label = el('span', { class: 'atex-cg-tick-label', text: day.label });
-                    if (range.mode === 'month' && idx % 2 !== 0) label.className += ' is-minor';
-                    tick.appendChild(label);
-                }
-                track.appendChild(tick);
-            });
-            var endTick = el('span', { class: 'atex-cg-tick is-end' + (scale ? ' is-scale' : '') });
-            endTick.style.left = '100%';
-            track.appendChild(endTick);
-        }
-
-        var body = el('div', { class: 'atex-cg-body atex-cg-body--' + range.mode });
-
-        // Шапка-шкала: пустая ячейка под метки + шкала дат.
-        var scaleRow = el('div', { class: 'atex-cg-row atex-cg-scale-row' });
-        scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Задание' }));
-        var scaleTrack = el('div', { class: 'atex-cg-track atex-cg-scale' });
-        appendTicks(scaleTrack, true);
-        scaleRow.appendChild(scaleTrack);
-        body.appendChild(scaleRow);
-
-        if (!rows.length) {
+        var body = el('div', { class: 'atex-cg-body' });
+        if (!data.groups.length) {
             body.appendChild(el('div', { class: 'atex-cg-empty', text: 'На выбранном интервале заданий нет' }));
             return body;
         }
+        var trackPx = Math.max(data.trackPx, 1);
+        body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
-        rows.forEach(function(rowData) {
-            var bar = rowData.bar;
-            var statusKey = bar.status && bar.status.key || 'unknown';
+        data.groups.forEach(function(group) {
+            // Заголовок станка (п.2) — отдельной строкой перед его заданиями.
+            body.appendChild(el('div', { class: 'atex-cg-machine-head' }, [
+                el('span', { class: 'atex-cg-machine-name', text: group.slitter.label }),
+                el('span', { class: 'atex-cg-machine-count', text: group.tasks.length + ' зад.' })
+            ]));
 
-            var labelCell = el('div', { class: 'atex-cg-label', title: rowData.label.main + (rowData.label.sub ? ' · ' + rowData.label.sub : '') }, [
-                el('span', { class: 'atex-cg-label-main', text: rowData.label.main }),
-                rowData.label.sub ? el('span', { class: 'atex-cg-label-sub', text: rowData.label.sub }) : null
-            ]);
-
-            var track = el('div', { class: 'atex-cg-track' });
-            appendTicks(track, false);
-
-            var barLink = el('a', {
-                class: 'atex-cg-bar is-' + statusKey,
-                href: planningLink(rowData.cut, self.planningUrl),
-                title: bar.title,
-                dataset: { cutId: bar.cutId }
-            }, [
-                el('span', { class: 'atex-cg-bar-main', text: bar.barLabel }),
-                el('span', { class: 'atex-cg-bar-status', text: bar.status.label })
-            ]);
-            barLink.style.left = bar.leftPct + '%';
-            barLink.style.width = bar.widthPct + '%';
-            track.appendChild(barLink);
-
-            body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
+            group.tasks.forEach(function(t) {
+                var statusKey = t.status && t.status.key || 'unknown';
+                var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
+                    el('span', { class: 'atex-cg-label-main', text: t.label })
+                ]);
+                var track = el('div', { class: 'atex-cg-track' });
+                track.style.minWidth = trackPx + 'px';
+                var barLink = el('a', {
+                    class: 'atex-cg-bar is-' + statusKey,
+                    href: planningLink(t.cut, self.planningUrl),
+                    title: t.title,
+                    dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
+                }, [
+                    el('span', { class: 'atex-cg-bar-main', text: t.barText })
+                ]);
+                barLink.style.left = t.leftPx + 'px';
+                barLink.style.width = t.widthPx + 'px';
+                track.appendChild(barLink);
+                body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
+            });
         });
 
         return body;
