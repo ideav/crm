@@ -1642,9 +1642,12 @@
     // #3583: кнопки отметки проходов правее .atex-sl-head-title. «Готово» — один
     // проход, «Готовы все» — все (с подтверждением). Доступны на активной резке
     // (не заблокированной очередью и не завершённой).
+    // #3670: у заблокированной очередью резки («ожидает предыдущую») кнопки проходов
+    // не показываем вовсе (раньше показывали деактивированными) — возвращаем пустой слот.
     AtexSlitter.prototype.renderPassButtons = function(cut) {
         var self = this;
-        var canMark = !this.isCutLocked(cut) && !core.isDone(cut.status);
+        if (this.isCutLocked(cut)) return el('div', { class: 'atex-sl-head-pass' });
+        var canMark = !core.isDone(cut.status);
         var one = el('button', { class: 'atex-sl-btn atex-sl-btn-pass', type: 'button', text: '✓ Готово',
             title: 'Отметить один проход выполненным: номер прохода +1, пересчитать «Счётчик кон.» и «Погонаж факт»' });
         var all = el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-all', type: 'button', text: '✓✓ Готовы все',
@@ -1657,13 +1660,18 @@
     };
 
     // #3557 #4: кнопки управления статусом — в шапке (вместо секции «Статус резки»).
-    // Доступные кнопки зависят от текущего (выведенного из событий) статуса. Для
-    // заблокированной очередью резки (#8) кнопки показаны, но деактивированы.
+    // Доступные кнопки зависят от текущего (выведенного из событий) статуса.
     // #3621: кнопка «Завершить» убрана — завершение теперь через зелёные кнопки
     // «Готово»/«Готовы все» (markPassDone → finishCut на последнем проходе).
+    // #3670: у заблокированной очередью резки («ожидает предыдущую») кнопки управления
+    // не показываем вовсе (раньше — показывали деактивированными), остаётся пояснение.
     AtexSlitter.prototype.renderCutControls = function(cut) {
         var self = this;
-        var locked = this.isCutLocked(cut);
+        var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
+        if (this.isCutLocked(cut)) {
+            actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка ожидает предыдущую в очереди' }));
+            return actions;
+        }
         // Текущий (выведенный из событий) статус: 'Ожидает'|'В работе'|'Наладка'|'Перерыв'|'Завершена'.
         var s = String(cut.status == null ? '' : cut.status).trim();
         var defs;
@@ -1681,16 +1689,11 @@
                 ['Пропуск', 'secondary', function() { self.skipCut(); }] // #3646: пропустить задание
             ];
         }
-        var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
         defs.forEach(function(def) {
             var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-' + def[1], type: 'button', text: def[0] });
-            if (locked) btn.disabled = true;
-            else btn.addEventListener('click', def[2]);
+            btn.addEventListener('click', def[2]);
             actions.appendChild(btn);
         });
-        if (locked) {
-            actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка ожидает предыдущую в очереди' }));
-        }
         return actions;
     };
 
