@@ -1636,31 +1636,17 @@
         // Текущий (выведенный из событий) статус: 'Ожидает'|'В работе'|'Наладка'|'Перерыв'|'Завершена'.
         var s = String(cut.status == null ? '' : cut.status).trim();
         var defs;
+        // #3640: «Начать» убрана — старт резки идёт через «Наладку» (setupCut ставит «Начато»
+        // + «В работе»). Для активной резки в ЛЮБОМ статусе показываем все три кнопки
+        // «Наладка / Перерыв / Прекратить» (каждая пишет событие смены). «Возобновить»
+        // оставлена только для завершённой резки — переоткрыть (снять «Закончено»).
         if (core.isDone(s)) {
             defs = [['Возобновить', 'secondary', function() { self.resumeCut(); }]];
-        } else if (s === 'Наладка') {
-            defs = [
-                ['Возобновить', 'primary', function() { self.resumeCut(); }],
-                ['Перерыв', 'secondary', function() { self.breakCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }]
-            ];
-        } else if (s === 'Перерыв') {
-            defs = [
-                ['Возобновить', 'primary', function() { self.resumeCut(); }],
-                ['Наладка', 'secondary', function() { self.setupCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }]
-            ];
-        } else if (s === 'В работе') {
-            defs = [
-                ['Наладка', 'secondary', function() { self.setupCut(); }],
-                ['Перерыв', 'secondary', function() { self.breakCut(); }],
-                ['Прекратить', 'secondary', function() { self.abortCut(); }]
-            ];
         } else {
-            // Ожидает
             defs = [
-                ['Начать', 'primary', function() { self.startCut(); }],
-                ['Наладка', 'secondary', function() { self.setupCut(); }]
+                ['Наладка', 'primary', function() { self.setupCut(); }],
+                ['Перерыв', 'secondary', function() { self.breakCut(); }],
+                ['Прекратить', 'secondary', function() { self.abortCut(); }]
             ];
         }
         var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
