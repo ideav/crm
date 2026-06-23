@@ -901,6 +901,9 @@
                     positionId: row.supply_position_id ? String(row.supply_position_id) : null,
                     cutId: cutId,
                     finishedBatchId: finishedBatchId,
+                    // #3624: номер заказа позиции прямо из cut_planning — нужен подписи
+                    // «Связанные позиции», когда позиция выпала из активного positions_list.
+                    orderNo: str(row.order_no),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
                     rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
@@ -972,9 +975,18 @@
     // её «Количество» (qty шт. — сколько рулонов в позиции заказа) + рулоны/метраж
     // обеспечения. position — объект из rowsToPositions (может отсутствовать →
     // fallbackId для «позиция #N»). Чистая (DOM не трогает), проверяется модульно.
-    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage) {
+    function formatLinkedPositionLabel(position, fallbackId, supplyRolls, footage, fallbackOrderNo) {
         var posId = position && position.id != null ? position.id : fallbackId;
-        var label = (position && position.label) || ('позиция #' + posId);
+        var label;
+        if (position && position.label) {
+            label = position.label;
+        } else {
+            // #3624: позиция выпала из активного positions_list (заказ закрыт/выполнен) —
+            // номер заказа берём из обеспечения (cut_planning.order_no), чтобы подпись
+            // осталась «<заказ>/<позиция>», а не «позиция #N». Нет order_no → прежний фолбэк.
+            var on = String(fallbackOrderNo == null ? '' : fallbackOrderNo).trim();
+            label = on !== '' ? (on + '/' + posId) : ('позиция #' + posId);
+        }
         var qty = stripNum(position && position.qty);
         if (qty > 0) label += ' · ' + round3(qty) + ' шт.';
         var rolls = stripNum(supplyRolls);
@@ -6838,7 +6850,10 @@
         (this.supplies || []).forEach(function(s) {
             var cid = String(s.cutId);
             if (!linkedLabelsByCut[cid]) linkedLabelsByCut[cid] = [];
-            linkedLabelsByCut[cid].push(posLabelById[String(s.positionId)] || ('позиция #' + s.positionId));
+            // #3624: позиция вне активного positions_list — в haystack кладём «<заказ>/<позиция>»
+            // из cut_planning.order_no, чтобы поиск по номеру заказа находил такие резки.
+            linkedLabelsByCut[cid].push(posLabelById[String(s.positionId)] ||
+                (s.orderNo ? (s.orderNo + '/' + s.positionId) : ('позиция #' + s.positionId)));
         });
         function cutMatchesSearch(c) {
             return cutMatchesQuery(c, query, linkedLabelsByCut[String(c.id)]);
@@ -7233,7 +7248,7 @@
             linked.forEach(function(s) {
                 // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж обеспечения.
                 var foot = supplyFootage(s, self.footageBySupply);
-                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot);
+                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });

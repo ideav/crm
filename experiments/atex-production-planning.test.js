@@ -225,8 +225,8 @@ assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
     [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
     'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
@@ -241,13 +241,13 @@ var issue3209Rows = [
       cut_plan_date: '1780837651', cut_status: '', supply_id: '23352', supply_position_id: '21101',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
-      order_approval_date: '', order_id: '17990', supply_footage: '800', supply_rolls: '6',
+      order_approval_date: '', order_id: '17990', order_no: '3690', supply_footage: '800', supply_rolls: '6',
       cut_length: '1200' },
     { cut_id: '23316', cut_slitter: 'Станок 1', cut_slitter_id: '1277',
       cut_plan_date: '1780837651', cut_status: '', supply_id: '23353', supply_position_id: '21102',
       cut_sequence: '1', cut_material: 'MR194', cut_jumbo_remaining: '13260.00',
       cut_winding: 'OUT', cut_roller_width: '60.00', cut_material_id: '2086',
-      order_approval_date: '', order_id: '17990', supply_footage: '600', supply_rolls: '3',
+      order_approval_date: '', order_id: '17990', order_no: '3690', supply_footage: '600', supply_rolls: '3',
       cut_length: '1200' },
     { cut_id: '23370', cut_slitter: 'Станок 2', cut_slitter_id: '1279',
       cut_plan_date: '1780837653', cut_status: '', supply_id: '', supply_position_id: '',
@@ -262,9 +262,9 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
     { id: '23370', number: '1780837653', length: 700, visible: true }
 ], 'rowsToPlanning #3209/#3242: timestamp cut_plan_date, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
-    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', footage: 800, rolls: 6 },
-    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', footage: 600, rolls: 3 }
-], 'rowsToPlanning #3209: carries supply footage and roll count from report rows');
+    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', footage: 600, rolls: 3 }
+], 'rowsToPlanning #3209: carries supply footage/rolls + order_no (#3624) from report rows');
 assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
     'cutRunLength #3209: cut_length is available as run-length fallback');
 assertEqual(planning.supplyFootage(issue3209Plan.supplies[0], { '23352': 0 }), 800,
@@ -315,6 +315,18 @@ assertEqual(planning.formatLinkedPositionLabel(
 assertEqual(planning.formatLinkedPositionLabel(undefined, '777', 3, 0),
     'позиция #777 · 3 рул.',
     'formatLinkedPositionLabel #3406: нет позиции в списке → fallback «позиция #N»');
+// #3624: позиция выпала из активного positions_list (другая дата) — номер заказа берём
+// из обеспечения (cut_planning.order_no), чтобы не терять «<заказ>/<позиция>».
+assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, '3690'),
+    '3690/73636 · 450 м',
+    'formatLinkedPositionLabel #3624: позиции нет в списке, но order_no обеспечения даёт «3690/73636»');
+assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, ''),
+    'позиция #73636 · 450 м',
+    'formatLinkedPositionLabel #3624: нет ни позиции, ни order_no → прежний фолбэк «позиция #N»');
+assertEqual(planning.formatLinkedPositionLabel(
+    { id: 'p1', label: 'АТХ-3002/1 · 25мм * 450м', qty: 70 }, 'p1', 12, 0, '9999'),
+    'АТХ-3002/1 · 25мм * 450м · 70 шт. · 12 рул.',
+    'formatLinkedPositionLabel #3624: позиция в списке есть → её подпись приоритетнее order_no обеспечения');
 
 // ── stripSupplyRolls (#3320): рулоны обеспечения полосы = min(рулоны полосы, 110% остатка) ──
 assertEqual(planning.stripSupplyRolls(8, 20), 8,
