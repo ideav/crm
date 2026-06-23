@@ -146,6 +146,31 @@
     background: var(--cg-track);
 }
 
+/* #3654: верхняя шкала часов + часовые деления. Деления выровнены по px с упаковкой. */
+.atex-cg-scale-row { position: sticky; top: 0; z-index: 4; }
+.atex-cg-label--scale { font-weight: 600; font-size: 12px; color: var(--cg-muted); }
+.atex-cg-scale { min-height: 20px; background: var(--cg-surface); }
+.atex-cg-hour-label {
+    position: absolute;
+    top: 3px;
+    transform: translateX(3px);
+    font-size: 11px;
+    color: var(--cg-muted);
+    white-space: nowrap;
+    pointer-events: none;
+}
+.atex-cg-hour-label.is-bold { font-weight: 700; color: var(--cg-accent); }
+/* Часовые деления внутри дорожек заданий: пунктир каждый час, пожирнее в 8/12/18. */
+.atex-cg-hour {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1px dashed var(--cg-grid);
+    pointer-events: none;
+}
+.atex-cg-hour.is-bold { border-left-width: 2px; border-left-color: var(--cg-muted); }
+
 /* Бар-ссылка (позиция/ширина в px задаются инлайн — упаковка встык). */
 .atex-cg-bar {
     position: absolute;

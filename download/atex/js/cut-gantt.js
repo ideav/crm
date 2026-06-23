@@ -309,6 +309,11 @@
     // по длительности в пределах станка (см. packGroups). Геометрия в px.
     var GANTT_PX_PER_MIN = 6;   // ширина бара = длительность(мин) × это; …
     var GANTT_MIN_BAR_PX = 26;  // …но не меньше минимума, чтобы крошечные задания было видно.
+    // #3654: часовая сетка. Упаковка идёт встык от начала смены, поэтому позиция в px
+    // соответствует «прошло от GANTT_DAY_START_HOUR»: x=0 → 08:00, далее каждый час.
+    // Деления каждый час пунктиром, пожирнее в GANTT_BOLD_HOURS (старт/обед/конец смены).
+    var GANTT_DAY_START_HOUR = 8;
+    var GANTT_BOLD_HOURS = { 8: true, 12: true, 18: true };
 
     // Текст внутри бара — номер заказа (полные детали — в title/подписи строки).
     function cutBarText(cut) {
@@ -698,6 +703,30 @@
         var trackPx = Math.max(data.trackPx, 1);
         body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
+        // #3654: часовые деления/подписи на дорожке шириной trackPx (x=0 → начало смены,
+        // далее каждый час). pxPerHour согласован с упаковкой (GANTT_PX_PER_MIN).
+        var pxPerHour = GANTT_PX_PER_MIN * 60;
+        function appendHours(track, withLabels) {
+            var hour = GANTT_DAY_START_HOUR;
+            for (var x = 0; x <= trackPx + 0.5; x += pxPerHour) {
+                var bold = !!GANTT_BOLD_HOURS[hour];
+                var node = el('span', { class: (withLabels ? 'atex-cg-hour-label' : 'atex-cg-hour') + (bold ? ' is-bold' : '') });
+                if (withLabels) node.textContent = String(hour);
+                node.style.left = x + 'px';
+                track.appendChild(node);
+                hour++;
+            }
+        }
+
+        // Верхняя шкала часов (подписи); деления выровнены с сеткой в дорожках заданий.
+        var scaleRow = el('div', { class: 'atex-cg-row atex-cg-scale-row' });
+        scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Время, ч' }));
+        var scaleTrack = el('div', { class: 'atex-cg-track atex-cg-scale' });
+        scaleTrack.style.minWidth = trackPx + 'px';
+        appendHours(scaleTrack, true);
+        scaleRow.appendChild(scaleTrack);
+        body.appendChild(scaleRow);
+
         data.groups.forEach(function(group) {
             // Заголовок станка (п.2) — отдельной строкой перед его заданиями.
             body.appendChild(el('div', { class: 'atex-cg-machine-head' }, [
@@ -712,6 +741,7 @@
                 ]);
                 var track = el('div', { class: 'atex-cg-track' });
                 track.style.minWidth = trackPx + 'px';
+                appendHours(track, false);   // #3654: часовая сетка под баром
                 var barLink = el('a', {
                     class: 'atex-cg-bar is-' + statusKey,
                     href: planningLink(t.cut, self.planningUrl),
