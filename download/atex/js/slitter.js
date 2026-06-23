@@ -300,10 +300,10 @@
     }
 
     // #3565 #3: порядок резок — строго по «Очередности», без всплытия незапущенных
-    // над начатыми (раньше факт старта тасовал список «по времени»). Завершённые — в конце.
+    // над начатыми (раньше факт старта тасовал список «по времени»).
+    // #3646: завершённые БОЛЬШЕ НЕ уходят в конец — остаются на своих местах по очереди
+    // (видны в общем порядке вместе с активными).
     function compareCutsForQueue(a, b) {
-        var ad = isDone(a && a.status), bd = isDone(b && b.status);
-        if (ad !== bd) return ad ? 1 : -1;
         var as = sequenceKey(a), bs = sequenceKey(b);
         if (as !== bs) return as - bs;
         var ak = dateKey(a && a.planDate), bk = dateKey(b && b.planDate);
@@ -318,7 +318,8 @@
         var list = (cuts || []).filter(function(cut) {
             if (selectedSlitterId && cutSlitterId(cut) !== selectedSlitterId) return false;
             if (selectedDateKey !== Infinity && dateKey(cut && cut.planDate) !== selectedDateKey) return false;
-            if (!o.includeDone && isDone(cut && cut.status)) return false;
+            // #3646: завершённые НЕ скрываем — показываем всегда (галка «Отобразить
+            // завершённые» убрана, они видны в общем порядке очереди).
             return true;
         }).map(function(cut, i) { return { cut: cut, i: i }; }).sort(function(a, b) {
             return compareCutsForQueue(a.cut, b.cut) || a.i - b.i;
@@ -550,6 +551,19 @@
         return isTimestampSeconds(value) ? formatDate(value) : String(value == null ? '' : value);
     }
 
+    // #3646: вторая строка карточки списка — время начала–окончания резки. Фактические
+    // «Начато»–«Закончено» (завершённая → «8:08 – 8:55»); начата, но не завершена →
+    // «8:08 – …»; не начата → плановый старт (planDate) без конца. Пусто → ''.
+    function cutQueueTime(cut) {
+        if (!cut) return '';
+        var startStr = formatClock(cut.startedAt || cut.planDate || '');
+        if (!startStr) return '';
+        var endStr = cut.finishedAt ? formatClock(cut.finishedAt) : '';
+        if (endStr) return startStr + ' – ' + endStr;
+        if (cut.startedAt) return startStr + ' – …';
+        return startStr;
+    }
+
     // ── #3460: чистое ядро раскладки ножей (порт из cut-map.js) ──
     // Карта раскроя слиттера: каждая «полоса» даёт `qty` ножей шириной `width`.
 
@@ -768,6 +782,7 @@
         // #3460: формат времени резки и разбор партий из отчёта
         isTimestampSeconds: isTimestampSeconds,
         formatClock: formatClock,
+        cutQueueTime: cutQueueTime,   // #3646
         formatDate: formatDate,
         cutTitle: cutTitle,
         humanizeLabel: humanizeLabel,
@@ -859,7 +874,7 @@
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
         this.selectedSlitterId = this.loadStoredSlitter();
         this.selectedDate = core.todayISO();
-        this.includeDone = false;
+        // #3646: this.includeDone убран — завершённые задания видны всегда.
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
         this.currentStrips = [];  // #3460: полосы выбранной резки (раскладка ножей)
@@ -1111,6 +1126,7 @@
             var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
             var inWorkIdx = colIndex(meta, CUT_REQ.inWork);      // #3557
             var finishedIdx = colIndex(meta, CUT_REQ.finishedAt); // #3557
+            var windingIdx = colIndex(meta, CUT_REQ.winding);    // #3646: «Тип намотки» в карточке списка
             self.cuts = (rows || []).map(function(r) {
                 var row = r.r || [];
                 var slitterRef = slitterIdx >= 0 ? parseRef(row[slitterIdx]) : { id: null, label: '' };
@@ -1136,7 +1152,8 @@
                     sequence: sequenceIdx >= 0 ? row[sequenceIdx] : '',
                     plannedRuns: plannedRunsIdx >= 0 ? row[plannedRunsIdx] : '',
                     runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
-                    startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : ''
+                    startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : '',
+                    winding: windingIdx >= 0 ? (row[windingIdx] || '') : '' // #3646
                 };
             });
         });
@@ -1408,8 +1425,8 @@
     AtexSlitter.prototype.currentQueue = function() {
         return core.prepareCutQueue(this.cuts, {
             slitterId: this.selectedSlitterId,
-            date: this.selectedDate,
-            includeDone: this.includeDone
+            date: this.selectedDate
+            // #3646: includeDone убран — завершённые показываем всегда.
         });
     };
 
@@ -1489,10 +1506,22 @@
             var active = String(self.currentCutId) === String(cut.id);
             var isFirstOpen = firstOpenId && String(firstOpenId) === String(cut.id);
             var locked = self.isCutLocked(cut);
-            // #3565 #2: подпись «N (время старта)», напр. «1 (08:30)»; у незапущенной — просто «N».
+            // #3646: карточка списка — № + «Вид сырья / Намотка / Метраж м * Резок» (стр. 1)
+            // и время начала–окончания (стр. 2). Вид сырья — из «Партии сырья» (Вид сырья).
+            var batch = self.findBatch(cut.batchId);
+            var material = (batch && batch.materialLabel) || cut.batch || '—';
+            var runLen = core.toNumber(cut.runLength);
+            var runsN = core.toNumber(cut.plannedRuns);
+            var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
+            var spec = [material, cut.winding || '—', dims].join(' / ');
             var cutMain = [
-                el('span', { class: 'atex-sl-cut-label', text: (idx + 1) + (cut.startedAt ? ' (' + core.formatClock(cut.startedAt) + ')' : '') })
+                el('div', { class: 'atex-sl-cut-line1' }, [
+                    el('span', { class: 'atex-sl-cut-num', text: String(idx + 1) }),
+                    el('span', { class: 'atex-sl-cut-spec', text: spec })
+                ])
             ];
+            var timeTxt = core.cutQueueTime(cut);
+            if (timeTxt) cutMain.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
             if (locked) cutMain.push(el('span', { class: 'atex-sl-cut-sub', text: 'ожидает предыдущую' }));
             var item = el('button', {
                 class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (locked ? ' is-disabled' : ''),
@@ -2455,13 +2484,9 @@
         var aside = el('aside', { class: 'atex-sl-sidebar' });
         // #3565 #1: счётчик резок в заголовке обновляется в renderCuts (updateSidebarTitle).
         this.sidebarTitleEl = el('h2', { text: 'Задание в производство' });
+        // #3646: галка «Отобразить завершённые» убрана — завершённые видны всегда,
+        // на своих местах по очереди.
         var head = el('div', { class: 'atex-sl-sidebar-head' }, [ this.sidebarTitleEl ]);
-        var filter = el('label', { class: 'atex-sl-filter' });
-        var cb = el('input', { type: 'checkbox' });
-        cb.addEventListener('change', function() { self.includeDone = cb.checked; self.renderCuts(); });
-        filter.appendChild(cb);
-        filter.appendChild(el('span', { text: 'Отобразить завершённые' }));
-        head.appendChild(filter);
         aside.appendChild(head);
         this.cutsEl = el('div', { class: 'atex-sl-cuts' });
         aside.appendChild(this.cutsEl);
