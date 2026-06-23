@@ -2823,10 +2823,27 @@
         var merged = mergeContinuationChains(cuts);
         var chainByLogical = merged.chainByLogical || {};
         var perPass = opts.perPassByCut || {};
+        // #3660: НЕ перепланировать чужие даты — обрабатываем только цепочки, чья ГОЛОВА в
+        // выбранном диапазоне «Дата плана» [scopeFromKey; scopeToKey] (ключи YYYYMMDD). Иначе
+        // генерация на 31.05 переписывала очередь/время ВСЕХ будущих заданий. Переполнение дня
+        // (продолжение цепочки на следующий день) сохраняется — это сегменты той же головы.
+        // Без scope (оба ключа null) — обрабатываем все (обратная совместимость/тесты).
+        var scopeFrom = opts.scopeFromKey, scopeTo = opts.scopeToKey;
+        var hasScope = scopeFrom != null || scopeTo != null;
+        function headInScope(c){
+            if (!hasScope) return true;
+            var k = planDateDayKey(c && c.planDate);
+            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
+            var fromK = scopeFrom == null ? -Infinity : scopeFrom;
+            var toK = scopeTo == null ? Infinity : scopeTo;
+            if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }
+            return k >= fromK && k <= toK;
+        }
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
             var sid = c && c.slitter && c.slitter.id;
             if (sid == null) return;
+            if (!headInScope(c)) return;   // #3660: чужая дата — не трогаем
             var key = String(sid);
             if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
             byMachine[key].push(c);
@@ -7127,6 +7144,10 @@
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
         });
+        // #3660: перепланируем ТОЛЬКО выбранный диапазон дат [С; По] — не лезем в другие даты.
+        // Пустой край → null (без ограничения с этой стороны).
+        var fromStr = String(self.filter && self.filter.date || '').trim();
+        var toStr = String(self.filter && self.filter.dateTo || '').trim();
         var ops = planCutOperations(self.cuts, {
             weights: planOptions,
             times: self.changeTimes,
@@ -7137,7 +7158,9 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
-            dayAnchorByCut: dayAnchorByCut   // #3658: привязка к дню «Даты план»
+            dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+            scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
+            scopeToKey: toStr === '' ? null : planDateDayKey(toStr)
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).

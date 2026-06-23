@@ -2408,6 +2408,32 @@ assertEqual(u3658.may30, Math.floor(Date.UTC(2026, 4, 30, 8, 0, 0) / 1000),
 assertEqual(u3658.jun4, Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000),
     'planCutOperations #3658: задание 4.06 — на 4.06 08:00');
 
+// ── #3660: scope — перепланируем ТОЛЬКО выбранный диапазон дат, не лезем в чужие даты ──
+// Генерация на 31.05 (scope [31.05;31.05]) не должна трогать задание 5.06.
+var ts3660May31 = String(Math.floor(Date.UTC(2026, 4, 31, 8, 0, 0) / 1000));
+var ts3660Jun5 = String(Math.floor(Date.UTC(2026, 5, 5, 8, 0, 0) / 1000));
+var b3660 = Date.UTC(2026, 4, 31, 0, 0, 0);
+var ops3660 = planning.planCutOperations(
+    [ cut3658('m31', '1', ts3660May31), cut3658('j5', '2', ts3660Jun5) ],
+    { preserveOrder: true, planBaseMidnightMs: b3660,
+      dayAnchorByCut: { m31: planning.dayOffsetFromBase(ts3660May31, b3660), j5: planning.dayOffsetFromBase(ts3660Jun5, b3660) },
+      perPassByCut: { m31: 5, j5: 5 }, dayStartMin: 480, dayEndMin: 990, times: { BETWEEN_CUTS: 0 },
+      scopeFromKey: planning.planDateDayKey('2026-05-31'), scopeToKey: planning.planDateDayKey('2026-05-31') }
+);
+assertEqual(ops3660.updates.map(function(u) { return u.cutId; }), ['m31'],
+    'planCutOperations #3660: scope 31.05 — в ops только 31.05, задание 5.06 НЕ трогаем');
+assertEqual(ops3660.creates.length === 0 && ops3660.deletes.length === 0, true,
+    'planCutOperations #3660: вне scope — без creates/deletes (будущее не перепланируется)');
+// Без scope (оба null) — обрабатываем оба (обратная совместимость).
+var ops3660all = planning.planCutOperations(
+    [ cut3658('m31', '1', ts3660May31), cut3658('j5', '2', ts3660Jun5) ],
+    { preserveOrder: true, planBaseMidnightMs: b3660,
+      dayAnchorByCut: { m31: 0, j5: 5 }, perPassByCut: { m31: 5, j5: 5 },
+      dayStartMin: 480, dayEndMin: 990, times: { BETWEEN_CUTS: 0 } }
+);
+assertEqual(ops3660all.updates.map(function(u) { return u.cutId; }).sort(), ['j5', 'm31'],
+    'planCutOperations #3660: без scope — обрабатываем оба (совместимость)');
+
 // ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
 // Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
 // Повторный planCutOperations должен ПЕРЕИСПОЛЬЗОВАТЬ запись B как update (а не
