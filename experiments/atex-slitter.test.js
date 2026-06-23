@@ -129,7 +129,8 @@ assertEqual(core.defectM2(-3, 910), 0, 'defectM2: отрицательные м�
 assertEqual(core.photoFieldKey('1118'), 't1118', 'photoFieldKey: t + reqId');
 assertEqual(core.photoFieldKey(null), '', 'photoFieldKey: нет reqId → пусто');
 
-// ── очередь слиттера: сначала выбор станка/даты, завершённые скрыты по умолчанию ──
+// ── #3646: очередь слиттера — фильтр по станку/дате; завершённые видны ВСЕГДА, на своих
+// местах по «Очередности» (не скрыты, не уходят в конец) ──
 var queueCuts = [
     { id: 'done-prev', slitterId: 's1', planDate: '2026-06-10', status: 'Завершена', sequence: 1, startedAt: '2026-06-10 08:00:00' },
     { id: 'wait-today', slitterId: 's1', planDate: '2026-06-11', status: 'Ожидает', sequence: 2, startedAt: '' },
@@ -137,13 +138,11 @@ var queueCuts = [
     { id: 'done-today', slitterId: 's1', planDate: '2026-06-11', status: 'Завершена', sequence: 1, startedAt: '2026-06-11 07:00:00' },
     { id: 'other-slitter', slitterId: 's2', planDate: '2026-06-11', status: 'Ожидает', sequence: 1, startedAt: '' }
 ];
-var hiddenDoneQueue = core.prepareCutQueue(queueCuts, { slitterId: 's1', date: '2026-06-11', includeDone: false });
-assertEqual(hiddenDoneQueue.cuts.map(function(c) { return c.id; }), ['wait-today', 'run-today'],
-    'prepareCutQueue filters by slitter/date and hides completed by default');
-assertEqual(hiddenDoneQueue.firstOpenCutId, 'wait-today',
-    'prepareCutQueue selects the first unstarted waiting cut');
-assertEqual(core.prepareCutQueue(queueCuts, { slitterId: 's1', date: '2026-06-11', includeDone: true }).cuts.map(function(c) { return c.id; }),
-    ['wait-today', 'run-today', 'done-today'], 'prepareCutQueue shows completed when requested');
+var q3646 = core.prepareCutQueue(queueCuts, { slitterId: 's1', date: '2026-06-11' });
+assertEqual(q3646.cuts.map(function(c) { return c.id; }), ['done-today', 'wait-today', 'run-today'],
+    'prepareCutQueue #3646: фильтр по станку/дате; завершённая (Очередность 1) остаётся на своём месте, не в конце и не скрыта');
+assertEqual(q3646.firstOpenCutId, 'wait-today',
+    'prepareCutQueue: первая открытая = первая НЕ завершённая по очереди (завершённую пропускаем)');
 
 // ── открытая смена: последняя отметка пользователя за день должна быть началом, не концом ──
 assertEqual(core.hasOpenShift([
@@ -214,9 +213,25 @@ var blockedCuts = [
     { id: 'c2', slitterId: 's1', planDate: '2026-06-11', status: 'Ожидает', sequence: 2, startedAt: '' },
     { id: 'c3', slitterId: 's1', planDate: '2026-06-11', status: 'Ожидает', sequence: 3, startedAt: '' }
 ];
-var blockedQueue = core.prepareCutQueue(blockedCuts, { slitterId: 's1', date: '2026-06-11', includeDone: false });
+var blockedQueue = core.prepareCutQueue(blockedCuts, { slitterId: 's1', date: '2026-06-11' });
 assertEqual(blockedQueue.firstOpenCutId, 'c1', '#3459 only first waiting cut is firstOpenCutId');
 assertEqual(blockedQueue.cuts.length, 3, '#3459 all three waiting cuts are in the queue (UI disables c2, c3)');
+
+// ── #3646: cutQueueTime — вторая строка карточки (начало–окончание). Время форматирует
+// formatClock (штамп → ЧЧ:ММ); сверяем композицию диапазона TZ-независимо. ──
+var t808 = String(Math.floor(Date.UTC(2026, 5, 11, 8, 8, 0) / 1000));
+var t855 = String(Math.floor(Date.UTC(2026, 5, 11, 8, 55, 0) / 1000));
+assertEqual(core.cutQueueTime({ startedAt: t808, finishedAt: t855 }),
+    core.formatClock(t808) + ' – ' + core.formatClock(t855),
+    'cutQueueTime #3646: завершённая → «начало – окончание»');
+assertEqual(core.cutQueueTime({ startedAt: t808, finishedAt: '' }),
+    core.formatClock(t808) + ' – …',
+    'cutQueueTime #3646: начата, не завершена → «начало – …»');
+assertEqual(core.cutQueueTime({ startedAt: '', planDate: t808 }),
+    core.formatClock(t808),
+    'cutQueueTime #3646: не начата → плановый старт (planDate)');
+assertEqual(core.cutQueueTime({ startedAt: '', planDate: '' }),
+    '', 'cutQueueTime #3646: нет времён → пусто');
 
 // ── #3459: verify new EVENT_TYPES include Пропуск and Отмена ──
 assertEqual(core.EVENT_TYPES.indexOf('Пропуск') >= 0, true, '#3459 EVENT_TYPES includes Пропуск');

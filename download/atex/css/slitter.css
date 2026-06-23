@@ -120,6 +120,12 @@
 .atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .atex-sl-cut-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-sub { font-size: 12px; color: var(--sl-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* #3646: карточка списка — № (жирный) + «Вид сырья / Намотка / Метраж м * Резок»,
+   второй строкой — время начала–окончания. */
+.atex-sl-cut-line1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.atex-sl-cut-num { font-weight: 700; flex: none; }
+.atex-sl-cut-spec { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atex-sl-cut-time { font-size: 12px; color: var(--sl-muted); font-variant-numeric: tabular-nums; }
 .atex-sl-empty { padding: 14px; color: var(--sl-muted); }
 
 /* Главная область */
