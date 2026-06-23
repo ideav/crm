@@ -1282,6 +1282,25 @@ var schedCuts = [
 var sched = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut: { A:300, B:600 }, shiftStartMin: 480 });
 assertEqual(sched[0], { cutId:'A', startMin:482, finishMin:483.2, setupMin:2, durationMin:1.2 }, 'buildSchedule: 1-я резка (лидер 2, намотка 300→1.2)');
 assertEqual(sched[1], { cutId:'B', startMin:485.2, finishMin:489.2, setupMin:2, durationMin:4 }, 'buildSchedule: 2-я накопительно (идентична → переналадка 0)');
+
+// ── #3652: привязка резки к её рабочему дню «Даты план» (якорь) ──
+// dayOffsetFromBase: смещение календарного дня от базы (полночь дня фильтра «С»).
+process.env.TZ = process.env.TZ || 'UTC';
+var s3652Base = Date.UTC(2026, 4, 20, 0, 0, 0); // 20.05.2026 00:00 UTC
+var s3652TsSame = String(Math.floor(Date.UTC(2026, 4, 20, 8, 0, 0) / 1000));   // 20.05 08:00
+var s3652Ts10 = String(Math.floor(Date.UTC(2026, 4, 30, 8, 0, 0) / 1000));     // 30.05 08:00 (+10 дней)
+assertEqual(planning.dayOffsetFromBase(s3652TsSame, s3652Base), 0, 'dayOffsetFromBase #3652: тот же день → 0');
+assertEqual(planning.dayOffsetFromBase(s3652Ts10, s3652Base), 10, 'dayOffsetFromBase #3652: +10 дней (30.05 от 20.05)');
+assertEqual(planning.dayOffsetFromBase('', s3652Base), null, 'dayOffsetFromBase #3652: пустая дата → null (без якоря)');
+assertEqual(planning.dayOffsetFromBase(String(Math.floor(Date.UTC(2026, 4, 18, 8, 0, 0) / 1000)), s3652Base), -2, 'dayOffsetFromBase #3652: раньше базы → отрицательное');
+// buildSchedule с якорем: задание «30.05» (offset 10) встаёт на ДЕНЬ 10, а не под дату «С».
+var s3652Sched = planning.buildSchedule([
+  { id:'A', plannedRuns:1, planDate:s3652TsSame },
+  { id:'B', plannedRuns:1, planDate:s3652Ts10 }
+], { windPoints: pts, runLengthByCut: { A:600, B:600 }, shiftStartMin: 480, shiftEndMin: 990,
+     times: { BETWEEN_CUTS: 0 }, dayAnchorByCut: { B: 10 } });
+assertEqual(Math.floor(s3652Sched[0].startMin / 1440), 0, 'buildSchedule #3652: A (20.05) на дне 0');
+assertEqual(Math.floor(s3652Sched[1].startMin / 1440), 10, 'buildSchedule #3652: B (30.05) привязан к дню 10, а не лёг под дату «С»');
 var schedPlannedRuns = planning.buildSchedule([
   { id:'C', plannedRuns:3 }
 ], { windPoints: pts, runLengthByCut: { C:600 }, shiftStartMin: 480 });
