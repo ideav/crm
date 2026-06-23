@@ -553,21 +553,24 @@
         return pk >= fromK && pk <= toK;
     }
 
-    // #3475: задания и обеспечения выбранного дня — мишени кнопки «Удалить». Берём резки
-    // с непустой плановой датой именно этого дня (незавершённые); недатированные резки к
-    // дню не относим. Обеспечения — все, чьё cutId входит в набор резок дня. Чистая
-    // функция (без контроллера/сети), чтобы покрыть отбор тестами.
-    function dayDeletionTargets(cuts, supplies, selectedDate) {
-        var sd = String(selectedDate == null ? '' : selectedDate).trim();
-        if (sd === '') return { cuts: [], supplies: [] };
-        var dayKey = planDateDayKey(sd);
+    // #3475/#3622: задания и обеспечения для кнопки «Удалить». Берём резки с непустой
+    // плановой датой В ДИАПАЗОНЕ фильтра [dateFrom; dateTo] — тот же набор, что показан в
+    // очереди (isCutVisible, #3599). До #3622 отбирали только один день (dateFrom), из-за
+    // чего при выбранном диапазоне «Удалить» не находило видимых заданий, чья «Дата план»
+    // приходилась на другой день диапазона («нет заданий для удаления, хотя вот они»).
+    // Незавершённые, незафиксированные (#3508 п.3), датированные. Обеспечения — все, чьё
+    // cutId входит в набор. Чистая функция — покрывается тестами. dateTo пуст → один день
+    // dateFrom (без перелива в соседние).
+    function dayDeletionTargets(cuts, supplies, dateFrom, dateTo) {
+        var fromStr = String(dateFrom == null ? '' : dateFrom).trim();
+        var toStr = String(dateTo == null ? '' : dateTo).trim();
+        if (fromStr === '') return { cuts: [], supplies: [] };
+        if (toStr === '') toStr = fromStr;
         var dayCuts = (cuts || []).filter(function(c) {
             if (!c) return false;
-            if (String(c.status || '').trim() === 'Завершён') return false;
-            if (c.fixed) return false;   // #3508 п.3: зафиксированные задания при удалении дня пропускаем
-            var pd = String(c.planDate || '').trim();
-            if (pd === '') return false;
-            return planDateDayKey(pd) === dayKey;
+            if (c.fixed) return false;   // #3508 п.3: зафиксированные при удалении пропускаем
+            if (String(c.planDate || '').trim() === '') return false;   // недатированные к диапазону не относим
+            return isCutVisible(c, fromStr, toStr);   // #3599: тот же диапазон, что и видимость очереди (отсеивает «Завершён»)
         });
         var cutIds = {};
         dayCuts.forEach(function(c) { cutIds[String(c.id)] = true; });
@@ -639,6 +642,16 @@
         var s = String(dateStr == null ? '' : dateStr).trim();
         var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
         return m ? (m[3] + '.' + m[2] + '.' + m[1]) : s;
+    }
+
+    // #3622: подпись диапазона дат плана для тостов/подтверждений: «ДД.ММ.ГГГГ» для
+    // одного дня (или пустого «По»), «ДД.ММ.ГГГГ – ДД.ММ.ГГГГ» для диапазона.
+    function formatPlanDayRangeLabel(dateFrom, dateTo) {
+        var from = formatPlanDayLabel(dateFrom);
+        var to = formatPlanDayLabel(dateTo);
+        if (from === '') return to;
+        if (to === '' || to === from) return from;
+        return from + ' – ' + to;
     }
 
     // #3616: дата-заголовок рабочего дня очереди. baseMidnightMs — полночь дня 0 расписания
@@ -3288,6 +3301,8 @@
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
         dayDeletionTargets: dayDeletionTargets,
+        formatPlanDayLabel: formatPlanDayLabel,
+        formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
         fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
@@ -4658,15 +4673,20 @@
     AtexProductionPlanning.prototype.fixDayTasks = function() {
         var self = this;
         if (this.busy) return;
-        var dateStr = String(this.filter && this.filter.date || '').trim();
-        if (dateStr === '') {
+        var fromStr = String(this.filter && this.filter.date || '').trim();
+        if (fromStr === '') {
             this.notify('Выберите «Дату плана», чтобы зафиксировать задания дня', 'error');
             return;
         }
-        var dayKey = planDateDayKey(dateStr);
-        var dayCuts = (this.cuts || []).filter(function(c) { return planDateDayKey(c.planDate) === dayKey; });
+        var toStr = String(this.filter && this.filter.dateTo || '').trim();
+        if (toStr === '') toStr = fromStr;
+        // #3622: фиксируем задания всего ВИДИМОГО диапазона [С; По], а не одного дня (как и
+        // удаление). Незавершённые/датированные — тот же набор, что в очереди (isCutVisible).
+        var dayCuts = (this.cuts || []).filter(function(c) {
+            return c && String(c.planDate || '').trim() !== '' && isCutVisible(c, fromStr, toStr);
+        });
         var toFix = dayCuts.filter(function(c) { return !c.fixed; });
-        var dateLabel = formatPlanDayLabel(dateStr);
+        var dateLabel = formatPlanDayRangeLabel(fromStr, toStr);
         if (!dayCuts.length) { this.notify('Нет заданий за ' + dateLabel + ' для фиксации', 'info'); return; }
         if (!toFix.length) { this.notify('Все задания за ' + dateLabel + ' уже зафиксированы', 'info'); return; }
         self.setCutsFixed(toFix.map(function(c) { return c.id; }), true, {
@@ -4693,8 +4713,8 @@
             this.notify('Выберите «Дату плана», чтобы удалить задания дня', 'error');
             return;
         }
-        var targets = dayDeletionTargets(this.cuts, this.supplies, dateStr);
-        var dateLabel = formatPlanDayLabel(dateStr);
+        var targets = dayDeletionTargets(this.cuts, this.supplies, this.filter.date, this.filter.dateTo);
+        var dateLabel = formatPlanDayRangeLabel(this.filter.date, this.filter.dateTo);
         if (!targets.cuts.length) {
             this.notify('Нет заданий за ' + dateLabel + ' для удаления', 'info');
             return;
