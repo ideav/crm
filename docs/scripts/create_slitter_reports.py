@@ -157,12 +157,24 @@ def existing_reports():
             out[str(name).strip()] = str(rec.get('i'))
     return out
 
-# ── Создание одного отчёта ─────────────────────────────────────────────────────
+def report_col_names(qid):
+    # Имена уже существующих колонок отчёта (t100) — для идемпотентного дозаведения.
+    meta = _req('GET', f'report/{qid}?JSON')
+    cols = meta.get('columns') or meta.get('cols') or []
+    return set((c.get('name') or c.get('val')) for c in cols if (c.get('name') or c.get('val')))
+
+def add_column(qid, t100, t28, fn, fmt):
+    c = post(f'_m_new/28?JSON&up={qid}', {'t28': t28, 't100': t100})
+    cid = str(c.get('id') or c.get('obj'))
+    if fn:
+        post(f'_m_set/{cid}?JSON', {'t104': str(fn)})
+    if fmt:
+        post(f'_m_set/{cid}?JSON', {'t84': fmt})
+    return cid
+
+# ── Создание/доводка одного отчёта (идемпотентно на уровне колонок) ─────────────
 def build_report(name, spec, existing):
     master = spec['master']
-    if name in existing:
-        print(f'  ∙ {name}: уже существует (queryId={existing[name]}) — пропускаю')
-        return existing[name]
     plan = []  # (t100, t28, t104, t84)
     for t100, src, fn, fmt in spec['cols']:
         if 'table' in src:
@@ -174,6 +186,21 @@ def build_report(name, spec, existing):
                 print(f'      ~ колонка {t100}: реквизит «{src["req"]}» не найден (optional) — пропущена')
                 continue
         plan.append((t100, t28, fn, fmt))
+
+    if name in existing:
+        qid = existing[name]
+        have = set() if DRY else report_col_names(qid)
+        missing = [p for p in plan if p[0] not in have]
+        print(f'  ∙ {name}: уже существует (queryId={qid}); колонок в спецификации={len(plan)}, недостающих={len(missing)}')
+        for t100, t28, fn, fmt in missing:
+            extra = (f' t104={fn}' if fn else '') + (f' t84={fmt}' if fmt else '')
+            print(f'      + {t100:20} t28={t28}{extra}')
+            if not DRY:
+                add_column(qid, t100, t28, fn, fmt)
+        if missing and not DRY:
+            print(f'      ✓ {name}: добавлено колонок {len(missing)}')
+        return qid
+
     print(f'  ∙ {name}: мастер={find_table(master).get("val")} ({table_id(master)}), колонок={len(plan)}')
     for t100, t28, fn, fmt in plan:
         extra = (f' t104={fn}' if fn else '') + (f' t84={fmt}' if fmt else '')
@@ -184,12 +211,7 @@ def build_report(name, spec, existing):
     qid = str(q.get('id') or q.get('obj'))
     print(f'      → queryId={qid}')
     for t100, t28, fn, fmt in plan:
-        c = post(f'_m_new/28?JSON&up={qid}', {'t28': t28, 't100': t100})
-        cid = str(c.get('id') or c.get('obj'))
-        if fn:
-            post(f'_m_set/{cid}?JSON', {'t104': str(fn)})
-        if fmt:
-            post(f'_m_set/{cid}?JSON', {'t84': fmt})
+        add_column(qid, t100, t28, fn, fmt)
     print(f'      ✓ {name} создан')
     return qid
 
