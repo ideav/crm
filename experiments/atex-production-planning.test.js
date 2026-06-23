@@ -1329,11 +1329,11 @@ var segDays3401 = planning.splitMachineQueue([{ id:'A' }],
 assertEqual(segDays3401.map(function(s){ return { day:s.dayOffset, runs:s.runs }; }),
     [{ day:0, runs:3 }, { day:1, runs:2 }],
     'splitMachineQueue #3401: проход = 5+5=10 мин → в окно 30 мин влезает 3 прохода, остаток на след. день');
-// #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
-// длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
+// #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00).
+// #3635 п.4: минуты окна округляем ВВЕРХ — setup(2)+12.5 = 14.5 → 15 (как диапазон по часам).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
-    '⏱ 08:00 – 08:15 · 14.5 мин',
-    'formatScheduleLine #3262: окно от начала setup; длительность = setup + резка');
+    '⏱ 08:00 – 08:15 · 15 мин',
+    'formatScheduleLine #3262/#3635: окно от начала setup; минуты вверх (14.5 → 15)');
 assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationMin:0 }, 0, true),
     '⏱ ошибка: нет метража прохода; длительность не рассчитана',
     'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
@@ -1756,8 +1756,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
             'runGenerateCuts #3215: t24308 пишет Очередность при создании');
-        assertEqual(cutPost.fields.t26584, 5.9,
-            'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
+        assertEqual(cutPost.fields.t26584, 6,
+            'runGenerateCuts #3223/#3635: t26584 пишет Длительность, минут целой ВВЕРХ (5.9 → 6)');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
             'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
         assertEqual(cutPost.fields.t27172, 'OUT',
@@ -2132,6 +2132,10 @@ function runApplySplitPlanTest() {
     controller.reload = function() { return Promise.resolve(); };
     controller.render = function() {};
     controller.notify = function() {};
+    // #3635 п.3: applySplitPlan теперь показывает прогресс — мокаем заглушками (без DOM).
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
     controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({ obj: 'newB' }); };
     var ops = {
         updates: [{ cutId: 'A', sequence: 1, planStartTs: 1000, plannedRuns: 10 }],
@@ -2305,6 +2309,31 @@ assertEqual(ops3421.updates.slice().sort(function(a, b) { return a.sequence - b.
     ['B', 'C', 'A'], 'planCutOperations #3421: пересборка переставляет 6,16,16 → 16,16,6 (ножи убывают)');
 assertEqual(ops3421.creates, [], 'planCutOperations #3421: один день, без переноса');
 assertEqual(ops3421.deletes, [], 'planCutOperations #3421: без удалений');
+
+// ── #3635 п.1/п.2: preserveOrder сортирует ДЕНЬ-первым, затем по «Очередности» ──
+// «Очередность» сбрасывается на каждый день; сортировка ТОЛЬКО по ней перемешивала дни:
+// задание дня D+1 (очередь 1) вставало перед фольгой дня D (очередь 2), фольга всплывала
+// в начало дня и ломала порядок ножей (#1), а вид после генерации расходился с видом
+// после перезагрузки, где groupBySlitter сортирует день-первым (#2).
+function cut3635(id, dayTs, seq, isFoil) {
+    // materialId уникален у каждой резки — иначе mergeContinuationChains (#3280) сольёт их
+    // как сегменты одной логической резки (одинаковая «подпись продолжения»).
+    return { id: id, slitter: { id: 'm5' }, materialId: 'mat-' + id, winding: 'OUT',
+        knifeWidths: [100], knifeCount: 1, plannedRuns: 1, isFoil: !!isFoil,
+        sequence: seq, planDate: String(dayTs) };
+}
+var d1ts = 1780963200, d2ts = 1780963200 + 86400;
+var ops3635 = planning.planCutOperations(
+    // вход намеренно перемешан по дням (как могло прийти из groupBySlitter до фикса)
+    [ cut3635('d2a', d2ts, 1, false), cut3635('d1foil', d1ts, 2, true),
+      cut3635('d1a', d1ts, 1, false), cut3635('d2b', d2ts, 2, false) ],
+    { preserveOrder: true, perPassByCut: { d2a: 1, d1foil: 1, d1a: 1, d2b: 1 },
+      dayStartMin: 0, dayEndMin: 10000, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: d1ts * 1000 }
+);
+assertEqual(
+    ops3635.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
+    ['d1a', 'd1foil', 'd2a', 'd2b'],
+    'planCutOperations #3635: preserveOrder день-первым — день1 (вкл. фольгу очередь 2) ПЕРЕД днём2, без перемешивания');
 
 // ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
 // Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
