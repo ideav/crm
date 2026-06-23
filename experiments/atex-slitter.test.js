@@ -429,4 +429,51 @@ var scD = core.shiftContinuation(scCuts, scCuts[3]);
 assertEqual(scD.isLast, true, 'shiftContinuation: D — последняя 30-го');
 assertEqual(scD.nextCut, null, 'shiftContinuation: нет следующего дня → nextCut null');
 
+// ── #3674: парсеры защищённых отчётов слиттера (report/ → те же формы, что object/) ──
+// rowsToSlitters: report/slitters_list → { id, label }
+var sl = core.rowsToSlitters([
+    { slitter_id: '1277', slitter_name: 'Станок 1' },
+    { slitter_id: '1277', slitter_name: 'Станок 1' },   // дубль (N:M стоп-лист) → схлопнуть
+    { slitter_id: '1279', slitter_name: '' },           // без имени → «Слиттер #id»
+    { slitter_id: '', slitter_name: 'мусор' }            // без id → отброшен
+]);
+assertEqual(sl, [
+    { id: '1277', label: 'Станок 1' },
+    { id: '1279', label: 'Слиттер #1279' }
+], 'rowsToSlitters: дедуп по id / фолбэк имени / без id отброшен');
+assertEqual(core.rowsToSlitters([]), [], 'rowsToSlitters: пусто → []');
+
+// rowsToCuts: report/slitter_cuts → дескриптор резки (DATETIME — unix-штамп секунд)
+var cuts3674 = core.rowsToCuts([{
+    cut_id: '90158', cut_plan_date: '1780203600', cut_slitter_id: '1282', cut_slitter: 'Станок 3',
+    cut_batch_id: '777', cut_batch: '1781038800', cut_sequence: '1', cut_planned_runs: '1',
+    cut_run_length: '600.00', cut_started: '1780253146', cut_in_work: 'X', cut_finished: '',
+    cut_winding: 'OUT', cut_material_id: '55', cut_material: 'MWR116L', cut_material_width: '891.00'
+}]);
+assertEqual(cuts3674.length, 1, 'rowsToCuts: одна строка → одна резка');
+assertEqual(cuts3674[0].id, '90158', 'rowsToCuts: id ← cut_id');
+assertEqual(cuts3674[0].label, core.cutTitle('1780203600'), 'rowsToCuts: label = cutTitle(plan_date)');
+assertEqual(cuts3674[0].status, 'Ожидает', 'rowsToCuts: статус по умолчанию = Ожидает (доберётся из событий)');
+assertEqual(cuts3674[0].slitterId, '1282', 'rowsToCuts: slitterId ← cut_slitter_id');
+assertEqual(cuts3674[0].batchId, '777', 'rowsToCuts: batchId ← cut_batch_id');
+assertEqual(cuts3674[0].planDate, '1780203600', 'rowsToCuts: planDate ← cut_plan_date (штамп)');
+assertEqual(cuts3674[0].runLength, '600.00', 'rowsToCuts: runLength ← cut_run_length');
+assertEqual(cuts3674[0].winding, 'OUT', 'rowsToCuts: winding ← cut_winding');
+assertEqual(cuts3674[0].materialId, '55', 'rowsToCuts: materialId ← cut_material_id');
+assertEqual(cuts3674[0].material, 'MWR116L', 'rowsToCuts: material ← cut_material');
+assertEqual(cuts3674[0].materialWidthMm, 891, 'rowsToCuts: materialWidthMm ← cut_material_width (число)');
+assertEqual(core.rowsToCuts([{ cut_plan_date: '1', cut_slitter_id: '1' }]), [], 'rowsToCuts: без cut_id → отброшено');
+
+// rowsToShiftEvents: report/slitter_shift_events → события (новые сверху), cutId ← event_cut_id
+var ev3674 = core.rowsToShiftEvents([
+    { event_id: '1', event_when: '1780057598', event_type: 'Начало смены', event_cut_id: '', event_user_id: '456', event_user: 'ateh', event_value: '', event_notes: 'Станок 1' },
+    { event_id: '2', event_when: '1780058141', event_type: 'Начало резки', event_cut_id: '89694', event_user_id: '456', event_user: 'ateh', event_value: '', event_notes: '' }
+]);
+assertEqual(ev3674.map(function(e){ return e.id; }), ['2', '1'], 'rowsToShiftEvents: сортировка по when убыв. (новые сверху)');
+assertEqual(ev3674[0].cutId, '89694', 'rowsToShiftEvents: cutId ← event_cut_id');
+assertEqual(ev3674[1].cutId, null, 'rowsToShiftEvents: пустой event_cut_id → null');
+assertEqual(ev3674[0].type, 'Начало резки', 'rowsToShiftEvents: type ← event_type');
+assertEqual(ev3674[0].userId, '456', 'rowsToShiftEvents: userId ← event_user_id');
+assertEqual(core.deriveCutStatus(ev3674[0].type, {}), 'В работе', 'rowsToShiftEvents+deriveCutStatus: «Начало резки» → В работе');
+
 console.log('\n' + passed + ' assertions passed');

@@ -7,13 +7,16 @@
 // Решение задачи ideav/crm#2915 (часть #2903). Правила разработки рабочих мест —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.5.
 //
-// На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): статус/счётчики/погонаж/брак — `_m_set/{резкаId}`; событие —
-// `_m_new/{Событие смены}`; список резок строится из `object/{Задание в производство}/`
-// с фильтром по выбранным слиттеру/дате. ID таблиц и реквизитов не хардкодятся: они
-// берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
-// разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
-// в объём этой задачи не входит.
+// Запись данных идёт напрямую командами `_m_*` (#2903): статус/счётчики/погонаж/брак
+// — `_m_set/{резкаId}`; событие — `_m_new/{Событие смены}`. ID таблиц и реквизитов не
+// хардкодятся: берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
+// разделы 3 и 6).
+// #3674: чтения переведены на защищённый слой `report/` — slitter_cuts (очередь
+// станка, FR_cut_slitter_id), slitter_shift_events (события), slitters_list (станки);
+// партии — material_batches (#3460). Разбор строк отчётов — чистые core.rowsTo*. На
+// случай отсутствия отчёта в сборке у каждого чтения тихий фолбэк на `object/`
+// (loadCutsFromTable / loadShiftEventsFromTable / loadSlittersFromTable). Отчёты
+// заводит docs/scripts/create_slitter_reports.py.
 //
 // Чистое ядро (цепочка статусов, FIFO-подбор партий, списание остатка, погонаж
 // из счётчиков, формат даты события) вынесено в объект `core` и экспортируется
@@ -693,6 +696,74 @@
         });
     }
 
+    // #3674: разбор защищённых отчётов слиттера (взамен сырых object/ + клиентских
+    // джойнов). Имена колонок — из report/slitter_cuts (80981), slitter_shift_events
+    // (91520), slitters_list (81051). DATETIME-поля приходят unix-штампом (секунды) —
+    // их понимают cutTitle/humanizeLabel/cutQueueTime/dateKey/eventWhenSeconds.
+
+    // Станки: report/slitters_list → { id, label } (как старый object/Слиттер).
+    // Дедуп по id: отчёт джойнит стоп-лист сырья (N:M) и размножает строки станка.
+    function rowsToSlitters(rows) {
+        var seen = {};
+        var out = [];
+        (rows || []).forEach(function(row) {
+            var id = firstField(row, ['slitter_id', 'id', 'i']);
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            out.push({ id: id, label: firstField(row, ['slitter_name', 'name']) || ('Слиттер #' + id) });
+        });
+        return out;
+    }
+
+    // Резки: report/slitter_cuts → дескриптор резки той же формы, что давал
+    // object/-разбор loadCuts. Дополнительно из отчёта берём материал и ширину
+    // (cut_material*/cut_material_width) — раньше резолвились через findBatch/materialWidths.
+    function rowsToCuts(rows) {
+        return (rows || []).map(function(row) {
+            var id = firstField(row, ['cut_id', 'id']);
+            var planDate = firstField(row, ['cut_plan_date']);
+            return {
+                id: id,
+                label: cutTitle(planDate || id),
+                status: STATUSES[0], // фактический статус доберётся из событий (applyEventStatuses)
+                inWork: firstField(row, ['cut_in_work']),
+                finishedAt: firstField(row, ['cut_finished']),
+                slitterId: firstField(row, ['cut_slitter_id']) || null,
+                slitter: firstField(row, ['cut_slitter']),
+                batchId: firstField(row, ['cut_batch_id']) || null,
+                batch: firstField(row, ['cut_batch']),
+                planDate: planDate,
+                sequence: firstField(row, ['cut_sequence']),
+                plannedRuns: firstField(row, ['cut_planned_runs']),
+                runLength: firstField(row, ['cut_run_length']),
+                startedAt: firstField(row, ['cut_started']),
+                winding: firstField(row, ['cut_winding']),
+                materialId: firstField(row, ['cut_material_id']) || null,
+                material: firstField(row, ['cut_material']),
+                materialWidthMm: toNumber(firstField(row, ['cut_material_width']))
+            };
+        }).filter(function(c) { return c.id; });
+    }
+
+    // События смены: report/slitter_shift_events → та же форма, что parseEventRows
+    // (новые сверху). cutId — из event_cut_id (ref на задание, 16415).
+    function rowsToShiftEvents(rows) {
+        return (rows || []).map(function(row) {
+            return {
+                id: firstField(row, ['event_id', 'id']),
+                when: firstField(row, ['event_when', 'when']),
+                type: firstField(row, ['event_type']),
+                cutId: firstField(row, ['event_cut_id']) || null,
+                userId: firstField(row, ['event_user_id']) || null,
+                user: firstField(row, ['event_user']),
+                value: firstField(row, ['event_value']),
+                notes: firstField(row, ['event_notes'])
+            };
+        }).sort(function(a, b) {
+            return String(b.when).localeCompare(String(a.when)); // новые сверху
+        });
+    }
+
     // #3557: статус резки выводится из последнего её события смены (приоритет) и
     // подкрепляется атрибутами «Начато»/«В работе»(bool)/«Закончено». Возвращает
     // один из: Ожидает | В работе | Наладка | Перерыв | Завершена.
@@ -787,6 +858,9 @@
         cutTitle: cutTitle,
         humanizeLabel: humanizeLabel,
         rowsToActiveBatches: rowsToActiveBatches,
+        rowsToSlitters: rowsToSlitters,     // #3674
+        rowsToCuts: rowsToCuts,             // #3674
+        rowsToShiftEvents: rowsToShiftEvents, // #3674
         isForeignWarehouse: isForeignWarehouse,
         // #3460: раскладка ножей (визуализация)
         totalKnives: totalKnives,
@@ -1011,7 +1085,16 @@
         });
     };
 
+    // #3674: станки из защищённого отчёта report/slitters_list (81051) вместо
+    // сырого object/Слиттер. Тихий фолбэк на прямое чтение, если отчёта нет в сборке.
     AtexSlitter.prototype.loadSlitters = function() {
+        var self = this;
+        return this.getJson('report/slitters_list?JSON_KV&LIMIT=0,1000').then(function(rows) {
+            self.slitters = core.rowsToSlitters(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+        }).catch(function() { return self.loadSlittersFromTable(); });
+    };
+
+    AtexSlitter.prototype.loadSlittersFromTable = function() {
         var self = this;
         var meta = this.meta.slitter;
         if (!meta) { this.slitters = []; return Promise.resolve(); }
@@ -1113,7 +1196,24 @@
         cut.materialWidthMm = cut.materialId ? (this.materialWidths[String(cut.materialId)] || 0) : 0;
     };
 
+    // #3674: очередь станка из защищённого отчёта report/slitter_cuts (80981) вместо
+    // сырого object/. Отчёт фильтруем по станку (FR_cut_slitter_id) — он рассчитан на
+    // этот фильтр (без него тяжёлый), а список и так станко-зависим (visibleCuts). Без
+    // выбранного станка резки не нужны (renderCuts просит выбрать станок). Материал и
+    // ширину отдаёт сам отчёт (cut_material*/cut_material_width). На отсутствие отчёта
+    // — тихий фолбэк на прямое чтение таблицы (loadCutsFromTable).
     AtexSlitter.prototype.loadCuts = function() {
+        var self = this;
+        var sid = this.selectedSlitterId;
+        if (!sid) { this.cuts = []; return Promise.resolve(); }
+        return this.getJson('report/slitter_cuts?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,2000')
+            .then(function(rows) {
+                self.cuts = core.rowsToCuts(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+            })
+            .catch(function() { return self.loadCutsFromTable(); });
+    };
+
+    AtexSlitter.prototype.loadCutsFromTable = function() {
         var self = this;
         var meta = this.meta.cut;
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
@@ -1323,18 +1423,34 @@
         });
     };
 
+    // #3674: события смены из защищённого отчёта report/slitter_shift_events (91520)
+    // вместо сырого object/. Разобранные события раскладываем общим хвостом
+    // applyLoadedEvents. Тихий фолбэк на прямое чтение (loadShiftEventsFromTable).
     AtexSlitter.prototype.loadShiftEvents = function() {
         var self = this;
+        return this.getJson('report/slitter_shift_events?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            self.applyLoadedEvents(core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []));
+        }).catch(function() { return self.loadShiftEventsFromTable(); });
+    };
+
+    // Общий хвост: разложить разобранные события (всё/за смену/текущей резки) и
+    // пересчитать статусы резок.
+    AtexSlitter.prototype.applyLoadedEvents = function(all) {
+        var self = this;
+        self.allEvents = all; // #3557: все события (для вывода статуса резок)
+        self.shiftEvents = self.filterShiftEvents(all);
+        self.events = self.currentCutId
+            ? self.shiftEvents.filter(function(ev) { return String(ev.cutId || '') === String(self.currentCutId); })
+            : [];
+        self.applyEventStatuses();
+    };
+
+    AtexSlitter.prototype.loadShiftEventsFromTable = function() {
+        var self = this;
         var meta = this.meta.event;
-        if (!meta) { this.shiftEvents = []; this.events = []; return Promise.resolve(); }
+        if (!meta) { this.shiftEvents = []; this.events = []; this.allEvents = []; return Promise.resolve(); }
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            var all = self.parseEventRows(rows);
-            self.allEvents = all; // #3557: все события (для вывода статуса резок)
-            self.shiftEvents = self.filterShiftEvents(all);
-            self.events = self.currentCutId
-                ? self.shiftEvents.filter(function(ev) { return String(ev.cutId || '') === String(self.currentCutId); })
-                : [];
-            self.applyEventStatuses();
+            self.applyLoadedEvents(self.parseEventRows(rows));
         });
     };
 
@@ -1463,7 +1579,9 @@
             self.currentCutId = null;
             self.currentCut = null;
             self.selectedBatchIds = [];
-            self.loadShiftEvents().then(function() { self.render(); });
+            // #3674: report/slitter_cuts фильтруется по станку → при смене станка
+            // перезагружаем резки (раньше грузились один раз, фильтровал visibleCuts).
+            self.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
         });
 
         box.appendChild(field('Дата', dateInp));
@@ -1509,7 +1627,7 @@
             // #3646: карточка списка — № + «Вид сырья / Намотка / Метраж м * Резок» (стр. 1)
             // и время начала–окончания (стр. 2). Вид сырья — из «Партии сырья» (Вид сырья).
             var batch = self.findBatch(cut.batchId);
-            var material = (batch && batch.materialLabel) || cut.batch || '—';
+            var material = (batch && batch.materialLabel) || cut.material || cut.batch || '—'; // #3674: cut.material из отчёта
             var runLen = core.toNumber(cut.runLength);
             var runsN = core.toNumber(cut.plannedRuns);
             var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
