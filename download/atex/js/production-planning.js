@@ -7490,7 +7490,17 @@
             self.renderLink();
         }
         dateFrom.addEventListener('change', function() { self.filter.date = dateFrom.value; applyDateRange(); });
-        dateTo.addEventListener('change', function() { self.filter.dateTo = dateTo.value; applyDateRange(); });
+        dateTo.addEventListener('change', function() {
+            self.filter.dateTo = dateTo.value;
+            // При смене «По»: если «С» оказалась ПОЗЖЕ «По» — подтягиваем «С» к «По» (не
+            // оставляем перевёрнутый диапазон). renderQueue перерисует поле «С» новым значением.
+            var to = String(self.filter.dateTo || '').trim();
+            var from = String(self.filter.date || '').trim();
+            if (to !== '' && from !== '' && planDateDayKey(from) > planDateDayKey(to)) {
+                self.filter.date = self.filter.dateTo;
+            }
+            applyDateRange();
+        });
         // #3508 п.1 / #3599: стрелки ‹/› двигают ВЕСЬ диапазон на ±1 день (ширина окна сохраняется).
         function shiftFilterDate(delta) {
             self.filter.date = shiftPlanDate(self.filter.date || todayISO(), delta);
