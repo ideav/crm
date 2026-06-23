@@ -225,8 +225,8 @@ assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
     [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
     'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
@@ -262,9 +262,9 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
     { id: '23370', number: '1780837653', length: 700, visible: true }
 ], 'rowsToPlanning #3209/#3242: timestamp cut_plan_date, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
-    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', footage: 800, rolls: 6 },
-    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', footage: 600, rolls: 3 }
-], 'rowsToPlanning #3209: carries supply footage/rolls + order_no (#3624) from report rows');
+    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 600, rolls: 3 }
+], 'rowsToPlanning #3209: carries supply footage/rolls + order_no (#3624) + position dims (#3633) from report rows');
 assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
     'cutRunLength #3209: cut_length is available as run-length fallback');
 assertEqual(planning.supplyFootage(issue3209Plan.supplies[0], { '23352': 0 }), 800,
@@ -315,14 +315,17 @@ assertEqual(planning.formatLinkedPositionLabel(
 assertEqual(planning.formatLinkedPositionLabel(undefined, '777', 3, 0),
     'позиция #777 · 3 рул.',
     'formatLinkedPositionLabel #3406: нет позиции в списке → fallback «позиция #N»');
-// #3624: позиция выпала из активного positions_list (другая дата) — номер заказа берём
-// из обеспечения (cut_planning.order_no), чтобы не терять «<заказ>/<позиция>».
+// #3633: позиция выпала из активного positions_list (другая дата/закрытый заказ) — подпись
+// собираем из данных обеспечения: номер заказа + габариты позиции, а НЕ id записи позиции.
+assertEqual(planning.formatLinkedPositionLabel(undefined, '84667', 0, 900, '3335', 25, 900),
+    '3335 · 25мм * 900м',
+    'formatLinkedPositionLabel #3633: позиции нет в списке → «<заказ> · <ширина>мм * <длина>м» (без id записи), метраж не дублируется');
 assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, '3690'),
-    '3690/73636 · 450 м',
-    'formatLinkedPositionLabel #3624: позиции нет в списке, но order_no обеспечения даёт «3690/73636»');
+    '3690 · 450 м',
+    'formatLinkedPositionLabel #3633: есть order_no, но нет габаритов → «<заказ>» + метраж (без висячего id)');
 assertEqual(planning.formatLinkedPositionLabel(undefined, '73636', 0, 450, ''),
     'позиция #73636 · 450 м',
-    'formatLinkedPositionLabel #3624: нет ни позиции, ни order_no → прежний фолбэк «позиция #N»');
+    'formatLinkedPositionLabel #3633: нет ни позиции, ни order_no → прежний фолбэк «позиция #N»');
 assertEqual(planning.formatLinkedPositionLabel(
     { id: 'p1', label: 'АТХ-3002/1 · 25мм * 450м', qty: 70 }, 'p1', 12, 0, '9999'),
     'АТХ-3002/1 · 25мм * 450м · 70 шт. · 12 рул.',
@@ -1354,9 +1357,11 @@ assertEqual(planning.setupTaskIdSet([ p5cut('P', '3', 2), p5cut('Q', '3', 3) ]),
     'setupTaskIdSet #3635 п.5: цепочка без 0-проходных — пусто');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
 // длительность = setup(2)+12.5 = 14.5 (диапазон совпадает с числом минут).
+// #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00).
+// #3635 п.4: минуты окна округляем ВВЕРХ — setup(2)+12.5 = 14.5 → 15 (как диапазон по часам).
 assertEqual(planning.formatScheduleLine(schedStoredDuration[0], 0, true),
-    '⏱ 08:00 – 08:15 · 14.5 мин',
-    'formatScheduleLine #3262: окно от начала setup; длительность = setup + резка');
+    '⏱ 08:00 – 08:15 · 15 мин',
+    'formatScheduleLine #3262/#3635: окно от начала setup; минуты вверх (14.5 → 15)');
 assertEqual(planning.formatScheduleLine({ startMin:482, finishMin:482, durationMin:0 }, 0, true),
     '⏱ ошибка: нет метража прохода; длительность не рассчитана',
     'formatScheduleLine #3229: нулевая длительность без метража отображается как ошибка');
@@ -1779,8 +1784,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
         assertEqual(cutPost.fields.t24308, 1,
             'runGenerateCuts #3215: t24308 пишет Очередность при создании');
-        assertEqual(cutPost.fields.t26584, 5.9,
-            'runGenerateCuts #3223: t26584 пишет Длительность, минут при планировании');
+        assertEqual(cutPost.fields.t26584, 6,
+            'runGenerateCuts #3223/#3635: t26584 пишет Длительность, минут целой ВВЕРХ (5.9 → 6)');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
             'runGenerateCuts #3238: t26990 пишет Тайминг с деталями расчёта');
         assertEqual(cutPost.fields.t27172, 'OUT',
@@ -2155,6 +2160,10 @@ function runApplySplitPlanTest() {
     controller.reload = function() { return Promise.resolve(); };
     controller.render = function() {};
     controller.notify = function() {};
+    // #3635 п.3: applySplitPlan теперь показывает прогресс — мокаем заглушками (без DOM).
+    controller.showProgress = function() {};
+    controller.updateProgress = function() {};
+    controller.hideProgress = function() {};
     controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({ obj: 'newB' }); };
     var ops = {
         updates: [{ cutId: 'A', sequence: 1, planStartTs: 1000, plannedRuns: 10 }],
@@ -2328,6 +2337,31 @@ assertEqual(ops3421.updates.slice().sort(function(a, b) { return a.sequence - b.
     ['B', 'C', 'A'], 'planCutOperations #3421: пересборка переставляет 6,16,16 → 16,16,6 (ножи убывают)');
 assertEqual(ops3421.creates, [], 'planCutOperations #3421: один день, без переноса');
 assertEqual(ops3421.deletes, [], 'planCutOperations #3421: без удалений');
+
+// ── #3635 п.1/п.2: preserveOrder сортирует ДЕНЬ-первым, затем по «Очередности» ──
+// «Очередность» сбрасывается на каждый день; сортировка ТОЛЬКО по ней перемешивала дни:
+// задание дня D+1 (очередь 1) вставало перед фольгой дня D (очередь 2), фольга всплывала
+// в начало дня и ломала порядок ножей (#1), а вид после генерации расходился с видом
+// после перезагрузки, где groupBySlitter сортирует день-первым (#2).
+function cut3635(id, dayTs, seq, isFoil) {
+    // materialId уникален у каждой резки — иначе mergeContinuationChains (#3280) сольёт их
+    // как сегменты одной логической резки (одинаковая «подпись продолжения»).
+    return { id: id, slitter: { id: 'm5' }, materialId: 'mat-' + id, winding: 'OUT',
+        knifeWidths: [100], knifeCount: 1, plannedRuns: 1, isFoil: !!isFoil,
+        sequence: seq, planDate: String(dayTs) };
+}
+var d1ts = 1780963200, d2ts = 1780963200 + 86400;
+var ops3635 = planning.planCutOperations(
+    // вход намеренно перемешан по дням (как могло прийти из groupBySlitter до фикса)
+    [ cut3635('d2a', d2ts, 1, false), cut3635('d1foil', d1ts, 2, true),
+      cut3635('d1a', d1ts, 1, false), cut3635('d2b', d2ts, 2, false) ],
+    { preserveOrder: true, perPassByCut: { d2a: 1, d1foil: 1, d1a: 1, d2b: 1 },
+      dayStartMin: 0, dayEndMin: 10000, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: d1ts * 1000 }
+);
+assertEqual(
+    ops3635.updates.slice().sort(function(a, b) { return a.sequence - b.sequence; }).map(function(u) { return u.cutId; }),
+    ['d1a', 'd1foil', 'd2a', 'd2b'],
+    'planCutOperations #3635: preserveOrder день-первым — день1 (вкл. фольгу очередь 2) ПЕРЕД днём2, без перемешивания');
 
 // ── #3427: повторная раскладка УЖЕ разбитой цепочки идемпотентна ───────────────
 // Цепочка [A(день0, 10 проходов) → B(день1, 5 проходов)] уже разбита по дням.
