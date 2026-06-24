@@ -627,6 +627,26 @@
         return out;
     }
 
+    // #3691: id «Обеспечений» резки из УЖЕ ЗАГРУЖЕННЫХ supplies (this.supplies из cut_planning,
+    // у каждого есть cutId). Отчёт 81463 (cut→fulfillment) оказался ненадёжным (зависел от
+    // совпадения дат резки/Партии ГП/Обеспечения и возвращал пусто) → удаление резки слало
+    // _m_del, не сняв ссылки Обеспечений на Партии ГП → 409. Берём связи из состояния очереди,
+    // дедупликация по id, пустые/чужие пропускаем. Чистая функция — покрывается тестами.
+    function cutFulfillmentIds(supplies, cutId) {
+        var want = (cutId == null || cutId === '') ? null : String(cutId);
+        var seen = {};
+        var out = [];
+        (supplies || []).forEach(function(s) {
+            if (!s) return;
+            if (want != null && String(s.cutId == null ? '' : s.cutId) !== want) return;
+            var fid = (s.id == null) ? '' : String(s.id).trim();
+            if (fid === '' || fid === 'null' || seen[fid]) return;
+            seen[fid] = true;
+            out.push(fid);
+        });
+        return out;
+    }
+
     // Сообщение об ошибке из ответа API. Команды `_m_*` и отчёты при отказе отдают
     // `[{"error":"…"}]` (массив; см. my_die/api_dump в index.php) с HTTP-кодом 4xx,
     // успех — данные без ключа `error`. Разворачиваем обе формы (массив-обёртку и
@@ -3682,6 +3702,7 @@
         formatPlanDayLabel: formatPlanDayLabel,
         formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
         fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
+        cutFulfillmentIds: cutFulfillmentIds,             // #3691
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
@@ -5462,17 +5483,18 @@
         return name || day || ('#' + cut.id);
     }
 
-    // #3486: id всех «Обеспечений» резки отчётом 81463 (cut → fulfillment). Они
-    // ссылаются на «Партии ГП» резки; пока ссылки живы, _m_del резки вернёт 409
-    // (DeleteTreeRefsCount в index.php), поэтому удалять их нужно ДО самой резки.
-    // Возвращает Promise<массив id>. LIMIT с запасом — резок с тысячами связей нет.
+    // #3691: id всех «Обеспечений» резки — из УЖЕ ЗАГРУЖЕННЫХ this.supplies (cut_planning),
+    // НЕ из отчёта 81463 (cut→fulfillment). Они ссылаются на «Партии ГП» резки; пока ссылки
+    // живы, _m_del резки вернёт 409 (DeleteTreeRefsCount в index.php), поэтому удалять их нужно
+    // ДО самой резки. Отчёт 81463 оказался ненадёжным (зависел от совпадения дат резки/Партии
+    // ГП/Обеспечения и возвращал пусто) → резка падала на 409. Promise — для совместимости с
+    // вызовом deleteCutTask (асинхронный контракт сохраняем).
     AtexProductionPlanning.prototype.loadCutFulfillments = function(cutId) {
-        return this.getJson('report/81463?JSON_KV&LIMIT=0,1000&FR_cutID=' + encodeURIComponent(cutId))
-            .then(function(rows) { return fulfillmentIdsFromRows(rows, cutId); });
+        return Promise.resolve(cutFulfillmentIds(this.supplies || [], cutId));
     };
 
-    // #3486: кнопка «🗑» в карточке резки. Сначала тянем id «Обеспечений» резки
-    // (report/81463), показываем подтверждение с их числом, по согласию — удаляем.
+    // #3486: кнопка «🗑» в карточке резки. Сначала собираем id «Обеспечений» резки
+    // (#3691: из this.supplies), показываем подтверждение с их числом, по согласию — удаляем.
     AtexProductionPlanning.prototype.deleteCutTask = function(cut, cardEl) {
         var self = this;
         if (this.busy || !cut) return;
