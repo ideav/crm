@@ -100,7 +100,8 @@
         material: 'Вид сырья',   // #3688: ссылка на «Вид сырья» (95358→1069); пишется при планировании — нужна prev_cut_setup
         fixed: 'Зафиксировано',  // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
         knifeSetupMin: 'Наладка ножей, мин',      // #3698: расчётная наладка ножей (KNIFE), мин (id 96067)
-        materialWindingMin: 'Сырье/намотка, мин'  // #3698: расчётная смена сырья/намотки (MATERIAL_WINDING), мин (id 96069)
+        materialWindingMin: 'Сырье/намотка, мин', // #3698: расчётная смена сырья/намотки (MATERIAL_WINDING), мин (id 96069)
+        cutAndLeader: 'Резка и Лидер'             // #3700: намотка («Длительность, минут») + лидер (BETWEEN_CUTS × резок), мин (id 96778)
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -116,6 +117,8 @@
     // #3698: хранимые активности переналадки (отчёт cut_planning — добавить колонки на сервере).
     var CUT_KNIFE_SETUP_COLUMNS = ['cut_knife_setup_min', 'cut_knife_setup', 'cut_setup_knife_min'];
     var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
+    // #3700: хранимое «Резка и Лидер» (намотка + лидер), в отчёте cut_planning — поле cut_time.
+    var CUT_TIME_COLUMNS = ['cut_time', 'cut_cut_leader_min', 'cut_run_leader_min'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
     var CUT_WRITE_LABELS = {
@@ -949,6 +952,7 @@
                     // нужны для diff в persistCutSetupColumns (пишем только изменившиеся).
                     storedKnifeSetupMin: rowValue(row, CUT_KNIFE_SETUP_COLUMNS),
                     storedMaterialWindingMin: rowValue(row, CUT_MATERIAL_WINDING_COLUMNS),
+                    storedCutAndLeaderMin: rowValue(row, CUT_TIME_COLUMNS),   // #3700: «Резка и Лидер» (cut_time)
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
@@ -7143,8 +7147,9 @@
         }
     };
 
-    // #3698: пересчитать и сохранить активности переналадки каждой резки — «Наладка ножей,
-    // мин» (KNIFE) и «Сырье/намотка, мин» (MATERIAL_WINDING) — чтобы Гант (cut-gantt) и отчёты
+    // #3698/#3700: пересчитать и сохранить расчётные минуты каждой резки — «Наладка ножей,
+    // мин» (KNIFE), «Сырье/намотка, мин» (MATERIAL_WINDING) и «Резка и Лидер» (намотка + лидер) —
+    // чтобы Гант (cut-gantt) и отчёты
     // брали готовые минуты, а не пересчитывали по соседям. Порядок исполнения — по
     // «Очередности» в пределах станка (как orderCutsInGroup Ганта); первая резка — от текущей
     // заправки станка (prev_cut_setup), нет данных → настройка ножей с нуля. Пишет только
@@ -7157,8 +7162,10 @@
         if (!meta) return Promise.resolve();
         var knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
         var matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
-        if (!knifeReq && !matReq) return Promise.resolve();   // колонок ещё нет в таблице
+        var cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        if (!knifeReq && !matReq && !cutTimeReq) return Promise.resolve();   // колонок ещё нет в таблице
         var times = this.opTimes || DEFAULT_OP_TIMES;
+        var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
         var prevBySlitter = this.prevSetupBySlitter || {};
         var bySlitter = {};
         (this.cuts || []).forEach(function(c) {
@@ -7182,12 +7189,21 @@
             arr.forEach(function(c) {
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
                 var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
-                var curK = c.storedKnifeSetupMin, curM = c.storedMaterialWindingMin;
-                var haveK = curK != null && curK !== '', haveM = curM != null && curM !== '';
-                if (!haveK || !haveM || Math.round(stripNum(curK)) !== wantK || Math.round(stripNum(curM)) !== wantM) {
-                    updates.push({ cutId: c.id, knife: wantK, material: wantM });
+                // #3700: «Резка и Лидер» = намотка («Длительность, минут») + лидер
+                // (BETWEEN_CUTS × число резок цуга, cutLeaderRuns). Зависит только от самой резки.
+                var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
+                // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
+                // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
+                function changed(req, cur, val) {
+                    return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
+                }
+                if (changed(knifeReq, c.storedKnifeSetupMin, wantK)
+                    || changed(matReq, c.storedMaterialWindingMin, wantM)
+                    || changed(cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                    updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT });
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
+                    c.storedCutAndLeaderMin = String(wantT);
                 }
             });
         });
@@ -7198,6 +7214,7 @@
                 var fields = {};
                 if (knifeReq) fields['t' + knifeReq] = String(u.knife);
                 if (matReq) fields['t' + matReq] = String(u.material);
+                if (cutTimeReq) fields['t' + cutTimeReq] = String(u.cutTime);   // #3700
                 return self.post('_m_set/' + u.cutId + '?JSON', fields);
             });
         });

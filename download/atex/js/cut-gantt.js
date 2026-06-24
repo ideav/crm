@@ -109,6 +109,8 @@
     // производства»). Если отчёт их отдаёт — берём готовые минуты вместо пересчёта.
     var CUT_KNIFE_SETUP_COLUMNS = ['cut_knife_setup_min', 'cut_knife_setup', 'cut_setup_knife_min'];
     var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
+    // #3700: хранимое «Резка и Лидер» (намотка + лидер) — в cut_planning поле cut_time.
+    var CUT_TIME_COLUMNS = ['cut_time', 'cut_cut_leader_min', 'cut_run_leader_min'];
 
     // URL рабочего места «Планирование производства». Префикс пути = имя БД и
     // отличается между базами (на тест-базе /ateh/, в проде может быть иным), поэтому
@@ -349,8 +351,10 @@
         (cuts || []).forEach(function(cut) {
             var tr = cutTimeRange(cut);
             if (!tr) return;
-            // #3675 п.3: бар = [наладка][резка]; правый край сдвинут на время наладки.
-            var barEndMs = tr.endMs + cutSetupMin(cut).total * 60000;
+            // #3675 п.3 / #3700: бар = [наладка][резка+лидер]; правый край = старт + (наладка +
+            // резка/лидер) минут. Хранимый cut_time даёт точную длину сегмента резки+лидера
+            // (фолбэк — окно cutTimeRange, тогда формула эквивалентна прежней tr.endMs + наладка).
+            var barEndMs = tr.startMs + (cutBarMinutes(cut) + cutSetupMin(cut).total) * 60000;
             if (minMs == null || tr.startMs < minMs) minMs = tr.startMs;
             if (maxMs == null || barEndMs > maxMs) maxMs = barEndMs;
         });
@@ -421,6 +425,18 @@
         return { knife: knife, material: material, total: round3(knife + material) };
     }
 
+    // #3700: длительность сегмента «резка+лидер» бара, мин. У ЗАПЛАНИРОВАННЫХ резок берём
+    // хранимое «Резка и Лидер» (cut_time) — точную сумму намотки и лидера; нет значения
+    // (легаси/до миграции) → грубое окно cutTimeRange (как раньше). Начатые/завершённые —
+    // всегда фактическое окно (план уже не показываем, как и наладку в cutSetupMin). Чистая — тест.
+    function cutBarMinutes(cut) {
+        var tr = cutTimeRange(cut);
+        var winMin = tr ? (tr.endMs - tr.startMs) / 60000 : 0;
+        if (tr && tr.actualStartMs != null) return winMin;
+        if (cut && cut.cutTimeMin != null) return Math.max(0, stripNum(cut.cutTimeMin));
+        return winMin;
+    }
+
     // Текст бара (#3668 п.4): диапазон времени, например «11:19-11:23 (4 мин)».
     // #3680: подпись охватывает ВСЁ задание (наладка + резка), а не только резку.
     // Начало = левый край бара (tr.startMs, та же точка, что у строки .atex-cg-label-main);
@@ -441,8 +457,7 @@
     function cutBarSegments(cut, pxPerMin, minPx) {
         var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
         var floor = minPx > 0 ? minPx : GANTT_MIN_BAR_PX;
-        var tr = cutTimeRange(cut);
-        var cutMin = tr ? (tr.endMs - tr.startMs) / 60000 : 0;
+        var cutMin = cutBarMinutes(cut);   // #3700: намотка+лидер (cut_time) или окно cutTimeRange (фолбэк)
         var cutPx = Math.max(round3(cutMin * ppm), floor);
         var setup = cutSetupMin(cut);
         function segPx(min) { return min > 0 ? Math.max(round3(min * ppm), 3) : 0; }
@@ -475,6 +490,8 @@
         var setup = cutSetupMin(cut);
         if (setup.knife > 0) lines.push('Наладка ножей: ' + setup.knife + ' мин');
         if (setup.material > 0) lines.push('Смена сырья: ' + setup.material + ' мин');
+        // #3700: суммарное «Резка и Лидер» (если отчёт отдал cut_time).
+        if (cut && cut.cutTimeMin != null) lines.push('Резка и лидер: ' + Math.max(0, stripNum(cut.cutTimeMin)) + ' мин');
         if (tr.planMs != null) lines.push('План: ' + formatDateTimeMinute(new Date(tr.planMs)));
         if (tr.actualStartMs != null) lines.push('Старт факт: ' + formatDateTimeMinute(new Date(tr.actualStartMs)));
         if (tr.actualEndMs != null) lines.push('Финиш факт: ' + formatDateTimeMinute(new Date(tr.actualEndMs)));
@@ -560,6 +577,8 @@
                 // attachSetupMinutes предпочтёт их пересчёту по соседям. null → не сохранено.
                 storedKnifeMin: storedMin(row, CUT_KNIFE_SETUP_COLUMNS),
                 storedMaterialMin: storedMin(row, CUT_MATERIAL_WINDING_COLUMNS),
+                // #3700: «Резка и Лидер» (cut_time) — намотка + лидер, мин; null → не сохранено.
+                cutTimeMin: storedMin(row, CUT_TIME_COLUMNS),
                 slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) }
             };
             order.push(id);
@@ -893,6 +912,7 @@
         cutRowLabel: cutRowLabel,
         cutBarTime: cutBarTime,
         cutSetupMin: cutSetupMin,
+        cutBarMinutes: cutBarMinutes,   // #3700
         cutBarSegments: cutBarSegments,
         cutChangeoverMinutes: cutChangeoverMinutes,
         ganttPrevSetupFromRows: ganttPrevSetupFromRows,
