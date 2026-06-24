@@ -98,7 +98,9 @@
         winding: 'Тип намотки',
         leader: 'Лидер',         // #3569: ссылка на «Лидер» (82519); при планировании копируется из позиции
         material: 'Вид сырья',   // #3688: ссылка на «Вид сырья» (95358→1069); пишется при планировании — нужна prev_cut_setup
-        fixed: 'Зафиксировано'   // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
+        fixed: 'Зафиксировано',  // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
+        knifeSetupMin: 'Наладка ножей, мин',      // #3698: расчётная наладка ножей (KNIFE), мин (id 96067)
+        materialWindingMin: 'Сырье/намотка, мин'  // #3698: расчётная смена сырья/намотки (MATERIAL_WINDING), мин (id 96069)
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -111,6 +113,9 @@
     ];
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
     var CUT_TIMING_COLUMNS = ['cut_timing'];
+    // #3698: хранимые активности переналадки (отчёт cut_planning — добавить колонки на сервере).
+    var CUT_KNIFE_SETUP_COLUMNS = ['cut_knife_setup_min', 'cut_knife_setup', 'cut_setup_knife_min'];
+    var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
     var CUT_WRITE_LABELS = {
@@ -940,6 +945,10 @@
                     plannedRuns: rowNum(row, CUT_PLANNED_RUN_COLUMNS),
                     duration: rowNum(row, CUT_DURATION_COLUMNS),
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
+                    // #3698: уже сохранённые активности переналадки ('' — колонки ещё нет/пусто),
+                    // нужны для diff в persistCutSetupColumns (пишем только изменившиеся).
+                    storedKnifeSetupMin: rowValue(row, CUT_KNIFE_SETUP_COLUMNS),
+                    storedMaterialWindingMin: rowValue(row, CUT_MATERIAL_WINDING_COLUMNS),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
@@ -1516,6 +1525,35 @@
 
     function firstSetupCost(next, times){
         return round3(firstSetupParts(next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
+    }
+
+    // #3698: расщепить переналадку prev→next на ДВЕ активности (минуты) для хранения в
+    // «Задание в производство»: «Наладка ножей, мин» (KNIFE) и «Сырье/намотка, мин»
+    // (MATERIAL_WINDING). Та же логика, что setupBreakdown, но числом по каждой активности.
+    // → { knifeMin, materialWindingMin }. Чистая (тест).
+    function setupActivityMinutes(prev, next, times, opts){
+        var knife = 0, matWind = 0;
+        setupBreakdown(prev, next, times, opts).forEach(function(p){
+            if (p.code === 'KNIFE') knife += Number(p.minutes) || 0;
+            else if (p.code === 'MATERIAL_WINDING') matWind += Number(p.minutes) || 0;
+        });
+        return { knifeMin: round3(knife), materialWindingMin: round3(matWind) };
+    }
+
+    // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
+    // (порядок исполнения — по «Очередности», как в Ганте orderCutsInGroup). Первая резка —
+    // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
+    // carryOverPrevCut); нет заправки (carryPrevCut=null) → настройка ножей с нуля
+    // (firstCutSetup). Зеркалит ветку setup в buildSchedule. → { cutId: { knifeMin, materialWindingMin } }.
+    // Чистая (тест).
+    function setupActivityColumns(orderedCuts, times, carryPrevCut){
+        var out = {};
+        (orderedCuts || []).forEach(function(c, i){
+            var prev = i > 0 ? orderedCuts[i - 1] : (carryPrevCut || null);
+            var opts = (i === 0 && !carryPrevCut) ? { firstCutSetup: true } : null;
+            out[String(c.id)] = setupActivityMinutes(prev, c, times, opts);
+        });
+        return out;
     }
 
     // #3401: число резок в цуге (в терминологии заказчика общая «резка» состоит из
@@ -3837,6 +3875,8 @@
         firstSetupParts: firstSetupParts,
         firstSetupCost: firstSetupCost,
         setupBreakdown: setupBreakdown,
+        setupActivityMinutes: setupActivityMinutes,   // #3698
+        setupActivityColumns: setupActivityColumns,   // #3698
         planningStrategy: planningStrategy,
         planningStrategyLabel: planningStrategyLabel,
         makePlanningOptions: makePlanningOptions,
@@ -4903,6 +4943,8 @@
             // Ручная привязка к позициям — отдельная доработка (#3242 PR3).
             console.log('[pp] 🔪 createCut: резка #' + id + ' создана (без обеспечений; выбрано позиций: ' + selectedPositions.length + ')');
             return self.reload().then(function() {
+                return self.persistCutSetupColumns();   // #3698: активности переналадки новой резки
+            }).then(function() {
                 self.setBusy(false);
                 self.draft = self.blankDraft();
                 self.selectedCutId = String(id);
@@ -5143,6 +5185,8 @@
                 return chain.then(function() { return cutId; });
             }).then(function(cutId) {
                 return self.reload().then(function() {
+                    return self.persistCutSetupColumns();   // #3698: активности переналадки новой резки
+                }).then(function() {
                     self.setBusy(false);
                     self.draft = self.blankDraft();
                     self.selectedCutId = String(cutId);
@@ -5474,6 +5518,8 @@
 
         return chain.then(function() {
             return self.reload();
+        }).then(function() {
+            return self.persistCutSetupColumns();   // #3698: пересчитать активности под новый день/порядок
         }).then(function() {
             // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
             // перенесённое задание осталось видимым в очереди (пустой край не ограничивает).
@@ -7097,6 +7143,67 @@
         }
     };
 
+    // #3698: пересчитать и сохранить активности переналадки каждой резки — «Наладка ножей,
+    // мин» (KNIFE) и «Сырье/намотка, мин» (MATERIAL_WINDING) — чтобы Гант (cut-gantt) и отчёты
+    // брали готовые минуты, а не пересчитывали по соседям. Порядок исполнения — по
+    // «Очередности» в пределах станка (как orderCutsInGroup Ганта); первая резка — от текущей
+    // заправки станка (prev_cut_setup), нет данных → настройка ножей с нуля. Пишет только
+    // изменившиеся (diff против отчётных значений), тихо и БЕЗ reload (свой экран РМ считает
+    // наладку на лету). Колонок ещё нет в метаданных → no-op. Ошибки глотает: доп-колонки не
+    // должны валить сохранение очереди/плана. Вызывается после сохранений порядка/плана.
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function() {
+        var self = this;
+        var meta = this.meta.cut;
+        if (!meta) return Promise.resolve();
+        var knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
+        var matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
+        if (!knifeReq && !matReq) return Promise.resolve();   // колонок ещё нет в таблице
+        var times = this.opTimes || DEFAULT_OP_TIMES;
+        var prevBySlitter = this.prevSetupBySlitter || {};
+        var bySlitter = {};
+        (this.cuts || []).forEach(function(c) {
+            if (!c) return;
+            var sid = c.slitter && c.slitter.id != null ? String(c.slitter.id) : '';
+            (bySlitter[sid] = bySlitter[sid] || []).push(c);
+        });
+        var updates = [];
+        Object.keys(bySlitter).forEach(function(sid) {
+            // Порядок исполнения станка: «Очередность» ↑ (пусто — в конец), затем «Дата план», id.
+            var arr = bySlitter[sid].slice().sort(function(a, b) {
+                var qa = a.sequence == null ? Infinity : a.sequence;
+                var qb = b.sequence == null ? Infinity : b.sequence;
+                if (qa !== qb) return qa - qb;
+                if (String(a.planDate) !== String(b.planDate)) return String(a.planDate).localeCompare(String(b.planDate));
+                return String(a.id).localeCompare(String(b.id));
+            });
+            var carrySetup = prevBySlitter[sid];
+            var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
+            var cols = setupActivityColumns(arr, times, carryPrevCut);
+            arr.forEach(function(c) {
+                var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
+                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
+                var curK = c.storedKnifeSetupMin, curM = c.storedMaterialWindingMin;
+                var haveK = curK != null && curK !== '', haveM = curM != null && curM !== '';
+                if (!haveK || !haveM || Math.round(stripNum(curK)) !== wantK || Math.round(stripNum(curM)) !== wantM) {
+                    updates.push({ cutId: c.id, knife: wantK, material: wantM });
+                    c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
+                    c.storedMaterialWindingMin = String(wantM);
+                }
+            });
+        });
+        if (!updates.length) return Promise.resolve();
+        var chain = Promise.resolve();
+        updates.forEach(function(u) {
+            chain = chain.then(function() {
+                var fields = {};
+                if (knifeReq) fields['t' + knifeReq] = String(u.knife);
+                if (matReq) fields['t' + matReq] = String(u.material);
+                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+            });
+        });
+        return chain.catch(function() { /* тихо: доп-колонки не валят сохранение очереди */ });
+    };
+
     // DRY-метод сохранения изменённых «Очередностей» (ручная перестановка ↑↓).
     // pairs = [{cutId, sequence}]. opts.successMessage — если передан, показывается
     // после reload вместо дефолтного; opts.silent — не показывать уведомление.
@@ -7136,6 +7243,8 @@
 
         return chain.then(function() {
             return self.reload();
+        }).then(function() {
+            return self.persistCutSetupColumns();   // #3698: пересчитать хранимые активности под новый порядок
         }).then(function() {
             self.setBusy(false);
             self.render();
@@ -7330,6 +7439,8 @@
         });
 
         return chain.then(function() { return self.reload(); }).then(function() {
+            return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
+        }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render(); return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
