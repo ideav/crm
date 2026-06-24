@@ -459,6 +459,16 @@
         return null;
     }
 
+    // #3682: команда записи поля позиции. Первую колонку (главное значение, t{id_типа})
+    // ставит ТОЛЬКО _m_save — _m_set к первой колонке неприменим (на live даёт 403, проверено
+    // в planning #775; см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §«_m_save» и docs/MCP.md §6–7;
+    // тот же паттерн в intake.js/production-planning.js). У «Заказанного количества» qty и есть
+    // первая колонка (writeKey == id таблицы), поэтому её правка раньше уходила в _m_set и
+    // молча не сохранялась. Реквизиты (writeKey == reqId) — по-прежнему _m_set.
+    function positionWriteCommand(writeKey, tableId) {
+        return String(writeKey) === String(tableId) ? '_m_save' : '_m_set';
+    }
+
     // Нормализация компактного формата JSON_DATA ([{i,u,o,r}]) в записи.
     function normalizeObjects(json, columns) {
         if (!Array.isArray(json)) return [];
@@ -575,6 +585,8 @@
 
     // Запрос правки позиции: POST _m_set/{positionId} + реквизиты редактируемых полей.
     // values — { qty, raw, width, length, sleeve, winding, status }; ключи без reqId пропускаются.
+    // ПРИМ.: в бою правка идёт по одной ячейке через savePositionCell (она и выбирает
+    // _m_set/_m_save по #3682). Этот батч-билдер используется только тестами.
     function buildSetPositionRequest(opts) {
         var fields = {};
         var cols = opts.columns || [];
@@ -1302,7 +1314,8 @@
         return pos && pos.values ? (pos.values.width || '') : '';
     }
 
-    // Сохранение одного поля позиции: _m_set/{posId} с единственным t{reqId}.
+    // Сохранение одного поля позиции: _m_set/{posId} с единственным t{reqId}
+    // (для первой колонки — qty у «Заказанного количества» — _m_save, см. #3682).
     // Если значение не изменилось — просто возврат отображения, без запроса.
     function savePositionCell(td, newValue) {
         if (!td) return;
@@ -1349,7 +1362,8 @@
         }
         var fields = {};
         fields[writeKey] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
-        var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
+        var cmd = positionWriteCommand(writeKey, state.positionTable);
+        var url = '/' + encodeURIComponent(getApiBase()) + '/' + cmd + '/' + encodeURIComponent(posId) + '?JSON';
         var body = buildFormBody(fields, getXsrf());
         setMessage('Сохранение…', 'info');
         var oldValue = pos.values[key] || '';
@@ -2048,6 +2062,9 @@
         buildCreateOrderRequest: buildCreateOrderRequest,
         buildCreatePositionRequest: buildCreatePositionRequest,
         buildSetPositionRequest: buildSetPositionRequest,
+        getColumn: getColumn,
+        positionWriteKey: positionWriteKey,
+        positionWriteCommand: positionWriteCommand,
         buildSetFieldRequest: buildSetFieldRequest,
         buildDeleteRequest: buildDeleteRequest,
         buildSetStatusRequest: buildSetStatusRequest,
