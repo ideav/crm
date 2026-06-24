@@ -7164,25 +7164,22 @@
         var matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
         var cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
         if (!knifeReq && !matReq && !cutTimeReq) return Promise.resolve();   // колонок ещё нет в таблице
-        var times = this.opTimes || DEFAULT_OP_TIMES;
+        // #3702: считаем теми же временами и в ТОМ ЖЕ порядке, что и план на экране, иначе
+        // у задания заполнялась «Сырье/намотка», которой в плане нет.
+        //  • this.changeTimes — структурированные веса переналадок (MATERIAL_WINDING / KNIFE /
+        //    BETWEEN_CUTS). this.opTimes — это raw {КОД: мин} без этих ключей, поэтому
+        //    setupBreakdown молча брал DEFAULT-веса (расхождение с планом).
+        //  • Порядок — groupBySlitter (день плана → «Очередность» → ножи), как очередь станка в
+        //    renderQueue. Прежний (sequence, planDate) перемешивал дни («Очередность» сбрасывается
+        //    на день), и у НЕ-первой резки дня предшественником становилась резка другого дня —
+        //    отсюда ложная «смена сырья».
+        var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
         var prevBySlitter = this.prevSetupBySlitter || {};
-        var bySlitter = {};
-        (this.cuts || []).forEach(function(c) {
-            if (!c) return;
-            var sid = c.slitter && c.slitter.id != null ? String(c.slitter.id) : '';
-            (bySlitter[sid] = bySlitter[sid] || []).push(c);
-        });
         var updates = [];
-        Object.keys(bySlitter).forEach(function(sid) {
-            // Порядок исполнения станка: «Очередность» ↑ (пусто — в конец), затем «Дата план», id.
-            var arr = bySlitter[sid].slice().sort(function(a, b) {
-                var qa = a.sequence == null ? Infinity : a.sequence;
-                var qb = b.sequence == null ? Infinity : b.sequence;
-                if (qa !== qb) return qa - qb;
-                if (String(a.planDate) !== String(b.planDate)) return String(a.planDate).localeCompare(String(b.planDate));
-                return String(a.id).localeCompare(String(b.id));
-            });
+        groupBySlitter(this.cuts || []).forEach(function(group) {
+            var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
+            var arr = group.cuts;   // уже упорядочены как очередь станка (день → «Очередность» → ножи)
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
