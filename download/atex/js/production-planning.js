@@ -3887,7 +3887,8 @@
         this.genPositions = [];    // [{ id, materialId, width, qty, dueKey }] — все позиции
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
-        this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
+        this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья» («Ширина, мм» — геометрия реза)
+        this.nominalWidthByMaterial = {}; // #3686: materialId → «Номинальная ширина» (рулон) для условий j= фактической ширины
         this.preferredByMaterial = {};  // кеш ходовых ширин: materialId|windDir|windLength → [{width, popularity}]
         this.maxStockIndex = planning.buildMaxStockIndex([], null);  // #3391: индекс «Максимального запаса» (пуст до загрузки)
         this.stockBalanceIndex = planning.buildStockBalanceIndex([]); // #3445: текущий остаток ГП по номенклатуре (пуст до загрузки)
@@ -4403,19 +4404,29 @@
         var self = this;
         var list = this._metaAll || [];
         var meta = tableByName(list, 'Вид сырья');
-        if (!meta) { this.jumboWidthByMaterial = {}; this.toleranceByMaterial = {}; return Promise.resolve(); }
+        if (!meta) { this.jumboWidthByMaterial = {}; this.nominalWidthByMaterial = {}; this.toleranceByMaterial = {}; return Promise.resolve(); }
         var widthIdx = columnIndex(meta, 'Ширина, мм');
+        // #3686: «Номинальная ширина» — физический размер рулона (напр. 910). Именно с ней
+        // сверяются условия j= справочника «Фактическая ширина резки», а НЕ с «Ширина, мм»
+        // (полезная ширина реза после кромки, напр. 891) — иначе правило j=910 не срабатывает.
+        var nomIdx = columnIndex(meta, 'Номинальная ширина');
         var tolIdx = columnIndex(meta, 'Допуск, мм');   // #3120: допуск по виду сырья (иначе дефолт)
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {}, tol = {}, names = {};
+            var map = {}, nom = {}, tol = {}, names = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+                var w = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+                map[String(rec.i)] = w;
+                // #3686: номинал для условий j=; нет колонки/значения → деградируем к «Ширина, мм»
+                // (прежнее поведение), чтобы не потерять резолв у видов сырья без номинала.
+                var nw = nomIdx >= 0 ? (Number(r[nomIdx]) || 0) : 0;
+                nom[String(rec.i)] = nw > 0 ? nw : w;
                 // сырое значение допуска (пустое — если не задано): resolveTolerance даст дефолт
                 tol[String(rec.i)] = tolIdx >= 0 ? r[tolIdx] : '';
                 names[String(rec.i)] = r[0] == null ? '' : String(r[0]);   // имя вида сырья (для подписи)
             });
             self.jumboWidthByMaterial = map;
+            self.nominalWidthByMaterial = nom;   // #3686
             self.toleranceByMaterial = tol;
             self.materialNameById = names;
         });
@@ -4478,7 +4489,8 @@
         (this.genPositions || []).forEach(function(p) {
             if (p.orderWidth == null) p.orderWidth = p.width;   // номинал из заказа
             var ctx = {
-                jumbo: self.jumboWidthByMaterial ? self.jumboWidthByMaterial[String(p.materialId)] : null,
+                // #3686: условие j= сверяется с «Номинальной шириной» рулона, не с «Ширина, мм»
+                jumbo: self.nominalWidthByMaterial ? self.nominalWidthByMaterial[String(p.materialId)] : null,
                 inches: self.sleeveInchesById ? self.sleeveInchesById[String(p.sleeveId)] : null
             };
             p.width = resolveCutWidth(p.orderWidth, ctx, self.actualWidthIndex);
@@ -6209,7 +6221,7 @@
             // #3457: loadPositions() пересоздал genPositions с НОМИНАЛЬНОЙ шириной заказа —
             // заново проставляем фактическую ширину резки (#3372: справочник 66190), иначе
             // планирование/раскладка/Партии ГП пойдут по номиналу (60мм вместо 59мм).
-            // Справочники (actualWidthIndex/jumboWidthByMaterial/sleeveInchesById) живут с start().
+            // Справочники (actualWidthIndex/jumboWidthByMaterial/nominalWidthByMaterial/sleeveInchesById) живут с start().
             self.annotatePositionsCutWidth();
             self.render();
             self.planAndConfirmCuts(actionsEl);
@@ -7911,7 +7923,8 @@
             // «{сырьё} {ширина} x {длина} {намотка} — {факт.ширина}мм х {резок} x {полос} = {мотков} шт.».
             var stripGroups = cutStripGroups(c);
             if (stripGroups.length) {
-                var jumboWidth = self.jumboWidthByMaterial ? self.jumboWidthByMaterial[String(c.materialId)] : null;
+                // #3686: обратный резолв (факт→номинал) сверяет j= с «Номинальной шириной» рулона
+                var jumboWidth = self.nominalWidthByMaterial ? self.nominalWidthByMaterial[String(c.materialId)] : null;
                 var matRows = stripGroups.map(function(g) {
                     // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
                     // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
