@@ -83,6 +83,13 @@ assertEqual({ mode: weekRange.mode, startIso: weekRange.startIso, endIso: weekRa
 assertEqual(gantt.shiftAnchor('2026-06-11', 'week', 1), '2026-06-15', 'shiftAnchor: +1 неделя');
 assertEqual(gantt.shiftAnchor('2026-06-11', 'week', -1), '2026-06-01', 'shiftAnchor: −1 неделя');
 
+// ── #3683: период по умолчанию — «День» (пустой/неизвестный режим → 'day', один день) ──
+var defRange = gantt.ganttRange('2026-06-11', '');
+assertEqual({ mode: defRange.mode, startIso: defRange.startIso, endIso: defRange.endIso, days: defRange.days.length },
+    { mode: 'day', startIso: '2026-06-11', endIso: '2026-06-12', days: 1 },
+    'ganttRange: дефолтный режим — День (1 день)');
+assertEqual(gantt.ganttRange('2026-06-11', 'неизвестно').mode, 'day', 'ganttRange: неизвестный режим → День');
+
 // ── cutStatus ──
 var NOW = gantt.parseDateTimeMs('2026-06-10 12:00');
 assertEqual(gantt.cutStatus({ planDate: '2026-06-20' }, NOW).key, 'planned', 'cutStatus: будущее → запланировано');
