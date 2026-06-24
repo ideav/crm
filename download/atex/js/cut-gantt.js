@@ -146,7 +146,7 @@
         for (var i = 0; i < GANTT_MODES.length; i++) {
             if (GANTT_MODES[i].id === s) return s;
         }
-        return 'week';
+        return 'day';   // #3683: период по умолчанию — «День»
     }
 
     function localDateMs(year, month, day, hour, minute, second) {
@@ -827,7 +827,7 @@
         this.busy = false;
         this.cuts = [];
         this.slitters = [];
-        this.state = { mode: 'week', anchor: todayISO(), slitter: '', status: '' };
+        this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '' };   // #3683: дефолт — «День»
     }
 
     AtexCutGantt.prototype.url = function(path) {
