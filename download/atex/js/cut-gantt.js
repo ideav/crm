@@ -105,6 +105,10 @@
     ];
 
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
+    // #3698: хранимые активности переналадки из cut_planning (пишет «Планирование
+    // производства»). Если отчёт их отдаёт — берём готовые минуты вместо пересчёта.
+    var CUT_KNIFE_SETUP_COLUMNS = ['cut_knife_setup_min', 'cut_knife_setup', 'cut_setup_knife_min'];
+    var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
 
     // URL рабочего места «Планирование производства». Префикс пути = имя БД и
     // отличается между базами (на тест-базе /ateh/, в проде может быть иным), поэтому
@@ -518,6 +522,15 @@
             }
             return 0;
         }
+        // #3698: хранимая активность (минуты) или null, если колонки нет/пусто — чтобы
+        // отличить «сохранён 0» от «не сохранено» (фолбэк на пересчёт в attachSetupMinutes).
+        function storedMin(row, cols) {
+            for (var i = 0; i < cols.length; i++) {
+                var v = row && row[cols[i]];
+                if (v != null && v !== '') return stripNum(v);
+            }
+            return null;
+        }
         (rows || []).forEach(function(row) {
             var id = str(row && row.cut_id);
             if (!id || byId[id]) return;
@@ -543,6 +556,10 @@
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
                 winding: str(row.cut_winding),
+                // #3698: хранимые активности переналадки (если cut_planning их отдаёт) —
+                // attachSetupMinutes предпочтёт их пересчёту по соседям. null → не сохранено.
+                storedKnifeMin: storedMin(row, CUT_KNIFE_SETUP_COLUMNS),
+                storedMaterialMin: storedMin(row, CUT_MATERIAL_WINDING_COLUMNS),
                 slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) }
             };
             order.push(id);
@@ -721,6 +738,17 @@
             var arr = orderCutsInGroup(byMachine[sid]);   // тот же порядок, что в дорожке станка
             var prev = null;
             arr.forEach(function(cut) {
+                // #3698: если «Планирование производства» сохранило активности (отчёт отдаёт
+                // cut_knife_setup_min / cut_material_winding_min) — берём готовые минуты как
+                // источник истины и НЕ пересчитываем по соседям (план учитывает смену партии
+                // сырья, которой нет в cut_planning). prev всё равно двигаем — для фолбэка
+                // последующих несохранённых резок.
+                if (cut.storedKnifeMin != null || cut.storedMaterialMin != null) {
+                    cut.setupKnifeMin = Math.max(0, stripNum(cut.storedKnifeMin));
+                    cut.setupMaterialMin = Math.max(0, stripNum(cut.storedMaterialMin));
+                    prev = cut;
+                    return;
+                }
                 var ch;
                 if (!prev) {
                     // #3693: первая резка станка — от текущей заправки (prev_cut_setup), иначе ножи с нуля.

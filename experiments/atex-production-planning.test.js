@@ -204,13 +204,13 @@ assertEqual(plan.cuts, [
       materialBatch: { id: null, label: '' },
       planDate: '06.05.2026', status: 'В работе', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', isFoil: false,
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [] }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
 // #3472: cut_leader собирается в leaders[] (различные); легаси-смешение → несколько.
