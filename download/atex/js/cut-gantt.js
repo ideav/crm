@@ -417,14 +417,15 @@
         return { knife: knife, material: material, total: round3(knife + material) };
     }
 
-    // Текст бара (#3668 п.4): диапазон времени РЕЗКИ, например «11:19-11:23 (4 мин)».
-    // #3675 п.3: startOffsetMin сдвигает окно вправо на время наладки — резка идёт ПОСЛЕ
-    // сегментов наладки, поэтому подпись показывает фактическое окно резки, а не наладки.
-    function cutBarTime(cut, startOffsetMin) {
+    // Текст бара (#3668 п.4): диапазон времени, например «11:19-11:23 (4 мин)».
+    // #3680: подпись охватывает ВСЁ задание (наладка + резка), а не только резку.
+    // Начало = левый край бара (tr.startMs, та же точка, что у строки .atex-cg-label-main);
+    // setupMin раздвигает только правый край — добавляет к окну минуты наладки перед резкой.
+    function cutBarTime(cut, setupMin) {
         var tr = cutTimeRange(cut);
         if (!tr) return '';
-        var off = (Number(startOffsetMin) || 0) * 60000;
-        var startMs = tr.startMs + off, endMs = tr.endMs + off;
+        var off = (Number(setupMin) || 0) * 60000;
+        var startMs = tr.startMs, endMs = tr.endMs + off;
         var mins = Math.max(1, Math.round((endMs - startMs) / 60000));
         return formatTime(startMs) + '-' + formatTime(endMs) + ' (' + mins + ' мин)';
     }
@@ -716,7 +717,8 @@
             g.tasks = g.cuts.map(function(cut) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var status = cutStatus(cut, nowMs);
-                // #3675 п.3: ширина бара = наладка + резка; подпись времени — окно РЕЗКИ (после наладки).
+                // #3675 п.3 / #3680: ширина бара = наладка + резка; подпись времени — ВСЁ окно задания
+                // (от начала наладки до конца резки), а не только резка.
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
                 return {
                     cut: cut, status: status,
