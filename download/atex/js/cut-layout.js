@@ -209,11 +209,13 @@
     return String(materialId == null ? '' : materialId) + '|' + parts.join('+');
   }
 
-  // ───────────────────── #3472: цель раскроя ─────────────────────
-  // Менеджер минимизирует РАСХОД джамбо (число прогонов ≡ метраж сырья), затем СКРАП
-  // (перепроизводство НЕзапасных ширин — рулоны сверх заказа, которые некуда деть).
-  // Эти две величины — лексикографическая цель оптимизатора (отход первичен, #3472):
-  // 110×8 + 89×10 раздельно = 18 прогонов выгоднее, чем 4+4 слитно = 20.
+  // ───────────────────── #3472/#3706: цель раскроя ─────────────────────
+  // Лексикографическая цель оптимизатора (по убыванию приоритета):
+  //   1) ПРОГОНЫ — расход джамбо ≡ метраж сырья (110×8 + 89×10 раздельно = 18 прогонов
+  //      выгоднее, чем 4+4 слитно = 20);
+  //   2) СКРАП — перепроизводство НЕзапасных ширин (рулоны сверх заказа, которые некуда деть);
+  //   3) ОТХОД — незанятая ширина джамбо × прогоны (#3706: при равных прогонах и скрапе
+  //      берём раскладку с меньшим реальным отходом — «не должно быть отходов вне допуска»).
 
   // orderStripQty: полос назначения «Заказ» данной ширины (миррор
   // nonStockStripQtyForWidth в production-planning — добор «Склад» не считаем).
@@ -249,12 +251,13 @@
     return scrap;
   }
 
-  // planLayouts: оркестратор раскладки (#3472). input = {jumboWidth, positions,
-  // preferred, options:{windowDays=3, tolerance}}. Группирует позиции по окну срока;
-  // ВНУТРИ окна — менеджерская модель: каждый заказ (различная ширина) сначала идёт
-  // ОТДЕЛЬНОЙ раскладкой (seed «1 заказ = 1 резка», макс. заполнение джамбо). Затем
-  // ограниченный перебор слияний: две раскладки сливаются в комбо ТОЛЬКО если это
-  // лексикографически снижает цель (прогоны, затем скрап) — заказ не дробится,
+  // planLayouts: оркестратор раскладки (#3472/#3706). input = {jumboWidth, positions
+  // (каждая {id, orderId, width, qty, dueKey, stockable}), preferred, options:{windowDays=3,
+  // tolerance}}. Группирует позиции по окну срока; ВНУТРИ окна — менеджерская модель:
+  // seed «1 заказ = 1 резка» по ключу (заказ, ширина) — одинаковая ширина одного заказа
+  // консолидируется, разных заказов — нет (иначе #3684). Затем ограниченный перебор
+  // слияний (B&B по парам): две раскладки сливаются в комбо ТОЛЬКО если это
+  // лексикографически снижает цель (прогоны → скрап → отход) — заказ не дробится,
   // объединение лишь по выгоде. Комбо ограничено (#3472 п.3): не более
   // options.maxWidthsPerCut (3) ширин и options.maxPositionsPerCut (3) заказов.
   // Позиции шире джамбо → skipped. Вход не мутирует.
@@ -271,7 +274,7 @@
     var maxWidths = (opts.maxWidthsPerCut == null) ? 3 : toNumber(opts.maxWidthsPerCut);
     var maxPositions = (opts.maxPositionsPerCut == null) ? 3 : toNumber(opts.maxPositionsPerCut);
     var positions = (input.positions || []).map(function(p){
-      return { id: p.id, width: toNumber(p.width), qty: toNumber(p.qty),
+      return { id: p.id, orderId: p.orderId, width: toNumber(p.width), qty: toNumber(p.qty),
                dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity, stockable: !!p.stockable };
     });
 
@@ -302,6 +305,9 @@
         demands: demands, result: result, demandByWidth: demandByWidth,
         stockableByWidth: stockableByWidth, positionsCovered: covered,
         runs: runs, scrap: layoutScrap(result.strips, runs, demandByWidth, stockableByWidth),
+        // #3706: реальный отход раскладки — незанятая ширина джамбо × прогоны
+        // (третичный критерий цели: при равных прогонах и скрапе берём меньший отход).
+        waste: round3(toNumber(result.remainder) * runs),
         overflow: result.overflow
       };
     }
@@ -314,15 +320,21 @@
       var clusterDueKey = Infinity;
       cluster.forEach(function(p){ if (p.dueKey < clusterDueKey) clusterDueKey = p.dueKey; });
 
-      // seed: одна раскладка на каждую РАЗЛИЧНУЮ ширину (одинаковая ширина — один продукт,
-      // склейка бесплатна; разные ширины — отдельные резки по умолчанию, без дробления заказа).
-      var widthOrder = [], byWidth = {};
+      // seed «1 заказ = 1 резка» (#3472/#3684): группируем по ключу (ЗАКАЗ, ширина).
+      // Одинаковая ширина ОДНОГО заказа — один продукт, консолидируем; одинаковая ширина
+      // РАЗНЫХ заказов — раздельные seed-группы (не склеиваем принудительно — иначе #3684:
+      // перебор по ширине джамбо → лишний прогон + почти пустая резка-сирота). Позиции без
+      // orderId — каждая своей группой (= «1 позиция = 1 резка»). Ключ всегда одноширинный,
+      // поэтому composeLayout агрегирует без риска сбросить «не влезшие» ширины в overflow;
+      // разные ширины заказа собираются обратно в одну резку ниже в refine — по выгоде.
+      var seedOrder = [], bySeed = {};
       cluster.forEach(function(p){
-        var k = String(round3(p.width));
-        if (!byWidth[k]) { byWidth[k] = []; widthOrder.push(k); }
-        byWidth[k].push({ width: p.width, qty: p.qty, positionId: p.id, stockable: p.stockable });
+        var owner = (p.orderId != null && String(p.orderId) !== '') ? ('o' + p.orderId) : ('p' + p.id);
+        var k = owner + '|w' + round3(p.width);
+        if (!bySeed[k]) { bySeed[k] = []; seedOrder.push(k); }
+        bySeed[k].push({ width: p.width, qty: p.qty, positionId: p.id, stockable: p.stockable });
       });
-      var groups = widthOrder.map(function(k){ return buildGroup(byWidth[k]); });
+      var groups = seedOrder.map(function(k){ return buildGroup(bySeed[k]); });
 
       // refine: пока есть лексикографически улучшающее слияние пары — сливаем (B&B по парам).
       var guard = 0;
@@ -340,10 +352,13 @@
             if (maxPositions > 0 && merged.positionsCovered.length > maxPositions) continue;
             var dr = merged.runs - (gi.runs + gj.runs);
             var ds = round3(merged.scrap - (gi.scrap + gj.scrap));
-            var improves = dr < 0 || (dr === 0 && ds < 0);        // строго лучше по (прогоны, скрап)
+            var dw = round3(merged.waste - (gi.waste + gj.waste));   // #3706: отход (трим)
+            // строго лучше по лексикографической цели (прогоны → скрап → отход)
+            var improves = dr < 0 || (dr === 0 && ds < 0) || (dr === 0 && ds === 0 && dw < 0);
             if (!improves) continue;
-            if (!best || dr < best.dr || (dr === best.dr && ds < best.ds)) {
-              best = { i: i, j: j, group: merged, dr: dr, ds: ds };
+            if (!best || dr < best.dr || (dr === best.dr && ds < best.ds) ||
+                (dr === best.dr && ds === best.ds && dw < best.dw)) {
+              best = { i: i, j: j, group: merged, dr: dr, ds: ds, dw: dw };
             }
           }
         }
