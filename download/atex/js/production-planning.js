@@ -6517,7 +6517,10 @@
                         positions: positionGroup.map(function(p) {
                             // #3423: запасные комбинации (есть в «Максимальном запасе») можно
                             // перепроизводить в запас; незапасные — резать ровно под заказ.
-                            return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey,
+                            // #3684/#3706: orderId — для seed «1 заказ = 1 резка» (позиции
+                            // одного заказа собираются в одну резку; одинаковая ширина РАЗНЫХ
+                            // заказов не склеивается принудительно).
+                            return { id: p.id, orderId: p.orderId, width: p.width, qty: p.qty, dueKey: p.dueKey,
                                 stockable: planning.isStockableNomenclature(self.maxStockIndex, {
                                     material: mat, width: p.width,
                                     length: group.windLength, winding: group.windDir }) };
