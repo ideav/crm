@@ -316,4 +316,35 @@ assertEqual(laidFitSmall.pxPerMin, 1, 'layoutGroups #3704: fitTrackPx меньш
 var laidZoomFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 0.25, fitTrackPx: 3120 });
 assertEqual(laidZoomFit.pxPerMin, 2, 'layoutGroups #3704: «−» ниже экрана упирается в «вписать в экран»');
 
+// ── #3708: бар не заходит за старт следующего задания (округление длительностей вверх) ──
+// cutBarTime с maxEndMs обрезает конец до старта следующего.
+var cutOvershoot = { planDate: '2026-06-10 08:00', duration: 21, leaderMin: 16 };   // намотка 21 + лидер 16 = 37
+assertEqual(gantt.cutBarTime(cutOvershoot, 30), '08:00-09:07 (67 мин)',
+    'cutBarTime: без обрезки — наладка 30 + резка+лидер 37 = 67 мин (конец 09:07)');
+assertEqual(gantt.cutBarTime(cutOvershoot, 30, gantt.parseDateTimeMs('2026-06-10 09:06')), '08:00-09:06 (66 мин)',
+    'cutBarTime #3708: конец обрезан до старта следующего (09:06)');
+assertEqual(gantt.cutBarTime(cutOvershoot, 30, gantt.parseDateTimeMs('2026-06-10 10:00')), '08:00-09:07 (67 мин)',
+    'cutBarTime #3708: clamp позже конца — без изменений');
+// layoutGroups: два задания подряд на станке, бар первого «перелезал» бы на 1 мин — режется встык.
+var overlapCuts = [
+    { id: 'A', planDate: '2026-06-10 08:00', duration: 21, plannedRuns: 8, leaderMin: 16, setupKnifeMin: 30, sequence: 1, slitter: { id: '1', label: 'Станок 1' } },
+    { id: 'B', planDate: '2026-06-10 09:06', duration: 44, plannedRuns: 10, leaderMin: 20, sequence: 2, slitter: { id: '1', label: 'Станок 1' } }
+];
+var laidClamp = gantt.layoutGroups(overlapCuts, gantt.ganttRange('2026-06-10', 'day'),
+    gantt.parseDateTimeMs('2026-06-10 07:00'), {}, { pxPerMin: 1 });
+var ct = laidClamp.groups[0].tasks;
+assertEqual([ct[0].cut.id, ct[0].leftPx, ct[0].widthPx], ['A', 0, 66],
+    'layoutGroups #3708: бар A обрезан с 67 до 66 мин (старт B)');
+assertEqual(ct[0].barText, '08:00-09:06 (66 мин)', 'layoutGroups #3708: подпись A совпадает с планом (до 09:06)');
+assertEqual(ct[0].leftPx + ct[0].widthPx, ct[1].leftPx, 'layoutGroups #3708: A встык к B — налезания нет');
+// Завершённое задание (есть факт. финиш) не режем — показываем реальную длительность.
+var doneThenNext = [
+    { id: 'D', planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:00', endDate: '2026-06-10 09:10', sequence: 1, slitter: { id: '1', label: 'Станок 1' } },
+    { id: 'E', planDate: '2026-06-10 09:06', duration: 30, sequence: 2, slitter: { id: '1', label: 'Станок 1' } }
+];
+var laidDone = gantt.layoutGroups(doneThenNext, gantt.ganttRange('2026-06-10', 'day'),
+    gantt.parseDateTimeMs('2026-06-10 07:00'), {}, { pxPerMin: 1 });
+assertEqual(laidDone.groups[0].tasks[0].widthPx, 70,
+    'layoutGroups #3708: завершённое задание не обрезается (факт 70 мин, конфликт виден)');
+
 console.log('\n' + passed + ' assertions passed');
