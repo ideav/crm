@@ -7212,6 +7212,9 @@
         //    отсюда ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        // #3708: точная намотка (как в расписании) для дробного «Резка и Лидер» — НЕ из ceil'нутой
+        // «Длительность, минут» (c.duration), иначе сохранённая длительность длиннее реального окна.
+        var windPoints = windingPointsFromTimes(this.opTimes || {});
         var prevBySlitter = this.prevSetupBySlitter || {};
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
@@ -7222,14 +7225,18 @@
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             arr.forEach(function(c) {
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
-                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
-                // #3700: «Резка и Лидер» = намотка («Длительность, минут») + лидер
-                // (BETWEEN_CUTS × число резок цуга, cutLeaderRuns). Зависит только от самой резки.
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
+                // #3708: поля наладок/лидера дробные (type 14) — храним ТОЧНЫЕ минуты (round3), без
+                // округления, иначе бар в Ганте (наладка + «Резка и Лидер») длиннее реального окна
+                // расписания (старт следующего задания) и налезает на него.
+                var wantK = round3(want.knifeMin), wantM = round3(want.materialWindingMin);
+                // #3700/#3708: «Резка и Лидер» = ТОЧНАЯ намотка (пересчёт из метража и норм, как
+                // расписание) + лидер (BETWEEN_CUTS × число резок цуга, cutLeaderRuns). НЕ из c.duration —
+                // она сохранена округлённой вверх (#3635 п.4), что и давало налезание баров.
+                var wantT = round3(scheduleDurationMinutes(c, c.length, windPoints) + betweenCuts * cutLeaderRuns(c));
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 function changed(req, cur, val) {
-                    return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
+                    return req && (!(cur != null && cur !== '') || round3(stripNum(cur)) !== round3(val));
                 }
                 if (changed(knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(matReq, c.storedMaterialWindingMin, wantM)

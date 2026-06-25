@@ -443,7 +443,7 @@
     // #3680: подпись охватывает ВСЁ задание (наладка + резка), а не только резку.
     // Начало = левый край бара (tr.startMs, та же точка, что у строки .atex-cg-label-main);
     // setupMin раздвигает только правый край — добавляет к окну минуты наладки перед резкой.
-    function cutBarTime(cut, setupMin) {
+    function cutBarTime(cut, setupMin, maxEndMs) {
         var tr = cutTimeRange(cut);
         if (!tr) return '';
         // #3705: правый край = старт + (резка+лидер) + наладка — ровно та же сумма минут, что у
@@ -451,6 +451,11 @@
         // лидера) + наладка → конец задания получался на лидер «между резками» короче плана.
         var startMs = tr.startMs;
         var endMs = startMs + (cutBarMinutes(cut) + (Number(setupMin) || 0)) * 60000;
+        // #3708: не заходить за старт следующего задания того же станка. Длительности хранятся
+        // округлёнными вверх (#3635 п.4), а cut_plan_date — по дробному времени, поэтому бар бывает
+        // на доли минуты длиннее реального окна и налезал на следующий бар.
+        var maxMs = Number(maxEndMs);
+        if (maxEndMs != null && isFinite(maxMs) && maxMs > startMs && endMs > maxMs) endMs = maxMs;
         var mins = Math.max(1, Math.round((endMs - startMs) / 60000));
         return formatTime(startMs) + '-' + formatTime(endMs) + ' (' + mins + ' мин)';
     }
@@ -885,18 +890,34 @@
 
         groups.forEach(function(g) {
             orderCutsInGroup(g.cuts);
-            g.tasks = g.cuts.map(function(cut) {
+            var ordered = g.cuts;
+            g.tasks = ordered.map(function(cut, i) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var status = cutStatus(cut, nowMs);
                 // #3675 п.3 / #3680: ширина бара = наладка + резка; подпись времени — ВСЁ окно задания
                 // (от начала наладки до конца резки), а не только резка.
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
+                var leftPx = round3((tr.startMs - win.startMs) / 60000 * pxPerMin);
+                var widthPx = seg.totalPx;
+                // #3708: бар не должен заходить за старт следующего задания того же станка —
+                // длительности хранятся вверх (#3635 п.4), а старты по дробному времени, поэтому бар
+                // бывал длиннее реального окна. Завершённые (есть факт. финиш) не режем — реальную
+                // длительность показываем как есть (конфликт виден).
+                var nextStartMs = null;
+                if (tr.actualEndMs == null && i + 1 < ordered.length) {
+                    var ntr = cutTimeRange(ordered[i + 1]);
+                    if (ntr && ntr.startMs > tr.startMs) nextStartMs = ntr.startMs;
+                }
+                if (nextStartMs != null) {
+                    var maxWidthPx = round3((nextStartMs - tr.startMs) / 60000 * pxPerMin);
+                    if (maxWidthPx > 0 && widthPx > maxWidthPx) widthPx = maxWidthPx;
+                }
                 return {
                     cut: cut, status: status,
-                    leftPx: round3((tr.startMs - win.startMs) / 60000 * pxPerMin),
-                    widthPx: seg.totalPx,
+                    leftPx: leftPx,
+                    widthPx: widthPx,
                     segments: seg,
-                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin),
+                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs),
                     title: cutBarTitle(cut, tr, status)
                 };
             });
