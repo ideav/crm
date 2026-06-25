@@ -209,6 +209,21 @@
 .atex-pp-date-field > .atex-pp-date-nav:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .atex-pp-date-nav:hover { background: var(--pp-surface); }
 
+/* #3713: иконка-ссылка «Диаграмма Ганта» рядом с выбором дат (отделена от стрелок). */
+.atex-pp-date-field > .atex-pp-gantt-link {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px;
+    margin-left: 6px;                 /* отделить от стрелок дат (перебивает схлоп границ) */
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    color: var(--pp-accent, #134174);
+    cursor: pointer;
+    text-decoration: none;
+}
+.atex-pp-date-field > .atex-pp-gantt-link:hover { background: var(--pp-surface); }
+
 .atex-pp-queue-group { margin-bottom: 16px; }
 
 /* Карточка резки — панель (#3120 п.1): информация + контролы + панель полос внутри. */

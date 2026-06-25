@@ -269,6 +269,53 @@
         return shiftIsoDate(range.startIso, dir * step);
     }
 
+    // #3713: число дней между «С» и «По» включительно. Нужно для шага навигации и
+    // оценки плотности (px/мин) произвольного диапазона.
+    function rangeDaySpan(fromIso, toIso) {
+        var f = parseDateTimeMs(fromIso);
+        if (f == null) return 1;
+        var t = parseDateTimeMs(toIso);
+        if (t == null) t = f;
+        var days = Math.round((startOfLocalDayMs(t) - startOfLocalDayMs(f)) / GANTT_DAY_MS) + 1;
+        return days > 0 ? days : 1;
+    }
+
+    // #3713: режим (для px/мин и подсветки кнопки), наиболее подходящий диапазону в N дней.
+    function daySpanToMode(fromIso, toIso) {
+        var days = rangeDaySpan(fromIso, toIso);
+        if (days <= 1) return 'day';
+        if (days <= 3) return 'three';
+        if (days <= 7) return 'week';
+        return 'month';
+    }
+
+    // #3713: произвольный диапазон [С; По] (включительно по день «По») как период Ганта —
+    // форма совпадает с ganttRange. Гант открывается этим диапазоном из «Планирования
+    // производства» (deep-link ?from=..&to=..). mode подбирается по длине (px/мин, подсветка).
+    function ganttRangeFromTo(fromIso, toIso) {
+        var fromMs = parseDateTimeMs(fromIso);
+        if (fromMs == null) fromMs = startOfLocalDayMs(Date.now());
+        var startMs = startOfLocalDayMs(fromMs);
+        var toMs = parseDateTimeMs(toIso);
+        var endDayMs = toMs == null ? startMs : startOfLocalDayMs(toMs);
+        if (endDayMs < startMs) endDayMs = startMs;
+        var endMs = endDayMs + GANTT_DAY_MS;   // «По» включительно
+        var outDays = [];
+        for (var t = startMs; t < endMs; t += GANTT_DAY_MS) {
+            outDays.push({
+                iso: localIsoDateFromMs(t),
+                label: formatDateShort(t),
+                leftPct: round3(((t - startMs) / (endMs - startMs)) * 100)
+            });
+        }
+        return {
+            mode: daySpanToMode(localIsoDateFromMs(startMs), localIsoDateFromMs(endDayMs)),
+            startMs: startMs, endMs: endMs,
+            startIso: localIsoDateFromMs(startMs), endIso: localIsoDateFromMs(endMs),
+            label: rangeLabel(startMs, endMs), days: outDays
+        };
+    }
+
     function cutDeadlineMs(cut) {
         var planMs = parseDateTimeMs(cut && cut.planDate);
         var duration = stripNum(cut && cut.duration);
@@ -947,14 +994,15 @@
         var s = String(search == null ? '' : search);
         var qm = s.indexOf('?');
         if (qm >= 0) s = s.slice(qm + 1);
-        var out = { cut: '', date: '', slitter: '' };
+        // #3713: from/to — диапазон дат из «Планирования производства» (иконка Ганта у фильтра дат).
+        var out = { cut: '', date: '', slitter: '', from: '', to: '' };
         s.split('&').forEach(function(pair) {
             if (!pair) return;
             var eq = pair.indexOf('=');
             var key = eq >= 0 ? pair.slice(0, eq) : pair;
             var val = eq >= 0 ? pair.slice(eq + 1) : '';
             try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (e) {}
-            if (key === 'cut' || key === 'date' || key === 'slitter') out[key] = val;
+            if (key === 'cut' || key === 'date' || key === 'slitter' || key === 'from' || key === 'to') out[key] = val;
         });
         return out;
     }
@@ -967,6 +1015,8 @@
         localIsoDateFromMs: localIsoDateFromMs,
         shiftIsoDate: shiftIsoDate,
         ganttRange: ganttRange,
+        ganttRangeFromTo: ganttRangeFromTo,   // #3713
+        daySpanToMode: daySpanToMode,         // #3713
         shiftAnchor: shiftAnchor,
         cutStatus: cutStatus,
         cutTimeRange: cutTimeRange,
@@ -1029,7 +1079,9 @@
         this.busy = false;
         this.cuts = [];
         this.slitters = [];
-        this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '', zoom: 1 };   // #3683: дефолт — «День»; #3704: зум по горизонтали
+        // #3683: дефолт — «День»; #3704: зум по горизонтали; #3713: fromIso/toIso — произвольный
+        // диапазон из deep-link «Планирования» (если задан, период берётся из него, а не из mode).
+        this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '', zoom: 1, fromIso: '', toIso: '' };
     }
 
     // #3704: шаг/границы зума горизонтального масштаба (множитель к px/мин режима).
@@ -1134,7 +1186,11 @@
         var self = this;
         var st = this.state;
         st.mode = normalizeMode(st.mode);
-        var range = ganttRange(st.anchor || todayISO(), st.mode);
+        // #3713: задан произвольный диапазон (deep-link из «Планирования») → период по нему;
+        // иначе обычный режим день/3 дня/неделя/месяц от якоря.
+        var range = st.fromIso
+            ? ganttRangeFromTo(st.fromIso, st.toIso || st.fromIso)
+            : ganttRange(st.anchor || todayISO(), st.mode);
         if (!st.anchor) st.anchor = range.startIso;
         var nowMs = this.nowMs();
 
@@ -1151,20 +1207,39 @@
         var self = this;
         var st = this.state;
 
+        // #3713: при произвольном диапазоне (deep-link) ‹/› двигают весь диапазон на его длину;
+        // в обычном режиме — на период. Выбор режима/даты сбрасывает диапазон в режим от якоря.
+        function shiftPeriod(dir) {
+            if (st.fromIso) {
+                var span = rangeDaySpan(st.fromIso, st.toIso || st.fromIso);
+                st.fromIso = shiftIsoDate(st.fromIso, dir * span);
+                st.toIso = shiftIsoDate(st.toIso || st.fromIso, dir * span);
+            } else {
+                st.anchor = shiftAnchor(st.anchor || range.startIso, st.mode, dir);
+            }
+            self.render();
+        }
         var prevBtn = el('button', { class: 'atex-cg-arrow', type: 'button', text: '‹', title: 'Предыдущий период' });
         var nextBtn = el('button', { class: 'atex-cg-arrow', type: 'button', text: '›', title: 'Следующий период' });
-        prevBtn.addEventListener('click', function() { st.anchor = shiftAnchor(st.anchor || range.startIso, st.mode, -1); self.render(); });
-        nextBtn.addEventListener('click', function() { st.anchor = shiftAnchor(st.anchor || range.startIso, st.mode, 1); self.render(); });
+        prevBtn.addEventListener('click', function() { shiftPeriod(-1); });
+        nextBtn.addEventListener('click', function() { shiftPeriod(1); });
 
+        var activeMode = st.fromIso ? range.mode : st.mode;   // #3713: при диапазоне подсвечиваем подходящий режим
         var modeWrap = el('div', { class: 'atex-cg-modes', role: 'group', 'aria-label': 'Период' });
         GANTT_MODES.forEach(function(m) {
-            var btn = el('button', { class: 'atex-cg-mode' + (m.id === st.mode ? ' is-active' : ''), type: 'button', text: m.label, title: m.label });
-            btn.addEventListener('click', function() { st.mode = m.id; self.render(); });
+            var btn = el('button', { class: 'atex-cg-mode' + (m.id === activeMode ? ' is-active' : ''), type: 'button', text: m.label, title: m.label });
+            btn.addEventListener('click', function() {
+                if (st.fromIso) { st.anchor = range.startIso; st.fromIso = ''; st.toIso = ''; }   // #3713: выход из диапазона
+                st.mode = m.id;
+                self.render();
+            });
             modeWrap.appendChild(btn);
         });
 
-        var dateInput = el('input', { class: 'atex-cg-input atex-cg-date', type: 'date', value: st.anchor || range.startIso, title: 'Дата периода' });
-        dateInput.addEventListener('change', function() { if (dateInput.value) { st.anchor = dateInput.value; self.render(); } });
+        var dateInput = el('input', { class: 'atex-cg-input atex-cg-date', type: 'date', value: st.fromIso || st.anchor || range.startIso, title: 'Дата периода' });
+        dateInput.addEventListener('change', function() {
+            if (dateInput.value) { st.anchor = dateInput.value; st.fromIso = ''; st.toIso = ''; self.render(); }   // #3713: дата → выход из диапазона
+        });
 
         var slitterSelect = el('select', { class: 'atex-cg-input atex-cg-slitter', title: 'Станок' });
         slitterSelect.appendChild(el('option', { value: '', text: 'Все станки' }));
@@ -1198,7 +1273,7 @@
         var zoomWrap = el('div', { class: 'atex-cg-zoom', role: 'group', 'aria-label': 'Масштаб по горизонтали' }, [zoomOutBtn, zoomResetBtn, zoomInBtn]);
 
         var todayBtn = el('button', { class: 'atex-cg-btn', type: 'button', text: 'Сегодня', title: 'Перейти к текущей дате' });
-        todayBtn.addEventListener('click', function() { st.anchor = todayISO(); self.render(); });
+        todayBtn.addEventListener('click', function() { st.anchor = todayISO(); st.fromIso = ''; st.toIso = ''; self.render(); });   // #3713: выход из диапазона
         var refreshBtn = el('button', { class: 'atex-cg-btn', type: 'button', text: 'Обновить', title: 'Перечитать данные' });
         refreshBtn.addEventListener('click', function() { self.refresh(); });
 
@@ -1376,6 +1451,15 @@
         root.dataset.initialized = '1';
         var controller = new AtexCutGantt(root);
         root._atexCutGantt = controller;
+        // #3713: deep-link из «Планирования производства» (иконка Ганта у фильтра дат):
+        // ?from=ГГГГ-ММ-ДД&to=ГГГГ-ММ-ДД[&slitter=..] — открыть диаграмму на этом диапазоне.
+        // Совместимо со старым ?date=ГГГГ-ММ-ДД (один день).
+        var dl = (typeof window !== 'undefined' && window.location) ? parseDeepLink(window.location.search) : null;
+        if (dl) {
+            if (dl.from) { controller.state.fromIso = dl.from; controller.state.toIso = dl.to || dl.from; }
+            else if (dl.date) { controller.state.anchor = dl.date; }
+            if (dl.slitter) controller.state.slitter = String(dl.slitter);
+        }
         controller.start();
     }
 
