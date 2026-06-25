@@ -3227,6 +3227,24 @@
         return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
     }
 
+    // #3706: статус остатка джамбо резки относительно допуска — для подсветки кнопки
+    // «Полосы» в очереди (та же логика, что у бейджа «вне допуска» в панели полос).
+    //   jumboWidth  — «Ширина, мм» сырья (факт. ширина джамбо);
+    //   knifeWidths — факт.ширины полос резки, развёрнутые по qty (cut.knifeWidths);
+    //   tolerance   — допуск остатка (мм) вида сырья.
+    // → 'warn' (|остаток| > допуска), 'ok' (в допуске), 'unknown' (джамбо не задан —
+    //   не сигналим ложный негатив, #3116 п.5).
+    function cutRemainderStatus(jumboWidth, knifeWidths, tolerance) {
+        var jumbo = stripNum(jumboWidth);
+        if (!(jumbo > 0)) return 'unknown';
+        var used = (knifeWidths || []).reduce(function(sum, w) {
+            var n = stripNum(w);
+            return sum + (n > 0 ? n : 0);
+        }, 0);
+        var rem = round3(jumbo - used);
+        return Math.abs(rem) <= Math.abs(stripNum(tolerance)) ? 'ok' : 'warn';
+    }
+
     // Подпись кнопки «Полосы» в строке резки: показывает количество полос резки
     // (Σ qty = knifeCount). При нуле/некорректном значении — без числа (#3147).
     function stripsButtonLabel(knifeCount) {
@@ -3973,6 +3991,7 @@
         stripsTotalKnives: stripsTotalKnives,
         knifeWidthsForStrips: knifeWidthsForStrips,
         stripsRemainder: stripsRemainder,
+        cutRemainderStatus: cutRemainderStatus,
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
         formatCutRuns: formatCutRuns,
@@ -4757,6 +4776,14 @@
     AtexProductionPlanning.prototype.resolveToleranceMm = function(materialId) {
         var raw = this.toleranceByMaterial ? this.toleranceByMaterial[String(materialId)] : '';
         return resolveTolerance(raw, DEFAULT_TOLERANCE_MM);
+    };
+
+    // #3706: статус остатка джамбо резки относительно допуска — для цвета кнопки
+    // «Полосы» в очереди. Тонкая обёртка над чистой planning.cutRemainderStatus:
+    // джамбо — «Ширина, мм» вида сырья, допуск — resolveToleranceMm.
+    AtexProductionPlanning.prototype.cutRemainderStatus = function(cut) {
+        var jumbo = (this.jumboWidthByMaterial || {})[String(cut.materialId)];
+        return planning.cutRemainderStatus(jumbo, cut.knifeWidths, this.resolveToleranceMm(cut.materialId));
     };
 
     // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью,
@@ -6017,6 +6044,8 @@
             if (!(jumbo > 0)) {
                 summaryEl.appendChild(metric('Остаток, мм', '—'));
                 summaryEl.appendChild(el('span', { class: 'atex-pp-strip-badge', text: 'ширина джамбо не задана' }));
+                // #3706: джамбо не задан — снять подсветку «вне допуска» с кнопки.
+                if (stripsBtn) { stripsBtn.classList.remove('is-warn'); stripsBtn.title = 'Полосы резки (количество полос)'; }
             } else {
                 var rem = planning.stripsRemainder(jumbo, strips);
                 var tol = self.resolveToleranceMm(cut.materialId);   // допуск вида сырья или дефолт 20
@@ -6026,6 +6055,11 @@
                 summaryEl.appendChild(remNode);
                 var badge = el('span', { class: 'atex-pp-strip-badge ' + (within ? 'is-ok' : 'is-warn'), text: within ? 'в допуске' : 'вне допуска' });
                 summaryEl.appendChild(badge);
+                // #3706: живо перекрасить кнопку «Полосы» этой карточки под текущий остаток.
+                if (stripsBtn) {
+                    if (within) { stripsBtn.classList.remove('is-warn'); stripsBtn.title = 'Полосы резки (количество полос)'; }
+                    else { stripsBtn.classList.add('is-warn'); stripsBtn.title = 'Полосы резки — отход вне допуска'; }
+                }
             }
             renderPreferred();   // #3128 — перефильтровать ходовые по текущему остатку
         }
@@ -8228,7 +8262,15 @@
                 var p = moveInQueue(sameDayCuts, dayIdx, 1);
                 if (p.length) self.saveSequences(p);
             });
-            var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: stripsButtonLabel(c.knifeCount), title: 'Полосы резки (количество полос)' });
+            // #3706: остаток резки вне допуска → кнопка «Полосы» светло-красная,
+            // чтобы отход вне допуска был виден прямо в очереди, без открытия панели.
+            var stripsWarn = self.cutRemainderStatus(c) === 'warn';
+            var strips = el('button', {
+                class: 'atex-pp-strips' + (stripsWarn ? ' is-warn' : ''),
+                type: 'button',
+                text: stripsButtonLabel(c.knifeCount),
+                title: stripsWarn ? 'Полосы резки — отход вне допуска' : 'Полосы резки (количество полос)'
+            });
             strips.addEventListener('click', function() {
                 if (self.busy) return;
                 self.openStrips(c, cardPanel);   // #3508 п.3: для зафиксированных панель полос открывается только на просмотр
