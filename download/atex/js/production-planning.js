@@ -3816,8 +3816,40 @@
         return out;
     }
 
+    // #3713: URL рабочего места «Диаграмма Ганта» относительно текущего пути (последний
+    // сегмент → cut-gantt). /ateh/production-planning → /ateh/cut-gantt. Вне браузера — дефолт.
+    var DEFAULT_GANTT_URL = '/atex/cut-gantt';
+    function ganttBaseFromLocation() {
+        if (typeof window === 'undefined' || !window.location || !window.location.pathname) return DEFAULT_GANTT_URL;
+        var path = String(window.location.pathname).replace(/\/+$/, '');
+        var idx = path.lastIndexOf('/');
+        return (idx >= 0 ? path.slice(0, idx) : '') + '/cut-gantt';
+    }
+
+    // #3713: ссылка на Гант с диапазоном дат фильтра «Дата плана» (?from=..&to=..). Гант
+    // открывается ровно этим диапазоном (см. ganttRangeFromTo в cut-gantt). Пустой «По» →
+    // to = from (один день). Чистая → проверяется тестом.
+    function ganttRangeLink(fromIso, toIso, baseUrl) {
+        var base = baseUrl || DEFAULT_GANTT_URL;
+        var from = String(fromIso == null ? '' : fromIso).trim();
+        var to = String(toIso == null ? '' : toIso).trim();
+        var params = [];
+        if (from) params.push('from=' + encodeURIComponent(from));
+        if (to) params.push('to=' + encodeURIComponent(to));
+        else if (from) params.push('to=' + encodeURIComponent(from));
+        return params.length ? base + '?' + params.join('&') : base;
+    }
+
+    // #3713: иконка-Гант (горизонтальные полосы) для ссылки у фильтра дат.
+    var GANTT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
+        '<rect x="1" y="2.5" width="8" height="2.6" rx="1"></rect>' +
+        '<rect x="4" y="6.7" width="9" height="2.6" rx="1"></rect>' +
+        '<rect x="2" y="10.9" width="6" height="2.6" rx="1"></rect></svg>';
+
     var planning = {
         parseDeepLink: parseDeepLink,
+        ganttRangeLink: ganttRangeLink,                 // #3713
+        ganttBaseFromLocation: ganttBaseFromLocation,   // #3713
         cutClickSelectsCut: cutClickSelectsCut,
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -7219,9 +7251,6 @@
         //    отсюда ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
-        // #3708: точная намотка (как в расписании) для дробного «Резка и Лидер» — НЕ из ceil'нутой
-        // «Длительность, минут» (c.duration), иначе сохранённая длительность длиннее реального окна.
-        var windPoints = windingPointsFromTimes(this.opTimes || {});
         var prevBySlitter = this.prevSetupBySlitter || {};
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
@@ -7232,18 +7261,19 @@
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             arr.forEach(function(c) {
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
-                // #3708: поля наладок/лидера дробные (type 14) — храним ТОЧНЫЕ минуты (round3), без
-                // округления, иначе бар в Ганте (наладка + «Резка и Лидер») длиннее реального окна
-                // расписания (старт следующего задания) и налезает на него.
-                var wantK = round3(want.knifeMin), wantM = round3(want.materialWindingMin);
-                // #3700/#3708: «Резка и Лидер» = ТОЧНАЯ намотка (пересчёт из метража и норм, как
-                // расписание) + лидер (BETWEEN_CUTS × число резок цуга, cutLeaderRuns). НЕ из c.duration —
-                // она сохранена округлённой вверх (#3635 п.4), что и давало налезание баров.
-                var wantT = round3(scheduleDurationMinutes(c, c.length, windPoints) + betweenCuts * cutLeaderRuns(c));
+                // #3715: пишем ЦЕЛЫЕ минуты (Math.round). Дробные значения (#3708) перестали
+                // записываться — поля не приняли нецелое, _m_set падал и обрывал запись всех трёх
+                // колонок («Наладка ножей»/«Сырье/намотка»/«Резка и Лидер») для всей очереди.
+                // Налезание баров (#3708) убирает обрезка по старту следующего задания в Ганте
+                // (cut-gantt.js), а не дробная длительность.
+                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
+                // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
+                // цуга, cutLeaderRuns). Зависит только от самой резки.
+                var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 function changed(req, cur, val) {
-                    return req && (!(cur != null && cur !== '') || round3(stripNum(cur)) !== round3(val));
+                    return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
                 if (changed(knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(matReq, c.storedMaterialWindingMin, wantM)
@@ -7937,7 +7967,16 @@
         var dateNext = el('button', { class: 'atex-pp-date-nav', type: 'button', text: '›', title: 'Сдвинуть диапазон на день вперёд' });
         datePrev.addEventListener('click', function() { if (!self.busy) shiftFilterDate(-1); });
         dateNext.addEventListener('click', function() { if (!self.busy) shiftFilterDate(1); });
-        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFrom, el('span', { class: 'atex-pp-date-sep', text: '–' }), dateTo, dateNext]);
+        // #3713: иконка-ссылка «Диаграмма Ганта» рядом с выбором дат — открывает Гант на этом же
+        // диапазоне (?from=..&to=..). href пересобирается при каждом renderQueue из текущего фильтра.
+        var ganttLink = el('a', {
+            class: 'atex-pp-gantt-link',
+            href: ganttRangeLink(this.filter.date, this.filter.dateTo, ganttBaseFromLocation()),
+            title: 'Открыть диаграмму Ганта на этом диапазоне дат',
+            'aria-label': 'Диаграмма Ганта',
+            html: GANTT_ICON_SVG
+        });
+        var dateNav = el('div', { class: 'atex-pp-date-field' }, [datePrev, dateFrom, el('span', { class: 'atex-pp-date-sep', text: '–' }), dateTo, dateNext, ganttLink]);
         // #3411: быстрый поиск между «Дата плана» и «Статус». Фильтрует карточки очереди
         // и пересчитывает счётчики на закладках станков (видно, в каком станке сколько
         // совпавших позиций). Поиск идёт по сырью/намотке/статусу и подписям связанных

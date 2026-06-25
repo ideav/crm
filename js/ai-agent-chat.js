@@ -55,6 +55,14 @@
             // Без панели и кнопки вызова работать нечему — тихо выходим.
             if (!this.toggle || !this.panel) return false;
 
+            // Issue #3716: не владельцу базы (имя пользователя ≠ имя базы) ИИ-агент
+            // недоступен — прячем кнопку вызова и НЕ обращаемся к ai/agent?JSON
+            // (ни resume, ни send, ни опросы здесь не навешиваются).
+            if (!this.isAgentAllowed()) {
+                this.toggle.style.display = 'none';
+                return false;
+            }
+
             var self = this;
 
             this.toggle.addEventListener('click', function () { self.togglePanel(); });
@@ -125,6 +133,23 @@
             if (typeof window !== 'undefined' && window.db) return String(window.db);
             var parts = window.location.pathname.split('/').filter(Boolean);
             return parts.length > 0 ? parts[0] : '';
+        },
+
+        // Имя текущего пользователя (глобаль `user` из main.html: '{_global_.user}').
+        getCurrentUserName: function () {
+            if (typeof user !== 'undefined' && user) return String(user);
+            if (typeof window !== 'undefined' && window.user) return String(window.user);
+            return '';
+        },
+
+        // Issue #3716: ИИ-агент доступен (и на сервере, и в UI) только пользователю,
+        // чьё имя совпадает с именем базы. Для остальных не делаем НИ ОДНОГО запроса
+        // /{db}/ai/agent?JSON — сервер их всё равно отклоняет (403), а лишние вызовы шумят.
+        // Сравнение зеркалит серверное aiAgentRequireOwner (index.php): strtolower обоих.
+        isAgentAllowed: function () {
+            var u = this.getCurrentUserName().toLowerCase();
+            var d = this.getCurrentDbName().toLowerCase();
+            return u !== '' && u === d;
         },
 
         getXsrfToken: function () {
