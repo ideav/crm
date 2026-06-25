@@ -271,12 +271,15 @@ assertEqual(gantt.planningLink({ id: '7', planDate: '', slitter: { id: null } })
 assertEqual(gantt.planningLink({ id: '7' }, '/x/pp'),
     '/x/pp?cut=7', 'planningLink: базовый URL переопределяется');
 
-// ── parseDeepLink: cut-gantt и planning разбирают одинаково ──
-var expectDL = { cut: '85472', date: '2026-05-06', slitter: '1285' };
-assertEqual(gantt.parseDeepLink('?cut=85472&date=2026-05-06&slitter=1285'), expectDL, 'parseDeepLink (gantt): полный');
-assertEqual(planning.parseDeepLink('?cut=85472&date=2026-05-06&slitter=1285'), expectDL, 'parseDeepLink (planning): полный');
-assertEqual(gantt.parseDeepLink(''), { cut: '', date: '', slitter: '' }, 'parseDeepLink: пусто');
-assertEqual(gantt.parseDeepLink('?foo=1&cut=9'), { cut: '9', date: '', slitter: '' }, 'parseDeepLink: лишние параметры игнорируются');
+// ── parseDeepLink: #3713 Гант дополнительно понимает from/to (диапазон из «Планирования») ──
+assertEqual(gantt.parseDeepLink('?cut=85472&date=2026-05-06&slitter=1285'),
+    { cut: '85472', date: '2026-05-06', slitter: '1285', from: '', to: '' }, 'parseDeepLink (gantt): полный');
+assertEqual(planning.parseDeepLink('?cut=85472&date=2026-05-06&slitter=1285'),
+    { cut: '85472', date: '2026-05-06', slitter: '1285' }, 'parseDeepLink (planning): полный');
+assertEqual(gantt.parseDeepLink('?from=2026-06-25&to=2026-06-27&slitter=1285'),
+    { cut: '', date: '', slitter: '1285', from: '2026-06-25', to: '2026-06-27' }, 'parseDeepLink (gantt) #3713: диапазон from/to');
+assertEqual(gantt.parseDeepLink(''), { cut: '', date: '', slitter: '', from: '', to: '' }, 'parseDeepLink: пусто');
+assertEqual(gantt.parseDeepLink('?foo=1&cut=9'), { cut: '9', date: '', slitter: '', from: '', to: '' }, 'parseDeepLink: лишние параметры игнорируются');
 
 // ── #3705: лидер «между резками» в конце задания (раньше терялся → бар короче плана) ──
 // Лидер = BETWEEN_CUTS × «Кол-во план» (порт cutLeaderRuns планировщика).
@@ -346,5 +349,24 @@ var laidDone = gantt.layoutGroups(doneThenNext, gantt.ganttRange('2026-06-10', '
     gantt.parseDateTimeMs('2026-06-10 07:00'), {}, { pxPerMin: 1 });
 assertEqual(laidDone.groups[0].tasks[0].widthPx, 70,
     'layoutGroups #3708: завершённое задание не обрезается (факт 70 мин, конфликт виден)');
+
+// ── #3713: произвольный диапазон [С;По] из «Планирования» (deep-link from/to) ──
+assertEqual(gantt.daySpanToMode('2026-06-25', '2026-06-25'), 'day', 'daySpanToMode: 1 день → day');
+assertEqual(gantt.daySpanToMode('2026-06-25', '2026-06-27'), 'three', 'daySpanToMode: 3 дня → three');
+assertEqual(gantt.daySpanToMode('2026-06-25', '2026-07-01'), 'week', 'daySpanToMode: 7 дней → week');
+assertEqual(gantt.daySpanToMode('2026-06-25', '2026-07-10'), 'month', 'daySpanToMode: >7 дней → month');
+var r3713 = gantt.ganttRangeFromTo('2026-06-25', '2026-06-27');
+assertEqual([r3713.startIso, gantt.localIsoDateFromMs(r3713.endMs - 1), r3713.mode, r3713.days.length],
+    ['2026-06-25', '2026-06-27', 'three', 3], 'ganttRangeFromTo #3713: 25–27 июня включительно (3 дня), mode three');
+assertEqual(gantt.ganttRangeFromTo('2026-06-25', '').mode, 'day', 'ganttRangeFromTo #3713: пустой «По» → один день');
+assertEqual([gantt.cutInRange({ planDate: '2026-06-26' }, r3713), gantt.cutInRange({ planDate: '2026-06-28' }, r3713)],
+    [true, false], 'cutInRange #3713: 26 в диапазоне, 28 — вне (По=27 включительно)');
+// planning.ganttRangeLink: иконка у фильтра дат → Гант с диапазоном.
+assertEqual(planning.ganttRangeLink('2026-06-25', '2026-06-27', '/ateh/cut-gantt'),
+    '/ateh/cut-gantt?from=2026-06-25&to=2026-06-27', 'ganttRangeLink #3713: from+to');
+assertEqual(planning.ganttRangeLink('2026-06-25', '', '/ateh/cut-gantt'),
+    '/ateh/cut-gantt?from=2026-06-25&to=2026-06-25', 'ganttRangeLink #3713: пустой «По» → to=from');
+assertEqual(planning.ganttRangeLink('', '', '/ateh/cut-gantt'), '/ateh/cut-gantt',
+    'ganttRangeLink #3713: без дат → базовый URL');
 
 console.log('\n' + passed + ' assertions passed');
