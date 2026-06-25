@@ -84,7 +84,8 @@ function makeEnv(fetchHandler){
         addEventListener: function(){},
         querySelector: function(){ return null; }
     };
-    global.window = { db: 'acme', location: { pathname: '/acme/main' } };
+    // #3716: ИИ-агент доступен только владельцу (имя пользователя = имя базы).
+    global.window = { db: 'acme', user: 'acme', location: { pathname: '/acme/main' } };
     global.__intervals = [];
     global.setInterval = function(fn, ms){ var h = { fn: fn, ms: ms, cleared: false }; global.__intervals.push(h); return h; };
     global.clearInterval = function(h){ if(h) h.cleared = true; };
