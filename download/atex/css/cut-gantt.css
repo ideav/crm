@@ -87,6 +87,11 @@
 .atex-cg-mode.is-active { background: var(--cg-accent); color: #fff; border-color: var(--cg-accent); }
 .atex-cg-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
+/* #3704: масштаб по горизонтали — «−» / текущий зум (сброс) / «+». */
+.atex-cg-zoom { display: inline-flex; align-items: center; gap: 4px; }
+.atex-cg-zoom .atex-cg-arrow { font-size: 16px; }
+.atex-cg-zoom-reset { min-width: 52px; text-align: center; padding: 0 8px; }
+
 /* ── Легенда ── */
 .atex-cg-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--cg-muted); }
 .atex-cg-legend-item { display: inline-flex; align-items: center; gap: 6px; }
