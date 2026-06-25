@@ -278,4 +278,42 @@ assertEqual(planning.parseDeepLink('?cut=85472&date=2026-05-06&slitter=1285'), e
 assertEqual(gantt.parseDeepLink(''), { cut: '', date: '', slitter: '' }, 'parseDeepLink: пусто');
 assertEqual(gantt.parseDeepLink('?foo=1&cut=9'), { cut: '9', date: '', slitter: '' }, 'parseDeepLink: лишние параметры игнорируются');
 
+// ── #3705: лидер «между резками» в конце задания (раньше терялся → бар короче плана) ──
+// Лидер = BETWEEN_CUTS × «Кол-во план» (порт cutLeaderRuns планировщика).
+assertEqual(gantt.ganttCutLeaderRuns({ plannedRuns: 8 }), 8, 'ganttCutLeaderRuns: «Кол-во план»');
+assertEqual(gantt.ganttCutLeaderRuns({ plannedRuns: 0 }), 1, 'ganttCutLeaderRuns: 0 резок → 1');
+assertEqual(gantt.ganttCutLeaderRuns({}), 1, 'ganttCutLeaderRuns: нет «Кол-во план» → 1');
+assertEqual(gantt.ganttLeaderMin({ plannedRuns: 8 }, { BETWEEN_CUTS: 2 }), 16, 'ganttLeaderMin: 2×8=16 (как разрыв task1 на скрине)');
+assertEqual(gantt.ganttLeaderMin({ plannedRuns: 10 }, { BETWEEN_CUTS: 2 }), 20, 'ganttLeaderMin: 2×10=20 (как разрыв task2 на скрине)');
+assertEqual(gantt.ganttLeaderMin({ plannedRuns: 5 }), 10, 'ganttLeaderMin: дефолт BETWEEN_CUTS=2 → 2×5=10');
+// attachLeaderMinutes кладёт cut.leaderMin каждому заданию.
+var leadCut = { planDate: '2026-06-10 08:00', duration: 35, plannedRuns: 8 };
+gantt.attachLeaderMinutes([leadCut], { BETWEEN_CUTS: 2 });
+assertEqual(leadCut.leaderMin, 16, 'attachLeaderMinutes: проставляет cut.leaderMin');
+// cutBarMinutes: cut_time нет → намотка + лидер; есть cut_time → берём его (уже с лидером).
+assertEqual(gantt.cutBarMinutes(leadCut), 51, 'cutBarMinutes #3705: намотка(35) + лидер(16), когда нет cut_time');
+assertEqual(gantt.cutBarMinutes({ planDate: '2026-06-10 08:00', duration: 35, leaderMin: 16, cutTimeMin: 50 }), 50,
+    'cutBarMinutes #3705: «Резка и Лидер» (cut_time) приоритетнее фолбэка');
+assertEqual(gantt.cutBarMinutes({ planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:00', endDate: '2026-06-10 08:40', leaderMin: 16 }), 40,
+    'cutBarMinutes #3705: у начатой — фактическое окно, лидер не добавляется');
+// cutBarTime: конец задания теперь включает лидер (фикс разрыва из #3705).
+assertEqual(gantt.cutBarTime(leadCut, 0), '08:00-08:51 (51 мин)', 'cutBarTime #3705: конец = старт + намотка + лидер');
+assertEqual(gantt.cutBarTime(leadCut, 30), '08:00-09:21 (81 мин)', 'cutBarTime #3705: + наладка 30 → конец 09:21');
+
+// ── #3704: зум по горизонтали + нижняя граница «вписать в экран» ──
+var laidZoom = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 2 });
+assertEqual(laidZoom.pxPerMin, 2, 'layoutGroups #3704: зум ×2 удваивает масштаб');
+assertEqual(laidZoom.trackPx, 3120, 'layoutGroups #3704: trackPx ×2 при зуме ×2');
+assertEqual(laidZoom.groups[0].tasks.map(function(t) { return [t.cut.id, t.leftPx, t.widthPx]; }),
+    [['11', 0, 60], ['10', 240, 120]], 'layoutGroups #3704: зум растягивает бары по горизонтали');
+// fitTrackPx поднимает масштаб, чтобы дорожка заполнила экран (не уже видимой области)…
+var laidFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, fitTrackPx: 3120 });
+assertEqual([laidFit.pxPerMin, laidFit.trackPx], [2, 3120], 'layoutGroups #3704: масштаб поднят до «вписать в экран»');
+// …но НЕ опускает ниже базового (узкий экран не сжимает бары мельче масштаба режима).
+var laidFitSmall = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, fitTrackPx: 780 });
+assertEqual(laidFitSmall.pxPerMin, 1, 'layoutGroups #3704: fitTrackPx меньше базового не сжимает масштаб');
+// Зум и fit вместе: зум ниже fit перекрывается «вписать в экран».
+var laidZoomFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 0.25, fitTrackPx: 3120 });
+assertEqual(laidZoomFit.pxPerMin, 2, 'layoutGroups #3704: «−» ниже экрана упирается в «вписать в экран»');
+
 console.log('\n' + passed + ' assertions passed');

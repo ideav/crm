@@ -434,7 +434,9 @@
         var winMin = tr ? (tr.endMs - tr.startMs) / 60000 : 0;
         if (tr && tr.actualStartMs != null) return winMin;
         if (cut && cut.cutTimeMin != null) return Math.max(0, stripNum(cut.cutTimeMin));
-        return winMin;
+        // #3705: cut_time не пришёл → намотка (окно cutTimeRange) + расчётный лидер «между резками»
+        // (attachLeaderMinutes кладёт cut.leaderMin). Иначе бар короче плана ровно на лидер.
+        return round3(winMin + Math.max(0, stripNum(cut && cut.leaderMin)));
     }
 
     // Текст бара (#3668 п.4): диапазон времени, например «11:19-11:23 (4 мин)».
@@ -444,8 +446,11 @@
     function cutBarTime(cut, setupMin) {
         var tr = cutTimeRange(cut);
         if (!tr) return '';
-        var off = (Number(setupMin) || 0) * 60000;
-        var startMs = tr.startMs, endMs = tr.endMs + off;
+        // #3705: правый край = старт + (резка+лидер) + наладка — ровно та же сумма минут, что у
+        // ширины бара (cutBarSegments) и у окна планировщика. Раньше брали tr.endMs (намотка БЕЗ
+        // лидера) + наладка → конец задания получался на лидер «между резками» короче плана.
+        var startMs = tr.startMs;
+        var endMs = startMs + (cutBarMinutes(cut) + (Number(setupMin) || 0)) * 60000;
         var mins = Math.max(1, Math.round((endMs - startMs) / 60000));
         return formatTime(startMs) + '-' + formatTime(endMs) + ' (' + mins + ' мин)';
     }
@@ -602,8 +607,25 @@
     }
 
     // #3675 п.3: op-времена наладки по умолчанию (как в таблице «Время операции, мин»:
-    // смена сырья 15 мин, смена ножей 30 мин). loadOpTimes переопределяет из базы, если иные.
-    var GANTT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30 };
+    // смена сырья 15 мин, смена ножей 30 мин). #3705: лидер «между резками» BETWEEN_CUTS = 2 мин
+    // (как DEFAULT_OP_TIMES планировщика). loadOpTimes переопределяет из базы, если иные.
+    var GANTT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, BETWEEN_CUTS: 2 };
+
+    // #3705: число резок цуга для лидера (порт cutLeaderRuns планировщика) — «Кол-во план»,
+    // округлённое; нет/0 → 1 (один лидер на резку без проходов). Лидер заправляют ПЕРЕД каждой.
+    function ganttCutLeaderRuns(cut) {
+        var r = stripNum(cut && cut.plannedRuns);
+        return r > 0 ? Math.round(r) : 1;
+    }
+
+    // #3705: лидер «между резками» в минутах = BETWEEN_CUTS × число резок (как в планировщике).
+    // Хранимое «Резка и Лидер» (cut_time) уже включает лидер; этот расчёт — фолбэк, когда отчёт
+    // cut_time не отдал, чтобы конец бара совпадал с планом (раньше терялся на лидер). Чистая — тест.
+    function ganttLeaderMin(cut, times) {
+        var t = times || GANTT_OP_TIMES;
+        var unit = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : GANTT_OP_TIMES.BETWEEN_CUTS) || 0;
+        return round3(unit * ganttCutLeaderRuns(cut));
+    }
 
     function ganttNormWinding(v) {
         var s = String(v == null ? '' : v).trim().toUpperCase();
@@ -786,6 +808,16 @@
         return cuts;
     }
 
+    // #3705: проставляет cut.leaderMin (лидер «между резками», BETWEEN_CUTS × «Кол-во план») каждому
+    // заданию — фолбэк для cutBarMinutes, когда отчёт не отдал «Резка и Лидер» (cut_time). Лидер на
+    // соседей не завязан, поэтому считается по одному заданию. Мутирует cuts. Чистая — тест.
+    function attachLeaderMinutes(cuts, times) {
+        (cuts || []).forEach(function(cut) {
+            if (cut) cut.leaderMin = ganttLeaderMin(cut, times);
+        });
+        return cuts;
+    }
+
     // Ссылка на «Планирование производства» с зашитыми заданием/датой/станком.
     // date — плановый день (YYYY-MM-DD) для фильтра очереди планировщика.
     function planningLink(cut, baseUrl) {
@@ -819,7 +851,16 @@
         });
 
         var win = ganttWindow(visible, range, o);
-        var pxPerMin = o.pxPerMin > 0 ? o.pxPerMin : pxPerMinForMode(range && range.mode);
+        // #3704: масштаб по горизонтали = базовый (по режиму) × зум кнопок. Снизу ограничен «вписать
+        // в экран»: дорожка не уже видимой области (fitTrackPx) — кнопка «−» не сжимает её мельче.
+        var basePxPerMin = o.pxPerMin > 0 ? o.pxPerMin : pxPerMinForMode(range && range.mode);
+        var zoom = Number(o.zoom) > 0 ? Number(o.zoom) : 1;
+        var pxPerMin = basePxPerMin * zoom;
+        var winMin = (win.endMs - win.startMs) / 60000;
+        if (o.fitTrackPx > 0 && winMin > 0) {
+            var fitPxPerMin = o.fitTrackPx / winMin;
+            if (pxPerMin < fitPxPerMin) pxPerMin = fitPxPerMin;
+        }
         var minPx = o.minPx > 0 ? o.minPx : GANTT_MIN_BAR_PX;
         var trackPx = ganttTrackPx(win, pxPerMin);
 
@@ -914,6 +955,9 @@
         cutSetupMin: cutSetupMin,
         cutBarMinutes: cutBarMinutes,   // #3700
         cutBarSegments: cutBarSegments,
+        ganttCutLeaderRuns: ganttCutLeaderRuns,   // #3705
+        ganttLeaderMin: ganttLeaderMin,           // #3705
+        attachLeaderMinutes: attachLeaderMinutes, // #3705
         cutChangeoverMinutes: cutChangeoverMinutes,
         ganttPrevSetupFromRows: ganttPrevSetupFromRows,
         ganttPrevSetupBySlitter: ganttPrevSetupBySlitter,
@@ -964,8 +1008,13 @@
         this.busy = false;
         this.cuts = [];
         this.slitters = [];
-        this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '' };   // #3683: дефолт — «День»
+        this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '', zoom: 1 };   // #3683: дефолт — «День»; #3704: зум по горизонтали
     }
+
+    // #3704: шаг/границы зума горизонтального масштаба (множитель к px/мин режима).
+    var GANTT_ZOOM_STEP = 1.5;
+    var GANTT_ZOOM_MIN = 0.25;
+    var GANTT_ZOOM_MAX = 16;
 
     AtexCutGantt.prototype.url = function(path) {
         return '/' + encodeURIComponent(this.db) + '/' + path;
@@ -1020,7 +1069,8 @@
                 });
                 return {
                     MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : GANTT_OP_TIMES.MATERIAL_WINDING,
-                    KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || GANTT_OP_TIMES.KNIFE
+                    KNIFE: Math.max(Number(raw.KNIFE_220_59) || 0, Number(raw.KNIFE_LE_59) || 0) || GANTT_OP_TIMES.KNIFE,
+                    BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : GANTT_OP_TIMES.BETWEEN_CUTS   // #3705: лидер «между резками»
                 };
             })
             .catch(function() { return Object.assign({}, GANTT_OP_TIMES); });
@@ -1042,6 +1092,8 @@
             // #3693: первая резка станка — наладка от его текущей заправки (prev_cut_setup).
             self.prevSetupBySlitter = ganttPrevSetupBySlitter(res[4] || []);
             attachSetupMinutes(self.cuts, self.opTimes, self.prevSetupBySlitter);
+            // #3705: лидер «между резками» — фолбэк для cutBarMinutes, когда нет cut_time в отчёте.
+            attachLeaderMinutes(self.cuts, self.opTimes);
             var merged = {};
             var ordered = [];
             (res[1] || []).concat(slittersFromCuts(self.cuts)).forEach(function(s) {
@@ -1113,6 +1165,17 @@
         statusSelect.value = st.status || '';
         statusSelect.addEventListener('change', function() { st.status = statusSelect.value || ''; self.render(); });
 
+        // #3704: масштаб по горизонтали — «−» сжимает (но не уже экрана), «+» растягивает; средняя
+        // кнопка показывает текущий зум и сбрасывает его в 100%.
+        var zoom = Number(st.zoom) > 0 ? Number(st.zoom) : 1;
+        var zoomOutBtn = el('button', { class: 'atex-cg-arrow', type: 'button', text: '−', title: 'Уменьшить масштаб (не уже экрана)' });
+        var zoomResetBtn = el('button', { class: 'atex-cg-btn atex-cg-zoom-reset', type: 'button', text: Math.round(zoom * 100) + '%', title: 'Сбросить масштаб' });
+        var zoomInBtn = el('button', { class: 'atex-cg-arrow', type: 'button', text: '+', title: 'Увеличить масштаб' });
+        zoomOutBtn.addEventListener('click', function() { self.setZoom((Number(st.zoom) || 1) / GANTT_ZOOM_STEP); });
+        zoomResetBtn.addEventListener('click', function() { self.setZoom(1); });
+        zoomInBtn.addEventListener('click', function() { self.setZoom((Number(st.zoom) || 1) * GANTT_ZOOM_STEP); });
+        var zoomWrap = el('div', { class: 'atex-cg-zoom', role: 'group', 'aria-label': 'Масштаб по горизонтали' }, [zoomOutBtn, zoomResetBtn, zoomInBtn]);
+
         var todayBtn = el('button', { class: 'atex-cg-btn', type: 'button', text: 'Сегодня', title: 'Перейти к текущей дате' });
         todayBtn.addEventListener('click', function() { st.anchor = todayISO(); self.render(); });
         var refreshBtn = el('button', { class: 'atex-cg-btn', type: 'button', text: 'Обновить', title: 'Перечитать данные' });
@@ -1122,6 +1185,7 @@
             el('div', { class: 'atex-cg-title', text: 'Диаграмма Ганта — задания в производство' }),
             el('div', { class: 'atex-cg-period' }, [prevBtn, el('span', { class: 'atex-cg-range', text: range.label }), nextBtn]),
             modeWrap,
+            zoomWrap,
             el('div', { class: 'atex-cg-tools' }, [dateInput, slitterSelect, statusSelect, todayBtn, refreshBtn])
         ]);
     };
@@ -1140,7 +1204,9 @@
         var self = this;
         var st = this.state;
         // #3668: задания размещаются по реальному времени на общей шкале окна.
-        var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter });
+        // #3704: зум по горизонтали + нижняя граница «вписать в экран» (дорожка не уже видимой области).
+        var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
+            { zoom: st.zoom, fitTrackPx: this._fitTrackPx() });
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
@@ -1227,6 +1293,29 @@
         });
 
         return body;
+    };
+
+    // #3704: ширина видимой области дорожки (px) = ширина корня − поля − колонка-метка − рамки.
+    // Нужна как нижняя граница масштаба, чтобы дорожка не была уже экрана. Вне браузера/без
+    // размеров → 0 (ограничение не применяется).
+    AtexCutGantt.prototype._fitTrackPx = function() {
+        if (typeof window === 'undefined' || !this.root || !window.getComputedStyle) return 0;
+        var w = this.root.clientWidth || window.innerWidth || 0;
+        if (!(w > 0)) return 0;
+        var cs = window.getComputedStyle(this.root);
+        var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+        var labelW = parseFloat(cs.getPropertyValue('--cg-label-w')) || 240;
+        var px = w - pad - labelW - 4;   // 4px ≈ рамки тела и колонки-метки
+        return px > 0 ? px : 0;
+    };
+
+    // #3704: установить зум горизонтального масштаба (в границах) и перерисовать.
+    AtexCutGantt.prototype.setZoom = function(zoom) {
+        var z = Number(zoom);
+        if (!isFinite(z) || z <= 0) z = 1;
+        z = Math.max(GANTT_ZOOM_MIN, Math.min(GANTT_ZOOM_MAX, z));
+        this.state.zoom = round3(z);
+        this.render();
     };
 
     AtexCutGantt.prototype.setBusy = function(on) {
