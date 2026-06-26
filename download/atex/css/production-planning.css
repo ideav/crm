@@ -326,11 +326,12 @@
     color: var(--pp-muted);
     white-space: nowrap;
 }
+/* #3758: сводка связей — компактная плашка в общем потоке строки. Раньше прижималась
+   вправо (margin-left:auto) и съедала всё свободное место, оттесняя втулку под обрезку. */
 .atex-pp-cut-supplies {
-    margin-left: auto;
+    flex: 0 0 auto;
     font-size: 12px;
     color: var(--pp-muted);
-    text-align: right;
     white-space: nowrap;
 }
 /* #3472: лидер резки. Смешанные лидеры (легаси) — предупреждающий стиль. */
@@ -344,15 +345,11 @@
     color: var(--pp-danger, #c0392b);
     font-weight: 600;
 }
-/* #3738: втулка резки — после лидера. Название «Диаметр втулки» бывает длинным,
-   поэтому плашка ужимается и обрезается многоточием (полное имя — в title).
-   Смешанные втулки (легаси) — предупреждающий стиль, как у лидера. */
+/* #3738: втулка резки — после лидера. #3758: НЕ обрезаем многоточием (обрезанную плашку
+   «втулка: …» было не видно) — показываем имя целиком, как у лидера; при нехватке места
+   строка переносится (flex-wrap). Смешанные втулки (легаси) — предупреждающий стиль. */
 .atex-pp-cut-sleeve {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 16em;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: 0 0 auto;
     white-space: nowrap;
     font-size: 12px;
     color: var(--pp-muted);
@@ -457,7 +454,6 @@
 .atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; cursor: default; }
 
 @media (max-width: 720px) {
-    .atex-pp-cut-supplies { margin-left: 0; }
     .atex-pp-filters { grid-template-columns: 1fr; }
 }
 
