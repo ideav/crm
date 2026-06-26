@@ -2291,18 +2291,16 @@
         return pts;
     }
 
-    // #3606: точки намотки ФОЛЬГИ из кодов WIND_FOIL_<метры>. Андрей: «4 мин за каждые
-    // 305 м» — пропорционально и БЕЗ клампа выше точки (122м→1.6, 305→4, 610→8). Чтобы
-    // windingMinutes давал линейную ставку через ноль и при одной точке, добавляем
-    // опорную (0,0). Помечаем foil:true для подписи нормы. Нет кодов WIND_FOIL_ → [].
+    // #3606: точки намотки ФОЛЬГИ из кодов WIND_FOIL_<метры>. #3742: норма «4 мин за каждые
+    // 305 м» считается БЛОКАМИ (foilWindingMinutes), а не пропорцией: проход короче нормы всё
+    // равно стоит полную норму (122м→4, 305→4, 400→8, 610→8). Помечаем foil:true — по флагу
+    // windingMinutes выбирает блочную модель и подпись нормы. Нет кодов WIND_FOIL_ → [].
     function foilWindingPointsFromTimes(opTimes){
         var pts = [];
         Object.keys(opTimes || {}).forEach(function(code){
             var m = /^WIND_FOIL_(\d+)$/.exec(code);
             if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0, foil: true });
         });
-        if (!pts.length) return [];
-        pts.push({ m: 0, min: 0, foil: true });
         pts.sort(function(a, b){ return a.m - b.m; });
         return pts;
     }
@@ -2314,13 +2312,29 @@
         return windPoints || [];
     }
 
+    // #3742: намотка ФОЛЬГИ — БЛОКАМИ, не пропорцией. Норма WIND_FOIL_<метры>=<мин> читается
+    // как «<мин> за каждые НАЧАТЫЕ <метры>»: время прохода = ceil(метраж / <метры>) × <мин>.
+    // Короткий проход всё равно стоит полную норму (122 м при норме 305 м = 4 мин, а не 1.6;
+    // 400 м = 8 мин — начат второй блок). Блок = наименьшая по метражу точка серии. Нет
+    // нормы / метраж ≤ 0 → 0.
+    function foilWindingMinutes(runMeters, foilPoints){
+        var x = Number(runMeters) || 0;
+        if (x <= 0) return 0;
+        var ref = (foilPoints || []).filter(function(p){ return Number(p.m) > 0; })
+            .sort(function(a, b){ return a.m - b.m; })[0];
+        if (!ref) return 0;
+        return round3(Math.ceil(x / Number(ref.m)) * (Number(ref.min) || 0));
+    }
+
     // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
     // пропорционально от 0; между точками — линейно; выше последней — экстраполяция по
-    // последнему отрезку (при одной точке — клампим). Нет точек / runMeters≤0 → 0.
+    // последнему отрезку (при одной точке — клампим). #3742: точки фольги (флаг foil) —
+    // блочная модель foilWindingMinutes, а не интерполяция. Нет точек / runMeters≤0 → 0.
     function windingMinutes(runMeters, points){
         var x = Number(runMeters) || 0;
         var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
         if (!p.length || x <= 0) return 0;
+        if (p.some(function(q){ return q.foil; })) return foilWindingMinutes(x, p);   // #3742: фольга — блоками
         if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
         for (var i = 1; i < p.length; i++){
             if (x <= p[i].m){
@@ -2359,7 +2373,7 @@
     // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
     // WIND_600=4 мин; WIND_900=5 мин (интерполяция)» (две). Пусто → ''.
     function formatWindingNorms(norms){
-        var items = (norms || []).filter(function(n){ return Number(n.m) > 0; }) // #3606: скрыть опорную точку (0,0) фольги
+        var items = (norms || []).filter(function(n){ return Number(n.m) > 0; }) // пропускаем нулевые опорные точки
             .map(function(n){ return (n.foil ? 'WIND_FOIL_' : 'WIND_') + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
         if (!items.length) return '';
         if (items.length === 1) return 'Норма намотки: ' + items[0];
@@ -4003,6 +4017,7 @@
         materialByCut: materialByCut,
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
+        foilWindingMinutes: foilWindingMinutes,   // #3742
         windPointsForCut: windPointsForCut,
         windingMinutes: windingMinutes,
         relevantWindingNorms: relevantWindingNorms,
