@@ -964,13 +964,21 @@
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
                     // #3472: лидеры резки (из cut_leader по всем строкам). Новые резки —
                     // один лидер; легаси (до ограничения по лидеру) могут мешать несколько.
-                    leaders: []
+                    leaders: [],
+                    // #3738: втулки резки (из cut_sleeve по всем строкам). Резка
+                    // единодиаметровая (layoutPositionGroups разбивает позиции по втулке) —
+                    // обычно одна; несколько (легаси-смешение) выделяем предупреждением.
+                    sleeves: []
                 };
                 order.push(cutId);
             }
             if (cutId && cutsById[cutId]) {
                 var leaderVal = str(row.cut_leader).trim();
                 if (leaderVal && cutsById[cutId].leaders.indexOf(leaderVal) < 0) cutsById[cutId].leaders.push(leaderVal);
+                // #3738: втулка из cut_sleeve (имя «Диаметр втулки» позиции). trim() —
+                // в справочнике встречается ведущий таб у некоторых названий.
+                var sleeveVal = str(row.cut_sleeve).trim();
+                if (sleeveVal && cutsById[cutId].sleeves.indexOf(sleeveVal) < 0) cutsById[cutId].sleeves.push(sleeveVal);
             }
             var supplyId = str(row.supply_id);
             if (supplyId) {
@@ -8311,6 +8319,18 @@
                     class: 'atex-pp-cut-leader' + (mixed ? ' atex-pp-cut-leader-mixed' : ''),
                     title: (mixed ? 'В резке смешаны разные лидеры: ' : 'Лидер: ') + cutLeaders.join(', '),
                     text: 'лидер: ' + cutLeaders.join(', ')
+                }));
+            }
+            // #3738: втулка резки — сразу после лидера. Источник — cut_sleeve (имя
+            // «Диаметр втулки» обеспеченной позиции). Одна втулка — обычная плашка;
+            // несколько (легаси-смешение до разбивки по втулке) — предупреждение, как у лидера.
+            var cutSleeves = (c.sleeves || []).filter(function(s) { return s; });
+            if (cutSleeves.length) {
+                var sleeveMixed = cutSleeves.length > 1;
+                infoChildren.push(el('span', {
+                    class: 'atex-pp-cut-sleeve' + (sleeveMixed ? ' atex-pp-cut-sleeve-mixed' : ''),
+                    title: (sleeveMixed ? 'В резке смешаны разные втулки: ' : 'Втулка: ') + cutSleeves.join(', '),
+                    text: 'втулка: ' + cutSleeves.join(', ')
                 }));
             }
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
