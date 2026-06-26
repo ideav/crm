@@ -363,9 +363,15 @@
     function layoutPositionGroups(positions) {
         var list = (positions || []).slice();
         if (!list.length) return [];
-        return [list];
+        var groups = {}, order = [];
+        list.forEach(function(p) {
+            var key = String(p && p.sleeveId != null ? p.sleeveId : '');
+            if (!groups[key]) { groups[key] = []; order.push(key); }
+            groups[key].push(p);
+        });
+        return order.map(function(k) { return groups[k]; });
     }
-
+    
     // Индекс колонки реквизита в строке JSON_OBJ. Колонки идут в порядке:
     // [главное значение, ...reqs в порядке метаданных].
     function columnIndex(meta, reqName) {
@@ -1196,11 +1202,12 @@
         (positions || []).forEach(function(p) {
             var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
             var leader = planningLeaderKey(p);
-            var groupKey = prefKey + '|L=' + leader;
+            var groupKey = prefKey + '|L=' + leader + '|S=' + (p.sleeveId || '');
             if (!groups[groupKey]) {
                 groups[groupKey] = {
                     key: prefKey,
                     leader: leader,
+                    sleeveId: p.sleeveId || '',
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
