@@ -8238,6 +8238,17 @@
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
             .forEach(function(cl) { cleanupByDay[cl.day] = cl; });
+        // #3743: суммарные рабочие минуты станка за каждый рабочий день — переналадка +
+        // намотка + лидер по каждому заданию дня (всё, чем станок занят). Считаем по полному
+        // расписанию (не по фильтру поиска), выводим в скобках после даты-заголовка. Уборка
+        // (#3155) имеет собственную строку с минутами и в сумму заданий не входит.
+        var dayMinutesBySched = {};
+        schedule.forEach(function(sc) {
+            var d = schedDay(sc);
+            if (d == null) return;
+            var m = (Number(sc.setupMin) || 0) + (Number(sc.durationMin) || 0) + (Number(sc.leaderMin) || 0);
+            dayMinutesBySched[d] = (dayMinutesBySched[d] || 0) + m;
+        });
         var lastDayDateRendered = null;   // #3616: дата-заголовок дня вставляется один раз на рабочий день
 
         activeGroup.cuts.forEach(function(c, idx) {
@@ -8497,8 +8508,12 @@
             // база планирования (день фильтра) + смещение дня расписания.
             var cardSchedDay = sc ? schedDay(sc) : null;
             if (cardSchedDay != null && cardSchedDay !== lastDayDateRendered) {
-                groupEl.appendChild(el('div', { class: 'atex-pp-day-date',
-                    text: formatPlanDayHeading(planBaseMidnightMs, cardSchedDay) }));
+                // #3743: после даты — суммарные минуты заданий станка за этот день: «(456 мин)».
+                var dayMins = Math.round(Number(dayMinutesBySched[cardSchedDay]) || 0);
+                groupEl.appendChild(el('div', { class: 'atex-pp-day-date' }, [
+                    formatPlanDayHeading(planBaseMidnightMs, cardSchedDay),
+                    el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
+                ]));
                 lastDayDateRendered = cardSchedDay;
             }
 
