@@ -365,8 +365,9 @@
     var MODE_PX_PER_MIN = { day: 2, three: 1, week: 0.4, month: 0.08 };
     var GANTT_PX_PER_MIN = MODE_PX_PER_MIN.day;     // масштаб по умолчанию (режим «День»)
     var GANTT_MIN_BAR_PX = 8;   // минимальная видимая ширина бара (текст выходит за его рамки)
-    var GANTT_DAY_START_HOUR = 8;   // окно по умолчанию (когда заданий нет) — смена 08:00–18:00
-    var GANTT_DAY_END_HOUR = 18;
+    var GANTT_DAY_START_HOUR = 8;   // рабочее окно — смена 08:00…
+    var GANTT_DAY_END_HOUR = 18;    // …18:00
+    var GANTT_SHIFT_TAIL_MIN = 30;  // #3747: получас уборки после смены — правый край рабочего окна 18:30
     // Часовая сетка: все деления одинаковым пунктиром; интервал в часах из набора
     // {1,2,4,6,8,12,24}, подбирается так, чтобы деления были не уже 50px (#3668 п.6).
     var GANTT_HOUR_STEPS = [1, 2, 4, 6, 8, 12, 24];
@@ -423,6 +424,78 @@
         return Math.max(round3((win.endMs - win.startMs) / 60000 * ppm), 1);
     }
 
+    // #3747: правый край бара задания (мс) — старт + наладка + резка+лидер. Та же формула,
+    // что в ganttWindow; нужна, чтобы рабочее окно дня покрывало захлёст бара за смену.
+    function cutBarEndMs(cut) {
+        var tr = cutTimeRange(cut);
+        if (!tr) return null;
+        return tr.startMs + (cutBarMinutes(cut) + cutSetupMin(cut).total) * 60000;
+    }
+
+    // #3747: рабочие отрезки дорожки — по одному на КАЛЕНДАРНЫЙ день с заданиями, окно
+    // [DAY_START_HOUR; DAY_END_HOUR + получас уборки]. Нерабочее время (ночь между сменами)
+    // на ось не попадает — отрезки идут встык (дни лесенкой). Бар, вышедший за смену (ранний
+    // старт или захлёст резки за 18:30), РАСШИРЯЕТ окно своего дня, чтобы не наложиться на
+    // соседний день. Заданий нет → одно окно-смена дня периода (как прежний ganttWindow).
+    // → [{startMs, endMs}] по возрастанию. Чистая — покрыта тестом.
+    function workingSegments(cuts, range, opts) {
+        var o = opts || {};
+        var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
+        var endHour = o.endHour != null ? Number(o.endHour) : GANTT_DAY_END_HOUR;
+        var tailMin = o.shiftTailMin != null ? Number(o.shiftTailMin) : GANTT_SHIFT_TAIL_MIN;
+        var byDay = {}, order = [];
+        (cuts || []).forEach(function(cut) {
+            var tr = cutTimeRange(cut);
+            if (!tr) return;
+            var dayMs = startOfLocalDayMs(tr.startMs);
+            var seg = byDay[dayMs];
+            if (!seg) {
+                seg = byDay[dayMs] = {
+                    startMs: dayMs + startHour * GANTT_HOUR_MS,
+                    endMs: dayMs + endHour * GANTT_HOUR_MS + tailMin * 60000
+                };
+                order.push(dayMs);
+            }
+            if (tr.startMs < seg.startMs) seg.startMs = tr.startMs;          // ранний старт
+            var barEndMs = cutBarEndMs(cut);
+            if (barEndMs != null && barEndMs > seg.endMs) seg.endMs = barEndMs; // захлёст за смену
+        });
+        if (!order.length) {
+            var dayMs0 = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
+            return [{ startMs: dayMs0 + startHour * GANTT_HOUR_MS, endMs: dayMs0 + endHour * GANTT_HOUR_MS + tailMin * 60000 }];
+        }
+        return order.sort(function(a, b) { return a - b; }).map(function(d) { return byDay[d]; });
+    }
+
+    // #3747: масштаб «время → px» по рабочим отрезкам (нерабочее время свёрнуто). Отрезки
+    // идут встык: leftPx накапливается, между днями px-разрыва нет. toPx(ms) клампит ms в
+    // отрезки: до первого окна → его левый край; в окне → leftPx + (ms−start)×ppm; в ночном
+    // разрыве → стык дней (левый край следующего окна). totalPx — сумма ширин окон.
+    function ganttScale(segments, pxPerMin) {
+        var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
+        var src = (segments || []).slice().sort(function(a, b) { return a.startMs - b.startMs; });
+        var acc = 0;
+        var segs = src.map(function(s) {
+            var widthPx = round3((s.endMs - s.startMs) / 60000 * ppm);
+            var seg = { startMs: s.startMs, endMs: s.endMs, leftPx: round3(acc), widthPx: widthPx };
+            acc = round3(acc + widthPx);
+            return seg;
+        });
+        function toPx(ms) {
+            if (!segs.length) return 0;
+            if (ms <= segs[0].startMs) return segs[0].leftPx;
+            for (var i = 0; i < segs.length; i++) {
+                if (ms <= segs[i].endMs) {
+                    if (ms >= segs[i].startMs) return round3(segs[i].leftPx + (ms - segs[i].startMs) / 60000 * ppm);
+                    return segs[i].leftPx;   // ночной разрыв перед окном i → стык дней
+                }
+            }
+            var last = segs[segs.length - 1];
+            return round3(last.leftPx + last.widthPx);
+        }
+        return { segments: segs, totalPx: Math.max(round3(acc), 1), pxPerMin: ppm, toPx: toPx };
+    }
+
     // Интервал часовой сетки (в часах) для заданной плотности px/час: наименьший шаг из
     // {1,2,4,6,8,12,24}, дающий деления не уже minPx. Шире 150px бывает только при шаге 1 ч
     // и очень крупном масштабе — мельче часа не делим (#3668 п.6).
@@ -436,28 +509,37 @@
         return GANTT_HOUR_STEPS[GANTT_HOUR_STEPS.length - 1];
     }
 
-    // Деления часовой сетки для окна [startMs;endMs) при масштабе pxPerMin. Все деления —
-    // одинаковым пунктиром. Метка — «HH:00»; на первом тике суток добавляется дата.
-    function hourTicks(win, pxPerMin, opts) {
+    // #3747: деления часовой сетки — ТОЛЬКО внутри рабочих окон масштаба (нерабочее время не
+    // показываем). По каждому окну: тик на левом крае окна с датой (начало смены/дня), далее по
+    // сетке часов {1,2,4,…} до конца окна. Метка — «HH:00» (или фактическое начало окна при
+    // раннем старте); дата — на первом тике каждого дня. Все деления одинаковым пунктиром.
+    function hourTicks(scale, pxPerMin, opts) {
         var o = opts || {};
-        if (!win || win.startMs == null || win.endMs == null) return [];
+        if (!scale || !scale.segments || !scale.segments.length) return [];
         var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
         var stepMs = chooseHourStep(ppm * 60, o) * GANTT_HOUR_MS;
         var ticks = [];
-        var prevDay = null;
-        for (var ms = floorToHourMs(win.startMs); ms <= win.endMs + 0.5; ms += stepMs) {
-            var dayIso = localIsoDateFromMs(ms);
-            var newDay = dayIso !== prevDay;
-            prevDay = dayIso;
+        scale.segments.forEach(function(seg) {
             ticks.push({
-                ms: ms,
-                hour: new Date(ms).getHours(),
-                leftPx: round3((ms - win.startMs) / 60000 * ppm),
-                label: formatTime(ms),
-                dateLabel: newDay ? formatDateShort(ms) : '',
-                newDay: newDay
+                ms: seg.startMs,
+                hour: new Date(seg.startMs).getHours(),
+                leftPx: seg.leftPx,
+                label: formatTime(seg.startMs),
+                dateLabel: formatDateShort(seg.startMs),
+                newDay: true
             });
-        }
+            for (var ms = floorToHourMs(seg.startMs) + stepMs; ms <= seg.endMs + 0.5; ms += stepMs) {
+                if (ms <= seg.startMs) continue;
+                ticks.push({
+                    ms: ms,
+                    hour: new Date(ms).getHours(),
+                    leftPx: scale.toPx(ms),
+                    label: formatTime(ms),
+                    dateLabel: '',
+                    newDay: false
+                });
+            }
+        });
         return ticks;
     }
 
@@ -645,14 +727,19 @@
 
     // Порядок заданий ВНУТРИ станка: по очередности (пусто — в конец), затем по
     // визуальному старту, затем по id. Мутирует переданный массив (он локальный в layoutGroups).
+    // #3747: порядок строк станка — по РЕАЛЬНОМУ времени старта (planDate/факт), а НЕ по
+    // «Очередности»: она сбрасывается на каждый день (1..N), поэтому сортировка по ней первой
+    // перемешивала дни (день2-очередь1 вставал над днём1-очередь2) — бары прыгали между днями,
+    // «не лесенкой». По времени старта строки идут строго хронологически (чистая лесенка через
+    // дни). «Очередность» и id — только тай-брейк при равном старте.
     function orderCutsInGroup(cuts) {
         cuts.sort(function(a, b) {
-            var qa = a.sequence == null ? Infinity : a.sequence;
-            var qb = b.sequence == null ? Infinity : b.sequence;
-            if (qa !== qb) return qa - qb;
             var ta = cutTimeRange(a), tb = cutTimeRange(b);
             var ma = ta ? ta.startMs : Infinity, mb = tb ? tb.startMs : Infinity;
             if (ma !== mb) return ma - mb;
+            var qa = a.sequence == null ? Infinity : a.sequence;
+            var qb = b.sequence == null ? Infinity : b.sequence;
+            if (qa !== qb) return qa - qb;
             return String(a.id).localeCompare(String(b.id));
         });
         return cuts;
@@ -903,18 +990,22 @@
         });
 
         var win = ganttWindow(visible, range, o);
+        // #3747: ось — только рабочие окна дней [08:00;18:30], нерабочее время (ночь) свёрнуто
+        // (ganttScale.toPx). Бар, вышедший за смену, расширяет окно своего дня (workingSegments).
+        var segments = workingSegments(visible, range, o);
         // #3704: масштаб по горизонтали = базовый (по режиму) × зум кнопок. Снизу ограничен «вписать
         // в экран»: дорожка не уже видимой области (fitTrackPx) — кнопка «−» не сжимает её мельче.
         var basePxPerMin = o.pxPerMin > 0 ? o.pxPerMin : pxPerMinForMode(range && range.mode);
         var zoom = Number(o.zoom) > 0 ? Number(o.zoom) : 1;
         var pxPerMin = basePxPerMin * zoom;
-        var winMin = (win.endMs - win.startMs) / 60000;
-        if (o.fitTrackPx > 0 && winMin > 0) {
-            var fitPxPerMin = o.fitTrackPx / winMin;
+        var workMin = segments.reduce(function(sum, s) { return sum + (s.endMs - s.startMs) / 60000; }, 0);
+        if (o.fitTrackPx > 0 && workMin > 0) {
+            var fitPxPerMin = o.fitTrackPx / workMin;
             if (pxPerMin < fitPxPerMin) pxPerMin = fitPxPerMin;
         }
         var minPx = o.minPx > 0 ? o.minPx : GANTT_MIN_BAR_PX;
-        var trackPx = ganttTrackPx(win, pxPerMin);
+        var scale = ganttScale(segments, pxPerMin);
+        var trackPx = scale.totalPx;
 
         var groupsMap = {};
         var orderKeys = [];
@@ -944,19 +1035,22 @@
                 // #3675 п.3 / #3680: ширина бара = наладка + резка; подпись времени — ВСЁ окно задания
                 // (от начала наладки до конца резки), а не только резка.
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
-                var leftPx = round3((tr.startMs - win.startMs) / 60000 * pxPerMin);
+                // #3747: левый край бара — по СВЁРНУТОЙ оси (scale.toPx): нерабочее время не
+                // занимает места, дни идут встык. Ширина — по минутам (наладка+резка), как и раньше.
+                var leftPx = scale.toPx(tr.startMs);
                 var widthPx = seg.totalPx;
                 // #3708: бар не должен заходить за старт следующего задания того же станка —
                 // длительности хранятся вверх (#3635 п.4), а старты по дробному времени, поэтому бар
                 // бывал длиннее реального окна. Завершённые (есть факт. финиш) не режем — реальную
-                // длительность показываем как есть (конфликт виден).
+                // длительность показываем как есть (конфликт виден). #3747: ширину-границу тоже
+                // считаем по свёрнутой оси, чтобы стык дней резал захлёст по краю рабочего окна.
                 var nextStartMs = null;
                 if (tr.actualEndMs == null && i + 1 < ordered.length) {
                     var ntr = cutTimeRange(ordered[i + 1]);
                     if (ntr && ntr.startMs > tr.startMs) nextStartMs = ntr.startMs;
                 }
                 if (nextStartMs != null) {
-                    var maxWidthPx = round3((nextStartMs - tr.startMs) / 60000 * pxPerMin);
+                    var maxWidthPx = round3(scale.toPx(nextStartMs) - leftPx);
                     if (maxWidthPx > 0 && widthPx > maxWidthPx) widthPx = maxWidthPx;
                 }
                 return {
@@ -970,7 +1064,7 @@
             });
             delete g.cuts;
         });
-        return { groups: groups, trackPx: trackPx, window: win, pxPerMin: pxPerMin };
+        return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
     }
 
     function slittersFromCuts(cuts) {
@@ -1012,6 +1106,7 @@
         STATUS_LABELS: STATUS_LABELS,
         normalizeMode: normalizeMode,
         parseDateTimeMs: parseDateTimeMs,
+        formatTime: formatTime,             // #3747 (тест свёрнутой оси)
         localIsoDateFromMs: localIsoDateFromMs,
         shiftIsoDate: shiftIsoDate,
         ganttRange: ganttRange,
@@ -1041,6 +1136,9 @@
         layoutGroups: layoutGroups,
         ganttWindow: ganttWindow,
         ganttTrackPx: ganttTrackPx,
+        cutBarEndMs: cutBarEndMs,           // #3747
+        workingSegments: workingSegments,   // #3747
+        ganttScale: ganttScale,             // #3747
         chooseHourStep: chooseHourStep,
         hourTicks: hourTicks,
         pxPerMinForMode: pxPerMinForMode,
@@ -1313,10 +1411,12 @@
         body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
         // #3668 п.6: часовые деления одинаковым пунктиром, шаг подобран по плотности окна.
-        var ticks = hourTicks(data.window, data.pxPerMin);
+        var ticks = hourTicks(data.scale, data.pxPerMin);   // #3747: деления по свёрнутой оси (рабочие окна)
         function appendHours(track) {
             ticks.forEach(function(t) {
-                var node = el('span', { class: 'atex-cg-hour' });
+                // #3747: на стыке дней (newDay) — сплошная линия-разделитель: ночь свёрнута,
+                // дни идут встык, поэтому границу смены выделяем отдельно от часовой сетки.
+                var node = el('span', { class: 'atex-cg-hour' + (t.newDay ? ' is-day' : '') });
                 node.style.left = t.leftPx + 'px';
                 track.appendChild(node);
             });

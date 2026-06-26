@@ -237,11 +237,12 @@ assertEqual([laid.window.startMs, laid.window.endMs],
 // task11 (08:00) left=0 w=30; task10 (10:00) left=120мин w=60 — между ними виден разрыв (10:00−08:30)
 assertEqual(laid.groups[0].tasks.map(function(t) { return [t.cut.id, t.leftPx, t.widthPx]; }),
     [['11', 0, 30], ['10', 120, 60]],
-    'layoutGroups: внутри станка — по очерёдности; left/width по реальному времени, разрыв виден');
-// task20 (06-11 09:00) на другом станке: left = 25 ч × 60 = 1500 мин
+    'layoutGroups: внутри станка — по времени старта; left/width по реальному времени, разрыв виден');
+// #3747: ось свёрнута к рабочим окнам [08:00;18:30]. task20 (06-11 09:00) на станке 2:
+// окно 06-10 = 630 мин (08:00…18:30), затем окно 06-11 встык; 09:00 = +60 мин → left = 690.
 assertEqual(laid.groups[1].tasks.map(function(t) { return [t.cut.id, t.leftPx, t.widthPx]; }),
-    [['20', 1500, 40]], 'layoutGroups: бар на следующих сутках смещён по реальному времени');
-assertEqual(laid.trackPx, 1560, 'layoutGroups: trackPx = длительность окна × масштаб (26 ч × 60)');
+    [['20', 690, 40]], 'layoutGroups: #3747 бар след. дня — встык за рабочим окном (ночь свёрнута)');
+assertEqual(laid.trackPx, 1260, 'layoutGroups: #3747 trackPx = 2 рабочих окна × 630 мин × 1 = 1260');
 assertEqual(gantt.layoutGroups(layoutCuts, weekRange, NOW, { slitter: '2' }, { pxPerMin: 1 }).groups.map(function(g) { return g.slitter.label; }),
     ['Станок 2'], 'layoutGroups: фильтр по станку');
 
@@ -251,15 +252,53 @@ assertEqual(gantt.chooseHourStep(60), 1, 'chooseHourStep: 60px/ч ≥50 → 1 ч
 assertEqual(gantt.chooseHourStep(24), 4, 'chooseHourStep: 24px/ч → 4 ч (96px, Неделя)');
 assertEqual(gantt.chooseHourStep(4.8), 12, 'chooseHourStep: 4.8px/ч → 12 ч (57.6px, Месяц)');
 
-// ── hourTicks: деления окна; метки «HH:00», дата на первом тике суток ──
-var win = { startMs: gantt.parseDateTimeMs('2026-06-10 08:00'), endMs: gantt.parseDateTimeMs('2026-06-10 12:00') };
-var ticks = gantt.hourTicks(win, 2); // 120px/ч → шаг 1 ч
+// ── hourTicks (#3747): деления ТОЛЬКО внутри рабочих окон масштаба; «HH:00», дата на старте дня ──
+var scale1 = gantt.ganttScale([{ startMs: gantt.parseDateTimeMs('2026-06-10 08:00'), endMs: gantt.parseDateTimeMs('2026-06-10 12:00') }], 2);
+var ticks = gantt.hourTicks(scale1, 2); // 120px/ч → шаг 1 ч
 assertEqual(ticks.map(function(t) { return t.label; }), ['08:00', '09:00', '10:00', '11:00', '12:00'],
     'hourTicks: метки каждый час 08:00…12:00');
 assertEqual([ticks[0].leftPx, ticks[1].leftPx, ticks[4].leftPx], [0, 120, 480],
     'hourTicks: шаг 120px (2px/мин×60), 12:00→480px');
 assertEqual([ticks[0].dateLabel, ticks[1].dateLabel], ['10.06', ''],
     'hourTicks: дата только на первом тике суток');
+
+// ── #3747: рабочие окна, свёрнутая ось, захлёст, хронологический порядок ──
+// workingSegments: по одному окну [08:00;18:30] на день с заданиями; ночь не входит.
+var segCuts = [
+    { id: 'a', planDate: '2026-06-10 09:00', duration: 60 },
+    { id: 'b', planDate: '2026-06-11 10:00', duration: 30 }
+];
+var segs = gantt.workingSegments(segCuts, weekRange, {});
+assertEqual(segs.map(function(s) { return [gantt.formatTime(s.startMs), gantt.formatTime(s.endMs)]; }),
+    [['08:00', '18:30'], ['08:00', '18:30']],
+    'workingSegments: окно [08:00;18:30] на каждый день с заданиями');
+// Заданий нет → одно окно-смена дня периода.
+assertEqual(gantt.workingSegments([], weekRange, {}).length, 1, 'workingSegments: пусто → одно окно-смена');
+// Захлёст: задание стартует 18:00, длится 60 → конец 19:00 расширяет правый край окна дня.
+var spill = gantt.workingSegments([{ id: 'x', planDate: '2026-06-10 18:00', duration: 60 }], weekRange, {});
+assertEqual([gantt.formatTime(spill[0].startMs), gantt.formatTime(spill[0].endMs)], ['08:00', '19:00'],
+    'workingSegments: захлёст за смену расширяет правый край окна дня (18:00+60 → 19:00)');
+// Ранний старт (07:30) расширяет левый край.
+var early = gantt.workingSegments([{ id: 'y', planDate: '2026-06-10 07:30', duration: 30 }], weekRange, {});
+assertEqual(gantt.formatTime(early[0].startMs), '07:30', 'workingSegments: ранний старт расширяет левый край окна');
+
+// ganttScale.toPx: ночь между окнами свёрнута, дни встык.
+var scale2 = gantt.ganttScale(segs, 1);
+assertEqual(scale2.totalPx, 1260, 'ganttScale: 2 окна × 630 мин × 1 = 1260');
+assertEqual(scale2.toPx(gantt.parseDateTimeMs('2026-06-10 08:00')), 0, 'ganttScale.toPx: старт 1-го окна → 0');
+assertEqual(scale2.toPx(gantt.parseDateTimeMs('2026-06-11 08:00')), 630, 'ganttScale.toPx: старт 2-го дня — встык за 1-м окном (ночь свёрнута)');
+assertEqual(scale2.toPx(gantt.parseDateTimeMs('2026-06-10 23:00')), 630, 'ganttScale.toPx: ночь (вне окон) → стык дней');
+
+// orderCutsInGroup (#3747): строки по реальному времени старта, НЕ по «Очередности»
+// (она сбрасывается на день). День2-очередь1 НЕ должен вставать над днём1-очередь2.
+var orderCuts = [
+    { id: 'd1q2', planDate: '2026-06-10 12:00', sequence: 2 },
+    { id: 'd2q1', planDate: '2026-06-11 08:00', sequence: 1 },
+    { id: 'd1q1', planDate: '2026-06-10 08:00', sequence: 1 }
+];
+assertEqual(gantt.orderCutsInGroup(orderCuts.slice()).map(function(c) { return c.id; }),
+    ['d1q1', 'd1q2', 'd2q1'],
+    'orderCutsInGroup: #3747 хронологически (день1 целиком, потом день2), а не вперемешку по очередности');
 
 // ── planningLink: ссылка на планировщик с датой/станком/заданием ──
 assertEqual(gantt.planningLink({ id: '85472', planDate: '06.05.2026', slitter: { id: '1285' } }),
@@ -304,19 +343,21 @@ assertEqual(gantt.cutBarTime(leadCut, 0), '08:00-08:51 (51 мин)', 'cutBarTime
 assertEqual(gantt.cutBarTime(leadCut, 30), '08:00-09:21 (81 мин)', 'cutBarTime #3705: + наладка 30 → конец 09:21');
 
 // ── #3704: зум по горизонтали + нижняя граница «вписать в экран» ──
+// #3747: workMin = 2 рабочих окна × 630 мин = 1260 (раньше 1560 с ночью). trackPx и «вписать
+// в экран» считаются от свёрнутой оси.
 var laidZoom = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 2 });
 assertEqual(laidZoom.pxPerMin, 2, 'layoutGroups #3704: зум ×2 удваивает масштаб');
-assertEqual(laidZoom.trackPx, 3120, 'layoutGroups #3704: trackPx ×2 при зуме ×2');
+assertEqual(laidZoom.trackPx, 2520, 'layoutGroups #3704: trackPx ×2 при зуме ×2 (#3747: 1260×2)');
 assertEqual(laidZoom.groups[0].tasks.map(function(t) { return [t.cut.id, t.leftPx, t.widthPx]; }),
     [['11', 0, 60], ['10', 240, 120]], 'layoutGroups #3704: зум растягивает бары по горизонтали');
 // fitTrackPx поднимает масштаб, чтобы дорожка заполнила экран (не уже видимой области)…
-var laidFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, fitTrackPx: 3120 });
-assertEqual([laidFit.pxPerMin, laidFit.trackPx], [2, 3120], 'layoutGroups #3704: масштаб поднят до «вписать в экран»');
+var laidFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, fitTrackPx: 2520 });
+assertEqual([laidFit.pxPerMin, laidFit.trackPx], [2, 2520], 'layoutGroups #3704: масштаб поднят до «вписать в экран» (#3747: 2520/1260=2)');
 // …но НЕ опускает ниже базового (узкий экран не сжимает бары мельче масштаба режима).
 var laidFitSmall = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, fitTrackPx: 780 });
 assertEqual(laidFitSmall.pxPerMin, 1, 'layoutGroups #3704: fitTrackPx меньше базового не сжимает масштаб');
 // Зум и fit вместе: зум ниже fit перекрывается «вписать в экран».
-var laidZoomFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 0.25, fitTrackPx: 3120 });
+var laidZoomFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 0.25, fitTrackPx: 2520 });
 assertEqual(laidZoomFit.pxPerMin, 2, 'layoutGroups #3704: «−» ниже экрана упирается в «вписать в экран»');
 
 // ── #3708: бар не заходит за старт следующего задания (округление длительностей вверх) ──
