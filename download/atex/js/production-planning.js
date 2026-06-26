@@ -7536,10 +7536,46 @@
         });
 
         // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
-        (ops.deletes || []).forEach(function(id) {
-            chain = chain.then(function() { return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}); }).then(splitBump);
+        (ops.deletes || []).forEach(function(cutId) {
+            chain = chain.then(function() {
+                var supplies = self.supplies || [];
+        
+                // Партии ГП, подчинённые удаляемой резке
+                var fbIds = {};
+                supplies.forEach(function(s) {
+                    if (s && String(s.cutId) === String(cutId) && s.finishedBatchId) {
+                        fbIds[String(s.finishedBatchId)] = true;
+                    }
+                });
+        
+                // Обеспечения, привязанные к этим партиям ГП (могут не иметь cutId)
+                var supplyIds = [];
+                supplies.forEach(function(s) {
+                    if (s && s.id && s.finishedBatchId && fbIds[String(s.finishedBatchId)]) {
+                        supplyIds.push(String(s.id));
+                    }
+                });
+        
+                // 1) удаляем обеспечения
+                var inner = Promise.resolve();
+                supplyIds.forEach(function(sid) {
+                    inner = inner.then(function() {
+                        return self.post('_m_del/' + encodeURIComponent(sid) + '?JSON', {});
+                    });
+                });
+                // 2) удаляем партии ГП
+                Object.keys(fbIds).forEach(function(fbId) {
+                    inner = inner.then(function() {
+                        return self.post('_m_del/' + encodeURIComponent(fbId) + '?JSON', {});
+                    });
+                });
+                // 3) удаляем саму резку
+                inner = inner.then(function() {
+                    return self.post('_m_del/' + encodeURIComponent(cutId) + '?JSON', {});
+                });
+                return inner;
+            }).then(splitBump);
         });
-
         return chain.then(function() { return self.reload(); }).then(function() {
             return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
         }).then(function() {
