@@ -346,6 +346,60 @@
         }).filter(function(x) { return x !== '0x0'; }).sort().join('|');
     }
 
+    // #3737: набор ШИРИН полос резки как порядко-независимый ключ — без «Кол-ва полос».
+    // Отчёт next_cut_setup отдаёт по строке на «Партию ГП» (ширина), без количества; полосы
+    // резки (fetchStrips/cut_strips) тоже идут по записи на «Партию ГП», поэтому ключи
+    // сравнимы. Совпадение = тот же набор ножей. Принимает строки полос {width} или числа.
+    // Пустые/нулевые ширины отбрасываем.
+    function widthSetKey(items) {
+        return (items || []).map(function(s) {
+            return round3(toNumber(s != null && typeof s === 'object' ? s.width : s));
+        }).filter(function(w) { return w > 0; }).sort(function(a, b) { return a - b; }).join('|');
+    }
+
+    // #3737: начало КАЛЕНДАРНОГО дня «Даты план» резки как unix-штамп (секунды) — нижняя
+    // граница FR_task_start для отчёта next_cut_setup. Полночь берём в локальной зоне (как
+    // dateKey), чтобы сравнение дня было согласовано. Пусто/не штамп → null.
+    function dayStartTimestamp(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!/^\d{9,13}$/.test(s)) return null;
+        var num = Number(s);
+        var ms = num >= 1e12 ? num : num * 1000;
+        var d = new Date(ms);
+        if (isNaN(d.getTime())) return null;
+        return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime() / 1000);
+    }
+
+    // #3737: конфигурация первой резки СЛЕДУЮЩЕГО календарного дня (после curDayKey) для
+    // станка из строк отчёта next_cut_setup (93371). Отчёт идёт по расписанию (task_start ↑),
+    // по строке на «Партию ГП»: ширина (width), сырьё (material_id), намотка (wind_dir). Берём
+    // задание с наименьшим task_start в дне позже текущего и собираем все его полосы.
+    // → { taskId, taskStart, widthKey, materialId } | null. Чистая → покрыта тестом.
+    function nextDaySetupConfig(rows, curDayKey) {
+        var sorted = (rows || []).slice().sort(function(a, b) {
+            return (toNumber(a.task_start) - toNumber(b.task_start)) ||
+                   (toNumber(a.batch_ord) - toNumber(b.batch_ord));
+        });
+        var firstId = null, firstStart = null;
+        for (var i = 0; i < sorted.length; i++) {
+            var dk = dateKey(sorted[i].task_start);
+            if (dk !== Infinity && dk > curDayKey) {
+                firstId = String(sorted[i].task_id);
+                firstStart = String(sorted[i].task_start);
+                break;
+            }
+        }
+        if (firstId == null) return null;
+        var widths = [], materialId = '';
+        sorted.forEach(function(r) {
+            if (String(r.task_id) === firstId && String(r.task_start) === firstStart) {
+                widths.push(r.width);
+                if (!materialId) materialId = String(r.material_id == null ? '' : r.material_id);
+            }
+        });
+        return { taskId: firstId, taskStart: firstStart, widthKey: widthSetKey(widths), materialId: materialId };
+    }
+
     // #3609: для выбранной резки — последняя ли она в смене (день+станок) и первая резка
     // СЛЕДУЮЩЕГО дня на этом же станке (ближайший день с резками > текущего). Порядок
     // внутри дня — по «Очередности» (sequence), затем id. → { isLast, nextCut|null }.
@@ -840,6 +894,9 @@
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
         knifeLayoutKey: knifeLayoutKey,
+        widthSetKey: widthSetKey,             // #3737
+        dayStartTimestamp: dayStartTimestamp, // #3737
+        nextDaySetupConfig: nextDaySetupConfig, // #3737
         shiftContinuation: shiftContinuation,
         hasOpenShift: hasOpenShift,
         shiftEventSlitterLabel: shiftEventSlitterLabel,
@@ -1334,22 +1391,37 @@
     // #3609: если выбранная резка — последняя в смене, а первая резка следующего дня
     // на этом станке совпадает по ножам и/или сырью — предупреждаем оператора (не убирать
     // сырьё / не трогать ножи). Результат в this.seamlessNotice, рендерит renderSeamless.
+    // #3737: конфигурацию первой резки СЛЕДУЮЩЕГО дня берём из защищённого отчёта
+    // next_cut_setup (93371) по станку, начиная с полуночи текущего дня. Отчёт отдаёт ширины
+    // полос и сырьё каждой предстоящей резки в порядке расписания (task_start) — поэтому
+    // «оставить конфигурацию» определяется даже когда резка следующего дня не загружена в
+    // очередь пульта (тот же случай, что один выбранный день в планировании). Сравниваем по
+    // НАБОРУ ШИРИН (widthSetKey: отчёт без «Кол-ва полос») и по сырью.
     AtexSlitter.prototype.computeSeamless = function() {
         var self = this;
         this.seamlessNotice = null;
         var cut = this.currentCut;
+        if (!cut) return Promise.resolve();
         var cont = core.shiftContinuation(this.cuts, cut);
-        if (!cut || !cont.isLast || !cont.nextCut) return Promise.resolve();
-        var nextCut = cont.nextCut;
-        var nb = nextCut.batchId ? this.findBatch(nextCut.batchId) : null;
-        var nextMatId = (nb && nb.materialId) || nextCut.materialId || '';
-        var curMatId = cut.materialId || '';
-        return this.fetchStrips(nextCut.id).then(function(nextStrips) {
-            var curKey = core.knifeLayoutKey(self.currentStrips);
-            var sameKnives = curKey !== '' && curKey === core.knifeLayoutKey(nextStrips);
-            var sameMaterial = String(curMatId) !== '' && String(curMatId) === String(nextMatId);
+        if (!cont.isLast) return Promise.resolve();   // предупреждение только у последней резки смены
+        var sid = String(cut.slitterId || self.selectedSlitterId || '');
+        var curDayKey = core.dateKey(cut.planDate);
+        var dayStartTs = core.dayStartTimestamp(cut.planDate);
+        if (!sid || dayStartTs == null) return Promise.resolve();
+        var params = ['JSON_KV', 'FR_slitter_id=' + encodeURIComponent(sid),
+                      'FR_task_start=' + encodeURIComponent('>' + dayStartTs)];
+        var curMatId = String(cut.materialId || '');
+        return this.getJson('report/next_cut_setup?' + params.join('&') + '&LIMIT=0,2000').then(function(rows) {
+            var next = core.nextDaySetupConfig(rows, curDayKey);
+            if (!next) return;
+            var curKey = core.widthSetKey(self.currentStrips);
+            var sameKnives = curKey !== '' && curKey === next.widthKey;
+            var sameMaterial = curMatId !== '' && curMatId === String(next.materialId || '');
             if (!sameKnives && !sameMaterial) return;
-            self.seamlessNotice = { nextCut: nextCut, sameKnives: sameKnives, sameMaterial: sameMaterial };
+            self.seamlessNotice = {
+                nextCut: { id: next.taskId, label: core.cutTitle(next.taskStart) },
+                sameKnives: sameKnives, sameMaterial: sameMaterial
+            };
         }).catch(function() {});
     };
 
