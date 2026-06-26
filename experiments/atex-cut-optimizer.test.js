@@ -171,4 +171,23 @@ assertEqual({ passes: plan9.totalPasses, wasteMm: plan9.totalWasteWidth, areaM2:
 assertEqual(core.widthPercent(60, 880, 880), 6.818, 'widthPercent scales to input width');
 assertEqual(core.widthPercent(50, 0, 0), 0, 'widthPercent is 0 when scale is 0');
 
+// ── #3744: оценка времени планирования резки (нормы метража WIND_* + настройка 45 мин) ──
+var ot = { WIND_300: 1.2, WIND_600: 3, WIND_900: 5, KNIFE: 30, MATERIAL_WINDING: 15 };
+var wp = core.windingPointsFromTimes(ot);
+assertEqual(wp, [{ m: 300, min: 1.2 }, { m: 600, min: 3 }, { m: 900, min: 5 }],
+    'windingPointsFromTimes parses WIND_<m> codes (special codes ignored), sorted');
+assertEqual(core.windingMinutes(600, wp), 3, 'windingMinutes hits an exact norm point');
+assertEqual(core.windingMinutes(450, wp), 2.1, 'windingMinutes interpolates between 300 and 600');
+assertEqual(core.windingMinutes(150, wp), 0.6, 'windingMinutes scales proportionally below the first point');
+assertEqual(core.windingMinutes(450, []), 0, 'windingMinutes with no norms → 0');
+// единожды настройка 45 + «Всего резок» × намотка рулона.
+assertEqual(core.planningMinutes(10, 450, wp), 66, 'planningMinutes = 45 + 10 × 2.1');
+assertEqual(core.planningMinutes(0, 450, wp), 0, 'planningMinutes is 0 when there are no cuts');
+assertEqual(core.planningMinutes(5, 450, []), 45, 'planningMinutes falls back to setup-only without norms');
+// три единицы: минуты целые, часы/дни — 1 знак; день = 450 минут.
+assertEqual(core.planningTimeUnits(66), { minutes: 66, hours: 1.1, days: 0.1 },
+    'planningTimeUnits splits minutes into minutes/hours/days (day = 450 min)');
+assertEqual(core.planningTimeUnits(900), { minutes: 900, hours: 15, days: 2 },
+    'planningTimeUnits: 900 мин = 15 ч = 2 дня');
+
 console.log('\n' + passed + ' assertions passed');

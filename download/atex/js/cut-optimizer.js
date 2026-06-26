@@ -83,6 +83,14 @@
     // #3573: допуск на отход по умолчанию (мм). Берётся из Вида сырья («Допуск, мм»),
     // а если у материала он не задан — действует это значение. По нему красится отход.
     var DEFAULT_TOLERANCE = 21;
+    // #3744: оценка времени планирования резки для менеджера. Таблица «Время операции,
+    // мин» — те же нормы метража WIND_<метры>, что использует production-planning.js
+    // (windingMinutes). Формула: единожды настройка SETUP_ONCE_MIN + «Всего резок» ×
+    // время намотки одного рулона. Перевод в дни — по MINUTES_PER_DAY рабочих минут.
+    var OP_TIMES_TABLE = 'Время операции, мин';
+    var OP_TIMES_CODE_REQ = 'Код операции';
+    var SETUP_ONCE_MIN = 45;       // единожды: настройка/переналадка станка на резку
+    var MINUTES_PER_DAY = 450;     // 1 рабочий день = 450 минут (для единицы «дни»)
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
 
@@ -407,6 +415,60 @@
         return round3(toNumber(width) / scale * 100);
     }
 
+    // #3744: точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы «Время
+    // операции, мин» (WIND_300=1.2 … WIND_1100=5.6). Та же модель метража, что в
+    // production-planning.js (windingPointsFromTimes). Спец-коды (WIND_FOIL_*) не парсим.
+    function windingPointsFromTimes(opTimes) {
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code) {
+            var m = /^WIND_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: toNumber(opTimes[code]) });
+        });
+        pts.sort(function(a, b) { return a.m - b.m; });
+        return pts;
+    }
+
+    // #3744: минуты намотки runMeters по точкам — кусочно-линейно (зеркало
+    // production-planning.js windingMinutes): ниже первой точки — пропорция от 0; между
+    // точками — линейно; выше последней — экстраполяция последним отрезком (при одной
+    // точке клампим). Нет точек / runMeters ≤ 0 → 0.
+    function windingMinutes(runMeters, points) {
+        var x = toNumber(runMeters);
+        var p = (points || []).slice().sort(function(a, b) { return a.m - b.m; });
+        if (!p.length || x <= 0) return 0;
+        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
+        for (var i = 1; i < p.length; i++) {
+            if (x <= p[i].m) {
+                var t = (x - p[i - 1].m) / (p[i].m - p[i - 1].m);
+                return round3(p[i - 1].min + t * (p[i].min - p[i - 1].min));
+            }
+        }
+        if (p.length < 2) return round3(p[p.length - 1].min);
+        var a = p[p.length - 2], b = p[p.length - 1];
+        var slope = (b.min - a.min) / (b.m - a.m);
+        return round3(b.min + slope * (x - b.m));
+    }
+
+    // #3744: общие минуты планирования резки = единожды настройка (SETUP_ONCE_MIN) + по
+    // каждой резке («Всего резок» = passes) время намотки одного рулона windingMinutes от
+    // длины рулона и норм WIND_*. Резок нет → 0. Норм нет → только настройка.
+    function planningMinutes(passes, rollLength, windPoints) {
+        var n = Math.max(0, Math.round(toNumber(passes)));
+        if (n <= 0) return 0;
+        return round3(SETUP_ONCE_MIN + n * windingMinutes(rollLength, windPoints));
+    }
+
+    // #3744: минуты → три единицы для менеджера. Часы и дни — с одним знаком после
+    // запятой; день = MINUTES_PER_DAY рабочих минут. { minutes, hours, days }.
+    function planningTimeUnits(mins) {
+        var m = round3(mins);
+        return {
+            minutes: Math.round(m),
+            hours: Math.round(m / 60 * 10) / 10,
+            days: Math.round(m / MINUTES_PER_DAY * 10) / 10
+        };
+    }
+
     var core = {
         toNumber: toNumber,
         round3: round3,
@@ -421,7 +483,11 @@
         partitionsAtMost: partitionsAtMost,
         expandSegments: expandSegments,
         computePlan: computePlan,
-        widthPercent: widthPercent
+        widthPercent: widthPercent,
+        windingPointsFromTimes: windingPointsFromTimes,
+        windingMinutes: windingMinutes,
+        planningMinutes: planningMinutes,
+        planningTimeUnits: planningTimeUnits
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -493,7 +559,8 @@
         this.root = root;
         this.db = (typeof window !== 'undefined' && window.db) || root.getAttribute('data-db') || '';
         this.xsrf = root.getAttribute('data-xsrf') || (typeof window !== 'undefined' && window.xsrf) || '';
-        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null };
+        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null, opTimes: null };
+        this.opTimes = {};        // #3744: нормы метража WIND_* из «Время операции, мин»
         this.materials = [];      // [{ id, label, width, length }]
         this.sleeves = [];        // [{ id, label }]
         this.clients = [];        // [{ id, label }]
@@ -566,6 +633,7 @@
             self.meta.sleeve = byName(TABLE.sleeve);
             self.meta.client = byName(TABLE.client);
             self.meta.leader = byName(TABLE.leader);  // #3592
+            self.meta.opTimes = byName(OP_TIMES_TABLE);  // #3744: нормы метража (необязательна)
             if (!self.meta.material) throw new Error('В метаданных не найдена таблица «' + TABLE.material + '»');
         });
     };
@@ -637,6 +705,27 @@
         }).catch(function() { self.batches = []; });
     };
 
+    // #3744: нормы метража из таблицы «Время операции, мин» — коды WIND_<метры> → минуты
+    // намотки (та же таблица и чтение, что в production-planning.js loadOperationTimes).
+    // Главное значение записи = минуты, колонка «Код операции» = код. Нет таблицы/доступа
+    // → пустые нормы (оценка времени тихо деградирует к одной настройке 45 мин).
+    AtexCutOptimizer.prototype.loadOperationTimes = function() {
+        var self = this;
+        this.opTimes = {};
+        var meta = this.meta.opTimes;
+        if (!meta) return Promise.resolve();
+        var codeIdx = colIndex(meta, OP_TIMES_CODE_REQ);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            var raw = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var code = codeIdx >= 0 ? String(r[codeIdx] == null ? '' : r[codeIdx]).trim() : '';
+                if (code) raw[code] = toNumber(r[0]);   // r[0] — главное значение = минуты
+            });
+            self.opTimes = raw;
+        }).catch(function() { self.opTimes = {}; });
+    };
+
     AtexCutOptimizer.prototype.materialById = function(id) {
         var wanted = String(id);
         return this.materials.filter(function(m) { return String(m.id) === wanted; })[0] || null;
@@ -672,7 +761,8 @@
                     self.loadRefList(self.meta.order).then(function(l) {
                         self.orders = l.map(function(o) { return { id: o.id, number: o.label }; });
                     }),
-                    self.loadMaterialBatches()
+                    self.loadMaterialBatches(),
+                    self.loadOperationTimes()   // #3744: нормы метража для оценки времени резки
                 ]);
             })
             .then(function() { self.renderForm(); })
@@ -1048,7 +1138,20 @@
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
         summary.appendChild(metric('Карт раскроя', p.mapCount));
         summary.appendChild(metric('Всего резок', p.totalPasses));
+        // #3744: общие минуты планирования резки в трёх единицах (минуты/часы/дни):
+        // единожды настройка 45 мин + «Всего резок» × время намотки рулона (нормы
+        // метража WIND_* из «Время операции, мин», как в production-planning.js).
+        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(this.opTimes || {}));
+        var units = planningTimeUnits(planMins);
+        var timeVal = el('span', { class: 'atex-co-time' }, [
+            el('span', { class: 'atex-co-time-min', text: ruNum(units.minutes) + ' мин' }),
+            el('span', { class: 'atex-co-time-sub', text: ruNum(units.hours) + ' ч · ' + ruNum(units.days) + ' дн' })
+        ]);
+        summary.appendChild(metric('Время на резку', timeVal, true));
         return summary;
+
+        // Русский десятичный разделитель (запятая) для часов/дней.
+        function ruNum(n) { return String(n).replace('.', ','); }
 
         function metric(label, value, primary) {
             var valueEl = el('span', { class: 'atex-co-metric-value' });
