@@ -300,6 +300,25 @@ assertEqual(gantt.orderCutsInGroup(orderCuts.slice()).map(function(c) { return c
     ['d1q1', 'd1q2', 'd2q1'],
     'orderCutsInGroup: #3747 хронологически (день1 целиком, потом день2), а не вперемешку по очередности');
 
+// hourTicks (#3756): на стыке дней часовой тик впритык к дате не ставим (время перекрывало
+// дату). Масштаб ~0.44 px/мин (Месяц+вписать) → шаг 2 ч ≈ 53px; 18:00 за 30 мин (13px) до
+// тика-даты следующего дня — выкидываем. У ПОСЛЕДНЕГО окна 18:00 у правого края остаётся.
+var dayScale = gantt.ganttScale([
+    { startMs: gantt.parseDateTimeMs('2026-06-26 08:00'), endMs: gantt.parseDateTimeMs('2026-06-26 18:30') },
+    { startMs: gantt.parseDateTimeMs('2026-06-27 08:00'), endMs: gantt.parseDateTimeMs('2026-06-27 18:30') }
+], 0.44);
+var dayTicks = gantt.hourTicks(dayScale, 0.44);
+var dateLefts = dayTicks.filter(function(t) { return t.newDay; }).map(function(t) { return t.leftPx; });
+var crowding = dayTicks.filter(function(t) {
+    return !t.newDay && dateLefts.some(function(d) { return Math.abs(d - t.leftPx) < 50; });
+});
+assertEqual(crowding.length, 0, 'hourTicks #3756: ни один часовой тик не стоит ближе 50px к дате дня');
+// 18:00 первого дня (перед датой 27.06) выкинут; 18:00 последнего дня (у края дорожки) есть.
+var day1Hours = dayTicks.filter(function(t) { return !t.newDay && t.leftPx < dateLefts[1]; }).map(function(t) { return t.label; });
+assertEqual(day1Hours.indexOf('18:00'), -1, 'hourTicks #3756: 18:00 перед стыком дней выкинут (не перекрывает дату)');
+var day2Hours = dayTicks.filter(function(t) { return !t.newDay && t.leftPx > dateLefts[1]; }).map(function(t) { return t.label; });
+assertEqual(day2Hours.indexOf('18:00') >= 0, true, 'hourTicks #3756: 18:00 последнего окна (у края дорожки) остаётся');
+
 // ── planningLink: ссылка на планировщик с датой/станком/заданием ──
 assertEqual(gantt.planningLink({ id: '85472', planDate: '06.05.2026', slitter: { id: '1285' } }),
     '/atex/production-planning?cut=85472&date=2026-05-06&slitter=1285',
