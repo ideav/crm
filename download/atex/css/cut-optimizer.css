@@ -375,6 +375,11 @@
 .atex-co-rolls-got { font-size: 32px; font-weight: 800; }
 .atex-co-rolls-of { font-size: 15px; font-weight: 600; color: var(--co-muted); }
 
+/* #3744: «Время на резку» — минуты крупно (наследуют размер метрики), часы/дни мельче
+   и приглушённо строкой ниже. */
+.atex-co-time { display: flex; flex-direction: column; gap: 1px; }
+.atex-co-time-sub { font-size: 14px; font-weight: 600; color: var(--co-muted); }
+
 .atex-co-nominal { color: var(--co-muted); }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
