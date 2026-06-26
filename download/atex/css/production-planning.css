@@ -344,6 +344,23 @@
     color: var(--pp-danger, #c0392b);
     font-weight: 600;
 }
+/* #3738: втулка резки — после лидера. Название «Диаметр втулки» бывает длинным,
+   поэтому плашка ужимается и обрезается многоточием (полное имя — в title).
+   Смешанные втулки (легаси) — предупреждающий стиль, как у лидера. */
+.atex-pp-cut-sleeve {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 16em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--pp-muted);
+}
+.atex-pp-cut-sleeve-mixed {
+    color: var(--pp-danger, #c0392b);
+    font-weight: 600;
+}
 /* #3354 п.1: сводка полос по ширинам под первой строкой карточки. Контейнер —
    .atex-pp-cut-material (переиспользован), одна текстовая строка на ширину. */
 .atex-pp-cut-material {
