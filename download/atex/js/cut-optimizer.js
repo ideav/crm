@@ -740,10 +740,7 @@
         form.appendChild(this.rowsEl);
         this.renderRows();
 
-        var addBtn = el('button', { class: 'atex-co-btn atex-co-btn-secondary', type: 'button', text: '+ Добавить ширину' });
-        addBtn.addEventListener('click', function() { self.rows.push({ width: '', qty: '1' }); self.renderRows(); self.maybeRecalc(); });
-        form.appendChild(addBtn);
-
+        // #3749: оптимизатор работает с ОДНОЙ шириной — добавление/удаление ширин убрано.
         var calcBtn = el('button', { class: 'atex-co-btn atex-co-btn-primary', type: 'button', text: 'Рассчитать' });
         calcBtn.addEventListener('click', function() { self.calculate(); });
         form.appendChild(calcBtn);
@@ -801,27 +798,21 @@
         }
     };
 
+    // #3749: одна ширина — единственная строка (ширина + количество), без кнопок
+    // добавления/удаления. this.rows всегда содержит ровно одну запись.
     AtexCutOptimizer.prototype.renderRows = function() {
         var self = this;
         var box = this.rowsEl;
         box.innerHTML = '';
-        this.rows.forEach(function(row, idx) {
-            var widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
-                placeholder: 'ширина, мм', value: row.width });
-            widthInput.addEventListener('input', function() { row.width = widthInput.value; self.maybeRecalc(); });
-            // Кол-во — целое, числовое, шаг 5 (#3478).
-            var qtyInput = el('input', { class: 'atex-co-input', type: 'number', inputmode: 'numeric',
-                min: '0', step: '5', placeholder: 'кол-во', value: row.qty });
-            qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; self.maybeRecalc(); });
-            var del = el('button', { class: 'atex-co-row-del', type: 'button', title: 'Удалить', text: '×' });
-            del.addEventListener('click', function() {
-                self.rows.splice(idx, 1);
-                if (!self.rows.length) self.rows.push({ width: '', qty: '1' });
-                self.renderRows();
-                self.maybeRecalc();
-            });
-            box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput, del]));
-        });
+        var row = this.rows[0] || (this.rows[0] = { width: '', qty: '1' });
+        var widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
+            placeholder: 'ширина, мм', value: row.width });
+        widthInput.addEventListener('input', function() { row.width = widthInput.value; self.maybeRecalc(); });
+        // Кол-во — целое, числовое, шаг 5 (#3478).
+        var qtyInput = el('input', { class: 'atex-co-input', type: 'number', inputmode: 'numeric',
+            min: '0', step: '5', placeholder: 'кол-во', value: row.qty });
+        qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; self.maybeRecalc(); });
+        box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput]));
     };
 
     // Комбобокс «Длина рулона»: текстовое поле (свой ввод) + кнопка-стрелка,

@@ -129,23 +129,13 @@
 
 .atex-co-rows-head { margin: 6px 0 6px; }
 .atex-co-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+/* #3749: одна ширина — строка из двух полей (ширина + количество), без кнопки удаления. */
 .atex-co-row {
     display: grid;
-    grid-template-columns: 1fr 90px 32px;
+    grid-template-columns: 1fr 90px;
     gap: 8px;
     align-items: center;
 }
-.atex-co-row-del {
-    border: 1px solid var(--co-border);
-    border-radius: 6px;
-    background: var(--co-surface);
-    color: var(--co-muted);
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 1;
-    padding: 6px 0;
-}
-.atex-co-row-del:hover { color: var(--co-warn); border-color: var(--co-warn); }
 
 .atex-co-btn {
     border: 1px solid var(--co-border);
