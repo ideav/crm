@@ -1559,6 +1559,34 @@
         return { knifeMin: round3(knife), materialWindingMin: round3(matWind) };
     }
 
+    // #3760: какие компоненты настройки положить в хвост смены, когда настройка целиком
+    // не влезает. Берём ПОДМНОЖЕСТВО компонентов с суммой ≥ остатка дня (дотягивает до конца
+    // смены) и МИНИМАЛЬНОЙ суммой (минимальный нахлёст). Остальное — на следующий день.
+    //   parts — [{minutes}], avail — остаток дня (мин), total — сумма всех компонентов.
+    // Примеры (ножи 30, сырьё 15): avail 8 → сырьё 15 (нахлёст 7); avail 20 → ножи 30
+    // (сырьё 15 < 20 не дотягивает, оставило бы простой); avail 35 → ножи+сырьё 45.
+    // Полный набор (сумма total ≥ avail в этой ветке) всегда годится; компонентов мало —
+    // полный перебор подмножеств. → минуты настройки в хвост (round3).
+    function minOverlapTailSetupMinutes(parts, avail, total) {
+        var mins = (parts || []).map(function(p){ return Number(p && p.minutes) || 0; })
+            .filter(function(m){ return m > 0; });
+        var tot = Number(total) || mins.reduce(function(s, m){ return s + m; }, 0);
+        if (!mins.length) return round3(tot);
+        var a = Number(avail) || 0, n = mins.length, best = tot;
+        if (n <= 16) {
+            for (var mask = 1; mask < (1 << n); mask++) {
+                var s = 0;
+                for (var b = 0; b < n; b++) if (mask & (1 << b)) s += mins[b];
+                if (s >= a && s < best) best = s;
+            }
+        } else {
+            var sorted = mins.slice().sort(function(x, y){ return y - x; }), acc = 0;
+            for (var i = 0; i < sorted.length && acc < a; i++) acc += sorted[i];
+            best = acc || tot;
+        }
+        return round3(best);
+    }
+
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
     // (порядок исполнения — по «Очередности», как в Ганте orderCutsInGroup). Первая резка —
     // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
@@ -2653,11 +2681,13 @@
             }
             // не влезает до конца окна (резерв обеда, если не вставлен) → 08:00 след. дня.
             // #3688: в окно должны влезть резка И лидер после неё (станок занят до конца лидера).
-            // #3739: при gapFill нахлёст за конец смены разрешён — НЕ выталкиваем на след. день,
-            // чтобы отображение совпало с планом (splitMachineQueue кладёт резку на её день,
-            // якорь по «Дате план» уводит на нужный день вперёд, а в пределах дня — нахлёст).
+            // #3739/#3760: при gapFill нахлёст за конец смены ограничен ОДНИМ шагом — резку,
+            // чьё ОКНО (начало настройки = start − setup) уже за концом смены, выталкиваем на
+            // следующий день; резка, начавшаяся в пределах смены, может выйти за край (один
+            // нахлёст), но следующая за ней уйдёт на завтра. Так тайминг не накапливается в ночь.
             var fitEnd = day * 1440 + shiftEnd - ((lunch && !lunchDone[day]) ? lunch.durationMin : 0);
-            if (hasWindow && !opts.gapFill && start + dur + leaderMin > fitEnd) {
+            var pushNextDay = opts.gapFill ? ((start - setup) >= fitEnd) : (start + dur + leaderMin > fitEnd);
+            if (hasWindow && pushNextDay) {
                 day += 1;
                 start = day * 1440 + shiftStart + setup;
                 if (lunch && !lunchDone[day] && (start - day * 1440) >= lunch.startMin) {
@@ -2836,43 +2866,43 @@
                 var perPassEffG = st.perPass + leader;
                 var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
                 var availG = effCapacity(day) - clock;
-                var maxPassesG = Math.floor((availG - setupG) / perPassEffG);
-                if (maxPassesG >= 1) {
-                    var passesNowG = Math.min(st.remaining, maxPassesG);
+                if (availG >= setupG) {
+                    // #3760: настройка влезает. Кладём проходы, что помещаются БЕЗ нахлёста, плюс
+                    // ОДИН нахлёстный (первый, пересекающий конец смены): «сколько успели сегодня
+                    // с нахлёстом — сохраняем, после первого нахлёста — остальное на завтра».
+                    var fittingG = Math.floor((availG - setupG) / perPassEffG);
+                    if (fittingG < 0) fittingG = 0;
+                    var overlapsG = fittingG < st.remaining;            // не все проходы влезли → нахлёст
+                    var passesNowG = Math.min(st.remaining, fittingG + (overlapsG ? 1 : 0));
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
-                    clock += setupG + durG; st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0;
-                    prevPhysical = c;
-                } else if (clock === 0) {
-                    // Пустой день не вмещает даже setup+1 проход — кладём 1 проход (нахлёст), как база.
-                    var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
-                    segments.push({ cutId: pick, dayOffset: day, runs: 1,
-                        windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
-                        durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
-                    clock += setupG + durO; st.remaining -= 1; st.isCont = true; st.pendingSetup = 0;
-                    prevPhysical = c;
-                } else if (setupG <= 0) {
-                    day += 1; clock = 0;   // продолжение без настройки на след. день
-                } else {
-                    // Хвост вмещает только настройку: целиком (#3635) либо КРУПНЕЙШИЙ компонент
-                    // с минимальным нахлёстом (#3739), остаток настройки — на след. день.
-                    var tailSetup, restSetup;
-                    if (availG >= setupG) { tailSetup = setupG; restSetup = 0; }
-                    else {
-                        var parts = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
-                        var largest = 0;
-                        parts.forEach(function(p){ var m = Number(p.minutes) || 0; if (m > largest) largest = m; });
-                        if (!(largest > 0)) largest = setupG;
-                        tailSetup = largest; restSetup = round3(setupG - largest);
-                    }
+                    st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
+                    if (overlapsG) { day += 1; clock = 0; }            // после первого нахлёста — на завтра
+                    else { clock += setupG + durG; }
+                } else if (clock > 0) {
+                    // #3760: хвост не вмещает настройку целиком — кладём подмножество компонентов,
+                    // дотягивающее до конца смены с МИНИМАЛЬНЫМ нахлёстом (minOverlapTailSetupMinutes);
+                    // остаток настройки + проходы — на следующий день как продолжение.
+                    var partsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
+                    var tailSetup = minOverlapTailSetupMinutes(partsG, availG, setupG);
+                    var restSetup = round3(setupG - tailSetup);
                     var wsS = day * 1440 + dayStart + clock;
                     segments.push({ cutId: pick, dayOffset: day, runs: 0,
                         windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
                         durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
                     clock += tailSetup; prevPhysical = c;
                     st.isCont = true; st.pendingSetup = restSetup;
+                    day += 1; clock = 0;
+                } else {
+                    // Пустой день не вмещает даже настройку (вырожденно: настройка > целого окна) —
+                    // кладём настройку + 1 проход с нахлёстом, остальное на следующий день.
+                    var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
+                    segments.push({ cutId: pick, dayOffset: day, runs: 1,
+                        windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
+                        durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
+                    st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
                     day += 1; clock = 0;
                 }
             }
@@ -4116,6 +4146,7 @@
         firstSetupCost: firstSetupCost,
         setupBreakdown: setupBreakdown,
         setupActivityMinutes: setupActivityMinutes,   // #3698
+        minOverlapTailSetupMinutes: minOverlapTailSetupMinutes,   // #3760
         setupActivityColumns: setupActivityColumns,   // #3698
         planningStrategy: planningStrategy,
         planningStrategyLabel: planningStrategyLabel,
