@@ -513,13 +513,17 @@
     // показываем). По каждому окну: тик на левом крае окна с датой (начало смены/дня), далее по
     // сетке часов {1,2,4,…} до конца окна. Метка — «HH:00» (или фактическое начало окна при
     // раннем старте); дата — на первом тике каждого дня. Все деления одинаковым пунктиром.
+    // #3756: дни идут встык, поэтому правый край окна — это тик-дата СЛЕДУЮЩЕГО дня. Часовой
+    // тик впритык к нему (напр. 18:00 за 30 мин до 18:30) перекрывал бы дату «27.06». Поэтому
+    // часовые тики ближе minPx к краю окна (к дате слева/справа) не ставим — дата приоритетнее.
     function hourTicks(scale, pxPerMin, opts) {
         var o = opts || {};
         if (!scale || !scale.segments || !scale.segments.length) return [];
         var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
+        var minPx = o.minPx > 0 ? o.minPx : GANTT_TICK_MIN_PX;   // #3756: зазор до тика-даты
         var stepMs = chooseHourStep(ppm * 60, o) * GANTT_HOUR_MS;
         var ticks = [];
-        scale.segments.forEach(function(seg) {
+        scale.segments.forEach(function(seg, si) {
             ticks.push({
                 ms: seg.startMs,
                 hour: new Date(seg.startMs).getHours(),
@@ -528,12 +532,20 @@
                 dateLabel: formatDateShort(seg.startMs),
                 newDay: true
             });
+            var segEndPx = seg.leftPx + seg.widthPx;
+            // #3756: справа дата есть только если за окном следует другой день (стык окон);
+            // у последнего окна правый край — конец дорожки, тик у края показываем.
+            var hasNextDay = si < scale.segments.length - 1;
             for (var ms = floorToHourMs(seg.startMs) + stepMs; ms <= seg.endMs + 0.5; ms += stepMs) {
                 if (ms <= seg.startMs) continue;
+                var leftPx = scale.toPx(ms);
+                // #3756: не ставим часовой тик впритык к дате дня — слева (дата своего окна,
+                // напр. при раннем старте) и справа (дата следующего дня на стыке окон).
+                if (leftPx - seg.leftPx < minPx || (hasNextDay && segEndPx - leftPx < minPx)) continue;
                 ticks.push({
                     ms: ms,
                     hour: new Date(ms).getHours(),
-                    leftPx: scale.toPx(ms),
+                    leftPx: leftPx,
                     label: formatTime(ms),
                     dateLabel: '',
                     newDay: false
