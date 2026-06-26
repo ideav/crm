@@ -178,7 +178,7 @@
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
     // Параметры раскладки cut-layout при генерации резок.
     var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
-    var DEFAULT_TOLERANCE_MM = 20; // допуск остатка джамбо по умолчанию (мм), если у «Вида сырья» «Допуск, мм» не задан
+    var DEFAULT_TOLERANCE_MM = 21; // допуск остатка джамбо по умолчанию (мм), если у «Вида сырья» «Допуск, мм» не задан
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -4815,13 +4815,15 @@
                 BETWEEN_CUTS: raw.BETWEEN_CUTS != null ? raw.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS,
                 CLEANUP_SHIFT: raw.CLEANUP_SHIFT != null ? raw.CLEANUP_SHIFT : DEFAULT_OP_TIMES.CLEANUP_SHIFT
             };
+            self.defaultToleranceMm = raw.DEFAULT_DEVIATION != null ? raw.DEFAULT_DEVIATION : DEFAULT_TOLERANCE_MM;
         });
     };
 
     // Допуск остатка для вида сырья: «Допуск, мм» из справочника, иначе DEFAULT_TOLERANCE_MM.
     AtexProductionPlanning.prototype.resolveToleranceMm = function(materialId) {
         var raw = this.toleranceByMaterial ? this.toleranceByMaterial[String(materialId)] : '';
-        return resolveTolerance(raw, DEFAULT_TOLERANCE_MM);
+        var def = (this.defaultToleranceMm != null) ? this.defaultToleranceMm : DEFAULT_TOLERANCE_MM;
+        return resolveTolerance(raw, def);
     };
 
     // #3706: статус остатка джамбо резки относительно допуска — для цвета кнопки
