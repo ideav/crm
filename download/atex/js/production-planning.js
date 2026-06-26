@@ -2631,8 +2631,11 @@
             }
             // не влезает до конца окна (резерв обеда, если не вставлен) → 08:00 след. дня.
             // #3688: в окно должны влезть резка И лидер после неё (станок занят до конца лидера).
+            // #3739: при gapFill нахлёст за конец смены разрешён — НЕ выталкиваем на след. день,
+            // чтобы отображение совпало с планом (splitMachineQueue кладёт резку на её день,
+            // якорь по «Дате план» уводит на нужный день вперёд, а в пределах дня — нахлёст).
             var fitEnd = day * 1440 + shiftEnd - ((lunch && !lunchDone[day]) ? lunch.durationMin : 0);
-            if (hasWindow && start + dur + leaderMin > fitEnd) {
+            if (hasWindow && !opts.gapFill && start + dur + leaderMin > fitEnd) {
                 day += 1;
                 start = day * 1440 + shiftStart + setup;
                 if (lunch && !lunchDone[day] && (start - day * 1440) >= lunch.startMin) {
@@ -2731,6 +2734,127 @@
                 clock += lunch.durationMin;
                 lunchDone[day] = true;
             }
+        }
+        // #3739: setup (минуты) и его компоненты для переналадки prev→c с учётом первой
+        // резки/заправки станка. cost == changeoverCost(...) — единый источник.
+        function setupPartsFor(prev, c) {
+            if (prev) return changeoverParts(prev, c, times);
+            if (opts.carryPrevCut) return changeoverParts(opts.carryPrevCut, c, times);   // #3688
+            if (opts.firstCutSetup) return firstSetupParts(c, times);                     // #3669
+            return [];
+        }
+        function setupCostFor(prev, c) {
+            return setupPartsFor(prev, c).reduce(function(s, p){ return s + (Number(p.minutes) || 0); }, 0);
+        }
+        // #3739: gap-fill. Вместо простоя в хвосте смены тянем будущую резку вперёд (раньше
+        // срока — допустимо, «с запасом по сроку») и заполняем день; нахлёст за конец смены
+        // разрешён. Выбор следующей резки — по НЕПРЕРЫВНОСТИ КОНФИГУРАЦИИ (минимальная
+        // переналадка от предыдущей): «начинать с той конфигурации, на которой закончили».
+        // Когда в хвост влезает только настройка — кладём КРУПНЕЙШИЙ её компонент (ножи/сырьё)
+        // с минимальным нахлёстом, остаток настройки — на след. день перед проходами.
+        if (opts.gapFill) {
+            var state = {};
+            var poolOrder = [];
+            (orderedCuts || []).forEach(function(c, i){
+                var id = String(c && c.id);
+                state[id] = {
+                    cut: c, idx: i,
+                    remaining: Math.round(Number(runsByCut[id] != null ? runsByCut[id] : c && c.plannedRuns) || 0),
+                    perPass: Number(perPassByCut[id] != null ? perPassByCut[id] : 0) || 0,
+                    anchor: anchorByCut[id] != null ? anchorByCut[id] : null,
+                    isCont: false, pendingSetup: 0
+                };
+                poolOrder.push(id);
+            });
+            function pending() {
+                return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
+            }
+            // R3: среди кандидатов — минимальная переналадка от prevPhysical (непрерывность
+            // конфигурации), затем фольга в конец (#3717), затем исходный порядок (срок/очередь).
+            function selectByConfig(ids) {
+                var best = null;
+                ids.forEach(function(id){
+                    var c = state[id].cut;
+                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c), state[id].idx ];
+                    if (!best) { best = { id: id, key: key }; return; }
+                    for (var k = 0; k < key.length; k++) {
+                        if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
+                        if (key[k] > best.key[k]) return;
+                    }
+                });
+                return best && best.id;
+            }
+            // Предохранитель от зацикливания: каждая итерация уменьшает remaining либо
+            // ставит настройку и двигает день (после чего проход точно ложится). Верхняя
+            // оценка — по суммарным проходам + запас на дни/настройки. На практике не срабатывает.
+            var totalRuns = 0;
+            poolOrder.forEach(function(id){ totalRuns += Math.max(0, state[id].remaining); });
+            var guard = 0, guardMax = (totalRuns + (orderedCuts || []).length + 8) * 8 + 1024;
+            while (guard++ < guardMax) {
+                var rem = pending();
+                if (!rem.length) break;
+                // Незавершённая резка (продолжение, ножи на станке) — доводим её первой.
+                var inProgress = rem.filter(function(id){ return state[id].isCont && state[id].remaining > 0; });
+                var due = rem.filter(function(id){ return state[id].anchor == null || state[id].anchor <= day; });
+                var pick = inProgress.length ? selectByConfig(inProgress)
+                    : (due.length ? selectByConfig(due) : selectByConfig(rem));   // нет «по сроку» → тянем будущую вперёд
+                var st = state[pick], c = st.cut;
+                insertLunchBefore();
+                // Резка без проходов/окна — один сегментик (как базовая ветка).
+                if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) {
+                    var s0 = leader + setupCostFor(prevPhysical, c);
+                    var w0 = day * 1440 + dayStart + clock;
+                    segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
+                        windowStartMin: round3(w0), startMin: round3(w0 + s0), setupMin: round3(s0),
+                        durationMin: 0, isContinuation: false, parentCutId: null });
+                    clock += s0;
+                    prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                    continue;
+                }
+                var perPassEffG = st.perPass + leader;
+                var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
+                var availG = effCapacity(day) - clock;
+                var maxPassesG = Math.floor((availG - setupG) / perPassEffG);
+                if (maxPassesG >= 1) {
+                    var passesNowG = Math.min(st.remaining, maxPassesG);
+                    var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
+                    segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
+                        windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
+                        durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
+                    clock += setupG + durG; st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0;
+                    prevPhysical = c;
+                } else if (clock === 0) {
+                    // Пустой день не вмещает даже setup+1 проход — кладём 1 проход (нахлёст), как база.
+                    var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
+                    segments.push({ cutId: pick, dayOffset: day, runs: 1,
+                        windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
+                        durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
+                    clock += setupG + durO; st.remaining -= 1; st.isCont = true; st.pendingSetup = 0;
+                    prevPhysical = c;
+                } else if (setupG <= 0) {
+                    day += 1; clock = 0;   // продолжение без настройки на след. день
+                } else {
+                    // Хвост вмещает только настройку: целиком (#3635) либо КРУПНЕЙШИЙ компонент
+                    // с минимальным нахлёстом (#3739), остаток настройки — на след. день.
+                    var tailSetup, restSetup;
+                    if (availG >= setupG) { tailSetup = setupG; restSetup = 0; }
+                    else {
+                        var parts = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
+                        var largest = 0;
+                        parts.forEach(function(p){ var m = Number(p.minutes) || 0; if (m > largest) largest = m; });
+                        if (!(largest > 0)) largest = setupG;
+                        tailSetup = largest; restSetup = round3(setupG - largest);
+                    }
+                    var wsS = day * 1440 + dayStart + clock;
+                    segments.push({ cutId: pick, dayOffset: day, runs: 0,
+                        windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
+                        durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
+                    clock += tailSetup; prevPhysical = c;
+                    st.isCont = true; st.pendingSetup = restSetup;
+                    day += 1; clock = 0;
+                }
+            }
+            return segments;
         }
         (orderedCuts || []).forEach(function(c){
             var cid = c && c.id;
@@ -3065,7 +3189,8 @@
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
                 dayAnchorByCut: opts.dayAnchorByCut,   // #3658: привязка к дню «Даты план»
-                firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+                firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+                gapFill: opts.gapFill   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
             });
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
@@ -7638,7 +7763,8 @@
             dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
-            firstCutSetup: true   // #3669 п.2: первая задача очереди резервирует настройку ножей
+            firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
+            gapFill: true   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
@@ -8167,7 +8293,8 @@
             setupTaskIds: setupTaskIds,
             dayAnchorByCut: dayAnchorByCut,
             carryPrevCut: carryPrevCut,   // #3688: заправка станка для первой резки
-            firstCutSetup: true   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
+            firstCutSetup: true,   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
+            gapFill: true   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
         };
         // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
         // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
