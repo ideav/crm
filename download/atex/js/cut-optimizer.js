@@ -718,7 +718,7 @@
         var lengthCombo = this.makeLengthCombo();
         this.lengthInput = lengthCombo.input;
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
-            el('label', { class: 'atex-co-label', text: 'Ширина входа (джамбо), мм' }), this.widthInput
+            el('label', { class: 'atex-co-label', text: 'Ширина входа, мм' }), this.widthInput
         ]));
         dims.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Длина рулона, м' }), lengthCombo.node
