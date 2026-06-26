@@ -2936,6 +2936,30 @@
         };
     }
 
+    // #3737: недостающий сосед карточки через ВНЕШНЮЮ границу выбранного диапазона дат.
+    // Сегмент-продолжение задания за границей диапазона лежит в дне ВНЕ фильтра — в очередь
+    // он не попадает, но присутствует в полном наборе резок (cut_planning грузится целиком).
+    // Поэтому у первой/последней карточки диапазона соседа через границу дня нет и значок
+    // ←/→ не рисуется (баг при выборе одного дня). Возвращает ближайший по КАЛЕНДАРНОМУ дню
+    // смежный по заданию (isDaySplitSibling) сегмент того же станка в более раннем (dir<0, ←)
+    // либо позднем (dir>0, →) дне, чем у `cut`; null — нет такого. Чистая → покрыта тестом.
+    function boundaryDaySibling(cuts, cut, dir){
+        if (!cut) return null;
+        var d0 = planDateDayKey(cut.planDate);
+        if (d0 === Infinity) return null;
+        var sid = String((cut.slitter && cut.slitter.id) || '');
+        var best = null, bestKey = dir < 0 ? -Infinity : Infinity;
+        (cuts || []).forEach(function(o){
+            if (!o || String(o.id) === String(cut.id)) return;
+            if (String((o.slitter && o.slitter.id) || '') !== sid) return;
+            if (!isDaySplitSibling(o, cut)) return;
+            var k = planDateDayKey(o.planDate);
+            if (k === Infinity) return;
+            if (dir < 0 ? (k < d0 && k > bestKey) : (k > d0 && k < bestKey)) { bestKey = k; best = o; }
+        });
+        return best;
+    }
+
     // #3280: слить записи-продолжения обратно в логические резки перед пере-разбиением.
     // Эвристика (без маркера): одинаковая сигнатура continuationSignature + смежные
     // календарные дни (разница 1) → одна цепочка; выживает самая ранняя запись (её id),
@@ -3896,6 +3920,7 @@
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
         daySplitBadges: daySplitBadges,
+        boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
         splitSupplyShares: splitSupplyShares,
@@ -8460,6 +8485,18 @@
             var prevCut = activeGroup.cuts[idx - 1];
             var prevSc = prevCut ? schedById[String(prevCut.id)] : null;
             var prevDay = prevSc ? schedDay(prevSc) : null;
+            // #3737: первая (нет prev) / последняя (нет next) карточка диапазона — подменяем
+            // отсутствующего соседа через границу дня смежным сегментом из дня ВНЕ фильтра,
+            // чтобы значок ←/→ рисовался и при выбранном одном дне. Синтетический день соседа
+            // (myDay∓1) гарантирует переход через границу (prevDay/nextDay !== myDay).
+            if (!prevCut && myDay != null) {
+                var bPrev = boundaryDaySibling(self.cuts, c, -1);
+                if (bPrev) { prevCut = bPrev; prevDay = myDay - 1; }
+            }
+            if (!nextCut && myDay != null) {
+                var bNext = boundaryDaySibling(self.cuts, c, 1);
+                if (bNext) { nextCut = bNext; nextDay = myDay + 1; }
+            }
             var spans = daySplitBadges(prevCut, prevDay, c, myDay, nextCut, nextDay);
             if (spans.fromPrev || spans.toNext) {
                 var spanBadges = [];
