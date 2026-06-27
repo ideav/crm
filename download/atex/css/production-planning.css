@@ -436,6 +436,22 @@
     font-variant-numeric: tabular-nums;
 }
 .atex-pp-day-date:first-child { margin-top: 2px; }
+/* #3788: день расписания — выходной/праздник, но задания на него есть → красный фон даты. */
+.atex-pp-day-date.is-dayoff {
+    background: var(--pp-warn);
+    color: #fff;
+    border-bottom-color: var(--pp-warn);
+    border-radius: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+.atex-pp-day-date.is-dayoff .atex-pp-day-mins { color: rgba(255, 255, 255, .85); }
+/* #3788: пометка «Выходной день» перед «Заданий в очереди нет» в пустой очереди. */
+.atex-pp-dayoff-note {
+    color: var(--pp-warn);
+    font-weight: 700;
+    margin-bottom: 4px;
+}
 /* #3743: суммарные минуты заданий станка за день — после даты, мягче самой даты. */
 .atex-pp-day-mins {
     font-weight: 400;
