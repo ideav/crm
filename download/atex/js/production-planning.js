@@ -7580,6 +7580,7 @@
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
         var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var lengthReqId = reqIdByName(cutMeta, CUT_REQ.length);   // #3781: «Метраж, м» (длина прогона)
         var cutReqIds = {
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
@@ -7587,8 +7588,24 @@
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: seqReqId,
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
-            leader: reqIdByName(cutMeta, CUT_REQ.leader)   // #3569: лидер копируется в запись-продолжение
+            leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
+            length: lengthReqId   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
         };
+        // #3781: длина прогона по id любой записи цепочки = длина прогона её ГОЛОВЫ. Записи-
+        // продолжения дробления по дням раньше не получали «Метраж, м», и cutRunLength
+        // откатывался к ПОДЕЛЁННОМУ метражу обеспечения (splitSupplyShares делит footage
+        // пропорционально проходам) → в очереди мелькала заниженная длина (281.25 вместо 450).
+        // Длина прогона одинакова у всех сегментов — берём её у головы и пишем во все сегменты.
+        var chainHeadById = {};
+        var splitChains = mergeContinuationChains(self.cuts || []).chainByLogical || {};
+        Object.keys(splitChains).forEach(function(head) {
+            (splitChains[head] || [head]).forEach(function(m) { chainHeadById[String(m)] = String(head); });
+        });
+        function runLenForCutId(cutId) {
+            var head = chainHeadById[String(cutId)] || String(cutId);
+            var hc = cutsById[head];
+            return hc ? cutRunLength(hc, self.supplies, self.footageBySupply) : 0;
+        }
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
         (ops.creates || []).forEach(function(cr) { (createsByParent[cr.parentCutId] = createsByParent[cr.parentCutId] || []).push(cr); });
@@ -7625,6 +7642,13 @@
                     // расписание считает настройку длинной резкой, ломая раскладку по дням.
                     var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
                     if (Number(u.plannedRuns) === 0 && durReqId) fields['t' + durReqId] = '0';
+                    // #3781: восстановить «Метраж, м» = длине прогона головы цепочки. Для головы
+                    // это та же длина (запись no-op по значению), для реюзнутого продолжения —
+                    // лечит ранее пустую длину (иначе очередь брала поделённый метраж обеспечения).
+                    if (lengthReqId) {
+                        var ulen = runLenForCutId(u.cutId);
+                        if (ulen > 0) fields['t' + lengthReqId] = String(round3(ulen));
+                    }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -7636,6 +7660,7 @@
             var parentCut = cutsById[parentId];
             var crs = createsByParent[parentId];
             var upd = updateByCut[parentId];
+            var parentRunLen = runLenForCutId(parentId);   // #3781: длина прогона цепочки (для «Метраж, м» продолжений)
             var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
             var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
             chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
@@ -7687,7 +7712,10 @@
                             sequence: cr.sequence,
                             winding: normWinding(parentCut && parentCut.winding),
                             // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
-                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : '')
+                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : ''),
+                            // #3781: «Метраж, м» = длина прогона цепочки. Без неё cutRunLength брал
+                            // поделённый метраж обеспечения и показывал заниженную длину.
+                            length: parentRunLen > 0 ? round3(parentRunLen) : ''
                         });
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
