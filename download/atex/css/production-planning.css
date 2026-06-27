@@ -377,6 +377,23 @@
     color: var(--pp-info-text);
     font-variant-numeric: tabular-nums;
 }
+/* #3769: расцветка строки по «Сроку изготовления» позиции относительно «Даты план».
+   Красный — срок раньше планирования (не успеваем); жёлтый — срок дальше план+DAYS_FORECAST
+   (делаем сильно заранее); в окне — без изменения (цвет выше). */
+.atex-pp-cut-material .atex-pp-strip-row.is-overdue {
+    color: #b91c1c;
+    font-weight: 600;
+    background: rgba(185, 28, 28, .10);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+.atex-pp-cut-material .atex-pp-strip-row.is-far {
+    color: #a16207;
+    font-weight: 600;
+    background: rgba(202, 138, 4, .12);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
 /* #3354 п.1: строка времени резки теперь встроена в первую строку карточки
    (между номером и сырьём), а не отдельным рядом ниже — поэтому без margin-top. */
 .atex-pp-cut-time {
