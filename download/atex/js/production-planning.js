@@ -775,6 +775,58 @@
         return Math.floor(d.getTime() / 1000);
     }
 
+    // #3787: unix-секунды → «DD.MM.YYYY» (время дописываем, только если не полночь — отпуск
+    // обычно цельными днями, «00:00» был бы шумом). Пусто/мусор → ''.
+    function formatDowntimeBound(sec) {
+        var n = Number(sec);
+        if (!isFinite(n) || n <= 0) return '';
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return '';
+        function pad(x) { return (x < 10 ? '0' : '') + x; }
+        var s = pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+        if (d.getHours() || d.getMinutes()) s += ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        return s;
+    }
+
+    // #3787: «ГГГГ-ММ-ДД» → полночь (мс, локально); null при нераспознанном (без подмены «сегодня»).
+    function isoDayMidnightMs(dateStr) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+        if (!m) return null;
+        return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0).getTime();
+    }
+
+    // #3787: подпись об отпуске(ах) станка, пересекающих отображаемый диапазон [dateFrom; dateTo]
+    // (фильтр «Дата плана», 'ГГГГ-ММ-ДД'; пустой dateTo = один день dateFrom). downtimes — строки
+    // окон простоя [{ start, end, notes }] (unix-сек, как this.downtimesBySlitter[slitterId]).
+    // → «отпуск с DD.MM.YYYY по DD.MM.YYYY» (несколько — через запятую; причина из «Примечаний» в
+    // скобках — «все детали»). Открытое окно (нет «Окончания») → «отпуск с DD.MM.YYYY». Нет
+    // пересечений / нераспознанная дата → ''. Чистая — тестируется без DOM.
+    function downtimeRangeNote(downtimes, dateFrom, dateTo) {
+        var list = downtimes || [];
+        if (!list.length) return '';
+        var fromMs = isoDayMidnightMs(dateFrom);
+        if (fromMs == null) return '';
+        var toMid = isoDayMidnightMs(String(dateTo || '').trim() || dateFrom);
+        var winEndMs = (toMid == null ? fromMs : toMid) + 86400000;   // конец последнего дня диапазона (исключит.)
+        var parts = list.filter(function(d) {
+            var startMs = (d && d.start != null && d.start !== '') ? Number(d.start) * 1000 : null;
+            if (startMs == null || !isFinite(startMs)) return false;
+            var endMs = (d.end != null && d.end !== '') ? Number(d.end) * 1000 : null;
+            // пересечение [startMs; endMs|∞) с отображаемым окном [fromMs; winEndMs)
+            return startMs < winEndMs && (endMs == null || endMs > fromMs);
+        }).sort(function(a, b) {
+            return (Number(a.start) || 0) - (Number(b.start) || 0);
+        }).map(function(d) {
+            var s = 'с ' + formatDowntimeBound(d.start);
+            var e = formatDowntimeBound(d.end);
+            if (e) s += ' по ' + e;
+            var notes = d.notes == null ? '' : String(d.notes).trim();
+            if (notes) s += ' (' + notes + ')';
+            return s;
+        });
+        return parts.length ? ('отпуск ' + parts.join(', ')) : '';
+    }
+
     // Сборка полей `t{reqId}` для записи. reqIds — { ключ: числовойId },
     // values — { ключ: значение }. Пустые значения (''/null/undefined) опускаются,
     // чтобы не перетирать данные и не плодить пустые реквизиты.
@@ -4278,6 +4330,8 @@
         shiftPlacementsPastDowntime: shiftPlacementsPastDowntime, // #3764
         unixToDatetimeLocal: unixToDatetimeLocal,                 // #3764
         datetimeLocalToUnix: datetimeLocalToUnix,                 // #3764
+        downtimeRangeNote: downtimeRangeNote,                     // #3787
+        formatDowntimeBound: formatDowntimeBound,                 // #3787
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
         daySplitBadges: daySplitBadges,
@@ -9286,7 +9340,13 @@
             groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'В этом станке нет позиций по запросу «' + query + '».' }));
         } else if (!groupEl.childNodes.length) {
             // #3535: активный станок без резок в этот день — явная подсказка вместо пустоты.
-            groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
+            // #3787: если у станка есть отпуск(а), пересекающие отображаемую дату — дописываем
+            // его детали: «Заданий в очереди нет, отпуск с … по …» (несколько — через запятую).
+            var dtNote = downtimeRangeNote(
+                (self.downtimesBySlitter || {})[String(activeGroup.slitter && activeGroup.slitter.id)],
+                self.filter && self.filter.date, self.filter && self.filter.dateTo);
+            groupEl.appendChild(el('div', { class: 'atex-pp-empty',
+                text: 'Заданий в очереди нет' + (dtNote ? ', ' + dtNote : '') }));
         }
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);

@@ -112,4 +112,48 @@ assertEqual(planning.datetimeLocalToUnix('2026-06-27T14:30'), sec,
 assertEqual(planning.unixToDatetimeLocal(0), '', '#3764: 0/пусто → ""');
 assertEqual(planning.datetimeLocalToUnix(''), null, '#3764: пустая строка → null');
 
+// ── #3787: подпись об отпуске станка в пустой очереди («Заданий в очереди нет, отпуск с … по …») ──
+function dsec(y, mo, d, h, mi) { return Date.UTC(y, mo - 1, d, h || 0, mi || 0, 0) / 1000; }
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10), end: dsec(2026, 6, 12) }], '2026-06-10', '2026-06-10'),
+    'отпуск с 10.06.2026 по 12.06.2026',
+    '#3787: одно окно, пересекает дату → «отпуск с … по …»');
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10), end: dsec(2026, 6, 12), notes: 'ТО' }], '2026-06-11', ''),
+    'отпуск с 10.06.2026 по 12.06.2026 (ТО)',
+    '#3787: причина из «Примечаний» в скобках (все детали); пустой dateTo = один день');
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10, 14, 30), end: dsec(2026, 6, 10, 16, 0) }], '2026-06-10', '2026-06-10'),
+    'отпуск с 10.06.2026 14:30 по 10.06.2026 16:00',
+    '#3787: ненулевое время дописывается к дате');
+
+assertEqual(
+    planning.downtimeRangeNote([
+        { start: dsec(2026, 6, 12), end: dsec(2026, 6, 13) },
+        { start: dsec(2026, 6, 10), end: dsec(2026, 6, 11) }
+    ], '2026-06-10', '2026-06-13'),
+    'отпуск с 10.06.2026 по 11.06.2026, с 12.06.2026 по 13.06.2026',
+    '#3787: несколько окон — через запятую, по возрастанию начала');
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10), end: dsec(2026, 6, 12) }], '2026-07-01', '2026-07-01'),
+    '',
+    '#3787: окно вне отображаемой даты → пусто');
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10), end: null }], '2026-06-15', '2026-06-15'),
+    'отпуск с 10.06.2026',
+    '#3787: открытое окно (нет «Окончания») → «отпуск с …», пересекает любую позднюю дату');
+
+assertEqual(planning.downtimeRangeNote([], '2026-06-10', '2026-06-10'), '',
+    '#3787: окон нет → пусто');
+
+assertEqual(
+    planning.downtimeRangeNote([{ start: dsec(2026, 6, 10), end: dsec(2026, 6, 12) }], '', ''),
+    '',
+    '#3787: нераспознанная дата → пусто (без подмены «сегодня»)');
+
 console.log('\n' + passed + ' assertions passed');
