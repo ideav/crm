@@ -712,6 +712,32 @@
 }
 .atex-pp-modal-close:hover { color: var(--pp-accent); }
 .atex-pp-modal .atex-pp-form { padding: 0; }
+
+/* #3764: модалка «Отпуск» — редактор окон простоя станка. */
+.atex-pp-dt-dialog { max-width: 640px; }
+.atex-pp-dt-title { margin: 0 28px 14px 0; }
+.atex-pp-dt-table { margin-bottom: 12px; }
+.atex-pp-dt-row {
+    display: grid;
+    /* Начало · Окончание · Примечания · удалить */
+    grid-template-columns: 1fr 1fr 1.4fr 32px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.atex-pp-dt-head { font-size: 12px; color: var(--pp-muted); font-weight: 600; }
+.atex-pp-dt-empty { color: var(--pp-muted); font-size: 13px; padding: 8px 2px; }
+.atex-pp-dt-del {
+    padding: 6px 0;
+    text-align: center;
+    color: var(--pp-warn);
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    cursor: pointer;
+}
+.atex-pp-dt-del:hover { color: var(--pp-accent); }
+.atex-pp-dt-add { margin-top: 4px; }
 /* #3320: модалка «Обеспечить полосу» — список позиций + подтверждение. */
 .atex-pp-supply-dialog { max-width: 520px; }
 .atex-pp-supply-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 320px; overflow-y: auto; }
