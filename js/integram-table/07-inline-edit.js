@@ -333,6 +333,8 @@
             filterInputs.forEach(input => {
                 // Skip date pickers — they are handled separately via 'change' event (issue #1008)
                 if (input.classList.contains('filter-date-picker')) return;
+                // Skip range from/to inputs — handled separately below (issue #3542)
+                if (input.classList.contains('filter-range-input')) return;
                 // Use 'input' event to apply filter on text change
                 input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
@@ -386,6 +388,44 @@
                     delete this.filters[colId].displayValue;
 
                     this.handleFilterOverride(colId, displayValue);
+
+                    clearTimeout(this.filterTimeout);
+                    this.filterTimeout = setTimeout(() => {
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;
+                        this.loadData(false);
+                    }, 500);
+                });
+            });
+
+            // Range filter from/to inputs (issue #3542): combine both halves into the stored
+            // "from,to" value. Date inputs fire 'change'; number/text inputs fire 'input'.
+            const filterRangeInputs = this.container.querySelectorAll('.filter-range-input');
+            filterRangeInputs.forEach(input => {
+                const evtName = (input.type === 'date' || input.type === 'datetime-local') ? 'change' : 'input';
+                input.addEventListener(evtName, () => {
+                    const colId = input.dataset.columnId;
+                    if (!this.filters[colId]) {
+                        this.filters[colId] = { type: '...', value: '' };
+                    }
+                    const wrapper = input.closest('.filter-cell-wrapper');
+                    const readPart = part => {
+                        const el = wrapper && wrapper.querySelector(`.filter-range-input[data-range-part="${ part }"]`);
+                        if (!el || !el.value) return '';
+                        // Date inputs carry data-is-datetime → convert HTML5 value to display format
+                        if (el.dataset.isDatetime === '1' || el.dataset.isDatetime === '0') {
+                            return this.convertHtml5DateToDisplay(el.value, el.dataset.isDatetime === '1');
+                        }
+                        return el.value.trim();
+                    };
+                    const from = readPart('from');
+                    const to = readPart('to');
+                    this.filters[colId].value = `${ from },${ to }`;
+                    delete this.filters[colId].displayValue;
+
+                    this.handleFilterOverride(colId, this.filters[colId].value);
 
                     clearTimeout(this.filterTimeout);
                     this.filterTimeout = setTimeout(() => {

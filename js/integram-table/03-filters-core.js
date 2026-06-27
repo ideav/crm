@@ -3,31 +3,64 @@
             return equalDefaultFormats.includes(format) ? '=' : '^';
         }
 
+        /**
+         * Is this the first (main value) column of the table?
+         * The first built column carries the record's own identity (id === metadata.id),
+         * so it can be filtered by record ID like a reference column (issue #3542).
+         */
+        isFirstColumn(column) {
+            return !!(column && Array.isArray(this.columns) && this.columns.length > 0 &&
+                column.id === this.columns[0].id);
+        }
+
+        /**
+         * Filter operators available for a column.
+         * Base set comes from the column format; the first column of ANY type additionally
+         * gets ID-based search (@ / !@), the same way reference columns do (issue #3542).
+         * REF already includes @ / !@, so it is not augmented.
+         */
+        getColumnFilterTypes(column) {
+            const format = column.format || 'SHORT';
+            const baseTypes = this.filterTypes[format] || this.filterTypes['SHORT'];
+            if (this.isFirstColumn(column) && format !== 'REF') {
+                return baseTypes.concat([
+                    { symbol: '@', name: 'по ID: включая', format: 'FR_{ T }=@{ X }' },
+                    { symbol: '!@', name: 'по ID: исключая', format: 'FR_{ T }=!@{ X }' }
+                ]);
+            }
+            return baseTypes;
+        }
+
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
             const colId = column.id;
 
             const format = column.format || 'SHORT';
-            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+            const filterGroup = this.getColumnFilterTypes(column);
             const filterDef = filterGroup.find(f => f.symbol === type);
 
             if (!filterDef) return;
 
             if (type === '@' || type === '!@') {
-                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819)
+                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819).
+                // Available on reference columns and on the first column of any type (issue #3542).
+                // Multiple IDs use the IN(...) form — the bare @(id,id) form is NOT understood by
+                // the backend (verified on live: returns nothing for both REF and first columns) (issue #3542).
                 const ids = value.split(',').map(v => v.trim()).filter(v => /^\d+$/.test(v));
                 if (ids.length === 0) return;
                 const formatted = ids.length === 1
                     ? `${type}${ids[0]}`
-                    : `${type}(${ids.join(',')})`;
+                    : `${type}IN(${ids.join(',')})`;
                 params.append(`FR_${ colId }`, formatted);
             } else if (type === '...') {
-                const values = value.split(',').map(v => v.trim());
-                if (values.length >= 2) {
-                    params.append(`FR_${ colId }`, values[0]);
-                    params.append(`TO_${ colId }`, values[1]);
-                }
+                // Range: two separate values from/to (issue #3542). Either side may be empty
+                // for an open-ended range — append only the bounds that were filled in.
+                const values = value.split(',');
+                const from = (values[0] || '').trim();
+                const to = (values[1] || '').trim();
+                if (from) params.append(`FR_${ colId }`, from);
+                if (to) params.append(`TO_${ colId }`, to);
             } else if (type === '%' || type === '!%') {
                 params.append(`FR_${ colId }`, type === '%' ? '%' : '!%');
             } else {
