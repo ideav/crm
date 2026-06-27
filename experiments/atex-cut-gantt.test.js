@@ -112,6 +112,12 @@ assertEqual(gantt.cutBarTime({ planDate: '2026-06-10 08:00', startDate: '2026-06
 // конец = после наладки 45 мин + резки 4 мин; длительность = 49 мин (а не только 4 мин резки).
 assertEqual(gantt.cutBarTime({ planDate: '2026-06-10 08:00', duration: 4 }, 45),
     '08:00-08:49 (49 мин)', 'cutBarTime: наладка+резка одним окном (#3680)');
+// #3770: cutBarSpanMin — число минут той же подписи (для суммы в заголовке станка).
+assertEqual(gantt.cutBarSpanMin({ planDate: '2026-06-10 11:19', duration: 4 }), 4,
+    'cutBarSpanMin: минуты подписи бара');
+assertEqual(gantt.cutBarSpanMin({ planDate: '2026-06-10 08:00', duration: 4 }, 45), 49,
+    'cutBarSpanMin: наладка+резка одним окном (#3680)');
+assertEqual(gantt.cutBarSpanMin({}), 0, 'cutBarSpanMin: нет времени → 0');
 
 // ── cutSetupMin (#3675 п.3): минуты наладки только у запланированных (без факт. старта) ──
 assertEqual(gantt.cutSetupMin({ planDate: '2026-06-10 08:00', setupKnifeMin: 30, setupMaterialMin: 15 }),
@@ -400,6 +406,9 @@ assertEqual([ct[0].cut.id, ct[0].leftPx, ct[0].widthPx], ['A', 0, 66],
     'layoutGroups #3708: бар A обрезан с 67 до 66 мин (старт B)');
 assertEqual(ct[0].barText, '08:00-09:06 (66 мин)', 'layoutGroups #3708: подпись A совпадает с планом (до 09:06)');
 assertEqual(ct[0].leftPx + ct[0].widthPx, ct[1].leftPx, 'layoutGroups #3708: A встык к B — налезания нет');
+// #3770: заголовок станка суммирует минуты всех баров (A=66 + B=64 → «2 (130 мин)»).
+assertEqual([ct[0].barMin, ct[1].barMin, laidClamp.groups[0].tasksMin], [66, 64, 130],
+    'layoutGroups #3770: tasksMin = сумма минут баров станка (66+64=130)');
 // Завершённое задание (есть факт. финиш) не режем — показываем реальную длительность.
 var doneThenNext = [
     { id: 'D', planDate: '2026-06-10 08:00', startDate: '2026-06-10 08:00', endDate: '2026-06-10 09:10', sequence: 1, slitter: { id: '1', label: 'Станок 1' } },
