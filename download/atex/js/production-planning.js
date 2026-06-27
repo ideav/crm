@@ -2928,6 +2928,9 @@
         var out = [];
         var setupIds = opts.setupTaskIds || {};   // #3635 п.5: сегменты настройки — намотка 0
         var anchorByCut = opts.dayAnchorByCut || {};   // #3652: якорь дня по «Дате план»
+        // #3805: остаток настройки setup-only-сегмента (хвост дня N), который переносится на
+        // его продолжение (день N+1) — keyed по continuationSignature цепочки.
+        var carrySetupBySig = {};
         (cuts || []).forEach(function(c, i){
             // #3652: привязать резку к её рабочему дню «Даты план» — если очередь не дотянула
             // до этого дня, прыгаем вперёд к его началу (08:00). Иначе при ДИАПАЗОНЕ дат «С–По»
@@ -2947,6 +2950,13 @@
                 ? changeoverCost(cuts[i-1], c, times)
                 : (opts.carryPrevCut ? changeoverCost(opts.carryPrevCut, c, times)
                                      : (opts.firstCutSetup ? firstSetupCost(c, times) : 0));
+            // #3805: продолжение setup-only-сегмента (тот же день N+1) несёт остаток настройки,
+            // не уместившийся в хвост дня N (changeoverCost между ними = 0, т.к. конфигурация та же).
+            var carrySig = continuationSignature(c);
+            if (carrySetupBySig[carrySig] != null) {
+                setup = round3(setup + carrySetupBySig[carrySig]);
+                delete carrySetupBySig[carrySig];
+            }
             var leaderMin = leader * cutLeaderRuns(c);   // #3688: лидер в конце резки
             var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
@@ -2974,6 +2984,29 @@
                 if (lunch && !lunchDone[day] && (start - day * 1440) >= lunch.startMin) {
                     start += lunch.durationMin;
                     lunchDone[day] = true;
+                }
+            }
+            // #3805: setup-only-сегмент (#3635 п.5), чья настройка вылезает за конец смены, —
+            // в хвост дня кладём только МИНИМАЛЬНОЕ подмножество компонентов настройки
+            // (minOverlapTailSetupMinutes, как splitMachineQueue), а остаток переносим на
+            // продолжение (день N+1). Иначе вся настройка (напр. ножи+сырьё=45) копилась бы в
+            // дне N, и сумма за день вылетала за рамки «смена + один шаг наладки» (#3805: 495
+            // мин при максимуме ~480). Считаем по окну ДО смещения на след. день (pushNextDay
+            // не сработал, иначе настройка влезает целиком в свежий день — дробить нечего).
+            var fitEndForDay = day * 1440 + shiftEnd - ((lunch && !lunchDone[day]) ? lunch.durationMin : 0);
+            if (hasWindow && setupIds[String(c && c.id)] && setup > 0 && start > fitEndForDay) {
+                var windowStartMin = start - setup;            // начало настройки (= t после якоря)
+                var availTail = fitEndForDay - windowStartMin; // остаток смены до её конца
+                if (availTail > 0) {
+                    var setupParts = i > 0 ? changeoverParts(cuts[i-1], c, times)
+                        : (opts.carryPrevCut ? changeoverParts(opts.carryPrevCut, c, times)
+                            : (opts.firstCutSetup ? firstSetupParts(c, times) : []));
+                    var tailSetup = minOverlapTailSetupMinutes(setupParts, availTail, setup);
+                    if (tailSetup < setup) {
+                        carrySetupBySig[carrySig] = round3(setup - tailSetup);
+                        setup = round3(tailSetup);
+                        start = round3(windowStartMin + setup);
+                    }
                 }
             }
             var finish = start + dur;
