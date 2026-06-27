@@ -1,7 +1,7 @@
         showFilterTypeMenu(target, columnId) {
             const column = this.columns.find(c => c.id === columnId);
             const format = column.format || 'SHORT';
-            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+            const filterGroup = this.getColumnFilterTypes(column);
 
             document.querySelectorAll('.filter-type-menu').forEach(m => m.remove());
 
@@ -65,6 +65,14 @@
                             this.render();
                             return;
                         }
+                    }
+
+                    // Switching to/from range ('...') changes the cell from one input to two
+                    // from/to fields (issue #3542) — clear the value and re-render to swap inputs.
+                    if ((symbol === '...') !== (oldType === '...')) {
+                        this.filters[columnId].value = '';
+                        this.render();
+                        return;
                     }
 
                     // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately

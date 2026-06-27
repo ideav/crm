@@ -12,6 +12,8 @@
             if (focusedElement && focusedElement.classList.contains('filter-input-with-icon')) {
                 focusState = {
                     columnId: focusedElement.dataset.columnId,
+                    // Range cells have two inputs sharing a columnId — remember which one (issue #3542)
+                    rangePart: focusedElement.dataset.rangePart || null,
                     selectionStart: focusedElement.selectionStart,
                     selectionEnd: focusedElement.selectionEnd
                 };
@@ -256,7 +258,10 @@
             // position when a filter input lives outside the visible scroll viewport
             // (issue #2744).
             if (focusState) {
-                const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
+                const selector = focusState.rangePart
+                    ? `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`
+                    : `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
+                const newInput = this.container.querySelector(selector);
                 if (newInput) {
                     newInput.focus({ preventScroll: true });
                     // Restore cursor position (only for text inputs, not date pickers)
@@ -376,6 +381,49 @@
                                    data-column-id="${ column.id }"
                                    data-is-datetime="${ isDateTime ? '1' : '0' }"
                                    value="${ html5Value }">
+                        </div>
+                    </td>
+                `;
+            }
+
+            // Range filter ('...'): two separate from/to fields instead of one comma-separated
+            // input — the comma syntax was unclear (issue #3542). Stored value stays "from,to".
+            if (currentFilter.type === '...') {
+                const isDate = dateFormats.includes(format);
+                const isDateTime = format === 'DATETIME';
+                let inputType = 'text';
+                if (isDate) inputType = isDateTime ? 'datetime-local' : 'date';
+                else if (format === 'NUMBER' || format === 'SIGNED') inputType = 'number';
+
+                const parts = (currentFilter.value || '').split(',');
+                const rawFrom = (parts[0] || '').trim();
+                const rawTo = (parts[1] || '').trim();
+                const fromVal = isDate ? (rawFrom ? this.formatDateForHtml5(rawFrom, isDateTime) : '') : rawFrom;
+                const toVal = isDate ? (rawTo ? this.formatDateForHtml5(rawTo, isDateTime) : '') : rawTo;
+                const dtAttr = isDate ? ` data-is-datetime="${ isDateTime ? '1' : '0' }"` : '';
+                const escAttr = v => String(v).replace(/"/g, '&quot;');
+
+                return `
+                    <td>
+                        <div class="filter-cell-wrapper filter-range-wrapper">
+                            <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                ${ currentFilter.type }
+                            </span>
+                            <input type="${ inputType }"
+                                   class="filter-input-with-icon filter-range-input"
+                                   data-column-id="${ column.id }"
+                                   data-range-part="from"${ dtAttr }
+                                   value="${ escAttr(fromVal) }"
+                                   placeholder="от"
+                                   autocomplete="off">
+                            <span class="filter-range-sep">—</span>
+                            <input type="${ inputType }"
+                                   class="filter-input-with-icon filter-range-input"
+                                   data-column-id="${ column.id }"
+                                   data-range-part="to"${ dtAttr }
+                                   value="${ escAttr(toVal) }"
+                                   placeholder="до"
+                                   autocomplete="off">
                         </div>
                     </td>
                 `;
