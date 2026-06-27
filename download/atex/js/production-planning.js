@@ -5744,6 +5744,14 @@
         }
         var fieldKey = 't' + fixedReqId;
         var flag = value ? '1' : '0';
+        // #3778: при ФИКСАЦИИ снимаем тайминг (Наладка ножей / Сырье-намотка / Резка и Лидер) в
+        // запись тем же _m_set, что и флаг. Раньше «Зафиксировать» писала ТОЛЬКО флаг, и у
+        // вручную созданных/зафиксированных заданий три поля оставались пустыми — гант пересчитывал
+        // их на лету. Считаем те же значения и в том же порядке, что план на экране
+        // (computeCutSetupUpdates), но пишем только для фиксируемых id. При снятии фиксации не трогаем.
+        var setupRes = value ? self.computeCutSetupUpdates(ids) : { reqs: {}, updates: [] };
+        var setupById = {};
+        setupRes.updates.forEach(function(u) { setupById[String(u.cutId)] = u; });
         this.setBusy(true);
         this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
         var done = 0;
@@ -5751,6 +5759,11 @@
         ids.forEach(function(id) {
             chain = chain.then(function() {
                 var fields = {}; fields[fieldKey] = flag;
+                var u = setupById[String(id)];   // #3778: дополняем флаг снимком тайминга
+                if (u) {
+                    var tf = setupTimingFields(setupRes.reqs, u);
+                    Object.keys(tf).forEach(function(k) { fields[k] = tf[k]; });
+                }
                 return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
                     .then(function() { self.updateProgress(++done); });
             });
@@ -7625,14 +7638,31 @@
     // изменившиеся (diff против отчётных значений), тихо и БЕЗ reload (свой экран РМ считает
     // наладку на лету). Колонок ещё нет в метаданных → no-op. Ошибки глотает: доп-колонки не
     // должны валить сохранение очереди/плана. Вызывается после сохранений порядка/плана.
-    AtexProductionPlanning.prototype.persistCutSetupColumns = function() {
-        var self = this;
+    // #3778: тайминг-поля задания (t96067 «Наладка ножей, мин» / t96069 «Сырье/намотка, мин» /
+    // t96778 «Резка и Лидер») одним набором реквизитов для _m_set. Отсутствующие reqId не пишем.
+    function setupTimingFields(reqs, u) {
+        var fields = {};
+        if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
+        if (reqs.matReq) fields['t' + reqs.matReq] = String(u.material);
+        if (reqs.cutTimeReq) fields['t' + reqs.cutTimeReq] = String(u.cutTime);   // #3700
+        return fields;
+    }
+
+    // #3778: вычислить тайминг-поля резок В ПОРЯДКЕ ПЛАНА и вернуть { reqs, updates } —
+    // updates только для резок, чьи хранимые значения ПУСТЫ или разошлись с расчётом (пустое
+    // хранимое всегда «изменилось» → force-write, отсюда наполняются «пустые опять» поля).
+    // onlyIds (массив id) ограничивает НАБОР ЗАПИСИ (снимок при «Зафиксировать»), но порядок и
+    // переналадка считаются по ВСЕЙ очереди станка — иначе у не-первой резки терялся предшественник.
+    AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds) {
         var meta = this.meta.cut;
-        if (!meta) return Promise.resolve();
-        var knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
-        var matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
-        var cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
-        if (!knifeReq && !matReq && !cutTimeReq) return Promise.resolve();   // колонок ещё нет в таблице
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
+        if (!meta) return { reqs: reqs, updates: [] };
+        reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
+        reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
+        reqs.cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
+        var onlySet = null;
+        if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
         // #3702: считаем теми же временами и в ТОМ ЖЕ порядке, что и план на экране, иначе
         // у задания заполнялась «Сырье/намотка», которой в плане нет.
         //  • this.changeTimes — структурированные веса переналадок (MATERIAL_WINDING / KNIFE /
@@ -7653,6 +7683,7 @@
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             arr.forEach(function(c) {
+                if (onlySet && !onlySet[String(c.id)]) return;   // снимок — только выбранные резки
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
                 // #3715: пишем ЦЕЛЫЕ минуты (Math.round). Дробные значения (#3708) перестали
                 // записываться — поля не приняли нецелое, _m_set падал и обрывал запись всех трёх
@@ -7665,12 +7696,13 @@
                 var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
+                // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
-                if (changed(knifeReq, c.storedKnifeSetupMin, wantK)
-                    || changed(matReq, c.storedMaterialWindingMin, wantM)
-                    || changed(cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
+                    || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
+                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
                     updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT });
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
@@ -7678,18 +7710,27 @@
                 }
             });
         });
+        return { reqs: reqs, updates: updates };
+    };
+
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function() {
+        var self = this;
+        var res = this.computeCutSetupUpdates(null);
+        var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
         var chain = Promise.resolve();
         updates.forEach(function(u) {
             chain = chain.then(function() {
-                var fields = {};
-                if (knifeReq) fields['t' + knifeReq] = String(u.knife);
-                if (matReq) fields['t' + matReq] = String(u.material);
-                if (cutTimeReq) fields['t' + cutTimeReq] = String(u.cutTime);   // #3700
-                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+                return self.post('_m_set/' + u.cutId + '?JSON', setupTimingFields(reqs, u));
             });
         });
-        return chain.catch(function() { /* тихо: доп-колонки не валят сохранение очереди */ });
+        // #3778: ошибки записи тайминга больше НЕ глотаем молча — раньше тихий catch скрывал,
+        // почему «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» оставались пустыми. Сохранение
+        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим.
+        return chain.catch(function(err) {
+            self.notify('Не удалось сохранить тайминг заданий (Наладка ножей / Сырье-намотка / '
+                + 'Резка и Лидер): ' + (err && err.message || err), 'error');
+        });
     };
 
     // DRY-метод сохранения изменённых «Очередностей» (ручная перестановка ↑↓).
