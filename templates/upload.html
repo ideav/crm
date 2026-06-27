@@ -960,6 +960,17 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                         j++;
                     }
                     h=m.join('');
+                    // issue #3810: реквизиты (и главное значение), добавленные в таблицу
+                    // ПОСЛЕ сохранения настройки, отсутствуют в сохранённом importMap, поэтому
+                    // циклы выше их пропускают. Дописываем такие поля в конец списка — как новые
+                    // входные колонки следом за уже размеченными, чтобы их можно было разложить
+                    // и задать формулу (по аналогии с веткой свежей настройки). Проверка
+                    // === undefined, т.к. индекс входной колонки может быть 0 (ложь по truthiness).
+                    if(uploadSets[chosenSet].importMap[json.type.id]===undefined)
+                        h+=addSortable(json.type.id,json.type.val,json.type.base,json.base.id);
+                    for(i in json.req_order)
+                        if(uploadSets[chosenSet].importMap[json.req_order[i]]===undefined)
+                            h+=addSortable(json.req_order[i],json.req_type[json.req_order[i]],json.req_base[json.req_order[i]],json.req_base_id[json.req_order[i]]);
                     $('#header').prop('checked',uploadSets[chosenSet].header);
                     $('#trim').prop('checked',uploadSets[chosenSet].trim);
                     $('#delim').val(uploadSets[chosenSet].delimiter);
