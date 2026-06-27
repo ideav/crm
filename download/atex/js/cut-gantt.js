@@ -584,9 +584,12 @@
     // #3680: подпись охватывает ВСЁ задание (наладка + резка), а не только резку.
     // Начало = левый край бара (tr.startMs, та же точка, что у строки .atex-cg-label-main);
     // setupMin раздвигает только правый край — добавляет к окну минуты наладки перед резкой.
-    function cutBarTime(cut, setupMin, maxEndMs) {
+    // #3770: окно подписи бара (наладка+резка) как {startMs, endMs, mins} — единый источник
+    // и для текста бара (cutBarTime), и для суммы минут в заголовке станка (cutBarSpanMin),
+    // чтобы они никогда не расходились. Геометрия — как раньше в cutBarTime.
+    function cutBarWindow(cut, setupMin, maxEndMs) {
         var tr = cutTimeRange(cut);
-        if (!tr) return '';
+        if (!tr) return null;
         // #3705: правый край = старт + (резка+лидер) + наладка — ровно та же сумма минут, что у
         // ширины бара (cutBarSegments) и у окна планировщика. Раньше брали tr.endMs (намотка БЕЗ
         // лидера) + наладка → конец задания получался на лидер «между резками» короче плана.
@@ -597,8 +600,20 @@
         // на доли минуты длиннее реального окна и налезал на следующий бар.
         var maxMs = Number(maxEndMs);
         if (maxEndMs != null && isFinite(maxMs) && maxMs > startMs && endMs > maxMs) endMs = maxMs;
-        var mins = Math.max(1, Math.round((endMs - startMs) / 60000));
-        return formatTime(startMs) + '-' + formatTime(endMs) + ' (' + mins + ' мин)';
+        return { startMs: startMs, endMs: endMs, mins: Math.max(1, Math.round((endMs - startMs) / 60000)) };
+    }
+
+    function cutBarTime(cut, setupMin, maxEndMs) {
+        var w = cutBarWindow(cut, setupMin, maxEndMs);
+        if (!w) return '';
+        return formatTime(w.startMs) + '-' + formatTime(w.endMs) + ' (' + w.mins + ' мин)';
+    }
+
+    // #3770: целое число минут, отображаемое в подписи бара (.atex-cg-bar-main). Заголовок
+    // станка суммирует эти значения → «6 (262 мин)». Нет окна (нет времени) → 0.
+    function cutBarSpanMin(cut, setupMin, maxEndMs) {
+        var w = cutBarWindow(cut, setupMin, maxEndMs);
+        return w ? w.mins : 0;
     }
 
     // #3675 п.3: ширины сегментов бара (px) при масштабе pxPerMin: [наладка ножей][смена сырья][резка].
@@ -1071,9 +1086,12 @@
                     widthPx: widthPx,
                     segments: seg,
                     label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs),
+                    barMin: cutBarSpanMin(cut, seg.setupMin, nextStartMs),   // #3770: минуты подписи бара
                     title: cutBarTitle(cut, tr, status)
                 };
             });
+            // #3770: суммарные минуты всех баров станка — для подписи «N (Σ мин)» в заголовке.
+            g.tasksMin = g.tasks.reduce(function(sum, t) { return sum + (t.barMin || 0); }, 0);
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
@@ -1130,6 +1148,7 @@
         cutInRange: cutInRange,
         cutRowLabel: cutRowLabel,
         cutBarTime: cutBarTime,
+        cutBarSpanMin: cutBarSpanMin,   // #3770
         cutSetupMin: cutSetupMin,
         cutBarMinutes: cutBarMinutes,   // #3700
         cutBarSegments: cutBarSegments,
@@ -1452,9 +1471,12 @@
         data.groups.forEach(function(group) {
             // #3668 п.3/п.5: заголовок станка — строка-грид; первая ячейка (имя + число
             // заданий нежирным) фиксируется при горизонтальном скролле.
+            // #3770: число заданий + сумма минут всех баров станка, например «6 (262 мин)».
+            var countText = String(group.tasks.length)
+                + (group.tasksMin > 0 ? ' (' + group.tasksMin + ' мин)' : '');
             var nameCell = el('div', { class: 'atex-cg-label atex-cg-machine-cell' }, [
                 el('span', { class: 'atex-cg-machine-name', text: group.slitter.label }),
-                el('span', { class: 'atex-cg-machine-count', text: String(group.tasks.length) })
+                el('span', { class: 'atex-cg-machine-count', text: countText })
             ]);
             var headTrack = el('div', { class: 'atex-cg-track atex-cg-machine-track' });
             headTrack.style.minWidth = trackPx + 'px';
