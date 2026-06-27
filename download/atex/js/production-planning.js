@@ -3113,6 +3113,10 @@
                     remaining: Math.round(Number(runsByCut[id] != null ? runsByCut[id] : c && c.plannedRuns) || 0),
                     perPass: Number(perPassByCut[id] != null ? perPassByCut[id] : 0) || 0,
                     anchor: anchorByCut[id] != null ? anchorByCut[id] : null,
+                    // #3792: «Зафиксировано» — замок на ДЕНЬ. Якорь дня обязателен (без «Даты
+                    // план» закрепить день нельзя → трактуем как свободную). Внутри дня резку
+                    // оптимизатор переставлять может, на другой день/в разбивку — нет.
+                    fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
                     isCont: false, pendingSetup: 0
                 };
                 poolOrder.push(id);
@@ -3146,10 +3150,50 @@
                 if (!rem.length) break;
                 // Незавершённая резка (продолжение, ножи на станке) — доводим её первой.
                 var inProgress = rem.filter(function(id){ return state[id].isCont && state[id].remaining > 0; });
-                var due = rem.filter(function(id){ return state[id].anchor == null || state[id].anchor <= day; });
-                var pick = inProgress.length ? selectByConfig(inProgress)
-                    : (due.length ? selectByConfig(due) : selectByConfig(rem));   // нет «по сроку» → тянем будущую вперёд
+                // #3792: «Зафиксировано» — замок на день. Фиксированная резка ложится ТОЛЬКО на
+                // свой день (fixedDay === day): в пул «тянуть будущее вперёд» (#3739) не попадает,
+                // а на своём дне берётся раньше свободных, чтобы её не вытеснил их нахлёст. Свободные
+                // (fixedDay == null) — как прежде: по сроку (anchor ≤ day), иначе тянем будущую вперёд.
+                var fixedToday = rem.filter(function(id){ return state[id].fixedDay != null && state[id].fixedDay === day; });
+                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && (state[id].anchor == null || state[id].anchor <= day); });
+                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null; });
+                var pick;
+                if (inProgress.length) pick = selectByConfig(inProgress);
+                else if (fixedToday.length) pick = selectByConfig(fixedToday);
+                else if (freeDue.length) pick = selectByConfig(freeDue);
+                else if (freeAny.length) pick = selectByConfig(freeAny);   // нет «по сроку» → тянем будущую свободную вперёд
+                else {
+                    // Остались только будущие зафиксированные — прыгаем к ближайшему их дню
+                    // (свободных в пуле нет, нахлёст-простой заполнять некем).
+                    var nextFixedDay = null;
+                    rem.forEach(function(id){
+                        var fd = state[id].fixedDay;
+                        if (fd != null && fd > day && (nextFixedDay == null || fd < nextFixedDay)) nextFixedDay = fd;
+                    });
+                    if (nextFixedDay == null) break;
+                    day = nextFixedDay; clock = 0; continue;
+                }
                 var st = state[pick], c = st.cut;
+                // #3792: фиксированная резка — один сегмент на своём дне, без разбивки; нахлёст за
+                // конец смены допустим (как обычный gapFill-нахлёст). Настройка — переналадка с
+                // предыдущей физической резкой. День не двигаем: переполнение само вытолкнет
+                // следующие свободные на завтра (avail < 0 → ветка-страж ниже).
+                if (st.fixedDay != null) {
+                    insertLunchBefore();
+                    var setupF = setupCostFor(prevPhysical, c);
+                    var perPassF = st.perPass + leader;
+                    var wsF = day * 1440 + dayStart + clock;
+                    var durF = (st.remaining > 0 && st.perPass > 0 && hasWindow) ? st.remaining * perPassF : 0;
+                    segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
+                        windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
+                        durationMin: round3(durF), isContinuation: false, parentCutId: null });
+                    clock += setupF + durF;
+                    prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                    continue;
+                }
+                // #3792: предыдущая фикс-резка могла переполнить день (нахлёст) — свободные тогда
+                // начинают со следующего дня, без хвостовой настройки на уже переполненном дне.
+                if (clock > 0 && (effCapacity(day) - clock) < 0) { day += 1; clock = 0; continue; }
                 insertLunchBefore();
                 // Резка без проходов/окна — один сегментик (как базовая ветка).
                 if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) {
@@ -6072,6 +6116,8 @@
     // порядок. Тот же autoSequenceQueue, но preserveOrder=false → реально пересобирает
     // (минимум переналадок группирует сырьё/набор ножей; при прочих равных больше полос
     // раньше). Перезаписывает ручные перестановки оператора (#3449), поэтому с подтверждением.
+    // #3792: зафиксированные задания остаются на своих днях (не переносятся/не разбиваются) —
+    // тот же замок на день, что и при генерации.
     AtexProductionPlanning.prototype.optimizeQueue = function(actionsEl) {
         var self = this;
         if (this.busy) return;
@@ -6081,7 +6127,8 @@
         if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
         var msg = el('span', { class: 'atex-pp-confirm-msg', text:
             'Пересобрать очередь в оптимальный порядок: группировка по сырью (минимум переналадок), ' +
-            'при прочих равных — больше полос раньше. Ручные перестановки очереди будут заменены.' });
+            'при прочих равных — больше полос раньше. Ручные перестановки заменятся; ' +
+            'зафиксированные задания останутся на своих днях (#3792).' });
         this.confirmAction(msg, host, [
             { label: 'Упорядочить', inline: true, onConfirm: function() { self.runOptimizeQueue(); } }
         ]);
@@ -7196,14 +7243,15 @@
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
-            // #3449: очередь по стратегии НЕ пересобираем (порядок оператора неприкосновенен).
-            // #3619: но всё равно заполняем дни до конца — расщепляем уже стоящие задания,
-            // переходящие границу рабочего дня, на по-дневные сегменты (preserveOrder=true
-            // сохраняет порядок). Идемпотентно (#3427): если расщеплять нечего — ничего не пишем.
-            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — заполняю дни существующих заданий');
-            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function(changed) {
-                self.notify(changed ? 'Дни заполнены: задания, переходящие границу дня, расщеплены по дням'
-                                    : 'Нет незапланированных позиций; дни уже заполнены', 'info');
+            // #3792: вброс новых заданий пересобирает очередь по правилам (preserveOrder=false:
+            // минимум переналадок — группировка сырья; при прочих равных — больше полос раньше).
+            // Ручной порядок оператора переживает генерацию ТОЛЬКО через флаг «Зафиксировано» —
+            // он держит задание на своём дне (не переносит/не разбивает), внутри дня переставлять
+            // можно. Идемпотентно (#3427): если ничего не меняется — ничего не пишем.
+            console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — пересобираю очередь по правилам');
+            this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
+                self.notify(changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
+                                    : 'Нет незапланированных позиций; очередь уже оптимальна', 'info');
             });
             return;
         }
@@ -7789,13 +7837,13 @@
             self.notify('Создано ' + nRecords + ' производственных заданий (' + planningStrategyLabel(planOptions.strategy) + '), заданий на втулки ' + nSleeveTasks +
                 (sleeveMin > 0 ? ' (' + sleeveMin + ' мин)' : '') +
                 ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
-            // #3449: очередь по стратегии НЕ пересобираем — порядок оператора неприкосновенен.
-            // #3619: но заполняем дни до конца — расщепляем задания, переходящие границу
-            // рабочего дня, на по-дневные сегменты: под каждый день своё «Задание в
-            // производство» + «Партия ГП» + «Обеспечение», рекурсивно. preserveOrder=true
-            // сохраняет текущий порядок очереди; идемпотентно (#3427) — повторный прогон без
+            // #3792: после создания заданий пересобираем очередь по правилам (preserveOrder=false):
+            // минимум переналадок (группировка сырья), при прочих равных — больше полос раньше.
+            // Под каждый день — своё «Задание в производство» + «Партия ГП» + «Обеспечение»,
+            // рекурсивно. Зафиксированные задания остаются на своих днях (не переносятся, не
+            // разбиваются), внутри дня переставляются. Идемпотентно (#3427) — повторный прогон без
             // изменений ничего не пишет. applySplitPlan сам делает reload+render.
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
