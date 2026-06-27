@@ -1308,6 +1308,56 @@
         return isNaN(t) ? Infinity : t;
     }
 
+    // #3769: YYYYMMDD-ключ (как у planDateDayKey/batchDateKey для дат) → Date (полночь
+    // местного времени) для арифметики по календарным дням. Невалидный/Infinity → null.
+    function dayKeyToDate(key) {
+        var n = Number(key);
+        if (!isFinite(n) || n < 10000101 || n > 99991231) return null;
+        var y = Math.floor(n / 10000), m = Math.floor(n / 100) % 100, d = n % 100;
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        var dt = new Date(y, m - 1, d);
+        return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    // #3769: YYYYMMDD-ключ → «DD.MM.YYYY» для подписи срока. Невалидный → ''.
+    function formatDayKey(key) {
+        var dt = dayKeyToDate(key);
+        if (!dt) return '';
+        var p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+        return p2(dt.getDate()) + '.' + p2(dt.getMonth() + 1) + '.' + dt.getFullYear();
+    }
+
+    // #3769: класс расцветки строки .atex-pp-strip-row по «Сроку изготовления» позиции
+    // (dueKey, YYYYMMDD) относительно «Даты план» задания (planKey, YYYYMMDD):
+    //   срок РАНЬШЕ планы            → 'is-overdue' (красный — не успеваем);
+    //   срок дальше планы+forecast   → 'is-far'     (жёлтый — делаем сильно заранее);
+    //   срок в окне [план; план+forecast] включительно → '' (без изменения цвета).
+    // forecastDays === null/отрицательный → жёлтый отключён (нет настройки), красный работает.
+    function dueColorClass(dueKey, planKey, forecastDays) {
+        var due = dayKeyToDate(dueKey), plan = dayKeyToDate(planKey);
+        if (!due || !plan) return '';
+        var diffDays = Math.round((due.getTime() - plan.getTime()) / 86400000);
+        if (diffDays < 0) return 'is-overdue';
+        if (forecastDays != null && forecastDays >= 0 && diffDays > forecastDays) return 'is-far';
+        return '';
+    }
+
+    // #3769: отсортированные уникальные ключи «Срока изготовления» позиций, которые
+    // обеспечивает резка (supplies cutId→positionId → genPositions[pos].dueKey).
+    // Позиции без срока или выпавшие из активного positions_list — пропускаются.
+    function cutDueKeys(cut, supplies, genPositions) {
+        var posMap = positionMap(genPositions);
+        var seen = {}, keys = [];
+        (supplies || []).forEach(function(s) {
+            if (!cut || !s || String(s.cutId) !== String(cut.id)) return;
+            var p = s.positionId != null ? posMap[String(s.positionId)] : null;
+            var k = p && p.dueKey;
+            if (k == null || !isFinite(k) || k === Infinity) return;
+            if (!seen[k]) { seen[k] = true; keys.push(k); }
+        });
+        return keys.sort(function(a, b) { return a - b; });
+    }
+
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
     // приходит unix-штампом (секунды) → форматируем как дату-время. Короткие record id
     // и не-штампы не форматируем как 1970-дату.
@@ -4086,6 +4136,10 @@
         cutFulfillmentIds: cutFulfillmentIds,             // #3691
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
+        dayKeyToDate: dayKeyToDate,             // #3769
+        formatDayKey: formatDayKey,             // #3769
+        dueColorClass: dueColorClass,           // #3769
+        cutDueKeys: cutDueKeys,                 // #3769
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
@@ -4418,7 +4472,8 @@
                 // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
                     key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
-                    key !== 'TOTAL_INTERVALS') return;   // #3599: буфер перед уборкой (мин)
+                    key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
+                    key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -4432,6 +4487,14 @@
             });
             self.daySettings = values;
         });
+    };
+
+    // #3769: DAYS_FORECAST из «Настройки» — окно срока изготовления (дни) для расцветки
+    // строк .atex-pp-strip-row. Нет/некорректно → null (жёлтый отключён, красный работает).
+    AtexProductionPlanning.prototype.daysForecast = function() {
+        var v = this.daySettings ? this.daySettings.DAYS_FORECAST : null;
+        var n = Number(v);
+        return (isFinite(n) && n >= 0) ? n : null;
     };
 
     AtexProductionPlanning.prototype.workingWindow = function() {
@@ -8551,14 +8614,25 @@
             if (stripGroups.length) {
                 // #3686: обратный резолв (факт→номинал) сверяет j= с «Номинальной шириной» рулона
                 var jumboWidth = self.nominalWidthByMaterial ? self.nominalWidthByMaterial[String(c.materialId)] : null;
+                // #3769: «Срок изготовления» обеспечиваемых позиций — в скобках в конце строки.
+                // Срок один на задание (позиции резки кластеризованы по сроку), поэтому
+                // показываем общий набор сроков и красим строку по самому раннему (срочному):
+                // раньше «Даты план» → красный, дальше план+DAYS_FORECAST → жёлтый, в окне → как есть.
+                var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);
+                var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
+                var dueSuffix = '';
+                if (dueKeys.length) {
+                    var dueLabels = dueKeys.map(formatDayKey).filter(function(s) { return s; });
+                    if (dueLabels.length) dueSuffix = ' (' + (dueLabels.length > 1 ? 'сроки: ' : 'срок: ') + dueLabels.join(', ') + ')';
+                }
                 var matRows = stripGroups.map(function(g) {
                     // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
                     // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
                     // (обратный резолв по справочнику), а после тире — реальные мм.
                     var ctx = { jumbo: jumboWidth, inches: null };
                     var nominal = resolveNominalWidth(g.width, ctx, self.actualWidthIndex);
-                    return el('div', { class: 'atex-pp-strip-row',
-                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) });
+                    return el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
+                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) + dueSuffix });
                 });
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-material' }, matRows));
             }
