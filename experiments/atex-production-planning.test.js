@@ -516,23 +516,23 @@ var outMat = planning.orderCuts(inMat).map(function(c){return c.materialId;});
 // число границ смены сырья = (различных − 1) = 1
 var bnd = 0; for (var i=1;i<outMat.length;i++) if (outMat[i]!==outMat[i-1]) bnd++;
 assertEqual(bnd, 1, 'orderCuts: сырьё сгруппировано (1 граница)');
-// #3568: «ножи по убыванию» (#3130) — ПЕРВИЧНЫЙ критерий очереди, даже если это
-// разбивает группировку сырья (#3268). Ножи 8/7/6 различны → строгое убывание
-// A-high → B-mid → A-low, хотя сырьё A при этом перестаёт быть сгруппированным
-// (минимум переналадки дал бы A-high → A-low → B-mid = 4+17 мин, но он теперь
-// вторичен). Минимизация переналадки (#3268/#3472) остаётся тай-брейком ТОЛЬКО
-// среди резок с равным числом ножей. До #3568 правило ножей↓ было лишь мягким
-// тай-брейком внутри greedy и после позиционной стоимости ножей (#3472) не
-// срабатывало → очередь шла по возрастанию ножей.
+// #3783/#3785: ПЕРВИЧНО — минимум переналадки (группировка сырья), НЕ число ножей.
+// Ножи 8/7/6 различны (каждый переход несёт смену ножей 30). Сырьё A (A-high, A-low)
+// дешевле держать вместе: переход A→A = 30 (только ножи), A→B = 45 (ножи+сырьё). Прежнее
+// правило #3568 (ножи↓ глобально первичны) разбивало сырьё → A-high, B-mid, A-low
+// (переналадка 45+45=90). Теперь сырьё сгруппировано: A-high, A-low, B-mid (30+45=75 —
+// меньше). «При прочих равных» внутри группы A число полос по убыванию (#3785): 8 раньше 6.
 var setupMinuteCuts = [
     cut('A-high', { m:'A', b:'bA', k:8, kw:[60] }),
     cut('B-mid',  { m:'B', b:'bB', k:7, kw:[60] }),
     cut('A-low',  { m:'A', b:'bA', k:6, kw:[60] })
 ];
-assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'B-mid', 'A-low'],
-    'orderCuts #3568: ножи по убыванию первичны (8,7,6), переналадка вторична');
-assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.knifeCount; }), [8, 7, 6],
-    'orderCuts #3568: явный SETUP — число ножей строго убывает');
+assertEqual(planning.orderCuts(setupMinuteCuts).map(function(c){ return c.id; }), ['A-high', 'A-low', 'B-mid'],
+    'orderCuts #3783: сырьё сгруппировано (минимум переналадки), не разбито по числу ножей');
+assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_STRATEGY_SETUP }).map(function(c){ return c.knifeCount; }), [8, 6, 7],
+    'orderCuts #3785: внутри сырья A полосы по убыванию (8,6), затем сырьё B (7)');
+assertEqual(planning.orderedChangeoverCost(setupMinuteCuts), 75,
+    'orderCuts #3783: группировка сырья (75) дешевле разбивки по ножам (90)');
 // Фольга строго в конце
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});

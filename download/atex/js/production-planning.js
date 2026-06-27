@@ -3871,7 +3871,9 @@
         return out;
     }
 
-    function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
+    // #3785: при равной стоимости перехода тай-брейк — число полос (ножей) ПО УБЫВАНИЮ
+    // («при прочих равных» больше полос — раньше), затем уже ширина ролика и id.
+    function startKey(c){ return [-(Number(c.knifeCount) || 0), Number(c.rollerWidth) || 0, String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
 
     function fatigueComplexityKey(c, machineWidth){
@@ -3965,13 +3967,14 @@
     function sequenceForStrategy(cuts, options){
         var opts = options || {};
         if (planningStrategy(opts) === PLANNING_STRATEGY_FATIGUE) return fatigueAwareSequence(cuts, opts);
-        // SETUP (#3568): «ножи по убыванию к концу дня» (#3130) — ПЕРВИЧНЫЙ критерий, а не
-        // мягкий тай-брейк. byKnifeCountDesc стабильно сортирует жадную (минимум переналадки)
-        // цепочку по knifeCount↓; среди резок с равным числом ножей сохраняется greedy-порядок
-        // (переналадка остаётся вторичной). Без этого враппера cmpKnifeDescSeq внутри greedy
-        // срабатывал лишь при РАВНОЙ стоимости цепочек, а после позиционной стоимости ножей
-        // (#3472) равенство почти не встречается → очередь шла по ВОЗРАСТАНИЮ ножей (#3568).
-        return byKnifeCountDesc(greedySequence(cuts, planningChangeTimes(opts)));
+        // SETUP (#3783/#3785): ПЕРВИЧНО — минимум суммарной переналадки (greedySequence
+        // группирует одно сырьё/набор ножей, переход внутри группы дешевле), поэтому сырьё
+        // не идёт вперемешку (#3783). ТАЙ-БРЕЙК «при прочих равных» — число полос по убыванию
+        // (#3785) — заложен в startKey жадной цепочки. Прежний враппер byKnifeCountDesc
+        // (#3568) пересортировывал всю цепочку по knifeCount↓ ГЛОБАЛЬНО, разбивая группы
+        // сырья и увеличивая переналадку — убран; «много ножей раньше» остаётся стратегией
+        // FATIGUE (сложные раньше) для тех, кому важна усталость, а не минимум переналадок.
+        return greedySequence(cuts, planningChangeTimes(opts));
     }
 
     // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
@@ -5871,6 +5874,39 @@
         if (!toFix.length) { this.notify('Все задания за ' + dateLabel + ' уже зафиксированы', 'info'); return; }
         self.setCutsFixed(toFix.map(function(c) { return c.id; }), true, {
             successMessage: 'Зафиксированы задания за ' + dateLabel + ': ' + toFix.length
+        });
+    };
+
+    // #3783/#3785: «Упорядочить» — пересобрать очередь видимого диапазона в оптимальный
+    // порядок. Тот же autoSequenceQueue, но preserveOrder=false → реально пересобирает
+    // (минимум переналадок группирует сырьё/набор ножей; при прочих равных больше полос
+    // раньше). Перезаписывает ручные перестановки оператора (#3449), поэтому с подтверждением.
+    AtexProductionPlanning.prototype.optimizeQueue = function(actionsEl) {
+        var self = this;
+        if (this.busy) return;
+        if (!(this.cuts && this.cuts.length)) { this.notify('Нет заданий для упорядочивания', 'info'); return; }
+        var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
+        var oldBar = host && host.querySelector && host.querySelector('.atex-pp-confirm-bar');
+        if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
+        var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+            'Пересобрать очередь в оптимальный порядок: группировка по сырью (минимум переналадок), ' +
+            'при прочих равных — больше полос раньше. Ручные перестановки очереди будут заменены.' });
+        this.confirmAction(msg, host, [
+            { label: 'Упорядочить', inline: true, onConfirm: function() { self.runOptimizeQueue(); } }
+        ]);
+    };
+
+    AtexProductionPlanning.prototype.runOptimizeQueue = function() {
+        var self = this;
+        if (this.busy) return;
+        this.setBusy(true);
+        this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
+            self.setBusy(false);
+            self.notify(changed ? 'Очередь упорядочена (минимум переналадок)' : 'Очередь уже оптимальна', 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            console.error('[pp] ⚙️ optimizeQueue: ОШИБКА', err && err.message, err && err.stack);
+            self.notify('Ошибка упорядочивания: ' + (err && err.message ? err.message : err), 'error');
         });
     };
 
@@ -9403,6 +9439,12 @@
         // #3475: «Добавить вручную» — второстепенная кнопка (без -primary).
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить вручную' });
         addBtn.addEventListener('click', function() { self.openForm(); });
+        // #3783/#3785: «Упорядочить» — пересобрать очередь видимого диапазона в оптимальный
+        // порядок (минимум переналадок: группировка сырья; при прочих равных больше полос
+        // раньше). Перезаписывает ручной порядок (#3449) — поэтому через подтверждение.
+        var orderBtn = el('button', { class: 'atex-pp-btn atex-pp-order-queue', type: 'button', text: 'Упорядочить',
+            title: 'Пересобрать очередь: группировка по сырью, минимум переналадок (при прочих равных больше полос раньше)' });
+        orderBtn.addEventListener('click', function() { self.optimizeQueue(queueActions); });
         // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня
         // (все станки). Между «Добавить вручную» и «Удалить».
         var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать', title: 'Зафиксировать все задания этого дня' });
@@ -9422,6 +9464,7 @@
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
+        queueActions.appendChild(orderBtn);
         queueActions.appendChild(fixBtn);
         queueActions.appendChild(delBtn);
         queueActions.appendChild(downtimeBtn);
