@@ -62,7 +62,15 @@
         sleeveTask: 'Задание на втулки',
         settings: 'Настройка',
         maxStock: 'Максимальный запас',  // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
-        leader: 'Лидер'                  // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
+        leader: 'Лидер',                 // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
+        downtime: 'Отпуск'               // #3764: подчинённая станку таблица «Отпуск» (122572) — окна простоя станка
+    };
+    // #3764: реквизиты подчинённой «Отпуск» (up = Слиттер). Главное значение записи —
+    // НАЧАЛО окна простоя (DATETIME, unix-сек); «Окончание» — конец окна (DATETIME);
+    // «Примечания» — причина (ТО и т.п.). В это время автогенерация не ставит задания.
+    var DOWNTIME_REQ = {
+        end: 'Окончание',
+        notes: 'Примечания'
     };
     // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
     // максимально допустимый запас (число); реквизиты задают комбинацию параметров
@@ -744,6 +752,29 @@
         return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
     }
 
+    // #3764: unix-секунды → значение `<input type="datetime-local">` («ГГГГ-ММ-ДДTЧЧ:ММ»,
+    // локальное время — как и отображение DATETIME через new Date(sec*1000)). Пусто/мусор → ''.
+    function unixToDatetimeLocal(sec) {
+        var n = Number(sec);
+        if (!isFinite(n) || n <= 0) return '';
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return '';
+        function pad(x) { return (x < 10 ? '0' : '') + x; }
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+            'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    // #3764: значение `<input type="datetime-local">` → unix-секунды (локальное время). null —
+    // пусто/нераспознано. Секунды обнуляем (поле даёт минутную точность).
+    function datetimeLocalToUnix(value) {
+        var s = String(value == null ? '' : value).trim();
+        var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+        if (!m) return null;
+        var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0, 0);
+        if (isNaN(d.getTime())) return null;
+        return Math.floor(d.getTime() / 1000);
+    }
+
     // Сборка полей `t{reqId}` для записи. reqIds — { ключ: числовойId },
     // values — { ключ: значение }. Пустые значения (''/null/undefined) опускаются,
     // чтобы не перетирать данные и не плодить пустые реквизиты.
@@ -1306,6 +1337,56 @@
         if (/^\d{9,11}$/.test(s)) return Number(s);
         var t = Date.parse(s);
         return isNaN(t) ? Infinity : t;
+    }
+
+    // #3769: YYYYMMDD-ключ (как у planDateDayKey/batchDateKey для дат) → Date (полночь
+    // местного времени) для арифметики по календарным дням. Невалидный/Infinity → null.
+    function dayKeyToDate(key) {
+        var n = Number(key);
+        if (!isFinite(n) || n < 10000101 || n > 99991231) return null;
+        var y = Math.floor(n / 10000), m = Math.floor(n / 100) % 100, d = n % 100;
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        var dt = new Date(y, m - 1, d);
+        return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    // #3769: YYYYMMDD-ключ → «DD.MM.YYYY» для подписи срока. Невалидный → ''.
+    function formatDayKey(key) {
+        var dt = dayKeyToDate(key);
+        if (!dt) return '';
+        var p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+        return p2(dt.getDate()) + '.' + p2(dt.getMonth() + 1) + '.' + dt.getFullYear();
+    }
+
+    // #3769: класс расцветки строки .atex-pp-strip-row по «Сроку изготовления» позиции
+    // (dueKey, YYYYMMDD) относительно «Даты план» задания (planKey, YYYYMMDD):
+    //   срок РАНЬШЕ планы            → 'is-overdue' (красный — не успеваем);
+    //   срок дальше планы+forecast   → 'is-far'     (жёлтый — делаем сильно заранее);
+    //   срок в окне [план; план+forecast] включительно → '' (без изменения цвета).
+    // forecastDays === null/отрицательный → жёлтый отключён (нет настройки), красный работает.
+    function dueColorClass(dueKey, planKey, forecastDays) {
+        var due = dayKeyToDate(dueKey), plan = dayKeyToDate(planKey);
+        if (!due || !plan) return '';
+        var diffDays = Math.round((due.getTime() - plan.getTime()) / 86400000);
+        if (diffDays < 0) return 'is-overdue';
+        if (forecastDays != null && forecastDays >= 0 && diffDays > forecastDays) return 'is-far';
+        return '';
+    }
+
+    // #3769: отсортированные уникальные ключи «Срока изготовления» позиций, которые
+    // обеспечивает резка (supplies cutId→positionId → genPositions[pos].dueKey).
+    // Позиции без срока или выпавшие из активного positions_list — пропускаются.
+    function cutDueKeys(cut, supplies, genPositions) {
+        var posMap = positionMap(genPositions);
+        var seen = {}, keys = [];
+        (supplies || []).forEach(function(s) {
+            if (!cut || !s || String(s.cutId) !== String(cut.id)) return;
+            var p = s.positionId != null ? posMap[String(s.positionId)] : null;
+            var k = p && p.dueKey;
+            if (k == null || !isFinite(k) || k === Infinity) return;
+            if (!seen[k]) { seen[k] = true; keys.push(k); }
+        });
+        return keys.sort(function(a, b) { return a - b; });
     }
 
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
@@ -2622,6 +2703,77 @@
         };
     }
 
+    // #3764: окна «Отпуска» станка → блокированные интервалы в МИНУТАХ от полуночи дня 0
+    // (той же оси, что startMin/windowStartMin расписания). downtimes — [{ start, end }]
+    // в unix-секундах (start — главное значение записи, end — «Окончание»). baseMidnightMs —
+    // полночь дня 0 (planBaseMidnightFrom). Возвращает отсортированный по началу массив
+    // [[startMin, endMin], …]; пустые/перевёрнутые/полностью прошедшие до базы окна отброшены.
+    function downtimeBlockedRanges(downtimes, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return [];
+        var out = [];
+        (downtimes || []).forEach(function(d) {
+            var s = Number(d && d.start), e = Number(d && d.end);
+            if (!isFinite(s) || s <= 0) return;
+            // Без «Окончания» окно не ограничено по верху — игнорируем (нечего блокировать осмысленно).
+            if (!isFinite(e) || e <= s) return;
+            var sMin = (s * 1000 - base) / 60000;
+            var eMin = (e * 1000 - base) / 60000;
+            if (eMin <= 0) return;   // окно целиком до дня 0 — на план не влияет
+            out.push([sMin, eMin]);
+        });
+        out.sort(function(a, b) { return a[0] - b[0]; });
+        return out;
+    }
+
+    // #3764: рабочее окно дня для абсолютной минуты от полуночи дня 0. Если минута до начала
+    // окна (ночь/утро) — подтягиваем к dayStart; если в/после конца окна — к dayStart следующего
+    // дня. blocked — отсортированные [[s,e],…]. Возвращает ближайшую минуту ≥ from, которая
+    // (а) внутри рабочего окна и (б) не попадает в блокированный интервал; для сегмента длиной
+    // len ещё и (в) ни один блок не НАЧИНАЕТСЯ внутри [m, m+len) (иначе сегмент въехал бы в
+    // простой — выталкиваем целиком за конец блока). Итераций ≤ числа блоков + дни (ограничено).
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd) {
+        var m = Number(from);
+        var L = Number(len) || 0;
+        var guard = 0, guardMax = (blocked || []).length * 2 + 8;
+        while (guard++ < guardMax) {
+            var day = Math.floor(m / 1440);
+            var within = m - day * 1440;
+            if (within < dayStart) { m = day * 1440 + dayStart; continue; }
+            if (within >= dayEnd) { m = (day + 1) * 1440 + dayStart; continue; }
+            var bumped = false;
+            for (var i = 0; i < (blocked || []).length; i++) {
+                var bS = blocked[i][0], bE = blocked[i][1];
+                // m внутри блока, либо блок начинается в пределах занимаемого сегментом окна.
+                if ((bS <= m && m < bE) || (m < bS && bS < m + L)) {
+                    if (bE > m) { m = bE; bumped = true; break; }
+                }
+            }
+            if (!bumped) return m;
+        }
+        return m;
+    }
+
+    // #3764: общий проход — сдвигает уже построенные размещения за окна «Отпуска» станка,
+    // сохраняя порядок. items — массив; acc — аксессоры { windowStart, length, shift } чтения
+    // окна-старта (минуты), длины (setup+намотка) и применения сдвига (delta) к элементу. blocked
+    // — отсортированные [[s,e],…] (минуты от полуночи дня 0). Сохраняет встык-упаковку (курсор =
+    // конец предыдущего): резку, сдвинутую простоем, догоняют следующие. Пустой blocked → no-op.
+    function shiftPlacementsPastDowntime(items, blocked, dayStart, dayEnd, acc) {
+        if (!blocked || !blocked.length || !items || !items.length) return items;
+        var cursor = -Infinity;
+        items.forEach(function(it) {
+            var ws = acc.windowStart(it);
+            if (ws < cursor) ws = cursor;
+            var len = acc.length(it);
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd);
+            var delta = placed - acc.windowStart(it);
+            if (delta !== 0) acc.shift(it, delta);
+            cursor = placed + len;
+        });
+        return items;
+    }
+
     // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
     // полуночи дня 0 (через сутки — следующий рабочий день). setup перед резкой = лидер
     // (BETWEEN_CUTS × число резок цуга, #3401) + переналадка с предыдущей (changeoverCost, мин); длительность =
@@ -2629,7 +2781,7 @@
     // fallback. Рабочее окно дня — [shiftStartMin, shiftEndMin] (08:00–16:30);
     // резка, не влезающая до конца окна, переносится на 08:00 следующего дня.
     // opts: { windPoints, times, shiftStartMin, shiftEndMin,
-    // runLengthByCut:{cutId:метры} }. Вход не мутирует.
+    // runLengthByCut:{cutId:метры}, blockedRanges:[[s,e],…] (#3764) }. Вход не мутирует.
     function buildSchedule(cuts, opts){
         opts = opts || {};
         var wind = opts.windPoints || [];
@@ -2700,6 +2852,13 @@
             out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur, leaderMin: round3(leaderMin) });
             t = finish + leaderMin;   // #3688: следующая резка стартует после лидера текущей
         });
+        // #3764: вынести задания за окна «Отпуска» станка (ТО и т.п.). Окно занимает
+        // [windowStart, +setup+намотка+лидер]; пустой blockedRanges → no-op (поведение прежнее).
+        if (hasWindow) shiftPlacementsPastDowntime(out, opts.blockedRanges, shiftStart, shiftEnd, {
+            windowStart: function(o) { return o.startMin - o.setupMin; },
+            length: function(o) { return o.setupMin + o.durationMin + o.leaderMin; },
+            shift: function(o, delta) { o.startMin = round3(o.startMin + delta); o.finishMin = round3(o.finishMin + delta); }
+        });
         return out;
     }
 
@@ -2760,6 +2919,17 @@
         var runsByCut = opts.runsByCut || {};
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
+        // #3764: вынести сегменты за окна «Отпуска» станка (общий проход по результату, как в
+        // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
+        // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
+        function applyDowntime(segs) {
+            if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
+                windowStart: function(s) { return s.windowStartMin; },
+                length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
+                shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); }
+            });
+            return segs;
+        }
         // #3342: плавающий обед. lunch.startMin — минуты от полуночи; durationMin — длина.
         var lunch = lunchParams(opts, dayStart, dayEnd);
         var lunchDone = {};
@@ -2906,7 +3076,7 @@
                     day += 1; clock = 0;
                 }
             }
-            return segments;
+            return applyDowntime(segments);   // #3764
         }
         (orderedCuts || []).forEach(function(c){
             var cid = c && c.id;
@@ -2975,7 +3145,7 @@
                 isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
             }
         });
-        return segments;
+        return applyDowntime(segments);   // #3764
     }
 
     // #3280: минуты расписания (от полуночи дня планирования) → Unix-штамп (секунды).
@@ -3016,7 +3186,8 @@
                 shiftEndMin: opts.dayEndMin,
                 lunchStartMin: opts.lunchStartMin,
                 lunchDurationMin: opts.lunchDurationMin,
-                firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+                firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+                blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
             });
             sched.forEach(function(sc){
                 var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
@@ -3266,7 +3437,8 @@
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
                 dayAnchorByCut: opts.dayAnchorByCut,   // #3658: привязка к дню «Даты план»
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
-                gapFill: opts.gapFill   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
+                gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
+                blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
             });
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
@@ -4089,6 +4261,10 @@
         cutFulfillmentIds: cutFulfillmentIds,             // #3691
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
+        dayKeyToDate: dayKeyToDate,             // #3769
+        formatDayKey: formatDayKey,             // #3769
+        dueColorClass: dueColorClass,           // #3769
+        cutDueKeys: cutDueKeys,                 // #3769
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
@@ -4097,6 +4273,11 @@
         splitMachineQueue: splitMachineQueue,
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
+        downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
+        nextFreeWorkMinute: nextFreeWorkMinute,                   // #3764
+        shiftPlacementsPastDowntime: shiftPlacementsPastDowntime, // #3764
+        unixToDatetimeLocal: unixToDatetimeLocal,                 // #3764
+        datetimeLocalToUnix: datetimeLocalToUnix,                 // #3764
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
         daySplitBadges: daySplitBadges,
@@ -4285,8 +4466,10 @@
             strip: null,
             finishedBatch: null,
             sleeveTask: null,
-            settings: null
+            settings: null,
+            downtime: null        // #3764: подчинённая «Отпуск» (окна простоя станка)
         };
+        this.downtimesBySlitter = {};  // #3764: карта slitterId → [{ id, start, end, notes }] (start/end — unix-сек)
         this.sleeveBatches = [];   // #3340: партии втулок «в работе» (отчёт sleeve_batches_active) для FIFO
         this.sleeveCutterId = '';  // #3340: id втулкореза TC-20 (резолв по имени)
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
@@ -4402,6 +4585,7 @@
             self.meta.settings = byName(TABLE.settings);
             self.meta.maxStock = byName(TABLE.maxStock);   // #3391: необязательная — фича включается её наличием
             self.meta.leader = byName(TABLE.leader);        // #3569: справочник «Лидер» (резолв метки → id)
+            self.meta.downtime = byName(TABLE.downtime);    // #3764: необязательная — кнопка/пропуск простоя включаются её наличием
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -4421,7 +4605,8 @@
                 // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
                     key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
-                    key !== 'TOTAL_INTERVALS') return;   // #3599: буфер перед уборкой (мин)
+                    key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
+                    key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -4435,6 +4620,14 @@
             });
             self.daySettings = values;
         });
+    };
+
+    // #3769: DAYS_FORECAST из «Настройки» — окно срока изготовления (дни) для расцветки
+    // строк .atex-pp-strip-row. Нет/некорректно → null (жёлтый отключён, красный работает).
+    AtexProductionPlanning.prototype.daysForecast = function() {
+        var v = this.daySettings ? this.daySettings.DAYS_FORECAST : null;
+        var n = Number(v);
+        return (isFinite(n) && n >= 0) ? n : null;
     };
 
     AtexProductionPlanning.prototype.workingWindow = function() {
@@ -4476,6 +4669,56 @@
                 };
             });
         });
+    };
+
+    // #3764: окна «Отпуска» (простоя) по станкам. Подчинённая «Отпуск» (up = Слиттер),
+    // главное значение записи — НАЧАЛО (DATETIME, unix-сек), «Окончание» — конец, «Примечания» —
+    // причина. Читаем по каждому станку отдельно (F_U=slitterId, как полосы по резке). Таблицы
+    // нет в метаданных (старое окружение) → пустая карта, фича выключена (кнопка не рисуется,
+    // расписание прежнее). Ошибка чтения не валит загрузку — лишь логируется.
+    AtexProductionPlanning.prototype.loadDowntimes = function() {
+        var self = this;
+        this.downtimesBySlitter = {};
+        var meta = this.meta.downtime;
+        if (!meta || !(this.slitters || []).length) return Promise.resolve();
+        var endIdx = columnIndex(meta, DOWNTIME_REQ.end);
+        var notesIdx = columnIndex(meta, DOWNTIME_REQ.notes);
+        return Promise.all(this.slitters.map(function(s) {
+            return self.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(s.id) + '&LIMIT=0,500')
+                .then(function(rows) {
+                    self.downtimesBySlitter[String(s.id)] = (rows || []).map(function(rec) {
+                        var r = rec.r || [];
+                        return {
+                            id: String(rec.i),
+                            start: (r[0] == null || r[0] === '') ? null : Number(r[0]),
+                            end: (endIdx >= 0 && r[endIdx] != null && r[endIdx] !== '') ? Number(r[endIdx]) : null,
+                            notes: (notesIdx >= 0 && r[notesIdx] != null) ? String(r[notesIdx]) : ''
+                        };
+                    });
+                });
+        })).then(function() {
+            console.log('[pp] 🛠 loadDowntimes: окон простоя по станкам:',
+                Object.keys(self.downtimesBySlitter).reduce(function(n, k) { return n + self.downtimesBySlitter[k].length; }, 0));
+        }).catch(function(err) {
+            console.warn('[pp] 🛠 loadDowntimes: не удалось прочитать «' + TABLE.downtime + '»:', err && err.message);
+            self.downtimesBySlitter = {};
+        });
+    };
+
+    // #3764: окна «Отпуска» станка → блокированные интервалы (минуты от полуночи дня 0) для
+    // планировщика. baseMidnightMs — база расписания (день фильтра «С»).
+    AtexProductionPlanning.prototype.blockedRangesForSlitter = function(slitterId, baseMidnightMs) {
+        return downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs);
+    };
+
+    // #3764: карта slitterId → blockedRanges по всем станкам (для planCutOperations).
+    AtexProductionPlanning.prototype.blockedRangesBySlitter = function(baseMidnightMs) {
+        var self = this, out = {};
+        Object.keys(this.downtimesBySlitter || {}).forEach(function(key) {
+            var ranges = downtimeBlockedRanges(self.downtimesBySlitter[key], baseMidnightMs);
+            if (ranges.length) out[key] = ranges;
+        });
+        return out;
     };
 
     // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
@@ -5567,6 +5810,14 @@
         }
         var fieldKey = 't' + fixedReqId;
         var flag = value ? '1' : '0';
+        // #3778: при ФИКСАЦИИ снимаем тайминг (Наладка ножей / Сырье-намотка / Резка и Лидер) в
+        // запись тем же _m_set, что и флаг. Раньше «Зафиксировать» писала ТОЛЬКО флаг, и у
+        // вручную созданных/зафиксированных заданий три поля оставались пустыми — гант пересчитывал
+        // их на лету. Считаем те же значения и в том же порядке, что план на экране
+        // (computeCutSetupUpdates), но пишем только для фиксируемых id. При снятии фиксации не трогаем.
+        var setupRes = value ? self.computeCutSetupUpdates(ids) : { reqs: {}, updates: [] };
+        var setupById = {};
+        setupRes.updates.forEach(function(u) { setupById[String(u.cutId)] = u; });
         this.setBusy(true);
         this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
         var done = 0;
@@ -5574,6 +5825,11 @@
         ids.forEach(function(id) {
             chain = chain.then(function() {
                 var fields = {}; fields[fieldKey] = flag;
+                var u = setupById[String(id)];   // #3778: дополняем флаг снимком тайминга
+                if (u) {
+                    var tf = setupTimingFields(setupRes.reqs, u);
+                    Object.keys(tf).forEach(function(k) { fields[k] = tf[k]; });
+                }
                 return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
                     .then(function() { self.updateProgress(++done); });
             });
@@ -7122,7 +7378,8 @@
                     dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
                     times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut,
                     lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
-                    firstCutSetup: true   // #3669 п.2: первая задача очереди — настройка ножей
+                    firstCutSetup: true,   // #3669 п.2: первая задача очереди — настройка ножей
+                    blockedRanges: self.blockedRangesForSlitter(s, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
                 });
                 var byPlanId = {};
                 segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
@@ -7480,14 +7737,31 @@
     // изменившиеся (diff против отчётных значений), тихо и БЕЗ reload (свой экран РМ считает
     // наладку на лету). Колонок ещё нет в метаданных → no-op. Ошибки глотает: доп-колонки не
     // должны валить сохранение очереди/плана. Вызывается после сохранений порядка/плана.
-    AtexProductionPlanning.prototype.persistCutSetupColumns = function() {
-        var self = this;
+    // #3778: тайминг-поля задания (t96067 «Наладка ножей, мин» / t96069 «Сырье/намотка, мин» /
+    // t96778 «Резка и Лидер») одним набором реквизитов для _m_set. Отсутствующие reqId не пишем.
+    function setupTimingFields(reqs, u) {
+        var fields = {};
+        if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
+        if (reqs.matReq) fields['t' + reqs.matReq] = String(u.material);
+        if (reqs.cutTimeReq) fields['t' + reqs.cutTimeReq] = String(u.cutTime);   // #3700
+        return fields;
+    }
+
+    // #3778: вычислить тайминг-поля резок В ПОРЯДКЕ ПЛАНА и вернуть { reqs, updates } —
+    // updates только для резок, чьи хранимые значения ПУСТЫ или разошлись с расчётом (пустое
+    // хранимое всегда «изменилось» → force-write, отсюда наполняются «пустые опять» поля).
+    // onlyIds (массив id) ограничивает НАБОР ЗАПИСИ (снимок при «Зафиксировать»), но порядок и
+    // переналадка считаются по ВСЕЙ очереди станка — иначе у не-первой резки терялся предшественник.
+    AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds) {
         var meta = this.meta.cut;
-        if (!meta) return Promise.resolve();
-        var knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
-        var matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
-        var cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
-        if (!knifeReq && !matReq && !cutTimeReq) return Promise.resolve();   // колонок ещё нет в таблице
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
+        if (!meta) return { reqs: reqs, updates: [] };
+        reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
+        reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
+        reqs.cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
+        var onlySet = null;
+        if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
         // #3702: считаем теми же временами и в ТОМ ЖЕ порядке, что и план на экране, иначе
         // у задания заполнялась «Сырье/намотка», которой в плане нет.
         //  • this.changeTimes — структурированные веса переналадок (MATERIAL_WINDING / KNIFE /
@@ -7508,6 +7782,7 @@
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             arr.forEach(function(c) {
+                if (onlySet && !onlySet[String(c.id)]) return;   // снимок — только выбранные резки
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
                 // #3715: пишем ЦЕЛЫЕ минуты (Math.round). Дробные значения (#3708) перестали
                 // записываться — поля не приняли нецелое, _m_set падал и обрывал запись всех трёх
@@ -7520,12 +7795,13 @@
                 var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
+                // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
-                if (changed(knifeReq, c.storedKnifeSetupMin, wantK)
-                    || changed(matReq, c.storedMaterialWindingMin, wantM)
-                    || changed(cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
+                    || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
+                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
                     updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT });
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
@@ -7533,18 +7809,27 @@
                 }
             });
         });
+        return { reqs: reqs, updates: updates };
+    };
+
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function() {
+        var self = this;
+        var res = this.computeCutSetupUpdates(null);
+        var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
         var chain = Promise.resolve();
         updates.forEach(function(u) {
             chain = chain.then(function() {
-                var fields = {};
-                if (knifeReq) fields['t' + knifeReq] = String(u.knife);
-                if (matReq) fields['t' + matReq] = String(u.material);
-                if (cutTimeReq) fields['t' + cutTimeReq] = String(u.cutTime);   // #3700
-                return self.post('_m_set/' + u.cutId + '?JSON', fields);
+                return self.post('_m_set/' + u.cutId + '?JSON', setupTimingFields(reqs, u));
             });
         });
-        return chain.catch(function() { /* тихо: доп-колонки не валят сохранение очереди */ });
+        // #3778: ошибки записи тайминга больше НЕ глотаем молча — раньше тихий catch скрывал,
+        // почему «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» оставались пустыми. Сохранение
+        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим.
+        return chain.catch(function(err) {
+            self.notify('Не удалось сохранить тайминг заданий (Наладка ножей / Сырье-намотка / '
+                + 'Резка и Лидер): ' + (err && err.message || err), 'error');
+        });
     };
 
     // DRY-метод сохранения изменённых «Очередностей» (ручная перестановка ↑↓).
@@ -7616,6 +7901,7 @@
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
         var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var lengthReqId = reqIdByName(cutMeta, CUT_REQ.length);   // #3781: «Метраж, м» (длина прогона)
         var cutReqIds = {
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
@@ -7623,8 +7909,24 @@
             status: reqIdByName(cutMeta, CUT_REQ.status),
             sequence: seqReqId,
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
-            leader: reqIdByName(cutMeta, CUT_REQ.leader)   // #3569: лидер копируется в запись-продолжение
+            leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
+            length: lengthReqId   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
         };
+        // #3781: длина прогона по id любой записи цепочки = длина прогона её ГОЛОВЫ. Записи-
+        // продолжения дробления по дням раньше не получали «Метраж, м», и cutRunLength
+        // откатывался к ПОДЕЛЁННОМУ метражу обеспечения (splitSupplyShares делит footage
+        // пропорционально проходам) → в очереди мелькала заниженная длина (281.25 вместо 450).
+        // Длина прогона одинакова у всех сегментов — берём её у головы и пишем во все сегменты.
+        var chainHeadById = {};
+        var splitChains = mergeContinuationChains(self.cuts || []).chainByLogical || {};
+        Object.keys(splitChains).forEach(function(head) {
+            (splitChains[head] || [head]).forEach(function(m) { chainHeadById[String(m)] = String(head); });
+        });
+        function runLenForCutId(cutId) {
+            var head = chainHeadById[String(cutId)] || String(cutId);
+            var hc = cutsById[head];
+            return hc ? cutRunLength(hc, self.supplies, self.footageBySupply) : 0;
+        }
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
         (ops.creates || []).forEach(function(cr) { (createsByParent[cr.parentCutId] = createsByParent[cr.parentCutId] || []).push(cr); });
@@ -7661,6 +7963,13 @@
                     // расписание считает настройку длинной резкой, ломая раскладку по дням.
                     var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
                     if (Number(u.plannedRuns) === 0 && durReqId) fields['t' + durReqId] = '0';
+                    // #3781: восстановить «Метраж, м» = длине прогона головы цепочки. Для головы
+                    // это та же длина (запись no-op по значению), для реюзнутого продолжения —
+                    // лечит ранее пустую длину (иначе очередь брала поделённый метраж обеспечения).
+                    if (lengthReqId) {
+                        var ulen = runLenForCutId(u.cutId);
+                        if (ulen > 0) fields['t' + lengthReqId] = String(round3(ulen));
+                    }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -7672,6 +7981,7 @@
             var parentCut = cutsById[parentId];
             var crs = createsByParent[parentId];
             var upd = updateByCut[parentId];
+            var parentRunLen = runLenForCutId(parentId);   // #3781: длина прогона цепочки (для «Метраж, м» продолжений)
             var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
             var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
             chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
@@ -7723,7 +8033,10 @@
                             sequence: cr.sequence,
                             winding: normWinding(parentCut && parentCut.winding),
                             // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
-                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : '')
+                            leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : ''),
+                            // #3781: «Метраж, м» = длина прогона цепочки. Без неё cutRunLength брал
+                            // поделённый метраж обеспечения и показывал заниженную длину.
+                            length: parentRunLen > 0 ? round3(parentRunLen) : ''
                         });
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
@@ -7878,7 +8191,8 @@
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
-            gapFill: true   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
+            gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
+            blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
         });
 
         // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
@@ -8004,6 +8318,184 @@
 
     AtexProductionPlanning.prototype.closeCutTiming = function() {
         if (this.timingModalEl) this.timingModalEl.classList.remove('is-open');
+    };
+
+    // ── #3764: «Отпуск» (окна простоя станка) ──────────────────────────────────
+
+    // Прочитать строки «Отпуска» одного станка (F_U=slitterId) → [{ id, start, end, notes }].
+    AtexProductionPlanning.prototype.fetchDowntimeRows = function(slitterId) {
+        var meta = this.meta.downtime;
+        if (!meta) return Promise.resolve([]);
+        var endIdx = columnIndex(meta, DOWNTIME_REQ.end);
+        var notesIdx = columnIndex(meta, DOWNTIME_REQ.notes);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(slitterId) + '&LIMIT=0,500')
+            .then(function(rows) {
+                return (rows || []).map(function(rec) {
+                    var r = rec.r || [];
+                    return {
+                        id: String(rec.i),
+                        start: (r[0] == null || r[0] === '') ? null : Number(r[0]),
+                        end: (endIdx >= 0 && r[endIdx] != null && r[endIdx] !== '') ? Number(r[endIdx]) : null,
+                        notes: (notesIdx >= 0 && r[notesIdx] != null) ? String(r[notesIdx]) : ''
+                    };
+                });
+            });
+    };
+
+    // Перечитать окна простоя станка с сервера в кеш (откат UI после ошибки записи).
+    AtexProductionPlanning.prototype.reloadDowntimesForSlitter = function(slitterId) {
+        var self = this;
+        return this.fetchDowntimeRows(slitterId).then(function(rows) {
+            self.downtimesBySlitter[String(slitterId)] = rows;
+            return rows;
+        });
+    };
+
+    AtexProductionPlanning.prototype.openDowntime = function() {
+        if (!this.meta.downtime) { this.notify('В метаданных нет таблицы «' + TABLE.downtime + '»', 'error'); return; }
+        var act = this.downtimeActiveSlitter;
+        if (!act || !act.id) { this.notify('Выберите станок (вкладку) для редактирования отпусков', 'error'); return; }
+        if (this.downtimeModalTitleEl) this.downtimeModalTitleEl.textContent = 'Отпуск станка «' + (act.label || act.id) + '»';
+        this.renderDowntimeTable();
+        if (this.downtimeModalEl) this.downtimeModalEl.classList.add('is-open');
+    };
+
+    AtexProductionPlanning.prototype.closeDowntime = function() {
+        if (this.downtimeModalEl) this.downtimeModalEl.classList.remove('is-open');
+        // Очередь могла измениться (автоплан пропускает простой) — перерисуем расписание.
+        try { this.renderQueue(); } catch (e) { /* очередь перерисуется при следующем render */ }
+    };
+
+    // Редактируемая таблица окон простоя активного станка: «Начало», «Окончание»,
+    // «Примечания», удаление строки и кнопка «+ Отпуск». Поля сохраняются по change
+    // (как полосы резки): начало — _m_save (главное значение DATETIME), реквизиты — _m_set.
+    AtexProductionPlanning.prototype.renderDowntimeTable = function() {
+        var self = this;
+        var body = this.downtimeModalBodyEl;
+        if (!body) return;
+        while (body.firstChild) body.removeChild(body.firstChild);
+        var act = this.downtimeActiveSlitter;
+        if (!act || !act.id) return;
+        var slitterId = act.id;
+        var rows = this.downtimesBySlitter[slitterId] || (this.downtimesBySlitter[slitterId] = []);
+        rows.sort(function(a, b) { return (Number(a.start) || 0) - (Number(b.start) || 0); });
+
+        var table = el('div', { class: 'atex-pp-dt-table' });
+        table.appendChild(el('div', { class: 'atex-pp-dt-row atex-pp-dt-head' }, [
+            el('span', { text: 'Начало' }),
+            el('span', { text: 'Окончание' }),
+            el('span', { text: 'Примечания' }),
+            el('span', { text: '' })
+        ]));
+        var tbody = el('div', { class: 'atex-pp-dt-tbody' });
+        table.appendChild(tbody);
+
+        function renderRows() {
+            while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+            if (!rows.length) {
+                tbody.appendChild(el('div', { class: 'atex-pp-dt-empty', text: 'Окон простоя нет. Добавьте отпуск кнопкой ниже.' }));
+            }
+            rows.forEach(function(row) {
+                var rowEl = el('div', { class: 'atex-pp-dt-row' });
+                var startInput = el('input', { class: 'atex-pp-input', type: 'datetime-local', step: '60' });
+                startInput.value = unixToDatetimeLocal(row.start);
+                startInput.addEventListener('change', function() {
+                    row.start = datetimeLocalToUnix(startInput.value);
+                    self.persistDowntimeRow(slitterId, row);
+                });
+                var endInput = el('input', { class: 'atex-pp-input', type: 'datetime-local', step: '60' });
+                endInput.value = unixToDatetimeLocal(row.end);
+                endInput.addEventListener('change', function() {
+                    row.end = datetimeLocalToUnix(endInput.value);
+                    self.persistDowntimeRow(slitterId, row);
+                });
+                var notesInput = el('input', { class: 'atex-pp-input', type: 'text', placeholder: 'причина (ТО и т.п.)' });
+                notesInput.value = row.notes || '';
+                notesInput.addEventListener('change', function() {
+                    row.notes = notesInput.value;
+                    self.persistDowntimeRow(slitterId, row);
+                });
+                var del = el('button', { class: 'atex-pp-btn atex-pp-dt-del', type: 'button', text: '×', title: 'Удалить отпуск' });
+                del.addEventListener('click', function() {
+                    self.deleteDowntimeRow(slitterId, row).then(function() {
+                        var i = rows.indexOf(row);
+                        if (i >= 0) rows.splice(i, 1);
+                        renderRows();
+                    }).catch(function() { /* отказ сервера — строку оставляем (deleteDowntimeRow уже уведомил) */ });
+                });
+                rowEl.appendChild(startInput);
+                rowEl.appendChild(endInput);
+                rowEl.appendChild(notesInput);
+                rowEl.appendChild(del);
+                tbody.appendChild(rowEl);
+            });
+        }
+        renderRows();
+
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-dt-add', type: 'button', text: '+ Отпуск' });
+        addBtn.addEventListener('click', function() {
+            rows.push({ id: null, start: null, end: null, notes: '' });
+            renderRows();
+        });
+
+        body.appendChild(table);
+        body.appendChild(addBtn);
+    };
+
+    // Сохранить строку отпуска. Создаёт (нет id) или обновляет. Главное значение (начало,
+    // DATETIME) пишется ТОЛЬКО через _m_save с t{tableId} (как плановый старт резки, #3280:
+    // _m_set→403, _m_save{val} не пишет datetime); «Окончание»/«Примечания» — _m_set.
+    // Записи одной строки СЕРИАЛИЗУЕМ цепочкой row._save: иначе быстрая правка нескольких
+    // полей НОВОЙ строки (id ещё не пришёл) шлёт несколько _m_new и плодит дубли. Следующая
+    // правка ждёт завершения предыдущей (id уже проставлен) и идёт как обновление.
+    AtexProductionPlanning.prototype.persistDowntimeRow = function(slitterId, row) {
+        var self = this;
+        var meta = this.meta.downtime;
+        if (!meta || !row) return Promise.resolve();
+        var run = function() {
+            // Без начала запись бессмысленна — создавать/обновлять нечего (ждём ввода).
+            if (row.start == null) return Promise.resolve();
+            if (row.end != null && row.end <= row.start) {
+                self.notify('«Окончание» отпуска должно быть позже начала', 'error');
+                return Promise.resolve();
+            }
+            var endReqId = reqIdByName(meta, DOWNTIME_REQ.end);
+            var notesReqId = reqIdByName(meta, DOWNTIME_REQ.notes);
+            var reqFields = buildFields(
+                { end: endReqId, notes: notesReqId },
+                { end: row.end != null ? String(row.end) : '', notes: row.notes }
+            );
+            var onErr = function(err) {
+                self.notify('Не удалось сохранить отпуск: ' + (err && err.message || err), 'error');
+                // Откат к серверному состоянию, чтобы UI не расходился с базой.
+                self.reloadDowntimesForSlitter(slitterId).then(function() { self.renderDowntimeTable(); });
+            };
+            if (row.id) {
+                var mainFields = {}; mainFields['t' + meta.id] = String(row.start);
+                return self.post('_m_save/' + row.id + '?JSON', mainFields).then(function() {
+                    if (Object.keys(reqFields).length) return self.post('_m_set/' + row.id + '?JSON', reqFields);
+                }).catch(onErr);
+            }
+            var createFields = addMainValueField(meta, reqFields, String(row.start));
+            return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(slitterId), createFields).then(function(res) {
+                var id = res && (res.obj || res.id || res.i);
+                if (id) row.id = String(id);
+                else throw new Error('сервер не вернул id записи');
+            }).catch(onErr);
+        };
+        var prev = (row._save && typeof row._save.then === 'function') ? row._save : Promise.resolve();
+        row._save = prev.then(run, run);
+        return row._save;
+    };
+
+    // Удалить строку отпуска. Не сохранённая (id=null) — просто из UI; иначе _m_del.
+    AtexProductionPlanning.prototype.deleteDowntimeRow = function(slitterId, row) {
+        var self = this;
+        if (!row || !row.id) return Promise.resolve();
+        return this.post('_m_del/' + encodeURIComponent(row.id) + '?JSON', {}).catch(function(err) {
+            self.notify('Не удалось удалить отпуск: ' + (err && err.message || err), 'error');
+            throw err;   // не убираем строку из UI, раз сервер отказал
+        });
     };
 
     function field(label, control) {
@@ -8358,6 +8850,17 @@
         box.appendChild(tabs);
 
         var activeGroup = tabGroups.filter(function(g) { return groupKey(g) === self.activeSlitter; })[0] || tabGroups[0];
+        // #3764: подпись/доступность кнопки «Отпуск {станок}» — по активному станку. Группа
+        // «Без слиттера» (id=null) станка не имеет → кнопку гасим (некуда писать простой).
+        if (this.downtimeBtn) {
+            // Кнопка видна только если таблица «Отпуск» есть в метаданных (фича включена).
+            this.downtimeBtn.style.display = this.meta.downtime ? '' : 'none';
+            var actSlitter = activeGroup && activeGroup.slitter;
+            var actId = actSlitter && actSlitter.id != null ? String(actSlitter.id) : '';
+            this.downtimeBtn.textContent = 'Отпуск' + (actId && actSlitter.label ? ' ' + actSlitter.label : '');
+            this.downtimeBtn.disabled = !actId;
+            this.downtimeActiveSlitter = actId ? { id: actId, label: actSlitter.label } : null;
+        }
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
 
         // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
@@ -8408,7 +8911,8 @@
             dayAnchorByCut: dayAnchorByCut,
             carryPrevCut: carryPrevCut,   // #3688: заправка станка для первой резки
             firstCutSetup: true,   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
-            gapFill: true   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
+            gapFill: true,   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
+            blockedRanges: self.blockedRangesForSlitter(carrySlitterId, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
         };
         // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
         // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
@@ -8587,14 +9091,25 @@
             if (stripGroups.length) {
                 // #3686: обратный резолв (факт→номинал) сверяет j= с «Номинальной шириной» рулона
                 var jumboWidth = self.nominalWidthByMaterial ? self.nominalWidthByMaterial[String(c.materialId)] : null;
+                // #3769: «Срок изготовления» обеспечиваемых позиций — в скобках в конце строки.
+                // Срок один на задание (позиции резки кластеризованы по сроку), поэтому
+                // показываем общий набор сроков и красим строку по самому раннему (срочному):
+                // раньше «Даты план» → красный, дальше план+DAYS_FORECAST → жёлтый, в окне → как есть.
+                var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);
+                var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
+                var dueSuffix = '';
+                if (dueKeys.length) {
+                    var dueLabels = dueKeys.map(formatDayKey).filter(function(s) { return s; });
+                    if (dueLabels.length) dueSuffix = ' (' + (dueLabels.length > 1 ? 'сроки: ' : 'срок: ') + dueLabels.join(', ') + ')';
+                }
                 var matRows = stripGroups.map(function(g) {
                     // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
                     // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
                     // (обратный резолв по справочнику), а после тире — реальные мм.
                     var ctx = { jumbo: jumboWidth, inches: null };
                     var nominal = resolveNominalWidth(g.width, ctx, self.actualWidthIndex);
-                    return el('div', { class: 'atex-pp-strip-row',
-                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) });
+                    return el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
+                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) + dueSuffix });
                 });
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-material' }, matRows));
             }
@@ -8939,12 +9454,20 @@
         // резку» (BatchDelete каскадом снимет подчинённые Партии ГП/Полосы/Расход).
         var delBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-warning atex-pp-del-day', type: 'button', text: 'Удалить' });
         delBtn.addEventListener('click', function() { self.deleteDayTasks(queueActions); });
+        // #3764: «Отпуск {станок}» — правее «Удалить». Открывает редактор окон простоя активного
+        // станка. Подпись/доступность/видимость проставляются в renderQueue (по активному станку
+        // и наличию таблицы «Отпуск» в метаданных). До загрузки метаданных кнопка скрыта.
+        var downtimeBtn = el('button', { class: 'atex-pp-btn atex-pp-dt-btn', type: 'button', text: 'Отпуск', title: 'Окна простоя станка (ТО и т.п.) — автогенерация их пропускает' });
+        downtimeBtn.style.display = 'none';
+        downtimeBtn.addEventListener('click', function() { self.openDowntime(); });
+        this.downtimeBtn = downtimeBtn;
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
         queueActions.appendChild(orderBtn);
         queueActions.appendChild(fixBtn);
         queueActions.appendChild(delBtn);
+        queueActions.appendChild(downtimeBtn);
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
@@ -8980,9 +9503,30 @@
         this.timingModalEl = el('div', { class: 'atex-pp-modal atex-pp-timing-modal' }, [timingDialog]);
         this.timingModalEl.addEventListener('click', function(e) { if (e.target === self.timingModalEl) self.closeCutTiming(); });
         this.root.appendChild(this.timingModalEl);
+
+        // #3764: модалка «Отпуск» (окна простоя станка) — заголовок, редактируемая таблица и
+        // кнопка «+ Отпуск». Та же механика оверлея, что у формы/тайминга (×/оверлей/Esc).
+        var dtTitle = el('h2', { class: 'atex-pp-form-title atex-pp-dt-title', text: 'Отпуск станка' });
+        var dtBody = el('div', { class: 'atex-pp-dt-body' });
+        var dtDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dt-dialog' });
+        var dtClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        dtClose.addEventListener('click', function() { self.closeDowntime(); });
+        dtDialog.appendChild(dtClose);
+        dtDialog.appendChild(dtTitle);
+        dtDialog.appendChild(dtBody);
+        this.downtimeModalTitleEl = dtTitle;
+        this.downtimeModalBodyEl = dtBody;
+        this.downtimeModalEl = el('div', { class: 'atex-pp-modal atex-pp-dt-modal' }, [dtDialog]);
+        this.downtimeModalEl.addEventListener('click', function(e) { if (e.target === self.downtimeModalEl) self.closeDowntime(); });
+        this.root.appendChild(this.downtimeModalEl);
+
         if (typeof document !== 'undefined') {
             document.addEventListener('keydown', function(e) {
                 if (e.key !== 'Escape' && e.keyCode !== 27) return;
+                if (self.downtimeModalEl && self.downtimeModalEl.classList.contains('is-open')) {
+                    self.closeDowntime();
+                    return;
+                }
                 if (self.timingModalEl && self.timingModalEl.classList.contains('is-open')) {
                     self.closeCutTiming();
                     return;
@@ -8997,7 +9541,7 @@
         return this.loadMetadata()
             .then(function() {
                 return Promise.all([
-                    self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
+                    self.loadSlittersWithStop().then(function(items) { self.slitters = items; return self.loadDowntimes(); }),   // #3764: окна простоя после станков
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
                     self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
@@ -9045,4 +9589,4 @@
 
  
  
-// @version 2026-06-23-issue-3616
+// @version 2026-06-27-issue-3764

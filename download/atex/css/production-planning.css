@@ -377,6 +377,23 @@
     color: var(--pp-info-text);
     font-variant-numeric: tabular-nums;
 }
+/* #3769: расцветка строки по «Сроку изготовления» позиции относительно «Даты план».
+   Красный — срок раньше планирования (не успеваем); жёлтый — срок дальше план+DAYS_FORECAST
+   (делаем сильно заранее); в окне — без изменения (цвет выше). */
+.atex-pp-cut-material .atex-pp-strip-row.is-overdue {
+    color: #b91c1c;
+    font-weight: 600;
+    background: rgba(185, 28, 28, .10);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+.atex-pp-cut-material .atex-pp-strip-row.is-far {
+    color: #a16207;
+    font-weight: 600;
+    background: rgba(202, 138, 4, .12);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
 /* #3354 п.1: строка времени резки теперь встроена в первую строку карточки
    (между номером и сырьём), а не отдельным рядом ниже — поэтому без margin-top. */
 .atex-pp-cut-time {
@@ -712,6 +729,32 @@
 }
 .atex-pp-modal-close:hover { color: var(--pp-accent); }
 .atex-pp-modal .atex-pp-form { padding: 0; }
+
+/* #3764: модалка «Отпуск» — редактор окон простоя станка. */
+.atex-pp-dt-dialog { max-width: 640px; }
+.atex-pp-dt-title { margin: 0 28px 14px 0; }
+.atex-pp-dt-table { margin-bottom: 12px; }
+.atex-pp-dt-row {
+    display: grid;
+    /* Начало · Окончание · Примечания · удалить */
+    grid-template-columns: 1fr 1fr 1.4fr 32px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.atex-pp-dt-head { font-size: 12px; color: var(--pp-muted); font-weight: 600; }
+.atex-pp-dt-empty { color: var(--pp-muted); font-size: 13px; padding: 8px 2px; }
+.atex-pp-dt-del {
+    padding: 6px 0;
+    text-align: center;
+    color: var(--pp-warn);
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    cursor: pointer;
+}
+.atex-pp-dt-del:hover { color: var(--pp-accent); }
+.atex-pp-dt-add { margin-top: 4px; }
 /* #3320: модалка «Обеспечить полосу» — список позиций + подтверждение. */
 .atex-pp-supply-dialog { max-width: 520px; }
 .atex-pp-supply-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 320px; overflow-y: auto; }
