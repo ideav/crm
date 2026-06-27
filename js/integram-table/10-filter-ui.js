@@ -25,6 +25,11 @@
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
                     const oldType = this.filters[columnId]?.type;
+                    // When no filter is set yet, the cell already shows the DEFAULT input shape
+                    // (DATE/DATETIME default to '=', a date picker). Compare against the effective
+                    // type so switching to a non-picker operator (e.g. '@' by ID, '...') re-renders
+                    // the input instead of leaving a stale date picker (issue #3777).
+                    const effectiveOldType = oldType || this.getDefaultFilterType(format);
                     if (!this.filters[columnId]) {
                         this.filters[columnId] = { type: this.getDefaultFilterType(format), value: '' };
                     }
@@ -54,22 +59,12 @@
                         }
                     }
 
-                    // For DATE/DATETIME columns, re-render when switching between date-picker types
-                    // and non-picker types (e.g. switching from '=' to '...' changes input from date to text) (issue #1008)
-                    if (format === 'DATE' || format === 'DATETIME') {
-                        const datePickerTypes = new Set(['=', '≥', '≤', '>', '<']);
-                        const wasDatePicker = datePickerTypes.has(oldType);
-                        const isDatePicker = datePickerTypes.has(symbol);
-                        if (wasDatePicker !== isDatePicker) {
-                            this.filters[columnId].value = '';
-                            this.render();
-                            return;
-                        }
-                    }
-
-                    // Switching to/from range ('...') changes the cell from one input to two
-                    // from/to fields (issue #3542) — clear the value and re-render to swap inputs.
-                    if ((symbol === '...') !== (oldType === '...')) {
+                    // Re-render when the rendered input shape changes: date picker ↔ text ↔
+                    // range two-field. Comparing the effective old type means a column still
+                    // showing its DEFAULT date picker (no filter set yet) correctly swaps to a
+                    // text field when an ID operator '@'/'!@' is picked (issues #1008, #3542, #3777).
+                    if (format !== 'REF' &&
+                        this.filterInputKind(format, effectiveOldType) !== this.filterInputKind(format, symbol)) {
                         this.filters[columnId].value = '';
                         this.render();
                         return;

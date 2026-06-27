@@ -362,10 +362,9 @@
             }
 
             // For DATE/DATETIME formats with value-based filter types, render a date/datetime picker (issue #1008)
-            // Filter types that need a date picker: =, ≥, ≤, >, < (not %, !%, or ...)
+            // Filter types that need a date picker: =, ≥, ≤, >, < (not %, !%, or ...) — see filterInputKind.
             const dateFormats = ['DATE', 'DATETIME'];
-            const datePickerFilterTypes = new Set(['=', '≥', '≤', '>', '<']);
-            if (dateFormats.includes(format) && datePickerFilterTypes.has(currentFilter.type)) {
+            if (this.filterInputKind(format, currentFilter.type) === 'date-picker') {
                 const isDateTime = format === 'DATETIME';
                 const inputType = isDateTime ? 'datetime-local' : 'date';
                 // Convert stored display value (DD.MM.YYYY or DD.MM.YYYY HH:MM:SS) to HTML5 format
@@ -388,7 +387,7 @@
 
             // Range filter ('...'): two separate from/to fields instead of one comma-separated
             // input — the comma syntax was unclear (issue #3542). Stored value stays "from,to".
-            if (currentFilter.type === '...') {
+            if (this.filterInputKind(format, currentFilter.type) === 'range') {
                 const isDate = dateFormats.includes(format);
                 const isDateTime = format === 'DATETIME';
                 let inputType = 'text';

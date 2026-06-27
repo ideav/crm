@@ -1585,6 +1585,22 @@ class IntegramTable{
             return baseTypes;
         }
 
+        /**
+         * The kind of input renderFilterCell draws for a (format, type) pair.
+         * Single source of truth shared by renderFilterCell and the re-render-on-
+         * type-switch decision so the two cannot drift (issues #1008, #3542, #3777).
+         * REF columns are handled separately (text input vs dropdown).
+         * @returns {'date-picker'|'range'|'text'}
+         */
+        filterInputKind(format, type) {
+            const datePickerTypes = ['=', '≥', '≤', '>', '<'];
+            if ((format === 'DATE' || format === 'DATETIME') && datePickerTypes.includes(type)) {
+                return 'date-picker';
+            }
+            if (type === '...') return 'range';
+            return 'text';
+        }
+
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
@@ -2058,10 +2074,9 @@ class IntegramTable{
             }
 
             // For DATE/DATETIME formats with value-based filter types, render a date/datetime picker (issue #1008)
-            // Filter types that need a date picker: =, ≥, ≤, >, < (not %, !%, or ...)
+            // Filter types that need a date picker: =, ≥, ≤, >, < (not %, !%, or ...) — see filterInputKind.
             const dateFormats = ['DATE', 'DATETIME'];
-            const datePickerFilterTypes = new Set(['=', '≥', '≤', '>', '<']);
-            if (dateFormats.includes(format) && datePickerFilterTypes.has(currentFilter.type)) {
+            if (this.filterInputKind(format, currentFilter.type) === 'date-picker') {
                 const isDateTime = format === 'DATETIME';
                 const inputType = isDateTime ? 'datetime-local' : 'date';
                 // Convert stored display value (DD.MM.YYYY or DD.MM.YYYY HH:MM:SS) to HTML5 format
@@ -2084,7 +2099,7 @@ class IntegramTable{
 
             // Range filter ('...'): two separate from/to fields instead of one comma-separated
             // input — the comma syntax was unclear (issue #3542). Stored value stays "from,to".
-            if (currentFilter.type === '...') {
+            if (this.filterInputKind(format, currentFilter.type) === 'range') {
                 const isDate = dateFormats.includes(format);
                 const isDateTime = format === 'DATETIME';
                 let inputType = 'text';
@@ -7561,6 +7576,11 @@ class IntegramTable{
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
                     const oldType = this.filters[columnId]?.type;
+                    // When no filter is set yet, the cell already shows the DEFAULT input shape
+                    // (DATE/DATETIME default to '=', a date picker). Compare against the effective
+                    // type so switching to a non-picker operator (e.g. '@' by ID, '...') re-renders
+                    // the input instead of leaving a stale date picker (issue #3777).
+                    const effectiveOldType = oldType || this.getDefaultFilterType(format);
                     if (!this.filters[columnId]) {
                         this.filters[columnId] = { type: this.getDefaultFilterType(format), value: '' };
                     }
@@ -7590,22 +7610,12 @@ class IntegramTable{
                         }
                     }
 
-                    // For DATE/DATETIME columns, re-render when switching between date-picker types
-                    // and non-picker types (e.g. switching from '=' to '...' changes input from date to text) (issue #1008)
-                    if (format === 'DATE' || format === 'DATETIME') {
-                        const datePickerTypes = new Set(['=', '≥', '≤', '>', '<']);
-                        const wasDatePicker = datePickerTypes.has(oldType);
-                        const isDatePicker = datePickerTypes.has(symbol);
-                        if (wasDatePicker !== isDatePicker) {
-                            this.filters[columnId].value = '';
-                            this.render();
-                            return;
-                        }
-                    }
-
-                    // Switching to/from range ('...') changes the cell from one input to two
-                    // from/to fields (issue #3542) — clear the value and re-render to swap inputs.
-                    if ((symbol === '...') !== (oldType === '...')) {
+                    // Re-render when the rendered input shape changes: date picker ↔ text ↔
+                    // range two-field. Comparing the effective old type means a column still
+                    // showing its DEFAULT date picker (no filter set yet) correctly swaps to a
+                    // text field when an ID operator '@'/'!@' is picked (issues #1008, #3542, #3777).
+                    if (format !== 'REF' &&
+                        this.filterInputKind(format, effectiveOldType) !== this.filterInputKind(format, symbol)) {
                         this.filters[columnId].value = '';
                         this.render();
                         return;

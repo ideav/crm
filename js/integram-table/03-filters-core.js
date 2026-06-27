@@ -31,6 +31,22 @@
             return baseTypes;
         }
 
+        /**
+         * The kind of input renderFilterCell draws for a (format, type) pair.
+         * Single source of truth shared by renderFilterCell and the re-render-on-
+         * type-switch decision so the two cannot drift (issues #1008, #3542, #3777).
+         * REF columns are handled separately (text input vs dropdown).
+         * @returns {'date-picker'|'range'|'text'}
+         */
+        filterInputKind(format, type) {
+            const datePickerTypes = ['=', '≥', '≤', '>', '<'];
+            if ((format === 'DATE' || format === 'DATETIME') && datePickerTypes.includes(type)) {
+                return 'date-picker';
+            }
+            if (type === '...') return 'range';
+            return 'text';
+        }
+
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
