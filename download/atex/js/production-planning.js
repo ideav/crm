@@ -4077,6 +4077,46 @@
         return out;
     }
 
+    // #3808: восстановить «Вид сырья» переходящих сегментов с ПУСТЫМ материалом. Сегмент-
+    // продолжение дробления по дням физически тот же, что и голова цепочки (станок|намотка|
+    // набор ножей) — отличается только днём. `continuationSignature` ВКЛЮЧАЕТ materialId,
+    // поэтому пустой материал продолжения не давал ему слиться с головой в
+    // `mergeContinuationChains` → `materialForCutId` (#3795) не находил голову и не лечил его:
+    // переходящее задание оставалось без сырья («—»). Группируем материал-АГНОСТИЧНО
+    // (станок|намотка|набор ножей — это `continuationSignature` без materialId) и, если в
+    // группе ровно одно непустое сырьё, проставляем его сегментам с пустым. Неоднозначные
+    // группы (несколько разных сырьёв) не трогаем — лечим только безопасные случаи. Мутирует
+    // `c.materialId`; → массив id вылеченных резок. Чистая (тест).
+    function healContinuationMaterials(cuts){
+        var groups = {};
+        (cuts || []).forEach(function(c){
+            var ks = ((c && c.knifeWidths) || []).slice().map(Number).sort(function(a, b){ return a - b; }).join(',');
+            var key = [
+                (c && c.slitter && c.slitter.id) == null ? '' : String(c.slitter.id),
+                normWinding(c && c.winding),
+                ks
+            ].join('|');
+            (groups[key] = groups[key] || []).push(c);
+        });
+        var healed = [];
+        Object.keys(groups).forEach(function(key){
+            var arr = groups[key];
+            var mats = {};
+            arr.forEach(function(c){
+                var m = c && c.materialId != null ? String(c.materialId).trim() : '';
+                if (m) mats[m] = true;
+            });
+            var distinct = Object.keys(mats);
+            if (distinct.length !== 1) return;   // нет источника / неоднозначно — не трогаем
+            var mat = distinct[0];
+            arr.forEach(function(c){
+                var m = c && c.materialId != null ? String(c.materialId).trim() : '';
+                if (m === '') { c.materialId = mat; healed.push(String(c.id)); }
+            });
+        });
+        return healed;
+    }
+
     // #3785: при равной стоимости перехода тай-брейк — число полос (ножей) ПО УБЫВАНИЮ
     // («при прочих равных» больше полос — раньше), затем уже ширина ролика и id.
     function startKey(c){ return [-(Number(c.knifeCount) || 0), Number(c.rollerWidth) || 0, String(c.id)]; }
@@ -4632,6 +4672,7 @@
         reserveFifo: reserveFifo,
         fifoBatchesForMaterial: fifoBatchesForMaterial,
         materialByCut: materialByCut,
+        healContinuationMaterials: healContinuationMaterials,   // #3808
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
         foilWindingMinutes: foilWindingMinutes,   // #3742
@@ -5686,6 +5727,19 @@
             if (m) {
                 c.materialId = m;
                 c.materialName = (self.materialNameById && self.materialNameById[m]) || c.materialName || '';
+            }
+        });
+        // #3808: переходящие сегменты с пустым «Видом сырья» (обеспечения которых ведут на
+        // НЕактивную позицию → materialByCut их не восстановил) лечим по цепочке станок|намотка|
+        // ножи (см. healContinuationMaterials). После этого materialId согласован у всей цепочки,
+        // поэтому continuationSignature снова объединяет сегменты, и applySplitPlan (#3795) при
+        // ближайшем сохранении пропишет «Вид сырья» в БД (т.е. лечение и отображается, и
+        // персистится).
+        var healed = healContinuationMaterials(this.cuts);
+        healed.forEach(function(id) {
+            var c = self.cuts.filter(function(x) { return String(x.id) === String(id); })[0];
+            if (c && !c.materialName) {
+                c.materialName = (self.materialNameById && self.materialNameById[String(c.materialId)]) || c.materialName || '';
             }
         });
     };
