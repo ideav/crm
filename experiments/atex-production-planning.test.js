@@ -2582,7 +2582,76 @@ function runGenerateCutsReannotatesActualWidthTest() {
     });
 }
 
+// #3778: «Зафиксировать» снимает тайминг (Наладка ножей / Сырье-намотка / Резка и Лидер) в
+// запись тем же _m_set, что и флаг; пустые поля наполняются (force-write), совпадающие — нет.
+function runFixSnapshotTimingTest() {
+    function makeController(stored) {
+        var controller = Object.create(api.Controller.prototype);
+        var posts = [];
+        controller.meta = { cut: { id: '1078', val: 'Производственная резка', reqs: [
+            req('1156', 'Слиттер'),
+            req('16403', 'Кол-во план'),
+            req('24308', 'Очередность'),
+            req('26584', 'Длительность, минут'),
+            req('81530', 'Зафиксировано'),
+            req('96067', 'Наладка ножей, мин'),
+            req('96069', 'Сырье/намотка, мин'),
+            req('96778', 'Резка и Лидер')
+        ] } };
+        controller.cuts = [{
+            id: 'c1', slitter: { id: '20', label: 'Станок 2' }, sequence: 1,
+            plannedRuns: 2, duration: 4, materialId: 'A', winding: 'IN',
+            storedKnifeSetupMin: stored ? stored.knife : '',
+            storedMaterialWindingMin: stored ? stored.material : '',
+            storedCutAndLeaderMin: stored ? stored.cutTime : ''
+        }];
+        controller.changeTimes = opT;
+        controller.prevSetupBySlitter = {};
+        controller.setBusy = function() {};
+        controller.showProgress = function() {};
+        controller.updateProgress = function() {};
+        controller.hideProgress = function() {};
+        controller.render = function() {};
+        controller.reload = function() { return Promise.resolve(); };
+        controller.notify = function() {};
+        controller.post = function(path, fields) { posts.push({ path: path, fields: fields || {} }); return Promise.resolve({}); };
+        controller._posts = posts;
+        return controller;
+    }
+    function setFor(controller) {
+        return controller._posts.filter(function(p) { return p.path.indexOf('_m_set/c1') === 0; })[0];
+    }
+
+    // 1) Пустые поля + фиксация → _m_set несёт флаг И три тайминг-поля.
+    var c1 = makeController(null);
+    return c1.setCutsFixed(['c1'], true).then(function() {
+        var set = setFor(c1);
+        assertEqual(!!set, true, 'fix #3778: записан _m_set для зафиксированной резки');
+        assertEqual(set.fields.t81530, '1', 'fix #3778: флаг «Зафиксировано»=1');
+        assertEqual([typeof set.fields.t96067, typeof set.fields.t96069, typeof set.fields.t96778],
+            ['string', 'string', 'string'], 'fix #3778: три тайминг-поля сняты вместе с флагом');
+        assertEqual(set.fields.t96778, '8', 'fix #3778: «Резка и Лидер» = Длительность(4) + лидер(2×2) = 8');
+
+        // 2) Те же значения уже хранятся → фиксация пишет ТОЛЬКО флаг (нет лишних записей).
+        var c2 = makeController({ knife: set.fields.t96067, material: set.fields.t96069, cutTime: set.fields.t96778 });
+        return c2.setCutsFixed(['c1'], true).then(function() {
+            assertEqual(Object.keys(setFor(c2).fields).sort(), ['t81530'],
+                'fix #3778: совпадающий тайминг не переписывается — только флаг');
+
+            // 3) Снятие фиксации тайминг не снимает (только флаг=0).
+            var c3 = makeController(null);
+            return c3.setCutsFixed(['c1'], false).then(function() {
+                var set3 = setFor(c3);
+                assertEqual(set3.fields.t81530, '0', 'fix #3778: снятие фиксации пишет флаг=0');
+                assertEqual(Object.keys(set3.fields).sort(), ['t81530'],
+                    'fix #3778: при снятии фиксации тайминг не трогаем');
+            });
+        });
+    });
+}
+
 runSaveSequencesT1078Test()
+    .then(runFixSnapshotTimingTest)
     .then(runApplySplitPlanTest)
     .then(runPreferredWidthsFilterTest)
     .then(runGenerateCutsDeferredGpTest)
