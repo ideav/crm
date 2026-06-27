@@ -588,6 +588,40 @@ assertEqual(
     planning.chooseSlitterBySetup({ id: 'C', materialId: 'MWR116L', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [40, 40], rollerWidth: 600 }, s3666, g3666, l3666, null),
     '1', 'chooseSlitterBySetup #3666: другой набор ширин — на пустой станок (не пихаем к чужому набору)');
 
+// ── #3801: ровная загрузка станков ──
+// Прицепиться негде (ни ножи, ни сырьё не совпадают ни с одним станком) → наименее
+// загруженный станок. Загрузки заданы так, что минимум — у станка «3» (не у наименьшего id),
+// поэтому выбор управляется именно загрузкой, а не порядком id.
+var s3801 = [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }];
+var gIncompat = {
+    '1': [{ id: 'a', materialId: 'MA', winding: 'IN', batchId: 'b', knifeCount: 2, knifeWidths: [50, 50], rollerWidth: 0 }],
+    '2': [{ id: 'b', materialId: 'MB', winding: 'IN', batchId: 'b', knifeCount: 2, knifeWidths: [60, 60], rollerWidth: 0 }],
+    '3': [{ id: 'c', materialId: 'MC', winding: 'IN', batchId: 'b', knifeCount: 2, knifeWidths: [70, 70], rollerWidth: 0 }],
+    '4': [{ id: 'd', materialId: 'MD', winding: 'IN', batchId: 'b', knifeCount: 2, knifeWidths: [80, 80], rollerWidth: 0 }]
+};
+assertEqual(
+    planning.chooseSlitterBySetup({ id: 'X', materialId: 'MX', winding: 'IN', batchId: 'b', knifeCount: 2, knifeWidths: [33, 33], rollerWidth: 0 },
+        s3801, gIncompat, { '1': 4, '2': 3, '3': 1, '4': 2 }, null),
+    '3', 'chooseSlitterBySetup #3801: несовместимая резка — на наименее загруженный станок');
+
+// То же сырьё + намотка (ножи другие) → объединяем на тот же станок, а не открываем пустой.
+var gMat3801 = { '4': [{ id: 'A', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 0 }] };
+assertEqual(
+    planning.chooseSlitterBySetup({ id: 'B', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [40, 40], rollerWidth: 0 },
+        s3801, gMat3801, { '1': 0, '2': 0, '3': 0, '4': 1 }, null),
+    '4', 'chooseSlitterBySetup #3801: то же сырьё+намотка — на тот же станок (объединяем сырьё), а не на пустой');
+
+// Два станка одинаково совместимы (то же сырьё+ножи) → на наименее загруженный из них.
+var gBoth3801 = {
+    '1': [{ id: 'p', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 0 }],
+    '4': [{ id: 'q', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 0 },
+          { id: 'r', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 0 }]
+};
+assertEqual(
+    planning.chooseSlitterBySetup({ id: 'Y', materialId: 'M', winding: 'IN', batchId: 'b1', knifeCount: 2, knifeWidths: [55, 33], rollerWidth: 0 },
+        s3801, gBoth3801, { '1': 1, '2': 0, '3': 0, '4': 2 }, null),
+    '1', 'chooseSlitterBySetup #3801: при равной совместимости — на наименее загруженный совместимый станок (а не на пустой)');
+
 // #3421: генерация хардкодила стратегию FATIGUE («сложные раньше»), которая по
 // route-score выдаёт ножи по ВОЗРАСТАНИЮ (6,16,16) на данных скриншота — вопреки
 // #3130. Фиксы #3412/#3415 правили SETUP-путь, до генерации не доходили. Поэтому

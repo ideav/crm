@@ -4189,8 +4189,17 @@
     // (knifeWidthSig). Одинаковую конфигурацию ножей не разносим по разным станкам: на
     // пустом станке прирост переналадки = 0 (у одиночной резки нет переходов), и прежде он
     // обыгрывал занятый совместимый (delta которого = переналадка), хотя физически пустой
-    // станок тоже требует настройки ножей с нуля. Поэтому совпавший набор ножей — первым,
-    // дальше прежний порядок: delta ↑, affinity ↑, загрузка ↑, id.
+    // станок тоже требует настройки ножей с нуля.
+    //
+    // #3801: «прицепиться» к станку можно по ножам (тот же набор ширин) ИЛИ по сырью (то же
+    // сырьё + намотка — резка идёт без смены сырья). Логика выбора:
+    //   • есть куда прицепиться → держим группировку: тот же набор ножей → то же сырьё →
+    //     минимум прироста переналадки (delta ↑) → аффинность ↑ → НАИМЕНЕЕ загруженный
+    //     совместимый станок (не сваливаем всё на один из нескольких совместимых) → id;
+    //   • прицепиться негде (ни по ножам, ни по сырью — везде холодная настройка) → выбираем
+    //     НАИМЕНЕЕ ЗАГРУЖЕННЫЙ станок (балансировка), затем delta ↑, аффинность ↑, id.
+    // Так одинаковое сырьё/ножи объединяются на одном станке, а несовместимые задания
+    // распределяются ровно, а не копятся на одном (неравномерная загрузка станков).
     function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
@@ -4202,7 +4211,10 @@
             if (b === Infinity) return -1;
             return a - b;
         }
+        function cmpId(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
         var cutSig = knifeWidthSig(cut);
+        var cutMat = String(cut && cut.materialId == null ? '' : cut.materialId).trim();
+        var cutWind = normWinding(cut && cut.winding);
         var candidates = allowed.map(function(s) {
             var id = String(s.id);
             var group = groups[id] || [];
@@ -4210,20 +4222,38 @@
             var after = orderedChangeoverCost(group.concat([cut]), weights);
             // #3666: 0 — станок уже режет тот же набор ширин ножей (приоритет), иначе 1.
             var sameKnives = (cutSig !== '' && group.some(function(g){ return knifeWidthSig(g) === cutSig; })) ? 0 : 1;
+            // #3801: 0 — станок уже режет то же сырьё + намотку (можно прицепиться по сырью), иначе 1.
+            var sameMaterial = (cutMat !== '' && group.some(function(g){
+                return String(g.materialId == null ? '' : g.materialId).trim() === cutMat && normWinding(g.winding) === cutWind;
+            })) ? 0 : 1;
             return {
                 id: id,
+                // #3801: 0 — есть к чему прицепиться (ножи ИЛИ сырьё), иначе 1 (холодная настройка).
+                attach: (sameKnives === 0 || sameMaterial === 0) ? 0 : 1,
                 sameKnives: sameKnives,
+                sameMaterial: sameMaterial,
                 delta: round3(after - before),
                 affinity: bestExistingTransitionCost(group, cut, weights),
                 load: Number(load[id]) || 0
             };
         });
+        // #3801: есть ли хоть один станок, к которому новая резка цепляется по ножам/сырью.
+        var anyAttach = candidates.some(function(c){ return c.attach === 0; });
         candidates.sort(function(a, b) {
-            return cmpNumber(a.sameKnives, b.sameKnives)   // #3666: тот же набор ножей — на тот же станок
+            if (anyAttach) {
+                return cmpNumber(a.attach, b.attach)            // #3801: совместимые станки — первыми
+                    || cmpNumber(a.sameKnives, b.sameKnives)    // #3666: тот же набор ножей — на тот же станок
+                    || cmpNumber(a.sameMaterial, b.sameMaterial)// #3801: то же сырьё — на тот же станок
+                    || cmpNumber(a.delta, b.delta)              // #3268: минимум прироста переналадки
+                    || cmpNumber(a.affinity, b.affinity)
+                    || cmpNumber(a.load, b.load)                // #3801: при равенстве — наименее загруженный
+                    || cmpId(a.id, b.id);
+            }
+            // #3801: прицепиться негде — выбираем наименее загруженный станок (балансировка).
+            return cmpNumber(a.load, b.load)
                 || cmpNumber(a.delta, b.delta)
                 || cmpNumber(a.affinity, b.affinity)
-                || cmpNumber(a.load, b.load)
-                || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+                || cmpId(a.id, b.id);
         });
         return candidates[0].id;
     }
