@@ -12080,14 +12080,19 @@ class IntegramTable{
 
             const typeName = this.getMetadataName(metadata);
             const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
+            // #3774: если главное значение таблицы — DATETIME, API отдаёт его unix-штампом —
+            // в заголовке показываем дату-время (как в .integram-title-link, #3247), а не штамп.
+            // Сырое firstColumnValue не меняем: оно идёт в dataset (имя для пароль-приглашения
+            // #1481) и сравнения; форматируем только видимый текст заголовка/вкладки браузера.
+            const firstColumnDisplay = firstColumnValue != null ? this.formatRecordTitleValue(firstColumnValue) : null;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnDisplay || typeName }`;
             const instanceName = this.options.instanceName;
 
             // Save and update navbar-workspace + document.title with object value
             const navbarWorkspace = document.querySelector('.navbar-workspace');
             const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
             const prevDocTitle = document.title;
-            const objectValue = firstColumnValue || typeName;
+            const objectValue = firstColumnDisplay || typeName;
             const truncatedValue = objectValue && objectValue.length > 32 ? objectValue.slice(0, 32) + '...' : objectValue;
             if (navbarWorkspace) navbarWorkspace.textContent = truncatedValue;
             document.title = truncatedValue;
@@ -19121,6 +19126,25 @@ class IntegramCreateFormHelper {
         return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
+    // Issue #3774: главное значение DATETIME-таблицы в заголовке формы редактирования —
+    // датой-временем, а не unix-штампом (как IntegramTable.formatRecordTitleValue/#3247).
+    // Тип колонки в заголовок не передаётся, поэтому штамп распознаём эвристикой: 9+ цифр
+    // (или мс >= 1e12) и год 2001–2100 — так же, как formatRefOptionLabel выше. Прочие
+    // значения (имена, короткие числа, уже форматированные строки) возвращаем как есть.
+    formatRecordTitleValue(value) {
+        const raw = String(value == null ? '' : value);
+        const s = raw.trim();
+        if (!/^\d{9,}(\.\d+)?$/.test(s)) return raw;
+        let n = parseFloat(s);
+        if (!isFinite(n)) return raw;
+        if (n >= 1e12) n = n / 1000;   // JS-штамп в миллисекундах → секунды
+        const d = new Date(n * 1000);
+        const year = d.getFullYear();
+        if (year < 2001 || year > 2100) return raw;
+        const pad = (v) => String(v).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     normalizeFormat(baseTypeId) {
         const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
                               'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
@@ -20295,7 +20319,8 @@ class IntegramCreateFormHelper {
 
         const typeName = this.getMetadataName(metadata);
         const recordVal = recordData && recordData.obj ? recordData.obj.val : '';
-        const title = `Редактирование: ${recordVal || typeName}`;
+        // #3774: DATETIME-главное-значение → дата-время вместо unix-штампа.
+        const title = `Редактирование: ${this.formatRecordTitleValue(recordVal) || typeName}`;
         const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
 
         // Build record ID link HTML

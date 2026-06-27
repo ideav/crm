@@ -107,6 +107,25 @@ class IntegramCreateFormHelper {
         return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
+    // Issue #3774: главное значение DATETIME-таблицы в заголовке формы редактирования —
+    // датой-временем, а не unix-штампом (как IntegramTable.formatRecordTitleValue/#3247).
+    // Тип колонки в заголовок не передаётся, поэтому штамп распознаём эвристикой: 9+ цифр
+    // (или мс >= 1e12) и год 2001–2100 — так же, как formatRefOptionLabel выше. Прочие
+    // значения (имена, короткие числа, уже форматированные строки) возвращаем как есть.
+    formatRecordTitleValue(value) {
+        const raw = String(value == null ? '' : value);
+        const s = raw.trim();
+        if (!/^\d{9,}(\.\d+)?$/.test(s)) return raw;
+        let n = parseFloat(s);
+        if (!isFinite(n)) return raw;
+        if (n >= 1e12) n = n / 1000;   // JS-штамп в миллисекундах → секунды
+        const d = new Date(n * 1000);
+        const year = d.getFullYear();
+        if (year < 2001 || year > 2100) return raw;
+        const pad = (v) => String(v).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${year} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     normalizeFormat(baseTypeId) {
         const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
                               'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
@@ -1281,7 +1300,8 @@ class IntegramCreateFormHelper {
 
         const typeName = this.getMetadataName(metadata);
         const recordVal = recordData && recordData.obj ? recordData.obj.val : '';
-        const title = `Редактирование: ${recordVal || typeName}`;
+        // #3774: DATETIME-главное-значение → дата-время вместо unix-штампа.
+        const title = `Редактирование: ${this.formatRecordTitleValue(recordVal) || typeName}`;
         const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
 
         // Build record ID link HTML

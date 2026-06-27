@@ -30,14 +30,19 @@
 
             const typeName = this.getMetadataName(metadata);
             const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
+            // #3774: если главное значение таблицы — DATETIME, API отдаёт его unix-штампом —
+            // в заголовке показываем дату-время (как в .integram-title-link, #3247), а не штамп.
+            // Сырое firstColumnValue не меняем: оно идёт в dataset (имя для пароль-приглашения
+            // #1481) и сравнения; форматируем только видимый текст заголовка/вкладки браузера.
+            const firstColumnDisplay = firstColumnValue != null ? this.formatRecordTitleValue(firstColumnValue) : null;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnDisplay || typeName }`;
             const instanceName = this.options.instanceName;
 
             // Save and update navbar-workspace + document.title with object value
             const navbarWorkspace = document.querySelector('.navbar-workspace');
             const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
             const prevDocTitle = document.title;
-            const objectValue = firstColumnValue || typeName;
+            const objectValue = firstColumnDisplay || typeName;
             const truncatedValue = objectValue && objectValue.length > 32 ? objectValue.slice(0, 32) + '...' : objectValue;
             if (navbarWorkspace) navbarWorkspace.textContent = truncatedValue;
             document.title = truncatedValue;
