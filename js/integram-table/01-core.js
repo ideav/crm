@@ -194,6 +194,22 @@
         }
 
         /**
+         * Resolve a column's symbolic display format the same way renderCell does
+         * (issue #3763): an already-symbolic format wins, otherwise the numeric type
+         * is mapped. Keeps export output identical to what the cell shows.
+         * @param {Object} column - Column definition
+         * @returns {string} Symbolic format name (e.g. 'DATE', 'DATETIME', 'SHORT')
+         */
+        resolveColumnFormat(column) {
+            const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                  'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                  'GRANT', 'REPORT_COLUMN', 'PATH'];
+            const upperFormat = column && column.format ? String(column.format).toUpperCase() : '';
+            if (validFormats.includes(upperFormat)) return upperFormat;
+            return column && column.type ? this.normalizeFormat(column.type) : 'SHORT';
+        }
+
+        /**
          * Check if the table has WRITE access (issue #1508)
          * Returns true when tableGranted is null (not set) or equals "WRITE"
          * Returns false for any other granted value (e.g. "READ")

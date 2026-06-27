@@ -211,6 +211,22 @@ class IntegramTable{
         }
 
         /**
+         * Resolve a column's symbolic display format the same way renderCell does
+         * (issue #3763): an already-symbolic format wins, otherwise the numeric type
+         * is mapped. Keeps export output identical to what the cell shows.
+         * @param {Object} column - Column definition
+         * @returns {string} Symbolic format name (e.g. 'DATE', 'DATETIME', 'SHORT')
+         */
+        resolveColumnFormat(column) {
+            const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                  'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                  'GRANT', 'REPORT_COLUMN', 'PATH'];
+            const upperFormat = column && column.format ? String(column.format).toUpperCase() : '';
+            if (validFormats.includes(upperFormat)) return upperFormat;
+            return column && column.type ? this.normalizeFormat(column.type) : 'SHORT';
+        }
+
+        /**
          * Check if the table has WRITE access (issue #1508)
          * Returns true when tableGranted is null (not set) or equals "WRITE"
          * Returns false for any other granted value (e.g. "READ")
@@ -18259,13 +18275,14 @@ class IntegramTable{
                 const exportRow = [];
                 columns.forEach(col => {
                     const cellValue = row[this.columns.indexOf(col)];
-                    const format = col.format || 'SHORT';
+                    // Resolve the symbolic format exactly as renderCell does so the export
+                    // matches what is shown on screen (issue #3763).
+                    const format = this.resolveColumnFormat(col);
                     let value = cellValue || '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    const upperFormat = String(format).toUpperCase();
-                    const isGrantOrReportColumn = upperFormat === 'GRANT' || upperFormat === 'REPORT_COLUMN';
+                    const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
                     if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
@@ -18282,6 +18299,18 @@ class IntegramTable{
                             // Only mask with asterisks if there's a value
                             value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
+                        case 'DATE': {
+                            // Export DATE as DD.MM.YYYY, not the raw Unix timestamp (issue #3763)
+                            const dateObj = this.parseDDMMYYYY(String(value));
+                            value = (dateObj && !isNaN(dateObj.getTime())) ? this.formatDateDisplay(dateObj) : String(value);
+                            break;
+                        }
+                        case 'DATETIME': {
+                            // Export DATETIME as DD.MM.YYYY HH:MM:SS, not the raw Unix timestamp (issue #3763)
+                            const dtObj = this.parseDDMMYYYYHHMMSS(String(value));
+                            value = (dtObj && !isNaN(dtObj.getTime())) ? this.formatDateTimeDisplay(dtObj) : String(value);
+                            break;
+                        }
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
@@ -18309,13 +18338,14 @@ class IntegramTable{
                 const exportRow = [];
                 columns.forEach(col => {
                     const cellValue = row[this.columns.indexOf(col)];
-                    const format = col.format || 'SHORT';
+                    // Resolve the symbolic format exactly as renderCell does so the export
+                    // matches what is shown on screen (issue #3763).
+                    const format = this.resolveColumnFormat(col);
                     let value = cellValue || '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    const upperFmt = String(format).toUpperCase();
-                    const isGrantOrReportColumn = upperFmt === 'GRANT' || upperFmt === 'REPORT_COLUMN';
+                    const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
                     if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
@@ -18332,6 +18362,18 @@ class IntegramTable{
                             // Only mask with asterisks if there's a value
                             value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
+                        case 'DATE': {
+                            // Export DATE as DD.MM.YYYY, not the raw Unix timestamp (issue #3763)
+                            const dateObj = this.parseDDMMYYYY(String(value));
+                            value = (dateObj && !isNaN(dateObj.getTime())) ? this.formatDateDisplay(dateObj) : String(value);
+                            break;
+                        }
+                        case 'DATETIME': {
+                            // Export DATETIME as DD.MM.YYYY HH:MM:SS, not the raw Unix timestamp (issue #3763)
+                            const dtObj = this.parseDDMMYYYYHHMMSS(String(value));
+                            value = (dtObj && !isNaN(dtObj.getTime())) ? this.formatDateTimeDisplay(dtObj) : String(value);
+                            break;
+                        }
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export

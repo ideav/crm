@@ -722,13 +722,14 @@
                 const exportRow = [];
                 columns.forEach(col => {
                     const cellValue = row[this.columns.indexOf(col)];
-                    const format = col.format || 'SHORT';
+                    // Resolve the symbolic format exactly as renderCell does so the export
+                    // matches what is shown on screen (issue #3763).
+                    const format = this.resolveColumnFormat(col);
                     let value = cellValue || '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    const upperFormat = String(format).toUpperCase();
-                    const isGrantOrReportColumn = upperFormat === 'GRANT' || upperFormat === 'REPORT_COLUMN';
+                    const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
                     if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
@@ -745,6 +746,18 @@
                             // Only mask with asterisks if there's a value
                             value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
+                        case 'DATE': {
+                            // Export DATE as DD.MM.YYYY, not the raw Unix timestamp (issue #3763)
+                            const dateObj = this.parseDDMMYYYY(String(value));
+                            value = (dateObj && !isNaN(dateObj.getTime())) ? this.formatDateDisplay(dateObj) : String(value);
+                            break;
+                        }
+                        case 'DATETIME': {
+                            // Export DATETIME as DD.MM.YYYY HH:MM:SS, not the raw Unix timestamp (issue #3763)
+                            const dtObj = this.parseDDMMYYYYHHMMSS(String(value));
+                            value = (dtObj && !isNaN(dtObj.getTime())) ? this.formatDateTimeDisplay(dtObj) : String(value);
+                            break;
+                        }
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
@@ -772,13 +785,14 @@
                 const exportRow = [];
                 columns.forEach(col => {
                     const cellValue = row[this.columns.indexOf(col)];
-                    const format = col.format || 'SHORT';
+                    // Resolve the symbolic format exactly as renderCell does so the export
+                    // matches what is shown on screen (issue #3763).
+                    const format = this.resolveColumnFormat(col);
                     let value = cellValue || '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    const upperFmt = String(format).toUpperCase();
-                    const isGrantOrReportColumn = upperFmt === 'GRANT' || upperFmt === 'REPORT_COLUMN';
+                    const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
                     if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
@@ -795,6 +809,18 @@
                             // Only mask with asterisks if there's a value
                             value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
+                        case 'DATE': {
+                            // Export DATE as DD.MM.YYYY, not the raw Unix timestamp (issue #3763)
+                            const dateObj = this.parseDDMMYYYY(String(value));
+                            value = (dateObj && !isNaN(dateObj.getTime())) ? this.formatDateDisplay(dateObj) : String(value);
+                            break;
+                        }
+                        case 'DATETIME': {
+                            // Export DATETIME as DD.MM.YYYY HH:MM:SS, not the raw Unix timestamp (issue #3763)
+                            const dtObj = this.parseDDMMYYYYHHMMSS(String(value));
+                            value = (dtObj && !isNaN(dtObj.getTime())) ? this.formatDateTimeDisplay(dtObj) : String(value);
+                            break;
+                        }
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
