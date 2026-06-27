@@ -8149,7 +8149,8 @@
             sequence: seqReqId,
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
             leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
-            length: lengthReqId   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
+            length: lengthReqId,   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
+            material: reqIdByName(cutMeta, CUT_REQ.material)   // #3795: «Вид сырья» — копируется в продолжение, иначе очередь следующего дня без сырья
         };
         // #3781: длина прогона по id любой записи цепочки = длина прогона её ГОЛОВЫ. Записи-
         // продолжения дробления по дням раньше не получали «Метраж, м», и cutRunLength
@@ -8165,6 +8166,13 @@
             var head = chainHeadById[String(cutId)] || String(cutId);
             var hc = cutsById[head];
             return hc ? cutRunLength(hc, self.supplies, self.footageBySupply) : 0;
+        }
+        // #3795: «Вид сырья» цепочки = сырьё её ГОЛОВЫ (у всех сегментов одно сырьё). Берём
+        // у головы, потому что у реюзнутого продолжения, созданного до фикса, поле пустое.
+        function materialForCutId(cutId) {
+            var head = chainHeadById[String(cutId)] || String(cutId);
+            var hc = cutsById[head];
+            return hc && hc.materialId != null && String(hc.materialId) !== '' ? String(hc.materialId) : '';
         }
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
@@ -8209,6 +8217,14 @@
                         var ulen = runLenForCutId(u.cutId);
                         if (ulen > 0) fields['t' + lengthReqId] = String(round3(ulen));
                     }
+                    // #3795: восстановить «Вид сырья» = сырью головы цепочки. Для головы — no-op
+                    // (то же сырьё); для реюзнутого продолжения, созданного до фикса с пустым
+                    // «Вид сырья», лечит пустоту, иначе очередь следующего дня без сырья («—»).
+                    var matReqId = reqIdByName(cutMeta, CUT_REQ.material);
+                    if (matReqId) {
+                        var umat = materialForCutId(u.cutId);
+                        if (umat) fields['t' + matReqId] = umat;
+                    }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -8221,6 +8237,7 @@
             var crs = createsByParent[parentId];
             var upd = updateByCut[parentId];
             var parentRunLen = runLenForCutId(parentId);   // #3781: длина прогона цепочки (для «Метраж, м» продолжений)
+            var parentMaterial = materialForCutId(parentId);   // #3795: «Вид сырья» цепочки (для продолжений)
             var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
             var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
             chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
@@ -8268,6 +8285,10 @@
                             status: (parentCut && parentCut.status) || CUT_STATUSES[0],
                             slitter: parentCut && parentCut.slitter && parentCut.slitter.id,
                             materialBatch: parentCut && parentCut.batchId,
+                            // #3795: «Вид сырья» цепочки → продолжение. Карточка очереди берёт сырьё
+                            // из cut_material (своего реквизита резки), а обеспечения продолжения не
+                            // привязаны к нему по «Заданию», поэтому materialByCut его не восстановит.
+                            material: parentMaterial,
                             plannedRuns: cr.plannedRuns,
                             sequence: cr.sequence,
                             winding: normWinding(parentCut && parentCut.winding),
