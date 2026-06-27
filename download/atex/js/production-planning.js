@@ -63,7 +63,8 @@
         settings: 'Настройка',
         maxStock: 'Максимальный запас',  // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
         leader: 'Лидер',                 // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
-        downtime: 'Отпуск'               // #3764: подчинённая станку таблица «Отпуск» (122572) — окна простоя станка
+        downtime: 'Отпуск',              // #3764: подчинённая станку таблица «Отпуск» (122572) — окна простоя станка
+        calendar: 'Календарь'            // #3788: таблица «Календарь» (123162) — праздничные/рабочие дни (исключения)
     };
     // #3764: реквизиты подчинённой «Отпуск» (up = Слиттер). Главное значение записи —
     // НАЧАЛО окна простоя (DATETIME, unix-сек); «Окончание» — конец окна (DATETIME);
@@ -72,6 +73,16 @@
         end: 'Окончание',
         notes: 'Примечания'
     };
+    // #3788: «Календарь» (123162, тип DATE). Главное значение записи — дата (ДД.ММ.ГГГГ);
+    // реквизит «Тип дня» (ссылка) задаёт исключение из обычного правила выходных:
+    //   «Праздничный день» — нерабочий (даже будни), «Рабочий день» — рабочий (даже Сб/Вс).
+    // По умолчанию (нет записи в календаре) Сб/Вс — выходные, будни — рабочие.
+    var CALENDAR_REQ = { dayType: 'Тип дня' };
+    var DAY_TYPE_HOLIDAY = 'Праздничный день';
+    var DAY_TYPE_WORKING = 'Рабочий день';
+    // #3788: горизонт расчёта нерабочих дней расписания (дней вперёд от базы). Покрывает
+    // годовой набор праздников; дальше плановой очереди не бывает.
+    var CALENDAR_HORIZON_DAYS = 366;
     // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
     // максимально допустимый запас (число); реквизиты задают комбинацию параметров
     // «Партии ГП», для которой имеет смысл создавать запас. Резолв по имени.
@@ -2778,6 +2789,72 @@
         return out;
     }
 
+    // #3788: «ДД.ММ.ГГГГ» → числовой ключ дня ГГГГММДД (для карты календаря). null — мусор.
+    function parseDmyKey(str) {
+        var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(str == null ? '' : str).trim());
+        return m ? (Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1])) : null;
+    }
+
+    // #3788: миллисекунды → ключ дня ГГГГММДД (локальный день).
+    function dayKeyFromMs(ms) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return null;
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    }
+
+    // #3788: рабочий ли день. calendarByDay: { ГГГГММДД: 'Праздничный день'|'Рабочий день' }
+    // (исключения); dow — день недели (0=Вс … 6=Сб). «Рабочий день» делает выходной рабочим,
+    // «Праздничный день» — будни нерабочим; иначе обычное правило (Сб/Вс — выходные).
+    function dayTypeWorking(dayKey, dow, calendarByDay) {
+        var t = calendarByDay && calendarByDay[dayKey];
+        if (t === DAY_TYPE_WORKING) return true;
+        if (t === DAY_TYPE_HOLIDAY) return false;
+        return dow !== 0 && dow !== 6;
+    }
+
+    // #3788: рабочий ли календарный день (по мс). Пустая/битая дата → считаем рабочим (не блокируем).
+    function dayIsWorking(ms, calendarByDay) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return true;
+        return dayTypeWorking(dayKeyFromMs(d.getTime()), d.getDay(), calendarByDay);
+    }
+
+    // #3788: нерабочие (выходные/праздничные) дни горизонта [0..horizonDays] от базы →
+    // блокированные интервалы в МИНУТАХ от полуночи дня 0 (та же ось, что blockedRanges #3764).
+    // Каждый нерабочий день — целиком [d*1440, (d+1)*1440]; смежные дни СЛИВАЮТСЯ в один
+    // интервал (выходные+праздники подряд → один блок, меньше работы свипу). Пустой calendarByDay
+    // → блокируются только Сб/Вс. baseMidnightMs нечисловой → []. Вход не мутирует.
+    function calendarBlockedRanges(calendarByDay, baseMidnightMs, horizonDays) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return [];
+        var bd = new Date(base);
+        if (isNaN(bd.getTime())) return [];
+        var H = Math.max(0, Number(horizonDays) || 0);
+        var offs = [];
+        for (var d = 0; d <= H; d++) {
+            // setDate(+d) — корректный календарный день (без накопления через DST, в МСК DST нет).
+            var day = new Date(bd.getFullYear(), bd.getMonth(), bd.getDate() + d, 0, 0, 0, 0);
+            if (!dayTypeWorking(dayKeyFromMs(day.getTime()), day.getDay(), calendarByDay)) offs.push(d);
+        }
+        var out = [];
+        for (var i = 0; i < offs.length; ) {
+            var s = offs[i], e = offs[i];
+            while (i + 1 < offs.length && offs[i + 1] === e + 1) { e = offs[++i]; }
+            out.push([s * 1440, (e + 1) * 1440]);   // целые сутки; стык на полуночь сольёт соседние
+            i++;
+        }
+        return out;
+    }
+
+    // #3788: слить два набора блокированных интервалов (минуты от базы) в один отсортированный
+    // массив (окна простоя станка #3764 ∪ нерабочие дни календаря). Дубли не схлопываем —
+    // свип (nextFreeWorkMinute) корректно работает с перекрытиями.
+    function mergeBlockedRanges(a, b) {
+        var out = (a || []).concat(b || []);
+        out.sort(function(x, y) { return x[0] - y[0]; });
+        return out;
+    }
+
     // #3764: рабочее окно дня для абсолютной минуты от полуночи дня 0. Если минута до начала
     // окна (ночь/утро) — подтягиваем к dayStart; если в/после конца окна — к dayStart следующего
     // дня. blocked — отсортированные [[s,e],…]. Возвращает ближайшую минуту ≥ from, которая
@@ -4326,6 +4403,12 @@
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
+        parseDmyKey: parseDmyKey,                                 // #3788
+        dayKeyFromMs: dayKeyFromMs,                               // #3788
+        dayTypeWorking: dayTypeWorking,                           // #3788
+        dayIsWorking: dayIsWorking,                               // #3788
+        calendarBlockedRanges: calendarBlockedRanges,             // #3788
+        mergeBlockedRanges: mergeBlockedRanges,                   // #3788
         nextFreeWorkMinute: nextFreeWorkMinute,                   // #3764
         shiftPlacementsPastDowntime: shiftPlacementsPastDowntime, // #3764
         unixToDatetimeLocal: unixToDatetimeLocal,                 // #3764
@@ -4524,6 +4607,7 @@
             downtime: null        // #3764: подчинённая «Отпуск» (окна простоя станка)
         };
         this.downtimesBySlitter = {};  // #3764: карта slitterId → [{ id, start, end, notes }] (start/end — unix-сек)
+        this.calendarByDay = {};       // #3788: карта ГГГГММДД → 'Праздничный день'|'Рабочий день' (исключения календаря)
         this.sleeveBatches = [];   // #3340: партии втулок «в работе» (отчёт sleeve_batches_active) для FIFO
         this.sleeveCutterId = '';  // #3340: id втулкореза TC-20 (резолв по имени)
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
@@ -4640,6 +4724,7 @@
             self.meta.maxStock = byName(TABLE.maxStock);   // #3391: необязательная — фича включается её наличием
             self.meta.leader = byName(TABLE.leader);        // #3569: справочник «Лидер» (резолв метки → id)
             self.meta.downtime = byName(TABLE.downtime);    // #3764: необязательная — кнопка/пропуск простоя включаются её наличием
+            self.meta.calendar = byName(TABLE.calendar);    // #3788: необязательная — пропуск выходных/праздников включается её наличием
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -4759,17 +4844,69 @@
         });
     };
 
-    // #3764: окна «Отпуска» станка → блокированные интервалы (минуты от полуночи дня 0) для
-    // планировщика. baseMidnightMs — база расписания (день фильтра «С»).
-    AtexProductionPlanning.prototype.blockedRangesForSlitter = function(slitterId, baseMidnightMs) {
-        return downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs);
+    // #3788: «Календарь» — исключения из обычных выходных. Таблица 123162 (тип DATE): главное
+    // значение — дата (ДД.ММ.ГГГГ), «Тип дня» (ссылка) = «Праздничный день»/«Рабочий день».
+    // Строим карту ГГГГММДД → тип. Таблицы нет в метаданных (старое окружение) → пустая карта,
+    // фича выключена (выходные/праздники не пропускаются, разметка дней не рисуется). Ошибка
+    // чтения не валит загрузку.
+    AtexProductionPlanning.prototype.loadCalendar = function() {
+        var self = this;
+        this.calendarByDay = {};
+        var meta = this.meta.calendar;
+        if (!meta) return Promise.resolve();
+        var typeIdx = columnIndex(meta, CALENDAR_REQ.dayType);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var key = parseDmyKey(r[0]);
+                if (key == null) return;
+                // «Тип дня» — ссылка «id:Метка»; берём метку (parseRef.label).
+                var typeLabel = (typeIdx >= 0 && r[typeIdx] != null) ? parseRef(r[typeIdx]).label : '';
+                if (typeLabel) self.calendarByDay[key] = typeLabel;
+            });
+            console.log('[pp] 📅 loadCalendar: дней-исключений в календаре:', Object.keys(self.calendarByDay).length);
+        }).catch(function(err) {
+            console.warn('[pp] 📅 loadCalendar: не удалось прочитать «' + TABLE.calendar + '»:', err && err.message);
+            self.calendarByDay = {};
+        });
     };
 
-    // #3764: карта slitterId → blockedRanges по всем станкам (для planCutOperations).
+    // #3788: нерабочие дни (выходные/праздники) горизонта → блокированные интервалы (минуты от
+    // базы). Фича включается наличием таблицы «Календарь»: без неё [] (расписание прежнее, дни
+    // не блокируются). baseMidnightMs — база расписания (день фильтра «С»). Глобальны для всех станков.
+    AtexProductionPlanning.prototype.calendarBlockedRanges = function(baseMidnightMs) {
+        if (!this.meta.calendar) return [];
+        return calendarBlockedRanges(this.calendarByDay, baseMidnightMs, CALENDAR_HORIZON_DAYS);
+    };
+
+    // #3788: рабочий ли день (по мс). Фича выключена (нет «Календаря») → всегда рабочий, чтобы
+    // разметка выходных не появлялась в старом окружении.
+    AtexProductionPlanning.prototype.dayIsWorking = function(ms) {
+        if (!this.meta.calendar) return true;
+        return dayIsWorking(ms, this.calendarByDay);
+    };
+
+    // #3764+#3788: блокированные интервалы станка = окна «Отпуска» этого станка ∪ нерабочие дни
+    // календаря (глобальные). baseMidnightMs — база расписания (день фильтра «С»).
+    AtexProductionPlanning.prototype.blockedRangesForSlitter = function(slitterId, baseMidnightMs) {
+        return mergeBlockedRanges(
+            downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs),
+            this.calendarBlockedRanges(baseMidnightMs)
+        );
+    };
+
+    // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
+    // Нерабочие дни календаря добавляем КАЖДОМУ станку (глобальны), поэтому строим по полному
+    // справочнику станков, а не только по тем, у кого есть отпуск.
     AtexProductionPlanning.prototype.blockedRangesBySlitter = function(baseMidnightMs) {
         var self = this, out = {};
-        Object.keys(this.downtimesBySlitter || {}).forEach(function(key) {
-            var ranges = downtimeBlockedRanges(self.downtimesBySlitter[key], baseMidnightMs);
+        var calBlocks = this.calendarBlockedRanges(baseMidnightMs);
+        var keys = {};
+        (this.slitters || []).forEach(function(s) { keys[String(s.id)] = true; });
+        Object.keys(this.downtimesBySlitter || {}).forEach(function(k) { keys[k] = true; });
+        Object.keys(keys).forEach(function(key) {
+            var ranges = mergeBlockedRanges(
+                downtimeBlockedRanges(self.downtimesBySlitter[key], baseMidnightMs), calBlocks);
             if (ranges.length) out[key] = ranges;
         });
         return out;
@@ -8877,6 +9014,10 @@
         var tabGroups = mergeStationTabs(this.slitters, groups);
 
         if (!tabGroups.length) {
+            // #3788: отображаемая дата — выходной/праздник → красным «Выходной день» перед подсказкой.
+            if (!this.dayIsWorking(planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)))) {
+                box.appendChild(el('div', { class: 'atex-pp-dayoff-note', text: 'Выходной день' }));
+            }
             box.appendChild(el('div', { class: 'atex-pp-empty', text: 'Заданий в очереди нет' }));
             return;
         }
@@ -9272,7 +9413,13 @@
             if (cardSchedDay != null && cardSchedDay !== lastDayDateRendered) {
                 // #3743: после даты — суммарные минуты заданий станка за этот день: «(456 мин)».
                 var dayMins = Math.round(Number(dayMinutesBySched[cardSchedDay]) || 0);
-                groupEl.appendChild(el('div', { class: 'atex-pp-day-date' }, [
+                // #3788: день расписания пришёлся на выходной/праздник, но задания на него есть
+                // (вручную или вытеснены) — помечаем дату красным фоном.
+                var dayOff = !self.dayIsWorking(planBaseMidnightMs + cardSchedDay * 86400000);
+                groupEl.appendChild(el('div', {
+                    class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : ''),
+                    title: dayOff ? 'Выходной/праздничный день — заданий быть не должно' : ''
+                }, [
                     formatPlanDayHeading(planBaseMidnightMs, cardSchedDay),
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
                 ]));
@@ -9339,6 +9486,11 @@
         if (hasQuery && !groupEl.childNodes.length) {
             groupEl.appendChild(el('div', { class: 'atex-pp-empty', text: 'В этом станке нет позиций по запросу «' + query + '».' }));
         } else if (!groupEl.childNodes.length) {
+            // #3788: отображаемая дата — выходной/праздник → красным «Выходной день» ПЕРЕД
+            // «Заданий в очереди нет» (планирование такие дни пропускает).
+            if (!self.dayIsWorking(planBaseMidnightMs)) {
+                groupEl.appendChild(el('div', { class: 'atex-pp-dayoff-note', text: 'Выходной день' }));
+            }
             // #3535: активный станок без резок в этот день — явная подсказка вместо пустоты.
             // #3787: если у станка есть отпуск(а), пересекающие отображаемую дату — дописываем
             // его детали: «Заданий в очереди нет, отпуск с … по …» (несколько — через запятую).
@@ -9611,6 +9763,7 @@
                     self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
                     self.loadDaySettings(),    // DAY_START_HOUR/DAY_END_HOUR для рабочего окна
+                    self.loadCalendar(),       // #3788: праздничные/рабочие дни (пропуск выходных при планировании)
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
@@ -9649,4 +9802,4 @@
 
  
  
-// @version 2026-06-27-issue-3764
+// @version 2026-06-27-issue-3788
