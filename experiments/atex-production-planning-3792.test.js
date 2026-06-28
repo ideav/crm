@@ -42,14 +42,14 @@ assertEqual(split.map(function(s){ return { day: s.dayOffset, runs: s.runs, cont
     [ { day: 0, runs: 15, cont: false } ],
     '#3792: зафиксированная резка — один сегмент на своём дне (нахлёст 150>100, не разбивается)');
 
-// контроль: ТА ЖЕ резка без фиксации разбивается по дням (#3760: 11 сегодня + 4 завтра)
+// контроль: ТА ЖЕ резка без фиксации разбивается по дням (#3821: 10 сегодня + 5 завтра, без нахлёста)
 var splitFree = planning.splitMachineQueue(
     [ cut('A', 'M1', [59, 59], 15) ],
     { dayStartMin: 0, dayEndMin: 100, times: TIMES,
       perPassByCut: { A: 10 }, runsByCut: { A: 15 }, dayAnchorByCut: { A: 0 }, gapFill: true });
 assertEqual(splitFree.map(function(s){ return { day: s.dayOffset, runs: s.runs }; }),
-    [ { day: 0, runs: 11 }, { day: 1, runs: 4 } ],
-    '#3792 контроль: незафиксированная резка разбивается по дням (11+4)');
+    [ { day: 0, runs: 10 }, { day: 1, runs: 5 } ],
+    '#3792 контроль: незафиксированная резка разбивается по дням (10+5, #3821 без нахлёста)');
 
 // ── 2) Зафиксированная остаётся на своём дне: gapFill НЕ тянет её в хвост более раннего дня ──
 // A (свободная, день 0, 5 проходов = 50 мин) + B (день 1). Свободную B (#3739) тянет в хвост
@@ -99,7 +99,7 @@ var noAnchor = planning.splitMachineQueue(
     { dayStartMin: 0, dayEndMin: 100, times: TIMES,
       perPassByCut: { A: 10 }, runsByCut: { A: 15 }, dayAnchorByCut: {}, gapFill: true });
 assertEqual(noAnchor.map(function(s){ return { day: s.dayOffset, runs: s.runs }; }),
-    [ { day: 0, runs: 11 }, { day: 1, runs: 4 } ],
-    '#3792: фикс без якоря дня — как свободная (день закрепить нечем, разбивается)');
+    [ { day: 0, runs: 10 }, { day: 1, runs: 5 } ],
+    '#3792: фикс без якоря дня — как свободная (день закрепить нечем, разбивается 10+5, #3821 без нахлёста)');
 
 console.log('\n' + passed + ' assertions passed');

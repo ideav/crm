@@ -3277,38 +3277,45 @@
                 var perPassEffG = st.perPass + leader;
                 var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
                 var availG = effCapacity(day) - clock;
-                if (availG >= setupG) {
-                    // #3760: настройка влезает. Кладём проходы, что помещаются БЕЗ нахлёста, плюс
-                    // ОДИН нахлёстный (первый, пересекающий конец смены): «сколько успели сегодня
-                    // с нахлёстом — сохраняем, после первого нахлёста — остальное на завтра».
-                    var fittingG = Math.floor((availG - setupG) / perPassEffG);
-                    if (fittingG < 0) fittingG = 0;
-                    var overlapsG = fittingG < st.remaining;            // не все проходы влезли → нахлёст
-                    var passesNowG = Math.min(st.remaining, fittingG + (overlapsG ? 1 : 0));
+                // #3821: в хвост дня кладём только проходы, ЦЕЛИКОМ влезающие в рабочую ёмкость
+                // (БЕЗ «нахлёстного» прохода #3760). Раньше брали fittingG + 1 нахлёстный → длинный
+                // проход выводил день за ёмкость (бейдж 483 при максимуме ~480, #3821). Теперь
+                // остаток проходов (включая бывший нахлёстный) уходит на следующий день; если в хвост
+                // не влезает ни один проход — настройку в хвост (ветка ниже), проходы — на завтра.
+                var fittingG = (availG >= setupG) ? Math.floor((availG - setupG) / perPassEffG) : 0;
+                if (fittingG < 0) fittingG = 0;
+                if (fittingG > 0) {
+                    var passesNowG = Math.min(st.remaining, fittingG);
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
-                    if (overlapsG) { day += 1; clock = 0; }            // после первого нахлёста — на завтра
+                    if (st.remaining > 0) { day += 1; clock = 0; }     // остаток проходов — на следующий день
                     else { clock += setupG + durG; }
                 } else if (clock > 0) {
-                    // #3760: хвост не вмещает настройку целиком — кладём подмножество компонентов,
-                    // дотягивающее до конца смены с МИНИМАЛЬНЫМ нахлёстом (minOverlapTailSetupMinutes);
-                    // остаток настройки + проходы — на следующий день как продолжение.
+                    // #3760/#3805/#3821: в хвост дня не влезает ни один проход. ЕСТЬ настройка — кладём её
+                    // в хвост: ПОДМНОЖЕСТВО компонентов, дотягивающее до конца смены с минимальным
+                    // нахлёстом (minOverlapTailSetupMinutes); влезает целиком (availG≥setupG) — всю.
+                    // Остаток настройки + проходы — на следующий день. НЕТ настройки (та же конфигурация,
+                    // #3821: setupG=0) — ничего в хвост не кладём (иначе пустой сегмент), резка целиком
+                    // на следующий день; небольшой простой в хвосте допустим (без нахлёстного прохода).
                     var partsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
                     var tailSetup = minOverlapTailSetupMinutes(partsG, availG, setupG);
-                    var restSetup = round3(setupG - tailSetup);
-                    var wsS = day * 1440 + dayStart + clock;
-                    segments.push({ cutId: pick, dayOffset: day, runs: 0,
-                        windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
-                        durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
-                    clock += tailSetup; prevPhysical = c;
-                    st.isCont = true; st.pendingSetup = restSetup;
+                    if (tailSetup > 0) {
+                        var wsS = day * 1440 + dayStart + clock;
+                        segments.push({ cutId: pick, dayOffset: day, runs: 0,
+                            windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
+                            durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
+                        clock += tailSetup; prevPhysical = c;
+                        st.isCont = true; st.pendingSetup = round3(setupG - tailSetup);
+                    }
                     day += 1; clock = 0;
                 } else {
-                    // Пустой день не вмещает даже настройку (вырожденно: настройка > целого окна) —
-                    // кладём настройку + 1 проход с нахлёстом, остальное на следующий день.
+                    // Вырожденно: даже ПУСТОЙ день не вмещает настройку + один проход (настройка или
+                    // одиночный проход длиннее целого окна). Разбить одиночный проход нельзя — кладём
+                    // настройку + 1 проход с нахлёстом, остальное на следующий день (#3821: единственный
+                    // случай, где нахлёстный проход сохраняется, иначе резка не разместилась бы никогда).
                     var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
                     segments.push({ cutId: pick, dayOffset: day, runs: 1,
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
