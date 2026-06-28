@@ -1052,10 +1052,14 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     saveSet['xlsx']={sheet:$('#xlsx-sheet').val(),r0:xlsxSel.r0,c0:xlsxSel.c0,r1:xlsxSel.r1,c1:xlsxSel.c1};
                 else if(uploadSets[chosenSet]&&uploadSets[chosenSet].xlsx)
                     saveSet['xlsx']=uploadSets[chosenSet].xlsx;
+                // issue #3824: значение настройки (t273 = JSON всего набора) кладём в ТЕЛО
+                // POST, а не в query-строку URL — иначе при большом наборе колонок/формул URL
+                // перерастал лимит и сервер отвечал 414 (Request-URI Too Long). intApi для
+                // строкового vars сам ставит Content-Type form-urlencoded и добавляет _xsrf.
                 if(json.object)
-                    intApi('POST','_m_set/'+json.object[0].id+'?JSON&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
+                    intApi('POST','_m_set/'+json.object[0].id+'?JSON','save-set','t273='+encodeURIComponent(JSON.stringify(saveSet)));
                 else
-                    intApi('POST','_m_new/269?JSON&up=1&t271=UPLOAD&t269='+encodeURIComponent($('#save-set').val())+'&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
+                    intApi('POST','_m_new/269?JSON&up=1','save-set','t271=UPLOAD&t269='+encodeURIComponent($('#save-set').val())+'&t273='+encodeURIComponent(JSON.stringify(saveSet)));
                 break;
                 
             case 'upload':
