@@ -3134,6 +3134,7 @@
         // planStartTs истории (задания 30.05 уезжали в выбранную 4.06). Якорь может быть
         // отрицательным (день раньше базы=дня «С»), поэтому стартовый день = минимальный якорь.
         var anchorByCut = opts.dayAnchorByCut || {};
+        var dueDayByCut = opts.dueDayByCut || {};   // #3826: день срока (смещение от базы) на резку
         var minAnchor = null;
         (orderedCuts || []).forEach(function(c){
             var a = anchorByCut[String(c && c.id)];
@@ -3181,6 +3182,7 @@
                     // план» закрепить день нельзя → трактуем как свободную). Внутри дня резку
                     // оптимизатор переставлять может, на другой день/в разбивку — нет.
                     fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
+                    dueDay: dueDayByCut[id] != null ? dueDayByCut[id] : null,   // #3826: день «Срока изготовления»
                     isCont: false, pendingSetup: 0
                 };
                 poolOrder.push(id);
@@ -3207,6 +3209,22 @@
                 });
                 return best && best.id;
             }
+            // #3826: среди фольги «своего срока» (срок ≤ дня) — крупнейшая, чья настройка+намотка
+            // ЦЕЛИКОМ влезает в остаток дня. Кладём такую (фольга — в конец дня, #3717), не дробя
+            // её настройку в хвост (иначе намотка-продолжение встала бы в НАЧАЛО следующего дня
+            // перед нефольгой — нарушение #3717). Ничего не влезает → null (день закрываем).
+            function bestFittingFoil(ids) {
+                var avail = effCapacity(day) - clock;
+                var best = null, bestDur = -1;
+                ids.forEach(function(id){
+                    var st = state[id], c = st.cut;
+                    if (!(st.remaining > 0) || !(st.perPass > 0)) return;
+                    var setup = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
+                    var dur = st.remaining * (st.perPass + leader);
+                    if (setup + dur <= avail && dur > bestDur) { best = id; bestDur = dur; }
+                });
+                return best;
+            }
             // Предохранитель от зацикливания: каждая итерация уменьшает remaining либо
             // ставит настройку и двигает день (после чего проход точно ложится). Верхняя
             // оценка — по суммарным проходам + запас на дни/настройки. На практике не срабатывает.
@@ -3228,7 +3246,55 @@
                 var pick;
                 if (inProgress.length) pick = selectByConfig(inProgress);
                 else if (fixedToday.length) pick = selectByConfig(fixedToday);
-                else if (freeDue.length) pick = selectByConfig(freeDue);
+                else if (freeDue.length) {
+                    // #3826: фольга всегда в конце дня (#3717) → внутри дня не может вытеснить
+                    // нефольгу. Поэтому если на ЭТОТ день приходится фольга СВОЕГО срока (срок ≤
+                    // дня), нельзя тянуть вперёд будущую (срок > дня) нефольгу: она съедала хвост,
+                    // и фольга своего срока переливалась на следующий день (баг #3826 — фольга со
+                    // сроком 23 уезжала на 24, хотя в дне 23 было место). Резервируем хвост дня под
+                    // работу своего срока: сперва нефольга своего срока, затем фольга своего срока —
+                    // крупнейшая ЦЕЛИКОМ влезающая (без дробления настройки). Когда ни одна фольга
+                    // не влезает в остаток — закрываем день (фольга остаётся в конце), хвост фольги
+                    // переедет на завтра. Нет фольги своего срока → прежнее поведение (можно тянуть).
+                    var dueTodayFoil = freeDue.filter(function(id){
+                        return state[id].cut && state[id].cut.isFoil && state[id].dueDay != null && state[id].dueDay <= day;
+                    });
+                    // фольга уже стоит на этом дне → нефольгу после неё не кладём (#3717).
+                    var foilOnDay = segments.some(function(s){
+                        var ss = state[String(s.cutId)];
+                        return s.dayOffset === day && ss && ss.cut && ss.cut.isFoil;
+                    });
+                    if (!dueTodayFoil.length) {
+                        pick = selectByConfig(freeDue);
+                    } else {
+                        var dueTodayNonFoil = freeDue.filter(function(id){
+                            return !(state[id].cut && state[id].cut.isFoil) && state[id].dueDay != null && state[id].dueDay <= day;
+                        });
+                        if (dueTodayNonFoil.length && !foilOnDay) {
+                            pick = selectByConfig(dueTodayNonFoil);   // сперва нефольга своего срока
+                        } else {
+                            pick = bestFittingFoil(dueTodayFoil);   // фольга своего срока — крупнейшая целиком влезающая
+                            if (pick == null) {
+                                // ни одна фольга своего срока целиком не влезла в остаток дня.
+                                var foilBiggerThanDay = dueTodayFoil.filter(function(id){
+                                    return (state[id].remaining * (state[id].perPass + leader)) > capacity;
+                                });
+                                if (foilBiggerThanDay.length) {
+                                    pick = selectByConfig(foilBiggerThanDay);   // крупнее целого дня → дробим (заполнит остаток)
+                                } else if (!foilOnDay) {
+                                    // фольги на дне ещё нет → остаток дозаполняем нефольгой (тянем
+                                    // вперёд будущую) — фольга уедет на след. день в конец, «фольга в
+                                    // конце» не нарушается (на этом дне фольги нет).
+                                    var fillNonFoil = freeDue.filter(function(id){ return !(state[id].cut && state[id].cut.isFoil); });
+                                    if (fillNonFoil.length) pick = selectByConfig(fillNonFoil);
+                                    else if (clock > 0) { day += 1; clock = 0; continue; }
+                                    else pick = selectByConfig(dueTodayFoil);
+                                } else if (clock > 0) { day += 1; clock = 0; continue; }   // фольга уже на дне → закрываем день
+                                else pick = selectByConfig(dueTodayFoil);
+                            }
+                        }
+                    }
+                }
                 else if (freeAny.length) pick = selectByConfig(freeAny);   // нет «по сроку» → тянем будущую свободную вперёд
                 else {
                     // Остались только будущие зафиксированные — прыгаем к ближайшему их дню
@@ -3649,6 +3715,14 @@
             var dueOff = dueDayOffsetFromBase(c && c.dueKey, base);
             effAnchorByCut[id] = (dueOff != null) ? Math.min(a, Math.max(0, dueOff)) : a;
         });
+        // #3826: день «Срока изготовления» (смещение от базы) на каждую резку — нужен
+        // splitMachineQueue, чтобы отличить «резку этого дня по сроку» (срок ≤ дня) от «тянем
+        // вперёд будущую» (срок > дня) и зарезервировать хвост дня под фольгу своего срока.
+        var dueDayByCut = {};
+        merged.cuts.forEach(function(c){
+            var off = dueDayOffsetFromBase(c && c.dueKey, base);
+            if (off != null) dueDayByCut[String(c && c.id)] = off;
+        });
         var perPass = opts.perPassByCut || {};
         // #3660: НЕ перепланировать чужие даты — обрабатываем только цепочки, чья ГОЛОВА в
         // выбранном диапазоне «Дата плана» [scopeFromKey; scopeToKey] (ключи YYYYMMDD). Иначе
@@ -3720,6 +3794,7 @@
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
                 dayAnchorByCut: effAnchorByCut,   // #3658: привязка к дню «Даты план» (#3815: ослаблена до дня срока для нефикс.)
+                dueDayByCut: dueDayByCut,   // #3826: день срока — резерв хвоста дня под фольгу своего срока
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
