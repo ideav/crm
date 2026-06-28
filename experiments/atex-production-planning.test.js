@@ -1456,8 +1456,9 @@ assertEqual(segP5.map(function(s){ return { c:s.cutId, day:s.dayOffset, runs:s.r
    { c:'B', day:0, runs:0, setupOnly:true },
    { c:'B', day:1, runs:2, setupOnly:false }],
   'splitMachineQueue #3635 п.5: настройка B в хвосте дня 0 (отдельный сегмент), проходы B с дня 1');
-// #3635 п.5: setupTaskIdSet — голова разбиения «настройка» (0 проходов) опознаётся по
-// цепочке (та же подпись продолжения + станок), где есть запись с проходами > 0.
+// #3635 п.5 / #3827: setupTaskIdSet — сегмент «настройка» (0 проходов) опознаётся по самому
+// признаку «Кол-во план» = 0, НЕ требуя присутствия продолжения-резки той же цепочки в наборе
+// (узкий фильтр дат прячет продолжение на след. дне — см. #3827).
 function p5cut(id, mat, runs) {
     return { id: id, slitter: { id: 'm1' }, materialId: mat, winding: 'IN',
         knifeWidths: [60], knifeCount: 1, plannedRuns: runs };
@@ -1465,8 +1466,8 @@ function p5cut(id, mat, runs) {
 assertEqual(planning.setupTaskIdSet([ p5cut('Bset', '2', 0), p5cut('Bcut', '2', 2), p5cut('A', '1', 1) ]),
     { Bset: true },
     'setupTaskIdSet #3635 п.5: 0-проходная голова с продолжением-резкой той же цепочки → настройка');
-assertEqual(planning.setupTaskIdSet([ p5cut('X', '9', 0) ]), {},
-    'setupTaskIdSet #3635 п.5: одинокая 0-проходная резка (нет резки в цепочке) — НЕ настройка');
+assertEqual(planning.setupTaskIdSet([ p5cut('X', '9', 0) ]), { X: true },
+    'setupTaskIdSet #3827: одинокая 0-проходная резка — тоже настройка (продолжение может быть вне фильтра дат)');
 assertEqual(planning.setupTaskIdSet([ p5cut('P', '3', 2), p5cut('Q', '3', 3) ]), {},
     'setupTaskIdSet #3635 п.5: цепочка без 0-проходных — пусто');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
