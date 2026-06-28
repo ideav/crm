@@ -4446,9 +4446,20 @@
     //     НАИМЕНЕЕ ЗАГРУЖЕННЫЙ станок (балансировка), затем delta ↑, аффинность ↑, id.
     // Так одинаковое сырьё/ножи объединяются на одном станке, а несовместимые задания
     // распределяются ровно, а не копятся на одном (неравномерная загрузка станков).
-    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights) {
+    //
+    // #3830: НЕ сваливать резку на станок, чей рабочий день уже ПЕРЕПОЛНЕН, когда есть другой
+    // допустимый станок со свободным местом. Раньше группировка по сырью (attach) была выше
+    // загрузки → вся фольга (общее сырьё «Фольга …») копилась на одном станке и вылетала за
+    // ёмкость дня (≈514 мин при 450), хотя у соседнего станка день был пуст. Признак overflow
+    // (рабочие минуты дня станка с этой резкой > ёмкости) стал ПЕРВЫМ критерием: при равных
+    // overflow держим прежнюю группировку/балансировку. Активно только когда задана ёмкость
+    // (dayCapacityMin, генерация); без неё (тесты/обратная совместимость) overflow всегда 0.
+    //   dayCapacityMin — рабочая ёмкость дня станка (мин); опционально.
+    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
+        var cap = Number(dayCapacityMin);
+        var capActive = isFinite(cap) && cap > 0;   // #3830: учитывать ёмкость только если задана
         var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId); });
         if (!allowed.length) return null;
         function cmpNumber(a, b) {
@@ -4458,9 +4469,17 @@
             return a - b;
         }
         function cmpId(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+        // #3830: рабочие минуты резки за день — намотка (+ лидер, если хранится). Переналадка
+        // считается отдельно (через прирост orderedChangeoverCost). Нет данных → 0.
+        function cutWorkMinutes(c) {
+            var cl = Number(c && c.storedCutAndLeaderMin);
+            if (isFinite(cl) && cl > 0) return cl;   // #3700: «Резка и Лидер» (намотка + лидер)
+            return Number(c && c.duration) || 0;     // намотка («Длительность, минут»)
+        }
         var cutSig = knifeWidthSig(cut);
         var cutMat = String(cut && cut.materialId == null ? '' : cut.materialId).trim();
         var cutWind = normWinding(cut && cut.winding);
+        var cutWork = cutWorkMinutes(cut);
         var candidates = allowed.map(function(s) {
             var id = String(s.id);
             var group = groups[id] || [];
@@ -4472,8 +4491,12 @@
             var sameMaterial = (cutMat !== '' && group.some(function(g){
                 return String(g.materialId == null ? '' : g.materialId).trim() === cutMat && normWinding(g.winding) === cutWind;
             })) ? 0 : 1;
+            // #3830: рабочие минуты дня станка с этой резкой = переналадки (after) + намотки всех.
+            var dayWork = round3(after + group.reduce(function(s2, g){ return s2 + cutWorkMinutes(g); }, 0) + cutWork);
             return {
                 id: id,
+                // #3830: 1 — день станка с этой резкой ВЫЛЕЗАЕТ за ёмкость (переполнен), иначе 0.
+                overflow: (capActive && dayWork > cap) ? 1 : 0,
                 // #3801: 0 — есть к чему прицепиться (ножи ИЛИ сырьё), иначе 1 (холодная настройка).
                 attach: (sameKnives === 0 || sameMaterial === 0) ? 0 : 1,
                 sameKnives: sameKnives,
@@ -4486,6 +4509,10 @@
         // #3801: есть ли хоть один станок, к которому новая резка цепляется по ножам/сырью.
         var anyAttach = candidates.some(function(c){ return c.attach === 0; });
         candidates.sort(function(a, b) {
+            // #3830: станок, где резка ВЛЕЗАЕТ в день, — всегда первым (не переполняем станок,
+            // если есть свободный). При равных overflow — прежняя логика группировки/балансировки.
+            var byOverflow = cmpNumber(a.overflow, b.overflow);
+            if (byOverflow) return byOverflow;
             if (anyAttach) {
                 return cmpNumber(a.attach, b.attach)            // #3801: совместимые станки — первыми
                     || cmpNumber(a.sameKnives, b.sameKnives)    // #3666: тот же набор ножей — на тот же станок
@@ -7771,6 +7798,11 @@
         }
 
         var layoutPlans = [];
+        // #3830: рабочая ёмкость дня станка (мин) — чтобы не сваливать резку на переполненный
+        // станок, когда есть свободный. Окно резки минус обед (как в splitMachineQueue).
+        var genWindow = self.workingWindow();
+        var genDayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0)
+            - (Number(genWindow.lunchDurationMin) || 0));
         layouts.forEach(function(lay, layIdx) {
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
@@ -7799,9 +7831,11 @@
                 isFoil: !!(lay && lay.isFoil),
                 width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
-                planDate: cutMainValue
+                planDate: cutMainValue,
+                // #3830: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, !!(lay && lay.isFoil))
             };
-            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions);
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin);
             if (slitterId != null) {
                 slitterId = String(slitterId);
                 if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
