@@ -3009,16 +3009,35 @@
                     }
                 }
             }
-            var finish = start + dur;
+            // #3816: резка, ПЕРЕСЕКАЮЩАЯ окно обеда (намотка стартует ДО LUNCH_START и идёт
+            // через него), — станок паузит на обед В ХОДЕ намотки. Раньше обед вставлялся
+            // паузой только перед резкой, СТАРТУЮЩЕЙ в/после LUNCH_START (см. выше), поэтому
+            // длинная резка через обед шла без паузы: день «работал сквозь обед», конец дня
+            // приходился на ~16:22 вместо ~17:00, а сумма за день получалась как целое окно без
+            // вычета обеда (#3816: 502 мин при ёмкости 450). Сдвигаем финиш намотки на
+            // длительность обеда (намотка прерывается на обед), обед помечаем вставленным;
+            // durationMin (минуты РАБОТЫ, основа бейджа дня) не меняется — захлёст #3760 сохранён.
+            var lunchGap = 0;
+            if (lunch && !lunchDone[day] && dur > 0) {
+                var nStartInDay = start - day * 1440;
+                if (nStartInDay < lunch.startMin && (nStartInDay + dur) > lunch.startMin) {
+                    lunchGap = lunch.durationMin;
+                    lunchDone[day] = true;
+                }
+            }
+            var finish = start + dur + lunchGap;
             // #3688: окно-старт = startMin − setupMin (без лидера); leaderMin — лидер после намотки.
             out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur, leaderMin: round3(leaderMin) });
-            t = finish + leaderMin;   // #3688: следующая резка стартует после лидера текущей
+            t = finish + leaderMin;   // #3688: следующая резка стартует после лидера текущей (#3816: после обеда, если он попал в эту резку)
         });
         // #3764: вынести задания за окна «Отпуска» станка (ТО и т.п.). Окно занимает
         // [windowStart, +setup+намотка+лидер]; пустой blockedRanges → no-op (поведение прежнее).
+        // #3816: длину окна берём из finishMin (= setup + намотка + ОБЕД, если он попал в резку)
+        // + лидер, иначе у резки через обед окно занятости было бы на длительность обеда короче.
+        // Для резок без обеда finishMin − startMin = durationMin — поведение прежнее.
         if (hasWindow) shiftPlacementsPastDowntime(out, opts.blockedRanges, shiftStart, shiftEnd, {
             windowStart: function(o) { return o.startMin - o.setupMin; },
-            length: function(o) { return o.setupMin + o.durationMin + o.leaderMin; },
+            length: function(o) { return o.setupMin + (o.finishMin - o.startMin) + o.leaderMin; },
             shift: function(o, delta) { o.startMin = round3(o.startMin + delta); o.finishMin = round3(o.finishMin + delta); }
         });
         return out;

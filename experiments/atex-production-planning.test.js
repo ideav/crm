@@ -1571,11 +1571,14 @@ assertEqual(segCont3342.map(function(s){ return { c:s.cutId, runs:s.runs, day:s.
     { c:'C', runs:3, day:1 }
 ], 'splitMachineQueue #3342: непрерывная резка через обед — день кончается раньше, остаток на след. день');
 
-// buildSchedule: тот же плавающий обед сдвигает старт резки после LUNCH_START.
+// buildSchedule: плавающий обед. #3816: намотка A (08:00, 300 мин) ПЕРЕСЕКАЕТ обед 12:20 —
+// станок паузит на обед В ХОДЕ A (раньше A «работала сквозь обед» до 13:00, а обед ставился
+// после неё — та же ошибка, что в #3816). Теперь финиш A сдвинут на обед: 08:00–13:40; B
+// идёт сразу после A (обед уже вставлен в A), без повторной паузы.
 var bsLunch3342 = planning.buildSchedule([{ id:'A', duration:300 }, { id:'B', duration:100 }],
     { windPoints:[], times:{ BETWEEN_CUTS:0 }, runLengthByCut:{}, shiftStartMin:480, shiftEndMin:970, lunchStartMin:740, lunchDurationMin:40 });
-assertEqual([bsLunch3342[0].startMin, bsLunch3342[0].finishMin], [480, 780], 'buildSchedule #3342: A 08:00–13:00');
-assertEqual([bsLunch3342[1].startMin, bsLunch3342[1].finishMin], [820, 920], 'buildSchedule #3342: обед 13:00–13:40 → B 13:40–15:20');
+assertEqual([bsLunch3342[0].startMin, bsLunch3342[0].finishMin], [480, 820], 'buildSchedule #3342/#3816: A 08:00–13:40 (обед 12:20–13:00 — пауза внутри A)');
+assertEqual([bsLunch3342[1].startMin, bsLunch3342[1].finishMin], [820, 920], 'buildSchedule #3342/#3816: B сразу после A — 13:40–15:20 (обед не дублируется)');
 
 // dayCleanups (#3155): блок уборки CLEANUP_SHIFT в конце каждого рабочего дня с резками.
 // schedW: A — день 0 (старт 482), B — день 1 (старт 1922 = 1440+482).
