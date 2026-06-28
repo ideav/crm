@@ -3652,12 +3652,21 @@
         var hasScope = scopeFrom != null || scopeTo != null;
         function headInScope(c){
             if (!hasScope) return true;
-            var k = planDateDayKey(c && c.planDate);
-            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
             var fromK = scopeFrom == null ? -Infinity : scopeFrom;
             var toK = scopeTo == null ? Infinity : scopeTo;
             if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }
-            return k >= fromK && k <= toK;
+            var k = planDateDayKey(c && c.planDate);
+            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
+            if (k >= fromK && k <= toK) return true;   // «Дата план» в окне фильтра (#3660)
+            // #3820: EDD — НЕзафиксированную резку, чей «Срок изготовления» приходится НА окно
+            // фильтра или РАНЬШЕ него (dueKey ≤ верхняя граница), но «Дата план» которой стоит
+            // ПОЗЖЕ окна (k > toK), всё равно берём в раскладку — иначе задание со сроком 23,
+            // «застрявшее» на 24, при фильтре [23;23] не попадало в scope и EDD не могло подтянуть
+            // его на 23 (#3815 ослабляет якорь до дня срока, но только для резок В scope). Так
+            // просроченное/срочное по сроку задание затягивается в окно; зафиксированное (#3508)
+            // и задание со сроком ПОЗЖЕ окна — остаются на своих днях (#3660 для чужих дат в силе).
+            if (scopeTo != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
+            return false;
         }
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
