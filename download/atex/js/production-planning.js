@@ -592,6 +592,18 @@
         return Math.round((cutMid - base) / 86400000);
     }
 
+    // #3815: «Срок изготовления» (dueKey, YYYYMMDD) → смещение дня от базы — той же базой и в той
+    // же (локальной) полночи, что dayOffsetFromBase для «Даты план», поэтому смещения напрямую
+    // сравнимы. Нет срока/Infinity/невалидный/нет базы → null.
+    function dueDayOffsetFromBase(dueKey, baseMidnightMs) {
+        var k = Number(dueKey);
+        if (!isFinite(k) || k < 10000101 || k > 99991231) return null;
+        var y = Math.floor(k / 10000), m = Math.floor(k / 100) % 100, d = k % 100;
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        var iso = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+        return dayOffsetFromBase(iso, baseMidnightMs);
+    }
+
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
@@ -3157,13 +3169,17 @@
             function pending() {
                 return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
             }
-            // R3: среди кандидатов — минимальная переналадка от prevPhysical (непрерывность
-            // конфигурации), затем фольга в конец (#3717), затем исходный порядок (срок/очередь).
+            // R3: среди кандидатов — приоритет (по убыванию): фольга в конец дня (#3717), затем
+            // более ранний «Срок изготовления» (#3815, EDD: раннему сроку — ранний день), затем
+            // минимальная переналадка от prevPhysical (непрерывность конфигурации, «начинать с той
+            // конфигурации, на которой закончили»), затем исходный порядок очереди. Так срок
+            // определяет ДЕНЬ задания, а переналадка — порядок ВНУТРИ одного срока.
             function selectByConfig(ids) {
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c), state[id].idx ];
+                    var due = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;   // #3815: нет срока → в конец
+                    var key = [ (c && c.isFoil) ? 1 : 0, due, setupCostFor(prevPhysical, c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
@@ -3580,6 +3596,33 @@
         var base = Number(opts.planBaseMidnightMs);
         var merged = mergeContinuationChains(cuts);
         var chainByLogical = merged.chainByLogical || {};
+        // #3815: проставить «Срок изготовления» (самый ранний срок обеспечиваемых позиций,
+        // dueKeyByCut по id головы) на логические резки — чтобы упорядочивание (orderCuts) и
+        // по-дневная раскладка (splitMachineQueue/selectByConfig) ставили задания с более ранним
+        // сроком на более ранние дни (EDD). Нет срока → Infinity (в конец). merged.cuts — копии
+        // голов, поэтому self.cuts не мутируем.
+        var dueKeyByCut = opts.dueKeyByCut || {};
+        merged.cuts.forEach(function(c){
+            var dk = (c && c.id != null) ? dueKeyByCut[String(c.id)] : null;
+            c.dueKey = (dk != null && isFinite(dk)) ? Number(dk) : Infinity;
+        });
+        // #3815: задание не должно «застревать» позже своего «Срока изготовления» из-за прежней
+        // «Даты план». Для НЕзафиксированных резок нижняя граница дня (anchor) ослабляется до дня
+        // срока (но не раньше начала окна, day 0): EDD сможет подтянуть задание с ранним сроком на
+        // ранний день, даже если прежняя раскладка поставила его позже (иначе при по-требованию
+        // пересборке «Упорядочить»/генерации старый якорь дня держал бы баг: на дне N — срок N+1,
+        // на N+1 — срок N). Зафиксированные задания (#3508) остаются на своём дне — якорь не трогаем.
+        // Активно только при наличии срока (есть dueKeyByCut); без сроков effAnchor == исходный.
+        var anchorIn = opts.dayAnchorByCut || {};
+        var effAnchorByCut = {};
+        merged.cuts.forEach(function(c){
+            var id = String(c && c.id);
+            var a = anchorIn[id];
+            if (a == null) return;   // нет «Даты план» — без якоря (как было)
+            if (c && c.fixed) { effAnchorByCut[id] = a; return; }   // фикс — на своём дне
+            var dueOff = dueDayOffsetFromBase(c && c.dueKey, base);
+            effAnchorByCut[id] = (dueOff != null) ? Math.min(a, Math.max(0, dueOff)) : a;
+        });
         var perPass = opts.perPassByCut || {};
         // #3660: НЕ перепланировать чужие даты — обрабатываем только цепочки, чья ГОЛОВА в
         // выбранном диапазоне «Дата плана» [scopeFromKey; scopeToKey] (ключи YYYYMMDD). Иначе
@@ -3641,7 +3684,7 @@
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: opts.dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+                dayAnchorByCut: effAnchorByCut,   // #3658: привязка к дню «Даты план» (#3815: ослаблена до дня срока для нефикс.)
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
@@ -4227,11 +4270,31 @@
     // выбранный оператором вариант (#3272). По умолчанию — реальные минуты
     // переналадки (#3268); fatigue-вариант ставит сложные резки раньше.
     // Проставить sequence; вход не мутировать.
+    // #3815: EDD — задания с более ранним «Сроком изготовления» (c.dueKey, YYYYMMDD) идут
+    // раньше, чтобы по-дневная раскладка ставила их на более ранние дни. Резки группируются по
+    // сроку (по возрастанию), ВНУТРИ каждого срока — выбранная стратегия (минимум переналадок,
+    // #3783). Резки без срока (dueKey не число → Infinity) собираются в последнюю группу. Если
+    // ни у одной резки срока нет — одна группа = прежнее поведение (полная обратная совместимость).
+    function sequenceByDue(list, opts){
+        var byDue = {}, order = [];
+        (list || []).forEach(function(c){
+            var k = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;
+            var sk = String(k);
+            if (!byDue[sk]) { byDue[sk] = { key: k, items: [] }; order.push(sk); }
+            byDue[sk].items.push(c);
+        });
+        order.sort(function(a, b){ return byDue[a].key - byDue[b].key; });
+        var out = [];
+        order.forEach(function(sk){ out = out.concat(sequenceForStrategy(byDue[sk].items, opts)); });
+        return out;
+    }
+
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
         var opts = makePlanningOptions(weights);
-        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
+        // #3717: фольга — отдельной группой в конец. #3815: внутри rest и foil — по сроку (EDD).
+        var seq = sequenceByDue(rest, opts).concat(sequenceByDue(foil, opts));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -8545,10 +8608,13 @@
         // задания 30.05 в 4.06. Привязываем каждое задание к ЕГО рабочему дню (может быть и
         // раньше базы → отрицательное смещение). Пустая «Дата план» — без якоря.
         var dayAnchorByCut = {};
+        var dueKeyByCut = {};   // #3815: «Срок изготовления» задания = самый ранний срок обеспечиваемых позиций (EDD)
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #3815
+            if (dueKeys.length) dueKeyByCut[String(c.id)] = dueKeys[0];
         });
         // #3660: перепланируем ТОЛЬКО выбранный диапазон дат [С; По] — не лезем в другие даты.
         // Пустой край → null (без ограничения с этой стороны).
@@ -8565,6 +8631,7 @@
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+            dueKeyByCut: dueKeyByCut,   // #3815: EDD — задание с более ранним сроком на более ранний день
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
