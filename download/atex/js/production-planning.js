@@ -6649,10 +6649,10 @@
         return chain.then(function() {
             return self.reload();
         }).then(function() {
-            return self.persistCutSetupColumns();   // #3698: пересчитать активности под новый день/порядок
-        }).then(function() {
             // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
             // перенесённое задание осталось видимым в очереди (пустой край не ограничивает).
+            // Делаем ДО пересчёта (autoSequenceQueue ниже): и день-источник, и целевой день
+            // должны попасть в scope перепланирования [С; По].
             var fromStr = String(self.filter && self.filter.date || '').trim();
             var toStr = String(self.filter && self.filter.dateTo || '').trim();
             if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
@@ -6666,7 +6666,16 @@
             }
             self.notify('Задание перенесено на ' + dateLabel +
                 (position === 'end' ? ' (в конец дня)' : ' (в начало дня)') + slitLabel, 'success');
-            return true;
+            // #3840: перенос менял «Дату план»/«Очередность» только переносимого задания и
+            // целевого дня — день-ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте
+            // вынутой (срочной) резки висел простой (РМ «Диаграмма Ганта» рисует сохранённый
+            // planStart). Пересобираем ВРЕМЯ старта затронутых дней, СОХРАНЯЯ ручной порядок
+            // (preserveOrder, #3619): gapFill пакует встык → дыра схлопывается, фольга остаётся
+            // в конце дня (#3717), замки зафиксированных (#3792) не нарушаются. autoSequenceQueue
+            // пишет planStart/«Очередность» только изменившимся (идемпотентно, #3427) и сам делает
+            // persistCutSetupColumns + reload/render — поэтому отдельный persistCutSetupColumns выше
+            // убран. Терминальный шаг — как после генерации (runGenerateCuts).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -6827,6 +6836,13 @@
             if (String(self.selectedCutId) === String(cutId)) self.selectedCutId = null;
             self.render();
             self.notify('Задание удалено: обеспечений — ' + ids.length, 'success');
+            // #3840: удаление резки из середины дня оставляло простой на её месте — прочие резки
+            // дня сохраняли прежний planStart (РМ «Диаграмма Ганта» рисует сохранённый planStart).
+            // Пересобираем время старта дня, СОХРАНЯЯ порядок (preserveOrder, #3619): gapFill
+            // пакует встык, дыра схлопывается. autoSequenceQueue сам пишет изменившееся
+            // (planStart/«Очередность») + persistCutSetupColumns + reload/render. Терминальный
+            // шаг — как после генерации (runGenerateCuts) и переноса (moveCutToDay).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -10199,4 +10215,4 @@
 
  
  
-// @version 2026-06-27-issue-3788
+// @version 2026-06-29-issue-3840
