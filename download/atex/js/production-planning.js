@@ -923,6 +923,19 @@
         return (diagnostics || []).map(function(d) { return d.message; }).join('; ');
     }
 
+    // #3851: обязательные поля payload «Производственной резки». Обычная резка (есть
+    // проходы) обязана нести намотку «Длительность, минут» и «Тайминг» — это страховка от
+    // несконфигурированных норм намотки (иначе вся очередь «0 мин»). Сегмент НАСТРОЙКИ
+    // (#3635 п.5: «настройка в хвосте дня N, проходы с дня N+1») создаётся с «Кол-во резок
+    // план»=0; намотки у него нет, поэтому «Длительность, минут»/«Тайминг» пусты ПО ЗАМЫСЛУ
+    // (расписание форсит его намотку в 0 по 0 проходов). Требовать их у него нельзя — иначе
+    // генерация падает «Неполный payload задания» на хвостовом сегменте настройки.
+    function cutCreateRequiredKeys(plannedRuns) {
+        return (Number(plannedRuns) > 0)
+            ? ['plannedRuns', 'duration', 'timing', 'length']
+            : ['plannedRuns', 'length'];
+    }
+
     function maxNumericCutNumber(cuts) {
         var max = 0;
         (cuts || []).forEach(function(cut) {
@@ -4571,6 +4584,7 @@
         splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
+        cutCreateRequiredKeys: cutCreateRequiredKeys,   // #3851
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
         supplyCutRelation: supplyCutRelation,
         buildSupplyFieldsForCut: buildSupplyFieldsForCut,
@@ -7812,7 +7826,7 @@
                     sequence: sequence
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
-                var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, ['plannedRuns', 'duration', 'timing', 'length']);
+                var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, cutCreateRequiredKeys(plannedRuns));
                 if (payloadDiagnostics.length) {
                     throw new Error('Неполный payload задания ' + (layIdx + 1) + ': ' + cutWriteDiagnosticSummary(payloadDiagnostics));
                 }
