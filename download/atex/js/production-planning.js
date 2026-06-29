@@ -4768,6 +4768,156 @@
         return candidates[0].id;
     }
 
+    // #3848: выравнивание загрузки станков ПОСЛЕ жадного назначения (chooseSlitterBySetup) и
+    // распределения по срокам. Жадность группирует одно сырьё/набор ножей на ОДИН станок —
+    // он может скопить работу на 5 дней, пока соседний простаивает. Здесь итеративно переносим
+    // ПОДВИЖНЫЕ задания (новые, plans) с ПЕРЕГРУЖЕННОГО (день ≥2) станка на менее загруженный,
+    // минимизируя ЛЕКСИКОГРАФИЧЕСКИ [макс. число дней, пик минут станка, сумма квадратов минут].
+    // Существующие резки (opts.fixedByMachine) держат базовую загрузку своих станков, но НЕ двигаются.
+    //
+    // Свойства, требуемые #3848:
+    //  • итерационный — по одному переносу за шаг, лучший улучшающий ход;
+    //  • журнал (opts.log) — старт / каждый перенос / стоп с причиной (в консоль — «панель отладки»);
+    //  • стоп при ОТСУТСТВИИ ПРОГРЕССА — нет хода, строго улучшающего счёт;
+    //  • без цикличных перестановок — Set посещённых КОМБИНАЦИЙ (stateHash): идентичное назначение
+    //    не повторяем. Плюс ходы только СТРОГО улучшающие счёт ⇒ счёт монотонно падает (циклы
+    //    «переставили-вернули» невозможны и без Set, но Set — явная страховка по требованию #3848).
+    //
+    // Мутирует plan.slitterId у перенесённых. Чистая (детерминированная) — тест.
+    // opts: { weights, dayCapacityMin, fixedByMachine:{slitterId:[cut…]}, log:fn(ev), maxIters }.
+    // → { moves:[{cutId,from,to}], iterations, stopReason, loadBefore, loadAfter }.
+    function rebalanceSlitterLoad(plans, slitters, opts) {
+        opts = opts || {};
+        var weights = opts.weights;
+        var times = planningChangeTimes(weights);
+        var cap = Number(opts.dayCapacityMin);
+        var hasCap = isFinite(cap) && cap > 0;
+        var log = typeof opts.log === 'function' ? opts.log : function(){};
+        var maxIters = isFinite(Number(opts.maxIters)) ? Number(opts.maxIters) : 1000;
+        var movablePlans = (plans || []).filter(function(p){ return p && p.slitterId != null && String(p.slitterId) !== ''; });
+        var machineList = (slitters || []).map(function(s){ return String(s.id); });
+        var fixedBy = opts.fixedByMachine || {};
+        if (machineList.length < 2 || !movablePlans.length) {
+            return { moves: [], iterations: 0, stopReason: 'nothing-to-balance', loadBefore: {}, loadAfter: {} };
+        }
+        var stopBlock = {};   // slitterId → stopMaterialIds (станок не варит это сырьё — туда не переносим)
+        (slitters || []).forEach(function(s){ stopBlock[String(s.id)] = s.stopMaterialIds; });
+
+        // Рабочие минуты задания (намотка + лидер, если хранится; иначе «Длительность»).
+        function workMin(m){
+            var cl = Number(m && m.storedCutAndLeaderMin);
+            if (isFinite(cl) && cl > 0) return cl;
+            return Number(m && m.duration) || 0;
+        }
+        // Минуты станка по его участникам (постоянные + подвижные) = намотка всех +
+        // переналадки очереди (orderedChangeoverCost учитывает порядок/фольгу/EDD) + настройка
+        // первой резки с нуля. Мемоизация по сигнатуре набора — orderCuts/переналадка дороги́е.
+        var minutesMemo = {};
+        function poolMinutes(members){
+            if (!members.length) return 0;
+            var ids = members.map(function(m){ return String(m.id); }); ids.sort();
+            var sig = ids.join(',');
+            if (minutesMemo[sig] != null) return minutesMemo[sig];
+            var work = 0; members.forEach(function(m){ work += workMin(m); });
+            var v = round3(work + orderedChangeoverCost(members, weights) + firstSetupCost(members[0], times));
+            minutesMemo[sig] = v;
+            return v;
+        }
+        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / cap) : 1) : 0; }
+
+        // Назначение подвижных: slitterId → [plan]. Полный набор станка = fixed + movable.
+        var byMachine = {};
+        machineList.forEach(function(id){ byMachine[id] = []; });
+        movablePlans.forEach(function(p){ (byMachine[String(p.slitterId)] = byMachine[String(p.slitterId)] || []).push(p); });
+        function membersOf(id){ return (fixedBy[id] || []).concat(byMachine[id] || []); }
+        function curMinutes(){ var o = {}; Object.keys(byMachine).forEach(function(id){ o[id] = poolMinutes(membersOf(id)); }); return o; }
+        function snapshot(){
+            var snap = {};
+            Object.keys(byMachine).forEach(function(id){
+                var m = poolMinutes(membersOf(id));
+                snap[id] = { minutes: m, days: daysOf(m), cuts: (byMachine[id] || []).length };
+            });
+            return snap;
+        }
+        // Счёт состояния = [макс. дней, пик минут станка, сумма квадратов минут]; меньше — лучше
+        // (лексикографически). Сумма КВАДРАТОВ (а не просто сумма) штрафует перекос: при равном
+        // пике она ниже у РОВНОГО распределения — это и выталкивает работу на простаивающий
+        // станок. Простая сумма минут, наоборот, росла бы от лишних настроек и склеивала всё на
+        // меньшем числе станков (застревание в духе 4/4/0/0) — поэтому не она.
+        function scoreFrom(minById){
+            var maxDays = 0, peak = 0, sumSq = 0;
+            Object.keys(minById).forEach(function(id){
+                var m = minById[id];
+                sumSq = round3(sumSq + m * m);
+                if (m > peak) peak = m;
+                var d = daysOf(m); if (d > maxDays) maxDays = d;
+            });
+            return [maxDays, round3(peak), sumSq];
+        }
+        function lexLess(a, b){
+            for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return true; if (a[i] > b[i]) return false; }
+            return false;
+        }
+        // Хэш комбинации — по ТЕКУЩЕМУ plan.slitterId каждого подвижного задания (а не по
+        // byMachine): пробный перенос временно ставит plan.slitterId = to, и хэш обязан это
+        // отражать, иначе все кандидаты выглядят «уже посещёнными» (был баг 0 переносов).
+        function stateHash(){
+            var byId = {};
+            machineList.forEach(function(id){ byId[id] = []; });
+            movablePlans.forEach(function(p){ (byId[String(p.slitterId)] = byId[String(p.slitterId)] || []).push(String(p.id)); });
+            return machineList.map(function(id){
+                return id + ':' + (byId[id] || []).slice().sort().join('+');
+            }).join('|');
+        }
+
+        var loadBefore = snapshot();
+        var visited = {}; visited[stateHash()] = true;
+        var moves = [], iter = 0, stopReason = 'no-progress';
+        log({ event: 'start', load: loadBefore, score: scoreFrom(curMinutes()) });
+
+        while (iter < maxIters){
+            var baseMin = curMinutes();
+            var baseScore = scoreFrom(baseMin);
+            var best = null;   // { plan, from, to, score, hash }
+            Object.keys(byMachine).forEach(function(from){
+                // Переносим ТОЛЬКО с перегруженного станка (его день не вмещает очередь —
+                // ≥2 дней). Когда вся работа станка влезает в один день, дробить её по другим
+                // станкам незачем (иначе лишние настройки на ровном месте). Без заданной ёмкости
+                // (тесты/обратная совместимость) день всегда «1» ⇒ переносов нет, поведение прежнее.
+                if (daysOf(baseMin[from]) < 2) return;
+                (byMachine[from] || []).forEach(function(plan){
+                    machineList.forEach(function(to){
+                        if (to === from) return;
+                        if (isMaterialBlocked(stopBlock[to], plan.materialId)) return;   // станок не варит это сырьё
+                        // пробный перенос: меняются минуты только from и to.
+                        var fromMembers = (fixedBy[from] || []).concat((byMachine[from] || []).filter(function(x){ return x !== plan; }));
+                        var trial = {}; Object.keys(baseMin).forEach(function(id){ trial[id] = baseMin[id]; });
+                        trial[from] = poolMinutes(fromMembers);
+                        trial[to] = poolMinutes(membersOf(to).concat([plan]));
+                        var sc = scoreFrom(trial);
+                        if (!lexLess(sc, best ? best.score : baseScore)) return;   // не лучше базы/текущего лучшего
+                        // не повторяем ранее посещённую комбинацию (страховка от циклов).
+                        var keep = plan.slitterId; plan.slitterId = to; var h = stateHash(); plan.slitterId = keep;
+                        if (visited[h]) return;
+                        best = { plan: plan, from: from, to: to, score: sc, hash: h };
+                    });
+                });
+            });
+            if (!best){ stopReason = 'no-progress'; break; }
+            byMachine[best.from] = (byMachine[best.from] || []).filter(function(x){ return x !== best.plan; });
+            best.plan.slitterId = best.to;
+            (byMachine[best.to] = byMachine[best.to] || []).push(best.plan);
+            visited[best.hash] = true;
+            iter++;
+            moves.push({ cutId: best.plan.id, from: best.from, to: best.to });
+            log({ event: 'move', step: iter, cutId: best.plan.id, from: best.from, to: best.to, score: best.score, load: snapshot() });
+        }
+        if (iter >= maxIters) stopReason = 'max-iters';
+        var loadAfter = snapshot();
+        log({ event: 'stop', reason: stopReason, iterations: iter, load: loadAfter });
+        return { moves: moves, iterations: iter, stopReason: stopReason, loadBefore: loadBefore, loadAfter: loadAfter };
+    }
+
     // Переставить резку в очереди станка: swap с соседом (dir -1 вверх / +1 вниз) +
     // нормализация «Очередности» 1..N по новому порядку. → изменённые [{cutId, sequence}].
     // На границе → []. Вход не мутирует.
@@ -5070,6 +5220,7 @@
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
+        rebalanceSlitterLoad: rebalanceSlitterLoad,   // #3848: выравнивание загрузки станков
         knifeWidthSig: knifeWidthSig,   // #3666
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
@@ -8198,6 +8349,43 @@
         if (layoutPlans.length) self.lastCutMainValue = cutMainState.last;
         nCuts = layoutPlans.length;   // #3453: раскладки без партии сырья отброшены — считаем по факту
 
+        // #3848: ВЫРАВНИВАНИЕ ЗАГРУЗКИ СТАНКОВ — в памяти, по массиву layoutPlans (никаких
+        // запросов в базу, #3857). Жадное chooseSlitterBySetup группирует одно сырьё/ножи на
+        // ОДИН станок → он копит работу на 5 дней, пока соседний простаивает. Итеративно
+        // переносим задания с перегруженного станка на менее загруженный (минимизируя макс.
+        // число дней), пока есть прогресс; цикличные перестановки исключены (Set посещённых
+        // комбинаций). Существующие резки держат базовую загрузку своих станков (fixedByMachine).
+        // Журнал шагов — в консоль («панель отладки»). Меняем только plan.slitterId; всё
+        // последующее (очередь, дробление по дням, запись) идёт по обновлённому назначению.
+        (function rebalanceGeneratedLoad(){
+            if (!(genDayCapacityMin > 0) || !self.slitters || self.slitters.length < 2) return;
+            var fixedByMachine = {};
+            (self.cuts || []).forEach(function(c){
+                var sid = c && c.slitter && c.slitter.id;
+                if (sid != null) (fixedByMachine[String(sid)] = fixedByMachine[String(sid)] || []).push(c);
+            });
+            var labelById = {};
+            (self.slitters || []).forEach(function(s){ labelById[String(s.id)] = (s.label || ('#' + s.id)); });
+            function fmt(load){
+                return Object.keys(load || {}).map(function(id){
+                    var l = load[id]; return (labelById[id] || id) + ':' + l.days + 'д/' + Math.round(l.minutes) + 'м';
+                }).join('  ');
+            }
+            var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
+                weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
+                log: function(ev){
+                    if (ev.event === 'start') console.log('[pp] ⚖ выравнивание загрузки — старт:', fmt(ev.load));
+                    else if (ev.event === 'move') console.log('[pp] ⚖ #' + ev.step + ' ' + ev.cutId + ' ' + (labelById[ev.from] || ev.from) + '→' + (labelById[ev.to] || ev.to) + '  | ' + fmt(ev.load));
+                    else if (ev.event === 'stop') console.log('[pp] ⚖ стоп (' + ev.reason + '), переносов ' + ev.iterations + ':', fmt(ev.load));
+                }
+            });
+            if (res.moves.length) {
+                var dB = Math.max.apply(null, Object.keys(res.loadBefore).map(function(k){ return res.loadBefore[k].days; }));
+                var dA = Math.max.apply(null, Object.keys(res.loadAfter).map(function(k){ return res.loadAfter[k].days; }));
+                console.log('[pp] ⚖ выравнивание: ' + res.moves.length + ' переносов; макс. дней станка ' + dB + '→' + dA);
+            }
+        })();
+
         // Create requests stay in layout order, but queue numbers for same-day
         // generated cuts follow the operator-selected planner (#3272).
         var sequenceGroups = {};
@@ -10556,4 +10744,4 @@
 
  
  
-// @version 2026-06-29-issue-3858
+// @version 2026-06-29-issue-3848
