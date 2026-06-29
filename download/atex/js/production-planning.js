@@ -3350,9 +3350,16 @@
         }
         // #3739: setup (минуты) и его компоненты для переналадки prev→c с учётом первой
         // резки/заправки станка. cost == changeoverCost(...) — единый источник.
+        // #3853: первая резка станка считается переналадкой от РЕАЛЬНОЙ заправки станка
+        // (carryPrevSetup из prev_cut_setup) — ровно как окно резки в setupActivityColumns
+        // (persistence). Раньше генерация planStart брала здесь «ножи с нуля» (firstCutSetup),
+        // а окно — переналадку от заправки → на первой карточке дня возникал разрыв/перекрытие.
+        // carryOverPrevCut нейтрализует партию ИМЕННО первой резки c (как arr[0] в persistence),
+        // поэтому батч не считается ложной сменой даже при gapFill-перестановке.
         function setupPartsFor(prev, c) {
             if (prev) return changeoverParts(prev, c, times);
             if (opts.carryPrevCut) return changeoverParts(opts.carryPrevCut, c, times);   // #3688
+            if (opts.carryPrevSetup) return changeoverParts(carryOverPrevCut(opts.carryPrevSetup, c), c, times);   // #3853
             if (opts.firstCutSetup) return firstSetupParts(c, times);                     // #3669
             return [];
         }
@@ -3609,9 +3616,7 @@
             insertLunchBefore();  // #3342: обед перед началом этой резки
             // Резка без проходов/длительности — один сегментик без раскладки по проходам.
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
-                var setup0 = leader + (prevPhysical ? changeoverCost(prevPhysical, c, times)
-                    : (opts.carryPrevCut ? changeoverCost(opts.carryPrevCut, c, times)   // #3688: первая резка — от заправки станка
-                       : (opts.firstCutSetup ? firstSetupCost(c, times) : 0)));
+                var setup0 = leader + setupCostFor(prevPhysical, c);   // #3688/#3853: первая резка — от заправки станка (carryPrevSetup)
                 var ws0 = day * 1440 + dayStart + clock;
                 segments.push({ cutId: String(cid), dayOffset: day, runs: runs, windowStartMin: round3(ws0),
                     startMin: round3(ws0 + setup0), setupMin: round3(setup0),
@@ -3625,9 +3630,7 @@
             var perPassEff = perPass + leader;
             while (remaining > 0) {
                 // #3401: setup сегмента — только переналадка с предыдущей резкой; лидер уже в perPassEff.
-                var setup = isCont ? 0 : (prevPhysical ? changeoverCost(prevPhysical, c, times)
-                    : (opts.carryPrevCut ? changeoverCost(opts.carryPrevCut, c, times)   // #3688: первая резка — от заправки станка
-                       : (opts.firstCutSetup ? firstSetupCost(c, times) : 0)));
+                var setup = isCont ? 0 : setupCostFor(prevPhysical, c);   // #3688/#3853: первая резка — от заправки станка (carryPrevSetup)
                 var avail = effCapacity(day) - clock;
                 // #3847: проходы — до потолка DAY_END_HOUR+MAX_OVERWORK_CUTS, настройка-хвост — до
                 // DAY_END_HOUR+MAX_OVERWORK_TUNE (фича выкл → обычная ёмкость до cutEndMin).
@@ -4005,6 +4008,7 @@
                 dayAnchorByCut: effAnchorByCut,   // #3658: привязка к дню «Даты план» (#3815: ослаблена до дня срока для нефикс.)
                 dueDayByCut: dueDayByCut,   // #3826: день срока — резерв хвоста дня под фольгу своего срока
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+                carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
             });
@@ -9088,6 +9092,7 @@
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
+            prevSetupBySlitter: self.prevSetupBySlitter,   // #3853: заправка станков (prev_cut_setup) → первая резка считается переналадкой от неё (как окно в persistence)
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
         });
@@ -10517,4 +10522,4 @@
 
  
  
-// @version 2026-06-29-issue-3840
+// @version 2026-06-29-issue-3853
