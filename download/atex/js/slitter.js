@@ -65,6 +65,7 @@
         counterStart: 'Счётчик нач.',
         counterEnd: 'Счётчик кон.',
         meterage: 'Погонаж факт, м',
+        rashod: 'Расход сырья',  // #3861: расход сырья, погонные метры (накопл. по резке)
         defect: 'Брак, м²',
         defectM: 'Брак, м',
         defectPhoto: 'Фото брака',
@@ -104,10 +105,11 @@
         resume: 'Возобновить', finish: 'Завершить', abort: 'Прекратить',
         shiftStart: 'Начало смены', shiftEnd: 'Конец смены',
         pass: 'Резка',  // #3583: отметка выполненного прохода (значение справочника «Тип события» 1193)
-        skip: 'Пропуск' // #3646: пропуск задания (значение справочника «Тип события» 1193, id 89834)
+        skip: 'Пропуск', // #3646: пропуск задания (значение справочника «Тип события» 1193, id 89834)
+        cleanup: 'Уборка завершена' // #3861: уборка по завершении всех резок (значение справочника «Тип события» 1193, id 176076)
     };
     // Типы событий смены (справочник «Тип события» базы ateh, 1193).
-    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.skip, EV.finish, EV.abort, EV.shiftEnd];
+    var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.skip, EV.finish, EV.abort, EV.cleanup, EV.shiftEnd];
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -214,6 +216,20 @@
     // Возврат остатка при отмене/уменьшении расхода: остаток + возвращаемое.
     function restoreConsumption(remainder, restored) {
         return round3(toNumber(remainder) + toNumber(restored));
+    }
+
+    // #3861: взаимный пересчёт остатка партии по номинальной ширине рулона (мм).
+    // Основная мера — погонные метры; площадь (м²) досчитывается из метров и наоборот.
+    //   L(м)  = S(м²) × 1000 / W(мм)
+    //   S(м²) = L(м)  × W(мм) / 1000
+    // Ширина ≤ 0 (неизвестна) → 0 (пересчёт невозможен).
+    function metersFromArea(areaM2, widthMm) {
+        var w = toNumber(widthMm);
+        return w > 0 ? round3(toNumber(areaM2) * 1000 / w) : 0;
+    }
+    function areaFromMeters(meters, widthMm) {
+        var w = toNumber(widthMm);
+        return w > 0 ? round3(toNumber(meters) * w / 1000) : 0;
     }
 
     // Брак в м²: метры брака × ширина сырья (мм → м). Любой нуль → 0.
@@ -740,6 +756,8 @@
                 date: firstField(row, ['batch_date', 'batch_arrival', 'batch_arrival_date', 'date']),
                 remainder: toNumber(firstField(row, ['batch_remainder_m2', 'remainder_m2', 'batch_remainder'])),
                 remainderM: toNumber(firstField(row, ['batch_remainder_m', 'remainder_m'])),
+                // #3861: номинальная ширина рулона из отчёта — для взаимопересчёта остатка м↔м².
+                widthMm: toNumber(firstField(row, ['width_mm', 'batch_width_mm', 'material_width_mm'])),
                 materialId: matId || null,
                 materialLabel: matLabel,
                 warehouse: wh,
@@ -884,6 +902,8 @@
         pickFifoBatch: pickFifoBatch,
         applyConsumption: applyConsumption,
         restoreConsumption: restoreConsumption,
+        metersFromArea: metersFromArea,   // #3861
+        areaFromMeters: areaFromMeters,   // #3861
         formatDateTime: formatDateTime,
         defectM2: defectM2,
         photoFieldKey: photoFieldKey,
@@ -1211,17 +1231,19 @@
         });
     };
 
-    // #3566 #5: отчёт material_batches отдаёт «Остаток, м²», но не «Остаток, м».
-    // Без погонных метров batchPasses=0 и список партий сырья выходит пустым.
-    // Досчитываем остаток в метрах из площади и ширины вида сырья:
-    // L(м) = S(м²) × 1000 / Ширина(мм). Вызывается после загрузки партий и ширин.
+    // #3566 #5 / #3861: остаток в метрах — основная мера; площадь (м²) с ним
+    // взаимовычисляема по номинальной ширине. Если отчёт отдал только одно из
+    // значений — досчитываем второе. Ширина: сперва из отчёта (width_mm),
+    // иначе из справочника «Вид сырья». Вызывается после загрузки партий и ширин.
     AtexSlitter.prototype.fillBatchRemainderM = function() {
         var widths = this.materialWidths || {};
         (this.batches || []).forEach(function(b) {
-            if (core.toNumber(b.remainderM) > 0) return;
-            var area = core.toNumber(b.remainder);
-            var width = core.toNumber(widths[String(b.materialId)]);
-            if (area > 0 && width > 0) b.remainderM = core.round3(area * 1000 / width);
+            var width = core.toNumber(b.widthMm) || core.toNumber(widths[String(b.materialId)]);
+            var hasM = core.toNumber(b.remainderM) > 0;
+            var hasArea = core.toNumber(b.remainder) > 0;
+            if (width <= 0) return;
+            if (!hasM && hasArea) b.remainderM = core.metersFromArea(b.remainder, width);
+            else if (hasM && !hasArea) b.remainder = core.areaFromMeters(b.remainderM, width);
         });
     };
 
@@ -1622,6 +1644,24 @@
         return this.currentQueue().cuts;
     };
 
+    // #3861: все резки смены выполнены — список непуст и нет первой открытой резки
+    // (только при открытой смене). Управляет показом «Уборка завершена» и скрытием
+    // кнопок проходов ✓ Готово / ✓✓ Готовы все.
+    AtexSlitter.prototype.allCutsDone = function() {
+        if (!this.isShiftOpen()) return false;
+        var q = this.currentQueue();
+        return q.cuts.length > 0 && !q.firstOpenCutId;
+    };
+
+    // #3861: уже отмечена «Уборка завершена» в текущей смене (по станку, как hasOpenShift).
+    AtexSlitter.prototype.hasCleanupEvent = function() {
+        var sl = this.selectedSlitterLabel();
+        return (this.shiftEvents || []).some(function(ev) {
+            if (ev.type !== EV.cleanup) return false;
+            return !sl || core.shiftEventSlitterLabel(ev) === sl;
+        });
+    };
+
     AtexSlitter.prototype.renderToolbar = function() {
         var self = this;
         var box = this.toolbarEl;
@@ -1659,11 +1699,14 @@
         box.appendChild(field('Дата', dateInp));
         box.appendChild(field('Станок', select));
 
-        // #3557 #1: «Закрыть смену» перенесена сюда из секции «События смены».
-        if (this.isShiftOpen()) {
-            var closeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Закрыть смену' });
-            closeBtn.addEventListener('click', function() { self.closeShift(); });
-            box.appendChild(closeBtn);
+        // #3861: «Уборка завершена» вместо «Закрыть смену». Появляется, когда все
+        // резки смены выполнены; пишет событие смены «Уборка завершена» и НЕ
+        // закрывает смену (панель резок остаётся для просмотра деталей). Показываем
+        // один раз за смену — при наличии отметки кнопку убираем.
+        if (this.allCutsDone() && !this.hasCleanupEvent()) {
+            var cleanBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Уборка завершена' });
+            cleanBtn.addEventListener('click', function() { self.markCleanupDone(); });
+            box.appendChild(cleanBtn);
         }
     };
 
@@ -1837,6 +1880,9 @@
     AtexSlitter.prototype.renderPassButtons = function(cut) {
         var self = this;
         if (this.isCutLocked(cut)) return el('div', { class: 'atex-sl-head-pass' });
+        // #3861: когда все резки смены выполнены — кнопки ✓ Готово / ✓✓ Готовы все
+        // убираем вовсе (резку можно открыть для просмотра деталей).
+        if (this.allCutsDone()) return el('div', { class: 'atex-sl-head-pass' });
         var canMark = !core.isDone(cut.status);
         var one = el('button', { class: 'atex-sl-btn atex-sl-btn-pass', type: 'button', text: '✓ Готово',
             title: 'Отметить один проход выполненным: номер прохода +1, пересчитать «Счётчик кон.» и «Погонаж факт»' });
@@ -2333,8 +2379,37 @@
         return this.cutAction(EV.skip, { setFinished: true, setInWork: false, message: 'Задание пропущено' });
     };
 
-    // #3557: Завершить резку — проверки счётчиков, погонаж в партию, «Закончено»=now,
-    // «В работе»=0, событие «Завершить», фиксация факта рулонов в «Партиях ГП» (#3433).
+    // #3861: списать расход (погонные метры) с остатка партии сырья резки. Основной
+    // остаток — «Остаток, м» = max(0, прежний − расход); «Остаток, м²» пересчитываем
+    // из метров по номинальной ширине (взаимовычисляемые) — пишем оба. finishMode —
+    // резка завершена: дополнительно снимаем у партии флаг «В работе».
+    AtexSlitter.prototype.applyBatchConsumption = function(cut, consumedM, finishMode) {
+        var batch = cut && cut.batchId ? this.findBatch(cut.batchId) : null;
+        var batchMeta = this.meta.batch;
+        if (!batch || !batchMeta) return Promise.resolve(null);
+        var remMReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
+        var remAreaReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
+        var width = core.toNumber(batch.widthMm) || core.toNumber((this.materialWidths || {})[String(batch.materialId)]);
+        var newRemM = core.applyConsumption(batch.remainderM, consumedM);
+        var newRemArea = width > 0 ? core.areaFromMeters(newRemM, width) : core.toNumber(batch.remainder);
+        var bf = {};
+        if (remMReq) bf['t' + remMReq] = newRemM;
+        if (remAreaReq) bf['t' + remAreaReq] = newRemArea;
+        if (finishMode) {
+            var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
+            if (batchActiveReq) bf['t' + batchActiveReq] = '';
+        }
+        if (!Object.keys(bf).length) return Promise.resolve(null);
+        return this.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
+            batch.remainderM = newRemM;
+            batch.remainder = newRemArea;
+            if (finishMode && typeof batch.active !== 'undefined') batch.active = '';
+        });
+    };
+
+    // #3557: Завершить резку — проверки счётчиков, «Закончено»=now, «В работе»=0,
+    // событие «Завершить», фиксация факта рулонов в «Партиях ГП» (#3433). #3861:
+    // остаток партии списывается расходом в markPassDone (applyBatchConsumption).
     AtexSlitter.prototype.finishCut = function() {
         var self = this;
         var cut = this.currentCut;
@@ -2354,34 +2429,21 @@
         // 1. Погонаж + «Закончено»=now + снять «В работе»
         var meta = this.meta.cut;
         var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
+        var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
         var finishedRid = reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
         var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
 
         var fields = {};
         if (meterageRid) fields['t' + meterageRid] = meterage;
+        if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры
         if (finishedRid) { cut.finishedAt = this.eventDateTime(); fields['t' + finishedRid] = cut.finishedAt; }
         if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = ''; }
 
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
             cut.meterage = String(meterage);
             cut.status = 'Завершена';
-
-            // 2. Счётчик кон. → «Остаток, м» партии сырья резки
-            var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
-            var batchMeta = self.meta.batch;
-            if (!batch || !batchMeta) return null;
-            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
-            if (!remReq) return null;
-            var newRem = cEnd; // счётчик кон. становится новым остатком, м
-            var bf = {};
-            bf['t' + remReq] = newRem;
-            // Сброс флага «В работе» у партии
-            var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
-            if (batchActiveReq) bf['t' + batchActiveReq] = '';
-            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
-                batch.remainderM = newRem;
-                if (typeof batch.active !== 'undefined') batch.active = '';
-            });
+            // #3861: остаток партии (Остаток,м + Остаток,м²) уже списан расходом в
+            // markPassDone (applyBatchConsumption) перед вызовом finishCut — здесь не трогаем.
         }).then(function() {
             // 3. Событие «Завершить»
             return self.createEvent({ type: EV.finish, value: String(meterage) }, cut.id);
@@ -2431,6 +2493,8 @@
             }
             self.setBusy(true);
             var meterage = core.round3(target * runLength);
+            // #3861: расход сырья этого нажатия (погонные метры) = новые проходы × «Метраж, м».
+            var consumedM = core.round3(Math.max(0, target - done) * runLength);
             var counterEnd = core.round3(core.toNumber(cut.counterStart) + meterage);
             cut.meterage = String(meterage);
             cut.counterEnd = String(counterEnd);
@@ -2438,14 +2502,19 @@
             var fields = {};
             var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
             var counterEndRid = reqIdByName(meta, CUT_REQ.counterEnd);
+            var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
             var startedRid = reqIdByAnyName(meta, CUT_STARTED_NAMES);
             var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
             if (meterageRid) fields['t' + meterageRid] = meterage;
             if (counterEndRid) fields['t' + counterEndRid] = counterEnd;
+            if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры (накопл. по резке)
             if (startedRid && !cut.startedAt) { cut.startedAt = self.eventDateTime(); fields['t' + startedRid] = cut.startedAt; }
             if (inWorkRid) { cut.inWork = '1'; fields['t' + inWorkRid] = '1'; }
             self.post('_m_set/' + cut.id + '?JSON', fields)
                 .then(function() { return self.createEvent({ type: EV.pass, value: String(target) }, cut.id); })
+                // #3861: списать расход с остатка партии (Остаток,м + Остаток,м²) после каждого
+                // нажатия ✓ Готово / ✓✓ Готовы все. На последнем проходе — finishMode (снять «В работе»).
+                .then(function() { return self.applyBatchConsumption(cut, consumedM, target >= total); })
                 .then(function() {
                     if (target >= total) { self.setBusy(false); self.finishCut(); return null; }
                     return self.loadEvents(cut.id)
@@ -2583,25 +2652,26 @@
         });
     };
 
-    AtexSlitter.prototype.closeShift = function() {
+    // #3861: «Уборка завершена» — событие смены (тип «Уборка завершена», справочник
+    // «Тип события» 176076), отмечается по завершении всех резок. Смену НЕ закрывает
+    // (панель резок остаётся для просмотра деталей). Заменила «Закрыть смену» в этом РМ.
+    AtexSlitter.prototype.markCleanupDone = function() {
         var self = this;
         if (this.busy) return;
+        if (!this.selectedSlitterId) { this.notify('Выберите станок', 'error'); return; }
         this.setBusy(true);
         this.createEvent({
-            type: 'Конец смены',
+            type: EV.cleanup,
             notes: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ')
         }, null).then(function() {
-            self.currentCutId = null;
-            self.currentCut = null;
-            self.selectedBatchIds = [];
             return self.loadShiftEvents();
         }).then(function() {
             self.setBusy(false);
-            self.notify('Смена закрыта', 'success');
+            self.notify('Уборка завершена', 'success');
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Не удалось закрыть смену: ' + err.message, 'error');
+            self.notify('Не удалось отметить уборку: ' + err.message, 'error');
         });
     };
 
