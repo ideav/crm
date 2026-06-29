@@ -476,4 +476,102 @@ assertEqual(ev3674[0].type, 'Начало резки', 'rowsToShiftEvents: type 
 assertEqual(ev3674[0].userId, '456', 'rowsToShiftEvents: userId ← event_user_id');
 assertEqual(core.deriveCutStatus(ev3674[0].type, {}), 'В работе', 'rowsToShiftEvents+deriveCutStatus: «Начало резки» → В работе');
 
+// ── #3861: width_mm в отчёте, взаимопересчёт остатка м↔м², расход, allCutsDone ──
+
+// rowsToActiveBatches: width_mm → widthMm (номинальная ширина рулона из отчёта)
+var batchesW = core.rowsToActiveBatches([
+    { batch_id: '20', batch_no: 'B-1', batch_material: 'ПЭТ 12', batch_remainder_m: '500', width_mm: '1000', batch_warehouse: 'Основной' }
+]);
+assertEqual(batchesW[0].widthMm, 1000, '#3861 rowsToActiveBatches: widthMm ← width_mm');
+assertEqual(parsedBatches[0].widthMm, 0, '#3861 rowsToActiveBatches: без width_mm → 0');
+
+// metersFromArea / areaFromMeters: взаимопересчёт по ширине; ширина 0 → 0
+assertEqual(core.areaFromMeters(700, 500), 350, '#3861 areaFromMeters: 700 м × 500 мм /1000 = 350 м²');
+assertEqual(core.metersFromArea(350, 500), 700, '#3861 metersFromArea: 350 м² ×1000/500 = 700 м');
+assertEqual(core.areaFromMeters(700, 0), 0, '#3861 areaFromMeters: ширина 0 → 0');
+assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 0 → 0');
+
+// fillBatchRemainderM: остаток м ↔ м² досчитывается по ширине (отчёт отдал одно из двух)
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.materialWidths = {};
+    inst.batches = [
+        { id: 'a', materialId: 'm', remainder: 350, remainderM: 0, widthMm: 500 }, // есть м², нет м
+        { id: 'b', materialId: 'm', remainder: 0, remainderM: 700, widthMm: 500 }  // есть м, нет м²
+    ];
+    inst.fillBatchRemainderM();
+    assertEqual(inst.batches[0].remainderM, 700, '#3861 fillBatchRemainderM: метры из м² по ширине');
+    assertEqual(inst.batches[1].remainder, 350, '#3861 fillBatchRemainderM: м² из метров по ширине');
+})();
+
+// allCutsDone: все резки выполнены (нет открытой) при открытой смене
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.isShiftOpen = function() { return true; };
+    inst.currentQueue = function() { return { cuts: [{}], firstOpenCutId: null }; };
+    assertEqual(inst.allCutsDone(), true, '#3861 allCutsDone: смена открыта, есть резки, нет открытой → true');
+    inst.currentQueue = function() { return { cuts: [{}], firstOpenCutId: '5' }; };
+    assertEqual(inst.allCutsDone(), false, '#3861 allCutsDone: есть открытая резка → false');
+    inst.currentQueue = function() { return { cuts: [], firstOpenCutId: null }; };
+    assertEqual(inst.allCutsDone(), false, '#3861 allCutsDone: нет резок → false');
+    inst.isShiftOpen = function() { return false; };
+    inst.currentQueue = function() { return { cuts: [{}], firstOpenCutId: null }; };
+    assertEqual(inst.allCutsDone(), false, '#3861 allCutsDone: смена закрыта → false');
+})();
+
+// applyBatchConsumption: списать расход (м), пересчитать м² по ширине, finishMode → снять «В работе»
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    var batch = { id: '77', materialId: 'm', remainderM: 1000, remainder: 500, widthMm: 500, active: '1' };
+    inst.findBatch = function(id) { return String(id) === '77' ? batch : null; };
+    inst.materialWidths = {};
+    inst.meta = { batch: { id: '106', reqs: [
+        { id: '1148', val: 'Остаток, м' },
+        { id: '1050', val: 'Остаток, м²' },
+        { id: '1160', val: 'В работе' }
+    ] } };
+    var captured = null;
+    inst.post = function(path, params) { captured = { path: path, params: params }; return Promise.resolve({}); };
+    inst.applyBatchConsumption({ batchId: '77' }, 200, false);
+    assertEqual(captured.path, '_m_set/77?JSON', '#3861 applyBatchConsumption: пишет в «Партия сырья»');
+    assertEqual(captured.params['t1148'], 800, '#3861 applyBatchConsumption: Остаток,м = 1000−200 (расход)');
+    assertEqual(captured.params['t1050'], 400, '#3861 applyBatchConsumption: Остаток,м² = 800×500/1000 (по ширине)');
+    assertEqual('t1160' in captured.params, false, '#3861 applyBatchConsumption: без finishMode «В работе» не трогаем');
+    inst.applyBatchConsumption({ batchId: '77' }, 0, true);
+    assertEqual(captured.params['t1160'], '', '#3861 applyBatchConsumption: finishMode → «В работе» у партии снят');
+})();
+
+// markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.busy = false;
+    inst.currentCut = { id: '90', batchId: '77', status: 'Ожидает', meterage: '0', counterStart: '1000', runLength: '600', plannedRuns: '3' };
+    inst.isCutLocked = function() { return false; };
+    inst.eventDateTime = function() { return '2026-06-29 10:00:00'; };
+    inst.meta = { cut: { id: '110', reqs: [
+        { id: '1104', val: 'Погонаж факт, м' },
+        { id: '1102', val: 'Счётчик кон.' },
+        { id: '1110', val: 'Расход сырья' },
+        { id: '1101', val: 'Начато' },
+        { id: '1162', val: 'В работе' }
+    ] } };
+    var posts = [];
+    inst.post = function(path, params) { posts.push({ path: path, params: params }); return Promise.resolve({}); };
+    inst.createEvent = function() { return Promise.resolve({}); };
+    inst.applyBatchConsumption = function() { return Promise.resolve(null); };
+    inst.loadEvents = function() { return Promise.resolve(); };
+    inst.loadCuts = function() { return Promise.resolve(); };
+    inst.applyEventStatuses = function() {};
+    inst.setBusy = function(v) { this.busy = v; };
+    inst.notify = function() {};
+    inst.render = function() {};
+    inst.markPassDone(false); // один проход: target=1, meterage=1×600
+    assertEqual(posts[0].params['t1104'], 600, '#3861 markPassDone: Погонаж факт = 1×600');
+    assertEqual(posts[0].params['t1110'], 600, '#3861 markPassDone: «Расход сырья» (погонные метры) = погонаж');
+})();
+
 console.log('\n' + passed + ' assertions passed');
