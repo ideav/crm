@@ -78,7 +78,7 @@ function runCaseType(scenario){
     'selectItem', 'json', 'chosenSet', 'uploadSets', 'formulas',
     'var h="", i, j, chosenType, chosenTypeName, upType, origMap={}, xlsxSavedSel;\n' +
     caseBody +
-    '\nreturn $("#sortable").html();'
+    '\nreturn { html: $("#sortable").html(), origMap: origMap };'
   );
   return factory(
     $, addSortable,
@@ -121,7 +121,7 @@ var json = {
 var html = runCaseType({
   json: json, chosenSet: 'Заказанное количество',
   uploadSets: { 'Заказанное количество': { type: '1076', importMap: savedImportMap, formulas: {} } }
-});
+}).html;
 
 // ── Assertions ───────────────────────────────────────────────────────────────
 check('added column «Ед.изм.» (req 129370) now appears in the field list',
@@ -134,6 +134,42 @@ check('a pre-existing mapped column (req 1138) is still present',
   /\[FIELD id=1138 /.test(html));
 check('removed column (req 9999, gone from table) is NOT rendered as a real field',
   !/\[FIELD id=9999 /.test(html) && /base=---/.test(html));
+
+// ── Middle-insertion scenario ────────────────────────────────────────────────
+// The new column is added in the MIDDLE of the table schema, not at the end.
+// Output-column placement is driven by origMap, which `case 'type'` rebuilds from
+// the live req_order on every load (upload.html:925-927). So inserting a requisite
+// in the middle must shift every later column +1 in the OUTPUT — for existing
+// fields and the new one alike — while the field-list append keeps it visible.
+function buildJson(order){
+  var rt={}, rb={}, rbid={};
+  order.forEach(function(id){ rt[id]=REQ[id]||('req'+id); rb[id]='SHORT'; rbid[id]=''; });
+  return { type:{id:'1076',val:'Заказанное количество',base:'LONG'}, base:{id:''},
+           req_order:order, req_type:rt, req_base:rb, req_base_id:rbid };
+}
+// importMap saved BEFORE the new column existed (so it has no 129370 entry).
+var imBefore = { '1076':5, '1138':0, '1141':1, '1143':2, '16325':3, '1147':4 };
+function runMid(order){
+  return runCaseType({ json: buildJson(order), chosenSet:'S',
+    uploadSets:{ 'S':{ type:'1076', importMap: imBefore, formulas:{} } } });
+}
+var orderNoNew   = ['1138','1141','1143','16325','1147'];               // before adding
+var orderWithNew = ['1138','1141','129370','1143','16325','1147'];      // 129370 inserted at idx 2
+var omBefore = runMid(orderNoNew).origMap;
+var midRes   = runMid(orderWithNew);
+var omAfter  = midRes.origMap;
+
+// origMap[id] = (1-based index in req_order); main value (type id) = 0.
+check('middle-inserted column gets its correct OUTPUT position (origMap=3)',
+  omAfter['129370'] === 3);
+check('columns AFTER the insertion point shift +1 in the output',
+  omAfter['1143'] === omBefore['1143'] + 1 &&
+  omAfter['16325'] === omBefore['16325'] + 1 &&
+  omAfter['1147'] === omBefore['1147'] + 1);
+check('columns BEFORE the insertion point keep their output position',
+  omAfter['1138'] === omBefore['1138'] && omAfter['1141'] === omBefore['1141']);
+check('middle-inserted column is rendered in the field list (visible & mappable)',
+  /\[FIELD id=129370 /.test(midRes.html));
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

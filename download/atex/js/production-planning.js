@@ -592,6 +592,18 @@
         return Math.round((cutMid - base) / 86400000);
     }
 
+    // #3815: «Срок изготовления» (dueKey, YYYYMMDD) → смещение дня от базы — той же базой и в той
+    // же (локальной) полночи, что dayOffsetFromBase для «Даты план», поэтому смещения напрямую
+    // сравнимы. Нет срока/Infinity/невалидный/нет базы → null.
+    function dueDayOffsetFromBase(dueKey, baseMidnightMs) {
+        var k = Number(dueKey);
+        if (!isFinite(k) || k < 10000101 || k > 99991231) return null;
+        var y = Math.floor(k / 10000), m = Math.floor(k / 100) % 100, d = k % 100;
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        var iso = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+        return dayOffsetFromBase(iso, baseMidnightMs);
+    }
+
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
@@ -1317,12 +1329,18 @@
         (positions || []).forEach(function(p) {
             var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
             var leader = planningLeaderKey(p);
-            var groupKey = prefKey + '|L=' + leader + '|S=' + (p.sleeveId || '');
+            // #3812: число втулочных полос (0/1/2) — отдельное измерение профиля: позиции
+            // с разной потребностью в полосах 110 мм идут в разные резки (своя резервируемая
+            // ширина джамбо). Для не-0.5″/не-110 count=0 у всех → разбиения нет.
+            var coreCount = Number(p && p.coreStripCount) || 0;
+            var groupKey = prefKey + '|L=' + leader + '|S=' + (p.sleeveId || '') + '|C=' + coreCount;
             if (!groups[groupKey]) {
                 groups[groupKey] = {
                     key: prefKey,
                     leader: leader,
                     sleeveId: p.sleeveId || '',
+                    coreStripCount: coreCount,                       // #3812
+                    coreStripWidth: Number(p && p.coreStripWidth) || 0,  // #3812
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
@@ -2144,6 +2162,7 @@
             var byWidth = {};
             var order = [];
             strips.forEach(function(s) {
+                if (s && s.core) return;   // #3812: втулочные полосы не урезаются по запасу
                 var w = round3(Number(s.width) || 0);
                 if (w <= 0) return;
                 var key = String(w);
@@ -2315,6 +2334,61 @@
             });
         });
         return best != null ? best : a;
+    }
+
+    // ── #3812: втулочные полосы для втулки 0.5″ шириной 110 мм ────────────────
+    // На втулке 0.5″ риббон у́же 55 мм не производится (ограниченная размерная
+    // сетка). При ширине втулки 110 мм в раскрой добавляются полосы 110 мм:
+    // продуктовая ширина 55–57 → 2 полосы; 63–64 → 1 полоса; иначе (58–62, 65–70,
+    // >70) — полос нет (>70 режется по обычному правилу втулки 1″). Полосы 110 мм
+    // занимают ширину джамбо той же резки (резервируются ДО укладки продукта).
+
+    // Ширина втулки из названия записи «Диаметр втулки» (фолбэк к реквизиту):
+    // «Втулка картонная 0.5" ширина 110 мм» → 110. Нет шаблона → null.
+    function parseSleeveWidthFromName(name) {
+        var m = String(name == null ? '' : name).match(/ширина\s*(\d+(?:[.,]\d+)?)\s*мм/i);
+        if (!m) return null;
+        var n = Number(m[1].replace(',', '.'));
+        return isFinite(n) && n > 0 ? n : null;
+    }
+
+    // Позицию можно произвести? Втулка 0.5″ запрещает ширину < 55 мм.
+    function isSleeveWidthProducible(inches, orderWidth) {
+        var w = Number(orderWidth);
+        if (Number(inches) === 0.5 && isFinite(w) && w < 55) return false;
+        return true;
+    }
+
+    // План втулочных полос для раскроя: { stripWidth, count }. Срабатывает только
+    // для втулки 0.5″ шириной 110 мм. orderWidths — НОМИНАЛЬНЫЕ ширины продукта в
+    // раскрое (резка разбита по count в профиле, поэтому ширины одного диапазона).
+    function sleeveCoreStripPlan(inches, coreWidthMm, orderWidths) {
+        var none = { stripWidth: 0, count: 0 };
+        if (Number(inches) !== 0.5 || Number(coreWidthMm) !== 110) return none;
+        var ws = (orderWidths || []).map(Number).filter(function(w) { return isFinite(w) && w > 0; });
+        if (!ws.length) return none;
+        var allIn = function(lo, hi) {
+            return ws.every(function(w) { return w >= lo - 1e-9 && w <= hi + 1e-9; });
+        };
+        if (allIn(55, 57)) return { stripWidth: 110, count: 2 };
+        if (allIn(63, 64)) return { stripWidth: 110, count: 1 };
+        return none;
+    }
+
+    // Дописать в раскрой втулочные полосы (#3812). Помечаем core:true — раскрой их
+    // показывает «Партией ГП» (Σ ширина×полос ≤ ширина джамбо), но capStockToHeadroom
+    // их не урезает и не считает перепроизводством, а проходы/обеспечение от них не
+    // зависят (у ширины 110 мм нет позиции). Идемпотентно: повторная ширина не двоится.
+    function appendCoreStrip(layout, coreWidth, count) {
+        if (!layout || !(count > 0) || !(coreWidth > 0)) return layout;
+        layout.strips = layout.strips || [];
+        var w = round3(coreWidth);
+        for (var i = 0; i < layout.strips.length; i++) {
+            var s = layout.strips[i];
+            if (s && s.core && round3(s.width) === w) { s.qty = count; return layout; }
+        }
+        layout.strips.push({ width: w, qty: count, purpose: 'Заказ', core: true, positionIds: [] });
+        return layout;
     }
 
     function nonStockStripQtyForWidth(layout, width) {
@@ -2698,25 +2772,25 @@
         return stored > 0 ? round3(stored) : 0;
     }
 
-    // #3635 п.5: id сегментов НАСТРОЙКИ — резки с 0 проходов, у которых в ТОЙ ЖЕ цепочке
-    // дневного разрыва (та же continuationSignature + станок) есть запись с проходами > 0.
-    // Это голова разбиения «настройка в конце дня N → намотка с дня N+1»: у неё намотки нет,
-    // поэтому в расписании её длительность 0 (а не оценка «1 проход» из scheduleDurationMinutes),
-    // и карточка показывает «Настройка». Обычные резки без проходов (легаси-оценка) не трогаем.
+    // #3635 п.5: id сегментов НАСТРОЙКИ — резки с 0 проходов (голова разбиения «настройка в
+    // конце дня N → намотка с дня N+1»): у них намотки нет, поэтому в расписании их длительность
+    // 0 (а не оценка «1 проход» из scheduleDurationMinutes), и карточка показывает «Настройка».
     function setupTaskIdSet(cuts) {
-        var byChain = {};
-        (cuts || []).forEach(function(c) {
-            if (!c) return;
-            var sid = c.slitter && c.slitter.id;
-            var key = continuationSignature(c) + '|' + String(sid == null ? '' : sid);
-            (byChain[key] = byChain[key] || []).push(c);
-        });
+        // #3635 п.5: запись «Задание в производство» с «Кол-во план» = 0 — это сегмент НАСТРОЙКИ
+        // (настройка в хвосте дня N, намотка-продолжение с дня N+1). Помечаем её setup-only по
+        // самому признаку «0 проходов».
+        // #3827: НЕ требуем, чтобы продолжение (с проходами) той же цепочки присутствовало в
+        // наборе. Раньше setup-сегмент опознавался лишь когда в загруженных резках была и резка
+        // той же цепочки (slitter|материал|намотка|ножи). При УЗКОМ фильтре дат продолжение
+        // (на след. дне) в набор не попадало → сегмент настройки оставался «одиноким», терял
+        // признак и в расписании считался обычной задачей с ПОЛНОЙ переналадкой в хвосте дня:
+        // #3805 не дробил его настройку по концу смены, и сумма дня прыгала (бейдж 483 при
+        // фильтре «23», но 467 при «23–30» — #3827). 0-проходную резку всегда создаёт только
+        // планировщик как разрыв настройки (splitMachineQueue, setupOnly) — другого источника нет,
+        // поэтому опознаём её независимо от того, виден ли её «хвост»-продолжение.
         var ids = {};
-        Object.keys(byChain).forEach(function(key) {
-            var grp = byChain[key];
-            var hasRuns = grp.some(function(c) { return (Number(c.plannedRuns) || 0) > 0; });
-            if (!hasRuns) return;   // нет «настоящей» резки в цепочке → это не разрыв настройки
-            grp.forEach(function(c) { if ((Number(c.plannedRuns) || 0) <= 0) ids[String(c.id)] = true; });
+        (cuts || []).forEach(function(c) {
+            if (c && (Number(c.plannedRuns) || 0) <= 0) ids[String(c.id)] = true;
         });
         return ids;
     }
@@ -2750,6 +2824,16 @@
         return isFinite(n) && n > 0 ? Math.round(n) : 0;
     }
 
+    // #3847: лимит нахлёста из настройки (MAX_OVERWORK_CUTS/MAX_OVERWORK_TUNE) — целое число
+    // минут ≥ 0. В отличие от parseDurationMinutes, ОТЛИЧАЕТ отсутствие (пусто/некорректно → null,
+    // фича выключена) от заданного «0» (нахлёст запрещён, но ограничение активно). Отрицательное → null.
+    function parseOverworkMinutes(value) {
+        var s = String(value == null ? '' : value).replace(',', '.').trim();
+        if (s === '') return null;
+        var n = Number(s);
+        return isFinite(n) && n >= 0 ? Math.round(n) : null;
+    }
+
     function resolveWorkingWindow(settings, cleanupMin) {
         var cfg = settings || {};
         var start = parseClockMinutes(cfg.DAY_START_HOUR, DAY_START_MIN);
@@ -2769,13 +2853,24 @@
         var lunchStart = (cfg.LUNCH_START != null && String(cfg.LUNCH_START).trim() !== '' && lunchDur > 0)
             ? parseClockMinutes(cfg.LUNCH_START, NaN) : NaN;
         var hasLunch = isFinite(lunchStart) && lunchDur > 0;
+        // #3847: максимальный нахлёст за конец рабочего дня (DAY_END_HOUR=endMin). Резку (проход)
+        // можно положить с нахлёстом, только если она кончится ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS;
+        // настройку (ножи/смена сырья) — ≤ DAY_END_HOUR+MAX_OVERWORK_TUNE. Пусто/некорректно →
+        // null (фича выключена: планировщик пакует до cutEndMin без сверхнормативного нахлёста).
+        var overCuts = parseOverworkMinutes(cfg.MAX_OVERWORK_CUTS);
+        var overTune = parseOverworkMinutes(cfg.MAX_OVERWORK_TUNE);
         return {
             startMin: round3(start),
             endMin: round3(end),
             cutEndMin: round3(cutEnd),
             cleanupMin: round3(cleanup),
             lunchStartMin: hasLunch ? round3(lunchStart) : null,  // #3342: начало окна обеда (мин от полуночи)
-            lunchDurationMin: hasLunch ? round3(lunchDur) : 0     // #3342: длительность обеда (мин)
+            lunchDurationMin: hasLunch ? round3(lunchDur) : 0,    // #3342: длительность обеда (мин)
+            // #3847: лимиты нахлёста (мин за DAY_END_HOUR); null = фича выключена. Если задан только
+            // один — второй наследует его (общий смысл «допустимый нахлёст»), чтобы частичная
+            // настройка не отключала ограничение целиком.
+            maxOverworkCutsMin: overCuts != null ? overCuts : overTune,
+            maxOverworkTuneMin: overTune != null ? overTune : overCuts
         };
     }
 
@@ -3022,19 +3117,117 @@
                     }
                 }
             }
-            var finish = start + dur;
+            // #3816: резка, ПЕРЕСЕКАЮЩАЯ окно обеда (намотка стартует ДО LUNCH_START и идёт
+            // через него), — станок паузит на обед В ХОДЕ намотки. Раньше обед вставлялся
+            // паузой только перед резкой, СТАРТУЮЩЕЙ в/после LUNCH_START (см. выше), поэтому
+            // длинная резка через обед шла без паузы: день «работал сквозь обед», конец дня
+            // приходился на ~16:22 вместо ~17:00, а сумма за день получалась как целое окно без
+            // вычета обеда (#3816: 502 мин при ёмкости 450). Сдвигаем финиш намотки на
+            // длительность обеда (намотка прерывается на обед), обед помечаем вставленным;
+            // durationMin (минуты РАБОТЫ, основа бейджа дня) не меняется — захлёст #3760 сохранён.
+            var lunchGap = 0;
+            if (lunch && !lunchDone[day] && dur > 0) {
+                var nStartInDay = start - day * 1440;
+                if (nStartInDay < lunch.startMin && (nStartInDay + dur) > lunch.startMin) {
+                    lunchGap = lunch.durationMin;
+                    lunchDone[day] = true;
+                }
+            }
+            var finish = start + dur + lunchGap;
             // #3688: окно-старт = startMin − setupMin (без лидера); leaderMin — лидер после намотки.
             out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur, leaderMin: round3(leaderMin) });
-            t = finish + leaderMin;   // #3688: следующая резка стартует после лидера текущей
+            t = finish + leaderMin;   // #3688: следующая резка стартует после лидера текущей (#3816: после обеда, если он попал в эту резку)
         });
         // #3764: вынести задания за окна «Отпуска» станка (ТО и т.п.). Окно занимает
         // [windowStart, +setup+намотка+лидер]; пустой blockedRanges → no-op (поведение прежнее).
+        // #3816: длину окна берём из finishMin (= setup + намотка + ОБЕД, если он попал в резку)
+        // + лидер, иначе у резки через обед окно занятости было бы на длительность обеда короче.
+        // Для резок без обеда finishMin − startMin = durationMin — поведение прежнее.
         if (hasWindow) shiftPlacementsPastDowntime(out, opts.blockedRanges, shiftStart, shiftEnd, {
             windowStart: function(o) { return o.startMin - o.setupMin; },
-            length: function(o) { return o.setupMin + o.durationMin + o.leaderMin; },
+            length: function(o) { return o.setupMin + (o.finishMin - o.startMin) + o.leaderMin; },
             shift: function(o, delta) { o.startMin = round3(o.startMin + delta); o.finishMin = round3(o.finishMin + delta); }
         });
         return out;
+    }
+
+    // #3846: показываем СОХРАНЁННЫЙ план БЕЗ live-пересчёта. Единый источник правды с РМ
+    // «Диаграмма Ганта (задания)»: и очередь production-planning, и cut-gantt берут одни и те
+    // же записанные поля резки, поэтому времена/минуты ВСЕГДА совпадают (раньше очередь
+    // пересчитывала расписание через buildSchedule на каждый рендер и расходилась с сохранённым:
+    // другая наладка — firstCutSetup вместо реальной заправки станка — и неучтённый обед).
+    // Тайминг строим из полей, записанных ГЕНЕРАЦИЕЙ: planStart (главное значение, t1078 —
+    // окно/начало настройки), сохранённая наладка (ножи + смена сырья) и «Резка и Лидер»
+    // (#3700: намотка + лидер). Обед (#3342) уже учтён в сохранённых planStart (генерация
+    // сдвинула старты послеобеденных резок) — на показе он отдельный блок (lunchBlocksFromSchedule).
+    // Форма результата совпадает с buildSchedule: { cutId, startMin, finishMin, setupMin,
+    // durationMin, leaderMin } в минутах от полуночи дня 0 (baseMidnightMs); лидер входит в
+    // durationMin (отдельной leaderMin нет — окно = setup + durationMin).
+    function scheduleFromStored(cuts, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
+        var out = [];
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего ставить на ось
+            var windowStartMin = round3((tsSec * 1000 - base) / 60000);     // окно = начало настройки
+            var setupMin = round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin));
+            var durationMin = round3(num(c.storedCutAndLeaderMin) || num(c.duration));   // намотка + лидер
+            var startMin = round3(windowStartMin + setupMin);               // старт намотки (после настройки)
+            out.push({
+                cutId: String(c.id),
+                startMin: startMin,
+                finishMin: round3(startMin + durationMin),
+                setupMin: setupMin,
+                durationMin: durationMin,
+                // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
+                // отдельной величины в сохранённом нет. null (а не 0): окно/минуты считают его 0
+                // (не двойной счёт), а модалка тайминга (buildCutTimingCtx) оценивает лидер для
+                // СВОЕЙ разбивки, не трогая расписание очереди/Ганта.
+                leaderMin: null
+            });
+        });
+        return out;
+    }
+
+    // #3846: блоки «Обед» для отображения — выводим обед как видимый разрыв между резками
+    // одного рабочего дня (раньше cut-gantt/очередь его не рисовали → выглядел как пустая
+    // «дыра в планировании»). Обед уже сидит в сохранённых planStart: между концом окна одной
+    // резки и началом окна следующей в ТОМ ЖЕ дне образуется зазор ≈ длительности обеда вокруг
+    // LUNCH_START. Берём такой зазор как обед. schedule — из scheduleFromStored/buildSchedule
+    // (отсортируем сами). opts: { lunchStartMin, lunchDurationMin, shiftStartMin }. Пустой обед
+    // (lunchDurationMin ≤ 0) → []. → [{ day, startMin, finishMin, durationMin }] (минуты от
+    // полуночи дня 0), по одному на день, где обед реально вставлен.
+    function lunchBlocksFromSchedule(schedule, opts) {
+        opts = opts || {};
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        if (!(lunchDur > 0)) return [];
+        var segs = (schedule || []).slice().filter(function(s) {
+            return s && isFinite(Number(s.startMin));
+        }).sort(function(a, b) { return a.startMin - b.startMin; });
+        var byDay = {};
+        var lunchByDay = {};
+        segs.forEach(function(s) {
+            var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
+            var winEnd = Number(s.finishMin) + (Number(s.leaderMin) || 0);
+            var day = Math.floor(winStart / 1440);
+            var prevEnd = byDay[day];
+            // Зазор внутри дня после предыдущей резки = обед (учтён только раз на день).
+            if (prevEnd != null && !lunchByDay[day]) {
+                var gap = winStart - prevEnd;
+                // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
+                // длительности): берём, если он не меньше почти полного обеда. Обед привязываем к
+                // НАЧАЛУ послеобеденной резки (finishMin = winStart) — так блок всегда прилегает к
+                // следующей карточке (надёжный матч при рендере), а любой остаточный простой (если
+                // зазор > обеда) остаётся ДО обеда.
+                if (gap >= lunchDur - 1) {
+                    lunchByDay[day] = { day: day, startMin: round3(winStart - lunchDur), finishMin: round3(winStart), durationMin: lunchDur };
+                }
+            }
+            if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
+        });
+        return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
     }
 
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
@@ -3094,6 +3287,17 @@
         var runsByCut = opts.runsByCut || {};
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
+        // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
+        // (DAY_END_HOUR, обычно > dayEnd = cutEndMin = DAY_END_HOUR−TOTAL_INTERVALS). Резку (проход)
+        // можно положить с нахлёстом, только если она кончится ≤ dayEndHour+maxOverworkCuts;
+        // настройку — ≤ dayEndHour+maxOverworkTune. Лимит не задан (null) → фича выключена: пакуем
+        // как раньше, до cutEndMin (effCapacity), без сверхнормативного нахлёста.
+        var dayEndHour = Number(opts.dayEndHourMin != null ? opts.dayEndHourMin : dayEnd) || 0;
+        var maxOverworkCuts = (opts.maxOverworkCutsMin != null && isFinite(Number(opts.maxOverworkCutsMin)))
+            ? Math.max(0, Number(opts.maxOverworkCutsMin)) : null;
+        var maxOverworkTune = (opts.maxOverworkTuneMin != null && isFinite(Number(opts.maxOverworkTuneMin)))
+            ? Math.max(0, Number(opts.maxOverworkTuneMin)) : maxOverworkCuts;
+        var overworkOn = maxOverworkCuts != null;
         // #3764: вынести сегменты за окна «Отпуска» станка (общий проход по результату, как в
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
@@ -3111,11 +3315,23 @@
         // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
         // если обед не получится поставить паузой между резками, день закончится раньше.
         function effCapacity(d) { return (lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity; }
+        // #3847: доступные минуты от текущего clock до потолка нахлёста для дня d. kind='cuts' —
+        // потолок DAY_END_HOUR+maxOverworkCuts (для проходов), 'tune' — DAY_END_HOUR+maxOverworkTune
+        // (для настройки). Минус резерв обеда (как effCapacity). Фича выключена → обычная ёмкость до
+        // cutEndMin (effCapacity−clock), поведение не меняется. clock/lunchDone — из замыкания.
+        function availFor(d, kind) {
+            var base = effCapacity(d) - clock;
+            if (!overworkOn || !hasWindow) return base;
+            var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
+            var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
+            return (dayEndHour - dayStart) + margin - lunchRes - clock;
+        }
         // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
         // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
         // planStartTs истории (задания 30.05 уезжали в выбранную 4.06). Якорь может быть
         // отрицательным (день раньше базы=дня «С»), поэтому стартовый день = минимальный якорь.
         var anchorByCut = opts.dayAnchorByCut || {};
+        var dueDayByCut = opts.dueDayByCut || {};   // #3826: день срока (смещение от базы) на резку
         var minAnchor = null;
         (orderedCuts || []).forEach(function(c){
             var a = anchorByCut[String(c && c.id)];
@@ -3163,6 +3379,7 @@
                     // план» закрепить день нельзя → трактуем как свободную). Внутри дня резку
                     // оптимизатор переставлять может, на другой день/в разбивку — нет.
                     fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
+                    dueDay: dueDayByCut[id] != null ? dueDayByCut[id] : null,   // #3826: день «Срока изготовления»
                     isCont: false, pendingSetup: 0
                 };
                 poolOrder.push(id);
@@ -3170,13 +3387,17 @@
             function pending() {
                 return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
             }
-            // R3: среди кандидатов — минимальная переналадка от prevPhysical (непрерывность
-            // конфигурации), затем фольга в конец (#3717), затем исходный порядок (срок/очередь).
+            // R3: среди кандидатов — приоритет (по убыванию): фольга в конец дня (#3717), затем
+            // более ранний «Срок изготовления» (#3815, EDD: раннему сроку — ранний день), затем
+            // минимальная переналадка от prevPhysical (непрерывность конфигурации, «начинать с той
+            // конфигурации, на которой закончили»), затем исходный порядок очереди. Так срок
+            // определяет ДЕНЬ задания, а переналадка — порядок ВНУТРИ одного срока.
             function selectByConfig(ids) {
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c), state[id].idx ];
+                    var due = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;   // #3815: нет срока → в конец
+                    var key = [ (c && c.isFoil) ? 1 : 0, due, setupCostFor(prevPhysical, c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
@@ -3184,6 +3405,22 @@
                     }
                 });
                 return best && best.id;
+            }
+            // #3826: среди фольги «своего срока» (срок ≤ дня) — крупнейшая, чья настройка+намотка
+            // ЦЕЛИКОМ влезает в остаток дня. Кладём такую (фольга — в конец дня, #3717), не дробя
+            // её настройку в хвост (иначе намотка-продолжение встала бы в НАЧАЛО следующего дня
+            // перед нефольгой — нарушение #3717). Ничего не влезает → null (день закрываем).
+            function bestFittingFoil(ids) {
+                var avail = effCapacity(day) - clock;
+                var best = null, bestDur = -1;
+                ids.forEach(function(id){
+                    var st = state[id], c = st.cut;
+                    if (!(st.remaining > 0) || !(st.perPass > 0)) return;
+                    var setup = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
+                    var dur = st.remaining * (st.perPass + leader);
+                    if (setup + dur <= avail && dur > bestDur) { best = id; bestDur = dur; }
+                });
+                return best;
             }
             // Предохранитель от зацикливания: каждая итерация уменьшает remaining либо
             // ставит настройку и двигает день (после чего проход точно ложится). Верхняя
@@ -3206,7 +3443,55 @@
                 var pick;
                 if (inProgress.length) pick = selectByConfig(inProgress);
                 else if (fixedToday.length) pick = selectByConfig(fixedToday);
-                else if (freeDue.length) pick = selectByConfig(freeDue);
+                else if (freeDue.length) {
+                    // #3826: фольга всегда в конце дня (#3717) → внутри дня не может вытеснить
+                    // нефольгу. Поэтому если на ЭТОТ день приходится фольга СВОЕГО срока (срок ≤
+                    // дня), нельзя тянуть вперёд будущую (срок > дня) нефольгу: она съедала хвост,
+                    // и фольга своего срока переливалась на следующий день (баг #3826 — фольга со
+                    // сроком 23 уезжала на 24, хотя в дне 23 было место). Резервируем хвост дня под
+                    // работу своего срока: сперва нефольга своего срока, затем фольга своего срока —
+                    // крупнейшая ЦЕЛИКОМ влезающая (без дробления настройки). Когда ни одна фольга
+                    // не влезает в остаток — закрываем день (фольга остаётся в конце), хвост фольги
+                    // переедет на завтра. Нет фольги своего срока → прежнее поведение (можно тянуть).
+                    var dueTodayFoil = freeDue.filter(function(id){
+                        return state[id].cut && state[id].cut.isFoil && state[id].dueDay != null && state[id].dueDay <= day;
+                    });
+                    // фольга уже стоит на этом дне → нефольгу после неё не кладём (#3717).
+                    var foilOnDay = segments.some(function(s){
+                        var ss = state[String(s.cutId)];
+                        return s.dayOffset === day && ss && ss.cut && ss.cut.isFoil;
+                    });
+                    if (!dueTodayFoil.length) {
+                        pick = selectByConfig(freeDue);
+                    } else {
+                        var dueTodayNonFoil = freeDue.filter(function(id){
+                            return !(state[id].cut && state[id].cut.isFoil) && state[id].dueDay != null && state[id].dueDay <= day;
+                        });
+                        if (dueTodayNonFoil.length && !foilOnDay) {
+                            pick = selectByConfig(dueTodayNonFoil);   // сперва нефольга своего срока
+                        } else {
+                            pick = bestFittingFoil(dueTodayFoil);   // фольга своего срока — крупнейшая целиком влезающая
+                            if (pick == null) {
+                                // ни одна фольга своего срока целиком не влезла в остаток дня.
+                                var foilBiggerThanDay = dueTodayFoil.filter(function(id){
+                                    return (state[id].remaining * (state[id].perPass + leader)) > capacity;
+                                });
+                                if (foilBiggerThanDay.length) {
+                                    pick = selectByConfig(foilBiggerThanDay);   // крупнее целого дня → дробим (заполнит остаток)
+                                } else if (!foilOnDay) {
+                                    // фольги на дне ещё нет → остаток дозаполняем нефольгой (тянем
+                                    // вперёд будущую) — фольга уедет на след. день в конец, «фольга в
+                                    // конце» не нарушается (на этом дне фольги нет).
+                                    var fillNonFoil = freeDue.filter(function(id){ return !(state[id].cut && state[id].cut.isFoil); });
+                                    if (fillNonFoil.length) pick = selectByConfig(fillNonFoil);
+                                    else if (clock > 0) { day += 1; clock = 0; continue; }
+                                    else pick = selectByConfig(dueTodayFoil);
+                                } else if (clock > 0) { day += 1; clock = 0; continue; }   // фольга уже на дне → закрываем день
+                                else pick = selectByConfig(dueTodayFoil);
+                            }
+                        }
+                    }
+                }
                 else if (freeAny.length) pick = selectByConfig(freeAny);   // нет «по сроку» → тянем будущую свободную вперёд
                 else {
                     // Остались только будущие зафиксированные — прыгаем к ближайшему их дню
@@ -3255,38 +3540,52 @@
                 var perPassEffG = st.perPass + leader;
                 var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
                 var availG = effCapacity(day) - clock;
-                if (availG >= setupG) {
-                    // #3760: настройка влезает. Кладём проходы, что помещаются БЕЗ нахлёста, плюс
-                    // ОДИН нахлёстный (первый, пересекающий конец смены): «сколько успели сегодня
-                    // с нахлёстом — сохраняем, после первого нахлёста — остальное на завтра».
-                    var fittingG = Math.floor((availG - setupG) / perPassEffG);
-                    if (fittingG < 0) fittingG = 0;
-                    var overlapsG = fittingG < st.remaining;            // не все проходы влезли → нахлёст
-                    var passesNowG = Math.min(st.remaining, fittingG + (overlapsG ? 1 : 0));
+                // #3847: ёмкость хвоста с учётом разрешённого нахлёста. Для проходов потолок —
+                // DAY_END_HOUR+MAX_OVERWORK_CUTS, для настройки — DAY_END_HOUR+MAX_OVERWORK_TUNE
+                // (фича выкл → обычная ёмкость до cutEndMin, как #3821).
+                var availCutsG = availFor(day, 'cuts');
+                var availTuneG = availFor(day, 'tune');
+                // #3821/#3847: в хвост дня кладём проходы, влезающие в ёмкость С УЧЁТОМ нахлёста —
+                // последний проход обязан кончиться ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS (нахлёст за
+                // конец смены ограничен, а не «один любой проход» #3760 и не «строго встык» #3821:
+                // короткий хвост проходит, длинный — на следующий день). Остаток проходов — на завтра;
+                // не влезает ни один — настройку в хвост (ветка ниже), проходы — на завтра.
+                var fittingG = (availCutsG >= setupG) ? Math.floor((availCutsG - setupG) / perPassEffG) : 0;
+                if (fittingG < 0) fittingG = 0;
+                if (fittingG > 0) {
+                    var passesNowG = Math.min(st.remaining, fittingG);
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
-                    if (overlapsG) { day += 1; clock = 0; }            // после первого нахлёста — на завтра
+                    if (st.remaining > 0) { day += 1; clock = 0; }     // остаток проходов — на следующий день
                     else { clock += setupG + durG; }
                 } else if (clock > 0) {
-                    // #3760: хвост не вмещает настройку целиком — кладём подмножество компонентов,
-                    // дотягивающее до конца смены с МИНИМАЛЬНЫМ нахлёстом (minOverlapTailSetupMinutes);
-                    // остаток настройки + проходы — на следующий день как продолжение.
+                    // #3760/#3805/#3821: в хвост дня не влезает ни один проход. ЕСТЬ настройка — кладём её
+                    // в хвост: ПОДМНОЖЕСТВО компонентов, дотягивающее до конца смены с минимальным
+                    // нахлёстом (minOverlapTailSetupMinutes); влезает целиком (availG≥setupG) — всю.
+                    // Остаток настройки + проходы — на следующий день. НЕТ настройки (та же конфигурация,
+                    // #3821: setupG=0) — ничего в хвост не кладём (иначе пустой сегмент), резка целиком
+                    // на следующий день; небольшой простой в хвосте допустим (без нахлёстного прохода).
                     var partsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
-                    var tailSetup = minOverlapTailSetupMinutes(partsG, availG, setupG);
-                    var restSetup = round3(setupG - tailSetup);
-                    var wsS = day * 1440 + dayStart + clock;
-                    segments.push({ cutId: pick, dayOffset: day, runs: 0,
-                        windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
-                        durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
-                    clock += tailSetup; prevPhysical = c;
-                    st.isCont = true; st.pendingSetup = restSetup;
+                    // #3847: настройку в хвост — до потолка DAY_END_HOUR+MAX_OVERWORK_TUNE (availTuneG),
+                    // не до cutEndMin: настройка может нахлестнуть за конец смены сильнее, чем резка.
+                    var tailSetup = minOverlapTailSetupMinutes(partsG, availTuneG, setupG);
+                    if (tailSetup > 0) {
+                        var wsS = day * 1440 + dayStart + clock;
+                        segments.push({ cutId: pick, dayOffset: day, runs: 0,
+                            windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
+                            durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
+                        clock += tailSetup; prevPhysical = c;
+                        st.isCont = true; st.pendingSetup = round3(setupG - tailSetup);
+                    }
                     day += 1; clock = 0;
                 } else {
-                    // Пустой день не вмещает даже настройку (вырожденно: настройка > целого окна) —
-                    // кладём настройку + 1 проход с нахлёстом, остальное на следующий день.
+                    // Вырожденно: даже ПУСТОЙ день не вмещает настройку + один проход (настройка или
+                    // одиночный проход длиннее целого окна). Разбить одиночный проход нельзя — кладём
+                    // настройку + 1 проход с нахлёстом, остальное на следующий день (#3821: единственный
+                    // случай, где нахлёстный проход сохраняется, иначе резка не разместилась бы никогда).
                     var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
                     segments.push({ cutId: pick, dayOffset: day, runs: 1,
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
@@ -3330,14 +3629,16 @@
                     : (opts.carryPrevCut ? changeoverCost(opts.carryPrevCut, c, times)   // #3688: первая резка — от заправки станка
                        : (opts.firstCutSetup ? firstSetupCost(c, times) : 0)));
                 var avail = effCapacity(day) - clock;
-                var maxPasses = Math.floor((avail - setup) / perPassEff);
+                // #3847: проходы — до потолка DAY_END_HOUR+MAX_OVERWORK_CUTS, настройка-хвост — до
+                // DAY_END_HOUR+MAX_OVERWORK_TUNE (фича выкл → обычная ёмкость до cutEndMin).
+                var maxPasses = Math.floor((availFor(day, 'cuts') - setup) / perPassEff);
                 if (maxPasses < 1) {
                     // #3635 п.5: настройка (переналадка ножей/сырья) ВЛЕЗАЕТ в остаток дня, а
                     // первый проход — уже нет → ставим отдельный сегмент НАСТРОЙКИ в конце дня N
                     // (заполняем хвост дня), а намотку начинаем с дня N+1 без повторной настройки.
                     // Только для первого сегмента резки (setup > 0, не продолжение) и только когда
-                    // настройка реально помещается; иначе — обычный перенос всего на след. день.
-                    if (clock > 0 && !isCont && setup > 0 && avail >= setup) {
+                    // настройка реально помещается (#3847: с учётом потолка нахлёста настройки).
+                    if (clock > 0 && !isCont && setup > 0 && availFor(day, 'tune') >= setup) {
                         var wsSet = day * 1440 + dayStart + clock;
                         segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
                             windowStartMin: round3(wsSet), startMin: round3(wsSet + setup),
@@ -3593,6 +3894,41 @@
         var base = Number(opts.planBaseMidnightMs);
         var merged = mergeContinuationChains(cuts);
         var chainByLogical = merged.chainByLogical || {};
+        // #3815: проставить «Срок изготовления» (самый ранний срок обеспечиваемых позиций,
+        // dueKeyByCut по id головы) на логические резки — чтобы упорядочивание (orderCuts) и
+        // по-дневная раскладка (splitMachineQueue/selectByConfig) ставили задания с более ранним
+        // сроком на более ранние дни (EDD). Нет срока → Infinity (в конец). merged.cuts — копии
+        // голов, поэтому self.cuts не мутируем.
+        var dueKeyByCut = opts.dueKeyByCut || {};
+        merged.cuts.forEach(function(c){
+            var dk = (c && c.id != null) ? dueKeyByCut[String(c.id)] : null;
+            c.dueKey = (dk != null && isFinite(dk)) ? Number(dk) : Infinity;
+        });
+        // #3815: задание не должно «застревать» позже своего «Срока изготовления» из-за прежней
+        // «Даты план». Для НЕзафиксированных резок нижняя граница дня (anchor) ослабляется до дня
+        // срока (но не раньше начала окна, day 0): EDD сможет подтянуть задание с ранним сроком на
+        // ранний день, даже если прежняя раскладка поставила его позже (иначе при по-требованию
+        // пересборке «Упорядочить»/генерации старый якорь дня держал бы баг: на дне N — срок N+1,
+        // на N+1 — срок N). Зафиксированные задания (#3508) остаются на своём дне — якорь не трогаем.
+        // Активно только при наличии срока (есть dueKeyByCut); без сроков effAnchor == исходный.
+        var anchorIn = opts.dayAnchorByCut || {};
+        var effAnchorByCut = {};
+        merged.cuts.forEach(function(c){
+            var id = String(c && c.id);
+            var a = anchorIn[id];
+            if (a == null) return;   // нет «Даты план» — без якоря (как было)
+            if (c && c.fixed) { effAnchorByCut[id] = a; return; }   // фикс — на своём дне
+            var dueOff = dueDayOffsetFromBase(c && c.dueKey, base);
+            effAnchorByCut[id] = (dueOff != null) ? Math.min(a, Math.max(0, dueOff)) : a;
+        });
+        // #3826: день «Срока изготовления» (смещение от базы) на каждую резку — нужен
+        // splitMachineQueue, чтобы отличить «резку этого дня по сроку» (срок ≤ дня) от «тянем
+        // вперёд будущую» (срок > дня) и зарезервировать хвост дня под фольгу своего срока.
+        var dueDayByCut = {};
+        merged.cuts.forEach(function(c){
+            var off = dueDayOffsetFromBase(c && c.dueKey, base);
+            if (off != null) dueDayByCut[String(c && c.id)] = off;
+        });
         var perPass = opts.perPassByCut || {};
         // #3660: НЕ перепланировать чужие даты — обрабатываем только цепочки, чья ГОЛОВА в
         // выбранном диапазоне «Дата плана» [scopeFromKey; scopeToKey] (ключи YYYYMMDD). Иначе
@@ -3603,12 +3939,21 @@
         var hasScope = scopeFrom != null || scopeTo != null;
         function headInScope(c){
             if (!hasScope) return true;
-            var k = planDateDayKey(c && c.planDate);
-            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
             var fromK = scopeFrom == null ? -Infinity : scopeFrom;
             var toK = scopeTo == null ? Infinity : scopeTo;
             if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }
-            return k >= fromK && k <= toK;
+            var k = planDateDayKey(c && c.planDate);
+            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
+            if (k >= fromK && k <= toK) return true;   // «Дата план» в окне фильтра (#3660)
+            // #3820: EDD — НЕзафиксированную резку, чей «Срок изготовления» приходится НА окно
+            // фильтра или РАНЬШЕ него (dueKey ≤ верхняя граница), но «Дата план» которой стоит
+            // ПОЗЖЕ окна (k > toK), всё равно берём в раскладку — иначе задание со сроком 23,
+            // «застрявшее» на 24, при фильтре [23;23] не попадало в scope и EDD не могло подтянуть
+            // его на 23 (#3815 ослабляет якорь до дня срока, но только для резок В scope). Так
+            // просроченное/срочное по сроку задание затягивается в окно; зафиксированное (#3508)
+            // и задание со сроком ПОЗЖЕ окна — остаются на своих днях (#3660 для чужих дат в силе).
+            if (scopeTo != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
+            return false;
         }
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
@@ -3651,10 +3996,14 @@
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var segs = splitMachineQueue(ordered, {
                 dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
+                dayEndHourMin: opts.dayEndHourMin,   // #3847: DAY_END_HOUR (реальный конец смены) для лимита нахлёста
+                maxOverworkCutsMin: opts.maxOverworkCutsMin,   // #3847: макс. нахлёст резки за DAY_END_HOUR
+                maxOverworkTuneMin: opts.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки за DAY_END_HOUR
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: opts.dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+                dayAnchorByCut: effAnchorByCut,   // #3658: привязка к дню «Даты план» (#3815: ослаблена до дня срока для нефикс.)
+                dueDayByCut: dueDayByCut,   // #3826: день срока — резерв хвоста дня под фольгу своего срока
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
@@ -4240,11 +4589,31 @@
     // выбранный оператором вариант (#3272). По умолчанию — реальные минуты
     // переналадки (#3268); fatigue-вариант ставит сложные резки раньше.
     // Проставить sequence; вход не мутировать.
+    // #3815: EDD — задания с более ранним «Сроком изготовления» (c.dueKey, YYYYMMDD) идут
+    // раньше, чтобы по-дневная раскладка ставила их на более ранние дни. Резки группируются по
+    // сроку (по возрастанию), ВНУТРИ каждого срока — выбранная стратегия (минимум переналадок,
+    // #3783). Резки без срока (dueKey не число → Infinity) собираются в последнюю группу. Если
+    // ни у одной резки срока нет — одна группа = прежнее поведение (полная обратная совместимость).
+    function sequenceByDue(list, opts){
+        var byDue = {}, order = [];
+        (list || []).forEach(function(c){
+            var k = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;
+            var sk = String(k);
+            if (!byDue[sk]) { byDue[sk] = { key: k, items: [] }; order.push(sk); }
+            byDue[sk].items.push(c);
+        });
+        order.sort(function(a, b){ return byDue[a].key - byDue[b].key; });
+        var out = [];
+        order.forEach(function(sk){ out = out.concat(sequenceForStrategy(byDue[sk].items, opts)); });
+        return out;
+    }
+
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
         var opts = makePlanningOptions(weights);
-        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
+        // #3717: фольга — отдельной группой в конец. #3815: внутри rest и foil — по сроку (EDD).
+        var seq = sequenceByDue(rest, opts).concat(sequenceByDue(foil, opts));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -4286,9 +4655,20 @@
     //     НАИМЕНЕЕ ЗАГРУЖЕННЫЙ станок (балансировка), затем delta ↑, аффинность ↑, id.
     // Так одинаковое сырьё/ножи объединяются на одном станке, а несовместимые задания
     // распределяются ровно, а не копятся на одном (неравномерная загрузка станков).
-    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights) {
+    //
+    // #3830: НЕ сваливать резку на станок, чей рабочий день уже ПЕРЕПОЛНЕН, когда есть другой
+    // допустимый станок со свободным местом. Раньше группировка по сырью (attach) была выше
+    // загрузки → вся фольга (общее сырьё «Фольга …») копилась на одном станке и вылетала за
+    // ёмкость дня (≈514 мин при 450), хотя у соседнего станка день был пуст. Признак overflow
+    // (рабочие минуты дня станка с этой резкой > ёмкости) стал ПЕРВЫМ критерием: при равных
+    // overflow держим прежнюю группировку/балансировку. Активно только когда задана ёмкость
+    // (dayCapacityMin, генерация); без неё (тесты/обратная совместимость) overflow всегда 0.
+    //   dayCapacityMin — рабочая ёмкость дня станка (мин); опционально.
+    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
+        var cap = Number(dayCapacityMin);
+        var capActive = isFinite(cap) && cap > 0;   // #3830: учитывать ёмкость только если задана
         var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId); });
         if (!allowed.length) return null;
         function cmpNumber(a, b) {
@@ -4298,9 +4678,17 @@
             return a - b;
         }
         function cmpId(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+        // #3830: рабочие минуты резки за день — намотка (+ лидер, если хранится). Переналадка
+        // считается отдельно (через прирост orderedChangeoverCost). Нет данных → 0.
+        function cutWorkMinutes(c) {
+            var cl = Number(c && c.storedCutAndLeaderMin);
+            if (isFinite(cl) && cl > 0) return cl;   // #3700: «Резка и Лидер» (намотка + лидер)
+            return Number(c && c.duration) || 0;     // намотка («Длительность, минут»)
+        }
         var cutSig = knifeWidthSig(cut);
         var cutMat = String(cut && cut.materialId == null ? '' : cut.materialId).trim();
         var cutWind = normWinding(cut && cut.winding);
+        var cutWork = cutWorkMinutes(cut);
         var candidates = allowed.map(function(s) {
             var id = String(s.id);
             var group = groups[id] || [];
@@ -4312,8 +4700,12 @@
             var sameMaterial = (cutMat !== '' && group.some(function(g){
                 return String(g.materialId == null ? '' : g.materialId).trim() === cutMat && normWinding(g.winding) === cutWind;
             })) ? 0 : 1;
+            // #3830: рабочие минуты дня станка с этой резкой = переналадки (after) + намотки всех.
+            var dayWork = round3(after + group.reduce(function(s2, g){ return s2 + cutWorkMinutes(g); }, 0) + cutWork);
             return {
                 id: id,
+                // #3830: 1 — день станка с этой резкой ВЫЛЕЗАЕТ за ёмкость (переполнен), иначе 0.
+                overflow: (capActive && dayWork > cap) ? 1 : 0,
                 // #3801: 0 — есть к чему прицепиться (ножи ИЛИ сырьё), иначе 1 (холодная настройка).
                 attach: (sameKnives === 0 || sameMaterial === 0) ? 0 : 1,
                 sameKnives: sameKnives,
@@ -4326,6 +4718,10 @@
         // #3801: есть ли хоть один станок, к которому новая резка цепляется по ножам/сырью.
         var anyAttach = candidates.some(function(c){ return c.attach === 0; });
         candidates.sort(function(a, b) {
+            // #3830: станок, где резка ВЛЕЗАЕТ в день, — всегда первым (не переполняем станок,
+            // если есть свободный). При равных overflow — прежняя логика группировки/балансировки.
+            var byOverflow = cmpNumber(a.overflow, b.overflow);
+            if (byOverflow) return byOverflow;
             if (anyAttach) {
                 return cmpNumber(a.attach, b.attach)            // #3801: совместимые станки — первыми
                     || cmpNumber(a.sameKnives, b.sameKnives)    // #3666: тот же набор ножей — на тот же станок
@@ -4536,6 +4932,10 @@
         buildActualWidthIndex: buildActualWidthIndex,    // #3372
         resolveCutWidth: resolveCutWidth,                // #3372
         resolveNominalWidth: resolveNominalWidth,        // #3408
+        parseSleeveWidthFromName: parseSleeveWidthFromName, // #3812
+        isSleeveWidthProducible: isSleeveWidthProducible, // #3812
+        sleeveCoreStripPlan: sleeveCoreStripPlan,        // #3812
+        appendCoreStrip: appendCoreStrip,                // #3812
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -4705,6 +5105,8 @@
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
+        scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
+        lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -4907,6 +5309,8 @@
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
                     key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
                     key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
+                    key !== 'MAX_OVERWORK_CUTS' &&      // #3847: макс. нахлёст резки за DAY_END_HOUR (мин)
+                    key !== 'MAX_OVERWORK_TUNE' &&      // #3847: макс. нахлёст настройки за DAY_END_HOUR (мин)
                     key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
@@ -5513,6 +5917,31 @@
         }).catch(function() { self.sleeveInchesById = {}; });
     };
 
+    // #3812: ширина втулки в мм по id записи «Диаметр втулки» → this.sleeveWidthById =
+    // { sleeveId: мм }. Источник: реквизит «Ширина втулки, мм» (если заведён), иначе
+    // фолбэк — ширина из НАЗВАНИЯ записи («… ширина 110 мм», parseSleeveWidthFromName).
+    // Контекст для втулочных полос (57 vs 110). Нет данных → запись без ширины (полосы
+    // не добавляются; обратная совместимость).
+    AtexProductionPlanning.prototype.loadSleeveWidths = function() {
+        var self = this;
+        this.sleeveWidthById = {};
+        var meta = tableByName(this._metaAll || [], 'Диаметр втулки');
+        if (!meta) return Promise.resolve();
+        var wIdx = columnIndex(meta, 'Ширина втулки, мм');
+        if (wIdx < 0) wIdx = columnIndex(meta, 'Ширина втулки');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var raw = wIdx >= 0 ? r[wIdx] : null;
+                var n = (raw != null && String(raw).trim() !== '') ? Number(raw) : NaN;
+                if (!isFinite(n) || !(n > 0)) n = parseSleeveWidthFromName(r[0]); // r[0] — название записи
+                if (isFinite(n) && n > 0) map[String(rec.i)] = Number(n);
+            });
+            self.sleeveWidthById = map;
+        }).catch(function() { self.sleeveWidthById = {}; });
+    };
+
     // #3372: проставить позициям фактическую ширину резки. Номинал заказа
     // сохраняется в orderWidth (для отображения), а width становится фактической —
     // её используют раскладка, полосы, Партии ГП и обеспечение (вся геометрия
@@ -5528,6 +5957,15 @@
                 inches: self.sleeveInchesById ? self.sleeveInchesById[String(p.sleeveId)] : null
             };
             p.width = resolveCutWidth(p.orderWidth, ctx, self.actualWidthIndex);
+            // #3812: контекст втулки 0.5″ — производимость и план втулочных полос 110 мм.
+            // Считаем по НОМИНАЛЬНОЙ ширине заказа (диапазоны 55–57/63–64 заданы в ней).
+            p.sleeveInches = ctx.inches == null ? null : Number(ctx.inches);
+            p.sleeveWidth = (self.sleeveWidthById && self.sleeveWidthById[String(p.sleeveId)] != null)
+                ? Number(self.sleeveWidthById[String(p.sleeveId)]) : null;
+            p.producible = isSleeveWidthProducible(p.sleeveInches, p.orderWidth);
+            var corePlan = sleeveCoreStripPlan(p.sleeveInches, p.sleeveWidth, [p.orderWidth]);
+            p.coreStripCount = corePlan.count;
+            p.coreStripWidth = corePlan.count > 0 ? corePlan.stripWidth : 0;
         });
     };
 
@@ -5876,14 +6314,24 @@
         var qty = Math.floor(Number(qtyRaw) || 0);
         if (!(qty > 0)) return Promise.resolve({ error: 'Укажите количество рулонов больше 0' });
         if (qty > remaining) return Promise.resolve({ error: 'Количество больше необеспеченного остатка (' + remaining + ' рул.)' });
+        // #3812: втулка 0.5″ — риббон у́же 55 мм не производим.
+        if (position.producible === false) return Promise.resolve({ error: 'Втулка 0.5″: риббон шириной < 55 мм не производится' });
         var mat = String(position.materialId == null ? '' : position.materialId);
         var jw = this.jumboWidthByMaterial[mat];
         if (!jw) return Promise.resolve({ error: 'Не задана ширина джамбо для сырья позиции' });
+        // #3812: резерв ширины джамбо под втулочные полосы 110 мм (см. annotatePositionsCutWidth).
+        var coreCount = position.coreStripCount || 0;
+        var coreWidth = position.coreStripWidth || 0;
+        var coreReserve = coreCount > 0 && coreWidth > 0 ? round3(coreCount * coreWidth) : 0;
+        var effJumbo = round3(jw - coreReserve);
+        if (coreReserve > 0 && !(effJumbo >= (Number(position.width) || 0))) {
+            return Promise.resolve({ error: 'Втулка ' + coreWidth + ' мм: не хватает ширины джамбо под втулочные полосы' });
+        }
         var profile = groupPositionsByPlanningProfile([position])[0] ||
             { key: '', windDir: position.windDir, windLength: position.windLength };
         return this.loadPreferredWidths(mat, profile.windDir, profile.windLength).then(function(preferred) {
             var res = layoutCore.planLayouts({
-                jumboWidth: jw,
+                jumboWidth: effJumbo,
                 positions: [{ id: position.id, width: position.width, qty: qty, dueKey: position.dueKey }],
                 preferred: preferred || self.preferredByMaterial[profile.key] || [],
                 options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
@@ -5892,6 +6340,7 @@
             if (!layouts.length) return { error: 'Не удалось построить раскладку для позиции' };
             var lay = layouts[0];
             lay.mat = mat; lay.windDir = profile.windDir; lay.windLength = profile.windLength;
+            if (coreReserve > 0) appendCoreStrip(lay, coreWidth, coreCount); // #3812: втулочные полосы в раскрой
             // posForCalc — единственная позиция с УРЕЗАННЫМ до qty кол-вом (для проходов/обеспечения).
             var posForCalc = [{ id: position.id, width: position.width, qty: qty, length: position.length,
                 sleeveId: position.sleeveId, sleeveReady: position.sleeveReady, dueKey: position.dueKey }];
@@ -6463,10 +6912,10 @@
         return chain.then(function() {
             return self.reload();
         }).then(function() {
-            return self.persistCutSetupColumns();   // #3698: пересчитать активности под новый день/порядок
-        }).then(function() {
             // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
             // перенесённое задание осталось видимым в очереди (пустой край не ограничивает).
+            // Делаем ДО пересчёта (autoSequenceQueue ниже): и день-источник, и целевой день
+            // должны попасть в scope перепланирования [С; По].
             var fromStr = String(self.filter && self.filter.date || '').trim();
             var toStr = String(self.filter && self.filter.dateTo || '').trim();
             if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
@@ -6480,7 +6929,16 @@
             }
             self.notify('Задание перенесено на ' + dateLabel +
                 (position === 'end' ? ' (в конец дня)' : ' (в начало дня)') + slitLabel, 'success');
-            return true;
+            // #3840: перенос менял «Дату план»/«Очередность» только переносимого задания и
+            // целевого дня — день-ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте
+            // вынутой (срочной) резки висел простой (РМ «Диаграмма Ганта» рисует сохранённый
+            // planStart). Пересобираем ВРЕМЯ старта затронутых дней, СОХРАНЯЯ ручной порядок
+            // (preserveOrder, #3619): gapFill пакует встык → дыра схлопывается, фольга остаётся
+            // в конце дня (#3717), замки зафиксированных (#3792) не нарушаются. autoSequenceQueue
+            // пишет planStart/«Очередность» только изменившимся (идемпотентно, #3427) и сам делает
+            // persistCutSetupColumns + reload/render — поэтому отдельный persistCutSetupColumns выше
+            // убран. Терминальный шаг — как после генерации (runGenerateCuts).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -6641,6 +7099,13 @@
             if (String(self.selectedCutId) === String(cutId)) self.selectedCutId = null;
             self.render();
             self.notify('Задание удалено: обеспечений — ' + ids.length, 'success');
+            // #3840: удаление резки из середины дня оставляло простой на её месте — прочие резки
+            // дня сохраняли прежний planStart (РМ «Диаграмма Ганта» рисует сохранённый planStart).
+            // Пересобираем время старта дня, СОХРАНЯЯ порядок (preserveOrder, #3619): gapFill
+            // пакует встык, дыра схлопывается. autoSequenceQueue сам пишет изменившееся
+            // (planStart/«Очередность») + persistCutSetupColumns + reload/render. Терминальный
+            // шаг — как после генерации (runGenerateCuts) и переноса (moveCutToDay).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -7372,6 +7837,12 @@
         // сырьё + направление намотки + длина намотки.
         // Только согласованные (order_approval_date или item_approval_date).
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
+        // #3812: позиции на втулке 0.5″ у́же 55 мм не производятся — исключаем из планирования.
+        var notProducible = [];
+        unsup = unsup.filter(function(p) {
+            if (p.producible === false) { notProducible.push(p); return false; }
+            return true;
+        });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
             // #3792: вброс новых заданий пересобирает очередь по правилам (preserveOrder=false:
@@ -7380,9 +7851,10 @@
             // он держит задание на своём дне (не переносит/не разбивает), внутри дня переставлять
             // можно. Идемпотентно (#3427): если ничего не меняется — ничего не пишем.
             console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — пересобираю очередь по правилам');
+            var npNote = notProducible.length ? ' Пропущено ' + notProducible.length + ' поз. (втулка 0.5″, ширина < 55 мм).' : '';
             this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
-                self.notify(changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
-                                    : 'Нет незапланированных позиций; очередь уже оптимальна', 'info');
+                self.notify((changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
+                                     : 'Нет незапланированных позиций; очередь уже оптимальна') + npNote, 'info');
             });
             return;
         }
@@ -7408,6 +7880,8 @@
             // Построить раскладки по каждому профилю; собрать пропуски.
             var allLayouts = [];   // [{...layout, mat}]
             var skipped = [];      // [{positionId, reason}]
+            // #3812: непроизводимые (втулка 0.5″, ширина < 55 мм) — в пропуски.
+            notProducible.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'втулка 0.5″: ширина < 55 мм не производится' }); });
             profiles.forEach(function(group) {
                 var mat = group.materialId;
                 var jw = self.jumboWidthByMaterial[mat];
@@ -7426,8 +7900,22 @@
                     var stockablePreferred = planning.filterStockableWidths(
                         self.maxStockIndex, self.preferredByMaterial[group.key] || [],
                         { material: mat, winding: group.windDir, length: group.windLength });
+                    // #3812: втулка 0.5″ шир. 110 мм — резервируем ширину джамбо под втулочные
+                    // полосы 110 мм ДО укладки продукта (occupied width), полосы дописываем
+                    // в каждый раскрой ниже. Профиль разбит по count, поэтому ширина едина.
+                    var coreCount = group.coreStripCount || 0;
+                    var coreWidth = group.coreStripWidth || 0;
+                    var coreReserve = coreCount > 0 && coreWidth > 0 ? round3(coreCount * coreWidth) : 0;
+                    var effJumbo = round3(jw - coreReserve);
+                    if (coreReserve > 0) {
+                        var maxProd = positionGroup.reduce(function(m, p) { var w = Number(p.width) || 0; return w > m ? w : m; }, 0);
+                        if (!(effJumbo >= maxProd)) {
+                            positionGroup.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'втулка ' + coreWidth + ' мм: не хватает ширины джамбо под втулочные полосы' }); });
+                            return;
+                        }
+                    }
                     var res = layoutCore.planLayouts({
-                        jumboWidth: jw,
+                        jumboWidth: effJumbo,
                         positions: positionGroup.map(function(p) {
                             // #3423: запасные комбинации (есть в «Максимальном запасе») можно
                             // перепроизводить в запас; незапасные — резать ровно под заказ.
@@ -7448,6 +7936,7 @@
                         lay.windLength = group.windLength;
                         lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
                         lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
+                        if (coreReserve > 0) appendCoreStrip(lay, coreWidth, coreCount); // #3812
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
@@ -7612,6 +8101,11 @@
         }
 
         var layoutPlans = [];
+        // #3830: рабочая ёмкость дня станка (мин) — чтобы не сваливать резку на переполненный
+        // станок, когда есть свободный. Окно резки минус обед (как в splitMachineQueue).
+        var genWindow = self.workingWindow();
+        var genDayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0)
+            - (Number(genWindow.lunchDurationMin) || 0));
         layouts.forEach(function(lay, layIdx) {
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
@@ -7640,9 +8134,11 @@
                 isFoil: !!(lay && lay.isFoil),
                 width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
-                planDate: cutMainValue
+                planDate: cutMainValue,
+                // #3830: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, !!(lay && lay.isFoil))
             };
-            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions);
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin);
             if (slitterId != null) {
                 slitterId = String(slitterId);
                 if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
@@ -7746,6 +8242,9 @@
                 });
                 var segs = splitMachineQueue(plans, {
                     dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
+                    dayEndHourMin: dayWindow.endMin,   // #3847: DAY_END_HOUR для лимита нахлёста
+                    maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,   // #3847: макс. нахлёст резки
+                    maxOverworkTuneMin: dayWindow.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки
                     times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut,
                     lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
                     firstCutSetup: true,   // #3669 п.2: первая задача очереди — настройка ножей
@@ -8559,10 +9058,13 @@
         // задания 30.05 в 4.06. Привязываем каждое задание к ЕГО рабочему дню (может быть и
         // раньше базы → отрицательное смещение). Пустая «Дата план» — без якоря.
         var dayAnchorByCut = {};
+        var dueKeyByCut = {};   // #3815: «Срок изготовления» задания = самый ранний срок обеспечиваемых позиций (EDD)
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #3815
+            if (dueKeys.length) dueKeyByCut[String(c.id)] = dueKeys[0];
         });
         // #3660: перепланируем ТОЛЬКО выбранный диапазон дат [С; По] — не лезем в другие даты.
         // Пустой край → null (без ограничения с этой стороны).
@@ -8573,12 +9075,16 @@
             times: self.changeTimes,
             dayStartMin: dayWindow.startMin,
             dayEndMin: dayWindow.cutEndMin,
+            dayEndHourMin: dayWindow.endMin,   // #3847: DAY_END_HOUR (реальный конец смены) для лимита нахлёста
+            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,   // #3847: макс. нахлёст резки за DAY_END_HOUR
+            maxOverworkTuneMin: dayWindow.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки за DAY_END_HOUR
             perPassByCut: perPassByCut,
             planBaseMidnightMs: planBaseMidnightMs,
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
+            dueKeyByCut: dueKeyByCut,   // #3815: EDD — задание с более ранним сроком на более ранний день
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
@@ -8740,6 +9246,31 @@
             self.downtimesBySlitter[String(slitterId)] = rows;
             return rows;
         });
+    };
+
+    // #3764/#3844: построить модалку «Отпуск» (заголовок, тело-таблица, «×», «ОК»).
+    // «×» и «ОК» (справа) закрывают окно; поля «Отпуска» сохраняются по change, поэтому
+    // отдельного «Сохранить» нет. Та же механика оверлея, что у формы/тайминга (×/оверлей/Esc).
+    AtexProductionPlanning.prototype.buildDowntimeModal = function() {
+        var self = this;
+        var dtTitle = el('h2', { class: 'atex-pp-form-title atex-pp-dt-title', text: 'Отпуск станка' });
+        var dtBody = el('div', { class: 'atex-pp-dt-body' });
+        var dtDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dt-dialog' });
+        var dtClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        dtClose.addEventListener('click', function() { self.closeDowntime(); });
+        // #3844: «ОК» (справа) — закрывает окно (поля сохраняются по change, отдельного «Сохранить» нет).
+        var dtOk = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-dt-ok', type: 'button', text: 'ОК', title: 'Закрыть' });
+        dtOk.addEventListener('click', function() { self.closeDowntime(); });
+        dtDialog.appendChild(dtClose);
+        dtDialog.appendChild(dtTitle);
+        dtDialog.appendChild(dtBody);
+        dtDialog.appendChild(el('div', { class: 'atex-pp-supply-actions' }, [dtOk]));
+        this.downtimeModalTitleEl = dtTitle;
+        this.downtimeModalBodyEl = dtBody;
+        this.downtimeModalEl = el('div', { class: 'atex-pp-modal atex-pp-dt-modal' }, [dtDialog]);
+        this.downtimeModalEl.addEventListener('click', function(e) { if (e.target === self.downtimeModalEl) self.closeDowntime(); });
+        this.root.appendChild(this.downtimeModalEl);
+        return this.downtimeModalEl;
     };
 
     AtexProductionPlanning.prototype.openDowntime = function() {
@@ -9277,42 +9808,22 @@
         // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
         // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
         var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
-        // #3652: якорь дня по «Дате план» каждой резки (смещение от базы=день фильтра «С»).
-        // Без него при ДИАПАЗОНЕ дат «С–По» buildSchedule паковал все видимые задания встык
-        // от дня «С» → задания 30.05 показывались под датой «С» (напр. 20.05). Привязываем
-        // каждое задание к его рабочему дню; пустая «Дата план» — без якоря (день 0).
-        var dayAnchorByCut = {};
-        activeGroup.cuts.forEach(function(c) {
-            var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
-            if (off != null && off > 0) dayAnchorByCut[String(c.id)] = off;
-        });
         // #3688: текущая заправка активного станка (из prev_cut_setup) → синтетическая
-        // «предыдущая резка» для первой резки очереди. Есть данные → переналадка считается от
-        // неё (смена сырья + ножи, если осталось другое; та же конфигурация → 0). Нет данных по
-        // станку → null, и расписание падает на firstCutSetup (настройка ножей с нуля, #3669).
+        // «предыдущая резка» для МОДАЛКИ тайминга первой резки очереди (#3240): смена сырья +
+        // ножи, если осталось другое. Нет данных → null + firstCutSetup (настройка ножей с нуля).
         var carrySlitterId = String(activeGroup.slitter && activeGroup.slitter.id);
         var carrySetup = (self.prevSetupBySlitter || {})[carrySlitterId];
         var carryPrevCut = (carrySetup && activeGroup.cuts.length)
             ? carryOverPrevCut(carrySetup, activeGroup.cuts[0]) : null;
-        var schedOpts = {
-            windPoints: windPoints,
-            times: self.changeTimes,
-            runLengthByCut: runLenByCut,
-            shiftStartMin: dayWindow.startMin,
-            shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin,
-            setupTaskIds: setupTaskIds,
-            dayAnchorByCut: dayAnchorByCut,
-            carryPrevCut: carryPrevCut,   // #3688: заправка станка для первой резки
-            firstCutSetup: true,   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
-            gapFill: true,   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
-            blockedRanges: self.blockedRangesForSlitter(carrySlitterId, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
-        };
-        // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
-        // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
-        var schedule = buildSchedule(activeGroup.cuts, schedOpts);
+        // #3846: НЕ пересчитываем расписание live (buildSchedule убран) — показываем СОХРАНЁННЫЙ
+        // план (scheduleFromStored), тот же, что рисует РМ «Диаграмма Ганта» → времена и минуты
+        // ВСЕГДА совпадают. Обед (#3342) уже учтён генерацией в сохранённых planStart; здесь он —
+        // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
+        var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        var lunchByDay = {};   // #3846: { schedDay → { startMin, finishMin, durationMin } } обеда
+        lunchBlocksFromSchedule(schedule, { lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin })
+            .forEach(function(lb) { lunchByDay[lb.day] = lb; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
         // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
@@ -9626,6 +10137,21 @@
                 lastDayDateRendered = cardSchedDay;
             }
 
+            // #3846: блок «Обед» (#3342, плавающий) перед карточкой, идущей сразу после обеденного
+            // зазора. Обед уже сидит в сохранённых planStart (его вставила генерация) — на странице
+            // планирования рисуем его явно, чтобы зазор не выглядел «дырой» и совпадал с Гантом.
+            // Обед привязан к началу послеобеденной резки (lunchByDay[].finishMin == окно карточки),
+            // поэтому матчим один раз — по совпадению с окном (startMin − setupMin) текущей карточки.
+            if (sc && cardSchedDay != null) {
+                var lb = lunchByDay[cardSchedDay];
+                if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
+                    groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
+                        text: '🍽 Обед · ' + formatClock(lb.startMin) + ' – ' + formatClock(lb.finishMin) +
+                              ' · ' + lb.durationMin + ' мин' }));
+                    lb._rendered = true;
+                }
+            }
+
             groupEl.appendChild(cardPanel);
 
             // Уборка в конце КАЖДОГО рабочего дня (#3155, #3280) — служит разделителем дня.
@@ -9916,21 +10442,9 @@
         this.timingModalEl.addEventListener('click', function(e) { if (e.target === self.timingModalEl) self.closeCutTiming(); });
         this.root.appendChild(this.timingModalEl);
 
-        // #3764: модалка «Отпуск» (окна простоя станка) — заголовок, редактируемая таблица и
-        // кнопка «+ Отпуск». Та же механика оверлея, что у формы/тайминга (×/оверлей/Esc).
-        var dtTitle = el('h2', { class: 'atex-pp-form-title atex-pp-dt-title', text: 'Отпуск станка' });
-        var dtBody = el('div', { class: 'atex-pp-dt-body' });
-        var dtDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dt-dialog' });
-        var dtClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
-        dtClose.addEventListener('click', function() { self.closeDowntime(); });
-        dtDialog.appendChild(dtClose);
-        dtDialog.appendChild(dtTitle);
-        dtDialog.appendChild(dtBody);
-        this.downtimeModalTitleEl = dtTitle;
-        this.downtimeModalBodyEl = dtBody;
-        this.downtimeModalEl = el('div', { class: 'atex-pp-modal atex-pp-dt-modal' }, [dtDialog]);
-        this.downtimeModalEl.addEventListener('click', function(e) { if (e.target === self.downtimeModalEl) self.closeDowntime(); });
-        this.root.appendChild(this.downtimeModalEl);
+        // #3764/#3844: модалка «Отпуск» (окна простоя станка) — заголовок, редактируемая
+        // таблица, кнопка «+ Отпуск» и «ОК»/«×» для закрытия. Скаффолд — buildDowntimeModal.
+        this.buildDowntimeModal();
 
         if (typeof document !== 'undefined') {
             document.addEventListener('keydown', function(e) {
@@ -9969,6 +10483,7 @@
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
                     self.loadActualWidths(),   // #3372: справочник фактической ширины резки (66190)
                     self.loadSleeveInches(),   // #3372: дюймы втулки по записи 8188 (контекст условия)
+                    self.loadSleeveWidths(),   // #3812: ширина втулки (мм) по записи (57/110) — втулочные полосы
                     self.loadPrevCutSetup(),   // #3688: текущая заправка станков (prev_cut_setup) для первой резки
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
@@ -10002,4 +10517,4 @@
 
  
  
-// @version 2026-06-27-issue-3788
+// @version 2026-06-29-issue-3840

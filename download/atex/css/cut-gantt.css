@@ -230,4 +230,32 @@
 .atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-late); }
 .atex-cg-bar.is-unknown { --cg-bar-color: var(--cg-unknown); }
 
+/* #3846: строка-маркер обеда (#3342). Обед уже зашит генерацией в planStart послеобеденных
+   резок — зазор на оси подписываем «🍽 Обед · N мин», иначе он читается как «дыра». Тёплый
+   пунктирный блок, по позиции/ширине = зазор; строка ниже обычных (служебная). */
+.atex-cg-lunch-row { background: repeating-linear-gradient(135deg, transparent, transparent 7px, rgba(240, 197, 116, .08) 7px, rgba(240, 197, 116, .08) 14px); }
+.atex-cg-label--lunch { color: #8a5a00; font-style: italic; }
+.atex-cg-lunch {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    min-width: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    background: #fff6e6;
+    border: 1px dashed #f0c574;
+    border-radius: 3px;
+    overflow: visible;
+}
+.atex-cg-lunch-text {
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+    color: #8a5a00;
+    text-shadow: 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg);
+    pointer-events: none;
+}
+
 .atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }

@@ -1456,8 +1456,9 @@ assertEqual(segP5.map(function(s){ return { c:s.cutId, day:s.dayOffset, runs:s.r
    { c:'B', day:0, runs:0, setupOnly:true },
    { c:'B', day:1, runs:2, setupOnly:false }],
   'splitMachineQueue #3635 п.5: настройка B в хвосте дня 0 (отдельный сегмент), проходы B с дня 1');
-// #3635 п.5: setupTaskIdSet — голова разбиения «настройка» (0 проходов) опознаётся по
-// цепочке (та же подпись продолжения + станок), где есть запись с проходами > 0.
+// #3635 п.5 / #3827: setupTaskIdSet — сегмент «настройка» (0 проходов) опознаётся по самому
+// признаку «Кол-во план» = 0, НЕ требуя присутствия продолжения-резки той же цепочки в наборе
+// (узкий фильтр дат прячет продолжение на след. дне — см. #3827).
 function p5cut(id, mat, runs) {
     return { id: id, slitter: { id: 'm1' }, materialId: mat, winding: 'IN',
         knifeWidths: [60], knifeCount: 1, plannedRuns: runs };
@@ -1465,8 +1466,8 @@ function p5cut(id, mat, runs) {
 assertEqual(planning.setupTaskIdSet([ p5cut('Bset', '2', 0), p5cut('Bcut', '2', 2), p5cut('A', '1', 1) ]),
     { Bset: true },
     'setupTaskIdSet #3635 п.5: 0-проходная голова с продолжением-резкой той же цепочки → настройка');
-assertEqual(planning.setupTaskIdSet([ p5cut('X', '9', 0) ]), {},
-    'setupTaskIdSet #3635 п.5: одинокая 0-проходная резка (нет резки в цепочке) — НЕ настройка');
+assertEqual(planning.setupTaskIdSet([ p5cut('X', '9', 0) ]), { X: true },
+    'setupTaskIdSet #3827: одинокая 0-проходная резка — тоже настройка (продолжение может быть вне фильтра дат)');
 assertEqual(planning.setupTaskIdSet([ p5cut('P', '3', 2), p5cut('Q', '3', 3) ]), {},
     'setupTaskIdSet #3635 п.5: цепочка без 0-проходных — пусто');
 // #3262: строка показывает ВСЁ окно (setup+резка): старт = startMin−setupMin (08:00),
@@ -1571,11 +1572,14 @@ assertEqual(segCont3342.map(function(s){ return { c:s.cutId, runs:s.runs, day:s.
     { c:'C', runs:3, day:1 }
 ], 'splitMachineQueue #3342: непрерывная резка через обед — день кончается раньше, остаток на след. день');
 
-// buildSchedule: тот же плавающий обед сдвигает старт резки после LUNCH_START.
+// buildSchedule: плавающий обед. #3816: намотка A (08:00, 300 мин) ПЕРЕСЕКАЕТ обед 12:20 —
+// станок паузит на обед В ХОДЕ A (раньше A «работала сквозь обед» до 13:00, а обед ставился
+// после неё — та же ошибка, что в #3816). Теперь финиш A сдвинут на обед: 08:00–13:40; B
+// идёт сразу после A (обед уже вставлен в A), без повторной паузы.
 var bsLunch3342 = planning.buildSchedule([{ id:'A', duration:300 }, { id:'B', duration:100 }],
     { windPoints:[], times:{ BETWEEN_CUTS:0 }, runLengthByCut:{}, shiftStartMin:480, shiftEndMin:970, lunchStartMin:740, lunchDurationMin:40 });
-assertEqual([bsLunch3342[0].startMin, bsLunch3342[0].finishMin], [480, 780], 'buildSchedule #3342: A 08:00–13:00');
-assertEqual([bsLunch3342[1].startMin, bsLunch3342[1].finishMin], [820, 920], 'buildSchedule #3342: обед 13:00–13:40 → B 13:40–15:20');
+assertEqual([bsLunch3342[0].startMin, bsLunch3342[0].finishMin], [480, 820], 'buildSchedule #3342/#3816: A 08:00–13:40 (обед 12:20–13:00 — пауза внутри A)');
+assertEqual([bsLunch3342[1].startMin, bsLunch3342[1].finishMin], [820, 920], 'buildSchedule #3342/#3816: B сразу после A — 13:40–15:20 (обед не дублируется)');
 
 // dayCleanups (#3155): блок уборки CLEANUP_SHIFT в конце каждого рабочего дня с резками.
 // schedW: A — день 0 (старт 482), B — день 1 (старт 1922 = 1440+482).
