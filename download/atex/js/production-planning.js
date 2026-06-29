@@ -8028,12 +8028,18 @@
         if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
         this._genRefreshing = true;
         this.setGenBusy(true);
+        // #3865: сразу показываем окно прогресса (этап подготовки неопределённый — без счётчика,
+        // полоса «бежит»), чтобы по клику «Сгенерировать» было видно, что идёт работа, а не тишина
+        // до подтверждения. Дальше планирование/генерация обновляют текст и счётчик.
+        this.showProgress('Подготовка генерации…', 0);
+        this.updateProgress(0, 'Обновление позиций, очереди и заправки станков…');
         // #3862: заправку станков (prev_cut_setup) тоже обновляем — она привязана к ДАТЕ окна
         // планирования (task_start<планБаза), а дату могли сменить после загрузки страницы; иначе
         // первая резка считалась бы от заправки на старую дату.
         Promise.all([this.loadPositions(), this.reload(), this.loadPrevCutSetup()]).then(function() {
             self._genRefreshing = false;
             self.setGenBusy(false);
+            self.updateProgress(0, 'Планирование раскладок…');   // #3865
             // #3457: loadPositions() пересоздал genPositions с НОМИНАЛЬНОЙ шириной заказа —
             // заново проставляем фактическую ширину резки (#3372: справочник 66190), иначе
             // планирование/раскладка/Партии ГП пойдут по номиналу (60мм вместо 59мм).
@@ -8044,6 +8050,7 @@
         }).catch(function(err) {
             self._genRefreshing = false;
             self.setGenBusy(false);
+            self.hideProgress();   // #3865
             console.error('[pp] ⚙️ generateCuts: не удалось обновить данные перед планированием', err);
             self.notify('Не удалось обновить данные перед планированием: ' + (err && err.message || err), 'error');
         });
@@ -8053,7 +8060,7 @@
     AtexProductionPlanning.prototype.planAndConfirmCuts = function(actionsEl) {
         var self = this;
         var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
-        if (!layoutCore || typeof layoutCore.planLayouts !== 'function') return;
+        if (!layoutCore || typeof layoutCore.planLayouts !== 'function') { this.hideProgress(); return; }   // #3865
 
         // #(no-srok-when-on-time): срок учитываем (дробим позиции по окну) только если
         // есть просроченные относительно даты планирования. Если все позиции укладываются
@@ -8081,6 +8088,7 @@
             // можно. Идемпотентно (#3427): если ничего не меняется — ничего не пишем.
             console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — пересобираю очередь по правилам');
             var npNote = notProducible.length ? ' Пропущено ' + notProducible.length + ' поз. (втулка 0.5″, ширина < 55 мм).' : '';
+            this.hideProgress();   // #3865: дальше autoSequenceQueue покажет свой прогресс «Сохранение плана резок…»
             this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
                 self.notify((changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
                                      : 'Нет незапланированных позиций; очередь уже оптимальна') + npNote, 'info');
@@ -8102,10 +8110,12 @@
         // На время запросов preferable_widths (preloads) деактивируем кнопку и
         // показываем крутилку (#3332), иначе клик «глохнет» без видимой реакции.
         self.setGenBusy(true);
+        if (preloads.length) self.updateProgress(0, 'Загрузка ходовых ширин…');   // #3865
         Promise.all(preloads).then(function() {
             // Запросы завершены — крутилку убираем; далее идёт синхронная раскладка
             // и (при наличии) модалка подтверждения / runGenerateCuts со своим busy.
             self.setGenBusy(false);
+            self.updateProgress(0, 'Планирование раскладок…');   // #3865
             // Построить раскладки по каждому профилю; собрать пропуски.
             var allLayouts = [];   // [{...layout, mat}]
             var skipped = [];      // [{positionId, reason}]
@@ -8177,6 +8187,7 @@
 
             if (!allLayouts.length) {
                 console.log('[pp] ⚙️ generateCuts: нет раскладок, выход');
+                self.hideProgress();   // #3865
                 self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
                 return;
             }
@@ -8211,6 +8222,7 @@
                     diagnostics: timingDiagnostics,
                     layouts: allLayouts.slice(0, 5)
                 });
+                self.hideProgress();   // #3865
                 self.notify('Ошибка подготовки заданий: ' + cutWriteDiagnosticSummary(timingDiagnostics.slice(0, 3)) +
                     (timingDiagnostics.length > 3 ? '; …' : ''), 'error');
                 return;
@@ -8246,6 +8258,9 @@
             // с ножами по убыванию (#3130) — стратегия SETUP. Прежняя «сложные раньше»
             // (FATIGUE) по route-score давала ножи по ВОЗРАСТАНИЮ (6,16,16), вопреки
             // #3130 (ideav/crm#3421). inline:true — именованная inline-кнопка, без модалки.
+            // #3865: прячем прогресс подготовки — показываем чистое подтверждение; на «Создать»
+            // прогресс вернётся (runGenerateCuts).
+            self.hideProgress();
             self.confirmAction(msg, actionsEl, [
                 { label: 'Создать', primary: true, inline: true, onConfirm: function() {
                     self.runGenerateCuts(allLayouts, skipped, PLANNING_STRATEGY_SETUP);
@@ -8253,6 +8268,7 @@
             ]);
         }).catch(function(err) {
             self.setGenBusy(false);
+            self.hideProgress();   // #3865
             self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
         });
     };
@@ -8263,6 +8279,11 @@
     // склад (та же Партия ГП без своего обеспечения). Зависимые _m_new не параллелятся.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped, strategy) {
         var self = this;
+        // #3865: окно прогресса показываем сразу по «Создать» — синхронная подготовка (раскладка
+        // по дням, выравнивание загрузки станков) выполняется до первых запросов; ниже окно
+        // сменится счётчиком «N из M». Без этого по «Создать» какое-то время не было индикатора.
+        this.showProgress('Генерация заданий…', 0);
+        this.updateProgress(0, 'Подготовка и выравнивание загрузки станков…');
         var cutMeta = this.meta.cut;
         var finishedBatchMeta = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         var supplyMeta = this.meta.supply;
@@ -10583,7 +10604,9 @@
     AtexProductionPlanning.prototype.showProgress = function(title, total) {
         this.hideProgress();
         this.progressTotal = Number(total) || 0;
-        var bar = el('div', { class: 'atex-pp-progress-bar' });
+        // #3865: total ≤ 0 → этап подготовки без счётчика, полоса «бежит» (is-indeterminate),
+        // под ней показываем текст «что происходит» (updateProgress detail).
+        var bar = el('div', { class: 'atex-pp-progress-bar' + (this.progressTotal > 0 ? '' : ' is-indeterminate') });
         var fill = el('div', { class: 'atex-pp-progress-fill' });
         bar.appendChild(fill);
         var counter = el('div', { class: 'atex-pp-progress-count', text: '' });
@@ -10610,7 +10633,7 @@
         if (this.progressCounter) {
             this.progressCounter.textContent = detail != null
                 ? detail
-                : ((Number(done) || 0) + ' из ' + total + ' (' + pct + '%)');
+                : (total > 0 ? ((Number(done) || 0) + ' из ' + total + ' (' + pct + '%)') : '');
         }
     };
 
@@ -10799,4 +10822,4 @@
 
  
  
-// @version 2026-06-29-issue-3862
+// @version 2026-06-29-issue-3865
