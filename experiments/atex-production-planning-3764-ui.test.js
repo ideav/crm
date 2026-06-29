@@ -149,5 +149,15 @@ c.notify = function(msg, kind) { notices.push({ msg: msg, kind: kind }); };
     await c.deleteDowntimeRow('101', { id: null });
     assert(posts.length === 0, '#3764-ui: удаление не сохранённой строки не дёргает сервер');
 
+    // ── 7) #3844: кнопка «ОК» (справа) закрывает окно ──
+    c.buildDowntimeModal();
+    var okBtn = c.downtimeModalEl.querySelector('.atex-pp-dt-ok');
+    assert(okBtn && okBtn.textContent === 'ОК', '#3844-ui: в модалке есть кнопка «ОК»');
+    var actions = c.downtimeModalEl.querySelector('.atex-pp-supply-actions');
+    assert(actions && actions.querySelector('.atex-pp-dt-ok'), '#3844-ui: «ОК» в правой панели действий (flex-end)');
+    c.downtimeModalEl.classList.add('is-open');
+    okBtn.click();
+    assert(!c.downtimeModalEl.classList.contains('is-open'), '#3844-ui: клик «ОК» закрывает окно (снимает is-open)');
+
     console.log('\n' + passed + ' assertions passed');
 })();

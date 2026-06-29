@@ -9090,6 +9090,31 @@
         });
     };
 
+    // #3764/#3844: построить модалку «Отпуск» (заголовок, тело-таблица, «×», «ОК»).
+    // «×» и «ОК» (справа) закрывают окно; поля «Отпуска» сохраняются по change, поэтому
+    // отдельного «Сохранить» нет. Та же механика оверлея, что у формы/тайминга (×/оверлей/Esc).
+    AtexProductionPlanning.prototype.buildDowntimeModal = function() {
+        var self = this;
+        var dtTitle = el('h2', { class: 'atex-pp-form-title atex-pp-dt-title', text: 'Отпуск станка' });
+        var dtBody = el('div', { class: 'atex-pp-dt-body' });
+        var dtDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dt-dialog' });
+        var dtClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        dtClose.addEventListener('click', function() { self.closeDowntime(); });
+        // #3844: «ОК» (справа) — закрывает окно (поля сохраняются по change, отдельного «Сохранить» нет).
+        var dtOk = el('button', { class: 'atex-pp-btn atex-pp-btn-primary atex-pp-dt-ok', type: 'button', text: 'ОК', title: 'Закрыть' });
+        dtOk.addEventListener('click', function() { self.closeDowntime(); });
+        dtDialog.appendChild(dtClose);
+        dtDialog.appendChild(dtTitle);
+        dtDialog.appendChild(dtBody);
+        dtDialog.appendChild(el('div', { class: 'atex-pp-supply-actions' }, [dtOk]));
+        this.downtimeModalTitleEl = dtTitle;
+        this.downtimeModalBodyEl = dtBody;
+        this.downtimeModalEl = el('div', { class: 'atex-pp-modal atex-pp-dt-modal' }, [dtDialog]);
+        this.downtimeModalEl.addEventListener('click', function(e) { if (e.target === self.downtimeModalEl) self.closeDowntime(); });
+        this.root.appendChild(this.downtimeModalEl);
+        return this.downtimeModalEl;
+    };
+
     AtexProductionPlanning.prototype.openDowntime = function() {
         if (!this.meta.downtime) { this.notify('В метаданных нет таблицы «' + TABLE.downtime + '»', 'error'); return; }
         var act = this.downtimeActiveSlitter;
@@ -10264,21 +10289,9 @@
         this.timingModalEl.addEventListener('click', function(e) { if (e.target === self.timingModalEl) self.closeCutTiming(); });
         this.root.appendChild(this.timingModalEl);
 
-        // #3764: модалка «Отпуск» (окна простоя станка) — заголовок, редактируемая таблица и
-        // кнопка «+ Отпуск». Та же механика оверлея, что у формы/тайминга (×/оверлей/Esc).
-        var dtTitle = el('h2', { class: 'atex-pp-form-title atex-pp-dt-title', text: 'Отпуск станка' });
-        var dtBody = el('div', { class: 'atex-pp-dt-body' });
-        var dtDialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dt-dialog' });
-        var dtClose = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
-        dtClose.addEventListener('click', function() { self.closeDowntime(); });
-        dtDialog.appendChild(dtClose);
-        dtDialog.appendChild(dtTitle);
-        dtDialog.appendChild(dtBody);
-        this.downtimeModalTitleEl = dtTitle;
-        this.downtimeModalBodyEl = dtBody;
-        this.downtimeModalEl = el('div', { class: 'atex-pp-modal atex-pp-dt-modal' }, [dtDialog]);
-        this.downtimeModalEl.addEventListener('click', function(e) { if (e.target === self.downtimeModalEl) self.closeDowntime(); });
-        this.root.appendChild(this.downtimeModalEl);
+        // #3764/#3844: модалка «Отпуск» (окна простоя станка) — заголовок, редактируемая
+        // таблица, кнопка «+ Отпуск» и «ОК»/«×» для закрытия. Скаффолд — buildDowntimeModal.
+        this.buildDowntimeModal();
 
         if (typeof document !== 'undefined') {
             document.addEventListener('keydown', function(e) {
