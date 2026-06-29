@@ -215,3 +215,39 @@
     font-size: 12px;
     color: #b45309;
 }
+
+/* #3869: РМ перестроено — тулбар (выбор втулкореза + «Закрыть все») и список заданий. */
+.atex-sc-layout { grid-template-columns: 1fr; }
+.atex-sc-toolbar {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    border: 1px solid var(--sc-border);
+    border-radius: 8px;
+    background: var(--sc-bg);
+    padding: 12px 16px;
+}
+.atex-sc-toolbar .atex-sc-field { margin: 0; min-width: 240px; }
+.atex-sc-toolbar-all { margin-left: auto; align-self: center; }
+.atex-sc-card-info { color: var(--sc-muted); font-size: 14px; margin: 6px 0 0; }
+
+/* Модалка подтверждения «Закрыть все». */
+.atex-sc-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+.atex-sc-confirm {
+    background: var(--sc-bg);
+    border-radius: 10px;
+    padding: 20px 22px;
+    max-width: 360px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
+}
+.atex-sc-confirm-msg { font-size: 16px; margin-bottom: 16px; }
+.atex-sc-confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
