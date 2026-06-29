@@ -26,6 +26,14 @@ function assertEqual(actual, expected, name) {
     }
 }
 
+// ── parseSleeveWidthFromName (фолбэк к реквизиту — реальные названия записей ateh) ──
+assertEqual(planning.parseSleeveWidthFromName('Втулка картонная 0.5" ширина 110 мм'), 110, 'имя 0.5" ширина 110 мм → 110');
+assertEqual(planning.parseSleeveWidthFromName('Втулка картонная 0.5" ширина 57 мм'), 57, 'имя 0.5" ширина 57 мм → 57');
+assertEqual(planning.parseSleeveWidthFromName('Втулка пластиковая фиолетовая 1" ширина 55 мм'), 55, 'имя 1" ширина 55 мм → 55');
+assertEqual(planning.parseSleeveWidthFromName('Втулка картонная (76мм/10мм/1000мм)'), null, 'имя без «ширина NN мм» → null');
+assertEqual(planning.parseSleeveWidthFromName('Втулка картонная 1" длина 1 метр'), null, 'имя «длина 1 метр» → null');
+assertEqual(planning.parseSleeveWidthFromName(''), null, 'пустое имя → null');
+
 // ── isSleeveWidthProducible ──
 assertEqual(planning.isSleeveWidthProducible(0.5, 54), false, '0.5″ ширина 54 → не производится');
 assertEqual(planning.isSleeveWidthProducible(0.5, 55), true,  '0.5″ ширина 55 → производится');

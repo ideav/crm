@@ -2330,6 +2330,15 @@
     // >70) — полос нет (>70 режется по обычному правилу втулки 1″). Полосы 110 мм
     // занимают ширину джамбо той же резки (резервируются ДО укладки продукта).
 
+    // Ширина втулки из названия записи «Диаметр втулки» (фолбэк к реквизиту):
+    // «Втулка картонная 0.5" ширина 110 мм» → 110. Нет шаблона → null.
+    function parseSleeveWidthFromName(name) {
+        var m = String(name == null ? '' : name).match(/ширина\s*(\d+(?:[.,]\d+)?)\s*мм/i);
+        if (!m) return null;
+        var n = Number(m[1].replace(',', '.'));
+        return isFinite(n) && n > 0 ? n : null;
+    }
+
     // Позицию можно произвести? Втулка 0.5″ запрещает ширину < 55 мм.
     function isSleeveWidthProducible(inches, orderWidth) {
         var w = Number(orderWidth);
@@ -4776,6 +4785,7 @@
         buildActualWidthIndex: buildActualWidthIndex,    // #3372
         resolveCutWidth: resolveCutWidth,                // #3372
         resolveNominalWidth: resolveNominalWidth,        // #3408
+        parseSleeveWidthFromName: parseSleeveWidthFromName, // #3812
         isSleeveWidthProducible: isSleeveWidthProducible, // #3812
         sleeveCoreStripPlan: sleeveCoreStripPlan,        // #3812
         appendCoreStrip: appendCoreStrip,                // #3812
@@ -5755,10 +5765,11 @@
         }).catch(function() { self.sleeveInchesById = {}; });
     };
 
-    // #3812: ширина втулки в мм по id записи «Диаметр втулки» (реквизит «Ширина
-    // втулки, мм») → this.sleeveWidthById = { sleeveId: мм }. Контекст для добавления
-    // втулочных полос (57 vs 110). Нет реквизита/доступа → пустая карта (обратная
-    // совместимость: без ширины втулки полосы не добавляются).
+    // #3812: ширина втулки в мм по id записи «Диаметр втулки» → this.sleeveWidthById =
+    // { sleeveId: мм }. Источник: реквизит «Ширина втулки, мм» (если заведён), иначе
+    // фолбэк — ширина из НАЗВАНИЯ записи («… ширина 110 мм», parseSleeveWidthFromName).
+    // Контекст для втулочных полос (57 vs 110). Нет данных → запись без ширины (полосы
+    // не добавляются; обратная совместимость).
     AtexProductionPlanning.prototype.loadSleeveWidths = function() {
         var self = this;
         this.sleeveWidthById = {};
@@ -5766,14 +5777,14 @@
         if (!meta) return Promise.resolve();
         var wIdx = columnIndex(meta, 'Ширина втулки, мм');
         if (wIdx < 0) wIdx = columnIndex(meta, 'Ширина втулки');
-        if (wIdx < 0) return Promise.resolve();
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
             var map = {};
             (rows || []).forEach(function(rec) {
-                var raw = (rec.r || [])[wIdx];
-                if (raw == null || String(raw).trim() === '') return;
-                var n = Number(raw);
-                if (isFinite(n)) map[String(rec.i)] = n;
+                var r = rec.r || [];
+                var raw = wIdx >= 0 ? r[wIdx] : null;
+                var n = (raw != null && String(raw).trim() !== '') ? Number(raw) : NaN;
+                if (!isFinite(n) || !(n > 0)) n = parseSleeveWidthFromName(r[0]); // r[0] — название записи
+                if (isFinite(n) && n > 0) map[String(rec.i)] = Number(n);
             });
             self.sleeveWidthById = map;
         }).catch(function() { self.sleeveWidthById = {}; });
