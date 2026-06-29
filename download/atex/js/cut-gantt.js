@@ -432,6 +432,44 @@
         return tr.startMs + (cutBarMinutes(cut) + cutSetupMin(cut).total) * 60000;
     }
 
+    // #3846: маркеры «Обед» для Ганта. Обед (#3342) уже зашит ГЕНЕРАЦИЕЙ в planStart
+    // послеобеденных резок: между концом окна одной резки и началом окна следующей в ТОМ ЖЕ
+    // календарном дне образуется зазор ≈ длительности обеда (LUNCH_DURATION). Раньше Гант его
+    // не подписывал → зазор выглядел необъяснённой «дырой в планировании» (#3842/#3846). Находим
+    // такой зазор и отдаём маркер, привязанный к НАЧАЛУ послеобеденной резки (как блок обеда в
+    // «Планировании производства», чтобы оба РМ показывали обед одинаково). lunchDurationMin ≤ 0
+    // (обед выключен/настройка не загрузилась) → []. ordered — резки станка в порядке очереди;
+    // scale — ось ganttScale (нерабочее время свёрнуто). → [{ beforeIndex, leftPx, widthPx,
+    // startMs, endMs, durationMin }], по одному на день с обедом. Чистая — покрыта тестом.
+    function ganttLunchMarkers(ordered, scale, lunchDurationMin) {
+        var lunchDur = Number(lunchDurationMin) || 0;
+        if (!(lunchDur > 0) || !ordered || !scale || typeof scale.toPx !== 'function') return [];
+        var out = [];
+        var lunchByDay = {};
+        for (var i = 1; i < ordered.length; i++) {
+            var prevEnd = cutBarEndMs(ordered[i - 1]);
+            var curTr = cutTimeRange(ordered[i]);
+            if (prevEnd == null || !curTr) continue;
+            var curStart = curTr.startMs;
+            var day = startOfLocalDayMs(curStart);
+            if (lunchByDay[day]) continue;                       // один обед на день
+            if (startOfLocalDayMs(prevEnd) !== day) continue;    // зазор через ночь (стык дней) — не обед
+            var gapMin = (curStart - prevEnd) / 60000;
+            if (gapMin < lunchDur - 1) continue;                 // зазор меньше обеда — не обед (встык/мелкий простой)
+            var startMs = curStart - lunchDur * 60000;           // привязка к началу послеобеденной резки
+            out.push({
+                beforeIndex: i,
+                startMs: startMs,
+                endMs: curStart,
+                leftPx: scale.toPx(startMs),
+                widthPx: Math.max(round3(scale.toPx(curStart) - scale.toPx(startMs)), 1),
+                durationMin: lunchDur
+            });
+            lunchByDay[day] = true;
+        }
+        return out;
+    }
+
     // #3747: рабочие отрезки дорожки — по одному на КАЛЕНДАРНЫЙ день с заданиями, окно
     // [DAY_START_HOUR; DAY_END_HOUR + получас уборки]. Нерабочее время (ночь между сменами)
     // на ось не попадает — отрезки идут встык (дни лесенкой). Бар, вышедший за смену (ранний
@@ -1092,6 +1130,9 @@
             });
             // #3770: суммарные минуты всех баров станка — для подписи «N (Σ мин)» в заголовке.
             g.tasksMin = g.tasks.reduce(function(sum, t) { return sum + (t.barMin || 0); }, 0);
+            // #3846: маркеры обеда (зазор ≈ LUNCH_DURATION между резками одного дня) — отдельной
+            // строкой перед послеобеденной резкой, чтобы зазор не выглядел «дырой».
+            g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin);
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
@@ -1168,6 +1209,7 @@
         ganttWindow: ganttWindow,
         ganttTrackPx: ganttTrackPx,
         cutBarEndMs: cutBarEndMs,           // #3747
+        ganttLunchMarkers: ganttLunchMarkers,   // #3846: маркеры обеда из зазоров расписания
         workingSegments: workingSegments,   // #3747
         ganttScale: ganttScale,             // #3747
         chooseHourStep: chooseHourStep,
@@ -1278,6 +1320,34 @@
             .catch(function() { return Object.assign({}, GANTT_OP_TIMES); });
     };
 
+    // #3846: длительность обеда (LUNCH_DURATION, мин) из таблицы «Настройка» — тот же источник,
+    // что и у «Планирования производства» (#3342), чтобы оба РМ одинаково опознавали обеденный
+    // зазор. Берём значение с учётом области видимости (БД-скоуп: db-тип > ATEH > общий). Ошибка/
+    // нет таблицы/нет ключа → 0 (маркеры обеда не рисуются — деградация без поломки Ганта).
+    AtexCutGantt.prototype.loadLunchSettings = function() {
+        var self = this;
+        return this.getJson('object/' + encodeURIComponent('Настройка') + '/?JSON_OBJ&LIMIT=0,1000')
+            .then(function(rows) {
+                var dbKey = String(self.db || '').trim().toUpperCase();
+                var best = null, bestRank = -1;
+                (rows || []).forEach(function(rec) {
+                    var r = (rec && rec.r) || [];
+                    var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
+                    if (key !== 'LUNCH_DURATION') return;
+                    var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
+                    var val = String(r[2] == null ? '' : r[2]).replace(',', '.').trim();
+                    if (val === '') return;
+                    var rank = 1;
+                    if (dbKey && type === dbKey) rank = 3;
+                    else if (type === 'ATEH') rank = 2;
+                    if (rank >= bestRank) { bestRank = rank; best = val; }
+                });
+                var n = best == null ? 0 : Number(best);
+                return isFinite(n) && n > 0 ? Math.round(n) : 0;
+            })
+            .catch(function() { return 0; });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -1285,8 +1355,10 @@
             this.loadSlitters(),
             this.loadStrips(),
             this.loadOpTimes(),
-            this.loadPrevCutSetup()   // #3693: текущая заправка станков для наладки первой резки
+            this.loadPrevCutSetup(),   // #3693: текущая заправка станков для наладки первой резки
+            this.loadLunchSettings()   // #3846: длительность обеда для маркеров обеда
         ]).then(function(res) {
+            self.lunchDurationMin = res[5] || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
             self.cuts = rowsToCuts(res[0] || []);
             // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
             attachStrips(self.cuts, res[2] || []);
@@ -1431,7 +1503,7 @@
         // #3668: задания размещаются по реальному времени на общей шкале окна.
         // #3704: зум по горизонтали + нижняя граница «вписать в экран» (дорожка не уже видимой области).
         var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
-            { zoom: st.zoom, fitTrackPx: this._fitTrackPx() });
+            { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin });
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
@@ -1482,7 +1554,29 @@
             headTrack.style.minWidth = trackPx + 'px';
             body.appendChild(el('div', { class: 'atex-cg-row atex-cg-machine-head' }, [nameCell, headTrack]));
 
-            group.tasks.forEach(function(t) {
+            // #3846: обед (#3342) рисуем строкой ПЕРЕД послеобеденной резкой (beforeIndex) —
+            // тем же зазором, что виден на оси, но подписанным «🍽 Обед · N мин» (иначе зазор
+            // читается как «дыра в планировании»). Обед уже зашит генерацией в planStart.
+            var lunchByBefore = {};
+            (group.lunches || []).forEach(function(l) { lunchByBefore[l.beforeIndex] = l; });
+
+            group.tasks.forEach(function(t, taskIdx) {
+                var lb = lunchByBefore[taskIdx];
+                if (lb) {
+                    var lunchTrack = el('div', { class: 'atex-cg-track' });
+                    lunchTrack.style.minWidth = trackPx + 'px';
+                    appendHours(lunchTrack);
+                    var lunchBar = el('div', { class: 'atex-cg-lunch', title: 'Обеденный перерыв · ' + lb.durationMin + ' мин' }, [
+                        el('span', { class: 'atex-cg-lunch-text', text: '🍽 Обед · ' + lb.durationMin + ' мин' })
+                    ]);
+                    lunchBar.style.left = lb.leftPx + 'px';
+                    lunchBar.style.width = lb.widthPx + 'px';
+                    lunchTrack.appendChild(lunchBar);
+                    var lunchLabel = el('div', { class: 'atex-cg-label atex-cg-label--lunch', title: 'Обеденный перерыв' }, [
+                        el('span', { class: 'atex-cg-label-main', text: 'Обед' })
+                    ]);
+                    body.appendChild(el('div', { class: 'atex-cg-row atex-cg-lunch-row' }, [lunchLabel, lunchTrack]));
+                }
                 var statusKey = t.status && t.status.key || 'unknown';
                 var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
                     el('span', { class: 'atex-cg-label-main', text: t.label })

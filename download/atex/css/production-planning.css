@@ -424,6 +424,21 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* #3846: маркер обеда (#3342) внутри дня — между резкой до обеда и послеобеденной.
+   Обед уже зашит генерацией в planStart; здесь он подписан, чтобы зазор не выглядел
+   «дырой». Тёплый оттенок отличает его от серого блока уборки. */
+.atex-pp-lunch {
+    margin: 6px 0;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #8a5a00;
+    background: #fff6e6;
+    border: 1px dashed #f0c574;
+    border-radius: 8px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
 /* #3616: дата рабочего дня — заголовок перед первой карточкой каждого дня расписания
    (после блока уборки предыдущего дня). Нумерация заданий начинается с 1 на каждый день. */
 .atex-pp-day-date {

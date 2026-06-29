@@ -2811,6 +2811,16 @@
         return isFinite(n) && n > 0 ? Math.round(n) : 0;
     }
 
+    // #3847: лимит нахлёста из настройки (MAX_OVERWORK_CUTS/MAX_OVERWORK_TUNE) — целое число
+    // минут ≥ 0. В отличие от parseDurationMinutes, ОТЛИЧАЕТ отсутствие (пусто/некорректно → null,
+    // фича выключена) от заданного «0» (нахлёст запрещён, но ограничение активно). Отрицательное → null.
+    function parseOverworkMinutes(value) {
+        var s = String(value == null ? '' : value).replace(',', '.').trim();
+        if (s === '') return null;
+        var n = Number(s);
+        return isFinite(n) && n >= 0 ? Math.round(n) : null;
+    }
+
     function resolveWorkingWindow(settings, cleanupMin) {
         var cfg = settings || {};
         var start = parseClockMinutes(cfg.DAY_START_HOUR, DAY_START_MIN);
@@ -2830,13 +2840,24 @@
         var lunchStart = (cfg.LUNCH_START != null && String(cfg.LUNCH_START).trim() !== '' && lunchDur > 0)
             ? parseClockMinutes(cfg.LUNCH_START, NaN) : NaN;
         var hasLunch = isFinite(lunchStart) && lunchDur > 0;
+        // #3847: максимальный нахлёст за конец рабочего дня (DAY_END_HOUR=endMin). Резку (проход)
+        // можно положить с нахлёстом, только если она кончится ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS;
+        // настройку (ножи/смена сырья) — ≤ DAY_END_HOUR+MAX_OVERWORK_TUNE. Пусто/некорректно →
+        // null (фича выключена: планировщик пакует до cutEndMin без сверхнормативного нахлёста).
+        var overCuts = parseOverworkMinutes(cfg.MAX_OVERWORK_CUTS);
+        var overTune = parseOverworkMinutes(cfg.MAX_OVERWORK_TUNE);
         return {
             startMin: round3(start),
             endMin: round3(end),
             cutEndMin: round3(cutEnd),
             cleanupMin: round3(cleanup),
             lunchStartMin: hasLunch ? round3(lunchStart) : null,  // #3342: начало окна обеда (мин от полуночи)
-            lunchDurationMin: hasLunch ? round3(lunchDur) : 0     // #3342: длительность обеда (мин)
+            lunchDurationMin: hasLunch ? round3(lunchDur) : 0,    // #3342: длительность обеда (мин)
+            // #3847: лимиты нахлёста (мин за DAY_END_HOUR); null = фича выключена. Если задан только
+            // один — второй наследует его (общий смысл «допустимый нахлёст»), чтобы частичная
+            // настройка не отключала ограничение целиком.
+            maxOverworkCutsMin: overCuts != null ? overCuts : overTune,
+            maxOverworkTuneMin: overTune != null ? overTune : overCuts
         };
     }
 
@@ -3117,6 +3138,85 @@
         return out;
     }
 
+    // #3846: показываем СОХРАНЁННЫЙ план БЕЗ live-пересчёта. Единый источник правды с РМ
+    // «Диаграмма Ганта (задания)»: и очередь production-planning, и cut-gantt берут одни и те
+    // же записанные поля резки, поэтому времена/минуты ВСЕГДА совпадают (раньше очередь
+    // пересчитывала расписание через buildSchedule на каждый рендер и расходилась с сохранённым:
+    // другая наладка — firstCutSetup вместо реальной заправки станка — и неучтённый обед).
+    // Тайминг строим из полей, записанных ГЕНЕРАЦИЕЙ: planStart (главное значение, t1078 —
+    // окно/начало настройки), сохранённая наладка (ножи + смена сырья) и «Резка и Лидер»
+    // (#3700: намотка + лидер). Обед (#3342) уже учтён в сохранённых planStart (генерация
+    // сдвинула старты послеобеденных резок) — на показе он отдельный блок (lunchBlocksFromSchedule).
+    // Форма результата совпадает с buildSchedule: { cutId, startMin, finishMin, setupMin,
+    // durationMin, leaderMin } в минутах от полуночи дня 0 (baseMidnightMs); лидер входит в
+    // durationMin (отдельной leaderMin нет — окно = setup + durationMin).
+    function scheduleFromStored(cuts, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
+        var out = [];
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего ставить на ось
+            var windowStartMin = round3((tsSec * 1000 - base) / 60000);     // окно = начало настройки
+            var setupMin = round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin));
+            var durationMin = round3(num(c.storedCutAndLeaderMin) || num(c.duration));   // намотка + лидер
+            var startMin = round3(windowStartMin + setupMin);               // старт намотки (после настройки)
+            out.push({
+                cutId: String(c.id),
+                startMin: startMin,
+                finishMin: round3(startMin + durationMin),
+                setupMin: setupMin,
+                durationMin: durationMin,
+                // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
+                // отдельной величины в сохранённом нет. null (а не 0): окно/минуты считают его 0
+                // (не двойной счёт), а модалка тайминга (buildCutTimingCtx) оценивает лидер для
+                // СВОЕЙ разбивки, не трогая расписание очереди/Ганта.
+                leaderMin: null
+            });
+        });
+        return out;
+    }
+
+    // #3846: блоки «Обед» для отображения — выводим обед как видимый разрыв между резками
+    // одного рабочего дня (раньше cut-gantt/очередь его не рисовали → выглядел как пустая
+    // «дыра в планировании»). Обед уже сидит в сохранённых planStart: между концом окна одной
+    // резки и началом окна следующей в ТОМ ЖЕ дне образуется зазор ≈ длительности обеда вокруг
+    // LUNCH_START. Берём такой зазор как обед. schedule — из scheduleFromStored/buildSchedule
+    // (отсортируем сами). opts: { lunchStartMin, lunchDurationMin, shiftStartMin }. Пустой обед
+    // (lunchDurationMin ≤ 0) → []. → [{ day, startMin, finishMin, durationMin }] (минуты от
+    // полуночи дня 0), по одному на день, где обед реально вставлен.
+    function lunchBlocksFromSchedule(schedule, opts) {
+        opts = opts || {};
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        if (!(lunchDur > 0)) return [];
+        var segs = (schedule || []).slice().filter(function(s) {
+            return s && isFinite(Number(s.startMin));
+        }).sort(function(a, b) { return a.startMin - b.startMin; });
+        var byDay = {};
+        var lunchByDay = {};
+        segs.forEach(function(s) {
+            var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
+            var winEnd = Number(s.finishMin) + (Number(s.leaderMin) || 0);
+            var day = Math.floor(winStart / 1440);
+            var prevEnd = byDay[day];
+            // Зазор внутри дня после предыдущей резки = обед (учтён только раз на день).
+            if (prevEnd != null && !lunchByDay[day]) {
+                var gap = winStart - prevEnd;
+                // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
+                // длительности): берём, если он не меньше почти полного обеда. Обед привязываем к
+                // НАЧАЛУ послеобеденной резки (finishMin = winStart) — так блок всегда прилегает к
+                // следующей карточке (надёжный матч при рендере), а любой остаточный простой (если
+                // зазор > обеда) остаётся ДО обеда.
+                if (gap >= lunchDur - 1) {
+                    lunchByDay[day] = { day: day, startMin: round3(winStart - lunchDur), finishMin: round3(winStart), durationMin: lunchDur };
+                }
+            }
+            if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
+        });
+        return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
+    }
+
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
     // в рабочее окно и помещается в нём. → { startMin, durationMin } | null.
     function lunchParams(opts, shiftStart, shiftEnd) {
@@ -3174,6 +3274,17 @@
         var runsByCut = opts.runsByCut || {};
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
+        // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
+        // (DAY_END_HOUR, обычно > dayEnd = cutEndMin = DAY_END_HOUR−TOTAL_INTERVALS). Резку (проход)
+        // можно положить с нахлёстом, только если она кончится ≤ dayEndHour+maxOverworkCuts;
+        // настройку — ≤ dayEndHour+maxOverworkTune. Лимит не задан (null) → фича выключена: пакуем
+        // как раньше, до cutEndMin (effCapacity), без сверхнормативного нахлёста.
+        var dayEndHour = Number(opts.dayEndHourMin != null ? opts.dayEndHourMin : dayEnd) || 0;
+        var maxOverworkCuts = (opts.maxOverworkCutsMin != null && isFinite(Number(opts.maxOverworkCutsMin)))
+            ? Math.max(0, Number(opts.maxOverworkCutsMin)) : null;
+        var maxOverworkTune = (opts.maxOverworkTuneMin != null && isFinite(Number(opts.maxOverworkTuneMin)))
+            ? Math.max(0, Number(opts.maxOverworkTuneMin)) : maxOverworkCuts;
+        var overworkOn = maxOverworkCuts != null;
         // #3764: вынести сегменты за окна «Отпуска» станка (общий проход по результату, как в
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
@@ -3191,6 +3302,17 @@
         // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
         // если обед не получится поставить паузой между резками, день закончится раньше.
         function effCapacity(d) { return (lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity; }
+        // #3847: доступные минуты от текущего clock до потолка нахлёста для дня d. kind='cuts' —
+        // потолок DAY_END_HOUR+maxOverworkCuts (для проходов), 'tune' — DAY_END_HOUR+maxOverworkTune
+        // (для настройки). Минус резерв обеда (как effCapacity). Фича выключена → обычная ёмкость до
+        // cutEndMin (effCapacity−clock), поведение не меняется. clock/lunchDone — из замыкания.
+        function availFor(d, kind) {
+            var base = effCapacity(d) - clock;
+            if (!overworkOn || !hasWindow) return base;
+            var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
+            var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
+            return (dayEndHour - dayStart) + margin - lunchRes - clock;
+        }
         // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
         // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
         // planStartTs истории (задания 30.05 уезжали в выбранную 4.06). Якорь может быть
@@ -3405,12 +3527,17 @@
                 var perPassEffG = st.perPass + leader;
                 var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
                 var availG = effCapacity(day) - clock;
-                // #3821: в хвост дня кладём только проходы, ЦЕЛИКОМ влезающие в рабочую ёмкость
-                // (БЕЗ «нахлёстного» прохода #3760). Раньше брали fittingG + 1 нахлёстный → длинный
-                // проход выводил день за ёмкость (бейдж 483 при максимуме ~480, #3821). Теперь
-                // остаток проходов (включая бывший нахлёстный) уходит на следующий день; если в хвост
-                // не влезает ни один проход — настройку в хвост (ветка ниже), проходы — на завтра.
-                var fittingG = (availG >= setupG) ? Math.floor((availG - setupG) / perPassEffG) : 0;
+                // #3847: ёмкость хвоста с учётом разрешённого нахлёста. Для проходов потолок —
+                // DAY_END_HOUR+MAX_OVERWORK_CUTS, для настройки — DAY_END_HOUR+MAX_OVERWORK_TUNE
+                // (фича выкл → обычная ёмкость до cutEndMin, как #3821).
+                var availCutsG = availFor(day, 'cuts');
+                var availTuneG = availFor(day, 'tune');
+                // #3821/#3847: в хвост дня кладём проходы, влезающие в ёмкость С УЧЁТОМ нахлёста —
+                // последний проход обязан кончиться ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS (нахлёст за
+                // конец смены ограничен, а не «один любой проход» #3760 и не «строго встык» #3821:
+                // короткий хвост проходит, длинный — на следующий день). Остаток проходов — на завтра;
+                // не влезает ни один — настройку в хвост (ветка ниже), проходы — на завтра.
+                var fittingG = (availCutsG >= setupG) ? Math.floor((availCutsG - setupG) / perPassEffG) : 0;
                 if (fittingG < 0) fittingG = 0;
                 if (fittingG > 0) {
                     var passesNowG = Math.min(st.remaining, fittingG);
@@ -3429,7 +3556,9 @@
                     // #3821: setupG=0) — ничего в хвост не кладём (иначе пустой сегмент), резка целиком
                     // на следующий день; небольшой простой в хвосте допустим (без нахлёстного прохода).
                     var partsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
-                    var tailSetup = minOverlapTailSetupMinutes(partsG, availG, setupG);
+                    // #3847: настройку в хвост — до потолка DAY_END_HOUR+MAX_OVERWORK_TUNE (availTuneG),
+                    // не до cutEndMin: настройка может нахлестнуть за конец смены сильнее, чем резка.
+                    var tailSetup = minOverlapTailSetupMinutes(partsG, availTuneG, setupG);
                     if (tailSetup > 0) {
                         var wsS = day * 1440 + dayStart + clock;
                         segments.push({ cutId: pick, dayOffset: day, runs: 0,
@@ -3487,14 +3616,16 @@
                     : (opts.carryPrevCut ? changeoverCost(opts.carryPrevCut, c, times)   // #3688: первая резка — от заправки станка
                        : (opts.firstCutSetup ? firstSetupCost(c, times) : 0)));
                 var avail = effCapacity(day) - clock;
-                var maxPasses = Math.floor((avail - setup) / perPassEff);
+                // #3847: проходы — до потолка DAY_END_HOUR+MAX_OVERWORK_CUTS, настройка-хвост — до
+                // DAY_END_HOUR+MAX_OVERWORK_TUNE (фича выкл → обычная ёмкость до cutEndMin).
+                var maxPasses = Math.floor((availFor(day, 'cuts') - setup) / perPassEff);
                 if (maxPasses < 1) {
                     // #3635 п.5: настройка (переналадка ножей/сырья) ВЛЕЗАЕТ в остаток дня, а
                     // первый проход — уже нет → ставим отдельный сегмент НАСТРОЙКИ в конце дня N
                     // (заполняем хвост дня), а намотку начинаем с дня N+1 без повторной настройки.
                     // Только для первого сегмента резки (setup > 0, не продолжение) и только когда
-                    // настройка реально помещается; иначе — обычный перенос всего на след. день.
-                    if (clock > 0 && !isCont && setup > 0 && avail >= setup) {
+                    // настройка реально помещается (#3847: с учётом потолка нахлёста настройки).
+                    if (clock > 0 && !isCont && setup > 0 && availFor(day, 'tune') >= setup) {
                         var wsSet = day * 1440 + dayStart + clock;
                         segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
                             windowStartMin: round3(wsSet), startMin: round3(wsSet + setup),
@@ -3852,6 +3983,9 @@
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var segs = splitMachineQueue(ordered, {
                 dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
+                dayEndHourMin: opts.dayEndHourMin,   // #3847: DAY_END_HOUR (реальный конец смены) для лимита нахлёста
+                maxOverworkCutsMin: opts.maxOverworkCutsMin,   // #3847: макс. нахлёст резки за DAY_END_HOUR
+                maxOverworkTuneMin: opts.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки за DAY_END_HOUR
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
@@ -4957,6 +5091,8 @@
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
+        scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
+        lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -5159,6 +5295,8 @@
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
                     key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
                     key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
+                    key !== 'MAX_OVERWORK_CUTS' &&      // #3847: макс. нахлёст резки за DAY_END_HOUR (мин)
+                    key !== 'MAX_OVERWORK_TUNE' &&      // #3847: макс. нахлёст настройки за DAY_END_HOUR (мин)
                     key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
@@ -8090,6 +8228,9 @@
                 });
                 var segs = splitMachineQueue(plans, {
                     dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
+                    dayEndHourMin: dayWindow.endMin,   // #3847: DAY_END_HOUR для лимита нахлёста
+                    maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,   // #3847: макс. нахлёст резки
+                    maxOverworkTuneMin: dayWindow.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки
                     times: self.changeTimes, perPassByCut: perPassByCut, runsByCut: runsByCut,
                     lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
                     firstCutSetup: true,   // #3669 п.2: первая задача очереди — настройка ножей
@@ -8920,6 +9061,9 @@
             times: self.changeTimes,
             dayStartMin: dayWindow.startMin,
             dayEndMin: dayWindow.cutEndMin,
+            dayEndHourMin: dayWindow.endMin,   // #3847: DAY_END_HOUR (реальный конец смены) для лимита нахлёста
+            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,   // #3847: макс. нахлёст резки за DAY_END_HOUR
+            maxOverworkTuneMin: dayWindow.maxOverworkTuneMin,   // #3847: макс. нахлёст настройки за DAY_END_HOUR
             perPassByCut: perPassByCut,
             planBaseMidnightMs: planBaseMidnightMs,
             lunchStartMin: dayWindow.lunchStartMin,
@@ -9650,42 +9794,22 @@
         // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
         // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
         var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
-        // #3652: якорь дня по «Дате план» каждой резки (смещение от базы=день фильтра «С»).
-        // Без него при ДИАПАЗОНЕ дат «С–По» buildSchedule паковал все видимые задания встык
-        // от дня «С» → задания 30.05 показывались под датой «С» (напр. 20.05). Привязываем
-        // каждое задание к его рабочему дню; пустая «Дата план» — без якоря (день 0).
-        var dayAnchorByCut = {};
-        activeGroup.cuts.forEach(function(c) {
-            var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
-            if (off != null && off > 0) dayAnchorByCut[String(c.id)] = off;
-        });
         // #3688: текущая заправка активного станка (из prev_cut_setup) → синтетическая
-        // «предыдущая резка» для первой резки очереди. Есть данные → переналадка считается от
-        // неё (смена сырья + ножи, если осталось другое; та же конфигурация → 0). Нет данных по
-        // станку → null, и расписание падает на firstCutSetup (настройка ножей с нуля, #3669).
+        // «предыдущая резка» для МОДАЛКИ тайминга первой резки очереди (#3240): смена сырья +
+        // ножи, если осталось другое. Нет данных → null + firstCutSetup (настройка ножей с нуля).
         var carrySlitterId = String(activeGroup.slitter && activeGroup.slitter.id);
         var carrySetup = (self.prevSetupBySlitter || {})[carrySlitterId];
         var carryPrevCut = (carrySetup && activeGroup.cuts.length)
             ? carryOverPrevCut(carrySetup, activeGroup.cuts[0]) : null;
-        var schedOpts = {
-            windPoints: windPoints,
-            times: self.changeTimes,
-            runLengthByCut: runLenByCut,
-            shiftStartMin: dayWindow.startMin,
-            shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin,
-            setupTaskIds: setupTaskIds,
-            dayAnchorByCut: dayAnchorByCut,
-            carryPrevCut: carryPrevCut,   // #3688: заправка станка для первой резки
-            firstCutSetup: true,   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
-            gapFill: true,   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
-            blockedRanges: self.blockedRangesForSlitter(carrySlitterId, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
-        };
-        // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
-        // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
-        var schedule = buildSchedule(activeGroup.cuts, schedOpts);
+        // #3846: НЕ пересчитываем расписание live (buildSchedule убран) — показываем СОХРАНЁННЫЙ
+        // план (scheduleFromStored), тот же, что рисует РМ «Диаграмма Ганта» → времена и минуты
+        // ВСЕГДА совпадают. Обед (#3342) уже учтён генерацией в сохранённых planStart; здесь он —
+        // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
+        var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        var lunchByDay = {};   // #3846: { schedDay → { startMin, finishMin, durationMin } } обеда
+        lunchBlocksFromSchedule(schedule, { lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin })
+            .forEach(function(lb) { lunchByDay[lb.day] = lb; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
         // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
@@ -9997,6 +10121,21 @@
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
                 ]));
                 lastDayDateRendered = cardSchedDay;
+            }
+
+            // #3846: блок «Обед» (#3342, плавающий) перед карточкой, идущей сразу после обеденного
+            // зазора. Обед уже сидит в сохранённых planStart (его вставила генерация) — на странице
+            // планирования рисуем его явно, чтобы зазор не выглядел «дырой» и совпадал с Гантом.
+            // Обед привязан к началу послеобеденной резки (lunchByDay[].finishMin == окно карточки),
+            // поэтому матчим один раз — по совпадению с окном (startMin − setupMin) текущей карточки.
+            if (sc && cardSchedDay != null) {
+                var lb = lunchByDay[cardSchedDay];
+                if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
+                    groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
+                        text: '🍽 Обед · ' + formatClock(lb.startMin) + ' – ' + formatClock(lb.finishMin) +
+                              ' · ' + lb.durationMin + ' мин' }));
+                    lb._rendered = true;
+                }
             }
 
             groupEl.appendChild(cardPanel);
