@@ -3117,6 +3117,85 @@
         return out;
     }
 
+    // #3846: показываем СОХРАНЁННЫЙ план БЕЗ live-пересчёта. Единый источник правды с РМ
+    // «Диаграмма Ганта (задания)»: и очередь production-planning, и cut-gantt берут одни и те
+    // же записанные поля резки, поэтому времена/минуты ВСЕГДА совпадают (раньше очередь
+    // пересчитывала расписание через buildSchedule на каждый рендер и расходилась с сохранённым:
+    // другая наладка — firstCutSetup вместо реальной заправки станка — и неучтённый обед).
+    // Тайминг строим из полей, записанных ГЕНЕРАЦИЕЙ: planStart (главное значение, t1078 —
+    // окно/начало настройки), сохранённая наладка (ножи + смена сырья) и «Резка и Лидер»
+    // (#3700: намотка + лидер). Обед (#3342) уже учтён в сохранённых planStart (генерация
+    // сдвинула старты послеобеденных резок) — на показе он отдельный блок (lunchBlocksFromSchedule).
+    // Форма результата совпадает с buildSchedule: { cutId, startMin, finishMin, setupMin,
+    // durationMin, leaderMin } в минутах от полуночи дня 0 (baseMidnightMs); лидер входит в
+    // durationMin (отдельной leaderMin нет — окно = setup + durationMin).
+    function scheduleFromStored(cuts, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
+        var out = [];
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего ставить на ось
+            var windowStartMin = round3((tsSec * 1000 - base) / 60000);     // окно = начало настройки
+            var setupMin = round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin));
+            var durationMin = round3(num(c.storedCutAndLeaderMin) || num(c.duration));   // намотка + лидер
+            var startMin = round3(windowStartMin + setupMin);               // старт намотки (после настройки)
+            out.push({
+                cutId: String(c.id),
+                startMin: startMin,
+                finishMin: round3(startMin + durationMin),
+                setupMin: setupMin,
+                durationMin: durationMin,
+                // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
+                // отдельной величины в сохранённом нет. null (а не 0): окно/минуты считают его 0
+                // (не двойной счёт), а модалка тайминга (buildCutTimingCtx) оценивает лидер для
+                // СВОЕЙ разбивки, не трогая расписание очереди/Ганта.
+                leaderMin: null
+            });
+        });
+        return out;
+    }
+
+    // #3846: блоки «Обед» для отображения — выводим обед как видимый разрыв между резками
+    // одного рабочего дня (раньше cut-gantt/очередь его не рисовали → выглядел как пустая
+    // «дыра в планировании»). Обед уже сидит в сохранённых planStart: между концом окна одной
+    // резки и началом окна следующей в ТОМ ЖЕ дне образуется зазор ≈ длительности обеда вокруг
+    // LUNCH_START. Берём такой зазор как обед. schedule — из scheduleFromStored/buildSchedule
+    // (отсортируем сами). opts: { lunchStartMin, lunchDurationMin, shiftStartMin }. Пустой обед
+    // (lunchDurationMin ≤ 0) → []. → [{ day, startMin, finishMin, durationMin }] (минуты от
+    // полуночи дня 0), по одному на день, где обед реально вставлен.
+    function lunchBlocksFromSchedule(schedule, opts) {
+        opts = opts || {};
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        if (!(lunchDur > 0)) return [];
+        var segs = (schedule || []).slice().filter(function(s) {
+            return s && isFinite(Number(s.startMin));
+        }).sort(function(a, b) { return a.startMin - b.startMin; });
+        var byDay = {};
+        var lunchByDay = {};
+        segs.forEach(function(s) {
+            var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
+            var winEnd = Number(s.finishMin) + (Number(s.leaderMin) || 0);
+            var day = Math.floor(winStart / 1440);
+            var prevEnd = byDay[day];
+            // Зазор внутри дня после предыдущей резки = обед (учтён только раз на день).
+            if (prevEnd != null && !lunchByDay[day]) {
+                var gap = winStart - prevEnd;
+                // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
+                // длительности): берём, если он не меньше почти полного обеда. Обед привязываем к
+                // НАЧАЛУ послеобеденной резки (finishMin = winStart) — так блок всегда прилегает к
+                // следующей карточке (надёжный матч при рендере), а любой остаточный простой (если
+                // зазор > обеда) остаётся ДО обеда.
+                if (gap >= lunchDur - 1) {
+                    lunchByDay[day] = { day: day, startMin: round3(winStart - lunchDur), finishMin: round3(winStart), durationMin: lunchDur };
+                }
+            }
+            if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
+        });
+        return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
+    }
+
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
     // в рабочее окно и помещается в нём. → { startMin, durationMin } | null.
     function lunchParams(opts, shiftStart, shiftEnd) {
@@ -4957,6 +5036,8 @@
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
+        scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
+        lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -9625,42 +9706,22 @@
         // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
         // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
         var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
-        // #3652: якорь дня по «Дате план» каждой резки (смещение от базы=день фильтра «С»).
-        // Без него при ДИАПАЗОНЕ дат «С–По» buildSchedule паковал все видимые задания встык
-        // от дня «С» → задания 30.05 показывались под датой «С» (напр. 20.05). Привязываем
-        // каждое задание к его рабочему дню; пустая «Дата план» — без якоря (день 0).
-        var dayAnchorByCut = {};
-        activeGroup.cuts.forEach(function(c) {
-            var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
-            if (off != null && off > 0) dayAnchorByCut[String(c.id)] = off;
-        });
         // #3688: текущая заправка активного станка (из prev_cut_setup) → синтетическая
-        // «предыдущая резка» для первой резки очереди. Есть данные → переналадка считается от
-        // неё (смена сырья + ножи, если осталось другое; та же конфигурация → 0). Нет данных по
-        // станку → null, и расписание падает на firstCutSetup (настройка ножей с нуля, #3669).
+        // «предыдущая резка» для МОДАЛКИ тайминга первой резки очереди (#3240): смена сырья +
+        // ножи, если осталось другое. Нет данных → null + firstCutSetup (настройка ножей с нуля).
         var carrySlitterId = String(activeGroup.slitter && activeGroup.slitter.id);
         var carrySetup = (self.prevSetupBySlitter || {})[carrySlitterId];
         var carryPrevCut = (carrySetup && activeGroup.cuts.length)
             ? carryOverPrevCut(carrySetup, activeGroup.cuts[0]) : null;
-        var schedOpts = {
-            windPoints: windPoints,
-            times: self.changeTimes,
-            runLengthByCut: runLenByCut,
-            shiftStartMin: dayWindow.startMin,
-            shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin,
-            setupTaskIds: setupTaskIds,
-            dayAnchorByCut: dayAnchorByCut,
-            carryPrevCut: carryPrevCut,   // #3688: заправка станка для первой резки
-            firstCutSetup: true,   // #3669 п.2: fallback — настройка ножей с нуля (нет данных prev_cut_setup)
-            gapFill: true,   // #3739: нахлёст разрешён — отображение тайминга совпадает с планом
-            blockedRanges: self.blockedRangesForSlitter(carrySlitterId, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
-        };
-        // #3562: зафиксированные задания планируются наравне со всеми — автогенерация может
-        // двигать их по времени в течение дня и менять очередность (пины #3508 п.6 убраны).
-        var schedule = buildSchedule(activeGroup.cuts, schedOpts);
+        // #3846: НЕ пересчитываем расписание live (buildSchedule убран) — показываем СОХРАНЁННЫЙ
+        // план (scheduleFromStored), тот же, что рисует РМ «Диаграмма Ганта» → времена и минуты
+        // ВСЕГДА совпадают. Обед (#3342) уже учтён генерацией в сохранённых planStart; здесь он —
+        // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
+        var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
+        var lunchByDay = {};   // #3846: { schedDay → { startMin, finishMin, durationMin } } обеда
+        lunchBlocksFromSchedule(schedule, { lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin })
+            .forEach(function(lb) { lunchByDay[lb.day] = lb; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
         // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
@@ -9972,6 +10033,21 @@
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
                 ]));
                 lastDayDateRendered = cardSchedDay;
+            }
+
+            // #3846: блок «Обед» (#3342, плавающий) перед карточкой, идущей сразу после обеденного
+            // зазора. Обед уже сидит в сохранённых planStart (его вставила генерация) — на странице
+            // планирования рисуем его явно, чтобы зазор не выглядел «дырой» и совпадал с Гантом.
+            // Обед привязан к началу послеобеденной резки (lunchByDay[].finishMin == окно карточки),
+            // поэтому матчим один раз — по совпадению с окном (startMin − setupMin) текущей карточки.
+            if (sc && cardSchedDay != null) {
+                var lb = lunchByDay[cardSchedDay];
+                if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
+                    groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
+                        text: '🍽 Обед · ' + formatClock(lb.startMin) + ' – ' + formatClock(lb.finishMin) +
+                              ' · ' + lb.durationMin + ' мин' }));
+                    lb._rendered = true;
+                }
             }
 
             groupEl.appendChild(cardPanel);
