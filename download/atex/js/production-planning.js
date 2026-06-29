@@ -2724,17 +2724,41 @@
             text: cutPrefix + 'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
             bold: true
         });
-        // #3688: лидер между резками заправляют ПОСЛЕ намотки (в конце резки), не на старте
-        // окна. Показываем его строкой от финиша намотки; «готово» — после лидера (станок свободен).
+        // #3688: лидер между резками заправляют ПОСЛЕ намотки (в конце резки), не на старте окна.
+        // #3862: если расписание СОХРАНЁННОЕ (scheduleFromStored), лидер ВХОДИТ в окно — finishMin
+        // уже конец лидера. Тогда строка лидера = от (finishMin − лидер), а «готово» = finishMin (тот
+        // же конец окна, что у карточки/Ганта; раньше модалка прибавляла лидер ВТОРОЙ раз → «готово»
+        // выезжало за окно, напр. 08:55 против 08:51). Для live-расписания (buildSchedule, leaderMin
+        // задан числом отдельно) лидер идёт ПОСЛЕ окна намотки: «готово» = finishMin + лидер (как раньше).
         var hasFinish = ctx.finishMin != null && isFinite(Number(ctx.finishMin));
         var leaderMin = round3(Number(ctx.leaderMin) || 0);
+        var leaderInWindow = ctx.leaderInWindow === true;
         if (hasFinish && leaderMin > 0) {
-            lines.push({ text: formatClock(ctx.finishMin) + ' · лидер между резками — ' + formatTimingNumber(leaderMin) + ' мин' });
+            var leaderClock = leaderInWindow ? round3(Number(ctx.finishMin) - leaderMin) : Number(ctx.finishMin);
+            lines.push({ text: formatClock(leaderClock) + ' · лидер между резками — ' + formatTimingNumber(leaderMin) + ' мин' });
         }
         if (hasFinish) {
-            lines.push({ text: formatClock(round3(Number(ctx.finishMin) + leaderMin)) + ' · готово' });
+            var doneClock = leaderInWindow ? Number(ctx.finishMin) : round3(Number(ctx.finishMin) + leaderMin);
+            lines.push({ text: formatClock(doneClock) + ' · готово' });
         }
         return lines;
+    }
+
+    // #3862: разбивка setup для модалки из СОХРАНЁННЫХ колонок резки («Наладка ножей»+«Сырьё-
+    // намотка»), а не пересчётом на лету. Минуты — из хранимого (сумма точно = sc.setupMin окна
+    // карточки/Ганта, иначе модалка рисовала setup короче окна и оставляла зазор перед настройкой,
+    // напр. начало в 08:15 вместо 08:00). Метки — из live-разбивки (firstSetupParts/changeoverParts),
+    // по коду компонента; если live не дал компонент (расходится с хранимым) — метка по умолчанию.
+    function storedSetupBreakdown(cut, prevCut, times, opts) {
+        function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
+        var knife = round3(num(cut && cut.storedKnifeSetupMin));
+        var matWind = round3(num(cut && cut.storedMaterialWindingMin));
+        var liveLabel = {};
+        setupBreakdown(prevCut, cut, times, opts).forEach(function(p) { liveLabel[p.code] = p.label; });
+        var parts = [];
+        if (knife > 0) parts.push({ code: 'KNIFE', label: liveLabel.KNIFE || 'настройка ножей', minutes: knife });
+        if (matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: liveLabel.MATERIAL_WINDING || 'смена сырья / намотки / партии', minutes: matWind });
+        return parts;
     }
 
     // Контекст тайминга одной резки для модалки (#3240): метраж/проходы/намотка, разбивка
@@ -2748,15 +2772,25 @@
         var oneRun = windingMinutes(length, pts);
         var total = runs > 0 ? round3(oneRun * runs) : oneRun;
         // #3688: лидер после намотки — из расписания (sc.leaderMin) либо считаем сами.
+        // #3862: сохранённое расписание (scheduleFromStored) НЕ хранит лидер отдельно — он входит в
+        // окно (durationMin = намотка+лидер, finishMin = конец лидера, sc.leaderMin == null). Тогда
+        // лидер для разбивки = остаток окна после намотки = (finishMin − startMin) − намотка, чтобы
+        // «готово» совпало с finishMin карточки/Ганта (а не пересчитывался независимо и не выезжал за окно).
         var leaderUnit = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
-        var leaderMin = (sc && sc.leaderMin != null) ? round3(Number(sc.leaderMin) || 0) : round3(leaderUnit * cutLeaderRuns(cut));
+        var leaderInWindow = !!(sc && sc.leaderMin == null && sc.finishMin != null && sc.startMin != null);
+        var leaderMin = leaderInWindow
+            ? round3(Math.max(0, (Number(sc.finishMin) - Number(sc.startMin)) - round3(total)))
+            : ((sc && sc.leaderMin != null) ? round3(Number(sc.leaderMin) || 0) : round3(leaderUnit * cutLeaderRuns(cut)));
         return {
             length: length,
             runs: runs,
             oneRun: round3(oneRun),
             total: round3(total),
-            setupParts: setupBreakdown(prevCut, cut, times, opts),   // #3669/#3688: ножи + смена сырья (без лидера)
+            // #3862: при сохранённом расписании setup берём из хранимых колонок (sum = sc.setupMin),
+            // иначе — live-разбивка (buildSchedule). Так модалка не расходится с карточкой/Гантом.
+            setupParts: leaderInWindow ? storedSetupBreakdown(cut, prevCut, times, opts) : setupBreakdown(prevCut, cut, times, opts),
             leaderMin: leaderMin,   // #3688: лидер в конце резки
+            leaderInWindow: leaderInWindow,   // #3862: лидер входит в окно (сохранённое расписание) → «готово» = finishMin
             norms: relevantWindingNorms(length, pts),
             startMin: sc ? sc.startMin : null,
             finishMin: sc ? sc.finishMin : null
@@ -6025,28 +6059,41 @@
         });
     };
 
-    // #3688: текущая заправка каждого станка из отчёта prev_cut_setup → this.prevSetupBySlitter
-    // = { slitterId: { materialId, winding, knifeWidths, knifeCount } } по верхней (последней по
-    // task_start) задаче станка. Нужна для переналадки ПЕРВОЙ резки очереди: если с предыдущего
-    // дня осталось другое сырьё/намотка/набор ножей (или ничего) — бронируем настройку ножей и
-    // смену сырья. Нет отчёта/доступа → пустая карта (деградация к firstCutSetup: ножи с нуля).
+    // #3688/#3862: текущая заправка каждого станка из отчёта prev_cut_setup → this.prevSetupBySlitter
+    // = { slitterId: { materialId, winding, knifeWidths, knifeCount } } по ПОСЛЕДНЕЙ задаче станка
+    // СТРОГО ДО начала окна планирования. Нужна для переналадки ПЕРВОЙ резки очереди: если перед
+    // планируемым днём на станке осталось другое сырьё/намотка/набор ножей (или ничего) — бронируем
+    // настройку ножей и смену сырья; нет данных → firstCutSetup (ножи с нуля).
+    //
+    // #3862 (issue #3737): «предыдущая заправка» берётся из отчёта prev_cut_setup (report 93371)
+    // с фильтрами FR_slitter_id={станок} и FR_task_start=<{планБаза} — ОДИН лёгкий запрос на
+    // станок. Раньше тянули отчёт ЦЕЛИКОМ (LIMIT 5000, без фильтров) и брали «верхнюю по task_start»
+    // на клиенте; но после генерации в отчёте уже лежат задачи ЭТОГО же нового плана (их task_start
+    // в будущем), и «верхняя» оказывалась будущей задачей плана → ложная конфигурация → лишняя смена
+    // сырья → окно первой резки 51 вместо 36 (расхождение карточки и модалки). Фильтр
+    // task_start<планБаза эти задачи отсекает: остаётся только реальная заправка ДО дня.
     AtexProductionPlanning.prototype.loadPrevCutSetup = function() {
         var self = this;
         this.prevSetupBySlitter = {};
-        return this.getJson('report/prev_cut_setup?JSON_KV&LIMIT=0,5000').then(function(rows) {
-            var bySlitter = {};
-            (rows || []).forEach(function(r) {
-                var sid = String(r && r.slitter_id == null ? '' : r.slitter_id);
-                if (sid === '') return;
-                (bySlitter[sid] = bySlitter[sid] || []).push(r);
-            });
-            var map = {};
-            Object.keys(bySlitter).forEach(function(sid) {
-                var setup = prevSetupFromRows(bySlitter[sid], sid);
-                if (setup) map[sid] = setup;
-            });
-            self.prevSetupBySlitter = map;
-        }).catch(function() { self.prevSetupBySlitter = {}; });
+        var slitters = this.slitters || [];
+        if (!slitters.length) return Promise.resolve();
+        // База планирования (полночь дня «С» из фильтра, без него — сегодня), сек.
+        var planBaseSec = Math.floor(Number(planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this))) / 1000);
+        if (!isFinite(planBaseSec) || planBaseSec <= 0) return Promise.resolve();
+        var map = {};
+        return Promise.all(slitters.map(function(s) {
+            var sid = String(s && s.id == null ? '' : s.id);
+            if (sid === '') return Promise.resolve();
+            // FR_task_start=%3C{планБаза} = task_start < планБаза (только задачи ДО планируемого дня).
+            return self.getJson('report/prev_cut_setup?JSON_KV&FR_slitter_id=' + encodeURIComponent(sid) +
+                    '&FR_task_start=%3C' + planBaseSec)
+                .then(function(rows) {
+                    // prevSetupFromRows берёт верхнюю по task_start = ПОСЛЕДНЮЮ задачу станка до дня.
+                    var setup = prevSetupFromRows(rows, sid);
+                    if (setup) map[sid] = setup;
+                })
+                .catch(function() { /* нет отчёта/данных по станку — без заправки (firstCutSetup) */ });
+        })).then(function() { self.prevSetupBySlitter = map; });
     };
 
     // #3372: справочник «Фактическая ширина резки» → this.actualWidthIndex.
@@ -7981,7 +8028,10 @@
         if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
         this._genRefreshing = true;
         this.setGenBusy(true);
-        Promise.all([this.loadPositions(), this.reload()]).then(function() {
+        // #3862: заправку станков (prev_cut_setup) тоже обновляем — она привязана к ДАТЕ окна
+        // планирования (task_start<планБаза), а дату могли сменить после загрузки страницы; иначе
+        // первая резка считалась бы от заправки на старую дату.
+        Promise.all([this.loadPositions(), this.reload(), this.loadPrevCutSetup()]).then(function() {
             self._genRefreshing = false;
             self.setGenBusy(false);
             // #3457: loadPositions() пересоздал genPositions с НОМИНАЛЬНОЙ шириной заказа —
@@ -10694,7 +10744,12 @@
         return this.loadMetadata()
             .then(function() {
                 return Promise.all([
-                    self.loadSlittersWithStop().then(function(items) { self.slitters = items; return self.loadDowntimes(); }),   // #3764: окна простоя после станков
+                    self.loadSlittersWithStop().then(function(items) {
+                        self.slitters = items;
+                        // #3764: окна простоя после станков. #3862: заправку станков (prev_cut_setup)
+                        // грузим ПОСЛЕ списка станков — по каждому свой фильтрованный запрос.
+                        return Promise.all([self.loadDowntimes(), self.loadPrevCutSetup()]);
+                    }),
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
                     self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
@@ -10711,7 +10766,7 @@
                     self.loadActualWidths(),   // #3372: справочник фактической ширины резки (66190)
                     self.loadSleeveInches(),   // #3372: дюймы втулки по записи 8188 (контекст условия)
                     self.loadSleeveWidths(),   // #3812: ширина втулки (мм) по записи (57/110) — втулочные полосы
-                    self.loadPrevCutSetup(),   // #3688: текущая заправка станков (prev_cut_setup) для первой резки
+                    // #3862: loadPrevCutSetup перенесён в цепочку после loadSlittersWithStop (нужен список станков).
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
@@ -10744,4 +10799,4 @@
 
  
  
-// @version 2026-06-29-issue-3848
+// @version 2026-06-29-issue-3862
