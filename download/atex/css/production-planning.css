@@ -877,6 +877,16 @@
     background: #134174;
     transition: width .2s ease;
 }
+/* #3865: неопределённый прогресс (этапы подготовки без счётчика) — бегущая полоса. */
+.atex-pp-progress-bar.is-indeterminate .atex-pp-progress-fill {
+    width: 40%;
+    transition: none;
+    animation: atex-pp-indet 1.1s ease-in-out infinite;
+}
+@keyframes atex-pp-indet {
+    0%   { margin-left: -40%; }
+    100% { margin-left: 100%; }
+}
 .atex-pp-progress-count {
     margin-top: 10px;
     font-size: 13px;
