@@ -3191,43 +3191,6 @@
         return out;
     }
 
-    // #3855: «Время старта» (planStart) КАЖДОЙ резки = накопленная сумма СОХРАНЁННЫХ окон дня
-    // от начала смены (08:00), на ЦЕЛОЙ минуте. Окно = «Наладка ножей» + «Сырьё/намотка» +
-    // «Резка и Лидер» (всё в целых минутах). Так planStart по построению совпадает с окном,
-    // которое рисуют обе РМ (#3846) → нет разрывов/перекрытий, и Гант (обрезает :SS вниз) и
-    // страница (вверх) показывают одну и ту же целую минуту. Раньше planStart писал отдельный
-    // расчёт splitMachineQueue (raw-намотка, «ножи с нуля»), расходясь с окном (#3853 чинил
-    // только настройку первой резки — этого мало: оставались суб-минутные сдвиги и :SS).
-    //   cuts — резки ОДНОГО станка в порядке исполнения (день → «Очередность»), каждая
-    //     { id, planDate (штамп дня, для номера дня), windowMin (целое окно) };
-    //   opts: { base (полночь дня 0, мс), shiftStartMin, lunchStartMin, lunchDurationMin }.
-    // Обед (#3342): если резка стартует В/ПОСЛЕ lunchStartMin — перед ней пауза lunchDurationMin
-    // (как insertLunchBefore в splitMachineQueue). Клок сбрасывается к 08:00 на каждый новый день.
-    // → { cutId: planStartTs (Unix-сек, целая минута) }. Чистая (без DOM/сети) → покрыта тестом.
-    function derivePlanStartTimestamps(cuts, opts) {
-        opts = opts || {};
-        var out = {};
-        var base = Number(opts.base);
-        if (!isFinite(base)) return out;
-        var shiftStart = Number(opts.shiftStartMin) || 0;
-        var lunchStart = (opts.lunchStartMin == null) ? null : Number(opts.lunchStartMin);
-        var lunchDur = Number(opts.lunchDurationMin) || 0;
-        var clock = shiftStart, curDay = null, lunchDone = false;
-        (cuts || []).forEach(function(c) {
-            if (!c) return;
-            var dayOff = dayOffsetFromBase(c.planDate, base);
-            if (dayOff == null) return;   // нет «Даты план» — не датируем
-            if (curDay !== dayOff) { curDay = dayOff; clock = shiftStart; lunchDone = false; }
-            // Обед как пауза перед резкой, стартующей в/после LUNCH_START (один раз на день).
-            if (lunchDur > 0 && lunchStart != null && !lunchDone && clock > shiftStart && clock >= lunchStart) {
-                clock += lunchDur; lunchDone = true;
-            }
-            out[String(c.id)] = Math.floor((base + dayOff * 86400000 + clock * 60000) / 1000);
-            clock += Math.max(0, Number(c.windowMin) || 0);
-        });
-        return out;
-    }
-
     // #3846: блоки «Обед» для отображения — выводим обед как видимый разрыв между резками
     // одного рабочего дня (раньше cut-gantt/очередь его не рисовали → выглядел как пустая
     // «дыра в планировании»). Обед уже сидит в сохранённых planStart: между концом окна одной
@@ -3650,6 +3613,7 @@
             var perPass = Number(perPassByCut[String(cid)] != null ? perPassByCut[String(cid)] : 0) || 0;
             var remaining = runs;
             var isCont = false;
+            var pendingSetup = 0;   // #3635 п.5: остаток настройки, перенесённый на продолжение след. дня
             insertLunchBefore();  // #3342: обед перед началом этой резки
             // Резка без проходов/длительности — один сегментик без раскладки по проходам.
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
@@ -3666,28 +3630,45 @@
             // #3401: каждая резка цуга включает свой лидер — добавляем его к стоимости прохода.
             var perPassEff = perPass + leader;
             while (remaining > 0) {
-                // #3401: setup сегмента — только переналадка с предыдущей резкой; лидер уже в perPassEff.
-                var setup = isCont ? 0 : setupCostFor(prevPhysical, c);   // #3688/#3853: первая резка — от заправки станка (carryPrevSetup)
+                // #3401: setup сегмента — переналадка с предыдущей резкой; лидер уже в perPassEff.
+                // #3635 п.5: у продолжения после сегмента настройки setup = ОСТАТОК настройки
+                // (pendingSetup), перенесённый с дня N (а не 0 — иначе остаток настройки терялся).
+                var setup = isCont ? pendingSetup : setupCostFor(prevPhysical, c);   // #3688/#3853: первая резка — от заправки станка (carryPrevSetup)
                 var avail = effCapacity(day) - clock;
                 // #3847: проходы — до потолка DAY_END_HOUR+MAX_OVERWORK_CUTS, настройка-хвост — до
                 // DAY_END_HOUR+MAX_OVERWORK_TUNE (фича выкл → обычная ёмкость до cutEndMin).
                 var maxPasses = Math.floor((availFor(day, 'cuts') - setup) / perPassEff);
                 if (maxPasses < 1) {
-                    // #3635 п.5: настройка (переналадка ножей/сырья) ВЛЕЗАЕТ в остаток дня, а
-                    // первый проход — уже нет → ставим отдельный сегмент НАСТРОЙКИ в конце дня N
-                    // (заполняем хвост дня), а намотку начинаем с дня N+1 без повторной настройки.
-                    // Только для первого сегмента резки (setup > 0, не продолжение) и только когда
-                    // настройка реально помещается (#3847: с учётом потолка нахлёста настройки).
-                    if (clock > 0 && !isCont && setup > 0 && availFor(day, 'tune') >= setup) {
-                        var wsSet = day * 1440 + dayStart + clock;
-                        segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
-                            windowStartMin: round3(wsSet), startMin: round3(wsSet + setup),
-                            setupMin: round3(setup), durationMin: 0,
-                            isContinuation: false, parentCutId: null, setupOnly: true });
-                        clock += setup;
-                        prevPhysical = c;
-                        isCont = true;   // настройка сделана → проходы дня N+1 идут как продолжение (без setup)
-                        day += 1; clock = 0; continue;
+                    // #3635 п.5: первый проход в остаток дня уже не влезает → в хвост дня N кладём
+                    // отдельный сегмент НАСТРОЙКИ, а намотку начинаем с дня N+1 как продолжение.
+                    // #3760/#3805: в хвост — НЕ всю переналадку, а ПОДМНОЖЕСТВО её компонентов
+                    // (ножи/сырьё), заполняющее окно резки до конца смены с минимальным нахлёстом
+                    // (minOverlapTailSetupMinutes по остатку cut-окна effCapacity−clock). Остаток
+                    // настройки (pendingSetup) переносим на продолжение дня N+1. Раньше тут клалась
+                    // ВСЯ настройка (ножи+сырьё), нахлёстывая за конец смены: оператору доставалось
+                    // «и ножи, и сырьё в один день», хотя влезала только часть (заказчик: «надо было
+                    // сделать что-то одно — настройку ножей, остальное завтра»).
+                    if (clock > 0 && !isCont && setup > 0) {
+                        // #3847: в хвост кладём подмножество настройки, заполняющее ОСТАТОК ДО ПОТОЛКА
+                        // нахлёста настройки (availFor 'tune'), с минимальным нахлёстом. Остаток — завтра.
+                        var tailAvail = availFor(day, 'tune');
+                        var setupParts = setupPartsFor(prevPhysical, c);
+                        var tailSetup = minOverlapTailSetupMinutes(setupParts, tailAvail, setup);
+                        // кладём хвост, только если выбранное подмножество реально помещается в потолок
+                        // нахлёста настройки (#3847); иначе — вся резка на чистый следующий день.
+                        // pendingSetup = setup − tailSetup: 0, если влезла вся настройка; >0 — остаток на завтра.
+                        if (tailSetup > 0 && tailAvail >= tailSetup) {
+                            var wsSet = day * 1440 + dayStart + clock;
+                            segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
+                                windowStartMin: round3(wsSet), startMin: round3(wsSet + tailSetup),
+                                setupMin: round3(tailSetup), durationMin: 0,
+                                isContinuation: false, parentCutId: null, setupOnly: true });
+                            clock += tailSetup;
+                            prevPhysical = c;
+                            isCont = true;                          // проходы дня N+1 — продолжение
+                            pendingSetup = round3(setup - tailSetup);   // остаток настройки → на продолжение
+                            day += 1; clock = 0; continue;
+                        }
                     }
                     if (clock > 0) { day += 1; clock = 0; continue; }   // переносим на чистый след. день
                     maxPasses = 1;   // целый день не вмещает даже setup+1 проход — кладём 1 (переполнение)
@@ -3703,6 +3684,7 @@
                 remaining -= passesNow;
                 prevPhysical = c;
                 isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
+                pendingSetup = 0;   // #3635 п.5: остаток настройки применён к этому сегменту — больше не добавляем
             }
         });
         return applyDowntime(segments);   // #3764
@@ -3714,7 +3696,12 @@
         var base = Number(dayMidnightMs);
         var min = Number(windowStartMin);
         if (!isFinite(base) || !isFinite(min)) return 0;
-        return Math.floor((base + min * 60000) / 1000);
+        // planStart всегда на ЦЕЛОЙ минуте, округление ВВЕРХ. Иначе при дробном окне (раздроблённая
+        // намотка) в штампе оставались секунды, и Гант (обрезает :SS вниз) расходился со страницей
+        // (округляет вверх) на ±1 мин. splitMachineQueue остаётся ЕДИНСТВЕННЫМ источником planStart
+        // (он же знает про нахлёст настройки #3805 и разрыв по дням #3635 п.5) — здесь только снап к
+        // минуте, без отдельного пересчёта по сохранённым окнам.
+        return Math.floor((base + Math.ceil(min) * 60000) / 1000);
     }
 
     // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
@@ -5147,7 +5134,6 @@
         resolveWorkingWindow: resolveWorkingWindow,
         buildSchedule: buildSchedule,
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
-        derivePlanStartTimestamps: derivePlanStartTimestamps,   // #3855: planStart = накопленное целое окно дня
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
@@ -8665,7 +8651,7 @@
     // переналадка считаются по ВСЕЙ очереди станка — иначе у не-первой резки терялся предшественник.
     AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds) {
         var meta = this.meta.cut;
-        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null, mainId: (meta && meta.id != null) ? meta.id : null };
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
         reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
         reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
@@ -8673,24 +8659,6 @@
         if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
         var onlySet = null;
         if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
-        // #3855: «Время старта» (planStart) каждой резки пересчитываем ЗДЕСЬ ЖЕ из тех же
-        // окон (setup + cutTime), что считаем для «Наладка ножей»/«Сырьё-намотка»/«Резка и
-        // Лидер» — одна функция, один источник правды, без пересчёта «на лету». planStart =
-        // накопленное целое окно дня от 08:00 (derivePlanStartTimestamps). Только при ПОЛНОМ
-        // проходе (генерация/пересборка): снимок «Зафиксировать» (onlyIds) старты не трогает.
-        var schedOpts = null;
-        if (!onlySet) {
-            try {
-                var schedBase = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-                if (isFinite(Number(schedBase)) && typeof this.workingWindow === 'function') {
-                    var dw = this.workingWindow();
-                    if (dw && isFinite(Number(dw.startMin))) {
-                        schedOpts = { base: Number(schedBase), shiftStartMin: dw.startMin,
-                            lunchStartMin: dw.lunchStartMin, lunchDurationMin: dw.lunchDurationMin };
-                    }
-                }
-            } catch (e) { schedOpts = null; }   // нет полного состояния контроллера — старты не трогаем
-        }
         // #3702: считаем теми же временами и в ТОМ ЖЕ порядке, что и план на экране, иначе
         // у задания заполнялась «Сырье/намотка», которой в плане нет.
         //  • this.changeTimes — структурированные веса переналадок (MATERIAL_WINDING / KNIFE /
@@ -8710,16 +8678,6 @@
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
-            // #3855: окно каждой резки (setup + cutTime, целые минуты) → planStart встык, целая
-            // минута. Считаем по ВСЕЙ очереди станка (не по onlySet), иначе клок дня поедет.
-            var planTs = {};
-            if (schedOpts) {
-                planTs = derivePlanStartTimestamps(arr.map(function(c) {
-                    var w = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
-                    var ct = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
-                    return { id: c.id, planDate: c.planDate, windowMin: Math.round(w.knifeMin) + Math.round(w.materialWindingMin) + ct };
-                }), schedOpts);
-            }
             arr.forEach(function(c) {
                 if (onlySet && !onlySet[String(c.id)]) return;   // снимок — только выбранные резки
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
@@ -8738,20 +8696,13 @@
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
-                // #3855: новый «Время старта» (встык, целая минута) и признак его изменения.
-                var newTs = planTs[String(c.id)];
-                var hasNewTs = newTs != null && isFinite(Number(newTs)) && Number(newTs) > 0;
-                var tsChanged = hasNewTs && Number(newTs) !== Number(c.planDate);
-                if (tsChanged
-                    || changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
+                if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
                     || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
-                    updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT,
-                        planStartTs: hasNewTs ? Number(newTs) : null });
+                    updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT });
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
                     c.storedCutAndLeaderMin = String(wantT);
-                    if (hasNewTs) { c.planDate = String(newTs); c.number = String(newTs); }   // #3855: локально, чтобы повтор не переписывал
                 }
             });
         });
@@ -8763,17 +8714,12 @@
         var res = this.computeCutSetupUpdates(null);
         var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
-        // #3855: «Время старта» (главное значение, DATETIME) пишется ТОЛЬКО через _m_save с
-        // t{tableId} (как в applySplitPlan; _m_set первую колонку не задаёт, issue #775).
-        var mainKey = reqs.mainId != null ? 't' + reqs.mainId : null;
+        // «Время старта» (planStart) пишет splitMachineQueue/applySplitPlan — единственный
+        // источник правды по дню/нахлёсту настройки (#3805, #3635 п.5). Здесь — только тайминг
+        // (Наладка ножей / Сырьё-намотка / Резка и Лидер), planStart не трогаем.
         var chain = Promise.resolve();
         updates.forEach(function(u) {
             chain = chain.then(function() {
-                var ts = Number(u.planStartTs);
-                if (!(mainKey && isFinite(ts) && ts > 0)) return;   // нет нового старта — только тайминг
-                var mf = {}; mf[mainKey] = String(ts);
-                return self.post('_m_save/' + u.cutId + '?JSON', mf);
-            }).then(function() {
                 var fields = setupTimingFields(reqs, u);
                 if (!Object.keys(fields).length) return;
                 return self.post('_m_set/' + u.cutId + '?JSON', fields);
@@ -8856,6 +8802,11 @@
         var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
+        // #3808: перед резолвом цепочек ЛЕЧИМ «Вид сырья» переходящих сегментов с пустым
+        // материалом (станок|намотка|ножи → единственное непустое сырьё группы). Иначе пустой
+        // материал продолжения рвёт continuationSignature → mergeContinuationChains не находит
+        // голову → materialForCutId возвращает пусто → продолжение дня N+1 уходит без сырья.
+        healContinuationMaterials(self.cuts || []);
         var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
         var lengthReqId = reqIdByName(cutMeta, CUT_REQ.length);   // #3781: «Метраж, м» (длина прогона)
         var cutReqIds = {
@@ -10605,4 +10556,4 @@
 
  
  
-// @version 2026-06-29-issue-3855
+// @version 2026-06-29-issue-3858
