@@ -1316,12 +1316,18 @@
         (positions || []).forEach(function(p) {
             var prefKey = preferredWidthsKey(p && p.materialId, p && p.windDir, p && p.windLength);
             var leader = planningLeaderKey(p);
-            var groupKey = prefKey + '|L=' + leader + '|S=' + (p.sleeveId || '');
+            // #3812: число втулочных полос (0/1/2) — отдельное измерение профиля: позиции
+            // с разной потребностью в полосах 110 мм идут в разные резки (своя резервируемая
+            // ширина джамбо). Для не-0.5″/не-110 count=0 у всех → разбиения нет.
+            var coreCount = Number(p && p.coreStripCount) || 0;
+            var groupKey = prefKey + '|L=' + leader + '|S=' + (p.sleeveId || '') + '|C=' + coreCount;
             if (!groups[groupKey]) {
                 groups[groupKey] = {
                     key: prefKey,
                     leader: leader,
                     sleeveId: p.sleeveId || '',
+                    coreStripCount: coreCount,                       // #3812
+                    coreStripWidth: Number(p && p.coreStripWidth) || 0,  // #3812
                     materialId: p && p.materialId != null ? String(p.materialId) : '',
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
@@ -2143,6 +2149,7 @@
             var byWidth = {};
             var order = [];
             strips.forEach(function(s) {
+                if (s && s.core) return;   // #3812: втулочные полосы не урезаются по запасу
                 var w = round3(Number(s.width) || 0);
                 if (w <= 0) return;
                 var key = String(w);
@@ -2314,6 +2321,52 @@
             });
         });
         return best != null ? best : a;
+    }
+
+    // ── #3812: втулочные полосы для втулки 0.5″ шириной 110 мм ────────────────
+    // На втулке 0.5″ риббон у́же 55 мм не производится (ограниченная размерная
+    // сетка). При ширине втулки 110 мм в раскрой добавляются полосы 110 мм:
+    // продуктовая ширина 55–57 → 2 полосы; 63–64 → 1 полоса; иначе (58–62, 65–70,
+    // >70) — полос нет (>70 режется по обычному правилу втулки 1″). Полосы 110 мм
+    // занимают ширину джамбо той же резки (резервируются ДО укладки продукта).
+
+    // Позицию можно произвести? Втулка 0.5″ запрещает ширину < 55 мм.
+    function isSleeveWidthProducible(inches, orderWidth) {
+        var w = Number(orderWidth);
+        if (Number(inches) === 0.5 && isFinite(w) && w < 55) return false;
+        return true;
+    }
+
+    // План втулочных полос для раскроя: { stripWidth, count }. Срабатывает только
+    // для втулки 0.5″ шириной 110 мм. orderWidths — НОМИНАЛЬНЫЕ ширины продукта в
+    // раскрое (резка разбита по count в профиле, поэтому ширины одного диапазона).
+    function sleeveCoreStripPlan(inches, coreWidthMm, orderWidths) {
+        var none = { stripWidth: 0, count: 0 };
+        if (Number(inches) !== 0.5 || Number(coreWidthMm) !== 110) return none;
+        var ws = (orderWidths || []).map(Number).filter(function(w) { return isFinite(w) && w > 0; });
+        if (!ws.length) return none;
+        var allIn = function(lo, hi) {
+            return ws.every(function(w) { return w >= lo - 1e-9 && w <= hi + 1e-9; });
+        };
+        if (allIn(55, 57)) return { stripWidth: 110, count: 2 };
+        if (allIn(63, 64)) return { stripWidth: 110, count: 1 };
+        return none;
+    }
+
+    // Дописать в раскрой втулочные полосы (#3812). Помечаем core:true — раскрой их
+    // показывает «Партией ГП» (Σ ширина×полос ≤ ширина джамбо), но capStockToHeadroom
+    // их не урезает и не считает перепроизводством, а проходы/обеспечение от них не
+    // зависят (у ширины 110 мм нет позиции). Идемпотентно: повторная ширина не двоится.
+    function appendCoreStrip(layout, coreWidth, count) {
+        if (!layout || !(count > 0) || !(coreWidth > 0)) return layout;
+        layout.strips = layout.strips || [];
+        var w = round3(coreWidth);
+        for (var i = 0; i < layout.strips.length; i++) {
+            var s = layout.strips[i];
+            if (s && s.core && round3(s.width) === w) { s.qty = count; return layout; }
+        }
+        layout.strips.push({ width: w, qty: count, purpose: 'Заказ', core: true, positionIds: [] });
+        return layout;
     }
 
     function nonStockStripQtyForWidth(layout, width) {
@@ -4723,6 +4776,9 @@
         buildActualWidthIndex: buildActualWidthIndex,    // #3372
         resolveCutWidth: resolveCutWidth,                // #3372
         resolveNominalWidth: resolveNominalWidth,        // #3408
+        isSleeveWidthProducible: isSleeveWidthProducible, // #3812
+        sleeveCoreStripPlan: sleeveCoreStripPlan,        // #3812
+        appendCoreStrip: appendCoreStrip,                // #3812
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -5699,6 +5755,30 @@
         }).catch(function() { self.sleeveInchesById = {}; });
     };
 
+    // #3812: ширина втулки в мм по id записи «Диаметр втулки» (реквизит «Ширина
+    // втулки, мм») → this.sleeveWidthById = { sleeveId: мм }. Контекст для добавления
+    // втулочных полос (57 vs 110). Нет реквизита/доступа → пустая карта (обратная
+    // совместимость: без ширины втулки полосы не добавляются).
+    AtexProductionPlanning.prototype.loadSleeveWidths = function() {
+        var self = this;
+        this.sleeveWidthById = {};
+        var meta = tableByName(this._metaAll || [], 'Диаметр втулки');
+        if (!meta) return Promise.resolve();
+        var wIdx = columnIndex(meta, 'Ширина втулки, мм');
+        if (wIdx < 0) wIdx = columnIndex(meta, 'Ширина втулки');
+        if (wIdx < 0) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var raw = (rec.r || [])[wIdx];
+                if (raw == null || String(raw).trim() === '') return;
+                var n = Number(raw);
+                if (isFinite(n)) map[String(rec.i)] = n;
+            });
+            self.sleeveWidthById = map;
+        }).catch(function() { self.sleeveWidthById = {}; });
+    };
+
     // #3372: проставить позициям фактическую ширину резки. Номинал заказа
     // сохраняется в orderWidth (для отображения), а width становится фактической —
     // её используют раскладка, полосы, Партии ГП и обеспечение (вся геометрия
@@ -5714,6 +5794,15 @@
                 inches: self.sleeveInchesById ? self.sleeveInchesById[String(p.sleeveId)] : null
             };
             p.width = resolveCutWidth(p.orderWidth, ctx, self.actualWidthIndex);
+            // #3812: контекст втулки 0.5″ — производимость и план втулочных полос 110 мм.
+            // Считаем по НОМИНАЛЬНОЙ ширине заказа (диапазоны 55–57/63–64 заданы в ней).
+            p.sleeveInches = ctx.inches == null ? null : Number(ctx.inches);
+            p.sleeveWidth = (self.sleeveWidthById && self.sleeveWidthById[String(p.sleeveId)] != null)
+                ? Number(self.sleeveWidthById[String(p.sleeveId)]) : null;
+            p.producible = isSleeveWidthProducible(p.sleeveInches, p.orderWidth);
+            var corePlan = sleeveCoreStripPlan(p.sleeveInches, p.sleeveWidth, [p.orderWidth]);
+            p.coreStripCount = corePlan.count;
+            p.coreStripWidth = corePlan.count > 0 ? corePlan.stripWidth : 0;
         });
     };
 
@@ -6062,14 +6151,24 @@
         var qty = Math.floor(Number(qtyRaw) || 0);
         if (!(qty > 0)) return Promise.resolve({ error: 'Укажите количество рулонов больше 0' });
         if (qty > remaining) return Promise.resolve({ error: 'Количество больше необеспеченного остатка (' + remaining + ' рул.)' });
+        // #3812: втулка 0.5″ — риббон у́же 55 мм не производим.
+        if (position.producible === false) return Promise.resolve({ error: 'Втулка 0.5″: риббон шириной < 55 мм не производится' });
         var mat = String(position.materialId == null ? '' : position.materialId);
         var jw = this.jumboWidthByMaterial[mat];
         if (!jw) return Promise.resolve({ error: 'Не задана ширина джамбо для сырья позиции' });
+        // #3812: резерв ширины джамбо под втулочные полосы 110 мм (см. annotatePositionsCutWidth).
+        var coreCount = position.coreStripCount || 0;
+        var coreWidth = position.coreStripWidth || 0;
+        var coreReserve = coreCount > 0 && coreWidth > 0 ? round3(coreCount * coreWidth) : 0;
+        var effJumbo = round3(jw - coreReserve);
+        if (coreReserve > 0 && !(effJumbo >= (Number(position.width) || 0))) {
+            return Promise.resolve({ error: 'Втулка ' + coreWidth + ' мм: не хватает ширины джамбо под втулочные полосы' });
+        }
         var profile = groupPositionsByPlanningProfile([position])[0] ||
             { key: '', windDir: position.windDir, windLength: position.windLength };
         return this.loadPreferredWidths(mat, profile.windDir, profile.windLength).then(function(preferred) {
             var res = layoutCore.planLayouts({
-                jumboWidth: jw,
+                jumboWidth: effJumbo,
                 positions: [{ id: position.id, width: position.width, qty: qty, dueKey: position.dueKey }],
                 preferred: preferred || self.preferredByMaterial[profile.key] || [],
                 options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
@@ -6078,6 +6177,7 @@
             if (!layouts.length) return { error: 'Не удалось построить раскладку для позиции' };
             var lay = layouts[0];
             lay.mat = mat; lay.windDir = profile.windDir; lay.windLength = profile.windLength;
+            if (coreReserve > 0) appendCoreStrip(lay, coreWidth, coreCount); // #3812: втулочные полосы в раскрой
             // posForCalc — единственная позиция с УРЕЗАННЫМ до qty кол-вом (для проходов/обеспечения).
             var posForCalc = [{ id: position.id, width: position.width, qty: qty, length: position.length,
                 sleeveId: position.sleeveId, sleeveReady: position.sleeveReady, dueKey: position.dueKey }];
@@ -7558,6 +7658,12 @@
         // сырьё + направление намотки + длина намотки.
         // Только согласованные (order_approval_date или item_approval_date).
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
+        // #3812: позиции на втулке 0.5″ у́же 55 мм не производятся — исключаем из планирования.
+        var notProducible = [];
+        unsup = unsup.filter(function(p) {
+            if (p.producible === false) { notProducible.push(p); return false; }
+            return true;
+        });
         console.log('[pp] ⚙️ generateCuts: всего позиций:', this.genPositions.length, ', необеспеченных согласованных:', unsup.length);
         if (!unsup.length) {
             // #3792: вброс новых заданий пересобирает очередь по правилам (preserveOrder=false:
@@ -7566,9 +7672,10 @@
             // он держит задание на своём дне (не переносит/не разбивает), внутри дня переставлять
             // можно. Идемпотентно (#3427): если ничего не меняется — ничего не пишем.
             console.log('[pp] ⚙️ generateCuts: незапланированных позиций нет — пересобираю очередь по правилам');
+            var npNote = notProducible.length ? ' Пропущено ' + notProducible.length + ' поз. (втулка 0.5″, ширина < 55 мм).' : '';
             this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
-                self.notify(changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
-                                    : 'Нет незапланированных позиций; очередь уже оптимальна', 'info');
+                self.notify((changed ? 'Очередь пересобрана по правилам (зафиксированные задания — на своих днях)'
+                                     : 'Нет незапланированных позиций; очередь уже оптимальна') + npNote, 'info');
             });
             return;
         }
@@ -7594,6 +7701,8 @@
             // Построить раскладки по каждому профилю; собрать пропуски.
             var allLayouts = [];   // [{...layout, mat}]
             var skipped = [];      // [{positionId, reason}]
+            // #3812: непроизводимые (втулка 0.5″, ширина < 55 мм) — в пропуски.
+            notProducible.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'втулка 0.5″: ширина < 55 мм не производится' }); });
             profiles.forEach(function(group) {
                 var mat = group.materialId;
                 var jw = self.jumboWidthByMaterial[mat];
@@ -7612,8 +7721,22 @@
                     var stockablePreferred = planning.filterStockableWidths(
                         self.maxStockIndex, self.preferredByMaterial[group.key] || [],
                         { material: mat, winding: group.windDir, length: group.windLength });
+                    // #3812: втулка 0.5″ шир. 110 мм — резервируем ширину джамбо под втулочные
+                    // полосы 110 мм ДО укладки продукта (occupied width), полосы дописываем
+                    // в каждый раскрой ниже. Профиль разбит по count, поэтому ширина едина.
+                    var coreCount = group.coreStripCount || 0;
+                    var coreWidth = group.coreStripWidth || 0;
+                    var coreReserve = coreCount > 0 && coreWidth > 0 ? round3(coreCount * coreWidth) : 0;
+                    var effJumbo = round3(jw - coreReserve);
+                    if (coreReserve > 0) {
+                        var maxProd = positionGroup.reduce(function(m, p) { var w = Number(p.width) || 0; return w > m ? w : m; }, 0);
+                        if (!(effJumbo >= maxProd)) {
+                            positionGroup.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'втулка ' + coreWidth + ' мм: не хватает ширины джамбо под втулочные полосы' }); });
+                            return;
+                        }
+                    }
                     var res = layoutCore.planLayouts({
-                        jumboWidth: jw,
+                        jumboWidth: effJumbo,
                         positions: positionGroup.map(function(p) {
                             // #3423: запасные комбинации (есть в «Максимальном запасе») можно
                             // перепроизводить в запас; незапасные — резать ровно под заказ.
@@ -7634,6 +7757,7 @@
                         lay.windLength = group.windLength;
                         lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
                         lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
+                        if (coreReserve > 0) appendCoreStrip(lay, coreWidth, coreCount); // #3812
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
@@ -10166,6 +10290,7 @@
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
                     self.loadActualWidths(),   // #3372: справочник фактической ширины резки (66190)
                     self.loadSleeveInches(),   // #3372: дюймы втулки по записи 8188 (контекст условия)
+                    self.loadSleeveWidths(),   // #3812: ширина втулки (мм) по записи (57/110) — втулочные полосы
                     self.loadPrevCutSetup(),   // #3688: текущая заправка станков (prev_cut_setup) для первой резки
                     // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
                     self.loadCutStrips().then(function() { return self.loadPlanning(); })
