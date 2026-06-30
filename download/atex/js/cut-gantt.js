@@ -670,13 +670,16 @@
     // #3770: окно подписи бара (наладка+резка) как {startMs, endMs, mins} — единый источник
     // и для текста бара (cutBarTime), и для суммы минут в заголовке станка (cutBarSpanMin),
     // чтобы они никогда не расходились. Геометрия — как раньше в cutBarTime.
-    function cutBarWindow(cut, setupMin, maxEndMs) {
+    function cutBarWindow(cut, setupMin, maxEndMs, startMsOverride) {
         var tr = cutTimeRange(cut);
         if (!tr) return null;
         // #3705: правый край = старт + (резка+лидер) + наладка — ровно та же сумма минут, что у
         // ширины бара (cutBarSegments) и у окна планировщика. Раньше брали tr.endMs (намотка БЕЗ
         // лидера) + наладка → конец задания получался на лидер «между резками» короче плана.
-        var startMs = tr.startMs;
+        // #3887: startMsOverride — старт бара, сдвинутый встык при коллизии сохранённых planStart
+        // (dedupeBarStarts); нужен, чтобы подпись времени совпала с позицией бара. Нет override —
+        // берём сохранённый старт (поведение не меняется для корректных данных).
+        var startMs = (startMsOverride != null && isFinite(Number(startMsOverride))) ? Number(startMsOverride) : tr.startMs;
         var endMs = startMs + (cutBarMinutes(cut) + (Number(setupMin) || 0)) * 60000;
         // #3708: не заходить за старт следующего задания того же станка. Длительности хранятся
         // округлёнными вверх (#3635 п.4), а cut_plan_date — по дробному времени, поэтому бар бывает
@@ -686,16 +689,16 @@
         return { startMs: startMs, endMs: endMs, mins: Math.max(1, Math.round((endMs - startMs) / 60000)) };
     }
 
-    function cutBarTime(cut, setupMin, maxEndMs) {
-        var w = cutBarWindow(cut, setupMin, maxEndMs);
+    function cutBarTime(cut, setupMin, maxEndMs, startMsOverride) {
+        var w = cutBarWindow(cut, setupMin, maxEndMs, startMsOverride);
         if (!w) return '';
         return formatTime(w.startMs) + '-' + formatTime(w.endMs) + ' (' + w.mins + ' мин)';
     }
 
     // #3770: целое число минут, отображаемое в подписи бара (.atex-cg-bar-main). Заголовок
     // станка суммирует эти значения → «6 (262 мин)». Нет окна (нет времени) → 0.
-    function cutBarSpanMin(cut, setupMin, maxEndMs) {
-        var w = cutBarWindow(cut, setupMin, maxEndMs);
+    function cutBarSpanMin(cut, setupMin, maxEndMs, startMsOverride) {
+        var w = cutBarWindow(cut, setupMin, maxEndMs, startMsOverride);
         return w ? w.mins : 0;
     }
 
@@ -1080,6 +1083,36 @@
         return params.length ? base + '?' + params.join('&') : base;
     }
 
+    // #3887: защита Ганта от испорченных сохранённых planStart — та же беда, что в очереди (#3885).
+    // Очередь («Планирование производства») и Гант рисуют ОДИН сохранённый план (t1078). Если у
+    // двух резок одного станка в один день старт совпал/пересёкся (след незавершённой пересборки
+    // времени старта: перенос до #3840 не трогал planStart, пересборка #3660 идёт лишь в scope
+    // фильтра), их бары встают в одну точку оси → наложение. scheduleFromStored (#3886) уже лечит
+    // это в очереди; здесь — то же для дорожки Ганта. Раскладываем встык: старт ОКНА бара
+    // (наладка+резка) не раньше конца окна предыдущей резки ТОГО ЖЕ дня. День берём по
+    // СОХРАНЁННОМУ старту (ось/заголовки/окна дней не уезжают). Двигаем только ПЛАНОВЫЕ бары (без
+    // факт. старта): у начатых/завершённых бар показывает реальное время, его не трогаем — но их
+    // окно всё равно отодвигает следующий ПЛАНОВЫЙ бар. Непересекающиеся сохранённые старты (в т.ч.
+    // обеденный зазор) не трогаем — display == сохранённое (философия #3846). ordered — резки
+    // станка в порядке дорожки (orderCutsInGroup). → массив старта бара (мс) по индексу, null где
+    // у резки нет времени. Чистая — покрыта тестом.
+    function dedupeBarStarts(ordered) {
+        var prevEndByDay = {};
+        return (ordered || []).map(function(cut) {
+            var tr = cutTimeRange(cut);
+            if (!tr) return null;
+            var day = startOfLocalDayMs(tr.startMs);                 // день — по сохранённому старту
+            var lenMs = (cutBarMinutes(cut) + cutSetupMin(cut).total) * 60000;
+            var startMs = tr.startMs;
+            var prevEnd = prevEndByDay[day];
+            // сдвигаем встык только плановый бар; реальное время (факт. старт) не двигаем
+            if (tr.actualStartMs == null && prevEnd != null && startMs < prevEnd) startMs = prevEnd;
+            var endMs = startMs + lenMs;
+            if (prevEnd == null || endMs > prevEnd) prevEndByDay[day] = endMs;   // окно занятости дня (макс)
+            return startMs;
+        });
+    }
+
     // #3668: размещение баров по РЕАЛЬНОМУ времени. Группировка по станку (сортировка по
     // метке), внутри станка — порядок строк по очерёдности/старту; каждое задание = отдельная
     // строка, бар на общей шкале времени окна (left/width по плану-факту, разрывы видны).
@@ -1139,25 +1172,31 @@
         groups.forEach(function(g) {
             orderCutsInGroup(g.cuts);
             var ordered = g.cuts;
+            // #3887: старты баров со снятым нахлёстом по сохранённому planStart (встык в дне).
+            // Для корректных данных barStarts[i] === сохранённый старт — поведение не меняется.
+            var barStarts = dedupeBarStarts(ordered);
             g.tasks = ordered.map(function(cut, i) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
+                var startMs = barStarts[i] != null ? barStarts[i] : tr.startMs;   // #3887: сдвинутый старт бара
                 var status = cutStatus(cut, nowMs);
                 // #3675 п.3 / #3680: ширина бара = наладка + резка; подпись времени — ВСЁ окно задания
                 // (от начала наладки до конца резки), а не только резка.
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
                 // #3747: левый край бара — по СВЁРНУТОЙ оси (scale.toPx): нерабочее время не
                 // занимает места, дни идут встык. Ширина — по минутам (наладка+резка), как и раньше.
-                var leftPx = scale.toPx(tr.startMs);
+                var leftPx = scale.toPx(startMs);
                 var widthPx = seg.totalPx;
                 // #3708: бар не должен заходить за старт следующего задания того же станка —
                 // длительности хранятся вверх (#3635 п.4), а старты по дробному времени, поэтому бар
                 // бывал длиннее реального окна. Завершённые (есть факт. финиш) не режем — реальную
                 // длительность показываем как есть (конфликт виден). #3747: ширину-границу тоже
                 // считаем по свёрнутой оси, чтобы стык дней резал захлёст по краю рабочего окна.
+                // #3887: границу берём по СДВИНУТОМУ старту следующей резки — при коллизии planStart
+                // соседняя резка раздвинута встык, и эта проверка обрезает захлёст к ней.
                 var nextStartMs = null;
                 if (tr.actualEndMs == null && i + 1 < ordered.length) {
-                    var ntr = cutTimeRange(ordered[i + 1]);
-                    if (ntr && ntr.startMs > tr.startMs) nextStartMs = ntr.startMs;
+                    var nStart = barStarts[i + 1];
+                    if (nStart != null && nStart > startMs) nextStartMs = nStart;
                 }
                 if (nextStartMs != null) {
                     var maxWidthPx = round3(scale.toPx(nextStartMs) - leftPx);
@@ -1168,8 +1207,9 @@
                     leftPx: leftPx,
                     widthPx: widthPx,
                     segments: seg,
-                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs),
-                    barMin: cutBarSpanMin(cut, seg.setupMin, nextStartMs),   // #3770: минуты подписи бара
+                    // #3887: подпись времени — по сдвинутому старту, чтобы текст совпал с позицией бара.
+                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs, startMs),
+                    barMin: cutBarSpanMin(cut, seg.setupMin, nextStartMs, startMs),   // #3770: минуты подписи бара
                     title: cutBarTitle(cut, tr, status)
                 };
             });
@@ -1250,6 +1290,7 @@
         attachSetupMinutes: attachSetupMinutes,
         rowsToCuts: rowsToCuts,
         orderCutsInGroup: orderCutsInGroup,
+        dedupeBarStarts: dedupeBarStarts,   // #3887
         layoutGroups: layoutGroups,
         ganttWindow: ganttWindow,
         ganttTrackPx: ganttTrackPx,
