@@ -26,17 +26,23 @@ function sec(ms) { return Math.floor(ms / 1000); }
 
 // ── slitterDownOnDay: окно отпуска пересекает сутки ──
 (function () {
-    // Отпуск 10–12 июня (закрытое окно: начало 10-го 00:00, конец 12-го 23:59).
+    var WS = 480, WE = 970;   // рабочее окно резки 08:00–16:10 (#3883: проверяем ПОЛНОЕ покрытие)
+    // Отпуск 10–12 июня (закрытое окно: начало 10-го 00:00, конец 12-го 23:59) — покрывает
+    // рабочее окно всех трёх дней целиком.
     var dt = [{ start: sec(dayMs(2026, 6, 10)), end: sec(dayMs(2026, 6, 12) + 86399000) }];
-    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 10)), 'slitterDownOnDay: 10 июня — отпуск');
-    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 11)), 'slitterDownOnDay: 11 июня — отпуск');
-    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 12)), 'slitterDownOnDay: 12 июня — отпуск');
-    assert(!planning.slitterDownOnDay(dt, dayMs(2026, 6, 9)), 'slitterDownOnDay: 9 июня — не отпуск');
-    assert(!planning.slitterDownOnDay(dt, dayMs(2026, 6, 13)), 'slitterDownOnDay: 13 июня — не отпуск');
-    assert(!planning.slitterDownOnDay([], dayMs(2026, 6, 10)), 'slitterDownOnDay: нет окон — не отпуск');
+    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 10), WS, WE), 'slitterDownOnDay: 10 июня — отпуск');
+    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 11), WS, WE), 'slitterDownOnDay: 11 июня — отпуск');
+    assert(planning.slitterDownOnDay(dt, dayMs(2026, 6, 12), WS, WE), 'slitterDownOnDay: 12 июня — отпуск');
+    assert(!planning.slitterDownOnDay(dt, dayMs(2026, 6, 9), WS, WE), 'slitterDownOnDay: 9 июня — не отпуск');
+    assert(!planning.slitterDownOnDay(dt, dayMs(2026, 6, 13), WS, WE), 'slitterDownOnDay: 13 июня — не отпуск');
+    assert(!planning.slitterDownOnDay([], dayMs(2026, 6, 10), WS, WE), 'slitterDownOnDay: нет окон — не отпуск');
     // Окно без «Окончания» — не блокируем (как в расписании, downtimeBlockedRanges).
-    assert(!planning.slitterDownOnDay([{ start: sec(dayMs(2026, 6, 10)) }], dayMs(2026, 6, 11)),
+    assert(!planning.slitterDownOnDay([{ start: sec(dayMs(2026, 6, 10)) }], dayMs(2026, 6, 11), WS, WE),
         'slitterDownOnDay: окно без «Окончания» — не блокирует');
+    // #3883: ЧАСТИЧНЫЙ отпуск (2 часа 08:00–10:00) рабочий день НЕ блокирует.
+    var part = [{ start: sec(dayMs(2026, 6, 10) + 8 * 3600000), end: sec(dayMs(2026, 6, 10) + 10 * 3600000) }];
+    assert(!planning.slitterDownOnDay(part, dayMs(2026, 6, 10), WS, WE),
+        'slitterDownOnDay: частичный отпуск 2 часа → НЕ весь день (станок работает)');
 })();
 
 // ── chooseSlitterBySetup: станок в отпуске исключается ──

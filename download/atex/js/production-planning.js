@@ -3021,23 +3021,40 @@
         return out;
     }
 
-    // #3876: на отпуске ли станок в указанный КАЛЕНДАРНЫЙ день. downtimes — окна простоя
-    // [{ start, end }] в unix-секундах (start — начало «Отпуска», end — «Окончание»), как
-    // this.downtimesBySlitter[slitterId]. dayMidnightMs — полночь дня (локально). true, если
-    // хоть одно ЗАКРЫТОЕ окно (с «Окончанием») пересекает сутки [dayMidnight, +24ч). Окна без
-    // «Окончания» не учитываем — как downtimeBlockedRanges (на расписание они не влияют),
-    // чтобы блокировка переноса/планирования была согласована с тайм-сдвигом расписания.
-    function slitterDownOnDay(downtimes, dayMidnightMs) {
+    // #3876: на отпуске ли станок ВЕСЬ рабочий день. downtimes — окна простоя [{ start, end }]
+    // в unix-секундах (start — начало «Отпуска», end — «Окончание»), как
+    // this.downtimesBySlitter[slitterId]. dayMidnightMs — полночь дня (локально). workStartMin/
+    // workEndMin — рабочее окно резки (мин от полуночи: startMin..cutEndMin).
+    //
+    // #3883: true ТОЛЬКО если закрытые окна отпуска ПОЛНОСТЬЮ покрывают рабочее окно [workStart;
+    // workEnd] этого дня. ЧАСТИЧНЫЙ отпуск (напр. 2 часа 08:00–10:00) день НЕ блокирует — станок
+    // работает остаток дня, а расписание само сдвигает резки за окно простоя (#3764,
+    // shiftPlacementsPastDowntime). Раньше любое пересечение суток считалось «весь день в отпуске»,
+    // и 2-часовое окно исключало станок из планирования совсем (Гант пустой во все дни). Окна без
+    // «Окончания» игнорируем (как в расписании). Рабочее окно не задано → проверяем сутки [0;1440].
+    function slitterDownOnDay(downtimes, dayMidnightMs, workStartMin, workEndMin) {
         var base = Number(dayMidnightMs);
         if (!isFinite(base)) return false;
-        var dayStart = base, dayEnd = base + 86400000;
-        return (downtimes || []).some(function(d) {
-            var s = Number(d && d.start);
-            if (!isFinite(s) || s <= 0) return false;
-            var e = Number(d && d.end);
-            if (!isFinite(e) || e <= s) return false;   // без «Окончания» — не блокируем (как в расписании)
-            return s * 1000 < dayEnd && e * 1000 > dayStart;
+        var wsMin = isFinite(Number(workStartMin)) ? Number(workStartMin) : 0;
+        var weMin = isFinite(Number(workEndMin)) ? Number(workEndMin) : 1440;
+        var ws = base + wsMin * 60000, we = base + weMin * 60000;
+        if (!(we > ws)) return false;
+        var ivs = [];
+        (downtimes || []).forEach(function(d) {
+            var s = Number(d && d.start), e = Number(d && d.end);
+            if (!isFinite(s) || s <= 0 || !isFinite(e) || e <= s) return;   // без «Окончания» — не учитываем
+            var a = Math.max(ws, s * 1000), b = Math.min(we, e * 1000);
+            if (b > a) ivs.push([a, b]);
         });
+        if (!ivs.length) return false;
+        ivs.sort(function(x, y) { return x[0] - y[0]; });
+        var cur = ws;
+        for (var i = 0; i < ivs.length; i++) {
+            if (ivs[i][0] > cur) return false;     // дыра в покрытии → есть рабочее время
+            if (ivs[i][1] > cur) cur = ivs[i][1];
+            if (cur >= we) return true;
+        }
+        return cur >= we;
     }
 
     // #3788: «ДД.ММ.ГГГГ» → числовой ключ дня ГГГГММДД (для карты календаря). null — мусор.
@@ -5835,11 +5852,15 @@
         );
     };
 
-    // #3876: на отпуске ли станок slitterId в день dayMidnightMs (полночь дня, мс). Календарь
-    // (выходные/праздники) сюда НЕ входит — он глобален и не делает станок «недоступным» в
-    // смысле этой проверки; речь именно об «Отпуске» конкретного станка (он без сырья и ножей).
+    // #3876: на отпуске ли станок slitterId ВЕСЬ рабочий день dayMidnightMs (полночь дня, мс).
+    // Календарь (выходные/праздники) сюда НЕ входит — он глобален и не делает станок «недоступным»
+    // в смысле этой проверки; речь именно об «Отпуске» конкретного станка (он без сырья и ножей).
+    // #3883: частичный отпуск (не на весь рабочий день) станок НЕ блокирует — отдаём рабочее окно
+    // [startMin; cutEndMin], slitterDownOnDay требует ПОЛНОГО покрытия (2-часовой отпуск → false).
     AtexProductionPlanning.prototype.slitterOnVacationDay = function(slitterId, dayMidnightMs) {
-        return slitterDownOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs);
+        var w = this.workingWindow();
+        return slitterDownOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs,
+            w && w.startMin, w && w.cutEndMin);
     };
 
     // #3876: id станков, у которых в день dayMidnightMs отпуск → { slitterId: true }. Для
