@@ -3219,15 +3219,28 @@
     // (а) внутри рабочего окна и (б) не попадает в блокированный интервал; для сегмента длиной
     // len ещё и (в) ни один блок не НАЧИНАЕТСЯ внутри [m, m+len) (иначе сегмент въехал бы в
     // простой — выталкиваем целиком за конец блока). Итераций ≤ числа блоков + дни (ограничено).
-    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd) {
+    // #3907: fitEnd (необяз.) — предел, до которого сегмент должен ЗАКОНЧИТЬСЯ (конец смены с
+    // учётом нахлёста-овертайма). Задан → сегмент, чей конец (start+len) выходит за fitEnd, но
+    // сам влезающий в рабочее окно дня, переносится на начало СЛЕДУЮЩЕГО рабочего дня (а не
+    // оставляется с нахлёстом за смену). Не задан → прежнее поведение (проверяли только старт).
+    // dayEnd по-прежнему граница, ПОСЛЕ которой новый сегмент не начинают.
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd) {
         var m = Number(from);
         var L = Number(len) || 0;
-        var guard = 0, guardMax = (blocked || []).length * 2 + 8;
+        var hasFit = (fitEnd != null && isFinite(Number(fitEnd)));
+        var endLimit = hasFit ? Number(fitEnd) : 0;
+        var dayCap = endLimit - dayStart;   // длина рабочего окна дня (с овертаймом)
+        // #3907: с переносом за конец дня итераций больше (пропуск целых дней) — запас увеличен.
+        var guard = 0, guardMax = (blocked || []).length * 2 + 768;
         while (guard++ < guardMax) {
             var day = Math.floor(m / 1440);
             var within = m - day * 1440;
             if (within < dayStart) { m = day * 1440 + dayStart; continue; }
             if (within >= dayEnd) { m = (day + 1) * 1440 + dayStart; continue; }
+            // #3907: сегмент должен влезть в рабочее окно дня ЦЕЛИКОМ. Конец за fitEnd, а сам
+            // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Сегмент длиннее
+            // целого окна разбить здесь нельзя — кладём как есть (вырожденный случай).
+            if (hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
             var bumped = false;
             for (var i = 0; i < (blocked || []).length; i++) {
                 var bS = blocked[i][0], bE = blocked[i][1];
@@ -3246,14 +3259,15 @@
     // окна-старта (минуты), длины (setup+намотка) и применения сдвига (delta) к элементу. blocked
     // — отсортированные [[s,e],…] (минуты от полуночи дня 0). Сохраняет встык-упаковку (курсор =
     // конец предыдущего): резку, сдвинутую простоем, догоняют следующие. Пустой blocked → no-op.
-    function shiftPlacementsPastDowntime(items, blocked, dayStart, dayEnd, acc) {
+    function shiftPlacementsPastDowntime(items, blocked, dayStart, dayEnd, acc, fitEnd) {
         if (!blocked || !blocked.length || !items || !items.length) return items;
         var cursor = -Infinity;
         items.forEach(function(it) {
             var ws = acc.windowStart(it);
             if (ws < cursor) ws = cursor;
             var len = acc.length(it);
-            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd);
+            // #3907: fitEnd — не оставлять сегмент с нахлёстом за смену (см. nextFreeWorkMinute).
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd);
             var delta = placed - acc.windowStart(it);
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
@@ -3569,11 +3583,16 @@
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
         function applyDowntime(segs) {
+            // #3907: предел конца сегмента при сдвиге за простой — конец смены с нахлёстом резки
+            // (dayEndHour + maxOverworkCuts), как в упаковке; нет овертайма → cutEndMin (dayEnd).
+            // Без него сегмент на целый день, сдвинутый простоем/выходным на старт в середине дня,
+            // вылезал за смену (#3907: 108 проходов с 10:35 до 17:26) — теперь переносится на завтра.
+            var fitEnd = overworkOn ? (dayEndHour + maxOverworkCuts) : dayEnd;
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
                 shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); }
-            });
+            }, fitEnd);
             return segs;
         }
         // #3342: плавающий обед. lunch.startMin — минуты от полуночи; durationMin — длина.
