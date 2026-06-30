@@ -8706,11 +8706,23 @@
     // склад (та же Партия ГП без своего обеспечения). Зависимые _m_new не параллелятся.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped, strategy) {
         var self = this;
-        // #3865: окно прогресса показываем сразу по «Создать» — синхронная подготовка (раскладка
-        // по дням, выравнивание загрузки станков) выполняется до первых запросов; ниже окно
-        // сменится счётчиком «N из M». Без этого по «Создать» какое-то время не было индикатора.
-        this.showProgress('Генерация заданий…', 0);
-        this.updateProgress(0, 'Подготовка и выравнивание загрузки станков…');
+        // #3865/#3902: окно прогресса показываем сразу по «Создать» И уступаем кадр браузеру,
+        // чтобы индикатор успел ОТРИСОВАТЬСЯ перед тяжёлой синхронной подготовкой (раскладка по
+        // дням + выравнивание загрузки станков по ВСЕМ резкам выполняются синхронно, до первых
+        // запросов). Один showProgress кадр не рисует: сразу за ним главный поток занимает
+        // подготовка, браузер не перерисовывается, и по «Создать» UI «висит» ~минуту без
+        // индикатора (#3902). setTimeout(0) отдаёт кадр на отрисовку, затем входим повторно и
+        // выполняем подготовку. Ниже окно сменится счётчиком «N из M».
+        if (!this._genPrepYielded) {
+            this.showProgress('Генерация заданий…', 0);
+            this.updateProgress(0, 'Подготовка и выравнивание загрузки станков…');
+            return new Promise(function(resolve) { setTimeout(resolve, 0); }).then(function() {
+                self._genPrepYielded = true;
+                return Promise.resolve(self.runGenerateCuts(layouts, skipped, strategy)).then(
+                    function(r) { self._genPrepYielded = false; return r; },
+                    function(e) { self._genPrepYielded = false; throw e; });
+            });
+        }
         var cutMeta = this.meta.cut;
         var finishedBatchMeta = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         var supplyMeta = this.meta.supply;
