@@ -3583,11 +3583,12 @@
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
         function applyDowntime(segs) {
-            // #3907: предел конца сегмента при сдвиге за простой — конец смены с нахлёстом резки
-            // (dayEndHour + maxOverworkCuts), как в упаковке; нет овертайма → cutEndMin (dayEnd).
+            // #3907: предел конца сегмента при сдвиге за простой — тот же потолок, что в упаковке
+            // (availFor 'cuts'): cutEndMin + maxOverworkCuts; нет овертайма → cutEndMin (dayEnd).
+            // #3909/#3910: потолок привязан к cutEndMin (dayEnd), а не к DAY_END_HOUR (см. availFor).
             // Без него сегмент на целый день, сдвинутый простоем/выходным на старт в середине дня,
             // вылезал за смену (#3907: 108 проходов с 10:35 до 17:26) — теперь переносится на завтра.
-            var fitEnd = overworkOn ? (dayEndHour + maxOverworkCuts) : dayEnd;
+            var fitEnd = overworkOn ? (dayEnd + maxOverworkCuts) : dayEnd;
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
@@ -3610,7 +3611,13 @@
             if (!overworkOn || !hasWindow) return base;
             var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
             var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
-            return (dayEndHour - dayStart) + margin - lunchRes - clock;
+            // #3909/#3910: нахлёст добавляем к cutEndMin (dayEnd = DAY_END_HOUR−TOTAL_INTERVALS),
+            // а НЕ к DAY_END_HOUR. Последнее задание дня обязано кончиться ≤ cutEndMin+margin
+            // (резка → +MAX_OVERWORK_CUTS, настройка → +MAX_OVERWORK_TUNE). Раньше базой был
+            // dayEndHour (16:30), и день паковался до 16:35+, копя 475–494 раб. мин (#3910 «494
+            // мин во 2 июле»). Теперь потолок 16:15 (резка) / 16:20 (настройка) — буфер уборки
+            // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
+            return (dayEnd - dayStart) + margin - lunchRes - clock;
         }
         // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
         // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
