@@ -47,13 +47,14 @@ var DAY = 86400;   // секунда-смещение смежного дня (p
 function widths(pairs) { var o = []; pairs.forEach(function(pr) { for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
 // Резка для mergeContinuationChains: одинаковая сигнатура у X/Y (material/winding/knives),
 // различает их только firstPartId. planDate в секундах (день = planDate/86400).
-function ch(id, firstPartId, dayOffset, runs) {
+function ch(id, firstPartId, dayOffset, runs, order) {
     return {
         id: id, firstPartId: firstPartId,
         slitter: { id: 'S1' }, materialId: 'M7', winding: 'OUT',
         knifeWidths: widths([[59, 16]]), knifeCount: 16,
         plannedRuns: runs == null ? 1 : runs,
-        planDate: String(1780963200 + dayOffset * DAY), orderId: 'O' + id
+        planDate: String(1780963200 + dayOffset * DAY),
+        orderId: order == null ? ('O' + id) : order
     };
 }
 
@@ -75,13 +76,25 @@ function ch(id, firstPartId, dayOffset, runs) {
     assertEqual(m.deletes, [], '1b: ничего не удаляется (это не продолжения)');
 })();
 
-// ── 1c: легаси (нет firstPartId) — прежняя эвристика (сигнатура + смежные дни) сливает.
+// ── 1c: легаси (нет firstPartId), смежные дни, ОДИН заказ → прежняя эвристика сливает.
 (function () {
-    var a = ch('A', '', 0, 7); var b = ch('Acont', '', 1, 3);
+    var a = ch('A', '', 0, 7, 'ORD'); var b = ch('Acont', '', 1, 3, 'ORD');
     var m = mergeContinuationChains([ a, b ]);
-    assertEqual(m.chainByLogical, { A: ['A', 'Acont'] }, '1c: легаси-эвристика сливает смежные дни одной сигнатуры');
+    assertEqual(m.chainByLogical, { A: ['A', 'Acont'] }, '1c: легаси-эвристика сливает смежные дни одной сигнатуры И заказа');
     assertEqual(m.cuts[0].plannedRuns, 10, '1c: проходы суммируются (7+3)');
     assertEqual(m.deletes, ['Acont'], '1c: продолжение на удаление');
+})();
+
+// ── 1e (#3892, корень defect B): легаси, та же сигнатура, смежные дни, но РАЗНЫЕ заказы —
+//     НЕ сливаются (иначе голова уезжала на ранний день вне scope #3660 и «Упорядочить»
+//     пропускал застрявшую резку). Пустой orderId у любой — по-прежнему совместим (#3808).
+(function () {
+    var x = ch('X', '', 0, 3, 'ORDX'); var y = ch('Y', '', 1, 4, 'ORDY');
+    var m = mergeContinuationChains([ x, y ]);
+    assertEqual(m.chainByLogical, { X: ['X'], Y: ['Y'] }, '1e: разные ЗАКАЗЫ одной конфигурации соседних дней НЕ сливаются');
+    assertEqual(m.deletes, [], '1e: ничего не удаляется (две самостоятельные резки)');
+    var me = mergeContinuationChains([ ch('E1', '', 0, 3, ''), ch('E2', '', 1, 4, '') ]);
+    assertEqual(me.chainByLogical, { E1: ['E1', 'E2'] }, '1e: пустой orderId у обеих — продолжение всё ещё сливается (#3808)');
 })();
 
 // ── 1d: смешанно — явная цепочка H/B + одиночная легаси-резка L другой конфигурации.
@@ -113,6 +126,34 @@ function pcut(id, material, knifeWidths, runs, sequence) {
     assert(ops.creates.length >= 1, '2: A не влезла в день → есть продолжение');
     assert(ops.creates.every(function (c) { return c.parentCutId === 'A'; }),
         '2: продолжение(я) ссылаются на голову A (parentCutId) — отсюда applySplitPlan берёт «ID первой части»');
+})();
+
+// ── 3 (defect B, корень): под scope ОДНОГО дня (#3660) резка, у которой на СОСЕДНЕМ раннем дне
+//     есть резка той же конфигурации, но ДРУГОГО заказа, раньше склеивалась с ней в цепочку с
+//     головой вне scope → «Упорядочить» её ПРОПУСКАЛ (перелив не выталкивался, зазоры не
+//     схлопывались). После фикса orderId — резка дня в scope перепланируется, чужая ранняя — нет.
+(function () {
+    var planDateDayKey = planning.planDateDayKey;
+    var base = Date.UTC(2026, 6, 3) / 1000;   // 03.07.2026 00:00 UTC (сек)
+    function dayCut(id, order, dayOff, runs) {
+        return { id: id, slitter: { id: 'mB' }, materialId: 'MW308', winding: 'OUT',
+            knifeWidths: widths([[100, 1]]), knifeCount: 1, plannedRuns: runs,
+            planDate: String(base + dayOff * DAY), orderId: order };
+    }
+    var prev = dayCut('prev', 'ORDP', -1, 50);   // 02.07, другой заказ, та же конфигурация
+    var today = dayCut('today', 'ORDT', 0, 40);  // 03.07
+    var scopeKey = planDateDayKey(base);         // 20260703
+    var ops = planCutOperations([prev, today], {
+        perPassByCut: { prev: 3, today: 3 }, planBaseMidnightMs: base * 1000,
+        dayStartMin: 480, dayEndMin: 970, dayEndHourMin: 990, maxOverworkCutsMin: 5, maxOverworkTuneMin: 10,
+        times: { BETWEEN_CUTS: 0 }, gapFill: true,
+        scopeFromKey: scopeKey, scopeToKey: scopeKey,
+        dayAnchorByCut: { prev: -1, today: 0 }
+    });
+    var ids = (ops.updates || []).map(function (u) { return u.cutId; })
+        .concat((ops.creates || []).map(function (c) { return c.parentCutId; }));
+    assert(ids.indexOf('today') >= 0, '3(B): резка дня в scope перепланируется (не пропущена из-за чужой ранней резки)');
+    assert(ids.indexOf('prev') < 0, '3(B): чужая ранняя резка (вне scope) не трогается (#3660)');
 })();
 
 // ── 4: cutRunLength = длина прогона головы (cut.length=450), а НЕ делёная доля обеспечения
