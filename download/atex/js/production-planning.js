@@ -3484,10 +3484,13 @@
         opts = opts || {};
         var lunchDur = Number(opts.lunchDurationMin) || 0;
         if (!(lunchDur > 0)) return [];
+        var lunchStart = Number(opts.lunchStartMin);   // #3909: 12:20 (мин от полуночи); NaN → привязка к зазору
+        var hasFixed = isFinite(lunchStart);
         var segs = (schedule || []).slice().filter(function(s) {
             return s && isFinite(Number(s.startMin));
         }).sort(function(a, b) { return a.startMin - b.startMin; });
         var byDay = {};
+        var prevCutByDay = {};   // #3909: cutId задания, после которого идёт зазор (несущее обед)
         var lunchByDay = {};
         segs.forEach(function(s) {
             var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
@@ -3498,15 +3501,24 @@
             if (prevEnd != null && !lunchByDay[day]) {
                 var gap = winStart - prevEnd;
                 // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
-                // длительности): берём, если он не меньше почти полного обеда. Обед привязываем к
-                // НАЧАЛУ послеобеденной резки (finishMin = winStart) — так блок всегда прилегает к
-                // следующей карточке (надёжный матч при рендере), а любой остаточный простой (если
-                // зазор > обеда) остаётся ДО обеда.
+                // длительности): берём, если он не меньше почти полного обеда. finishMin (= НАЧАЛО
+                // послеобеденной резки) остаётся КЛЮЧОМ привязки строки обеда к карточке.
                 if (gap >= lunchDur - 1) {
-                    lunchByDay[day] = { day: day, startMin: round3(winStart - lunchDur), finishMin: round3(winStart), durationMin: lunchDur };
+                    // #3909: при известном LUNCH_START ПОКАЗЫВАЕМ обед в 12:20 (внутри несущего его
+                    // задания prevCutByDay), а не в зазоре после него; carrierCutId — это задание.
+                    // LUNCH_START неизвестен → показываем в зазоре (dispStart = startMin), как было.
+                    var dispStart = hasFixed ? round3(day * 1440 + lunchStart) : round3(winStart - lunchDur);
+                    lunchByDay[day] = {
+                        day: day,
+                        startMin: round3(winStart - lunchDur), finishMin: round3(winStart),   // ключ привязки (зазор)
+                        dispStartMin: dispStart, dispFinishMin: round3(dispStart + lunchDur),  // #3909: показываемое время
+                        carrierCutId: hasFixed && prevCutByDay[day] != null ? String(prevCutByDay[day]) : null,
+                        durationMin: lunchDur
+                    };
                 }
             }
             if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
+            prevCutByDay[day] = s.cutId;   // #3909: для зазора следующего задания дня
         });
         return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
     }
@@ -10973,8 +10985,12 @@
             if (sc && cardSchedDay != null) {
                 var lb = lunchByDay[cardSchedDay];
                 if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
+                    // #3909: показываем обед в фиксированные 12:20–13:00 (dispStartMin/dispFinishMin),
+                    // а не в зазоре после несущего задания; привязка строки — по finishMin (зазор).
+                    var lbS = lb.dispStartMin != null ? lb.dispStartMin : lb.startMin;
+                    var lbF = lb.dispFinishMin != null ? lb.dispFinishMin : lb.finishMin;
                     groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
-                        text: '🍽 Обед · ' + formatClock(lb.startMin) + ' – ' + formatClock(lb.finishMin) +
+                        text: '🍽 Обед · ' + formatClock(lbS) + ' – ' + formatClock(lbF) +
                               ' · ' + lb.durationMin + ' мин' }));
                     lb._rendered = true;
                 }
