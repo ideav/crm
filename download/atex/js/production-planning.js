@@ -4978,7 +4978,33 @@
             minutesMemo[sig] = v;
             return v;
         }
-        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / cap) : 1) : 0; }
+        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / cap) : 1) : 0; }   // содержимое в рабочих днях
+        // #3881: «загруженность» станка = ДАТА ОКОНЧАНИЯ последней задачи (у кого позже — тот
+        // загружен сильнее). Содержимое (daysOf рабочих дней) кладём по дням от базы, ПРОПУСКАЯ
+        // дни отпуска станка → станок с отпуском заканчивает ПОЗЖЕ при тех же минутах (его не
+        // грузят на послеотпускное время, пока другие простаивают). Дни отпуска тоже считаются
+        // ЗАНЯТЫМИ: станок в отпуске без задач после него «занят» до конца отпуска (уточнение
+        // заказчика — «дату окончания отпуска считать последней датой задач, если после него
+        // задач нет»). span = число календарных дней от дня 0 до последнего занятого включительно.
+        // opts.machineDayOff(id, dayOffset)→bool — день-смещение от базы у станка нерабочий (отпуск);
+        // не задан → span == daysOf (нет инфо об отпусках; тесты/обратная совместимость).
+        var machineDayOff = typeof opts.machineDayOff === 'function' ? opts.machineDayOff : null;
+        var spanMemo = {};
+        function spanDays(machineId, min){
+            var content = daysOf(min);
+            if (!machineDayOff) return content;   // нет отпусков-инфо — прежнее поведение
+            var memoKey = machineId + ':' + content;
+            if (memoKey in spanMemo) return spanMemo[memoKey];
+            var remaining = content, lastBusy = -1, guard = content + 731;   // защита от зацикливания
+            for (var d = 0; d <= guard; d++){
+                if (machineDayOff(machineId, d)) { lastBusy = d; continue; }   // день отпуска — занят
+                if (remaining > 0) { remaining--; lastBusy = d; continue; }    // рабочий день — кладём содержимое
+                break;   // свободный день, содержимого больше нет → станок свободен
+            }
+            var span = lastBusy + 1;
+            spanMemo[memoKey] = span;
+            return span;
+        }
 
         // Назначение подвижных: slitterId → [plan]. Полный набор станка = fixed + movable.
         var byMachine = {};
@@ -4990,7 +5016,7 @@
             var snap = {};
             Object.keys(byMachine).forEach(function(id){
                 var m = poolMinutes(membersOf(id));
-                snap[id] = { minutes: m, days: daysOf(m), cuts: (byMachine[id] || []).length };
+                snap[id] = { minutes: m, days: spanDays(id, m), cuts: (byMachine[id] || []).length };   // #3881: span с учётом отпуска
             });
             return snap;
         }
@@ -5005,7 +5031,7 @@
                 var m = minById[id];
                 sumSq = round3(sumSq + m * m);
                 if (m > peak) peak = m;
-                var d = daysOf(m); if (d > maxDays) maxDays = d;
+                var d = spanDays(id, m); if (d > maxDays) maxDays = d;   // #3881: дата окончания (span с учётом отпуска)
             });
             return [maxDays, round3(peak), sumSq];
         }
@@ -5040,11 +5066,12 @@
             var baseScore = scoreFrom(baseMin);
             var best = null;   // { plan, from, to, score, hash }
             Object.keys(byMachine).forEach(function(from){
-                // Переносим ТОЛЬКО с перегруженного станка (его день не вмещает очередь —
-                // ≥2 дней). Когда вся работа станка влезает в один день, дробить её по другим
-                // станкам незачем (иначе лишние настройки на ровном месте). Без заданной ёмкости
+                // Переносим ТОЛЬКО со станка, заканчивающего на 2-й день и позже (#3881:
+                // дата окончания с учётом отпуска — станок с отпуском кончает позже и потому
+                // донор, его задания уезжают на простаивающие станки). Вся работа влезает в один
+                // день (и без отпуска) — дробить незачем (лишние настройки). Без заданной ёмкости
                 // (тесты/обратная совместимость) день всегда «1» ⇒ переносов нет, поведение прежнее.
-                if (daysOf(baseMin[from]) < 2) return;
+                if (spanDays(from, baseMin[from]) < 2) return;
                 (byMachine[from] || []).forEach(function(plan){
                     machineList.forEach(function(to){
                         if (to === from) return;
@@ -8660,8 +8687,20 @@
                     var l = load[id]; return (labelById[id] || id) + ':' + l.days + 'д/' + Math.round(l.minutes) + 'м';
                 }).join('  ');
             }
+            // #3881: «загруженность» = дата окончания с учётом отпуска. machineDayOff(id, dayOffset)
+            // — нерабочий ли день-смещение от базы плана у станка (отпуск). Мемоизируем по дню.
+            var rebBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
+            var machineDayOffMemo = {};
+            function machineDayOff(machineId, dayOffset){
+                var k = machineId + ':' + dayOffset;
+                if (k in machineDayOffMemo) return machineDayOffMemo[k];
+                var v = self.slitterOnVacationDay(machineId, rebBaseMidnightMs + dayOffset * 86400000);
+                machineDayOffMemo[k] = v;
+                return v;
+            }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
+                machineDayOff: machineDayOff,   // #3881: дата окончания с учётом отпуска (span)
                 // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
                 slitterDayBlocked: function(slitterId, plan){
                     var sec = Number(plan && plan.planDate);
