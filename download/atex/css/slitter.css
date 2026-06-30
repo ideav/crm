@@ -254,6 +254,18 @@
     font-weight: 600;
     line-height: 1.35;
 }
+/* #3889: инструкция оператору для задания-«настройки» (последняя резка смены, не до конца). */
+.atex-sl-setup-note {
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    border: 1px solid var(--sl-info-text);
+    border-radius: 6px;
+    background: var(--sl-info-bg);
+    color: var(--sl-info-text);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
 .atex-sl-batch-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
