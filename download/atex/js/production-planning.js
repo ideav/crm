@@ -9514,6 +9514,31 @@
         var splitTotal = (ops.updates || []).length + Object.keys(createsByParent).length + (ops.deletes || []).length;
         var splitDone = 0;
         function splitBump() { self.updateProgress(++splitDone); }
+        // #3895: операции плана-разбиения НЕ должны валить всю пересборку из-за ОДНОЙ отсутствующей
+        // записи. Если запись (резка/обеспечение/Партия ГП) уже удалена (сервер: «No such record»),
+        // править/удалять нечего — пропускаем эту операцию и продолжаем, иначе единичная устаревшая
+        // ссылка обрывала applySplitPlan на середине → план применялся ЧАСТИЧНО, planStart-ы
+        // оставались с коллизиями (#3885), а «Упорядочить» падал «Ошибка разбиения заданий».
+        // Реальные (другие) ошибки по-прежнему пробрасываем.
+        function softSkip(err) {
+            var m = (err && err.message != null) ? String(err.message) : String(err);
+            if (/no such record/i.test(m)) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: пропуск операции — запись не найдена (' + m + ')');
+                splitBump();   // учли как обработанную (запись отсутствует — делать нечего)
+                return;
+            }
+            throw err;
+        }
+        // #3895: _m_del уже отсутствующей записи — не ошибка (её и хотели удалить). Глотаем
+        // «No such record» НА КАЖДОЙ операции удаления, чтобы цепочка удаления (обеспечения →
+        // Партии ГП → сама резка) дошла до конца и не оставила запись-фантом в очереди/Ганте.
+        function delMissingOk(id) {
+            return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).catch(function(err) {
+                var m = (err && err.message != null) ? String(err.message) : String(err);
+                if (/no such record/i.test(m)) { if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: уже удалено: ' + id); return; }
+                throw err;
+            });
+        }
         this.setBusy(true);
         if (splitTotal > 0) this.showProgress('Сохранение плана резок…', splitTotal);
         var chain = Promise.resolve();
@@ -9565,7 +9590,7 @@
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
-            }).then(splitBump);
+            }).then(splitBump).catch(softSkip);
         });
 
         // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
@@ -9686,7 +9711,7 @@
                     });
                 });
                 return cChain;
-            }).then(splitBump);
+            }).then(splitBump).catch(softSkip);
         });
 
         // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
@@ -9710,25 +9735,19 @@
                     }
                 });
         
-                // 1) удаляем обеспечения
+                // 1) удаляем обеспечения (отсутствующие — пропускаем, #3895)
                 var inner = Promise.resolve();
                 supplyIds.forEach(function(sid) {
-                    inner = inner.then(function() {
-                        return self.post('_m_del/' + encodeURIComponent(sid) + '?JSON', {});
-                    });
+                    inner = inner.then(function() { return delMissingOk(sid); });
                 });
                 // 2) удаляем партии ГП
                 Object.keys(fbIds).forEach(function(fbId) {
-                    inner = inner.then(function() {
-                        return self.post('_m_del/' + encodeURIComponent(fbId) + '?JSON', {});
-                    });
+                    inner = inner.then(function() { return delMissingOk(fbId); });
                 });
                 // 3) удаляем саму резку
-                inner = inner.then(function() {
-                    return self.post('_m_del/' + encodeURIComponent(cutId) + '?JSON', {});
-                });
+                inner = inner.then(function() { return delMissingOk(cutId); });
                 return inner;
-            }).then(splitBump);
+            }).then(splitBump).catch(softSkip);
         });
         return chain.then(function() { return self.reload(); }).then(function() {
             return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
