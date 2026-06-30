@@ -153,4 +153,66 @@ assertEqual(core.taskDefaultsFromPosition({
     sleeve: '8188:76'
 }), { planQty: '10', diameter: 76 }, 'taskDefaultsFromPosition: plan qty and sleeve diameter from position');
 
+// ── #3869: фильтр заданий по втулкорезу, терминальные статусы, действия ──
+
+assertEqual(core.isSkipped('Пропущена'), true, '#3869 isSkipped: Пропущена → true');
+assertEqual(core.isSkipped('готово'), false, '#3869 isSkipped: Готово → false');
+assertEqual(core.isTerminal('Готово'), true, '#3869 isTerminal: Готово → true');
+assertEqual(core.isTerminal('Пропущена'), true, '#3869 isTerminal: Пропущена → true');
+assertEqual(core.isTerminal('Ожидает'), false, '#3869 isTerminal: Ожидает → false');
+
+var allTasks = [
+    { id: '1', cutterId: '10', status: 'Готово' },
+    { id: '2', cutterId: '20', status: 'Ожидает' },
+    { id: '3', cutterId: '10', status: 'Ожидает' },
+    { id: '4', cutterId: '10', status: 'Пропущена' }
+];
+assertEqual(core.tasksForCutter(allTasks, '10').map(function(t){ return t.id; }), ['3', '1', '4'],
+    '#3869 tasksForCutter: только втулкорез 10, активные выше завершённых');
+assertEqual(core.tasksForCutter(allTasks, '').length, 0, '#3869 tasksForCutter: без втулкореза → []');
+assertEqual(core.tasksForCutter(allTasks, '99').length, 0, '#3869 tasksForCutter: нет заданий втулкореза → []');
+assertEqual(core.hasActiveTasks(allTasks, '10'), true, '#3869 hasActiveTasks: есть активное → true');
+assertEqual(core.hasActiveTasks([{ id: '1', cutterId: '10', status: 'Готово' }], '10'), false,
+    '#3869 hasActiveTasks: все терминальные → false');
+
+// Controller.markTaskDone / skipTask — запись «Статус» (+ Кол-во факт для Готово)
+(function() {
+    var Controller = require('../download/atex/js/sleeve-cutter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.busy = false;
+    inst.meta = { task: { id: '112', reqs: [ { id: '1124', val: 'Статус' }, { id: '1122', val: 'Кол-во факт' } ] } };
+    var captured = [];
+    inst.post = function(path, params) { captured.push({ path: path, params: params }); return Promise.resolve({}); };
+    inst.setBusy = function(v) { this.busy = v; };
+    inst.notify = function() {};
+    inst.render = function() {};
+
+    inst.markTaskDone({ id: '5', planQty: '120', factQty: '', status: 'Ожидает' });
+    assertEqual(captured[0].path, '_m_set/5?JSON', '#3869 markTaskDone: _m_set по id задания');
+    assertEqual(captured[0].params['t1124'], 'Готово', '#3869 markTaskDone: Статус=Готово');
+    assertEqual(captured[0].params['t1122'], 120, '#3869 markTaskDone: Кол-во факт = К-во план');
+
+    inst.busy = false; captured = [];
+    inst.skipTask({ id: '6', planQty: '50', factQty: '', status: 'Ожидает' });
+    assertEqual(captured[0].params['t1124'], 'Пропущена', '#3869 skipTask: Статус=Пропущена');
+    assertEqual('t1122' in captured[0].params, false, '#3869 skipTask: Кол-во факт не трогаем');
+})();
+
+// Controller.visibleTasks / отбор closeAll — только активные задания втулкореза
+(function() {
+    var Controller = require('../download/atex/js/sleeve-cutter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.selectedCutterId = '10';
+    inst.tasks = [
+        { id: '1', cutterId: '10', status: 'Ожидает' },
+        { id: '2', cutterId: '10', status: 'Готово' },
+        { id: '3', cutterId: '10', status: 'В работе' },
+        { id: '4', cutterId: '20', status: 'Ожидает' }
+    ];
+    assertEqual(inst.visibleTasks().map(function(t){ return t.id; }), ['1', '3', '2'],
+        '#3869 visibleTasks: задания втулкореза 10, активные выше завершённых');
+    var pending = inst.visibleTasks().filter(function(t){ return !core.isTerminal(t.status) && t.id; }).map(function(t){ return t.id; });
+    assertEqual(pending, ['1', '3'], '#3869 closeAll-отбор: к закрытию только активные (не Готово, не чужой втулкорез)');
+})();
+
 console.log('\n' + passed + ' assertions passed');

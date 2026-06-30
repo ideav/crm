@@ -96,6 +96,36 @@
         return normalizeStatus(status) === STATUSES[STATUSES.length - 1];
     }
 
+    // #3869: «Пропущена» — терминальный статус (оператор пропустил задание). Не в
+    // STATUSES (та — цепочка прогресса Ожидает→В работе→Готово), но завершает
+    // задание наравне с «Готово»: кнопки действий у такого задания не показываем.
+    var SKIPPED = 'Пропущена';
+    function isSkipped(status) {
+        return normalizeStatus(status).toLowerCase() === SKIPPED.toLowerCase();
+    }
+    function isTerminal(status) {
+        return isDone(status) || isSkipped(status);
+    }
+
+    // #3869: задания выбранного втулкореза (по реквизиту «Втулкорез»). Пустой
+    // cutterId → []. Активные (не терминальные) задания — выше завершённых,
+    // исходный порядок внутри групп сохраняем (сортировка стабильна в Node/V8).
+    function tasksForCutter(tasks, cutterId) {
+        var id = String(cutterId == null ? '' : cutterId);
+        if (!id) return [];
+        var list = (tasks || []).filter(function(t) {
+            return String(t.cutterId == null ? '' : t.cutterId) === id;
+        });
+        return list.slice().sort(function(a, b) {
+            return (isTerminal(a.status) ? 1 : 0) - (isTerminal(b.status) ? 1 : 0);
+        });
+    }
+
+    // #3869: есть ли у втулкореза незавершённые задания (для кнопки «Закрыть все»).
+    function hasActiveTasks(tasks, cutterId) {
+        return tasksForCutter(tasks, cutterId).some(function(t) { return !isTerminal(t.status); });
+    }
+
     // Сводка по заданиям позиции: сколько план/факт суммарно, сколько готово,
     // и процент выполнения (по факту от плана). Для шапки и прогресса.
     function summarize(tasks) {
@@ -330,6 +360,11 @@
         normalizeStatus: normalizeStatus,
         nextStatus: nextStatus,
         isDone: isDone,
+        SKIPPED: SKIPPED,             // #3869
+        isSkipped: isSkipped,         // #3869
+        isTerminal: isTerminal,       // #3869
+        tasksForCutter: tasksForCutter, // #3869
+        hasActiveTasks: hasActiveTasks, // #3869
         summarize: summarize,
         pickCutter: pickCutter,
         formatRange: formatRange,
@@ -373,12 +408,10 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { position: null, task: null, cutter: null };
-        this.cutters = [];        // справочник втулкорезов [{ id, label }]
+        this.cutters = [];        // справочник втулкорезов [{ id, label, diaMin, diaMax }]
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
-        this.positions = [];      // позиции заказа [{ id, label, qty, sleeve, status }]
-        this.currentPositionId = null; // выбранная позиция заказа
-        this.currentPosition = null;   // { id, label, qty, sleeve, status }
-        this.tasks = [];          // задания выбранной позиции [{ id, planQty, cutterId, diameter, factQty, status }]
+        this.tasks = [];          // ВСЕ задания на втулки [{ id, planQty, cutterId, diameter, factQty, status }]
+        this.selectedCutterId = null; // #3869: выбранный втулкорез (фильтр списка заданий)
         this.busy = false;
     }
 
@@ -465,7 +498,7 @@
             self.meta.task = byName(TABLE.task);
             self.meta.cutter = byName(TABLE.cutter);
             if (!self.meta.task) throw new Error('В метаданных не найдена таблица «' + TABLE.task + '»');
-            if (!self.meta.position) throw new Error('В метаданных не найдена таблица «' + TABLE.position + '»');
+            if (!self.meta.cutter) throw new Error('В метаданных не найдена таблица «' + TABLE.cutter + '»');
         });
     };
 
@@ -496,68 +529,75 @@
         });
     };
 
-    AtexSleeveCutter.prototype.loadPositions = function() {
-        var self = this;
-        return this.getJson('report/orders_list?JSON_KV&LIMIT=0,5000').catch(function() {
-            return self.getJson('report/positions_list?JSON_KV&LIMIT=0,5000');
-        }).then(function(rows) {
-            self.positions = core.rowsToPositions(rows);
-        });
-    };
+    // ── Чтение заданий на втулки ──
 
-    // ── Чтение заданий выбранной позиции заказа ──
-
-    AtexSleeveCutter.prototype.loadTasks = function(positionId) {
+    // #3869: грузим ВСЕ задания на втулки (object/112). Дедик-отчёта нет —
+    // фильтрация по выбранному втулкорезу выполняется в visibleTasks.
+    AtexSleeveCutter.prototype.loadTasks = function() {
         var self = this;
         var meta = this.meta.task;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(positionId) + '&LIMIT=0,1000').then(function(rows) {
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
             self.tasks = (rows || []).map(function(rec) { return core.taskFromRow(meta, rec); });
         });
     };
 
-    AtexSleeveCutter.prototype.blankTask = function() {
-        var defaults = core.taskDefaultsFromPosition(this.currentPosition);
-        var task = {
-            id: null,
-            planQty: defaults.planQty,
-            cutterId: null,
-            cutterAuto: false,
-            diameter: defaults.diameter,
-            factQty: '',
-            status: STATUSES[0]
-        };
-        core.autoAssignCutter(task, this.cutters);
-        return task;
+    // #3869: задания выбранного втулкореза (активные выше завершённых).
+    AtexSleeveCutter.prototype.visibleTasks = function() {
+        return core.tasksForCutter(this.tasks, this.selectedCutterId);
     };
 
-    // ── Рендеринг ──
+    // #3869: запоминаем выбор втулкореза (как «Станок» в слиттере, через localStorage).
+    AtexSleeveCutter.prototype.storeCutter = function() {
+        try { if (window.localStorage) window.localStorage.setItem('atex-sc-cutter', this.selectedCutterId || ''); } catch (e) {}
+    };
+    AtexSleeveCutter.prototype.restoreCutter = function() {
+        try {
+            var id = window.localStorage && window.localStorage.getItem('atex-sc-cutter');
+            if (id && (this.cutters || []).some(function(c) { return String(c.id) === String(id); })) this.selectedCutterId = String(id);
+        } catch (e) {}
+    };
+
+    // ── Рендеринг (#3869: втулкорез → список заданий; без позиций/смены/CRUD) ──
 
     AtexSleeveCutter.prototype.render = function() {
-        this.renderPositions();
+        this.renderToolbar();
         this.renderTasks();
     };
 
-    AtexSleeveCutter.prototype.renderPositions = function() {
+    // Тулбар: выбор втулкореза + «Закрыть все» (если есть активные задания).
+    AtexSleeveCutter.prototype.renderToolbar = function() {
         var self = this;
-        var box = this.positionsEl;
+        var box = this.toolbarEl;
         if (!box) return;
         box.innerHTML = '';
-        if (!this.positions.length) {
-            box.appendChild(el('div', { class: 'atex-sc-empty', text: 'Позиций пока нет' }));
-            return;
-        }
-        this.positions.forEach(function(position) {
-            var active = String(self.currentPositionId) === String(position.id);
-            var item = el('button', {
-                class: 'atex-sc-cut-item' + (active ? ' is-active' : ''),
-                type: 'button'
-            }, [
-                el('span', { class: 'atex-sc-cut-label', text: position.label }),
-                position.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(position.status) }) : null
-            ]);
-            item.addEventListener('click', function() { self.openPosition(position.id); });
-            box.appendChild(item);
+
+        var select = el('select', { class: 'atex-sc-input' });
+        select.appendChild(el('option', { value: '', text: 'Выберите втулкорез' }));
+        this.cutterOptions().forEach(function(c) {
+            var opt = el('option', { value: c.id, text: c.label });
+            if (String(c.id) === String(self.selectedCutterId)) opt.selected = true;
+            select.appendChild(opt);
         });
+        select.addEventListener('change', function() {
+            self.selectedCutterId = select.value || null;
+            self.storeCutter();
+            self.render();
+        });
+        box.appendChild(this.field('Втулкорез', select));
+
+        if (this.selectedCutterId && core.hasActiveTasks(this.tasks, this.selectedCutterId)) {
+            var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-toolbar-all', type: 'button', text: '✓✓ Закрыть все' });
+            allBtn.addEventListener('click', function() { self.closeAll(); });
+            box.appendChild(allBtn);
+        }
+    };
+
+    // Обёртка «подпись + контрол» для тулбара.
+    AtexSleeveCutter.prototype.field = function(label, control) {
+        return el('label', { class: 'atex-sc-field' }, [
+            el('span', { class: 'atex-sc-label', text: label }),
+            control
+        ]);
     };
 
     AtexSleeveCutter.prototype.renderTasks = function() {
@@ -566,40 +606,27 @@
         if (!host) return;
         host.innerHTML = '';
 
-        if (!this.currentPositionId) {
-            host.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Выберите позицию заказа слева, чтобы увидеть задания на втулки.' }));
+        if (!this.selectedCutterId) {
+            host.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Выберите втулкорез, чтобы увидеть задания на втулки.' }));
             return;
         }
 
-        var position = this.currentPosition || {};
-        var head = el('div', { class: 'atex-sc-head' }, [
-            el('h2', { class: 'atex-sc-head-title', text: position.label || ('Позиция #' + this.currentPositionId) }),
-            position.status ? el('span', { class: 'atex-sc-badge', text: core.normalizeStatus(position.status) }) : null
-        ]);
-        host.appendChild(head);
+        var tasks = this.visibleTasks();
+        if (!tasks.length) {
+            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'Заданий на втулки для этого втулкореза нет.' }));
+            return;
+        }
 
-        // Сводка по заданиям.
-        var s = core.summarize(this.tasks);
-        var summary = el('div', { class: 'atex-sc-summary' }, [
+        var s = core.summarize(tasks);
+        host.appendChild(el('div', { class: 'atex-sc-summary' }, [
             metric('Заданий', s.total),
             metric('Готово', s.done + ' / ' + s.total),
-            metric('План, шт', s.planQty),
-            metric('Факт, шт', s.factQty),
-            metric('Выполнено', s.percent + '%')
-        ]);
-        host.appendChild(summary);
+            metric('План, шт', s.planQty)
+        ]));
 
         var listWrap = el('div', { class: 'atex-sc-tasks' });
-        if (!this.tasks.length) {
-            listWrap.appendChild(el('div', { class: 'atex-sc-empty', text: 'Заданий нет — добавьте первое.' }));
-        } else {
-            this.tasks.forEach(function(task, idx) { listWrap.appendChild(self.renderTaskCard(task, idx)); });
-        }
+        tasks.forEach(function(task, idx) { listWrap.appendChild(self.renderTaskRow(task, idx)); });
         host.appendChild(listWrap);
-
-        var addBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-add', type: 'button', text: '+ Добавить задание' });
-        addBtn.addEventListener('click', function() { self.tasks.push(self.blankTask()); self.renderTasks(); });
-        host.appendChild(addBtn);
 
         function metric(label, value) {
             return el('div', { class: 'atex-sc-metric' }, [
@@ -609,177 +636,124 @@
         }
     };
 
-    AtexSleeveCutter.prototype.renderTaskCard = function(task, idx) {
+    // Карточка задания: Ø / план / факт / статус + кнопки ✓ Готово / Пропустить.
+    // У завершённого (Готово) или пропущенного — только бейдж статуса, без кнопок.
+    AtexSleeveCutter.prototype.renderTaskRow = function(task, idx) {
         var self = this;
-        var card = el('div', { class: 'atex-sc-card' + (core.isDone(task.status) ? ' is-done' : ''), 'data-submit-scope': '' });
+        var terminal = core.isTerminal(task.status);
+        var badgeMod = core.isDone(task.status) ? ' atex-sc-badge-done' : (core.isSkipped(task.status) ? '' : ' atex-sc-badge-wip');
+        var card = el('div', { class: 'atex-sc-card' + (terminal ? ' is-done' : '') });
 
         card.appendChild(el('div', { class: 'atex-sc-card-head' }, [
             el('span', { class: 'atex-sc-card-num', text: '№ ' + (idx + 1) }),
-            el('span', { class: 'atex-sc-badge atex-sc-badge-' + (core.isDone(task.status) ? 'done' : 'wip'), text: core.normalizeStatus(task.status) })
+            el('span', { class: 'atex-sc-badge' + badgeMod, text: core.normalizeStatus(task.status) })
         ]));
 
-        var grid = el('div', { class: 'atex-sc-card-grid' });
+        var d = core.toNumber(task.diameter);
+        var fact = core.toNumber(task.factQty);
+        var parts = [];
+        if (d) parts.push('Ø ' + d + ' мм');
+        parts.push('план ' + core.toNumber(task.planQty) + ' шт');
+        if (fact) parts.push('факт ' + fact + ' шт');
+        card.appendChild(el('div', { class: 'atex-sc-card-info', text: parts.join(' · ') }));
 
-        // Втулкорез (ссылка). Подписи с диапазоном; ручной выбор снимает авто-признак.
-        var cutterRef = this.refSelect({
-            options: this.cutterOptions(),
-            value: task.cutterId,
-            placeholder: '— втулкорез —',
-            reqId: reqIdByName(this.meta.task, TASK_REQ.cutter),
-            onChange: function(value) { task.cutterId = value || null; task.cutterAuto = false; }
-        });
-        var cutterField = this.cardField('Втулкорез', cutterRef);
-        if (task.diameter !== '' && task.diameter != null && !core.pickCutter(task.diameter, this.cutters)) {
-            cutterField.appendChild(el('span', { class: 'atex-sc-hint', text: 'нет втулкореза под Ø' + core.toNumber(task.diameter) }));
+        if (!terminal) {
+            var doneBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance', type: 'button', text: '✓ Готово' });
+            doneBtn.addEventListener('click', function() { self.markTaskDone(task); });
+            var skipBtn = el('button', { class: 'atex-sc-btn', type: 'button', text: 'Пропустить' });
+            skipBtn.addEventListener('click', function() { self.skipTask(task); });
+            card.appendChild(el('div', { class: 'atex-sc-card-actions' }, [doneBtn, skipBtn]));
         }
-        grid.appendChild(cutterField);
-
-        // Диаметр. По завершении ввода — авто-подбор втулкореза.
-        var diam = numInput(task.diameter, '76');
-        diam.addEventListener('input', function() { task.diameter = diam.value; });
-        diam.addEventListener('change', function() {
-            task.diameter = diam.value;
-            core.autoAssignCutter(task, self.cutters);
-            self.renderTasks();
-        });
-        grid.appendChild(this.cardField('Диаметр, мм', diam));
-
-        // Кол-во план.
-        var plan = numInput(task.planQty, '0');
-        plan.addEventListener('input', function() { task.planQty = plan.value; });
-        grid.appendChild(this.cardField('Кол-во план', plan));
-
-        // Кол-во факт.
-        var fact = numInput(task.factQty, '0');
-        fact.addEventListener('input', function() { task.factQty = fact.value; });
-        grid.appendChild(this.cardField('Кол-во факт', fact));
-
-        // Статус.
-        var statusSel = el('select', { class: 'atex-sc-input' });
-        var statuses = core.STATUSES.slice();
-        if (task.status && statuses.indexOf(task.status) === -1) statuses.push(task.status);
-        statuses.forEach(function(st) {
-            var o = el('option', { value: st, text: st });
-            if (task.status === st) o.selected = true;
-            statusSel.appendChild(o);
-        });
-        statusSel.addEventListener('change', function() { task.status = statusSel.value; self.renderTasks(); });
-        grid.appendChild(this.cardField('Статус', statusSel));
-
-        card.appendChild(grid);
-
-        // Действия: «дальше по статусу», сохранить, удалить.
-        var actions = el('div', { class: 'atex-sc-card-actions' });
-
-        if (!core.isDone(task.status)) {
-            var next = core.nextStatus(task.status);
-            var advance = el('button', { class: 'atex-sc-btn atex-sc-btn-advance', type: 'button', text: '→ ' + next });
-            advance.addEventListener('click', function() { task.status = next; self.saveTask(task); });
-            actions.appendChild(advance);
-        }
-
-        var saveBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-primary', type: 'button', text: 'Сохранить' });
-        saveBtn.addEventListener('click', function() { self.saveTask(task); });
-        actions.appendChild(saveBtn);
-
-        var delBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-del', type: 'button', title: 'Удалить задание', text: '×' });
-        delBtn.addEventListener('click', function() { self.deleteTask(task, idx); });
-        actions.appendChild(delBtn);
-
-        card.appendChild(actions);
         return card;
-
-        function numInput(value, placeholder) {
-            var inp = el('input', { class: 'atex-sc-input', type: 'number', min: '0', step: 'any', placeholder: placeholder || '0' });
-            inp.value = value == null ? '' : value;
-            return inp;
-        }
     };
 
-    AtexSleeveCutter.prototype.cardField = function(label, control) {
-        return el('label', { class: 'atex-sc-field' }, [
-            el('span', { class: 'atex-sc-label', text: label }),
-            control
-        ]);
-    };
+    // ── Действия по заданию (#3869: только статус, в партию не пишем) ──
 
-    // ── Сохранение / удаление задания ──
-
-    AtexSleeveCutter.prototype.saveTask = function(task) {
-        var self = this;
-        if (this.busy) return;
-        if (!this.currentPositionId) { this.notify('Сначала выберите позицию заказа', 'error'); return; }
+    // Записать «Статус» задания; для «Готово» дополнительно «Кол-во факт»=«К-во план».
+    // Обновляет задание в памяти после подтверждения сервером.
+    AtexSleeveCutter.prototype.setTaskStatus = function(task, status, setFact) {
+        if (!task || !task.id) return Promise.resolve();
         var meta = this.meta.task;
-        // Реквизиты (втулкорез, диаметр, факт, статус) и главное значение —
-        // плановое количество втулок «К-во план» (первая колонка, #3159).
-        var fields = core.taskReqFields(meta, task);
-        var planValue = core.taskMainValue(task);
-
-        this.setBusy(true);
-        var chain;
-        if (task.id) {
-            chain = this.post('_m_save/' + task.id + '?JSON', { val: planValue })
-                .then(function() { return self.post('_m_set/' + task.id + '?JSON', fields); })
-                .then(function() { return task.id; });
-        } else {
-            var createParams = {};
-            Object.keys(fields).forEach(function(k) { createParams[k] = fields[k]; });
-            createParams['t' + meta.id] = planValue;
-            chain = this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(this.currentPositionId), createParams)
-                .then(function(res) {
-                    var id = res && (res.obj || res.id || res.i);
-                    if (!id) throw new Error('Сервер не вернул id нового задания');
-                    task.id = String(id);
-                    return task.id;
-                });
+        var fields = {};
+        var statusRid = reqIdByName(meta, TASK_REQ.status);
+        if (statusRid) fields['t' + statusRid] = status;
+        var planVal = core.taskMainValue(task);
+        if (setFact && planVal !== '') {
+            var factRid = reqIdByName(meta, TASK_REQ.factQty);
+            if (factRid) fields['t' + factRid] = planVal;
         }
-
-        chain.then(function() {
-            return self.loadTasks(self.currentPositionId);
-        }).then(function() {
-            self.setBusy(false);
-            self.notify('Задание сохранено', 'success');
-            self.renderTasks();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка сохранения: ' + err.message, 'error');
+        return this.post('_m_set/' + task.id + '?JSON', fields).then(function() {
+            task.status = status;
+            if (setFact && planVal !== '') task.factQty = planVal;
         });
     };
 
-    AtexSleeveCutter.prototype.deleteTask = function(task, idx) {
+    AtexSleeveCutter.prototype.markTaskDone = function(task) {
         var self = this;
         if (this.busy) return;
-        // Новая (несохранённая) строка — просто убираем из формы.
-        if (!task.id) {
-            this.tasks.splice(idx, 1);
-            this.renderTasks();
-            return;
-        }
         this.setBusy(true);
-        this.post('_m_del/' + task.id + '?JSON', {}).then(function() {
-            return self.loadTasks(self.currentPositionId);
-        }).then(function() {
+        this.setTaskStatus(task, core.STATUSES[core.STATUSES.length - 1], true).then(function() {
             self.setBusy(false);
-            self.notify('Задание удалено', 'success');
-            self.renderTasks();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка удаления: ' + err.message, 'error');
-        });
-    };
-
-    AtexSleeveCutter.prototype.openPosition = function(positionId) {
-        var self = this;
-        this.setBusy(true);
-        this.currentPositionId = String(positionId);
-        this.currentPosition = this.positions.filter(function(p) { return String(p.id) === String(positionId); })[0] || null;
-        this.loadTasks(positionId).then(function() {
-            self.setBusy(false);
+            self.notify('Задание отмечено «Готово»', 'success');
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Не удалось открыть задания: ' + err.message, 'error');
+            self.notify('Ошибка: ' + err.message, 'error');
         });
+    };
+
+    AtexSleeveCutter.prototype.skipTask = function(task) {
+        var self = this;
+        if (this.busy) return;
+        this.setBusy(true);
+        this.setTaskStatus(task, core.SKIPPED, false).then(function() {
+            self.setBusy(false);
+            self.notify('Задание пропущено', 'info');
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка: ' + err.message, 'error');
+        });
+    };
+
+    // «Закрыть все» — пометить все незавершённые задания втулкореза «Готово»
+    // (с подтверждением); последовательная запись, затем перерисовка.
+    AtexSleeveCutter.prototype.closeAll = function() {
+        var self = this;
+        if (this.busy) return;
+        var pending = this.visibleTasks().filter(function(t) { return !core.isTerminal(t.status) && t.id; });
+        if (!pending.length) { this.notify('Нет незавершённых заданий', 'info'); return; }
+        this.confirmModal('Отметить все ' + pending.length + ' заданий «Готово»?', function() {
+            self.setBusy(true);
+            var done = core.STATUSES[core.STATUSES.length - 1];
+            var chain = Promise.resolve();
+            pending.forEach(function(t) { chain = chain.then(function() { return self.setTaskStatus(t, done, true); }); });
+            chain.then(function() {
+                self.setBusy(false);
+                self.notify('Все задания отмечены «Готово»', 'success');
+                self.render();
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Ошибка: ' + err.message, 'error');
+                self.render();
+            });
+        });
+    };
+
+    // Подтверждение без confirm() — встроенная модалка (как в слиттере).
+    AtexSleeveCutter.prototype.confirmModal = function(message, onYes) {
+        var overlay = el('div', { class: 'atex-sc-confirm-overlay' });
+        var yes = el('button', { class: 'atex-sc-btn atex-sc-btn-primary', type: 'button', text: 'Да' });
+        var no = el('button', { class: 'atex-sc-btn', type: 'button', text: 'Отмена' });
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        yes.addEventListener('click', function() { close(); onYes(); });
+        no.addEventListener('click', close);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        overlay.appendChild(el('div', { class: 'atex-sc-confirm' }, [
+            el('div', { class: 'atex-sc-confirm-msg', text: message }),
+            el('div', { class: 'atex-sc-confirm-actions' }, [no, yes])
+        ]));
+        (this.root || document.body).appendChild(overlay);
     };
 
     AtexSleeveCutter.prototype.setBusy = function(on) {
@@ -812,24 +786,21 @@
     AtexSleeveCutter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
+        // #3869: сверху — тулбар (выбор втулкореза + «Закрыть все»), ниже — список заданий.
+        // Без боковой панели позиций и без смены.
         var layout = el('div', { class: 'atex-sc-layout' });
-        var aside = el('aside', { class: 'atex-sc-sidebar' }, [
-            el('div', { class: 'atex-sc-sidebar-head' }, [ el('h2', { text: 'Позиции' }) ])
-        ]);
-        this.positionsEl = el('div', { class: 'atex-sc-cuts' });
-        aside.appendChild(this.positionsEl);
+        this.toolbarEl = el('div', { class: 'atex-sc-toolbar' });
         this.tasksEl = el('section', { class: 'atex-sc-main' });
-        layout.appendChild(aside);
+        layout.appendChild(this.toolbarEl);
         layout.appendChild(this.tasksEl);
         this.root.appendChild(layout);
         this.toastHost = this.root;
 
-        this.positionsEl.appendChild(el('div', { class: 'atex-sc-loading', text: 'Загрузка…' }));
         this.tasksEl.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadCutters(), self.loadPositions()]); })
-            .then(function() { self.render(); })
+            .then(function() { return Promise.all([self.loadCutters(), self.loadTasks()]); })
+            .then(function() { self.restoreCutter(); self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
