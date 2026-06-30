@@ -2377,18 +2377,70 @@
 
     // Дописать в раскрой втулочные полосы (#3812). Помечаем core:true — раскрой их
     // показывает «Партией ГП» (Σ ширина×полос ≤ ширина джамбо), но capStockToHeadroom
-    // их не урезает и не считает перепроизводством, а проходы/обеспечение от них не
-    // зависят (у ширины 110 мм нет позиции). Идемпотентно: повторная ширина не двоится.
-    function appendCoreStrip(layout, coreWidth, count) {
+    // их не урезает и не считает перепроизводством, а число проходов от них не зависит
+    // (проходы по продукту, см. plannedRunsForLayout). Идемпотентно: повторная ширина не двоится.
+    //
+    // #3872: если 110-мм втулки уже заказаны (есть позиции заказа той же ширины — обычно в том
+    // же заказе), полосы ПРИВЯЗЫВАЮТСЯ к этим позициям (fillerPositionIds): полоса несёт их id,
+    // а сами позиции добавляются в positionsCovered — резка их обеспечивает (на произведённое
+    // min(заказ, полосы×проходов), излишек в запас). Нет таких позиций → fillerPositionIds пуст,
+    // полоса синтетическая (positionIds: []), поведение #3812. core:true остаётся в обоих случаях
+    // (проходы не растут от 110 мм — фикс. число полос задаёт продукт-носитель).
+    function appendCoreStrip(layout, coreWidth, count, fillerPositionIds) {
         if (!layout || !(count > 0) || !(coreWidth > 0)) return layout;
         layout.strips = layout.strips || [];
         var w = round3(coreWidth);
+        var ids = (fillerPositionIds || []).map(String);
+        if (ids.length) {
+            layout.positionsCovered = layout.positionsCovered || [];
+            ids.forEach(function(id) { if (layout.positionsCovered.indexOf(id) < 0) layout.positionsCovered.push(id); });
+        }
         for (var i = 0; i < layout.strips.length; i++) {
             var s = layout.strips[i];
-            if (s && s.core && round3(s.width) === w) { s.qty = count; return layout; }
+            if (s && s.core && round3(s.width) === w) {
+                s.qty = count;
+                if (ids.length) s.positionIds = ids.slice();
+                return layout;
+            }
         }
-        layout.strips.push({ width: w, qty: count, purpose: 'Заказ', core: true, positionIds: [] });
+        layout.strips.push({ width: w, qty: count, purpose: 'Заказ', core: true, positionIds: ids.slice() });
         return layout;
+    }
+
+    // #3872: позиция заказа подходит под «втулочную полосу» носителя (group), если её можно
+    // отрезать тем же джамбо (то же сырьё/намотка/длина), её фактическая ширина = ширине полосы
+    // (coreStripWidth, 110 мм), она производима и сама не требует втулочных полос. Такие позиции
+    // резка-носитель использует вместо синтетических полос. Чистая (тест).
+    function isCoreStripFiller(position, group) {
+        if (!position || !group) return false;
+        if (!(Number(group.coreStripCount) > 0) || !(Number(group.coreStripWidth) > 0)) return false;
+        if (position.producible === false) return false;
+        if (Number(position.coreStripCount) > 0) return false;   // сам носитель — не филлер
+        if (round3(Number(position.width) || 0) !== round3(Number(group.coreStripWidth) || 0)) return false;
+        if (String(position.materialId == null ? '' : position.materialId) !== String(group.materialId == null ? '' : group.materialId)) return false;
+        if (normWinding(position.windDir) !== normWinding(group.windDir)) return false;
+        if (windLengthValue(position.windLength) !== windLengthValue(group.windLength)) return false;
+        return true;
+    }
+
+    // #3872: выбрать позиции заказа, которые раскладка-носитель забирает под втулочные полосы.
+    // Кандидаты — необеспеченные позиции (candidates); берём подходящие группе (isCoreStripFiller),
+    // чей заказ ПОКРЫТ этой раскладкой (coveredOrderIds), и ещё не забранные (claimed). Помечает
+    // выбранные в claimed (мутирует), чтобы одна 110-мм позиция не ушла в две резки. → [positionId].
+    function selectCoreStripFillers(candidates, group, coveredOrderIds, claimed) {
+        var picked = [];
+        var orders = coveredOrderIds || {};
+        var taken = claimed || {};
+        (candidates || []).forEach(function(p) {
+            if (!p || p.id == null) return;
+            var id = String(p.id);
+            if (taken[id]) return;
+            if (!orders[String(p.orderId)]) return;
+            if (!isCoreStripFiller(p, group)) return;
+            taken[id] = true;
+            picked.push(id);
+        });
+        return picked;
     }
 
     function nonStockStripQtyForWidth(layout, width) {
@@ -2399,10 +2451,27 @@
         }, 0);
     }
 
+    // #3812/#3872: ширины, обслуживаемые ТОЛЬКО втулочными полосами (core) и ни одной обычной
+    // полосой. Их потребность не определяет число проходов: фикс. число полос задаёт продукт-
+    // носитель, а позиции 110 мм обеспечиваются на произведённое (см. plannedRunsForLayout).
+    function coreOnlyStripWidths(layout) {
+        var core = {}, nonCore = {};
+        (layout && layout.strips || []).forEach(function(s) {
+            if (!s) return;
+            var key = stripWidthKey(s.width);
+            if (s.core) core[key] = true;
+            else if (!isStockStrip(s)) nonCore[key] = true;
+        });
+        var out = {};
+        Object.keys(core).forEach(function(k) { if (!nonCore[k]) out[k] = true; });
+        return out;
+    }
+
     function plannedRunsForLayout(layout, positions) {
         var direct = Number(layout && (layout.plannedRuns || layout.runCount || layout.runs));
         if (isFinite(direct) && direct > 0) return Math.ceil(direct);
         var byId = positionMap(positions);
+        var coreOnly = coreOnlyStripWidths(layout);   // #3872: 110-мм позиции не двигают проходы
         var demandByWidth = {};
         (layout && layout.positionsCovered || []).forEach(function(pid) {
             var p = byId[String(pid)];
@@ -2411,6 +2480,7 @@
             var qty = Number(p.qty) || 0;
             if (w <= 0 || qty <= 0) return;
             var key = stripWidthKey(w);
+            if (coreOnly[key]) return;   // #3872: ширина только из втулочных полос — проходы по продукту
             demandByWidth[key] = (demandByWidth[key] || 0) + qty;
         });
         var runs = 1;
@@ -5148,6 +5218,9 @@
         isSleeveWidthProducible: isSleeveWidthProducible, // #3812
         sleeveCoreStripPlan: sleeveCoreStripPlan,        // #3812
         appendCoreStrip: appendCoreStrip,                // #3812
+        isCoreStripFiller: isCoreStripFiller,            // #3872
+        selectCoreStripFillers: selectCoreStripFillers,  // #3872
+        coreOnlyStripWidths: coreOnlyStripWidths,        // #3872
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -8121,14 +8194,28 @@
             var skipped = [];      // [{positionId, reason}]
             // #3812: непроизводимые (втулка 0.5″, ширина < 55 мм) — в пропуски.
             notProducible.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'втулка 0.5″: ширина < 55 мм не производится' }); });
-            profiles.forEach(function(group) {
+
+            // #3872: дополнительные втулки 110 мм могут быть уже заказаны. Профили-носители
+            // втулочных полос обрабатываем ПЕРВЫМИ: на каждую их раскладку «забираем» подходящие
+            // позиции заказа 110 мм (тот же заказ, то же сырьё/намотка/длина) как реальные полосы
+            // (coreFillerClaims), а уже потом планируем остальные профили — забранные 110-мм позиции
+            // в свою отдельную резку не уходят. Не нашлось — добиваем синтетикой (#3812).
+            var posById = positionMap(self.genPositions);
+            var coreFillerClaims = {};   // positionId → true (позиция съедена носителем как полоса 110)
+            var orderedProfiles = profiles.filter(function(g) { return g.coreStripCount > 0; })
+                .concat(profiles.filter(function(g) { return !(g.coreStripCount > 0); }));
+
+            orderedProfiles.forEach(function(group) {
                 var mat = group.materialId;
+                // #3872: позиции, уже забранные носителем как втулочные полосы, в этом профиле не планируем.
+                var groupPositions = group.positions.filter(function(p) { return !coreFillerClaims[String(p.id)]; });
+                if (!groupPositions.length) return;
                 var jw = self.jumboWidthByMaterial[mat];
                 if (!jw) {
-                    group.positions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
+                    groupPositions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
                     return;
                 }
-                layoutPositionGroups(group.positions).forEach(function(positionGroup) {
+                layoutPositionGroups(groupPositions).forEach(function(positionGroup) {
                     // Нет просроченных позиций (всё в рамках срока) → окно срока не нужно,
                     // объединяем все позиции сырья (windowDays=Infinity); иначе дробим по WINDOW_DAYS.
                     var hasOverdue = positionGroup.some(function(p) {
@@ -8175,7 +8262,18 @@
                         lay.windLength = group.windLength;
                         lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
                         lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
-                        if (coreReserve > 0) appendCoreStrip(lay, coreWidth, coreCount); // #3812
+                        if (coreReserve > 0) {
+                            // #3872: привязать втулочные полосы к уже заказанным 110-мм позициям
+                            // того же заказа (что покрывает раскладка). Найденные позиции — реальные
+                            // полосы (обеспечение на произведённое); не нашлось — синтетика (#3812).
+                            var coveredOrders = {};
+                            (lay.positionsCovered || []).forEach(function(pid) {
+                                var cp = posById[String(pid)];
+                                if (cp && cp.orderId != null && String(cp.orderId) !== '') coveredOrders[String(cp.orderId)] = true;
+                            });
+                            var fillerIds = selectCoreStripFillers(unsup, group, coveredOrders, coreFillerClaims);
+                            appendCoreStrip(lay, coreWidth, coreCount, fillerIds); // #3812/#3872
+                        }
                         allLayouts.push(lay);
                     });
                     (res.skipped || []).forEach(function(s) { skipped.push(s); });
