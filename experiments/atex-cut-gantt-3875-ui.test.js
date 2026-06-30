@@ -86,4 +86,29 @@ var off = buildBody(false);
 assert(off.querySelectorAll('.atex-cg-dayoff-band').length === 0, '#3875 гейтинг: без «Календаря» полос нет');
 assert(datedLabels(off).every(function(l) { return !l.dayoff; }), '#3875 гейтинг: без «Календаря» дата не помечается');
 
+// ── Пустой интервал на нерабочую дату → красное «Выходной день» перед сообщением ──
+function buildEmpty(fromIso, toIso, calendarEnabled) {
+    var inst = Object.create(Controller.prototype);
+    inst.root = new StubNode('div');
+    inst.cuts = [];   // нет заданий → пустой интервал
+    inst.state = { mode: 'day', anchor: fromIso, slitter: '', status: '', zoom: 1, fromIso: fromIso, toIso: toIso };
+    inst.lunchDurationMin = 0;
+    inst.calendarByDay = {};
+    inst.calendarEnabled = calendarEnabled;
+    inst._fitTrackPx = function() { return 0; };
+    var range = gantt.ganttRangeFromTo(fromIso, toIso);
+    return inst._buildBody(range, Date.UTC(2026, 5, 27, 12, 0, 0));
+}
+// Суббота 27.06 (выходной), пусто → есть «Выходной день» + сообщение.
+var emptySat = buildEmpty('2026-06-27', '2026-06-27', true);
+var noteSat = emptySat.querySelector('.atex-cg-dayoff-note');
+assert(noteSat && noteSat.textContent === 'Выходной день', '#3875: пустой выходной → красное «Выходной день»');
+assert(/заданий нет/.test(emptySat.querySelector('.atex-cg-empty').textContent), '#3875: сообщение о пустом интервале сохранено');
+// Пятница 26.06 (рабочий), пусто → «Выходной день» НЕ показываем.
+var emptyFri = buildEmpty('2026-06-26', '2026-06-26', true);
+assert(!emptyFri.querySelector('.atex-cg-dayoff-note'), '#3875: пустой рабочий день → без «Выходной день»');
+// Гейтинг: без «Календаря» на выходной — строки нет.
+var emptyOff = buildEmpty('2026-06-27', '2026-06-27', false);
+assert(!emptyOff.querySelector('.atex-cg-dayoff-note'), '#3875 гейтинг: без «Календаря» «Выходной день» не показываем');
+
 console.log('\n' + passed + ' assertions passed');

@@ -1430,6 +1430,19 @@
         return dayIsWorking(ms, this.calendarByDay);
     };
 
+    // #3875: все ли дни выбранного интервала нерабочие (выходные/праздники). true — на пустом
+    // интервале показываем «Выходной день»; смешанный интервал (есть рабочие дни) → false.
+    // Без «Календаря» dayIsWorking всегда true → всегда false (строка не появляется).
+    AtexCutGantt.prototype._rangeAllDaysOff = function(range) {
+        var self = this;
+        var days = (range && range.days) || [];
+        if (!days.length) return false;
+        return days.every(function(d) {
+            var ms = parseDateTimeMs(d.iso);
+            return ms != null && !self.dayIsWorking(ms);
+        });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -1590,7 +1603,16 @@
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
-            body.appendChild(el('div', { class: 'atex-cg-empty', text: 'На выбранном интервале заданий нет' }));
+            var emptyBox = el('div', { class: 'atex-cg-empty' });
+            // #3875: если выбранный интервал — целиком нерабочие дни (выходные/праздники по
+            // «Календарю»), пишем красным «Выходной день» перед сообщением о пустом интервале
+            // (как пустая нерабочая дата в «Планировании», #3788). Гейтинг — через dayIsWorking
+            // (без «Календаря» все дни «рабочие», строка не появляется).
+            if (this._rangeAllDaysOff(range)) {
+                emptyBox.appendChild(el('div', { class: 'atex-cg-dayoff-note', text: 'Выходной день' }));
+            }
+            emptyBox.appendChild(el('div', { text: 'На выбранном интервале заданий нет' }));
+            body.appendChild(emptyBox);
             return body;
         }
         var trackPx = data.trackPx;
