@@ -2792,12 +2792,24 @@
         var oneRun = round3(Number(ctx.oneRun) || 0);
         var total = round3(Number(ctx.total) || 0);
         var setupParts = ctx.setupParts || [];
+        // #3889: сегмент НАСТРОЙКИ (0 проходов) — последняя резка смены, не успевшая начаться:
+        // в этот день делается только переналадка (ножи/сырьё), а намотка переносится на
+        // продолжение следующего рабочего дня. Раньше модалка печатала «Итого резка: X * 0 = X»
+        // (бессмысленно) и не объясняла, что задание продолжится — отсюда вопросы заказчика #3889.
+        var setupOnly = ctx.setupOnly === true || !(runs > 0);
         var lines = [];
+        // #3889: продолжение предыдущего рабочего дня (тот же логический задание, ножи на станке) —
+        // тег сверху, чтобы было видно, что настройка уже выполнена накануне (см. daySplitBadges).
+        if (ctx.continuesFromPrevDay) {
+            lines.push({ text: '↩ Продолжение резки предыдущего рабочего дня (ножи на станке).', bold: true });
+        }
         lines.push({ text: 'Метраж прохода: ' + formatTimingNumber(length) + ' м' });
         lines.push({ text: 'Плановых проходов: ' + formatTimingNumber(runs) });
-        lines.push({ text: 'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин' });
-        var normLine = formatWindingNorms(ctx.norms);
-        if (normLine) lines.push({ text: normLine });
+        if (!setupOnly) {
+            lines.push({ text: 'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин' });
+            var normLine = formatWindingNorms(ctx.norms);
+            if (normLine) lines.push({ text: normLine });
+        }
         lines.push({ text: '' });
         lines.push({ text: 'Тайминг окна:' });
         var setupTotal = setupParts.reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0);
@@ -2810,6 +2822,15 @@
             if (clock != null) clock += mins;
         });
         var cutPrefix = hasStart ? (formatClock(ctx.startMin) + ' · ') : '';
+        if (setupOnly) {
+            // #3889: вместо «Итого резка: X * 0» — только настройка; намотка пойдёт с дня N+1.
+            // Лидер не показываем (он заправляется в конце намотки, которой в этот день нет).
+            lines.push({ text: cutPrefix + 'Только настройка станка — намотка начнётся в следующем рабочем дне', bold: true });
+            if (hasStart) lines.push({ text: formatClock(ctx.startMin) + ' · готово (настройка)' });
+            lines.push({ text: '' });
+            lines.push({ text: '↪ Это последняя резка смены. Намотка (резка) — продолжение в следующем рабочем дне.' });
+            return lines;
+        }
         lines.push({
             text: cutPrefix + 'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
             bold: true
@@ -2830,6 +2851,12 @@
         if (hasFinish) {
             var doneClock = leaderInWindow ? Number(ctx.finishMin) : round3(Number(ctx.finishMin) + leaderMin);
             lines.push({ text: formatClock(doneClock) + ' · готово' });
+        }
+        // #3889: обычная резка с проходами, у которой остаток проходов уходит на следующий день
+        // (дробление по проходам, не по настройке) — поясняем, что задание продолжится.
+        if (ctx.continuesNextDay) {
+            lines.push({ text: '' });
+            lines.push({ text: '↪ Остаток проходов — продолжение в следующем рабочем дне.' });
         }
         return lines;
     }
@@ -2860,7 +2887,11 @@
         var runs = stripNum(cut && cut.plannedRuns);
         var pts = windPointsForCut(cut && cut.isFoil, windPoints); // #3606: фольга — своя норма намотки
         var oneRun = windingMinutes(length, pts);
-        var total = runs > 0 ? round3(oneRun * runs) : oneRun;
+        // #3889: сегмент НАСТРОЙКИ (хвост дня N перед намоткой дня N+1) — «Кол-во план» = 0.
+        // У него намотки нет (вся намотка переносится на продолжение след. дня), поэтому total = 0,
+        // а не oneRun: модалка не печатает «Итого резка: X * 0 = X» (бессмысленное «namotka * 0»).
+        var setupOnly = !(runs > 0);
+        var total = setupOnly ? 0 : round3(oneRun * runs);
         // #3688: лидер после намотки — из расписания (sc.leaderMin) либо считаем сами.
         // #3862: сохранённое расписание (scheduleFromStored) НЕ хранит лидер отдельно — он входит в
         // окно (durationMin = намотка+лидер, finishMin = конец лидера, sc.leaderMin == null). Тогда
@@ -2882,6 +2913,7 @@
             leaderMin: leaderMin,   // #3688: лидер в конце резки
             leaderInWindow: leaderInWindow,   // #3862: лидер входит в окно (сохранённое расписание) → «готово» = finishMin
             norms: relevantWindingNorms(length, pts),
+            setupOnly: setupOnly,   // #3889: 0 проходов — только настройка, намотка с дня N+1
             startMin: sc ? sc.startMin : null,
             finishMin: sc ? sc.finishMin : null
         };
@@ -10788,6 +10820,19 @@
                 if (bNext) { nextCut = bNext; nextDay = myDay + 1; }
             }
             var spans = daySplitBadges(prevCut, prevDay, c, myDay, nextCut, nextDay);
+            // #3889: сегмент НАСТРОЙКИ (0 проходов) ВСЕГДА продолжается в следующем дне — его
+            // создаёт только splitMachineQueue как разрыв «настройка в хвосте дня N → намотка с
+            // дня N+1». Поэтому значок «→» форсируем по setupOnly, не полагаясь на совпадение
+            // continuationSignature с соседом (у настройки сырьё/намотка могут быть пустыми —
+            // тогда сигнатура не совпала бы и значок пропал, хотя продолжение есть).
+            if (isSetupTask) spans.toNext = true;
+            // #3889: пробрасываем признаки дробления в контекст тайминга — модалка поясняет,
+            // что резка продолжится (toNext) или продолжает вчерашнюю (fromPrev).
+            var timingCtx = self._timingByCut[String(c.id)];
+            if (timingCtx) {
+                timingCtx.continuesNextDay = !!spans.toNext;
+                timingCtx.continuesFromPrevDay = !!spans.fromPrev;
+            }
             if (spans.fromPrev || spans.toNext) {
                 var spanBadges = [];
                 if (spans.fromPrev) spanBadges.push(el('span', {
@@ -10797,7 +10842,9 @@
                 }));
                 if (spans.toNext) spanBadges.push(el('span', {
                     class: 'atex-pp-cut-span atex-pp-cut-span-next',
-                    title: 'Задание продолжается в следующем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                    title: (isSetupTask
+                        ? 'Только настройка станка — намотка продолжится в следующем рабочем дне'
+                        : 'Задание продолжается в следующем рабочем дне') + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
                     text: '→'
                 }));
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-spans' }, spanBadges));
