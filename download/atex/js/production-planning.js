@@ -4130,6 +4130,18 @@
             emitChain(arr);
         });
         // Легаси-эвристика (#3280): одинаковая continuationSignature + смежные календарные дни.
+        // #3892: ДОПОЛНИТЕЛЬНО требуем СОВПАДЕНИЯ ЗАКАЗА (orderId) — как isDaySplitSibling (#3613).
+        // Без этого две РАЗНЫЕ резки одной конфигурации (один станок|сырьё|намотка|ножи) в соседние
+        // дни склеивались в одну «цепочку», её голова уезжала на более ранний день, и при scope по
+        // фильтру (#3660, ключ = дата ГОЛОВЫ) перепланирование пропускало всю цепочку — «Упорядочить»
+        // не трогал застрявшую переполненную резку (issue #3892: №7 на 03.07 не выталкивался, зазоры
+        // не схлопывались). Пустой orderId у любой из записей (легаси/#3808) — считаем совместимым,
+        // чтобы не осиротить настоящие продолжения с незаполненным заказом.
+        function sameOrder(a, b){
+            var oa = String((a && a.orderId) == null ? '' : a.orderId).trim();
+            var ob = String((b && b.orderId) == null ? '' : b.orderId).trim();
+            return oa === '' || ob === '' || oa === ob;
+        }
         var groups = {}, order = [];
         legacyCuts.forEach(function(c){
             var s = continuationSignature(c);
@@ -4146,6 +4158,7 @@
                     var prevDay = planDayNumber(arr[j - 1]);
                     var curDay = planDayNumber(arr[j]);
                     if (prevDay == null || curDay == null || (curDay - prevDay) !== 1) break;
+                    if (!sameOrder(chain[0], arr[j])) break;   // #3892: другой заказ — не продолжение
                     chain.push(arr[j]);
                     j++;
                 }
