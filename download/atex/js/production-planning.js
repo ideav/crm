@@ -120,7 +120,15 @@
         fixed: 'Зафиксировано',  // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
         knifeSetupMin: 'Наладка ножей, мин',      // #3698: расчётная наладка ножей (KNIFE), мин (id 96067)
         materialWindingMin: 'Сырье/намотка, мин', // #3698: расчётная смена сырья/намотки (MATERIAL_WINDING), мин (id 96069)
-        cutAndLeader: 'Резка и Лидер'             // #3700: намотка («Длительность, минут») + лидер (BETWEEN_CUTS × резок), мин (id 96778)
+        cutAndLeader: 'Резка и Лидер',            // #3700: намотка («Длительность, минут») + лидер (BETWEEN_CUTS × резок), мин (id 96778)
+        // #3892: ЯВНАЯ ссылка на голову цепочки дробления — id ПЕРВОГО сегмента логической резки
+        // (id 196458, type 3/string). Все сегменты одной резки (голова + продолжения по дням)
+        // несут одинаковый «ID первой части» = id головы; голова ссылается на саму себя. Заменяет
+        // прежнюю эвристику continuationSignature (станок|сырьё|намотка|ножи + смежные дни),
+        // которая рвалась при пустом «Виде сырья»/несовпадении сигнатуры (#3795/#3808/#3781) и
+        // утекала делёными метражами/настройкой в очередь. Пустой (легаси-запись до миграции) →
+        // откат на эвристику в mergeContinuationChains; следующее сохранение проставит маркер.
+        firstPart: 'ID первой части'
     };
     var CUT_PLANNED_RUN_COLUMNS = [
         'cut_planned_runs',
@@ -138,6 +146,10 @@
     var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
     // #3700: хранимое «Резка и Лидер» (намотка + лидер), в отчёте cut_planning — поле cut_time.
     var CUT_TIME_COLUMNS = ['cut_time', 'cut_cut_leader_min', 'cut_run_leader_min'];
+    // #3892: «ID первой части» (голова цепочки) из отчёта cut_planning. Колонку на сервере в
+    // отчёт добавить (как #3698 добавил cut_knife_setup_min); нет колонки → пусто → откат на
+    // эвристику цепочки (mergeContinuationChains), запись маркера при этом не ломается.
+    var CUT_FIRST_PART_COLUMNS = ['cut_first_part', 'cut_first_part_id', 'cut_head_id', 'cut_chain_head'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
     var CUT_WRITE_LABELS = {
@@ -1078,6 +1090,9 @@
                     storedKnifeSetupMin: rowValue(row, CUT_KNIFE_SETUP_COLUMNS),
                     storedMaterialWindingMin: rowValue(row, CUT_MATERIAL_WINDING_COLUMNS),
                     storedCutAndLeaderMin: rowValue(row, CUT_TIME_COLUMNS),   // #3700: «Резка и Лидер» (cut_time)
+                    // #3892: «ID первой части» (голова цепочки дробления). Пусто (нет колонки/легаси) →
+                    // mergeContinuationChains откатывается на эвристику continuationSignature.
+                    firstPartId: rowValue(row, CUT_FIRST_PART_COLUMNS),
                     isFoil: /фольг/i.test(str(row.cut_material)),
                     orderId: str(row.order_id),
                     orderApprovalDate: str(row.order_approval_date || row.item_approval_date),
@@ -4070,21 +4085,59 @@
     // → { cuts:[логические резки], deletes:[id записей-продолжений], chainByLogical:{logicalId:[id…]} }.
     // Вход не мутирует.
     function mergeContinuationChains(cuts){
-        var groups = {}, order = [];
-        (cuts || []).forEach(function(c){
-            var s = continuationSignature(c);
-            if (!groups[s]) { groups[s] = []; order.push(s); }
-            groups[s].push(c);
-        });
         var logical = [], deletes = [], chainByLogical = {};
-        order.forEach(function(s){
-            var arr = groups[s].slice().sort(function(a, b){
+        function sortByDay(arr){
+            return arr.slice().sort(function(a, b){
                 var da = planDayNumber(a), db = planDayNumber(b);
                 if (da == null && db == null) return 0;
                 if (da == null) return 1;
                 if (db == null) return -1;
                 return da - db;
             });
+        }
+        // chain — записи одной логической резки по возрастанию дня (chain[0] = голова).
+        function emitChain(chain){
+            var head = chain[0];
+            var lg = {};
+            for (var k in head) { if (Object.prototype.hasOwnProperty.call(head, k)) lg[k] = head[k]; }
+            lg.plannedRuns = chain.reduce(function(sum, c){ return sum + (Number(c.plannedRuns) || 0); }, 0);
+            logical.push(lg);
+            chainByLogical[String(head.id)] = chain.map(function(c){ return String(c.id); });
+            for (var m = 1; m < chain.length; m++) deletes.push(String(chain[m].id));
+        }
+        // #3892: основной признак цепочки — ЯВНЫЙ «ID первой части» (firstPartId = id головы).
+        // Записи с непустым маркером группируем по нему (надёжно: не зависит от совпадения
+        // сигнатуры/сырья и не склеивает разные заказы одной конфигурации соседних дней).
+        // Записи без маркера (легаси до миграции) — прежней эвристикой (сигнатура + смежные дни).
+        var explicitGroups = {}, explicitOrder = [], legacyCuts = [];
+        (cuts || []).forEach(function(c){
+            var fp = (c && c.firstPartId != null) ? String(c.firstPartId).trim() : '';
+            if (fp !== '') {
+                if (!explicitGroups[fp]) { explicitGroups[fp] = []; explicitOrder.push(fp); }
+                explicitGroups[fp].push(c);
+            } else {
+                legacyCuts.push(c);
+            }
+        });
+        explicitOrder.forEach(function(fp){
+            var arr = sortByDay(explicitGroups[fp]);
+            // Голова = запись, чей id == маркеру (ссылается на себя). Нет такой (голову удалили/
+            // перенесли) → самый ранний сегмент становится головой; следующее сохранение
+            // перепроставит маркер на его id. Голову держим первой, остальное — по дню.
+            var headIdx = -1;
+            for (var i = 0; i < arr.length; i++) { if (String(arr[i].id) === fp) { headIdx = i; break; } }
+            if (headIdx > 0) { var h = arr.splice(headIdx, 1)[0]; arr.unshift(h); }
+            emitChain(arr);
+        });
+        // Легаси-эвристика (#3280): одинаковая continuationSignature + смежные календарные дни.
+        var groups = {}, order = [];
+        legacyCuts.forEach(function(c){
+            var s = continuationSignature(c);
+            if (!groups[s]) { groups[s] = []; order.push(s); }
+            groups[s].push(c);
+        });
+        order.forEach(function(s){
+            var arr = sortByDay(groups[s]);
             var i = 0;
             while (i < arr.length) {
                 var chain = [arr[i]];
@@ -4096,13 +4149,7 @@
                     chain.push(arr[j]);
                     j++;
                 }
-                var head = chain[0];
-                var lg = {};
-                for (var k in head) { if (Object.prototype.hasOwnProperty.call(head, k)) lg[k] = head[k]; }
-                lg.plannedRuns = chain.reduce(function(sum, c){ return sum + (Number(c.plannedRuns) || 0); }, 0);
-                logical.push(lg);
-                chainByLogical[String(head.id)] = chain.map(function(c){ return String(c.id); });
-                for (var m = 1; m < chain.length; m++) deletes.push(String(chain[m].id));
+                emitChain(chain);
                 i = j;
             }
         });
@@ -4266,6 +4313,9 @@
                         creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
                     }
                 }
+                // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
+                // выводит её из chainHeadById (для update) / parentCutId (для create), чтобы не
+                // менять контракт planCutOperations (строгие сравнения ops в тестах #3280/#3427).
             });
         });
         // Лишние записи цепочки (сегментов стало меньше, чем записей) — на удаление. Цепочки
@@ -9414,8 +9464,10 @@
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
             leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
             length: lengthReqId,   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
-            material: reqIdByName(cutMeta, CUT_REQ.material)   // #3795: «Вид сырья» — копируется в продолжение, иначе очередь следующего дня без сырья
+            material: reqIdByName(cutMeta, CUT_REQ.material),   // #3795: «Вид сырья» — копируется в продолжение, иначе очередь следующего дня без сырья
+            firstPart: reqIdByName(cutMeta, CUT_REQ.firstPart)   // #3892: «ID первой части» (голова цепочки) — на голову и все продолжения
         };
+        var firstPartReqId = cutReqIds.firstPart;
         // #3781: длина прогона по id любой записи цепочки = длина прогона её ГОЛОВЫ. Записи-
         // продолжения дробления по дням раньше не получали «Метраж, м», и cutRunLength
         // откатывался к ПОДЕЛЁННОМУ метражу обеспечения (splitSupplyShares делит footage
@@ -9489,6 +9541,14 @@
                         var umat = materialForCutId(u.cutId);
                         if (umat) fields['t' + matReqId] = umat;
                     }
+                    // #3892: «ID первой части» — голова цепочки (для головы = собственный id).
+                    // Проставляем явный маркер на существующие записи, чтобы цепочка опознавалась
+                    // без эвристики; в planCutOperations firstPartId всегда задан.
+                    if (firstPartReqId) {
+                        var uHead = (u.firstPartId != null && u.firstPartId !== '')
+                            ? String(u.firstPartId) : (chainHeadById[String(u.cutId)] || String(u.cutId));
+                        if (uHead) fields['t' + firstPartReqId] = uHead;
+                    }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -9560,7 +9620,10 @@
                             leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : ''),
                             // #3781: «Метраж, м» = длина прогона цепочки. Без неё cutRunLength брал
                             // поделённый метраж обеспечения и показывал заниженную длину.
-                            length: parentRunLen > 0 ? round3(parentRunLen) : ''
+                            length: parentRunLen > 0 ? round3(parentRunLen) : '',
+                            // #3892: «ID первой части» = id головы (parentId) — связывает продолжение
+                            // с первой частью явно, без эвристики continuationSignature.
+                            firstPart: (cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId)
                         });
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
@@ -10905,9 +10968,15 @@
         } else {
             var posById = {};
             this.positions.forEach(function(p) { posById[p.id] = p; });
+            // #3892: метраж берём по ВСЕЙ резке (длина прогона = «Метраж, м», одинакова у всех
+            // сегментов цепочки, #3781), а НЕ из «Метраж, м» обеспечения этого сегмента. У
+            // переходящей (дроблёной) резки обеспечение делится по дням (splitSupplyShares), и
+            // raw-метраж сегмента — бессмысленная дробь (напр. 348.496 вместо 450). cutRunLength
+            // стартует с cut.length (head) и игнорирует делёные доли → реальная длина прогона.
+            var cutRunLen = cutRunLength(cut, self.supplies, self.footageBySupply);
             linked.forEach(function(s) {
-                // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж обеспечения.
-                var foot = supplyFootage(s, self.footageBySupply);
+                // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж.
+                var foot = cutRunLen > 0 ? cutRunLen : supplyFootage(s, self.footageBySupply);
                 var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo, s.positionWidth, s.positionLength);
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
