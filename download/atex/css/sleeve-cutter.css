@@ -229,7 +229,9 @@
     padding: 12px 16px;
 }
 .atex-sc-toolbar .atex-sc-field { margin: 0; min-width: 240px; }
+.atex-sc-toolbar .atex-sc-field-date { min-width: 170px; }
 .atex-sc-toolbar-all { margin-left: auto; align-self: center; }
+.atex-sc-caption { font-size: 15px; font-weight: 600; color: var(--text-primary, #374151); margin: 2px 0 12px; }
 .atex-sc-card-info { color: var(--sc-muted); font-size: 14px; margin: 6px 0 0; }
 
 /* Модалка подтверждения «Закрыть все». */

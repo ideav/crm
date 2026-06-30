@@ -1,7 +1,10 @@
 <!DOCTYPE html>
-<!-- Браузерный стенд для рабочего места «Пульт втулкореза» (#2916).
-     Мокает fetch: metadata, object/{id} и команды _m_*.
-     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<!-- Браузерный стенд для рабочего места «Пульт втулкореза» (#2916, #3869 + выбор даты).
+     Мокает fetch: metadata, object/{Втулкорез}, отчёт report/sleeve_tasks и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон.
+     Боевая схема: главное значение задания — Unix плановой даты; статус выводится из
+     «Начато»/«Закончено»/«Кол-во факт»; задания читаются отчётом sleeve_tasks с серверным
+     фильтром по втулкорезу и дню. -->
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -15,51 +18,47 @@
 </div>
 
 <script>
-// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
-// Таблица «Задание на втулки» (1080) задаётся через alias, а её главное
-// значение (первая колонка) — плановое количество втулок «К-во план» (#3159).
+// ── Мок боевой схемы ateh ──
+// «Задание на втулки» (1080) задаётся через alias; главное значение (первая колонка) —
+// Unix плановой даты. Реквизиты: Втулкорез, Кол-во (план), Кол-во факт, Начато, Закончено.
 var META = [
     { id: 1071, val: 'Втулкорез', reqs: [
         { id: 1095, val: 'Статус' },
         { id: 8286, val: 'Диаметр min, мм' },
         { id: 8287, val: 'Диаметр max, мм' }
     ]},
-    { id: 1076, val: 'Позиция заказа', reqs: [
-        { id: 1137, val: 'Кол-во' },
-        { id: 1141, val: 'Ширина, мм' },
-        { id: 8194, val: 'Диаметр втулки' },
-        { id: 13671, val: 'К-во план', alias: 'Задание на втулки', arr_id: '1080' }
-    ]},
-    { id: 1080, val: 'К-во план', alias: 'Задание на втулки', attrs: '{"alias":"Задание на втулки"}', reqs: [
+    { id: 1080, val: 'Задача на втулки', attrs: '{"alias":"Задание на втулки"}', reqs: [
         { id: 1180, val: 'Втулкорез' },
-        { id: 1181, val: 'Диаметр, мм' },
+        { id: 16399, val: 'Кол-во' },
         { id: 1183, val: 'Кол-во факт' },
-        { id: 1184, val: 'Статус' }
+        { id: 54315, val: 'Начато' },
+        { id: 27163, val: 'Закончено' }
     ]}
 ];
 
-// Хранилище-заглушка. r = [главное значение (план), ...reqs по порядку метаданных].
-var DB = {
-    cutters: [
-        { i: 201, r: ['ВР-20/25', 'Доступен', '20', '25'] },
-        { i: 202, r: ['ВР-26/40', 'Доступен', '26', '40'] },
-        { i: 203, r: ['ВР-41/76', 'Доступен', '41', '76'] }
-    ],
-    positions: [
-        { order_no: 'АТХ-3139', position_id: '301', position_no: '1', position_qty: '100',
-          position_width: '57.00', position_length: '1200', position_sleeve: '8188:76', position_status: 'В работе' },
-        { order_no: 'АТХ-3139', position_id: '302', position_no: '2', position_qty: '60',
-          position_width: '40.00', position_length: '1200', position_sleeve: '8189:40', position_status: 'Новая' }
-    ],
-    tasks: {
-        301: [
-            { i: 401, r: ['100', '203:ВР-41/76', '76', '100', 'Готово'] },
-            { i: 402, r: ['100', '203:ВР-41/76', '76', '45', 'В работе'] }
-        ],
-        302: []
-    },
-    nextId: 500
-};
+function pad2(n){ n = String(n); return n.length < 2 ? '0' + n : n; }
+function dayUnix(offsetDays, hh, mm){
+    var d = new Date();
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + offsetDays, hh, mm || 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
+}
+
+// Заглушка-«база» отчёта: строки sleeve_tasks (JSON_KV-объекты).
+var ROWS = [
+    { task_id: '401', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '100', fact: '100', started: String(dayUnix(0, 7, 5)), finished: String(dayUnix(0, 7, 40)) }, // сегодня, Готово
+    { task_id: '402', task_date: String(dayUnix(0, 8, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '45',  fact: '',    started: '',                       finished: '' },                       // сегодня, Ожидает
+    { task_id: '403', task_date: String(dayUnix(0, 9, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '30',  fact: '',    started: String(dayUnix(0, 9, 35)), finished: '' },                       // сегодня, В работе
+    { task_id: '404', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-20/25', cutter_id: '201', qty: '12',  fact: '',    started: '',                       finished: '' },                       // сегодня, другой втулкорез
+    { task_id: '405', task_date: String(dayUnix(-1, 8, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '70',  fact: '',    started: '',                       finished: '' }                        // вчера
+];
+
+var CUTTERS = [
+    { i: 201, r: ['ВР-20/25', 'Доступен', '20', '25'] },
+    { i: 202, r: ['ВР-26/40', 'Доступен', '26', '40'] },
+    { i: 203, r: ['ВР-41/76', 'Доступен', '41', '76'] }
+];
+
+function param(u, name){ var m = u.match(new RegExp('[?&]' + name + '=([^&]+)')); return m ? decodeURIComponent(m[1]) : null; }
 
 var realFetch = window.fetch;
 window.fetch = function(url, opts) {
@@ -68,26 +67,41 @@ window.fetch = function(url, opts) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
-    if (/\/report\/orders_list/.test(u)) return json(DB.positions);
-    if (/\/report\/positions_list/.test(u)) return json(DB.positions);
+
+    if (/\/report\/sleeve_tasks/.test(u)) {
+        var cid = param(u, 'FR_cutter_id');
+        var from = param(u, 'FR_task_date'), to = param(u, 'TO_task_date');
+        var rows = ROWS.filter(function(r) {
+            if (cid && String(r.cutter_id) !== String(cid)) return false;
+            var d = Number(r.task_date);
+            if (from != null && d < Number(from)) return false;
+            if (to != null && d >= Number(to)) return false;
+            return true;
+        });
+        return json(rows);
+    }
+
     var mObj = u.match(/\/object\/(\d+)\//);
-    if (mObj) {
-        var tid = mObj[1];
-        if (tid === '1071') return json(DB.cutters);
-        if (tid === '1080') {
-            var fu = u.match(/F_U=(\d+)/);
-            var key = fu ? fu[1] : null;
-            return json((key && DB.tasks[key]) || []);
-        }
-    }
-    if (/\/_m_new\//.test(u)) {
-        var id = DB.nextId++;
-        console.log('[mock] _m_new', u, opts && opts.body);
-        return json({ obj: id, i: id });
-    }
-    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
-        console.log('[mock]', u, opts && opts.body);
+    if (mObj && mObj[1] === '1071') return json(CUTTERS);
+
+    if (/\/_m_set\//.test(u)) {
+        // Применяем правку к строке отчёта, чтобы UI отражал результат после действия.
+        var id = u.match(/_m_set\/(\d+)/);
+        var body = (opts && opts.body) || '';
+        var fin = (body.match(/t27163=(\d+)/) || [])[1];
+        var fact = (body.match(/t1183=(\d+)/) || [])[1];
+        if (id) ROWS.forEach(function(r) {
+            if (r.task_id === id[1]) {
+                if (fin) r.finished = fin;
+                if (fact) r.fact = fact;
+            }
+        });
+        console.log('[mock] _m_set', u, body);
         return json({ ok: 1 });
+    }
+    if (/\/_m_new\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1, i: 999 });
     }
     return realFetch(url, opts);
 };
