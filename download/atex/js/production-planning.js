@@ -1629,6 +1629,19 @@
     //   смена набора ножей ИЛИ сужение ролика → KNIFE. Бинарно (изменилось/нет), без
     //   нормировок. prev/next отсутствует → [] (первой резке переналадка не нужна).
     //   → [{ code, label, minutes }] (только применившиеся, с minutes > 0).
+
+    // #3871: ускорение выравнивания загрузки станков (rebalanceSlitterLoad). Пост-проход
+    // на каждую пробу переноса пересчитывал переналадку по ПОЛНЫМ наборам станка
+    // (orderedChangeoverCost → greedySequence c перебором стартов, O(n³)). При ~170 резках это
+    // ≈40 с на перенос — «Создать» висел минутами, окно прогресса не успевало отрисоваться.
+    // На время выравнивания включаются два упрощения: changeoverCost кэшируется по паре id
+    // (в пределах прохода times постоянен, объекты резок по id не меняются), а greedySequence
+    // строит цепочку от ОДНОГО старта (O(n²)) вместо перебора всех. Оценка переналадки тут
+    // нужна лишь как ориентир баланса — финальную очередь всё равно собирает planCutOperations.
+    // Вне выравнивания (false/null) планировщик считает переналадку как прежде, побайтово.
+    var balanceFastChangeover = false;   // greedySequence: цепочка от одного старта (без перебора)
+    var balancePairCostMemo = null;      // changeoverCost: кэш по паре id { 'prevId>nextId': минуты }
+
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
@@ -1699,6 +1712,13 @@
     // Стоимость перехода prev→next в МИНУТАХ переналадки (Σ компонентов changeoverParts;
     // две операции — обе вычитают время смены).
     function changeoverCost(prev, next, times){
+        // #3871: во время выравнивания загрузки — кэш по паре id (тот же переход считается
+        // тысячи раз по разным наборам станка). Объекты резок и times в проходе неизменны.
+        if (balancePairCostMemo && prev && next && prev.id != null && next.id != null) {
+            var ck = String(prev.id) + '>' + String(next.id);
+            if (balancePairCostMemo[ck] !== undefined) return balancePairCostMemo[ck];
+            return (balancePairCostMemo[ck] = round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0)));
+        }
         return round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
     }
 
@@ -4595,7 +4615,9 @@
         var pool = (cuts || []).slice();
         if (pool.length <= 1) return pool;
         pool.sort(function(a, b){ return cmpKey(startKey(a), startKey(b)); });
-        if (pool.length > GREEDY_MULTISTART_LIMIT) return greedyFromStart(pool[0], pool.slice(1), weights);
+        // #3871: при выравнивании загрузки — цепочка от одного старта (перебор стартов даёт
+        // O(n³) и делал «Создать» очень медленным); как и при больших очередях (>limit).
+        if (pool.length > GREEDY_MULTISTART_LIMIT || balanceFastChangeover) return greedyFromStart(pool[0], pool.slice(1), weights);
         var best = null, bestCost = Infinity, bestKnife = null;
         for (var s = 0; s < pool.length; s++){
             var seq = greedyFromStart(pool[s], pool.slice(0, s).concat(pool.slice(s + 1)), weights);
@@ -4904,6 +4926,11 @@
             }).join('|');
         }
 
+        // #3871: на время прохода считаем переналадку быстро (кэш по паре id + одностартовая
+        // цепочка). Сбрасываем флаги в finally, чтобы планировщик дальше считал как обычно.
+        var prevFast = balanceFastChangeover, prevMemo = balancePairCostMemo;
+        balanceFastChangeover = true; balancePairCostMemo = {};
+        try {
         var loadBefore = snapshot();
         var visited = {}; visited[stateHash()] = true;
         var moves = [], iter = 0, stopReason = 'no-progress';
@@ -4950,6 +4977,9 @@
         var loadAfter = snapshot();
         log({ event: 'stop', reason: stopReason, iterations: iter, load: loadAfter });
         return { moves: moves, iterations: iter, stopReason: stopReason, loadBefore: loadBefore, loadAfter: loadAfter };
+        } finally {
+            balanceFastChangeover = prevFast; balancePairCostMemo = prevMemo;
+        }
     }
 
     // Переставить резку в очереди станка: swap с соседом (dir -1 вверх / +1 вниз) +
