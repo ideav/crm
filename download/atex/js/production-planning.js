@@ -3021,6 +3021,25 @@
         return out;
     }
 
+    // #3876: на отпуске ли станок в указанный КАЛЕНДАРНЫЙ день. downtimes — окна простоя
+    // [{ start, end }] в unix-секундах (start — начало «Отпуска», end — «Окончание»), как
+    // this.downtimesBySlitter[slitterId]. dayMidnightMs — полночь дня (локально). true, если
+    // хоть одно ЗАКРЫТОЕ окно (с «Окончанием») пересекает сутки [dayMidnight, +24ч). Окна без
+    // «Окончания» не учитываем — как downtimeBlockedRanges (на расписание они не влияют),
+    // чтобы блокировка переноса/планирования была согласована с тайм-сдвигом расписания.
+    function slitterDownOnDay(downtimes, dayMidnightMs) {
+        var base = Number(dayMidnightMs);
+        if (!isFinite(base)) return false;
+        var dayStart = base, dayEnd = base + 86400000;
+        return (downtimes || []).some(function(d) {
+            var s = Number(d && d.start);
+            if (!isFinite(s) || s <= 0) return false;
+            var e = Number(d && d.end);
+            if (!isFinite(e) || e <= s) return false;   // без «Окончания» — не блокируем (как в расписании)
+            return s * 1000 < dayEnd && e * 1000 > dayStart;
+        });
+    }
+
     // #3788: «ДД.ММ.ГГГГ» → числовой ключ дня ГГГГММДД (для карты календаря). null — мусор.
     function parseDmyKey(str) {
         var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(str == null ? '' : str).trim());
@@ -4818,13 +4837,19 @@
     // overflow держим прежнюю группировку/балансировку. Активно только когда задана ёмкость
     // (dayCapacityMin, генерация); без неё (тесты/обратная совместимость) overflow всегда 0.
     //   dayCapacityMin — рабочая ёмкость дня станка (мин); опционально.
-    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin) {
+    // #3876: unavailableSlitterIds (опц.) — { slitterId: true } станков, у которых в день этой
+    // резки отпуск; их не выбираем (станок без сырья и ножей). Если после исключения не остаётся
+    // ни одного станка (все в отпуске) — откатываемся к полному списку, чтобы не «потерять» резку.
+    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin, unavailableSlitterIds) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
         var cap = Number(dayCapacityMin);
         var capActive = isFinite(cap) && cap > 0;   // #3830: учитывать ёмкость только если задана
+        var unavail = unavailableSlitterIds || {};
         var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId); });
         if (!allowed.length) return null;
+        var available = allowed.filter(function(s){ return !unavail[String(s.id)]; });   // #3876: не в отпуске в этот день
+        if (available.length) allowed = available;   // все в отпуске → оставляем как было (резку не теряем)
         function cmpNumber(a, b) {
             if (a === b) return 0;
             if (a === Infinity) return 1;
@@ -4928,6 +4953,10 @@
         }
         var stopBlock = {};   // slitterId → stopMaterialIds (станок не варит это сырьё — туда не переносим)
         (slitters || []).forEach(function(s){ stopBlock[String(s.id)] = s.stopMaterialIds; });
+        // #3876: не переносить задание на станок, у которого в день этого задания отпуск.
+        // opts.slitterDayBlocked(slitterId, plan) → bool (контроллер даёт по downtimesBySlitter +
+        // plan.planDate). Не задан → null (поведение прежнее; тесты/обратная совместимость).
+        var slitterDayBlocked = typeof opts.slitterDayBlocked === 'function' ? opts.slitterDayBlocked : null;
 
         // Рабочие минуты задания (намотка + лидер, если хранится; иначе «Длительность»).
         function workMin(m){
@@ -5020,6 +5049,7 @@
                     machineList.forEach(function(to){
                         if (to === from) return;
                         if (isMaterialBlocked(stopBlock[to], plan.materialId)) return;   // станок не варит это сырьё
+                        if (slitterDayBlocked && slitterDayBlocked(to, plan)) return;     // #3876: станок в отпуске в день задания
                         // пробный перенос: меняются минуты только from и to.
                         var fromMembers = (fixedBy[from] || []).concat((byMachine[from] || []).filter(function(x){ return x !== plan; }));
                         var trial = {}; Object.keys(baseMin).forEach(function(id){ trial[id] = baseMin[id]; });
@@ -5278,6 +5308,7 @@
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
+        slitterDownOnDay: slitterDownOnDay,                       // #3876
         parseDmyKey: parseDmyKey,                                 // #3788
         dayKeyFromMs: dayKeyFromMs,                               // #3788
         dayTypeWorking: dayTypeWorking,                           // #3788
@@ -5775,6 +5806,39 @@
             downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs),
             this.calendarBlockedRanges(baseMidnightMs)
         );
+    };
+
+    // #3876: на отпуске ли станок slitterId в день dayMidnightMs (полночь дня, мс). Календарь
+    // (выходные/праздники) сюда НЕ входит — он глобален и не делает станок «недоступным» в
+    // смысле этой проверки; речь именно об «Отпуске» конкретного станка (он без сырья и ножей).
+    AtexProductionPlanning.prototype.slitterOnVacationDay = function(slitterId, dayMidnightMs) {
+        return slitterDownOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs);
+    };
+
+    // #3876: id станков, у которых в день dayMidnightMs отпуск → { slitterId: true }. Для
+    // исключения таких станков при выборе/балансировке (не ставить задание на станок в отпуске).
+    AtexProductionPlanning.prototype.vacationSlitterIdsForDay = function(dayMidnightMs) {
+        var self = this, out = {};
+        (this.slitters || []).forEach(function(s) {
+            if (self.slitterOnVacationDay(s.id, dayMidnightMs)) out[String(s.id)] = true;
+        });
+        return out;
+    };
+
+    // #3876: заправка станков для расчёта настройки. У станка, который НА отпуске в день базы
+    // плана (baseMidnightMs), сырья и ножей нет — его заправку обнуляем (пустой объект). Тогда
+    // первая резка станка ПОСЛЕ отпуска считает ПОЛНУЮ настройку (смена сырья + ножи с нуля,
+    // changeoverParts от пустого станка), а не наследует prev_cut_setup, бывший ДО отпуска.
+    // Прочие станки — как есть (#3853/#3862). Применяется и в плане (splitMachineQueue), и в
+    // хранимых колонках (computeCutSetupUpdates) — один источник, тайминги совпадают.
+    AtexProductionPlanning.prototype.planningPrevSetupBySlitter = function(baseMidnightMs) {
+        var self = this, src = this.prevSetupBySlitter || {}, out = {};
+        Object.keys(src).forEach(function(k) { out[k] = src[k]; });
+        (this.slitters || []).forEach(function(s) {
+            var key = String(s.id);
+            if (self.slitterOnVacationDay(key, baseMidnightMs)) out[key] = { materialId: '', winding: '', knifeWidths: [] };
+        });
+        return out;
     };
 
     // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
@@ -7151,6 +7215,16 @@
             var position = posEnd.checked ? 'end' : 'start';
             var fix = !!fixCb.checked;
             var targetSlitterId = slitSelect ? String(slitSelect.value || '') : '';   // #3669 п.1
+            // #3876: целевой станок в отпуске в выбранный день — не переносим (станок без сырья
+            // и ножей). Сообщаем, диалог не закрываем — пользователь меняет день/станок.
+            var targetSid = targetSlitterId !== '' ? targetSlitterId
+                : String(cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
+            var targetMid = planBaseMidnightFrom(dateStr, controllerNowMs(self));
+            if (targetSid !== '' && self.slitterOnVacationDay(targetSid, targetMid)) {
+                var sl = (self.slitters || []).filter(function(s) { return String(s.id) === targetSid; })[0];
+                self.notify('Станок ' + ((sl && sl.label) || ('#' + targetSid)) + ' в отпуске в этот день — перенос невозможен', 'error');
+                return;
+            }
             close();
             self.moveCutToDay(cut, dateStr, position, fix, targetSlitterId);
         });
@@ -7200,6 +7274,13 @@
         var targetSidStr = String(targetSlitterId == null ? '' : targetSlitterId).trim();
         var sidStr = targetSidStr !== '' ? targetSidStr : curSidStr;
         var slitterChanged = !!slitterReqId && sidStr !== '' && sidStr !== curSidStr;
+        // #3876: не переносить задание на станок, у которого в целевой день отпуск (станок без
+        // сырья и ножей). Авторитетная проверка (диалог уже проверяет — но метод вызываем и иначе).
+        if (sidStr !== '' && this.slitterOnVacationDay(sidStr, targetMidnightMs)) {
+            var slv = (this.slitters || []).filter(function(s) { return String(s.id) === sidStr; })[0];
+            this.notify('Станок ' + ((slv && slv.label) || ('#' + sidStr)) + ' в отпуске на ' + dateLabel + ' — перенос невозможен', 'error');
+            return Promise.resolve(false);
+        }
         // Задания станка-получателя на целевом дне (по хранимой «Дате план»), без перемещаемого.
         var dayCuts = (this.cuts || []).filter(function(c) {
             if (!c || String(c.id) === String(cut.id)) return false;
@@ -8484,6 +8565,15 @@
         var genWindow = self.workingWindow();
         var genDayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0)
             - (Number(genWindow.lunchDurationMin) || 0));
+        // #3876: станки в отпуске на день резки не выбираем (мемо по дню — vacations единичны).
+        var genVacationByDay = {};
+        function vacationSetForDay(dayKey, planDateSec) {
+            if (!(dayKey in genVacationByDay)) {
+                var d = new Date(Number(planDateSec) * 1000); d.setHours(0, 0, 0, 0);
+                genVacationByDay[dayKey] = self.vacationSlitterIdsForDay(d.getTime());
+            }
+            return genVacationByDay[dayKey];
+        }
         layouts.forEach(function(lay, layIdx) {
             var plannedRuns = plannedRunsForLayout(lay, posById);
             var runLength = layoutRunLength(lay, posById);
@@ -8516,7 +8606,7 @@
                 // #3830: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
                 duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, !!(lay && lay.isFoil))
             };
-            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin);
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin, vacationSetForDay(day, cutMainValue));
             if (slitterId != null) {
                 slitterId = String(slitterId);
                 if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
@@ -8572,6 +8662,13 @@
             }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
+                // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
+                slitterDayBlocked: function(slitterId, plan){
+                    var sec = Number(plan && plan.planDate);
+                    if (!isFinite(sec) || sec <= 0) return false;
+                    var d = new Date(sec * 1000); d.setHours(0, 0, 0, 0);
+                    return self.slitterOnVacationDay(slitterId, d.getTime());
+                },
                 log: function(ev){
                     if (ev.event === 'start') console.log('[pp] ⚖ выравнивание загрузки — старт:', fmt(ev.load));
                     else if (ev.event === 'move') console.log('[pp] ⚖ #' + ev.step + ' ' + ev.cutId + ' ' + (labelById[ev.from] || ev.from) + '→' + (labelById[ev.to] || ev.to) + '  | ' + fmt(ev.load));
@@ -9057,7 +9154,10 @@
         //    отсюда ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
-        var prevBySlitter = this.prevSetupBySlitter || {};
+        // #3876: тот же источник заправки, что и план (splitMachineQueue): станок в отпуске на
+        // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
+        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
@@ -9513,7 +9613,7 @@
             scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
             scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
-            prevSetupBySlitter: self.prevSetupBySlitter,   // #3853: заправка станков (prev_cut_setup) → первая резка считается переналадкой от неё (как окно в persistence)
+            prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
         });
@@ -10238,7 +10338,9 @@
         // «предыдущая резка» для МОДАЛКИ тайминга первой резки очереди (#3240): смена сырья +
         // ножи, если осталось другое. Нет данных → null + firstCutSetup (настройка ножей с нуля).
         var carrySlitterId = String(activeGroup.slitter && activeGroup.slitter.id);
-        var carrySetup = (self.prevSetupBySlitter || {})[carrySlitterId];
+        // #3876: станок в отпуске на день базы → заправка обнулена (как в плане/хранимых колонках):
+        // первая резка после отпуска в модалке тоже показывает полную настройку (ножи + сырьё).
+        var carrySetup = self.planningPrevSetupBySlitter(planBaseMidnightMs)[carrySlitterId];
         var carryPrevCut = (carrySetup && activeGroup.cuts.length)
             ? carryOverPrevCut(carrySetup, activeGroup.cuts[0]) : null;
         // #3846: НЕ пересчитываем расписание live (buildSchedule убран) — показываем СОХРАНЁННЫЙ
