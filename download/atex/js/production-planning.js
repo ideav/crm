@@ -3327,6 +3327,15 @@
         var base = Number(baseMidnightMs);
         function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
         var out = [];
+        // #3885: сохранённые planStart двух резок ОДНОГО станка в один день могут совпасть
+        // (напр. обе t1078 = 08:00) — след незавершённой пересборки времени старта: перенос
+        // до #3840 не пересобирал planStart, а пересборка #3660 идёт только в scope фильтра, и
+        // «осиротевший» старт остаётся прежним. Раньше очередь пересчитывала расписание на лету
+        // (buildSchedule) и нахлёст не показывала; с #3846 (показ сохранённого) две карточки
+        // вставали в одно время. Резки приходят в порядке очереди (день → «Очередность»),
+        // поэтому раскладываем встык: старт ОКНА резки не раньше конца окна предыдущей резки
+        // ЭТОГО дня. Непересекающиеся сохранённые старты не трогаем (display == сохранённое).
+        var prevWindowEndByDay = {};
         (cuts || []).forEach(function(c) {
             if (!c) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
@@ -3334,11 +3343,19 @@
             var windowStartMin = round3((tsSec * 1000 - base) / 60000);     // окно = начало настройки
             var setupMin = round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin));
             var durationMin = round3(num(c.storedCutAndLeaderMin) || num(c.duration));   // намотка + лидер
+            // #3885: устранить нахлёст с предыдущей резкой того же дня — сдвинуть начало окна к
+            // её концу. День берём по СОХРАНЁННОМУ старту (до сдвига), чтобы группировка по дате
+            // (заголовок/минуты дня) не уезжала; сдвиг лечит только нахлёст внутри дня.
+            var day = Math.floor(windowStartMin / 1440);
+            var prevEnd = prevWindowEndByDay[day];
+            if (prevEnd != null && windowStartMin < prevEnd) windowStartMin = prevEnd;
             var startMin = round3(windowStartMin + setupMin);               // старт намотки (после настройки)
+            var finishMin = round3(startMin + durationMin);
+            prevWindowEndByDay[day] = finishMin;   // окно занятости = setup + намотка (лидер уже в durationMin)
             out.push({
                 cutId: String(c.id),
                 startMin: startMin,
-                finishMin: round3(startMin + durationMin),
+                finishMin: finishMin,
                 setupMin: setupMin,
                 durationMin: durationMin,
                 // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
