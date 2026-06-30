@@ -83,6 +83,11 @@
     // #3788: горизонт расчёта нерабочих дней расписания (дней вперёд от базы). Покрывает
     // годовой набор праздников; дальше плановой очереди не бывает.
     var CALENDAR_HORIZON_DAYS = 366;
+    // #3898: отпуск станка длиной НЕ БОЛЕЕ этого числа КАЛЕНДАРНЫХ дней НЕ сбрасывает заправку
+    // (сырьё/ножи) — первая резка после такого короткого простоя наследует прежнюю настройку,
+    // а не пересчитывает её с нуля (#3876). Длиннее порога → заправка обнуляется (полная
+    // настройка после отпуска). Менять здесь, если порог «короткого» отпуска нужно сдвинуть.
+    var DOWNTIME_KEEP_SETUP_MAX_DAYS = 2;
     // Реквизиты «Максимального запаса» (#3391, table/67113). Главное значение записи —
     // максимально допустимый запас (число); реквизиты задают комбинацию параметров
     // «Партии ГП», для которой имеет смысл создавать запас. Резолв по имени.
@@ -3104,6 +3109,44 @@
         return cur >= we;
     }
 
+    // #3898: полночь (локального) дня для метки в мс. Шкала календарная — как dayKeyFromMs.
+    function startOfDayMs(ms) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return NaN;
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+    }
+
+    // #3898: длина окна отпуска [startSec; endSec] (unix-сек) в КАЛЕНДАРНЫХ днях — сколько
+    // суток станок простаивает. Считаем от полуночи дня «начала» до полуночи последнего
+    // ПОКРЫТОГО дня включительно; «Окончание» ровно в 00:00 нового дня этот день не добавляет
+    // (−1 мс). Примеры: 02.07 08:00→18:00 = 1; 02.07→04.07 00:00 = 2; 02.07 08:00→04.07 10:00 = 3.
+    function downtimeSpanDays(startSec, endSec) {
+        var s = Number(startSec) * 1000, e = Number(endSec) * 1000;
+        if (!isFinite(s) || !isFinite(e) || e <= s) return 0;
+        var sd = startOfDayMs(s), ed = startOfDayMs(e - 1);
+        if (isNaN(sd) || isNaN(ed)) return 0;
+        return Math.round((ed - sd) / 86400000) + 1;
+    }
+
+    // #3898: максимальная длина (в КАЛЕНДАРНЫХ днях) закрытого окна «Отпуска», накрывающего
+    // сутки дня dayMidnightMs. Отпуск = одна запись окна [начало; окончание]; если простой
+    // разбит на несколько записей — берём наибольшую из накрывающих день базы. 0 — день не
+    // накрыт ни одним окном. downtimes — [{ start, end }] в unix-секундах.
+    function vacationSpanDaysOnDay(downtimes, dayMidnightMs) {
+        var base = Number(dayMidnightMs);
+        if (!isFinite(base)) return 0;
+        var dayEnd = base + 86400000, maxDays = 0;
+        (downtimes || []).forEach(function(d) {
+            var s = Number(d && d.start), e = Number(d && d.end);
+            if (!isFinite(s) || s <= 0 || !isFinite(e) || e <= s) return;
+            if (!(s * 1000 < dayEnd && e * 1000 > base)) return;   // окно не накрывает день базы
+            var span = downtimeSpanDays(s, e);
+            if (span > maxDays) maxDays = span;
+        });
+        return maxDays;
+    }
+
     // #3788: «ДД.ММ.ГГГГ» → числовой ключ дня ГГГГММДД (для карты календаря). null — мусор.
     function parseDmyKey(str) {
         var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(str == null ? '' : str).trim());
@@ -5465,6 +5508,8 @@
         planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
         slitterDownOnDay: slitterDownOnDay,                       // #3876
+        downtimeSpanDays: downtimeSpanDays,                       // #3898
+        vacationSpanDaysOnDay: vacationSpanDaysOnDay,             // #3898
         parseDmyKey: parseDmyKey,                                 // #3788
         dayKeyFromMs: dayKeyFromMs,                               // #3788
         dayTypeWorking: dayTypeWorking,                           // #3788
@@ -5996,9 +6041,22 @@
         Object.keys(src).forEach(function(k) { out[k] = src[k]; });
         (this.slitters || []).forEach(function(s) {
             var key = String(s.id);
-            if (self.slitterOnVacationDay(key, baseMidnightMs)) out[key] = { materialId: '', winding: '', knifeWidths: [] };
+            // #3898: только ДЛИННЫЙ отпуск (> DOWNTIME_KEEP_SETUP_MAX_DAYS дней) обнуляет
+            // заправку. После короткого простоя (≤ N дней) станок сохраняет сырьё/ножи —
+            // первая резка не пересчитывает настройку с нуля.
+            if (self.longVacationOnDay(key, baseMidnightMs)) out[key] = { materialId: '', winding: '', knifeWidths: [] };
         });
         return out;
+    };
+
+    // #3898: отпуск, накрывающий день базы плана, ДЛИННЕЕ порога «короткого» простоя?
+    // Предусловие — станок реально не работает весь день базы (slitterOnVacationDay, #3883:
+    // частичный отпуск не считается). Только длинный отпуск (> DOWNTIME_KEEP_SETUP_MAX_DAYS
+    // календарных дней) сбрасывает заправку; ≤ N дней → заправка сохраняется (#3876 смягчён).
+    AtexProductionPlanning.prototype.longVacationOnDay = function(slitterId, dayMidnightMs) {
+        if (!this.slitterOnVacationDay(slitterId, dayMidnightMs)) return false;
+        var span = vacationSpanDaysOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs);
+        return span > DOWNTIME_KEEP_SETUP_MAX_DAYS;
     };
 
     // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
