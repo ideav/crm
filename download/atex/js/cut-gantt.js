@@ -194,6 +194,16 @@
         return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
     }
 
+    // #3904: «ЧЧ:ММ» (LUNCH_START из «Настройки») → минуты от полуночи. Мусор/пусто → NaN
+    // (проверка времени обеда тогда пропускается — поведение как было).
+    function parseLunchStartMinutes(val) {
+        var m = /^(\d{1,2}):(\d{2})$/.exec(String(val == null ? '' : val).trim());
+        if (!m) return NaN;
+        var h = Number(m[1]), mi = Number(m[2]);
+        if (!isFinite(h) || !isFinite(mi) || h > 23 || mi > 59) return NaN;
+        return h * 60 + mi;
+    }
+
     // #3875: «Календарь» (#3788) — пометка нерабочих дней (выходных/праздников) на оси Ганта.
     // Та же логика, что в «Планировании производства»: «Праздничный день» делает дату нерабочей
     // (даже будни), «Рабочий день» — рабочей (даже Сб/Вс); по умолчанию (нет записи) Сб/Вс — выходные.
@@ -486,9 +496,10 @@
     // (обед выключен/настройка не загрузилась) → []. ordered — резки станка в порядке очереди;
     // scale — ось ganttScale (нерабочее время свёрнуто). → [{ beforeIndex, leftPx, widthPx,
     // startMs, endMs, durationMin }], по одному на день с обедом. Чистая — покрыта тестом.
-    function ganttLunchMarkers(ordered, scale, lunchDurationMin) {
+    function ganttLunchMarkers(ordered, scale, lunchDurationMin, lunchStartMin) {
         var lunchDur = Number(lunchDurationMin) || 0;
         if (!(lunchDur > 0) || !ordered || !scale || typeof scale.toPx !== 'function') return [];
+        var lunchStart = Number(lunchStartMin);   // #3904: минуты от полуночи; NaN = проверку времени пропускаем
         var out = [];
         var lunchByDay = {};
         for (var i = 1; i < ordered.length; i++) {
@@ -501,6 +512,11 @@
             if (startOfLocalDayMs(prevEnd) !== day) continue;    // зазор через ночь (стык дней) — не обед
             var gapMin = (curStart - prevEnd) / 60000;
             if (gapMin < lunchDur - 1) continue;                 // зазор меньше обеда — не обед (встык/мелкий простой)
+            // #3904: зазор — обед, ТОЛЬКО если послеобеденная резка начинается у времени обеда
+            // (≥ LUNCH_START). Иначе ПЕРВЫЙ большой зазор дня (утренний — настройка резки после
+            // короткой переходящей резки) ошибочно помечался обедом. LUNCH_START неизвестен (нет
+            // ключа/настройка не загрузилась) → проверку пропускаем (поведение как было).
+            if (isFinite(lunchStart) && (curStart - day) / 60000 < lunchStart) continue;
             var startMs = curStart - lunchDur * 60000;           // привязка к началу послеобеденной резки
             out.push({
                 beforeIndex: i,
@@ -1217,7 +1233,7 @@
             g.tasksMin = g.tasks.reduce(function(sum, t) { return sum + (t.barMin || 0); }, 0);
             // #3846: маркеры обеда (зазор ≈ LUNCH_DURATION между резками одного дня) — отдельной
             // строкой перед послеобеденной резкой, чтобы зазор не выглядел «дырой».
-            g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin);
+            g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
@@ -1424,23 +1440,28 @@
         return this.getJson('object/' + encodeURIComponent('Настройка') + '/?JSON_OBJ&LIMIT=0,1000')
             .then(function(rows) {
                 var dbKey = String(self.db || '').trim().toUpperCase();
-                var best = null, bestRank = -1;
+                // #3846/#3904: \u043E\u0431\u0430 \u043A\u043B\u044E\u0447\u0430 \u0438\u0437 \u00AB\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u00BB \u0441 \u0443\u0447\u0451\u0442\u043E\u043C \u043E\u0431\u043B\u0430\u0441\u0442\u0438 \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
+                var bestRank = { LUNCH_DURATION: -1, LUNCH_START: -1 };
+                var bestVal = { LUNCH_DURATION: null, LUNCH_START: null };
                 (rows || []).forEach(function(rec) {
                     var r = (rec && rec.r) || [];
                     var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
-                    if (key !== 'LUNCH_DURATION') return;
+                    if (key !== 'LUNCH_DURATION' && key !== 'LUNCH_START') return;
                     var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                     var val = String(r[2] == null ? '' : r[2]).replace(',', '.').trim();
                     if (val === '') return;
                     var rank = 1;
                     if (dbKey && type === dbKey) rank = 3;
                     else if (type === 'ATEH') rank = 2;
-                    if (rank >= bestRank) { bestRank = rank; best = val; }
+                    if (rank >= bestRank[key]) { bestRank[key] = rank; bestVal[key] = val; }
                 });
-                var n = best == null ? 0 : Number(best);
-                return isFinite(n) && n > 0 ? Math.round(n) : 0;
+                var n = bestVal.LUNCH_DURATION == null ? 0 : Number(bestVal.LUNCH_DURATION);
+                return {
+                    durationMin: isFinite(n) && n > 0 ? Math.round(n) : 0,
+                    startMin: parseLunchStartMinutes(bestVal.LUNCH_START)   // #3904: \u00AB12:20\u00BB \u2192 740; \u043F\u0443\u0441\u0442\u043E \u2192 NaN
+                };
             })
-            .catch(function() { return 0; });
+            .catch(function() { return { durationMin: 0, startMin: NaN }; });
     };
 
     // #3875: «Календарь» (#3788) — нерабочие дни (выходные/праздники). Читаем таблицу по имени
@@ -1495,7 +1516,9 @@
             this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
             this.loadCalendar()        // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
         ]).then(function(res) {
-            self.lunchDurationMin = res[5] || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
+            var lunchCfg = res[5] || {};   // #3846/#3904: { durationMin, startMin } из «Настройки»
+            self.lunchDurationMin = lunchCfg.durationMin || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
+            self.lunchStartMin = lunchCfg.startMin;              // #3904: LUNCH_START (мин), NaN = неизвестно
             self.cuts = rowsToCuts(res[0] || []);
             // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
             attachStrips(self.cuts, res[2] || []);
@@ -1640,7 +1663,8 @@
         // #3668: задания размещаются по реальному времени на общей шкале окна.
         // #3704: зум по горизонтали + нижняя граница «вписать в экран» (дорожка не уже видимой области).
         var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
-            { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin });
+            { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin,
+              lunchStartMin: this.lunchStartMin });   // #3904: время обеда — чтобы утренний зазор не помечался обедом
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
