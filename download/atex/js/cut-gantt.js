@@ -517,13 +517,22 @@
             // короткой переходящей резки) ошибочно помечался обедом. LUNCH_START неизвестен (нет
             // ключа/настройка не загрузилась) → проверку пропускаем (поведение как было).
             if (isFinite(lunchStart) && (curStart - day) / 60000 < lunchStart) continue;
-            var startMs = curStart - lunchDur * 60000;           // привязка к началу послеобеденной резки
+            // #3909: при известном LUNCH_START обед ФИКСИРУЕМ в 12:20 (а не в зазоре после задания,
+            // куда генерация зашила +40). Зазор лежит сразу после «несущего» задания (ordered[i-1]),
+            // чьё окно содержит 12:20 — его полосу растягиваем до старта послеобеденного задания
+            // (carrierIndex/postStartMs, см. render), а обед рисуем ВНУТРИ этого пролёта. LUNCH_START
+            // неизвестен → прежняя привязка к началу послеобеденной резки (зазор как есть).
+            var fixed = isFinite(lunchStart);
+            var startMs = fixed ? (day + lunchStart * 60000) : (curStart - lunchDur * 60000);
+            var endMs = fixed ? (day + (lunchStart + lunchDur) * 60000) : curStart;
             out.push({
                 beforeIndex: i,
+                carrierIndex: fixed ? (i - 1) : null,   // #3909: задание, растягиваемое обедом (несущее 12:20)
+                postStartMs: fixed ? curStart : null,   // #3909: старт послеобеденного задания (предел растяжки)
                 startMs: startMs,
-                endMs: curStart,
+                endMs: endMs,
                 leftPx: scale.toPx(startMs),
-                widthPx: Math.max(round3(scale.toPx(curStart) - scale.toPx(startMs)), 1),
+                widthPx: Math.max(round3(scale.toPx(endMs) - scale.toPx(startMs)), 1),
                 durationMin: lunchDur
             });
             lunchByDay[day] = true;
@@ -1222,6 +1231,7 @@
                     cut: cut, status: status,
                     leftPx: leftPx,
                     widthPx: widthPx,
+                    startMs: startMs,   // #3909: старт бара (для растяжки «несущего» обед задания)
                     segments: seg,
                     // #3887: подпись времени — по сдвинутому старту, чтобы текст совпал с позицией бара.
                     label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs, startMs),
@@ -1234,6 +1244,20 @@
             // #3846: маркеры обеда (зазор ≈ LUNCH_DURATION между резками одного дня) — отдельной
             // строкой перед послеобеденной резкой, чтобы зазор не выглядел «дырой».
             g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
+            // #3909: «несущее» обед задание растягиваем до старта послеобеденного (заполняем зазор,
+            // куда генерация зашила +40), чтобы обед нарисовался в 12:20 ВНУТРИ его пролёта, а не
+            // дырой после него. Минуты подписи (barMin) — рабочие, обед в сумму не входит.
+            (g.lunches || []).forEach(function(lb) {
+                if (lb.carrierIndex == null || lb.postStartMs == null) return;
+                var carrier = g.tasks[lb.carrierIndex];
+                if (!carrier) return;
+                var fillPx = round3(scale.toPx(lb.postStartMs) - carrier.leftPx);
+                if (fillPx > carrier.widthPx) {
+                    carrier.widthPx = fillPx;
+                    carrier.barText = formatTime(carrier.startMs) + '-' + formatTime(lb.postStartMs) +
+                        ' (' + carrier.barMin + ' мин)';   // пролёт со встроенным обедом; минуты — рабочие
+                }
+            });
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };

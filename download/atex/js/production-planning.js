@@ -3484,10 +3484,13 @@
         opts = opts || {};
         var lunchDur = Number(opts.lunchDurationMin) || 0;
         if (!(lunchDur > 0)) return [];
+        var lunchStart = Number(opts.lunchStartMin);   // #3909: 12:20 (мин от полуночи); NaN → привязка к зазору
+        var hasFixed = isFinite(lunchStart);
         var segs = (schedule || []).slice().filter(function(s) {
             return s && isFinite(Number(s.startMin));
         }).sort(function(a, b) { return a.startMin - b.startMin; });
         var byDay = {};
+        var prevCutByDay = {};   // #3909: cutId задания, после которого идёт зазор (несущее обед)
         var lunchByDay = {};
         segs.forEach(function(s) {
             var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
@@ -3498,15 +3501,24 @@
             if (prevEnd != null && !lunchByDay[day]) {
                 var gap = winStart - prevEnd;
                 // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
-                // длительности): берём, если он не меньше почти полного обеда. Обед привязываем к
-                // НАЧАЛУ послеобеденной резки (finishMin = winStart) — так блок всегда прилегает к
-                // следующей карточке (надёжный матч при рендере), а любой остаточный простой (если
-                // зазор > обеда) остаётся ДО обеда.
+                // длительности): берём, если он не меньше почти полного обеда. finishMin (= НАЧАЛО
+                // послеобеденной резки) остаётся КЛЮЧОМ привязки строки обеда к карточке.
                 if (gap >= lunchDur - 1) {
-                    lunchByDay[day] = { day: day, startMin: round3(winStart - lunchDur), finishMin: round3(winStart), durationMin: lunchDur };
+                    // #3909: при известном LUNCH_START ПОКАЗЫВАЕМ обед в 12:20 (внутри несущего его
+                    // задания prevCutByDay), а не в зазоре после него; carrierCutId — это задание.
+                    // LUNCH_START неизвестен → показываем в зазоре (dispStart = startMin), как было.
+                    var dispStart = hasFixed ? round3(day * 1440 + lunchStart) : round3(winStart - lunchDur);
+                    lunchByDay[day] = {
+                        day: day,
+                        startMin: round3(winStart - lunchDur), finishMin: round3(winStart),   // ключ привязки (зазор)
+                        dispStartMin: dispStart, dispFinishMin: round3(dispStart + lunchDur),  // #3909: показываемое время
+                        carrierCutId: hasFixed && prevCutByDay[day] != null ? String(prevCutByDay[day]) : null,
+                        durationMin: lunchDur
+                    };
                 }
             }
             if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
+            prevCutByDay[day] = s.cutId;   // #3909: для зазора следующего задания дня
         });
         return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
     }
@@ -3583,11 +3595,12 @@
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
         function applyDowntime(segs) {
-            // #3907: предел конца сегмента при сдвиге за простой — конец смены с нахлёстом резки
-            // (dayEndHour + maxOverworkCuts), как в упаковке; нет овертайма → cutEndMin (dayEnd).
+            // #3907: предел конца сегмента при сдвиге за простой — тот же потолок, что в упаковке
+            // (availFor 'cuts'): cutEndMin + maxOverworkCuts; нет овертайма → cutEndMin (dayEnd).
+            // #3909/#3910: потолок привязан к cutEndMin (dayEnd), а не к DAY_END_HOUR (см. availFor).
             // Без него сегмент на целый день, сдвинутый простоем/выходным на старт в середине дня,
             // вылезал за смену (#3907: 108 проходов с 10:35 до 17:26) — теперь переносится на завтра.
-            var fitEnd = overworkOn ? (dayEndHour + maxOverworkCuts) : dayEnd;
+            var fitEnd = overworkOn ? (dayEnd + maxOverworkCuts) : dayEnd;
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
@@ -3610,7 +3623,13 @@
             if (!overworkOn || !hasWindow) return base;
             var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
             var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
-            return (dayEndHour - dayStart) + margin - lunchRes - clock;
+            // #3909/#3910: нахлёст добавляем к cutEndMin (dayEnd = DAY_END_HOUR−TOTAL_INTERVALS),
+            // а НЕ к DAY_END_HOUR. Последнее задание дня обязано кончиться ≤ cutEndMin+margin
+            // (резка → +MAX_OVERWORK_CUTS, настройка → +MAX_OVERWORK_TUNE). Раньше базой был
+            // dayEndHour (16:30), и день паковался до 16:35+, копя 475–494 раб. мин (#3910 «494
+            // мин во 2 июле»). Теперь потолок 16:15 (резка) / 16:20 (настройка) — буфер уборки
+            // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
+            return (dayEnd - dayStart) + margin - lunchRes - clock;
         }
         // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
         // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
@@ -10966,8 +10985,12 @@
             if (sc && cardSchedDay != null) {
                 var lb = lunchByDay[cardSchedDay];
                 if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
+                    // #3909: показываем обед в фиксированные 12:20–13:00 (dispStartMin/dispFinishMin),
+                    // а не в зазоре после несущего задания; привязка строки — по finishMin (зазор).
+                    var lbS = lb.dispStartMin != null ? lb.dispStartMin : lb.startMin;
+                    var lbF = lb.dispFinishMin != null ? lb.dispFinishMin : lb.finishMin;
                     groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
-                        text: '🍽 Обед · ' + formatClock(lb.startMin) + ' – ' + formatClock(lb.finishMin) +
+                        text: '🍽 Обед · ' + formatClock(lbS) + ' – ' + formatClock(lbF) +
                               ' · ' + lb.durationMin + ' мин' }));
                     lb._rendered = true;
                 }

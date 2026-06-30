@@ -1,10 +1,12 @@
 // Unit tests for #3847 — «Максимальное время нахлёста за конец рабочего дня».
 //
-// Настройки MAX_OVERWORK_CUTS / MAX_OVERWORK_TUNE (Настройка/ATEH): резку (проход) нельзя класть
-// с нахлёстом, если она кончится позже DAY_END_HOUR+MAX_OVERWORK_CUTS; настройку (ножи/смена сырья)
-// — позже DAY_END_HOUR+MAX_OVERWORK_TUNE. DAY_END_HOUR = реальный конец смены (endMin), обычно >
-// cutEndMin (= DAY_END_HOUR − TOTAL_INTERVALS, буфер #3599). Задание делится по проходам: короткий
-// «хвостовой» проход с нахлёстом ≤ лимита остаётся в дне, длинный — уходит на следующий день.
+// #3909/#3910: ПОТОЛОК нахлёста привязан к cutEndMin (= DAY_END_HOUR − TOTAL_INTERVALS), а НЕ к
+// DAY_END_HOUR. Резку (проход) нельзя класть с нахлёстом, если она кончится позже
+// cutEndMin+MAX_OVERWORK_CUTS; настройку (ножи/смена сырья) — позже cutEndMin+MAX_OVERWORK_TUNE.
+// Раньше базой был DAY_END_HOUR (день паковался до 16:35, копя 475–494 раб. мин — #3910); теперь
+// 16:15 (резка) / 16:20 (настройка), буфер уборки (TOTAL_INTERVALS) поглощает нахлёст. Задание
+// делится по проходам: короткий «хвостовой» проход/настройка ≤ лимита остаётся в дне, длинный — на
+// следующий день.
 //
 // Фича включается ТОЛЬКО когда лимит задан (resolveWorkingWindow → maxOverworkCutsMin != null);
 // без настроек планировщик пакует как раньше (до cutEndMin, #3821) — это проверяем отдельно.
@@ -35,16 +37,16 @@ function runsById(segs) {
     return segs.map(function(s) { return { day: s.dayOffset, runs: s.runs, setup: s.setupMin, ws: s.windowStartMin }; });
 }
 
-// ── Базовая ветка (генерация, gapFill=false): нахлёст резки ограничен DAY_END_HOUR+5 ──────────
-// perPass 103: 5 проходов = 515 мин, конец 480+515=995=16:35 = DAY_END_HOUR+5 (ровно лимит) → ОК.
-// 6-й кончился бы в 16:35+103 — за лимитом → на следующий день.
+// ── Базовая ветка (генерация, gapFill=false): нахлёст резки ограничен cutEndMin+5 (#3909) ──────
+// perPass 99: 5 проходов = 495 мин, конец 480+495=975=16:15 = cutEndMin+5 (ровно лимит) → ОК.
+// Без нахлёста влезает 4 (floor(490/99)); нахлёст добавляет ровно 1 проход.
 var baseOpts = { dayStartMin: DAY_START, dayEndMin: CUT_END, leader: 0, times: TIMES,
-    perPassByCut: { A: 103 }, runsByCut: { A: 6 } };
+    perPassByCut: { A: 99 }, runsByCut: { A: 6 } };
 var onBase = planning.splitMachineQueue([cut('A')], Object.assign({}, baseOpts, OVER));
 assertEqual(runsById(onBase), [{ day: 0, runs: 5, setup: 0, ws: 480 }, { day: 1, runs: 1, setup: 0, ws: 1920 }],
-    '#3847 база: 5 проходов в день0 (последний кончается 16:35=DAY_END_HOUR+5), 6-й — день1');
-// Сегмент дня0 кончается ровно в DAY_END_HOUR+MAX_OVERWORK_CUTS (995).
-assertEqual(onBase[0].startMin + onBase[0].durationMin, 995, '#3847 база: конец дня0 = DAY_END_HOUR+5 (16:35)');
+    '#3847/#3909 база: 5 проходов в день0 (последний кончается 16:15=cutEndMin+5), 6-й — день1');
+// Сегмент дня0 кончается ровно в cutEndMin+MAX_OVERWORK_CUTS (975).
+assertEqual(onBase[0].startMin + onBase[0].durationMin, 975, '#3847/#3909 база: конец дня0 = cutEndMin+5 (16:15)');
 
 // ── Фича выключена (нет лимита) → пакуем до cutEndMin (#3821): 4 прохода в день0 ───────────────
 var offBase = planning.splitMachineQueue([cut('A')], baseOpts);
@@ -63,26 +65,27 @@ assertEqual(runsById(offGap).map(function(s) { return { day: s.day, runs: s.runs
     [{ day: 0, runs: 4 }, { day: 1, runs: 2 }],
     '#3847 gapFill: без лимита — 4 прохода (как #3821)');
 
-// ── Нахлёст НАСТРОЙКИ ограничен DAY_END_HOUR+10 ────────────────────────────────────────────────
-// A заполняет день0 до 16:20 (clock 500). B — другое сырьё (setup 15). Первый проход B не влезает,
-// но настройка 15 кончается в 16:35 = DAY_END_HOUR+5 ≤ DAY_END_HOUR+10 → сегмент НАСТРОЙКИ в хвост,
+// ── Нахлёст НАСТРОЙКИ ограничен cutEndMin+10 (#3909) ───────────────────────────────────────────
+// A (p97×5=485) заполняет день0 до 16:05. B — другое сырьё (setup 15). Первый проход B не влезает
+// (cutEndMin+5), но настройка 15 кончается в 16:20 = cutEndMin+10 → сегмент НАСТРОЙКИ в хвост,
 // проходы B — на день1.
 var setupOpts = { dayStartMin: DAY_START, dayEndMin: CUT_END, leader: 0, times: TIMES,
-    perPassByCut: { A: 100, B: 100 }, runsByCut: { A: 5, B: 2 } };
+    perPassByCut: { A: 97, B: 100 }, runsByCut: { A: 5, B: 2 } };
 var withSetup = planning.splitMachineQueue([cut('A', 'M1'), cut('B', 'M2')], Object.assign({}, setupOpts, OVER));
 var bSegs = withSetup.filter(function(s) { return s.cutId === 'B'; });
 assertEqual(bSegs.map(function(s) { return { day: s.dayOffset, runs: s.runs, setup: s.setupMin, setupOnly: !!s.setupOnly }; }),
     [{ day: 0, runs: 0, setup: 15, setupOnly: true }, { day: 1, runs: 2, setup: 0, setupOnly: false }],
-    '#3847: настройка B (15 мин) кладётся в хвост дня0 (нахлёст ≤ +10), проходы — день1');
-assertEqual(bSegs[0].startMin + bSegs[0].durationMin, 995, '#3847: конец настройки в хвосте = 16:35 (≤ DAY_END_HOUR+10)');
+    '#3847/#3909: настройка B (15 мин) кладётся в хвост дня0 (нахлёст ≤ +10), проходы — день1');
+assertEqual(bSegs[0].startMin + bSegs[0].durationMin, 980, '#3847/#3909: конец настройки в хвосте = 16:20 (= cutEndMin+10)');
 
-// Та же раскладка, но смена И сырья И ножей (setup 45): настройка кончилась бы в 17:05 (за +10) →
-// ВСЯ резка B (с настройкой) уходит на следующий день, в хвосте дня0 настройки нет.
-var withBigSetup = planning.splitMachineQueue([cut('A', 'M1', [30]), cut('B', 'M2', [40])], Object.assign({}, setupOpts, OVER));
+// Та же раскладка, но A заполняет день0 ровно до cutEndMin (p98×5=490, 16:10): в нахлёст настройки
+// остаётся лишь 10 мин < 15 → настройка B не влезает даже в хвост → ВСЯ резка B на день1.
+var setupOpts2 = Object.assign({}, setupOpts, { perPassByCut: { A: 98, B: 100 } });
+var withBigSetup = planning.splitMachineQueue([cut('A', 'M1'), cut('B', 'M2')], Object.assign({}, setupOpts2, OVER));
 var bBig = withBigSetup.filter(function(s) { return s.cutId === 'B'; });
 assertEqual(bBig.map(function(s) { return { day: s.dayOffset, runs: s.runs, setup: s.setupMin }; }),
-    [{ day: 1, runs: 2, setup: 45 }],
-    '#3847: настройка 45 мин не влезает в нахлёст +10 → вся резка B на день1, хвост дня0 пуст');
+    [{ day: 1, runs: 2, setup: 15 }],
+    '#3847/#3909: настройка не влезает в остаток нахлёста (10<15) → вся резка B на день1');
 
 // ── resolveWorkingWindow парсит лимиты ────────────────────────────────────────────────────────
 function ww(extra) {
