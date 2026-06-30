@@ -17,6 +17,8 @@
 //     ролям не нужен, в т.ч. к «Лидер», ср. #3623).
 //   • GET /{db}/object/{slitter}/?JSON_OBJ — справочник станков для фильтра (при
 //     отсутствии прав станки берутся из самих заданий).
+//   • GET /{db}/object/Календарь/?JSON_OBJ — #3875: нерабочие дни (выходные/праздники,
+//     таблица #3788) для подсветки на оси; таблицы нет → подсветка выключена.
 //
 // Чистое ядро (разбор дат, интервалы, статусы, раскладка баров, сортировка строк,
 // сборка ссылки на планировщик) вынесено в объект `gantt` и экспортируется через
@@ -190,6 +192,49 @@
     function startOfLocalDayMs(ms) {
         var d = new Date(ms);
         return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    }
+
+    // #3875: «Календарь» (#3788) — пометка нерабочих дней (выходных/праздников) на оси Ганта.
+    // Та же логика, что в «Планировании производства»: «Праздничный день» делает дату нерабочей
+    // (даже будни), «Рабочий день» — рабочей (даже Сб/Вс); по умолчанию (нет записи) Сб/Вс — выходные.
+    var DAY_TYPE_HOLIDAY = 'Праздничный день';
+    var DAY_TYPE_WORKING = 'Рабочий день';
+
+    // Ссылка «id:Метка» → метка (для значения «Тип дня»). Без двоеточия — значение как есть.
+    function refLabel(raw) {
+        var s = String(raw == null ? '' : raw);
+        var i = s.indexOf(':');
+        return i >= 0 ? s.slice(i + 1) : s;
+    }
+
+    // «ДД.ММ.ГГГГ» → числовой ключ дня ГГГГММДД (для карты календаря); мусор → null.
+    function parseDmyKey(str) {
+        var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(str == null ? '' : str).trim());
+        return m ? (Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1])) : null;
+    }
+
+    // Миллисекунды → ключ дня ГГГГММДД (локальный день).
+    function dayKeyFromMs(ms) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return null;
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    }
+
+    // Рабочий ли день. calendarByDay: { ГГГГММДД: 'Праздничный день'|'Рабочий день' } (исключения);
+    // dow — день недели (0=Вс … 6=Сб). «Рабочий день» делает выходной рабочим, «Праздничный день» —
+    // будни нерабочим; иначе обычное правило (Сб/Вс — выходные).
+    function dayTypeWorking(dayKey, dow, calendarByDay) {
+        var t = calendarByDay && calendarByDay[dayKey];
+        if (t === DAY_TYPE_WORKING) return true;
+        if (t === DAY_TYPE_HOLIDAY) return false;
+        return dow !== 0 && dow !== 6;
+    }
+
+    // Рабочий ли календарный день (по мс). Пустая/битая дата → считаем рабочим (не помечаем).
+    function dayIsWorking(ms, calendarByDay) {
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return true;
+        return dayTypeWorking(dayKeyFromMs(d.getTime()), d.getDay(), calendarByDay);
     }
 
     function shiftIsoDate(iso, days) {
@@ -1219,7 +1264,12 @@
         slittersFromCuts: slittersFromCuts,
         parseDeepLink: parseDeepLink,
         formatCutNumber: formatCutNumber,
-        todayISO: todayISO
+        todayISO: todayISO,
+        refLabel: refLabel,                 // #3875
+        parseDmyKey: parseDmyKey,           // #3875/#3788
+        dayKeyFromMs: dayKeyFromMs,         // #3875/#3788
+        dayTypeWorking: dayTypeWorking,     // #3875/#3788
+        dayIsWorking: dayIsWorking          // #3875/#3788
     };
 
     // ───────────────────────── DOM-хелпер ─────────────────────────
@@ -1250,6 +1300,10 @@
         this.busy = false;
         this.cuts = [];
         this.slitters = [];
+        // #3875/#3788: карта нерабочих дней ГГГГММДД → 'Праздничный день'|'Рабочий день'.
+        // Фича подсветки выходных включается наличием таблицы «Календарь» (calendarEnabled).
+        this.calendarByDay = {};
+        this.calendarEnabled = false;
         // #3683: дефолт — «День»; #3704: зум по горизонтали; #3713: fromIso/toIso — произвольный
         // диапазон из deep-link «Планирования» (если задан, период берётся из него, а не из mode).
         this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '', zoom: 1, fromIso: '', toIso: '' };
@@ -1348,6 +1402,47 @@
             .catch(function() { return 0; });
     };
 
+    // #3875: «Календарь» (#3788) — нерабочие дни (выходные/праздники). Читаем таблицу по имени
+    // (главное значение — дата ДД.ММ.ГГГГ, реквизит «Тип дня» — ссылка). Таблицы нет в базе
+    // (старое окружение) или ошибка чтения → фича выключена, разметка нерабочих дней не рисуется.
+    AtexCutGantt.prototype.loadCalendar = function() {
+        var self = this;
+        this.calendarByDay = {};
+        this.calendarEnabled = false;
+        return this.getJson('object/' + encodeURIComponent('Календарь') + '/?JSON_OBJ&LIMIT=0,2000')
+            .then(function(rows) {
+                self.calendarEnabled = true;
+                (rows || []).forEach(function(rec) {
+                    var r = rec.r || [];
+                    var key = parseDmyKey(r[0]);
+                    if (key == null) return;
+                    var typeLabel = refLabel(r[1]);   // «Тип дня» — единственный реквизит таблицы
+                    if (typeLabel) self.calendarByDay[key] = typeLabel;
+                });
+            })
+            .catch(function() { self.calendarByDay = {}; self.calendarEnabled = false; });
+    };
+
+    // #3875: рабочий ли день (по мс). Фича выключена (нет «Календаря») → всегда рабочий, чтобы
+    // подсветка выходных не появлялась в старом окружении (как в Планировании, #3788).
+    AtexCutGantt.prototype.dayIsWorking = function(ms) {
+        if (!this.calendarEnabled) return true;
+        return dayIsWorking(ms, this.calendarByDay);
+    };
+
+    // #3875: все ли дни выбранного интервала нерабочие (выходные/праздники). true — на пустом
+    // интервале показываем «Выходной день»; смешанный интервал (есть рабочие дни) → false.
+    // Без «Календаря» dayIsWorking всегда true → всегда false (строка не появляется).
+    AtexCutGantt.prototype._rangeAllDaysOff = function(range) {
+        var self = this;
+        var days = (range && range.days) || [];
+        if (!days.length) return false;
+        return days.every(function(d) {
+            var ms = parseDateTimeMs(d.iso);
+            return ms != null && !self.dayIsWorking(ms);
+        });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -1356,7 +1451,8 @@
             this.loadStrips(),
             this.loadOpTimes(),
             this.loadPrevCutSetup(),   // #3693: текущая заправка станков для наладки первой резки
-            this.loadLunchSettings()   // #3846: длительность обеда для маркеров обеда
+            this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
+            this.loadCalendar()        // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
         ]).then(function(res) {
             self.lunchDurationMin = res[5] || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
             self.cuts = rowsToCuts(res[0] || []);
@@ -1507,7 +1603,16 @@
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
-            body.appendChild(el('div', { class: 'atex-cg-empty', text: 'На выбранном интервале заданий нет' }));
+            var emptyBox = el('div', { class: 'atex-cg-empty' });
+            // #3875: если выбранный интервал — целиком нерабочие дни (выходные/праздники по
+            // «Календарю»), пишем красным «Выходной день» перед сообщением о пустом интервале
+            // (как пустая нерабочая дата в «Планировании», #3788). Гейтинг — через dayIsWorking
+            // (без «Календаря» все дни «рабочие», строка не появляется).
+            if (this._rangeAllDaysOff(range)) {
+                emptyBox.appendChild(el('div', { class: 'atex-cg-dayoff-note', text: 'Выходной день' }));
+            }
+            emptyBox.appendChild(el('div', { text: 'На выбранном интервале заданий нет' }));
+            body.appendChild(emptyBox);
             return body;
         }
         var trackPx = data.trackPx;
@@ -1515,7 +1620,27 @@
 
         // #3668 п.6: часовые деления одинаковым пунктиром, шаг подобран по плотности окна.
         var ticks = hourTicks(data.scale, data.pxPerMin);   // #3747: деления по свёрнутой оси (рабочие окна)
+
+        // #3875: нерабочие дни (выходные/праздники по «Календарю» #3788) подсвечиваем полосой за
+        // колонкой дня. На свёрнутой оси видны только дни с заданиями, поэтому полоса появляется
+        // лишь когда на нерабочий день всё же попали задания («заданий быть не должно») — как
+        // красная дата в «Планировании» (#3788). Каждый сегмент оси = рабочее окно одного дня.
+        var dayoffBands = [];
+        if (this.calendarEnabled) {
+            ((data.scale && data.scale.segments) || []).forEach(function(seg) {
+                if (!self.dayIsWorking(seg.startMs)) dayoffBands.push({ leftPx: seg.leftPx, widthPx: seg.widthPx });
+            });
+        }
+        function appendDayoffBands(track) {
+            dayoffBands.forEach(function(b) {
+                var band = el('span', { class: 'atex-cg-dayoff-band' });
+                band.style.left = b.leftPx + 'px';
+                band.style.width = b.widthPx + 'px';
+                track.appendChild(band);   // первым в треке → позади часовой сетки и баров
+            });
+        }
         function appendHours(track) {
+            appendDayoffBands(track);
             ticks.forEach(function(t) {
                 // #3747: на стыке дней (newDay) — сплошная линия-разделитель: ночь свёрнута,
                 // дни идут встык, поэтому границу смены выделяем отдельно от часовой сетки.
@@ -1530,8 +1655,11 @@
         scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Время' }));
         var scaleTrack = el('div', { class: 'atex-cg-track atex-cg-scale' });
         scaleTrack.style.minWidth = trackPx + 'px';
+        appendDayoffBands(scaleTrack);   // #3875: полоса нерабочего дня и под шапкой оси
         ticks.forEach(function(t) {
-            var lbl = el('span', { class: 'atex-cg-hour-label' + (t.newDay ? ' is-day' : '') });
+            // #3875: дату нерабочего дня (выходной/праздник с заданиями) помечаем красным.
+            var dayoff = t.newDay && self.dayIsWorking && !self.dayIsWorking(t.ms);
+            var lbl = el('span', { class: 'atex-cg-hour-label' + (t.newDay ? ' is-day' : '') + (dayoff ? ' is-dayoff' : '') });
             lbl.style.left = t.leftPx + 'px';
             if (t.dateLabel) lbl.appendChild(el('span', { class: 'atex-cg-hour-date', text: t.dateLabel }));
             lbl.appendChild(el('span', { class: 'atex-cg-hour-time', text: t.label }));

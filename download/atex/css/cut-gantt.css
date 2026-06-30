@@ -13,6 +13,7 @@
     --cg-warn: var(--color-error, #b91c1c);
     --cg-track: #f8fafc;
     --cg-grid: #e5e7eb;
+    --cg-dayoff: rgba(185, 28, 28, .08);   /* #3875: подсветка нерабочих дней (выходные/праздники) */
     --cg-planned: #2563eb;
     --cg-running: #0891b2;
     --cg-unfinished: #d97706;
@@ -39,6 +40,7 @@
     --cg-ok: #22c55e;
     --cg-late: #f87171;
     --cg-unknown: #94a3b8;
+    --cg-dayoff: rgba(248, 113, 113, .14);   /* #3875: подсветка нерабочих дней (тёмная тема) */
 }
 
 .atex-cg *,
@@ -175,6 +177,20 @@
 }
 /* #3747: стык рабочих дней (ночь свёрнута) — сплошная линия-разделитель смены. */
 .atex-cg-hour.is-day { border-left: 1px solid var(--cg-accent); opacity: 0.5; }
+
+/* #3875: нерабочий день (выходной/праздник по «Календарю» #3788) с заданиями — полоса за
+   колонкой дня и красная дата на оси («заданий быть не должно», как в «Планировании»). */
+.atex-cg-dayoff-band {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--cg-dayoff);
+    pointer-events: none;
+    z-index: 0;
+}
+.atex-cg-hour-label.is-dayoff .atex-cg-hour-date { color: var(--cg-warn); }
+/* #3875: пустой интервал на нерабочую дату — красное «Выходной день» перед сообщением. */
+.atex-cg-dayoff-note { color: var(--cg-warn); font-weight: 700; margin-bottom: 6px; }
 
 /* Бар-ссылка (позиция/ширина в px задаются инлайн — реальное время задания).
    #3675 п.3: бар — flex-контейнер сегментов [наладка ножей][смена сырья][резка]; цвет статуса

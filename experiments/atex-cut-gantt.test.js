@@ -438,4 +438,35 @@ assertEqual(planning.ganttRangeLink('2026-06-25', '', '/ateh/cut-gantt'),
 assertEqual(planning.ganttRangeLink('', '', '/ateh/cut-gantt'), '/ateh/cut-gantt',
     'ganttRangeLink #3713: без дат → базовый URL');
 
+// ── #3875: подсветка нерабочих дней (выходные/праздники по «Календарю» #3788) ──
+assertEqual(gantt.parseDmyKey('01.01.2026'), 20260101, 'parseDmyKey: ДД.ММ.ГГГГ → ГГГГММДД');
+assertEqual(gantt.parseDmyKey('1.1.2026'), null, 'parseDmyKey: без ведущих нулей → null');
+assertEqual(gantt.parseDmyKey('  '), null, 'parseDmyKey: пусто → null');
+assertEqual(gantt.refLabel('123167:Праздничный день'), 'Праздничный день', 'refLabel: «id:Метка» → метка');
+assertEqual(gantt.refLabel('Готово'), 'Готово', 'refLabel: без двоеточия → как есть');
+
+// dayKeyFromMs — локальный (в тестах TZ=UTC) день.
+assertEqual(gantt.dayKeyFromMs(Date.UTC(2026, 0, 1, 10, 0, 0)), 20260101, 'dayKeyFromMs: мс → ГГГГММДД');
+
+// dayTypeWorking: исключения календаря важнее обычного правила выходных.
+var CAL = { 20260101: 'Праздничный день', 20260110: 'Рабочий день' };
+// 2026-01-01 — четверг (dow=4), но праздник → нерабочий.
+assertEqual(gantt.dayTypeWorking(20260101, 4, CAL), false, 'dayTypeWorking: праздник в будни → нерабочий');
+// 2026-01-03 — суббота (dow=6), без исключения → нерабочий.
+assertEqual(gantt.dayTypeWorking(20260103, 6, CAL), false, 'dayTypeWorking: суббота без исключения → нерабочий');
+// 2026-01-10 — суббота (dow=6), но «Рабочий день» → рабочий.
+assertEqual(gantt.dayTypeWorking(20260110, 6, CAL), true, 'dayTypeWorking: рабочая суббота → рабочий');
+// 2026-01-05 — понедельник (dow=1) → рабочий.
+assertEqual(gantt.dayTypeWorking(20260105, 1, CAL), true, 'dayTypeWorking: будни → рабочий');
+// Пустой календарь → обычное правило (Сб/Вс — выходные).
+assertEqual([gantt.dayTypeWorking(20260103, 6, {}), gantt.dayTypeWorking(20260104, 0, {}), gantt.dayTypeWorking(20260105, 1, {})],
+    [false, false, true], 'dayTypeWorking: пустой календарь → Сб/Вс выходные, будни рабочие');
+
+// dayIsWorking — по мс (TZ=UTC): праздник/суббота нерабочие, рабочая суббота рабочая.
+assertEqual(gantt.dayIsWorking(Date.UTC(2026, 0, 1, 12, 0, 0), CAL), false, 'dayIsWorking: 01.01 праздник → false');
+assertEqual(gantt.dayIsWorking(Date.UTC(2026, 0, 3, 12, 0, 0), CAL), false, 'dayIsWorking: 03.01 суббота → false');
+assertEqual(gantt.dayIsWorking(Date.UTC(2026, 0, 10, 12, 0, 0), CAL), true, 'dayIsWorking: 10.01 рабочая суббота → true');
+assertEqual(gantt.dayIsWorking(Date.UTC(2026, 0, 5, 12, 0, 0), CAL), true, 'dayIsWorking: 05.01 будни → true');
+assertEqual(gantt.dayIsWorking('мусор', CAL), true, 'dayIsWorking: битая дата → рабочий (не помечаем)');
+
 console.log('\n' + passed + ' assertions passed');
