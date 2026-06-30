@@ -1,27 +1,30 @@
 // Рабочее место atex «Пульт втулкореза» (роль Оператор, планшет).
 //
-// По заданию на втулки оператор выбирает втулкорез, вводит количество факт и
-// меняет статус задания (Ожидает → В работе → Готово). Задания подчинены
-// «Заказанному количеству»: втулки для одной позиции могут планироваться общей партией,
-// даже если сама позиция обеспечивается несколькими производственными резками.
-// Решение задачи ideav/crm#2916 (часть #2903), актуализация #3139, #3159. Правила
-// разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих
-// мест — docs/atex_workplaces.md §3.6.
+// Оператор выбирает втулкорез и ДАТУ, на которую смотрит задания на втулки, и
+// ведёт их выполнение: ✓ Готово / Пропустить / ✓✓ Закрыть все. Задания
+// планируются на конкретную дату (плановый старт) и подчинены позиции заказа.
+// Решение ideav/crm#2916 (часть #2903); перестройка по образцу пульта слиттера
+// (#3869); выравнивание под БОЕВУЮ схему ateh + выбор даты. Правила разработки —
+// docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.6.
 //
-// Таблица «Задание на втулки» теперь идентифицируется по alias, а её главное
-// значение (первая колонка) — это плановое количество втулок «К-во план» (#3159).
-// Поэтому таблицы ищутся в метаданных и по `val` (первая колонка), и по `alias`
-// (отображаемое имя), а план берётся/пишется как главное значение, а не реквизит.
+// БОЕВАЯ СХЕМА (live ateh): «Задание на втулки» — подчинённая таблица позиции, её
+// ГЛАВНОЕ ЗНАЧЕНИЕ (первая колонка) — это ДАТА/ВРЕМЯ планового старта (Unix), а не
+// количество. Реквизиты: «Втулкорез» (ссылка), «Кол-во» (план), «Кол-во факт»,
+// «Начато» и «Закончено» (обе — дата/время). Отдельного поля «Статус» НЕТ — статус
+// задания выводится из заполненности «Начато»/«Закончено»/«Кол-во факт»:
+//   Закончено + факт>0 → Готово;  Закончено + факт=0 → Пропущена;
+//   Начато (без Закончено) → В работе;  иначе → Ожидает.
 //
-// На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={позицияId}`,
-// правки — `_m_set/{заданиеId}`, новые задания — `_m_new/{Задание на втулки}`
-// с `up={позицияId}`. Список позиций берётся отчётом `orders_list`, с fallback на
-// `positions_list`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
+// Подчинённую таблицу нельзя прочитать плоско (`object/{задание}` отдаёт 0 строк),
+// поэтому задания читаются отчётом `sleeve_tasks` (master = таблица задания), а сам
+// отчёт фильтруется СЕРВЕРНО по втулкорезу (`FR_cutter_id`) и по диапазону планового
+// старта выбранного дня (`FR_task_date`/`TO_task_date`, границы — локальная полночь).
+// Действия пишутся напрямую `_m_set/{заданиеId}` (Закончено + Кол-во факт); в партию
+// сырья ничего не пишем (#3869). ID таблиц/реквизитов не хардкодятся — берутся по
+// именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
-// Чистое ядро (статусы заданий и сводка) вынесено в объект `core` и
-// экспортируется через module.exports для модульных тестов
+// Чистое ядро (статусы, сводка, разбор строк отчёта, дата-хелперы) вынесено в объект
+// `core` и экспортируется через module.exports для модульных тестов
 // (experiments/atex-sleeve-cutter.test.js).
 
 (function(root, factory) {
@@ -43,22 +46,36 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     'use strict';
 
-    // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
-    // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = { position: ['Заказанное количество', 'Позиция заказа'], task: 'Задание на втулки', cutter: 'Втулкорез' };
-    // Реквизиты задания. Плановое количество втулок («К-во план») — это главное
-    // значение таблицы (первая колонка), а не реквизит, поэтому в списке его нет
-    // (#3159): оно читается/пишется через `core.taskMainValue`.
+    // Имена таблиц и реквизитов схемы atex. По именам рабочее место находит
+    // конкретные числовые id в метаданных текущей сборки (а не хардкодит их).
+    var TABLE = { task: 'Задание на втулки', cutter: 'Втулкорез' };
+    // Реквизиты задания на втулки (боевая схема). Плановая дата — это главное
+    // значение таблицы (первая колонка), поэтому в списке реквизитов её нет.
     var TASK_REQ = {
         cutter: 'Втулкорез',
-        diameter: 'Диаметр, мм',
+        qty: 'Кол-во',            // плановое количество втулок
         factQty: 'Кол-во факт',
-        status: 'Статус'
+        started: 'Начато',        // дата/время старта
+        finished: 'Закончено'     // дата/время завершения
     };
     var CUTTER_REQ = { diaMin: 'Диаметр min, мм', diaMax: 'Диаметр max, мм' };
 
-    // Статусы задания по дизайн-спеке atex (§3.6): жёсткая цепочка переходов.
+    // Отчёт по заданиям на втулки и имена его колонок (см. docs/atex_workplaces.md §3.6).
+    var REPORT = 'sleeve_tasks';
+    var COL = {
+        id: 'task_id',
+        date: 'task_date',     // главное значение — Unix плановой даты
+        cutter: 'cutter',
+        cutterId: 'cutter_id',
+        qty: 'qty',
+        fact: 'fact',
+        started: 'started',
+        finished: 'finished'
+    };
+
+    // Статусы задания (выводятся из полей; отдельного поля «Статус» на бою нет).
     var STATUSES = ['Ожидает', 'В работе', 'Готово'];
+    var SKIPPED = 'Пропущена';
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -71,63 +88,128 @@
         return isFinite(n) ? n : 0;
     }
 
-    // Приведение статуса к одному из известных; неизвестное возвращается как есть
-    // (значение из БД сохраняем без потерь — поле «Статус» это свободный текст).
-    function normalizeStatus(status) {
-        var s = String(status == null ? '' : status).trim();
-        if (!s) return STATUSES[0];
-        for (var i = 0; i < STATUSES.length; i++) {
-            if (STATUSES[i].toLowerCase() === s.toLowerCase()) return STATUSES[i];
-        }
-        return s;
+    function round3(n) { return Math.round(n * 1000) / 1000; }
+    function str(value) { return value == null ? '' : String(value); }
+    function pad2(n) { var s = String(n); return s.length < 2 ? '0' + s : s; }
+
+    // Значение поля строки отчёта: JSON_KV отдаёт либо строку, либо {val,id}.
+    function kvVal(v) {
+        if (v != null && typeof v === 'object') return v.val != null ? v.val : (v.id != null ? v.id : '');
+        return v == null ? '' : v;
+    }
+    function isFilled(v) { return !(v === '' || v == null); }
+
+    // ── Дата/время: Unix ↔ локальная дата (конвенция cut-gantt.js — локальный TZ) ──
+
+    // Unix (сек или мс) → миллисекунды; 0/мусор → 0.
+    function unixToMs(value) {
+        var n = toNumber(value);
+        if (!n) return 0;
+        return n >= 1e12 ? n : n * 1000;
+    }
+    function localIsoFromMs(ms) {
+        var d = new Date(ms);
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+    // Unix → 'YYYY-MM-DD' по локальному времени; пусто → ''.
+    function unixToLocalIso(value) {
+        var ms = unixToMs(value);
+        return ms ? localIsoFromMs(ms) : '';
+    }
+    // Unix → 'HH:MM' по локальному времени; пусто → ''.
+    function unixToLocalTime(value) {
+        var ms = unixToMs(value);
+        if (!ms) return '';
+        var d = new Date(ms);
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    function todayLocalIso() { return localIsoFromMs(Date.now()); }
+
+    function isoParts(iso) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso));
+        return m ? { y: +m[1], mo: +m[2], d: +m[3] } : null;
+    }
+    // Границы дня в Unix-секундах: [локальная полночь, следующая локальная полночь).
+    // Используются как серверный фильтр отчёта по плановому старту (FR_/TO_).
+    function dayBoundsUnix(iso) {
+        var p = isoParts(iso);
+        if (!p) return null;
+        var start = new Date(p.y, p.mo - 1, p.d, 0, 0, 0, 0).getTime();
+        var end = new Date(p.y, p.mo - 1, p.d + 1, 0, 0, 0, 0).getTime();
+        return { start: Math.floor(start / 1000), end: Math.floor(end / 1000) };
+    }
+    // 'YYYY-MM-DD' → 'DD.MM.YYYY' (для подписи); нераспознанное — как есть.
+    function formatRuDate(iso) {
+        var p = isoParts(iso);
+        return p ? pad2(p.d) + '.' + pad2(p.mo) + '.' + p.y : String(iso == null ? '' : iso);
     }
 
-    // Следующий статус в цепочке Ожидает → В работе → Готово.
-    // На финальном (или неизвестном) статусе возвращает текущий — двигаться некуда.
-    function nextStatus(status) {
-        var s = normalizeStatus(status);
-        var idx = STATUSES.indexOf(s);
-        if (idx === -1 || idx === STATUSES.length - 1) return s;
-        return STATUSES[idx + 1];
+    // ── Статус задания из полей ──
+
+    // Выводит статус из заполненности «Начато»/«Закончено»/«Кол-во факт».
+    function statusFromFields(task) {
+        var t = task || {};
+        if (isFilled(t.finished)) return toNumber(t.factQty) > 0 ? STATUSES[2] : SKIPPED;
+        if (isFilled(t.started)) return STATUSES[1];
+        return STATUSES[0];
+    }
+    function eqStatus(a, b) {
+        return String(a == null ? '' : a).trim().toLowerCase() === String(b).toLowerCase();
+    }
+    function isDone(status) { return eqStatus(status, STATUSES[2]); }
+    function isSkipped(status) { return eqStatus(status, SKIPPED); }
+    function isTerminal(status) { return isDone(status) || isSkipped(status); }
+
+    // ── Разбор строк отчёта sleeve_tasks → задания ──
+
+    function taskFromReportRow(row) {
+        var r = row || {};
+        var dateUnix = toNumber(kvVal(r[COL.date]));
+        var task = {
+            id: str(kvVal(r[COL.id])) || null,
+            dateUnix: dateUnix,
+            dateIso: dateUnix ? unixToLocalIso(dateUnix) : '',
+            cutterId: str(kvVal(r[COL.cutterId])) || null,
+            cutterLabel: str(kvVal(r[COL.cutter])),
+            planQty: kvVal(r[COL.qty]),
+            factQty: kvVal(r[COL.fact]),
+            started: kvVal(r[COL.started]),
+            finished: kvVal(r[COL.finished])
+        };
+        task.status = statusFromFields(task);
+        return task;
     }
 
-    // Задание завершено?
-    function isDone(status) {
-        return normalizeStatus(status) === STATUSES[STATUSES.length - 1];
+    // Сортировка для показа: активные (не терминальные) выше завершённых, внутри
+    // групп — по плановому времени старта (раньше — выше). Сорт стабилен (V8).
+    function sortTasks(tasks) {
+        return (tasks || []).slice().sort(function(a, b) {
+            var ta = isTerminal(a.status) ? 1 : 0, tb = isTerminal(b.status) ? 1 : 0;
+            if (ta !== tb) return ta - tb;
+            return toNumber(a.dateUnix) - toNumber(b.dateUnix);
+        });
     }
 
-    // #3869: «Пропущена» — терминальный статус (оператор пропустил задание). Не в
-    // STATUSES (та — цепочка прогресса Ожидает→В работе→Готово), но завершает
-    // задание наравне с «Готово»: кнопки действий у такого задания не показываем.
-    var SKIPPED = 'Пропущена';
-    function isSkipped(status) {
-        return normalizeStatus(status).toLowerCase() === SKIPPED.toLowerCase();
-    }
-    function isTerminal(status) {
-        return isDone(status) || isSkipped(status);
-    }
-
-    // #3869: задания выбранного втулкореза (по реквизиту «Втулкорез»). Пустой
-    // cutterId → []. Активные (не терминальные) задания — выше завершённых,
-    // исходный порядок внутри групп сохраняем (сортировка стабильна в Node/V8).
-    function tasksForCutter(tasks, cutterId) {
-        var id = String(cutterId == null ? '' : cutterId);
-        if (!id) return [];
+    // Задания выбранного втулкореза на выбранную дату (защитный клиентский фильтр —
+    // отчёт уже отфильтрован серверно). Пустой cutterId → []. Активные выше завершённых.
+    function visibleTasks(tasks, cutterId, iso) {
+        var cid = str(cutterId);
+        if (!cid) return [];
+        var dayIso = str(iso);
         var list = (tasks || []).filter(function(t) {
-            return String(t.cutterId == null ? '' : t.cutterId) === id;
+            if (str(t.cutterId) !== cid) return false;
+            if (dayIso && str(t.dateIso) !== dayIso) return false;
+            return true;
         });
-        return list.slice().sort(function(a, b) {
-            return (isTerminal(a.status) ? 1 : 0) - (isTerminal(b.status) ? 1 : 0);
-        });
+        return sortTasks(list);
     }
 
-    // #3869: есть ли у втулкореза незавершённые задания (для кнопки «Закрыть все»).
-    function hasActiveTasks(tasks, cutterId) {
-        return tasksForCutter(tasks, cutterId).some(function(t) { return !isTerminal(t.status); });
+    // Есть ли незавершённые задания (для кнопки «Закрыть все»).
+    function hasActiveTasks(tasks, cutterId, iso) {
+        return visibleTasks(tasks, cutterId, iso).some(function(t) { return !isTerminal(t.status); });
     }
 
-    // Сводка по заданиям позиции: сколько план/факт суммарно, сколько готово,
-    // и процент выполнения (по факту от плана). Для шапки и прогресса.
+    // Сводка по заданиям: план/факт суммарно, сколько готово, % выполнения по факту.
     function summarize(tasks) {
         var list = tasks || [];
         var plan = 0, fact = 0, done = 0;
@@ -141,23 +223,12 @@
             done: done,
             planQty: round3(plan),
             factQty: round3(fact),
-            // Процент выполнения по факту от плана (0..100, без плана → 0).
             percent: plan > 0 ? Math.min(100, Math.round((fact / plan) * 100)) : 0
         };
     }
 
-    function round3(n) {
-        return Math.round(n * 1000) / 1000;
-    }
-
-    function str(value) {
-        return value == null ? '' : String(value);
-    }
-
     // ── Поиск сущностей метаданных по имени (val/alias) ──
 
-    // alias таблицы/реквизита: берём из готового поля `alias`, иначе разбираем
-    // `attrs` (JSON со свойством alias). Таблицы получили alias в #3159.
     function aliasOf(entry) {
         if (!entry) return '';
         if (entry.alias != null && entry.alias !== '') return String(entry.alias);
@@ -165,13 +236,10 @@
             try {
                 var a = JSON.parse(entry.attrs);
                 if (a && a.alias != null) return String(a.alias);
-            } catch (e) { /* attrs не JSON — alias нет */ }
+            } catch (e) { /* attrs не JSON */ }
         }
         return '';
     }
-
-    // Совпадение сущности с искомым именем: и по `val` (первая колонка),
-    // и по `alias` (отображаемое имя). Регистр и пробелы игнорируются (#3159).
     function matchesName(entry, name) {
         if (!entry) return false;
         var target = String(name == null ? '' : name).trim().toLowerCase();
@@ -179,8 +247,6 @@
         if (String(entry.val == null ? '' : entry.val).trim().toLowerCase() === target) return true;
         return aliasOf(entry).trim().toLowerCase() === target;
     }
-
-    // Таблица из метаданных по имени (val или alias); нет → null.
     function tableByName(list, name) {
         var arr = Array.isArray(list) ? list : (list == null ? [] : [list]);
         var names = Array.isArray(name) ? name : [name];
@@ -191,17 +257,10 @@
         }
         return null;
     }
-
-    // Значение реквизита из метаданных по имени (val/alias) → его числовой id.
     function reqIdByName(meta, name) {
-        var found = (meta && meta.reqs || []).filter(function(r) {
-            return matchesName(r, name);
-        })[0];
+        var found = (meta && meta.reqs || []).filter(function(r) { return matchesName(r, name); })[0];
         return found ? String(found.id) : null;
     }
-
-    // Индекс колонки JSON_OBJ по имени реквизита. Колонки идут в порядке
-    // [главное значение, ...reqs по порядку метаданных].
     function colIndex(meta, reqName) {
         var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
         var rid = reqIdByName(meta, reqName);
@@ -209,177 +268,39 @@
         return idx >= 0 ? idx : -1;
     }
 
-    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
-    function parseRef(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
-    }
-
-    function refLabel(value) {
-        var ref = parseRef(value);
-        return ref.label || ref.id || '';
-    }
-
-    // ── Маппинг строк задания на втулки ──
-
-    // Строка JSON_OBJ задания → объект задания. Плановое количество — это
-    // главное значение (первая колонка r[0]), остальное — реквизиты (#3159).
-    function taskFromRow(meta, rec) {
-        var r = (rec && rec.r) || [];
-        var cutterIdx = colIndex(meta, TASK_REQ.cutter);
-        var diamIdx = colIndex(meta, TASK_REQ.diameter);
-        var factIdx = colIndex(meta, TASK_REQ.factQty);
-        var statusIdx = colIndex(meta, TASK_REQ.status);
-        var cutterRef = cutterIdx >= 0 ? parseRef(r[cutterIdx]) : { id: null };
-        return {
-            id: rec && rec.i != null ? String(rec.i) : null,
-            planQty: r[0] || '',
-            cutterId: cutterRef.id,
-            cutterAuto: false,
-            diameter: diamIdx >= 0 ? (r[diamIdx] || '') : '',
-            factQty: factIdx >= 0 ? (r[factIdx] || '') : '',
-            status: statusIdx >= 0 ? normalizeStatus(r[statusIdx]) : STATUSES[0]
-        };
-    }
-
-    // Главное значение задания для записи (_m_save / t{tableId}) — план втулок.
-    // Пусто → '' (команда такие поля не отправляет), иначе число.
-    function taskMainValue(task) {
-        var v = task ? task.planQty : '';
-        return (v === '' || v == null) ? '' : toNumber(v);
-    }
-
-    // Реквизиты задания для _m_set/_m_new в форме `t{reqId}` (по именам из
-    // метаданных). Без главного значения — его пишем отдельно (taskMainValue).
-    function taskReqFields(meta, task) {
-        var fields = {};
-        function set(reqName, value) {
-            var rid = reqIdByName(meta, reqName);
-            if (rid) fields['t' + rid] = value;
-        }
-        function num(v) { return (v === '' || v == null) ? '' : toNumber(v); }
-        set(TASK_REQ.cutter, (task && task.cutterId) || '');
-        set(TASK_REQ.diameter, num(task && task.diameter));
-        set(TASK_REQ.factQty, num(task && task.factQty));
-        set(TASK_REQ.status, normalizeStatus(task && task.status));
-        return fields;
-    }
-
-    function positionLabel(position) {
-        var p = position || {};
-        var orderNo = str(p.orderNo).trim();
-        var no = str(p.no).trim();
-        var width = str(p.width).trim();
-        var head = '';
-        if (orderNo && no) head = orderNo + '/' + no;
-        else if (orderNo) head = orderNo;
-        else if (no) head = '№' + no;
-        else head = 'Позиция #' + str(p.id);
-        return head + (width ? ' · ' + width + ' мм' : '');
-    }
-
-    // Плоские строки отчётов orders_list/positions_list → позиции для пульта.
-    // Задания на втулки подчинены позиции (#3139), поэтому повторные строки
-    // отчёта по одной позиции дедуплицируются.
-    function rowsToPositions(rows) {
-        var byId = {};
-        var order = [];
-        (rows || []).forEach(function(row) {
-            var id = str(row.position_id);
-            if (!id || byId[id]) return;
-            var p = {
-                id: id,
-                orderNo: str(row.order_no),
-                no: str(row.position_no),
-                qty: str(row.position_qty),
-                width: str(row.position_width) || str(row.position_width_mm),
-                length: str(row.position_length) || str(row.position_length_m),
-                sleeve: str(row.position_sleeve),
-                status: str(row.position_status)
-            };
-            p.label = positionLabel(p);
-            byId[id] = p;
-            order.push(id);
-        });
-        return order.map(function(id) { return byId[id]; });
-    }
-
-    // Значения новой строки задания из выбранной позиции: план = кол-во позиции,
-    // диаметр = справочное значение «Диаметр втулки», если отчёт его отдаёт.
-    function taskDefaultsFromPosition(position) {
-        var qty = position && position.qty != null ? str(position.qty) : '';
-        var sleeve = position && position.sleeve != null ? refLabel(position.sleeve) : '';
-        return {
-            planQty: qty,
-            diameter: sleeve === '' ? '' : toNumber(sleeve)
-        };
-    }
-
-    // Подбор втулкореза по диаметру задания: запись, чей диапазон
-    // [diaMin..diaMax] покрывает diameter (границы включительно); при нескольких —
-    // с самым узким диапазоном; нет подходящего → null. Пустой диаметр → null.
-    function pickCutter(diameter, cutters) {
-        var d = toNumber(diameter);
-        if (!d || !cutters) return null;
-        var best = null, bestWidth = Infinity;
-        cutters.forEach(function(c) {
-            var min = (c.diaMin === '' || c.diaMin == null) ? -Infinity : toNumber(c.diaMin);
-            var max = (c.diaMax === '' || c.diaMax == null) ? Infinity : toNumber(c.diaMax);
-            if (d < min || d > max) return;
-            var width = max - min;
-            if (best === null || width < bestWidth) { best = c; bestWidth = width; }
-        });
-        return best;
-    }
-
-    // Подпись диапазона диаметров: «20–25 мм», «от 20 мм», «до 76 мм» или ''.
+    // Подпись диапазона диаметров втулкореза: «20–25 мм», «от 20 мм», «до 76 мм» или ''.
     function formatRange(min, max) {
-        var hasMin = !(min === '' || min == null);
-        var hasMax = !(max === '' || max == null);
+        var hasMin = isFilled(min), hasMax = isFilled(max);
         if (hasMin && hasMax) return toNumber(min) + '–' + toNumber(max) + ' мм';
         if (hasMin) return 'от ' + toNumber(min) + ' мм';
         if (hasMax) return 'до ' + toNumber(max) + ' мм';
         return '';
     }
 
-    // Авто-назначение втулкореза заданию по диаметру. Ручной выбор оператора
-    // (cutterId задан и не авто) не перетирается. Иначе — pickCutter и признак
-    // cutterAuto. Мутирует и возвращает задание.
-    function autoAssignCutter(task, cutters) {
-        if (!task) return task;
-        if (task.cutterId && !task.cutterAuto) return task;
-        var picked = pickCutter(task.diameter, cutters);
-        task.cutterId = picked ? picked.id : null;
-        task.cutterAuto = !!picked;
-        return task;
-    }
-
     var core = {
         STATUSES: STATUSES,
+        SKIPPED: SKIPPED,
         toNumber: toNumber,
-        normalizeStatus: normalizeStatus,
-        nextStatus: nextStatus,
+        statusFromFields: statusFromFields,
         isDone: isDone,
-        SKIPPED: SKIPPED,             // #3869
-        isSkipped: isSkipped,         // #3869
-        isTerminal: isTerminal,       // #3869
-        tasksForCutter: tasksForCutter, // #3869
-        hasActiveTasks: hasActiveTasks, // #3869
+        isSkipped: isSkipped,
+        isTerminal: isTerminal,
+        unixToLocalIso: unixToLocalIso,
+        unixToLocalTime: unixToLocalTime,
+        todayLocalIso: todayLocalIso,
+        dayBoundsUnix: dayBoundsUnix,
+        formatRuDate: formatRuDate,
+        taskFromReportRow: taskFromReportRow,
+        sortTasks: sortTasks,
+        visibleTasks: visibleTasks,
+        hasActiveTasks: hasActiveTasks,
         summarize: summarize,
-        pickCutter: pickCutter,
         formatRange: formatRange,
-        autoAssignCutter: autoAssignCutter,
-        rowsToPositions: rowsToPositions,
-        taskDefaultsFromPosition: taskDefaultsFromPosition,
         aliasOf: aliasOf,
         matchesName: matchesName,
         tableByName: tableByName,
         reqIdByName: reqIdByName,
-        colIndex: colIndex,
-        parseRef: parseRef,
-        taskFromRow: taskFromRow,
-        taskMainValue: taskMainValue,
-        taskReqFields: taskReqFields
+        colIndex: colIndex
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -401,17 +322,14 @@
         return node;
     }
 
-    // Метаданные-хелперы (reqIdByName, colIndex, parseRef) и маппинг строк
-    // задания вынесены в core (см. выше) — браузерный слой использует их оттуда.
-
     function AtexSleeveCutter(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { position: null, task: null, cutter: null };
-        this.cutters = [];        // справочник втулкорезов [{ id, label, diaMin, diaMax }]
-        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
-        this.tasks = [];          // ВСЕ задания на втулки [{ id, planQty, cutterId, diameter, factQty, status }]
-        this.selectedCutterId = null; // #3869: выбранный втулкорез (фильтр списка заданий)
+        this.meta = { task: null, cutter: null };
+        this.cutters = [];             // справочник втулкорезов [{ id, label, diaMin, diaMax }]
+        this.tasks = [];               // задания выбранного втулкореза на выбранную дату
+        this.selectedCutterId = null;  // выбранный втулкорез (localStorage)
+        this.selectedDate = core.todayLocalIso(); // выбранная дата (localStorage), по умолчанию сегодня
         this.busy = false;
     }
 
@@ -427,38 +345,6 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
-    };
-
-    AtexSleeveCutter.prototype.loadRefOptions = function(reqId, query, limit) {
-        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
-    };
-
-    AtexSleeveCutter.prototype.refSelect = function(opts) {
-        var self = this;
-        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
-        if (helper && typeof helper.createSelect === 'function') {
-            return helper.createSelect({
-                classPrefix: 'atex-sc',
-                inputClass: 'atex-sc-input',
-                options: opts.options || [],
-                value: opts.value,
-                placeholder: opts.placeholder,
-                reqId: opts.reqId,
-                cache: this.refOptions,
-                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
-                onChange: opts.onChange
-            });
-        }
-
-        var nativeSelect = el('select', { class: 'atex-sc-input' });
-        nativeSelect.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
-        (opts.options || []).forEach(function(item) {
-            var o = el('option', { value: item.id, text: item.label });
-            if (String(opts.value) === String(item.id)) o.selected = true;
-            nativeSelect.appendChild(o);
-        });
-        nativeSelect.addEventListener('change', function() { opts.onChange(nativeSelect.value); });
-        return nativeSelect;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -489,14 +375,8 @@
         var self = this;
         return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
-            // Таблицы ищем по имени с учётом alias (#3159): «Задание на втулки» —
-            // это alias таблицы, чьё главное значение называется «К-во план».
-            function byName(name) {
-                return core.tableByName(list, name);
-            }
-            self.meta.position = byName(TABLE.position);
-            self.meta.task = byName(TABLE.task);
-            self.meta.cutter = byName(TABLE.cutter);
+            self.meta.task = core.tableByName(list, TABLE.task);
+            self.meta.cutter = core.tableByName(list, TABLE.cutter);
             if (!self.meta.task) throw new Error('В метаданных не найдена таблица «' + TABLE.task + '»');
             if (!self.meta.cutter) throw new Error('В метаданных не найдена таблица «' + TABLE.cutter + '»');
         });
@@ -507,8 +387,8 @@
         if (!this.meta.cutter) { this.cutters = []; return Promise.resolve(); }
         var meta = this.meta.cutter;
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var minIdx = colIndex(meta, CUTTER_REQ.diaMin);
-            var maxIdx = colIndex(meta, CUTTER_REQ.diaMax);
+            var minIdx = core.colIndex(meta, CUTTER_REQ.diaMin);
+            var maxIdx = core.colIndex(meta, CUTTER_REQ.diaMax);
             self.cutters = (rows || []).map(function(r) {
                 var row = r.r || [];
                 return {
@@ -529,24 +409,31 @@
         });
     };
 
-    // ── Чтение заданий на втулки ──
+    // ── Чтение заданий на втулки (отчёт sleeve_tasks, серверный фильтр) ──
 
-    // #3869: грузим ВСЕ задания на втулки (object/112). Дедик-отчёта нет —
-    // фильтрация по выбранному втулкорезу выполняется в visibleTasks.
+    // Задания выбранного втулкореза на выбранную дату. Без выбранного втулкореза —
+    // ничего не грузим. Отчёт фильтруется серверно по cutter_id и диапазону даты дня.
     AtexSleeveCutter.prototype.loadTasks = function() {
         var self = this;
-        var meta = this.meta.task;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.tasks = (rows || []).map(function(rec) { return core.taskFromRow(meta, rec); });
+        if (!this.selectedCutterId) { this.tasks = []; return Promise.resolve(); }
+        var path = 'report/' + REPORT + '?JSON_KV&LIMIT=0,5000' +
+            '&FR_' + COL.cutterId + '=' + encodeURIComponent(this.selectedCutterId);
+        var bounds = core.dayBoundsUnix(this.selectedDate);
+        if (bounds) {
+            path += '&FR_' + COL.date + '=' + bounds.start + '&TO_' + COL.date + '=' + bounds.end;
+        }
+        return this.getJson(path).then(function(rows) {
+            var list = Array.isArray(rows) ? rows : [];
+            self.tasks = list.map(function(row) { return core.taskFromReportRow(row); });
         });
     };
 
-    // #3869: задания выбранного втулкореза (активные выше завершённых).
     AtexSleeveCutter.prototype.visibleTasks = function() {
-        return core.tasksForCutter(this.tasks, this.selectedCutterId);
+        return core.visibleTasks(this.tasks, this.selectedCutterId, this.selectedDate);
     };
 
-    // #3869: запоминаем выбор втулкореза (как «Станок» в слиттере, через localStorage).
+    // ── Запоминание выбора втулкореза и даты (localStorage) ──
+
     AtexSleeveCutter.prototype.storeCutter = function() {
         try { if (window.localStorage) window.localStorage.setItem('atex-sc-cutter', this.selectedCutterId || ''); } catch (e) {}
     };
@@ -556,15 +443,39 @@
             if (id && (this.cutters || []).some(function(c) { return String(c.id) === String(id); })) this.selectedCutterId = String(id);
         } catch (e) {}
     };
+    AtexSleeveCutter.prototype.storeDate = function() {
+        try { if (window.localStorage) window.localStorage.setItem('atex-sc-date', this.selectedDate || ''); } catch (e) {}
+    };
+    AtexSleeveCutter.prototype.restoreDate = function() {
+        try {
+            var d = window.localStorage && window.localStorage.getItem('atex-sc-date');
+            if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) this.selectedDate = d;
+        } catch (e) {}
+    };
 
-    // ── Рендеринг (#3869: втулкорез → список заданий; без позиций/смены/CRUD) ──
+    // Перезагрузить задания под текущий втулкорез/дату и перерисовать.
+    AtexSleeveCutter.prototype.refresh = function() {
+        var self = this;
+        this.setBusy(true);
+        return this.loadTasks().then(function() {
+            self.setBusy(false);
+            self.render();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка загрузки заданий: ' + err.message, 'error');
+            self.tasks = [];
+            self.render();
+        });
+    };
+
+    // ── Рендеринг (втулкорез + дата → список заданий) ──
 
     AtexSleeveCutter.prototype.render = function() {
         this.renderToolbar();
         this.renderTasks();
     };
 
-    // Тулбар: выбор втулкореза + «Закрыть все» (если есть активные задания).
+    // Тулбар: выбор втулкореза + выбор даты + «Закрыть все» (если есть активные).
     AtexSleeveCutter.prototype.renderToolbar = function() {
         var self = this;
         var box = this.toolbarEl;
@@ -581,11 +492,19 @@
         select.addEventListener('change', function() {
             self.selectedCutterId = select.value || null;
             self.storeCutter();
-            self.render();
+            self.refresh();
         });
         box.appendChild(this.field('Втулкорез', select));
 
-        if (this.selectedCutterId && core.hasActiveTasks(this.tasks, this.selectedCutterId)) {
+        var date = el('input', { type: 'date', class: 'atex-sc-input', value: this.selectedDate || '' });
+        date.addEventListener('change', function() {
+            self.selectedDate = date.value || core.todayLocalIso();
+            self.storeDate();
+            self.refresh();
+        });
+        box.appendChild(this.field('Дата', date, 'atex-sc-field-date'));
+
+        if (this.selectedCutterId && core.hasActiveTasks(this.tasks, this.selectedCutterId, this.selectedDate)) {
             var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-toolbar-all', type: 'button', text: '✓✓ Закрыть все' });
             allBtn.addEventListener('click', function() { self.closeAll(); });
             box.appendChild(allBtn);
@@ -593,8 +512,8 @@
     };
 
     // Обёртка «подпись + контрол» для тулбара.
-    AtexSleeveCutter.prototype.field = function(label, control) {
-        return el('label', { class: 'atex-sc-field' }, [
+    AtexSleeveCutter.prototype.field = function(label, control, extraClass) {
+        return el('label', { class: 'atex-sc-field' + (extraClass ? ' ' + extraClass : '') }, [
             el('span', { class: 'atex-sc-label', text: label }),
             control
         ]);
@@ -611,9 +530,11 @@
             return;
         }
 
+        host.appendChild(el('div', { class: 'atex-sc-caption', text: 'Задания на ' + core.formatRuDate(this.selectedDate) }));
+
         var tasks = this.visibleTasks();
         if (!tasks.length) {
-            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'Заданий на втулки для этого втулкореза нет.' }));
+            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'На эту дату заданий для этого втулкореза нет.' }));
             return;
         }
 
@@ -636,7 +557,7 @@
         }
     };
 
-    // Карточка задания: Ø / план / факт / статус + кнопки ✓ Готово / Пропустить.
+    // Карточка задания: старт / план / факт / статус + кнопки ✓ Готово / Пропустить.
     // У завершённого (Готово) или пропущенного — только бейдж статуса, без кнопок.
     AtexSleeveCutter.prototype.renderTaskRow = function(task, idx) {
         var self = this;
@@ -646,13 +567,13 @@
 
         card.appendChild(el('div', { class: 'atex-sc-card-head' }, [
             el('span', { class: 'atex-sc-card-num', text: '№ ' + (idx + 1) }),
-            el('span', { class: 'atex-sc-badge' + badgeMod, text: core.normalizeStatus(task.status) })
+            el('span', { class: 'atex-sc-badge' + badgeMod, text: task.status })
         ]));
 
-        var d = core.toNumber(task.diameter);
+        var startTime = core.unixToLocalTime(task.dateUnix);
         var fact = core.toNumber(task.factQty);
         var parts = [];
-        if (d) parts.push('Ø ' + d + ' мм');
+        if (startTime) parts.push('старт ' + startTime);
         parts.push('план ' + core.toNumber(task.planQty) + ' шт');
         if (fact) parts.push('факт ' + fact + ' шт');
         card.appendChild(el('div', { class: 'atex-sc-card-info', text: parts.join(' · ') }));
@@ -667,24 +588,27 @@
         return card;
     };
 
-    // ── Действия по заданию (#3869: только статус, в партию не пишем) ──
+    // ── Действия по заданию (только «Закончено»/«Кол-во факт»; в партию не пишем) ──
 
-    // Записать «Статус» задания; для «Готово» дополнительно «Кол-во факт»=«К-во план».
-    // Обновляет задание в памяти после подтверждения сервером.
-    AtexSleeveCutter.prototype.setTaskStatus = function(task, status, setFact) {
+    // Завершить задание: пишем «Закончено» = сейчас. Для «Готово» — ещё и
+    // «Кол-во факт» = «Кол-во» (план). Для «Пропустить» факт не трогаем (остаётся
+    // пустым/0 → статус выводится как «Пропущена»). Обновляет задание в памяти.
+    AtexSleeveCutter.prototype.writeCompletion = function(task, withFact) {
         if (!task || !task.id) return Promise.resolve();
         var meta = this.meta.task;
         var fields = {};
-        var statusRid = reqIdByName(meta, TASK_REQ.status);
-        if (statusRid) fields['t' + statusRid] = status;
-        var planVal = core.taskMainValue(task);
-        if (setFact && planVal !== '') {
-            var factRid = reqIdByName(meta, TASK_REQ.factQty);
+        var nowUnix = Math.floor(Date.now() / 1000);
+        var finRid = core.reqIdByName(meta, TASK_REQ.finished);
+        if (finRid) fields['t' + finRid] = nowUnix;
+        var planVal = core.toNumber(task.planQty);
+        if (withFact && planVal > 0) {
+            var factRid = core.reqIdByName(meta, TASK_REQ.factQty);
             if (factRid) fields['t' + factRid] = planVal;
         }
         return this.post('_m_set/' + task.id + '?JSON', fields).then(function() {
-            task.status = status;
-            if (setFact && planVal !== '') task.factQty = planVal;
+            task.finished = nowUnix;
+            if (withFact && planVal > 0) task.factQty = planVal;
+            task.status = core.statusFromFields(task);
         });
     };
 
@@ -692,7 +616,7 @@
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
-        this.setTaskStatus(task, core.STATUSES[core.STATUSES.length - 1], true).then(function() {
+        this.writeCompletion(task, true).then(function() {
             self.setBusy(false);
             self.notify('Задание отмечено «Готово»', 'success');
             self.render();
@@ -706,7 +630,7 @@
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
-        this.setTaskStatus(task, core.SKIPPED, false).then(function() {
+        this.writeCompletion(task, false).then(function() {
             self.setBusy(false);
             self.notify('Задание пропущено', 'info');
             self.render();
@@ -716,8 +640,8 @@
         });
     };
 
-    // «Закрыть все» — пометить все незавершённые задания втулкореза «Готово»
-    // (с подтверждением); последовательная запись, затем перерисовка.
+    // «Закрыть все» — пометить все незавершённые задания «Готово» (с подтверждением);
+    // последовательная запись, затем перерисовка.
     AtexSleeveCutter.prototype.closeAll = function() {
         var self = this;
         if (this.busy) return;
@@ -725,9 +649,8 @@
         if (!pending.length) { this.notify('Нет незавершённых заданий', 'info'); return; }
         this.confirmModal('Отметить все ' + pending.length + ' заданий «Готово»?', function() {
             self.setBusy(true);
-            var done = core.STATUSES[core.STATUSES.length - 1];
             var chain = Promise.resolve();
-            pending.forEach(function(t) { chain = chain.then(function() { return self.setTaskStatus(t, done, true); }); });
+            pending.forEach(function(t) { chain = chain.then(function() { return self.writeCompletion(t, true); }); });
             chain.then(function() {
                 self.setBusy(false);
                 self.notify('Все задания отмечены «Готово»', 'success');
@@ -786,8 +709,7 @@
     AtexSleeveCutter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
-        // #3869: сверху — тулбар (выбор втулкореза + «Закрыть все»), ниже — список заданий.
-        // Без боковой панели позиций и без смены.
+        // Сверху — тулбар (втулкорез + дата + «Закрыть все»), ниже — список заданий.
         var layout = el('div', { class: 'atex-sc-layout' });
         this.toolbarEl = el('div', { class: 'atex-sc-toolbar' });
         this.tasksEl = el('section', { class: 'atex-sc-main' });
@@ -799,8 +721,13 @@
         this.tasksEl.appendChild(el('div', { class: 'atex-sc-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadCutters(), self.loadTasks()]); })
-            .then(function() { self.restoreCutter(); self.render(); })
+            .then(function() { return self.loadCutters(); })
+            .then(function() {
+                self.restoreCutter();
+                self.restoreDate();
+                return self.loadTasks();
+            })
+            .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
