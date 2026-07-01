@@ -75,4 +75,37 @@ function assert(cond, name) { assertEqual(!!cond, true, name); }
     assert(rFix.moves.length > rBug.moves.length, '#3957 ФИКС: переносов больше (реальный перегруз за отпуском виден)');
 })();
 
+// ── 3) perDaySetupMin: подневная настройка (#3669) сдвигает ХВОСТ дальше со станка с отпуском ──
+// Модель выравнивания сбрасывала станок с отпуском РОВНО под доотпускной потолок (3×cap), но
+// реальное дробление по дням доплачивает настройку первой резки КАЖДОГО дня → те же минуты не
+// влезают в 3 дня и тонким хвостом переливаются за отпуск (13–16.07). perDaySetupMin заряжает эту
+// подневную настройку (effCap = cap − perDaySetupMin) → станок с отпуском сбрасывается НИЖЕ
+// наивного потолка, оставляя запас, и хвост уходит на свободные станки.
+(function () {
+    var CAP = 450;
+    function plan(id, sid) { return { id: id, slitterId: String(sid), materialId: 'M' + id, winding: 'OUT', knifeWidths: [id % 40 + 5], knifeCount: 1, isFoil: false, duration: 90 }; }
+    function dist(p) { var o = {}; p.forEach(function (x) { o[x.slitterId] = (o[x.slitterId] || 0) + 1; }); return o; }
+    function weekend(d) { var m = ((d % 7) + 7) % 7; return m === 3 || m === 4; }
+    function off(id, d) { return weekend(d) || (String(id) === '1' && d >= 5 && d <= 11); }
+    function build() { var a = []; for (var i = 0; i < 60; i++) a.push(plan(i, '1')); return a; }   // всё на Станок1, перегруз
+
+    var base = build();
+    var rBase = planning.rebalanceSlitterLoad(base, [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }],
+        { weights: null, dayCapacityMin: CAP, machineDayOff: off });   // perDaySetupMin не задан → 0
+    var withPsd = build();
+    var rPsd = planning.rebalanceSlitterLoad(withPsd, [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }],
+        { weights: null, dayCapacityMin: CAP, perDaySetupMin: 45, machineDayOff: off });
+
+    assert(rPsd.loadAfter['1'].minutes < rBase.loadAfter['1'].minutes,
+        '#3957 perDaySetupMin: Станок 1 сброшен НИЖЕ, чем без подневной настройки (' +
+        Math.round(rPsd.loadAfter['1'].minutes) + ' < ' + Math.round(rBase.loadAfter['1'].minutes) + ')');
+    assert(rPsd.loadAfter['1'].minutes <= 3 * (CAP - 45),
+        '#3957 perDaySetupMin: работа Станка 1 ≤ доотпускной ёмкости с запасом (3×405=1215) — реальный хвост не переливается');
+    assert((dist(withPsd)['1'] || 0) < (dist(base)['1'] || 0),
+        '#3957 perDaySetupMin: у Станка 1 меньше заданий (лишнее ушло на 2/3/4)');
+    // perDaySetupMin=0 (обратная совместимость) → как раньше (тесты #3921/#3881/#3848 не задают его).
+    assertEqual(rBase.loadAfter['1'].days, rPsd.loadAfter['1'].days,
+        '#3957 perDaySetupMin: пол «дата окончания отпуска» (span=12) сохранён в обоих случаях');
+})();
+
 console.log('\n' + passed + ' assertions passed');
