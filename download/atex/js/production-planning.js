@@ -4466,6 +4466,22 @@
             if (toKey != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
             return false;
         }
+        // #3924: осиротевшие сегменты НАСТРОЙКИ (0 проходов) — мусор прежних пересборок. У них
+        // пустой «ID первой части» (голову-резку удалили/перенесли), поэтому mergeContinuationChains
+        // не подшивает их к цепочке, а делает ОТДЕЛЬНОЙ логической резкой с plannedRuns=0. Планировщик
+        // такую резку не раскладывает (0 проходов) → обычный delete-путь (usedByHead, ниже) её не
+        // трогает, и она оседает «настройкой в начале дня», раздувая бейдж дня за ёмкость (issue #3924,
+        // тот же станко-день, что #3920: Станок 1, 02.07, MW308). Удаляем такие сироты В ПРЕДЕЛАХ scope
+        // (чужие даты не трогаем, #3660). Реальные резки (проходы>0) и настоящие setup-хвосты (член
+        // цепочки, у чьей ГОЛОВЫ проходы>0 → сумма цепочки>0) под условие не попадают.
+        var orphanDeletes = [];
+        merged.cuts = merged.cuts.filter(function(c){
+            if (Number(c && c.plannedRuns) > 0) return true;       // есть проходы где-либо в цепочке — реальная резка
+            if (c && c.fixed) return true;                         // #3508: зафиксированное авто-чисткой не удаляем
+            if (!inScopeUpTo(c, scopeTo)) return true;             // вне окна фильтра — не трогаем (#3660)
+            (chainByLogical[String(c && c.id)] || [String(c && c.id)]).forEach(function(id){ orphanDeletes.push(String(id)); });
+            return false;
+        });
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
         // #3635/#3923; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
         function planMachineSegs(cutsOfMachine, key){
@@ -4605,6 +4621,9 @@
             if (used == null) return;
             for (var k = used; k < chain.length; k++) deletes.push(String(chain[k]));
         });
+        // #3924: осиротевшие setup-сегменты (0 проходов) — на удаление (собраны выше при отсеве
+        // из merged.cuts). Дедуп на случай пересечения с delete-путём цепочек.
+        orphanDeletes.forEach(function(id){ if (deletes.indexOf(id) < 0) deletes.push(id); });
         return { updates: updates, creates: creates, deletes: deletes };
     }
 
