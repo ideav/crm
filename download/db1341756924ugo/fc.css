@@ -1,0 +1,133 @@
+/* ИНТЕГРАМ FC — фирменный стиль рабочих мест (антитотализатор) */
+:root{
+  --fc-green:#16c784;      /* поле / успех / акцент */
+  --fc-green-2:#0aa86a;
+  --fc-gold:#ffce3a;       /* валюта G */
+  --fc-cringe:#ff4d6d;     /* кринж / позор / проигрыш */
+  --fc-purple:#8b5cf6;     /* живые ставки */
+  --fc-blue:#3b82f6;
+  --fc-ink:#0c1322;        /* тёмный фон-карточки бренда */
+  --fc-line:rgba(255,255,255,.10);
+}
+[data-theme="light"]{ --fc-ink:#f4f7fb; --fc-line:rgba(0,0,0,.10); }
+
+.fc{ font-family:-apple-system,Segoe UI,Roboto,Inter,system-ui,sans-serif; color:var(--text-primary,#e6edf3); }
+.fc *{ box-sizing:border-box; }
+.fc-wrap{ max-width:1180px; margin:0 auto; padding:6px 4px 40px; }
+
+/* Заголовок страницы */
+.fc-hero{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  background:linear-gradient(120deg, var(--fc-green-2) 0%, #0c8f5a 45%, #0c1322 100%);
+  color:#fff; border-radius:16px; padding:18px 22px; margin:6px 0 18px;
+  box-shadow:0 10px 30px rgba(0,0,0,.28); position:relative; overflow:hidden;
+}
+.fc-hero::after{ content:"⚽"; position:absolute; right:-10px; top:-18px; font-size:120px; opacity:.10; }
+.fc-hero .fc-logo{ font-weight:900; letter-spacing:.5px; font-size:22px; display:flex; align-items:center; gap:8px; }
+.fc-hero .fc-logo .b{ background:#fff; color:var(--fc-green-2); padding:2px 8px; border-radius:8px; }
+.fc-hero h1{ font-size:18px; margin:0; font-weight:800; }
+.fc-hero p{ margin:2px 0 0; opacity:.9; font-size:13px; }
+.fc-hero .sp{ flex:1; }
+
+/* Сетка карточек */
+.fc-grid{ display:grid; gap:14px; }
+.fc-grid.c2{ grid-template-columns:repeat(2,1fr); }
+.fc-grid.c3{ grid-template-columns:repeat(3,1fr); }
+.fc-grid.c4{ grid-template-columns:repeat(4,1fr); }
+@media(max-width:900px){ .fc-grid.c2,.fc-grid.c3,.fc-grid.c4{ grid-template-columns:1fr; } }
+
+.fc-card{
+  background:var(--card-bg,var(--input-bg,#141b2d)); border:1px solid var(--border-color,var(--fc-line));
+  border-radius:14px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.12);
+}
+.fc-card h3{ margin:0 0 12px; font-size:14px; font-weight:800; display:flex; align-items:center; gap:8px;
+  text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary,#9fb0c3); }
+.fc-card h3 .pi{ color:var(--fc-green); }
+
+/* KPI */
+.fc-kpi{ text-align:left; }
+.fc-kpi .v{ font-size:26px; font-weight:900; line-height:1.1; }
+.fc-kpi .l{ font-size:12px; color:var(--text-secondary,#9fb0c3); margin-top:4px; }
+.fc-kpi .ic{ font-size:20px; }
+
+/* Валюта G */
+.g{ color:var(--fc-gold); font-weight:800; }
+.g::after{ content:" Ǥ"; font-weight:700; }
+.gpos{ color:var(--fc-green); font-weight:800; }
+.gneg{ color:var(--fc-cringe); font-weight:800; }
+
+/* Бэйджи / чипы */
+.chip{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:700;
+  padding:3px 10px; border-radius:999px; background:var(--bg-secondary,#1c2740); color:var(--text-primary,#e6edf3); }
+.chip.green{ background:rgba(22,199,132,.16); color:var(--fc-green); }
+.chip.gold{ background:rgba(255,206,58,.16); color:var(--fc-gold); }
+.chip.red{ background:rgba(255,77,109,.16); color:var(--fc-cringe); }
+.chip.purple{ background:rgba(139,92,246,.18); color:var(--fc-purple); }
+.chip.blue{ background:rgba(59,130,246,.18); color:var(--fc-blue); }
+.chip.live{ background:rgba(255,77,109,.18); color:var(--fc-cringe); }
+.chip.live::before{ content:""; width:7px; height:7px; border-radius:50%; background:var(--fc-cringe); animation:pulse 1.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Таблица */
+.fc-table{ width:100%; border-collapse:collapse; font-size:13px; }
+.fc-table th{ text-align:left; padding:9px 10px; color:var(--text-secondary,#9fb0c3);
+  border-bottom:2px solid var(--border-color,var(--fc-line)); font-size:11px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+.fc-table td{ padding:9px 10px; border-bottom:1px solid var(--border-color,var(--fc-line)); }
+.fc-table tr:hover td{ background:var(--bg-secondary,rgba(255,255,255,.03)); }
+.fc-table td.num,.fc-table th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+.fc-rank{ font-weight:900; color:var(--fc-green); width:26px; }
+.fc-rank.r1{ color:var(--fc-gold); } .fc-rank.r2{ color:#cbd5e1; } .fc-rank.r3{ color:#d08a4f; }
+
+/* Матч-карточка */
+.fc-match{ display:flex; align-items:center; gap:10px; padding:12px; border-radius:12px;
+  border:1px solid var(--border-color,var(--fc-line)); background:var(--card-bg,var(--input-bg,#141b2d)); margin-bottom:10px; cursor:pointer; transition:.15s; }
+.fc-match:hover{ border-color:var(--fc-green); transform:translateY(-1px); }
+.fc-match .side{ flex:1; text-align:center; font-weight:700; font-size:13px; }
+.fc-match .emb{ font-size:24px; display:block; }
+.fc-match .score{ font-size:22px; font-weight:900; min-width:64px; text-align:center; }
+.fc-match .vs{ font-size:12px; color:var(--text-secondary,#9fb0c3); }
+
+/* Лента событий */
+.fc-feed{ list-style:none; margin:0; padding:0; }
+.fc-feed li{ display:flex; gap:10px; padding:8px 0; border-bottom:1px dashed var(--border-color,var(--fc-line)); font-size:13px; }
+.fc-feed .min{ font-weight:900; color:var(--fc-green); min-width:34px; }
+.fc-feed .goal{ color:var(--fc-gold); } .fc-feed .cringe{ color:var(--fc-cringe); }
+
+/* Кнопки / формы */
+.btn{ display:inline-flex; align-items:center; gap:7px; font-weight:800; font-size:13px; cursor:pointer;
+  border:none; border-radius:10px; padding:9px 16px; background:var(--fc-green); color:#04130c; transition:.15s; }
+.btn:hover{ background:var(--fc-green-2); color:#fff; }
+.btn.ghost{ background:transparent; border:1px solid var(--border-color,var(--fc-line)); color:var(--text-primary,#e6edf3); }
+.btn.gold{ background:var(--fc-gold); color:#241c00; }
+.btn.red{ background:var(--fc-cringe); color:#fff; }
+.btn[disabled]{ opacity:.45; cursor:not-allowed; }
+.fc-field{ margin-bottom:12px; }
+.fc-field label{ display:block; font-size:12px; font-weight:700; margin-bottom:5px; color:var(--text-secondary,#9fb0c3); }
+.fc-field select,.fc-field input{ width:100%; padding:10px 12px; border-radius:10px;
+  border:1px solid var(--input-border,var(--border-color,var(--fc-line))); background:var(--input-bg,#0e1626); color:var(--text-primary,#e6edf3); font-size:14px; }
+
+/* Стена позора */
+.fc-shame{ display:flex; gap:12px; flex-wrap:wrap; }
+.fc-shame .it{ flex:1; min-width:130px; text-align:center; padding:14px; border-radius:12px;
+  background:rgba(255,77,109,.08); border:1px solid rgba(255,77,109,.25); }
+.fc-shame .it .av{ font-size:34px; } .fc-shame .it .nm{ font-weight:800; margin-top:4px; }
+
+/* Модалка */
+.fc-overlay{ position:fixed; inset:0; background:rgba(3,7,15,.55); z-index:1001; display:none; }
+.fc-overlay.on{ display:block; }
+.fc-modal{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:1002; width:min(460px,94vw);
+  background:var(--input-bg,#141b2d); color:var(--text-primary,#e6edf3); border:1px solid var(--border-color,var(--fc-line));
+  border-radius:16px; padding:22px; box-shadow:0 18px 50px rgba(0,0,0,.45); display:none; }
+.fc-modal.on{ display:block; }
+.fc-modal h3{ margin:0 0 16px; font-size:16px; font-weight:800; }
+.fc-modal .x{ position:absolute; top:14px; right:16px; cursor:pointer; opacity:.6; font-size:18px; }
+
+.fc-muted{ color:var(--text-secondary,#9fb0c3); }
+.fc-empty{ text-align:center; padding:30px; color:var(--text-secondary,#9fb0c3); }
+.fc-tabs{ display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+.fc-tab{ padding:8px 14px; border-radius:10px; cursor:pointer; font-weight:700; font-size:13px;
+  background:var(--bg-secondary,#1c2740); color:var(--text-secondary,#9fb0c3); }
+.fc-tab.on{ background:var(--fc-green); color:#04130c; }
+.toast{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2000; padding:12px 20px;
+  border-radius:12px; background:var(--fc-green); color:#04130c; font-weight:800; box-shadow:0 8px 24px rgba(0,0,0,.3); display:none; }
+.toast.red{ background:var(--fc-cringe); color:#fff; }
