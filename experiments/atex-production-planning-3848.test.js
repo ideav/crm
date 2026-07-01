@@ -44,7 +44,7 @@ function plan(id, slitterId, dur, mat) {
         weights: null, dayCapacityMin: CAP,
         log: function (ev) { steps.push(ev); }
     });
-    assertEqual(maxDays(res.loadBefore), 3, '#3848 старт: С4 на 3 дня (перегруз)');
+    assertEqual(maxDays(res.loadBefore), 4, '#3848 старт: С4 на 4 дня (перегруз; #3965 реальная укладка с настройками первой резки дня, не naive ceil)');
     assert(res.loadBefore['1'].minutes === 0 && res.loadBefore['3'].minutes === 0, '#3848 старт: С1 и С3 простаивают (0 мин)');
     assert(res.moves.length > 0, '#3848 есть переносы');
     assertEqual(maxDays(res.loadAfter), 1, '#3848 итог: макс. день станка снизился до 1');
