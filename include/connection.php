@@ -35,6 +35,13 @@ define("Y_CLIENT_ID", integram_env('INTEGRAM_YANDEX_CLIENT_ID', '9a7b699'));
 define("Y_CLIENT_PK", integram_env('INTEGRAM_YANDEX_CLIENT_PK', 'b5fc3n5'));
 define("SMARTCAPTCHA_CLIENT_KEY", integram_env('INTEGRAM_SMARTCAPTCHA_CLIENT_KEY', 'ysc1_2EhhILbwBUoENgVrsbujEEPhih5dgPfh4Rs2WfImcd89ae95'));
 define("SMARTCAPTCHA_SERVER_KEY", integram_env('INTEGRAM_SMARTCAPTCHA_SERVER_KEY', 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'));
+# VK ID и Telegram — соцвход для публичных приложений (#3946). Реальные значения
+# задаются переменными окружения на сервере; в репозитории — пустые заглушки,
+# секреты в git не попадают (тот же приём, что и для Yandex/Google выше).
+define("VK_CLIENT_ID", integram_env('INTEGRAM_VK_CLIENT_ID', ''));   # ID приложения VK ID
+define("VK_CLIENT_PK", integram_env('INTEGRAM_VK_CLIENT_PK', ''));   # Защищённый ключ VK ID
+define("TG_BOT_TOKEN", integram_env('INTEGRAM_TG_BOT_TOKEN', ''));   # Токен бота из @BotFather
+define("TG_BOT_NAME",  integram_env('INTEGRAM_TG_BOT_NAME', ''));    # Публичный username бота (для Login Widget)
 
 #Exec_sql("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'", "Set sql_mode");
 Exec_sql("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'", "Set sql_mode");

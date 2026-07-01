@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход в «Интеграм FC»</title>
+<!--
+  Страница входа приложения «Интеграм FC» (issue #3946). Отдаётся функцией login()
+  напрямую из templates/custom/{_global_.z}/login.html (до авторизации). Плейсхолдеры:
+    {_global_.z}                — имя базы (для state и ссылки на вход по паролю)
+    {_global_.host}             — хост (redirect_uri провайдеров)
+    {_global_.tg_bot}           — username Telegram-бота (Login Widget)
+    {_global_.vk_client_id}     — ID приложения VK ID
+    {_global_.yandex_client_id} — ID приложения Yandex
+    {_global_.message}          — код сообщения от login() (напр. signupNotAvailable)
+  Соцкнопки ведут на /auth.asp?code=… (VK/Yandex) и /my?state=… (Telegram);
+  сервер создаёт участника с приветственным бонусом — см. registerAppParticipant().
+-->
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+    background:#c9d2e3;background-image:linear-gradient(135deg,#e7ecf5 0%,#c3ccdf 100%);}
+  .card{width:100%;max-width:460px;background:#fff;border-radius:22px;padding:30px 30px 24px;
+    box-shadow:0 24px 60px rgba(30,40,80,.22);position:relative;}
+  .logo{width:64px;height:64px;border-radius:16px;margin:4px auto 14px;display:flex;
+    align-items:center;justify-content:center;font-size:32px;
+    background:linear-gradient(135deg,#eef1fb,#e2e7f7);box-shadow:0 4px 14px rgba(80,90,160,.15);}
+  h1{font-size:27px;font-weight:800;color:#1b2340;text-align:center;letter-spacing:-.3px}
+  .sub{margin:8px 0 22px;text-align:center;color:#8a93ab;font-size:14px;line-height:1.4}
+  .prov{display:flex;align-items:center;gap:14px;width:100%;border:none;cursor:pointer;
+    border-radius:15px;padding:15px 18px;margin-bottom:13px;text-align:left;text-decoration:none;
+    color:#fff;transition:transform .12s ease,box-shadow .12s ease}
+  .prov:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(20,25,50,.28)}
+  .prov .ic{width:40px;height:40px;border-radius:11px;flex:0 0 auto;display:flex;
+    align-items:center;justify-content:center;background:rgba(255,255,255,.13);font-size:20px}
+  .prov .tx{flex:1}
+  .prov .tt{font-size:16px;font-weight:700;line-height:1.1}
+  .prov .ts{font-size:12.5px;opacity:.72;margin-top:3px}
+  .prov .go{background:#fff;color:#1b2340;font-weight:700;font-size:13px;border-radius:9px;
+    padding:8px 16px;white-space:nowrap}
+  .tg{background:linear-gradient(135deg,#12232f,#1b2f3f)}
+  .tg .go{background:#28a8ea;color:#fff}
+  .vk{background:linear-gradient(135deg,#101c33,#17233f)}
+  .vk .go{background:#2787f5;color:#fff}
+  .ya{background:linear-gradient(135deg,#201018,#2a141d)}
+  .ya .go{background:#fc3f1d;color:#fff}
+  .tg-widget{display:flex;justify-content:flex-end;min-width:96px}
+  .note{margin-top:18px;background:#fff7e6;border:1px solid #ffe4a8;border-radius:14px;
+    padding:14px 16px;display:flex;gap:12px}
+  .note .ni{color:#d98a1f;font-size:18px;flex:0 0 auto}
+  .note .nt{font-size:12.5px;color:#9a7420;line-height:1.5}
+  .note .nt b{color:#7d5e10}
+  .pw{margin-top:16px;text-align:center}
+  .pw a{color:#8a93ab;font-size:13px;text-decoration:none}
+  .pw a:hover{color:#2787f5;text-decoration:underline}
+  .err{display:none;margin-bottom:16px;background:#fdecec;border:1px solid #f5b5b5;color:#b23b3b;
+    border-radius:12px;padding:11px 14px;font-size:13.5px;text-align:center}
+  .err.on{display:block}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">⚽</div>
+    <h1>Вход в «Интеграм FC»</h1>
+    <div class="sub">Выберите способ авторизации для сохранения<br>результатов и ставок</div>
+
+    <div class="err" id="err"></div>
+
+    <!-- Telegram: официальный Login Widget (подписанные данные проверяет сервер) -->
+    <div class="prov tg">
+      <div class="ic">✈️</div>
+      <div class="tx"><div class="tt">Telegram Login</div><div class="ts">Рекомендуемый способ</div></div>
+      <div class="tg-widget" id="tg-widget"></div>
+    </div>
+
+    <!-- VK ID -->
+    <a class="prov vk" id="vk-btn" href="#" rel="nofollow">
+      <div class="ic">🅥</div>
+      <div class="tx"><div class="tt">ВКонтакте ID</div><div class="ts">Через социальную сеть VK</div></div>
+      <span class="go">Войти</span>
+    </a>
+
+    <!-- Яндекс ID -->
+    <a class="prov ya" id="ya-btn" href="#" rel="nofollow">
+      <div class="ic">Я</div>
+      <div class="tx"><div class="tt">Яндекс ID</div><div class="ts">Единый Яндекс-паспорт</div></div>
+      <span class="go">Войти</span>
+    </a>
+
+    <div class="note">
+      <div class="ni">🛡️</div>
+      <div class="nt"><b>Безопасность данных.</b> Мы не запрашиваем ваши пароли. Авторизация
+        безопасна и происходит в один клик. При входе дарим <b>100 граммов</b>!</div>
+    </div>
+
+    <div class="pw"><a href="/start.html?db={_global_.z}">Вход по паролю (для сотрудников)</a></div>
+  </div>
+
+<script>
+(function(){
+  var DB   = "{_global_.z}",
+      HOST = "{_global_.host}",
+      TGBOT= "{_global_.tg_bot}",
+      VKID = "{_global_.vk_client_id}",
+      YAID = "{_global_.yandex_client_id}",
+      MSG  = "{_global_.message}";
+  var redirect = "https://" + HOST + "/auth.asp";
+
+  // Сообщение об ошибке (например, соцвход недоступен для этой базы).
+  if(MSG){
+    var m = {
+      signupNotAvailable: "Регистрация через соцсети для этой базы пока не включена.",
+      oauthError:         "Не удалось войти через соцсеть. Попробуйте ещё раз.",
+      telegramAuthFailed: "Не удалось проверить вход через Telegram. Попробуйте ещё раз."
+    }[MSG];
+    if(m){ var e=document.getElementById('err'); e.textContent=m; e.classList.add('on'); }
+  }
+
+  // VK ID (classic OAuth): code → сервер обменяет на токен в ветке $isVk.
+  document.getElementById('vk-btn').href = VKID
+    ? "https://oauth.vk.com/authorize?client_id=" + encodeURIComponent(VKID) +
+      "&redirect_uri=" + encodeURIComponent(redirect) +
+      "&response_type=code&scope=email&v=5.199&state=" + encodeURIComponent("vk:" + DB)
+    : "#";
+
+  // Яндекс ID.
+  document.getElementById('ya-btn').href = YAID
+    ? "https://oauth.yandex.ru/authorize?response_type=code&client_id=" + encodeURIComponent(YAID) +
+      "&redirect_uri=" + encodeURIComponent(redirect) +
+      "&state=" + encodeURIComponent("yandex:" + DB)
+    : "#";
+
+  function disableIfEmpty(id, val){
+    if(!val){ var a=document.getElementById(id); a.style.opacity=".45"; a.style.pointerEvents="none"; }
+  }
+  disableIfEmpty('vk-btn', VKID);
+  disableIfEmpty('ya-btn', YAID);
+
+  // Telegram Login Widget — редирект на /my?state=<db> с подписанными полями.
+  if(TGBOT){
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = "https://telegram.org/js/telegram-widget.js?22";
+    s.setAttribute('data-telegram-login', TGBOT);
+    s.setAttribute('data-size', 'medium');
+    s.setAttribute('data-userpic', 'false');
+    s.setAttribute('data-request-access', 'write');
+    s.setAttribute('data-auth-url', "https://" + HOST + "/my?state=" + encodeURIComponent(DB));
+    document.getElementById('tg-widget').appendChild(s);
+  } else {
+    document.getElementById('tg-widget').innerHTML = '<span class="go" style="opacity:.5">Войти</span>';
+  }
+})();
+</script>
+</body>
+</html>

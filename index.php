@@ -258,6 +258,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
 }
 elseif(($z == "my") && !empty($_GET['code'])){
     $isYandex = isset($_GET['state']) && strpos($_GET['state'], 'yandex') === 0;
+    $isVk     = isset($_GET['state']) && strpos($_GET['state'], 'vk:') === 0;   # VK ID (#3946)
     if($isYandex){
         # Yandex OAuth: exchange code for token
         $oauthCodePrefix = substr($_GET['code'], 0, 8);
@@ -348,6 +349,52 @@ elseif(($z == "my") && !empty($_GET['code'])){
             $socialName = "Yandex";
         }
     }
+    elseif($isVk){
+        # VK ID OAuth (#3946): обмен code на токен (серверный flow oauth.vk.com).
+        $oauthHost = isset($_SERVER["HTTP_HOST"]) ? $_SERVER["HTTP_HOST"] : $_SERVER["SERVER_NAME"];
+        $ch = curl_init('https://oauth.vk.com/access_token?'.http_build_query(array(
+            'client_id'     => VK_CLIENT_ID,
+            'client_secret' => VK_CLIENT_PK,
+            'redirect_uri'  => 'https://'.$oauthHost.'/auth.asp',
+            'code'          => $_GET['code']
+        )));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $data = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+        # Пометить code использованным и снять блокировку (как в ветках Yandex/Google).
+        @touch($oauthUsedFile);
+        if($oauthLockFp){
+            flock($oauthLockFp, LOCK_UN);
+            fclose($oauthLockFp);
+            @unlink($oauthLockFile);
+        }
+        if(!empty($data['access_token']) && !empty($data['user_id'])){
+            $socialId = $data['user_id'];
+            $email = isset($data['email']) ? $data['email'] : "";
+            $name = ""; $picture = "";
+            $ch = curl_init('https://api.vk.com/method/users.get?'.http_build_query(array(
+                'user_ids'     => $socialId,
+                'fields'       => 'photo_200',
+                'access_token' => $data['access_token'],
+                'v'            => '5.199'
+            )));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $info = json_decode(curl_exec($ch), true);
+            curl_close($ch);
+            if(isset($info['response'][0])){
+                $u = $info['response'][0];
+                $name = trim((isset($u['first_name'])?$u['first_name']:'').' '.(isset($u['last_name'])?$u['last_name']:''));
+                $picture = isset($u['photo_200']) ? $u['photo_200'] : "";
+            }
+            $db = strpos($_GET['state'], 'vk:') === 0 ? urldecode(substr($_GET['state'], 3)) : "";
+            if($db !== "" && !checkDbName(USER_DB_MASK, $db)) $db = "";
+            $socialName = "VK";
+        }
+        wlog("[VK OAuth] callback: user_id=".(isset($data['user_id'])?$data['user_id']:'?')
+            .", ok=".(!empty($data['access_token'])?"1":"0"), "log");
+    }
     else{
         # Google OAuth: exchange code for token
         $params = array(
@@ -391,58 +438,41 @@ elseif(($z == "my") && !empty($_GET['code'])){
             $socialName = "Google";
         }
     }
-    if(!empty($data['access_token'])){
-        if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
-                                        FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
-                                                ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
-                                                ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
-                                                ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
-                                                .(strlen($db)?" AND db.val='$db'":"")
-                                        ." WHERE user.val='".$socialId."' AND user.t=".USER
-                                            , "Get $socialName user and their DBs"))){
-			updateTokens($row);
-    	    if($row["db"]){
-    	        $z = $row["db"];
-                if($row = mysqli_fetch_array(Exec_sql("SELECT user.id, token.val tok, xsrf.val xsrf FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
-                                                        ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
-                                                    ." WHERE user.val='$z' AND user.t=".USER
-                                                    , "Get token for $socialName user"))){
-        	        if($row["tok"])
-            	        $token = $row["tok"];
-            	    else{
-            			$token = secureToken();
-                        Insert($row["id"], 1, TOKEN, $token, "Reset token for $socialName admin");
-            	    }
-        	        if(!$row["xsrf"])
-                        Insert($row["id"], 1, XSRF, xsrf($token, $z), "Reset xsrf for $socialName admin");
-                }
-    	        else
-            		login($z, "", "adminNotFound");
-    	    }
-    	    else
-    	        $token = $row["token"];
-        	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
-    	}
-        else{
-			$GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
-			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
-            $id = newUser($socialId, $email, "115", $name, $picture);
-            Insert($id, 1, 274, $socialName, "Set social for new $socialName user");
-            Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Set token for new $socialName user");
-            Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Set xsrf for new $socialName user");
-            if(isset($_COOKIE["_aff"]))
-                Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the $socialName affiliate ref");
-        	setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
-        	createDb($id, $name, $email);
-        }
-		# Redirect to a validated local workspace only — never to raw $_GET['state'],
-		# which an attacker can set to an arbitrary URL (open redirect, issue #2123).
-		# $db was already validated against USER_DB_MASK at line 317 (Yandex) and 360 (Google).
-		header("Location: /".(!$isYandex && strlen($db) ? $db : $z));
-    }
-    else
-        login("", "", "oauthError", isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : "tokenExchangeFailed"));
+    # Общий финал: логин существующего пользователя / саморегистрация участника /
+    # SaaS-регистрация владельца (#3946 вынесено в socialFinish). VK — только соцвход
+    # в app-базу ($allowSaas=false); Yandex/Google сохраняют SaaS-поведение.
+    socialFinish($db, isset($socialId)?$socialId:"", isset($email)?$email:"", isset($name)?$name:"",
+                 isset($picture)?$picture:"", isset($socialName)?$socialName:"OAuth", !$isYandex,
+                 !empty($data['access_token']),
+                 isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : ""),
+                 !$isVk);
 	die();
+}
+elseif(($z == "my") && isset($_GET['hash']) && isset($_GET['id']) && isset($_GET['auth_date'])){
+    # Telegram Login Widget callback (#3946). Данные приходят query-параметрами
+    # (id, first_name, last_name, username, photo_url, auth_date, hash) — не code.
+    # Проверяем подпись: hash = HMAC-SHA256(data_check_string, key=SHA256(bot_token)).
+    $checkHash = (string)$_GET['hash'];
+    $pairs = array();
+    foreach(array('auth_date','first_name','id','last_name','photo_url','username') as $k)
+        if(isset($_GET[$k]) && $_GET[$k] !== "")
+            $pairs[] = $k."=".$_GET[$k];
+    sort($pairs);
+    $dataCheckString = implode("\n", $pairs);
+    $secretKey = hash('sha256', TG_BOT_TOKEN, true);
+    $calcHash  = hash_hmac('sha256', $dataCheckString, $secretKey);
+    $fresh     = (time() - (int)$_GET['auth_date']) < 86400;   # виджет-подпись живёт сутки
+    $ok        = (TG_BOT_TOKEN !== "") && hash_equals($calcHash, $checkHash) && $fresh;
+    wlog("[Telegram] login callback: id=".preg_replace('/\D/','',(string)$_GET['id']).", ok=".($ok?"1":"0"), "log");
+    $socialId = preg_replace('/\D/', '', (string)$_GET['id']);   # tg id — только цифры
+    $name     = trim((isset($_GET['first_name'])?$_GET['first_name']:'').' '.(isset($_GET['last_name'])?$_GET['last_name']:''));
+    if($name === "" && isset($_GET['username'])) $name = (string)$_GET['username'];
+    $picture  = isset($_GET['photo_url']) ? $_GET['photo_url'] : "";
+    $tgState  = isset($_GET['state']) ? $_GET['state'] : "";
+    $db       = ($tgState !== "" && checkDbName(USER_DB_MASK, $tgState)) ? $tgState : "";
+    # Telegram — только соцвход в app-базу ($allowSaas=false, preferAppDb=true).
+    socialFinish($db, $socialId, "", $name, $picture, "Telegram", true, $ok, "telegramAuthFailed", false);
+    die();
 }
 elseif($_SERVER["REQUEST_METHOD"] == "OPTIONS"){
 	header("Allow: GET,POST,OPTIONS");
@@ -683,6 +713,134 @@ function newUser($user, $email, $role, $name, $picture){
         Insert($id, 1, 280, $picture, "Insert picture");
     return $id;
 }
+# --- Публичная саморегистрация участника в существующую app-базу (issue #3946) ---
+# Конфиг публичной регистрации базы лежит файлом templates/custom/$db/signup.json:
+#   {"role":1206,"userReq":<id реквизита-ссылки на USER у «Участника»>,"bonus":100}
+# Файл создаёт админ (провижининг), его наличие = база принимает соцрегистрацию.
+# Возвращает массив конфига или null.
+function publicSignupConfig($db){
+    if(!checkDbName(USER_DB_MASK, $db))
+        return null;
+    $f = "templates/custom/$db/signup.json";
+    if(!is_file($f))
+        return null;
+    $cfg = json_decode(file_get_contents($f), true);
+    if(!is_array($cfg) || empty($cfg['role']))
+        return null;
+    $cfg['role']    = (int)$cfg['role'];
+    $cfg['userReq'] = isset($cfg['userReq']) ? (int)$cfg['userReq'] : 0;
+    $cfg['bonus']   = isset($cfg['bonus'])   ? (int)$cfg['bonus']   : 0;
+    return $cfg;
+}
+# Зарегистрировать (или залогинить повторно) участника ВНУТРИ базы $db под ролью
+# $cfg['role']. Логин USER = "<провайдер>:<соц-id>" (уникален по провайдеру). Первая
+# регистрация создаёт «Участника» (498) с приветственным бонусом; повторный вход по
+# тому же ключу бонус НЕ начисляет. Функция ставит cookie, редиректит и завершает запрос.
+function registerAppParticipant($db, $cfg, $socialName, $socialId, $email, $name, $picture){
+    global $z;
+    if(!checkDbName(USER_DB_MASK, $db))
+        my_die("Invalid database");
+    $z = $db;   # переключаем контекст: Insert()/Exec_sql() работают с базой приложения
+    $key    = strtolower($socialName).":".$socialId;   # провайдер-префиксный логин
+    $keyEsc = addslashes($key);
+    if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, tok.id tokId, tok.val token, xs.id xsId
+                    FROM $z user LEFT JOIN $z tok ON tok.up=user.id AND tok.t=".TOKEN
+                              ." LEFT JOIN $z xs ON xs.up=user.id AND xs.t=".XSRF
+                    ." WHERE user.val='$keyEsc' AND user.t=".USER." LIMIT 1", "Find social participant"))){
+        # Повторный вход — обновляем токен/xsrf при необходимости, бонус не трогаем.
+        $token = $row["token"];
+        if(!$token){
+            $token = secureToken();
+            Insert($row["uid"], 1, TOKEN, $token, "Reset participant token");
+        }
+        if(!$row["xsId"])
+            Insert($row["uid"], 1, XSRF, xsrf($token, $z), "Reset participant xsrf");
+    }
+    else{
+        # Первая регистрация: USER(18) с ролью-болельщиком + «Участник»(498) с бонусом.
+        $token = secureToken();
+        $uid = Insert(1, 0, USER, $key, "New social participant ($socialName)");
+        Insert($uid, 1, 115, $cfg['role'], "Participant role");
+        if(strlen($email)) Insert($uid, 1, EMAIL, $email, "Participant email");
+        if(strlen($name))  Insert($uid, 1, 33, $name, "Participant name");
+        Insert($uid, 1, 156, date("Ymd"), "Participant reg date");
+        Insert($uid, 1, TOKEN, $token, "Participant token");
+        Insert($uid, 1, XSRF, xsrf($token, $z), "Participant xsrf");
+        Insert($uid, 1, ACTIVITY, microtime(TRUE), "Participant activity");
+        $mid = Insert(1, 0, 498, strlen($name) ? $name : $key, "New member");
+        if(strlen($picture)) Insert($mid, 1, 500, $picture, "Member avatar");
+        Insert($mid, 1, 518, date("Ymd"), "Member reg date");
+        if($cfg['bonus'] > 0) Insert($mid, 1, 502, $cfg['bonus'], "Welcome bonus");
+        if($cfg['userReq'] > 0) Insert($mid, 1, $cfg['userReq'], $uid, "Link member to user");
+    }
+    setcookie("idb_$z", $token, time() + 2592000*12, "/");   # 30*12 days
+    header("Location: /$z");
+    die();
+}
+# Общий финал соцвхода: найти существующего SaaS-пользователя в $z(="my") и залогинить,
+# иначе — либо саморегистрация участника в app-базу (если у неё есть signup.json), либо
+# (только для провайдеров с $allowSaas) обычная регистрация владельца с созданием своей
+# базы. Вынесено из ветки OAuth-callback, чтобы переиспользовать для Telegram (#3946).
+function socialFinish($db, $socialId, $email, $name, $picture, $socialName, $preferAppDb, $ok, $errDetails, $allowSaas){
+    global $z;
+    if(!$ok){
+        login("", "", "oauthError", strlen($errDetails) ? $errDetails : "tokenExchangeFailed");
+        die();
+    }
+    $sidEsc = addslashes($socialId);
+    if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
+                                    FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
+                                            ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
+                                            ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
+                                            ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
+                                            .(strlen($db)?" AND db.val='".addslashes($db)."'":"")
+                                    ." WHERE user.val='".$sidEsc."' AND user.t=".USER
+                                        , "Get $socialName user and their DBs"))){
+        updateTokens($row);
+        if($row["db"]){
+            $z = $row["db"];
+            if($row = mysqli_fetch_array(Exec_sql("SELECT user.id, token.val tok, xsrf.val xsrf FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
+                                                    ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
+                                                ." WHERE user.val='$z' AND user.t=".USER
+                                                , "Get token for $socialName user"))){
+                if($row["tok"])
+                    $token = $row["tok"];
+                else{
+                    $token = secureToken();
+                    Insert($row["id"], 1, TOKEN, $token, "Reset token for $socialName admin");
+                }
+                if(!$row["xsrf"])
+                    Insert($row["id"], 1, XSRF, xsrf($token, $z), "Reset xsrf for $socialName admin");
+            }
+            else
+                login($z, "", "adminNotFound");
+        }
+        else
+            $token = $row["token"];
+        setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
+    }
+    else{
+        # #3946: сначала пробуем саморегистрацию участника в существующую app-базу.
+        if(strlen($db) && ($cfg = publicSignupConfig($db)))
+            registerAppParticipant($db, $cfg, $socialName, $socialId, $email, $name, $picture); # ставит cookie, редиректит, die()
+        if(!$allowSaas)
+            login($db, "", "signupNotAvailable");   # VK/Telegram без app-базы — SaaS не создаём
+        $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
+        $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
+        $id = newUser($socialId, $email, "115", $name, $picture);
+        Insert($id, 1, 274, $socialName, "Set social for new $socialName user");
+        Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Set token for new $socialName user");
+        Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Set xsrf for new $socialName user");
+        if(isset($_COOKIE["_aff"]))
+            Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the $socialName affiliate ref");
+        setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
+        createDb($id, $name, $email);
+    }
+    # Redirect to a validated local workspace only — never to raw $_GET['state'],
+    # which an attacker can set to an arbitrary URL (open redirect, issue #2123).
+    header("Location: /".($preferAppDb && strlen($db) ? $db : $z));
+    die();
+}
 function checkDbNameReserved($db)
 {
     # Reserved MySQL clauses
@@ -740,6 +898,24 @@ function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
 	if(isApi())
 		api_dump(json_encode(array("message"=>$message, "db"=>$z, "login"=>$u, "details"=>$details)), "login.json");
+	# #3946: если у базы есть собственная страница входа — отдаём её вместо глобальной
+	# start.html. Плейсхолдеры {_global_.*} заполняем публичными параметрами провайдеров
+	# (секретов тут нет: bot username и client_id публичны и так уходят в браузер).
+	if(strlen($z) && checkDbName(USER_DB_MASK, $z) && strpos(strtolower($_SERVER["REQUEST_URI"]), "auth.asp") === FALSE){
+		$loginFile = "templates/custom/$z/login.html";
+		if(is_file($loginFile)){
+			$host = isset($_SERVER["HTTP_HOST"]) ? $_SERVER["HTTP_HOST"] : $_SERVER["SERVER_NAME"];
+			echo strtr(file_get_contents($loginFile), array(
+				"{_global_.z}"                => htmlspecialchars($z, ENT_QUOTES),
+				"{_global_.host}"             => htmlspecialchars($host, ENT_QUOTES),
+				"{_global_.tg_bot}"           => htmlspecialchars(TG_BOT_NAME, ENT_QUOTES),
+				"{_global_.vk_client_id}"     => htmlspecialchars(VK_CLIENT_ID, ENT_QUOTES),
+				"{_global_.yandex_client_id}" => htmlspecialchars(Y_CLIENT_ID, ENT_QUOTES),
+				"{_global_.message}"          => htmlspecialchars($message, ENT_QUOTES),
+			));
+			die();
+		}
+	}
 	$p = "?";
 	if(strlen($z))
 	    $p .= "db=$z&";
