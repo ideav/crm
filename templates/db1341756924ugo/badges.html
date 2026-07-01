@@ -1,0 +1,104 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=3">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div class="fc-tabs" id="tabs">
+    <div class="fc-tab on" data-t="badges">Значки</div>
+    <div class="fc-tab" data-t="creators">Творцы</div>
+  </div>
+  <div id="pane-badges"><div class="fc-empty">Загрузка…</div></div>
+  <div id="pane-creators" style="display:none"></div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=3"></script>
+<script>
+(function(){
+  var IB=FC.I.BADGE, IA=FC.I.AWD, IE=FC.I.MEM;
+  document.getElementById('hero').innerHTML = FC.hero('Зал славы','Значки пророков и месячный рейтинг творцов');
+
+  // вкладки
+  document.querySelectorAll('#tabs .fc-tab').forEach(function(t){
+    t.onclick=function(){
+      document.querySelectorAll('#tabs .fc-tab').forEach(function(x){x.classList.remove('on');});
+      t.classList.add('on');
+      var on=t.getAttribute('data-t');
+      document.getElementById('pane-badges').style.display   = on==='badges'  ?'':'none';
+      document.getElementById('pane-creators').style.display = on==='creators'?'':'none';
+    };
+  });
+
+  Promise.all([FC.list(FC.T.MEM), FC.list(FC.T.BADGE), FC.list(FC.T.AWD)]).then(function(r){
+    var members=r[0], badges=r[1], awards=r[2];
+    var memIdx=FC.index(members);
+
+    // группировка выданных значков: по id значка и по имени (страховка)
+    var byId={}, byName={};
+    awards.forEach(function(a){
+      var bid=FC.refId(a.r[IA.badge]), nm=a.r[IA.name];
+      if(bid){ (byId[bid]=byId[bid]||[]).push(a); }
+      if(nm){ (byName[nm]=byName[nm]||[]).push(a); }
+    });
+    function earners(b){ return byId[b.i] || byName[b.r[IB.name]] || []; }
+    function ava(a){ var m=memIdx[a.u]; return m?(m.r[IE.ava]||'👤'):'👤'; }
+    function nick(a){ var m=memIdx[a.u]; return m?FC.esc(m.r[IE.nick]):'—'; }
+
+    // ---- ВКЛАДКА «ЗНАЧКИ» ----
+    var pane=document.getElementById('pane-badges');
+    if(badges.length){
+      pane.innerHTML='<div class="fc-grid c3">'+badges.map(function(b){
+        var ea=earners(b);
+        var avs=ea.slice(0,8).map(function(a){ return '<span title="'+nick(a)+'" style="font-size:20px">'+FC.esc(ava(a))+'</span>'; }).join('');
+        var more=ea.length>8?'<span class="fc-muted" style="font-size:12px">+'+(ea.length-8)+'</span>':'';
+        return '<div class="fc-card" style="text-align:center">'+
+          '<div style="font-size:46px;line-height:1">'+FC.esc(b.r[IB.icon]||'🏅')+'</div>'+
+          '<h2 style="margin:8px 0 4px;font-size:17px">'+FC.esc(b.r[IB.name])+'</h2>'+
+          (b.r[IB.cond]?'<div class="fc-muted" style="font-size:12px;min-height:32px">'+FC.esc(b.r[IB.cond])+'</div>':'<div style="min-height:32px"></div>')+
+          (b.r[IB.rew]?'<div style="margin:8px 0"><span class="chip gold">🎁 '+FC.esc(b.r[IB.rew])+'</span></div>':'')+
+          '<div style="margin-top:10px;display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;min-height:24px">'+
+            (ea.length?(avs+' '+more):'<span class="fc-muted" style="font-size:12px">пока никто не получил</span>')+'</div>'+
+          '<div class="fc-muted" style="font-size:11px;margin-top:6px">получили: <b>'+ea.length+'</b></div>'+
+        '</div>';
+      }).join('')+'</div><div id="badges-nudge"></div>';
+    } else {
+      // страховка: значков-определений нет — покажем выданные по имени
+      var names=Object.keys(byName);
+      pane.innerHTML = names.length
+        ? '<div class="fc-grid c3">'+names.map(function(nm){ var ea=byName[nm];
+            return '<div class="fc-card" style="text-align:center"><div style="font-size:46px">🏅</div>'+
+              '<h2 style="margin:8px 0 4px;font-size:17px">'+FC.esc(nm)+'</h2>'+
+              '<div class="fc-muted" style="font-size:11px">получили: <b>'+ea.length+'</b></div></div>'; }).join('')+'</div><div id="badges-nudge"></div>'
+        : '<div class="fc-empty">Значки ещё не заведены. Их можно настроить в таблице «Значки».</div><div id="badges-nudge"></div>';
+    }
+    // хук конструктора: «настройте любые бейджи в Интеграм» (issue #3932)
+    FC.constructorNudge('badges-nudge','Хотите такой же значок для своей компании? В Интеграм можно настроить любые бейджи за активности — под свой бренд.');
+
+    // ---- ВКЛАДКА «ТВОРЦЫ» ----
+    var awdCount={}; awards.forEach(function(a){ awdCount[a.u]=(awdCount[a.u]||0)+1; });
+    var ranked=members.slice().sort(function(a,b){
+      var d=FC.num(b.r[IE.inv])-FC.num(a.r[IE.inv]); if(d) return d;      // привлечено друзей
+      d=FC.num(b.r[IE.bets])-FC.num(a.r[IE.bets]); if(d) return d;        // активность (ставки)
+      return FC.num(b.r[IE.win])-FC.num(a.r[IE.win]);                     // заработано грамов
+    }).slice(0,10);
+
+    var cp=document.getElementById('pane-creators');
+    cp.innerHTML=
+      '<div class="fc-card" style="margin-bottom:14px;background:linear-gradient(135deg,rgba(255,206,58,.10),rgba(139,92,246,.10));border-color:rgba(255,206,58,.30)">'+
+        '<div style="font-weight:900;font-size:16px">🏆 Топ-10 творцов месяца</div>'+
+        '<div class="fc-muted" style="font-size:13px;margin-top:4px">Рейтинг по привлечённым друзьям и активности. Победители получают <b>бесплатный расширенный тариф Интеграм на месяц</b> — и приз, и продвижение платформы.</div>'+
+      '</div>'+
+      '<div class="fc-card"><table class="fc-table"><tr><th>#</th><th>Игрок</th><th class="num">Друзей</th><th class="num">Ставок</th><th class="num">ROI</th><th class="num">Значков</th></tr>'+
+        ranked.map(function(m,i){
+          var rc=i===0?'r1':(i===1?'r2':(i===2?'r3':''));
+          var medal=i===0?'🥇':(i===1?'🥈':(i===2?'🥉':(i+1)));
+          var roi=FC.num(m.r[IE.roi]);
+          return '<tr><td class="fc-rank '+rc+'">'+medal+'</td>'+
+            '<td>'+FC.esc(m.r[IE.ava]||'👤')+' <b>'+FC.esc(m.r[IE.nick])+'</b> <span class="fc-muted" style="font-size:11px">'+FC.esc(m.r[IE.rank]||'')+'</span></td>'+
+            '<td class="num"><b class="gpos">'+m.r[IE.inv]+'</b></td>'+
+            '<td class="num">'+m.r[IE.bets]+'</td>'+
+            '<td class="num" style="color:'+(roi>=0?'var(--fc-green)':'var(--fc-cringe)')+'">'+(roi>=0?'+':'')+roi+'%</td>'+
+            '<td class="num">'+(awdCount[m.i]||0)+'</td></tr>';
+        }).join('')+'</table>'+(ranked.length?'':'<div class="fc-empty">Пока нет участников</div>')+'</div>'+
+      '<div class="fc-card" style="margin-top:14px"><h3><i class="pi pi-share-alt"></i>Позвать в рейтинг</h3>'+
+        FC.shareButtons(location.origin+'/'+FC.DB+'/badges', 'Топ творцов Интеграм FC — привлекай друзей и попади в топ-10 месяца!')+'</div>';
+  });
+})();
+</script>
