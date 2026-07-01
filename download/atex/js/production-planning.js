@@ -6330,6 +6330,17 @@
             w && w.startMin, w && w.cutEndMin);
     };
 
+    // #3957: нерабочий ли день-смещение для ВЫРАВНИВАНИЯ ЗАГРУЗКИ (rebalanceSlitterLoad,
+    // machineDayOff). Станок не работает в день, если это выходной/праздник (#3788 dayIsWorking,
+    // общий для ВСЕХ станков) ИЛИ у станка отпуск (#3876 slitterOnVacationDay). Модель span/endPos
+    // ОБЯЗАНА пропускать те же дни, что и реальное расписание (calendarBlockedRanges +
+    // downtimeBlockedRanges), иначе содержимое, влезающее в рабочие дни ДО выходных перед отпуском,
+    // «не доходит» до отпуска — станок с отпуском выглядит заканчивающим рано (Станок 1 «4д» вместо
+    // «12д»), и хвост за отпуском не стекает на свободные станки.
+    AtexProductionPlanning.prototype.balanceDayOff = function(slitterId, dayMidnightMs) {
+        return !this.dayIsWorking(dayMidnightMs) || this.slitterOnVacationDay(slitterId, dayMidnightMs);
+    };
+
     // #3876: id станков, у которых в день dayMidnightMs отпуск → { slitterId: true }. Для
     // исключения таких станков при выборе/балансировке (не ставить задание на станок в отпуске).
     AtexProductionPlanning.prototype.vacationSlitterIdsForDay = function(dayMidnightMs) {
@@ -9209,14 +9220,18 @@
                     var l = load[id]; return (labelById[id] || id) + ':' + l.days + 'д/' + Math.round(l.minutes) + 'м';
                 }).join('  ');
             }
-            // #3881: «загруженность» = дата окончания с учётом отпуска. machineDayOff(id, dayOffset)
-            // — нерабочий ли день-смещение от базы плана у станка (отпуск). Мемоизируем по дню.
+            // #3881/#3957: «загруженность» = дата окончания с учётом нерабочих дней станка.
+            // machineDayOff(id, dayOffset) — нерабочий ли день-смещение от базы плана: выходной/
+            // праздник (#3788, для всех станков) ИЛИ отпуск станка (#3876). Оба нужны: без выходных
+            // содержимое, влезающее в дни до выходных перед отпуском, «не доходит» до отпуска —
+            // станок с отпуском выглядит заканчивающим рано, хвост за отпуском не стекает (#3957).
+            // Мемоизируем по дню.
             var rebBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
             var machineDayOffMemo = {};
             function machineDayOff(machineId, dayOffset){
                 var k = machineId + ':' + dayOffset;
                 if (k in machineDayOffMemo) return machineDayOffMemo[k];
-                var v = self.slitterOnVacationDay(machineId, rebBaseMidnightMs + dayOffset * 86400000);
+                var v = self.balanceDayOff(machineId, rebBaseMidnightMs + dayOffset * 86400000);
                 machineDayOffMemo[k] = v;
                 return v;
             }
