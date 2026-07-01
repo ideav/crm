@@ -1,0 +1,25 @@
+# --- Интеграм: переменные окружения для mod_php ---
+# Добавьте эти строки в КОНЕЦ файла /etc/apache2/envvars и подставьте свои значения.
+# После правки: sudo systemctl restart apache2  (именно restart, не reload).
+#
+# Значения — в одинарных кавычках, без пробелов вокруг знака '='.
+
+# --- База данных (обязательно) ---
+export INTEGRAM_DB_HOST=127.0.0.1
+export INTEGRAM_DB_PORT=3306
+export INTEGRAM_DB_NAME=ideav
+export INTEGRAM_DB_USER=ideav
+export INTEGRAM_DB_PASSWORD='ЗАМЕНИТЕ_на_пароль_БД'
+
+# --- Администратор и безопасность (обязательно) ---
+export INTEGRAM_MASTER_PASSWORD='ЗАМЕНИТЕ_на_master-пароль'
+export INTEGRAM_SALT='ЗАМЕНИТЕ_на_вывод: openssl rand -hex 24'
+export INTEGRAM_ADMIN_EMAIL='admin@example.local'
+
+# --- Почта SMTP (не обязательно; нужно, если Интеграм должен слать письма) ---
+# export INTEGRAM_SMTP_HOST='ssl://smtp.yandex.ru'
+# export INTEGRAM_SMTP_PORT='465'
+# export INTEGRAM_SMTP_USERNAME='robot@example.com'
+# export INTEGRAM_SMTP_PASSWORD='пароль-приложения'
+# export INTEGRAM_SMTP_FROM='Integram'
+# export INTEGRAM_SMTP_DEBUG='false'
