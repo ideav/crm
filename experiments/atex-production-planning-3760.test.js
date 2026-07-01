@@ -1,9 +1,8 @@
 // Unit tests for #3760 — «Время за пределами рабочего дня»: нахлёст ограничен ОДНИМ шагом,
 // резку разбиваем на границе дня.
-//   1) Настройка в хвост: подмножество компонентов с суммой ≥ остатка дня и МИНИМАЛЬНЫМ
-//      нахлёстом; остальное — на завтра. Реконсиляция #3739/#3760:
-//        хвост 20 (ножи 30, сырьё 15) → ножи 30 (сырьё не дотягивает);
-//        хвост 8  (ножи 30, сырьё 15) → сырьё 15 (оба дотягивают, берём меньший).
+//   1) minOverlapTailSetupMinutes (используется в НЕ-gapFill ветке) — подмножество с суммой ≥
+//      остатка дня и МИНИМАЛЬНЫМ нахлёстом. #3939: в ветке gapFill (запись плана) хвост настройки
+//      с нахлёстом ОТМЕНЁН — настройка кладётся только если влезает целиком, иначе вся резка назавтра.
 //   2) Проходы: #3821 ОТМЕНИЛ нахлёстный проход — сегодня только ЦЕЛИКОМ влезающие в ёмкость,
 //      остальное на завтра (раньше клали + один нахлёстный, выводивший день за ёмкость).
 //   3) buildSchedule: тайминг не накапливается в ночь — резка, чьё окно начинается за концом
@@ -37,18 +36,18 @@ assertEqual(planning.minOverlapTailSetupMinutes([{minutes:30},{minutes:15}], 35,
 assertEqual(planning.minOverlapTailSetupMinutes([{minutes:30}], 5, 30), 30,
     '#3760: один компонент — он и идёт в хвост');
 
-// ── 2) Настройка на границе (канон #3760): хвост 8 → сырьё 15, ножи + проходы на завтра ──
+// ── 2) #3939: настройка (45) не влезает в остаток 8 → вся резка B на следующий день (без нахлёста) ──
+// Раньше в хвост клали сырьё 15 с нахлёстом; #3939 отменил нахлёст настройки — день не должен
+// вылезать за ёмкость. B уходит на день 1 и дальше дробится по проходам (68−45=23 → 2 прохода в день1).
 var sp = planning.splitMachineQueue(
     [ cut('A', 'M1', [59, 59], 6), cut('B', 'M2', [30, 30], 3) ],
     { dayStartMin: 0, dayEndMin: 68, times: TIMES,
       perPassByCut: { A: 10, B: 10 }, runsByCut: { A: 6, B: 3 },
       dayAnchorByCut: { A: 0, B: 0 }, gapFill: true });
-var bSet = sp.filter(function(s){ return s.cutId === 'B' && s.setupOnly; })[0];
-var bPas = sp.filter(function(s){ return s.cutId === 'B' && !s.setupOnly; })[0];
-assertEqual(bSet && { day: bSet.dayOffset, setup: bSet.setupMin, runs: bSet.runs }, { day: 0, setup: 15, runs: 0 },
-    '#3760: в хвост дня 0 — сырьё 15 (нахлёст), не ножи');
-assertEqual(bPas && { day: bPas.dayOffset, setup: bPas.setupMin, runs: bPas.runs }, { day: 1, setup: 30, runs: 3 },
-    '#3760: ножи 30 + проходы B — на следующий день');
+assertEqual(sp.filter(function(s){ return s.cutId === 'B'; })
+        .map(function(s){ return { day: s.dayOffset, setup: s.setupMin, runs: s.runs, setupOnly: !!s.setupOnly }; }),
+    [{ day: 1, setup: 45, runs: 2, setupOnly: false }, { day: 2, setup: 0, runs: 1, setupOnly: false }],
+    '#3760/#3939: настройка 45 не влезает в остаток дня0 (8) → вся резка B с дня1 (без хвоста настройки в дне0)');
 
 // ── 3) Проходы: только ЦЕЛИКОМ влезающие сегодня, остальное на завтра (#3821: без нахлёста) ──
 var pp = planning.splitMachineQueue(

@@ -4008,20 +4008,24 @@
                     // Остаток настройки + проходы — на следующий день. НЕТ настройки (та же конфигурация,
                     // #3821: setupG=0) — ничего в хвост не кладём (иначе пустой сегмент), резка целиком
                     // на следующий день; небольшой простой в хвосте допустим (без нахлёстного прохода).
-                    var partsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
-                    // #3847: настройку в хвост — до потолка DAY_END_HOUR+MAX_OVERWORK_TUNE (availTuneG),
-                    // не до cutEndMin: настройка может нахлестнуть за конец смены сильнее, чем резка.
-                    var tailSetup = minOverlapTailSetupMinutes(partsG, availTuneG, setupG);
-                    if (tailSetup > 0) {
+                    // #3939: настройку в хвост дня кладём, ТОЛЬКО если она ЦЕЛИКОМ влезает до конца
+                    // рабочего окна (effCapacity−clock, БЕЗ нахлёста). Заказчик: «оверворк» — день не
+                    // должен вылезать за ёмкость. Настройка не влезает целиком (напр. атомарные ножи 30
+                    // при остатке 5, или ножи+сырьё 45 при остатке 20) → в хвост НЕ кладём вовсе, вся резка
+                    // уходит на следующий день ОДНОЙ карточкой (иначе setup-only хвост раздувал бейдж дня
+                    // и/или выталкивался applyDowntime на начало следующего поверх продолжения, #3934/#3939).
+                    // Влезает целиком — кладём всю (passes с дня N+1 без настройки, #3635 п.5).
+                    var roomG = round3(effCapacity(day) - clock);
+                    if (setupG > 0 && setupG <= roomG) {
                         var wsS = day * 1440 + dayStart + clock;
                         segments.push({ cutId: pick, dayOffset: day, runs: 0,
-                            windowStartMin: round3(wsS), startMin: round3(wsS + tailSetup), setupMin: round3(tailSetup),
+                            windowStartMin: round3(wsS), startMin: round3(wsS + setupG), setupMin: round3(setupG),
                             durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
-                        clock += tailSetup; prevPhysical = c;
-                        st.isCont = true; st.pendingSetup = round3(setupG - tailSetup);
-                        ppTrace('  проход не влез — в хвост дня положена ЧАСТЬ настройки ' + Math.round(tailSetup) + ' мин (остаток настройки ' + Math.round(st.pendingSetup) + ' → завтра), день ' + (day + 1));
+                        clock += setupG; prevPhysical = c;
+                        st.isCont = true; st.pendingSetup = 0;
+                        ppTrace('  проход не влез — настройка ' + Math.round(setupG) + ' мин целиком в хвост дня (влезла), проходы → день ' + (day + 1));
                     } else {
-                        ppTrace('  проход не влез, настройки в хвост нет (setupG=' + Math.round(setupG) + ') → резка целиком на день ' + (day + 1));
+                        ppTrace('  проход не влез, настройка (' + Math.round(setupG) + ') не влезает в остаток дня (' + Math.round(roomG) + ') → резка целиком на день ' + (day + 1));
                     }
                     day += 1; clock = 0;
                 } else {
