@@ -9725,6 +9725,29 @@
             var hc = cutsById[head];
             return hc && hc.materialId != null && String(hc.materialId) !== '' ? String(hc.materialId) : '';
         }
+        // #3916: тайминг записи-СЕГМЕНТА считаем по ЕЁ проходам (plannedRuns), а не по целой
+        // резке. Разбивка по дням уменьшала «Кол-во резок план» сегмента, но «Длительность,
+        // минут» и «Резка и Лидер» оставались от полной резки (голова 30 из 82 проходов хранила
+        // намотку всех 82 → бейдж дня 452→520, а карточка тянулась до 17:16). Пишем обе колонки
+        // по проходам сегмента (0 проходов = setup-сегмент #3635 п.5 → 0). Намотка сегмента —
+        // тем же plannedCutDurationMinutes, что и splitMachineQueue (perPass × проходы), лидер —
+        // BETWEEN_CUTS × проходов (как cutLeaderRuns в computeCutSetupUpdates) — так «Резка и
+        // Лидер» совпадает с длительностью сегмента расписания, и бейдж = раскладке генерации.
+        var durReqIdSplit = reqIdByName(cutMeta, CUT_REQ.duration);
+        var cutTimeReqIdSplit = reqIdByName(cutMeta, CUT_REQ.cutAndLeader);
+        var betweenCutsSplit = Number((self.changeTimes && self.changeTimes.BETWEEN_CUTS != null)
+            ? self.changeTimes.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        function splitSegTimingFields(cutId, plannedRuns) {
+            var out = {};
+            var P = Math.max(0, Math.round(Number(plannedRuns) || 0));
+            var head = cutsById[chainHeadById[String(cutId)] || String(cutId)];
+            var isFoil = !!(head && head.isFoil);
+            // #3635 п.4: «Длительность, минут» — целой (вверх), как при создании резки.
+            var winding = P > 0 ? Math.ceil(plannedCutDurationMinutes(runLenForCutId(cutId), P, self.opTimes, isFoil)) : 0;
+            if (durReqIdSplit) out['t' + durReqIdSplit] = String(winding);
+            if (cutTimeReqIdSplit) out['t' + cutTimeReqIdSplit] = String(P > 0 ? Math.round(winding + betweenCutsSplit * P) : 0);
+            return out;
+        }
         // buildFields ключ для проходов — по runsReqId (live «Кол-во резок план»).
         var createsByParent = {};
         (ops.creates || []).forEach(function(cr) { (createsByParent[cr.parentCutId] = createsByParent[cr.parentCutId] || []).push(cr); });
@@ -9781,11 +9804,11 @@
                     var fields = {};
                     if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
                     if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
-                    // #3635 п.5: сегмент НАСТРОЙКИ (0 проходов) — обнуляем сохранённую
-                    // «Длительность, минут», иначе остаётся старая (намотка целой резки) и
-                    // расписание считает настройку длинной резкой, ломая раскладку по дням.
-                    var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
-                    if (Number(u.plannedRuns) === 0 && durReqId) fields['t' + durReqId] = '0';
+                    // #3916/#3635 п.5: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
+                    // по ЕГО проходам. 0 проходов (setup-сегмент) → 0; уменьшенные проходы дробления
+                    // → намотка/лидер сегмента, а не целой резки (иначе голова хранила намотку всех
+                    // проходов → бейдж дня переполнялся, карточка вылезала за смену).
+                    if (u.plannedRuns != null) Object.assign(fields, splitSegTimingFields(u.cutId, u.plannedRuns));
                     // #3781: восстановить «Метраж, м» = длине прогона головы цепочки. Для головы
                     // это та же длина (запись no-op по значению), для реюзнутого продолжения —
                     // лечит ранее пустую длину (иначе очередь брала поделённый метраж обеспечения).
@@ -9885,6 +9908,9 @@
                             // с первой частью явно, без эвристики continuationSignature.
                             firstPart: (cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId)
                         });
+                        // #3916: продолжение дробления — «Длительность»/«Резка и Лидер» по его
+                        // проходам (cr.plannedRuns), длина прогона/фольга — головы (parentId).
+                        Object.assign(cutFields, splitSegTimingFields(parentId, cr.plannedRuns));
                         cutFields = addMainValueField(cutMeta, cutFields, cr.planStartTs);
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
