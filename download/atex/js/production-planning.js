@@ -9187,6 +9187,26 @@
                 machineDayOffMemo[k] = v;
                 return v;
             }
+            // #3957 ДИАГНОСТИКА: что видит модель загрузки по дням (0..20 от базы плана) для
+            // КАЖДОГО станка — рабочий(.) / выходной-праздник(W, #3788) / отпуск(V, #3876) / оба(B).
+            // Плюс machineDayOff(=off?) и spanDays текущей загрузки. Если у станка с отпуском в
+            // строке нет V — отпуск НЕ подхватывается (id/окно/покрытие #3883), и хвост не стекает.
+            try {
+                var DAY_MS_DBG = 86400000;
+                (self.slitters || []).forEach(function(s){
+                    var id = String(s.id), row = '', off = '';
+                    for (var d = 0; d <= 20; d++){
+                        var ms = rebBaseMidnightMs + d * DAY_MS_DBG;
+                        var wk = !self.dayIsWorking(ms), vc = self.slitterOnVacationDay(id, ms);
+                        row += vc && wk ? 'B' : vc ? 'V' : wk ? 'W' : '.';
+                        off += machineDayOff(id, d) ? 'x' : '.';   // что реально вернёт модель загрузки
+                    }
+                    // Если row содержит W/V, а off в тех же позициях '.', значит machineDayOff НЕ
+                    // подхватывает выходной/отпуск (устаревшая сборка call-site / balanceDayOff).
+                    console.log('[pp] ⚖ dayoff ' + (labelById[id] || id) + ' [0..20]: сырьё=' + row +
+                        ' модель=' + off + '  (W=выходной V=отпуск B=оба; x=день занят в балансе)');
+                });
+            } catch (e) { console.warn('[pp] ⚖ dayoff diag error', e); }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
                 machineDayOff: machineDayOff,   // #3881: дата окончания с учётом отпуска (span)
