@@ -3278,29 +3278,35 @@
     // сам влезающий в рабочее окно дня, переносится на начало СЛЕДУЮЩЕГО рабочего дня (а не
     // оставляется с нахлёстом за смену). Не задан → прежнее поведение (проверяли только старт).
     // dayEnd по-прежнему граница, ПОСЛЕ которой новый сегмент не начинают.
-    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd) {
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit) {
         var m = Number(from);
         var L = Number(len) || 0;
         var hasFit = (fitEnd != null && isFinite(Number(fitEnd)));
         var endLimit = hasFit ? Number(fitEnd) : 0;
         var dayCap = endLimit - dayStart;   // длина рабочего окна дня (с овертаймом)
+        // #3934: потолок нахлёста (fitEnd, #3907) применяем ТОЛЬКО к сегменту, СДВИНУТОМУ простоем —
+        // блоком либо встык-курсором (movedInit). Сегмент, НЕ сдвинутый простоем, splitMachineQueue
+        // положил в хвост дня с НАМЕРЕННЫМ нахлёстом (#3635 п.5/#3739/#3805 — «настройка в хвосте
+        // дня N, резка с дня N+1»); выталкивать его на начало след. дня по потолку нельзя — иначе он
+        // уезжает ПОВЕРХ своего продолжения («настройка в начале дня» + бейдж дня растёт, issue #3934).
+        var moved = !!movedInit;
         // #3907: с переносом за конец дня итераций больше (пропуск целых дней) — запас увеличен.
         var guard = 0, guardMax = (blocked || []).length * 2 + 768;
         while (guard++ < guardMax) {
             var day = Math.floor(m / 1440);
             var within = m - day * 1440;
             if (within < dayStart) { m = day * 1440 + dayStart; continue; }
-            if (within >= dayEnd) { m = (day + 1) * 1440 + dayStart; continue; }
+            if (within >= dayEnd) { m = (day + 1) * 1440 + dayStart; moved = true; continue; }
             // #3907: сегмент должен влезть в рабочее окно дня ЦЕЛИКОМ. Конец за fitEnd, а сам
-            // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Сегмент длиннее
-            // целого окна разбить здесь нельзя — кладём как есть (вырожденный случай).
-            if (hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
+            // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Только для сдвинутого
+            // простоем сегмента (#3934). Сегмент длиннее целого окна разбить нельзя — кладём как есть.
+            if (moved && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
             var bumped = false;
             for (var i = 0; i < (blocked || []).length; i++) {
                 var bS = blocked[i][0], bE = blocked[i][1];
                 // m внутри блока, либо блок начинается в пределах занимаемого сегментом окна.
                 if ((bS <= m && m < bE) || (m < bS && bS < m + L)) {
-                    if (bE > m) { m = bE; bumped = true; break; }
+                    if (bE > m) { m = bE; bumped = true; moved = true; break; }
                 }
             }
             if (!bumped) return m;
@@ -3317,12 +3323,17 @@
         if (!blocked || !blocked.length || !items || !items.length) return items;
         var cursor = -Infinity;
         items.forEach(function(it) {
-            var ws = acc.windowStart(it);
+            var origWs = acc.windowStart(it);
+            var ws = origWs;
             if (ws < cursor) ws = cursor;
             var len = acc.length(it);
+            // #3934: сегмент «сдвинут простоем» уже если встык-курсор поднял его старт (предыдущий
+            // уехал за простой) — тогда к нему применяем потолок нахлёста (#3907); сегмент на своём
+            // месте (не тронут ни блоком, ни курсором) оставляем как есть (намеренный хвост дня).
+            var cursorMoved = (ws !== origWs);
             // #3907: fitEnd — не оставлять сегмент с нахлёстом за смену (см. nextFreeWorkMinute).
-            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd);
-            var delta = placed - acc.windowStart(it);
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved);
+            var delta = placed - origWs;
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
         });
