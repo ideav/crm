@@ -50,18 +50,39 @@ echo "Корень репозитория: $root"
 echo "Файл архива:        $out"
 echo
 
-# 1) Сформировать список файлов и проверить на утечку чужих данных.
-listing="$(tar "${exclude[@]}" -cf - "${include[@]}" | tar -tf -)"
+# 1) Собрать во временный staging-каталог (только нужные файлы, без чужих данных).
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+tar "${exclude[@]}" -cf - "${include[@]}" | tar -xf - -C "$stage"
+
+# 2) Наложить пакетный оверрайд локальной установки (issue #3950): убрать
+#    регистрацию, вход через Яндекс и капчу. Правим ТОЛЬКО копии в staging —
+#    общие файлы репозитория (start.html, js/app.js) не трогаем.
+cp "$root/local/overrides/local-install.js" "$stage/js/local-install.js"
+if ! grep -q 'js/local-install.js' "$stage/start.html"; then
+    sed -i -E 's#(<script src="js/app\.js"[^>]*></script>)#\1\n    <script src="js/local-install.js"></script>#' "$stage/start.html"
+fi
+grep -q 'js/local-install.js' "$stage/start.html" \
+    || { echo "ОШИБКА: не удалось подключить local-install.js в start.html" >&2; exit 1; }
+
+# 3) Проверить staging на утечку данных другого заказчика.
+listing="$(cd "$stage" && find . -type f | sed 's#^\./##')"
 if leak="$(printf '%s\n' "$listing" | grep -Ei 'atex|sportzania|xcom|(^|/)ball(/|$)' || true)"; [ -n "$leak" ]; then
     echo "ОШИБКА: в архив попали данные другого заказчика:" >&2
     printf '%s\n' "$leak" >&2
     exit 1
 fi
 
-# 2) Собрать сам архив.
-tar "${exclude[@]}" -czf "$out" "${include[@]}"
+# 4) Нормализовать права: каталоги обходимы, файлы читаемы всеми (скрипты
+#    сохраняют +x). Иначе режим временного каталога mktemp (700) попадёт в
+#    корневую запись архива и после распаковки веб-сервер не сможет войти в
+#    каталог сайта.
+chmod -R a+rX "$stage"
 
-# 3) Отчёт.
+# 5) Упаковать staging в архив.
+tar -czf "$out" -C "$stage" .
+
+# 6) Отчёт.
 count="$(printf '%s\n' "$listing" | grep -c . || true)"
 size="$(du -h "$out" | cut -f1)"
 echo "Готово."
