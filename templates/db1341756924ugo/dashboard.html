@@ -1,0 +1,95 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap" id="dash">
+  <div id="hero"></div>
+  <div class="fc-grid c4" id="kpi"></div>
+  <div class="fc-grid c2" style="margin-top:14px">
+    <div class="fc-card"><h3><i class="pi pi-bolt"></i>Матчи на табло</h3><div id="matches"></div></div>
+    <div class="fc-card"><h3><i class="pi pi-megaphone"></i>Лента событий</h3><ul class="fc-feed" id="feed"></ul></div>
+  </div>
+  <div class="fc-grid c2" style="margin-top:14px">
+    <div class="fc-card"><h3><i class="pi pi-dollar"></i>Топ ставок часа</h3><div id="topbets"></div></div>
+    <div class="fc-card"><h3 style="color:var(--fc-cringe)"><i class="pi pi-crown" style="color:var(--fc-cringe)"></i>Стена позора</h3><div class="fc-shame" id="shame"></div>
+      <div id="cringe" style="margin-top:14px"></div></div>
+  </div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  document.getElementById('hero').innerHTML = FC.hero('Дэшборд','Антитотализатор: побеждает ставка на самый непопулярный исход');
+  Promise.all([ FC.list(FC.T.MATCH), FC.list(FC.T.MEM), FC.list(FC.T.BET), FC.list(FC.T.VID) ])
+  .then(function(res){
+    var matches=res[0], members=res[1], bets=res[2], vids=res[3];
+    var IM=FC.I.MATCH, IB=FC.I.BET, IE=FC.I.MEM;
+    // KPI
+    var bankWeek = matches.reduce(function(s,m){return s+FC.num(m.r[IM.bank]);},0);
+    var openBets = bets.filter(function(b){ return FC.refLabel(b.r[IB.stat])==='Открыта'; }).length;
+    var kpis=[
+      ['pi-users','#16c784',members.length,'участников'],
+      ['pi-bolt','#3b82f6',matches.length,'матчей в туре'],
+      ['pi-ticket','#8b5cf6',openBets,'открытых ставок'],
+      ['pi-dollar','#ffce3a',bankWeek+' Ǥ','банк недели']
+    ];
+    document.getElementById('kpi').innerHTML = kpis.map(function(k){
+      return '<div class="fc-card fc-kpi"><div class="ic"><i class="pi '+k[0]+'" style="color:'+k[1]+'"></i></div>'+
+        '<div class="v" style="color:'+k[1]+'">'+k[2]+'</div><div class="l">'+k[3]+'</div></div>';
+    }).join('');
+
+    // Матчи на табло (live + open сначала)
+    var order={'Идёт':0,'Ставки открыты':1,'Ставки закрыты':2,'Завершён':3};
+    var ms = matches.slice().sort(function(a,b){
+      return (order[FC.refLabel(a.r[IM.stat])]??9)-(order[FC.refLabel(b.r[IM.stat])]??9); });
+    document.getElementById('matches').innerHTML = ms.slice(0,5).map(function(m){
+      var st=FC.refLabel(m.r[IM.stat]);
+      var live = st==='Идёт' || st==='Завершён';
+      return '<div class="fc-match" onclick="location.href=\'/'+FC.DB+'/matches?m='+m.i+'\'">'+
+        '<div class="side"><span class="emb">'+(FC.refLabel(m.r[IM.home]).slice(0,2))+'</span>'+FC.esc(FC.refLabel(m.r[IM.home]))+'</div>'+
+        '<div><div class="score">'+(live?(m.r[IM.sh]+':'+m.r[IM.sa]):'<span class="vs">vs</span>')+'</div>'+
+        '<div style="text-align:center;margin-top:4px">'+FC.matchStatusChip(st)+'</div></div>'+
+        '<div class="side">'+FC.esc(FC.refLabel(m.r[IM.away]))+'<span class="emb">'+(FC.refLabel(m.r[IM.away]).slice(0,2))+'</span></div>'+
+      '</div>';
+    }).join('') || '<div class="fc-empty">Нет матчей</div>';
+
+    // Лента событий: тянем события активных/завершённых матчей
+    var actMatches = matches.filter(function(m){ var s=FC.refLabel(m.r[IM.stat]); return s==='Идёт'||s==='Завершён'; }).slice(0,4);
+    Promise.all(actMatches.map(function(m){ return FC.children(FC.T.EV, m.i).then(function(evs){
+      return evs.map(function(e){ return {m:m, e:e}; }); }); })).then(function(groups){
+      var all=[].concat.apply([],groups);
+      all.sort(function(a,b){ return FC.num(b.e.r[FC.I.EV.min])-FC.num(a.e.r[FC.I.EV.min]); });
+      var feed=document.getElementById('feed');
+      feed.innerHTML = all.slice(0,9).map(function(x){
+        var t=FC.refLabel(x.e.r[FC.I.EV.type]); var cls = t==='Гол'?'goal':(t==='Сенсация'?'cringe':'');
+        return '<li><span class="min">'+x.e.r[FC.I.EV.min]+"'</span><span class=\""+cls+'">'+FC.esc(x.e.r[FC.I.EV.txt])+'</span></li>';
+      }).join('') || '<li class="fc-muted">Событий пока нет</li>';
+    });
+
+    // Топ ставок часа
+    var recent = bets.slice().sort(function(a,b){ return FC.num(b.r[IB.dt])-FC.num(a.r[IB.dt]); }).slice(0,6);
+    document.getElementById('topbets').innerHTML =
+      '<table class="fc-table"><tr><th>Игрок</th><th>Вариант</th><th class="num">Ставка</th><th>Статус</th></tr>'+
+      recent.map(function(b){
+        var st=FC.refLabel(b.r[IB.stat]);
+        var chip = st==='Выиграла'?'<span class="chip green">выигрыш</span>':(st==='Проиграла'?'<span class="chip red">проигрыш</span>':'<span class="chip purple">в игре</span>');
+        return '<tr><td>'+FC.esc(FC.refLabel(b.r[IB.mem]))+'</td><td>'+FC.esc(FC.refLabel(b.r[IB.vid]))+'</td>'+
+          '<td class="num"><span class="g">'+b.r[IB.sum]+'</span></td><td>'+chip+'</td></tr>';
+      }).join('')+'</table>';
+
+    // Стена позора: владельцы короны + крупнейшие проигравшие
+    var shamed = members.filter(function(m){ return String(m.r[IE.crown])==='1'||String(m.r[IE.crown]).toLowerCase()==='true'; });
+    if(shamed.length<3){
+      var byLoss = members.slice().sort(function(a,b){ return FC.num(b.r[IE.lose])-FC.num(a.r[IE.lose]); });
+      byLoss.forEach(function(m){ if(shamed.length<3 && shamed.indexOf(m)<0) shamed.push(m); });
+    }
+    document.getElementById('shame').innerHTML = shamed.slice(0,3).map(function(m){
+      return '<div class="it"><div class="av">'+(m.r[IE.ava]||'👤')+'</div><div class="nm">'+FC.esc(m.r[IE.nick])+'</div>'+
+        '<div class="fc-muted" style="font-size:12px">проиграно <span class="gneg">'+m.r[IE.lose]+' Ǥ</span></div>'+
+        '<div style="margin-top:4px">👑</div></div>';
+    }).join('');
+    document.getElementById('cringe').innerHTML =
+      '<div class="fc-card" style="background:rgba(255,77,109,.07);border-color:rgba(255,77,109,.3)">'+
+      '<h3 style="color:var(--fc-cringe)"><i class="pi pi-exclamation-triangle" style="color:var(--fc-cringe)"></i>Кринж-событие недели</h3>'+
+      '<div style="font-weight:800;font-size:15px">«Вратарь забьёт гол»</div>'+
+      '<div class="fc-muted" style="margin-top:6px">Случайная кринж-ставка тура. Поставило 4% банка — если зайдёт, СЕНСАЦИЯ и бонус из резерва!</div></div>';
+  });
+})();
+</script>

@@ -1,0 +1,67 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div class="fc-card" style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <b><i class="pi pi-user"></i> Кабинет участника:</b>
+    <select id="me" style="max-width:280px;padding:8px 12px;border-radius:10px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary)"></select>
+  </div></div>
+  <div id="profile"></div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  var IE=FC.I.MEM;
+  document.getElementById('hero').innerHTML = FC.hero('Личный кабинет','Баланс, история транзакций, значки и реферальная программа');
+  var members=[], meId=null;
+  FC.list(FC.T.MEM).then(function(r){ members=r;
+    var sel=document.getElementById('me');
+    sel.innerHTML=members.map(function(m){return '<option value="'+m.i+'">'+(m.r[IE.ava]||'')+' '+FC.esc(m.r[IE.nick])+'</option>';}).join('');
+    meId=localStorage.getItem('fc_me')||(members[0]&&members[0].i); if(meId) sel.value=meId;
+    sel.onchange=function(){ meId=sel.value; localStorage.setItem('fc_me',meId); render(); };
+    render();
+  });
+
+  function render(){
+    var m=members.filter(function(x){return String(x.i)===String(meId);})[0]; if(!m) return;
+    var link=location.origin+'/'+FC.DB+'/dashboard?ref='+encodeURIComponent(m.r[IE.ref]||'');
+    var crown = String(m.r[IE.crown])==='1'?'<span class="chip red">👑 Капитан Очевидность</span>':'';
+    var el=document.getElementById('profile');
+    el.innerHTML=
+      '<div class="fc-grid c3">'+
+        '<div class="fc-card" style="text-align:center"><div style="font-size:54px">'+(m.r[IE.ava]||'👤')+'</div>'+
+          '<h2 style="margin:6px 0 2px">'+FC.esc(m.r[IE.nick])+'</h2><div><span class="chip">'+FC.esc(m.r[IE.rank]||'')+'</span> '+crown+'</div>'+
+          '<div style="margin-top:12px" class="fc-muted">с '+FC.fmtDate(m.r[IE.reg])+'</div></div>'+
+        '<div class="fc-card fc-kpi"><div class="ic">💰</div><div class="v g">'+m.r[IE.bal]+'</div><div class="l">баланс Ǥ (не покупается, только зарабатывается)</div>'+
+          '<div style="margin-top:10px"><span class="chip green">выиграно '+m.r[IE.win]+' Ǥ</span> <span class="chip red">проиграно '+m.r[IE.lose]+' Ǥ</span></div></div>'+
+        '<div class="fc-card"><h3><i class="pi pi-share-alt"></i>Реферальная программа</h3>'+
+          '<div>Код: <span class="chip gold">'+FC.esc(m.r[IE.ref]||'')+'</span></div>'+
+          '<div style="margin:8px 0"><b style="font-size:22px" class="gpos">'+m.r[IE.inv]+'</b> <span class="fc-muted">друзей приглашено (+10 Ǥ за каждого)</span></div>'+
+          '<button class="btn ghost" onclick="navigator.clipboard&&navigator.clipboard.writeText(\''+link+'\');FC.toast(\'Ссылка скопирована\')"><i class="pi pi-copy"></i> Копировать ссылку</button></div>'+
+      '</div>'+
+      '<div class="fc-grid c4" style="margin-top:14px">'+
+        kpi('🎲',m.r[IE.bets],'ставок сделано')+
+        kpi('📈',(FC.num(m.r[IE.roi])>=0?'+':'')+m.r[IE.roi]+'%','ROI', FC.num(m.r[IE.roi])>=0?'var(--fc-green)':'var(--fc-cringe)')+
+        kpi('🔥',m.r[IE.streak],'текущая серия')+
+        kpi('👥',m.r[IE.inv],'приглашено')+
+      '</div>'+
+      '<div class="fc-grid c2" style="margin-top:14px">'+
+        '<div class="fc-card"><h3><i class="pi pi-wallet"></i>История транзакций</h3><div id="tx"></div></div>'+
+        '<div class="fc-card"><h3><i class="pi pi-star-fill"></i>Мои значки</h3><div id="awd"></div></div>'+
+      '</div>';
+
+    FC.children(FC.T.TX, m.i).then(function(txs){
+      txs.sort(function(a,b){return FC.num(b.r[FC.I.TX.dt])-FC.num(a.r[FC.I.TX.dt]);});
+      document.getElementById('tx').innerHTML = txs.length?('<table class="fc-table"><tr><th>Операция</th><th>Дата</th><th class="num">Сумма</th></tr>'+
+        txs.map(function(t){ return '<tr><td>'+FC.esc(t.r[FC.I.TX.op])+'</td><td class="fc-muted">'+FC.fmtDT(t.r[FC.I.TX.dt])+'</td><td class="num">'+FC.gpos(t.r[FC.I.TX.amt])+'</td></tr>';}).join('')+'</table>')
+        : '<div class="fc-empty">Нет операций</div>';
+    });
+    FC.children(FC.T.AWD, m.i).then(function(aws){
+      document.getElementById('awd').innerHTML = aws.length?('<div style="display:flex;gap:10px;flex-wrap:wrap">'+
+        aws.map(function(a){ return '<div class="chip gold" style="padding:8px 14px;font-size:14px">🏅 '+FC.esc(a.r[FC.I.AWD.name])+' <span class="fc-muted" style="font-size:11px">'+FC.fmtDate(a.r[FC.I.AWD.dt])+'</span></div>';}).join('')+'</div>')
+        : '<div class="fc-empty">Значков пока нет — играй активнее!</div>';
+    });
+  }
+  function kpi(ic,v,l,col){ return '<div class="fc-card fc-kpi"><div class="ic">'+ic+'</div><div class="v" style="'+(col?'color:'+col:'')+'">'+v+'</div><div class="l">'+l+'</div></div>'; }
+})();
+</script>

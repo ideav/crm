@@ -1,0 +1,64 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div class="fc-grid c2">
+    <div class="fc-card"><h3><i class="pi pi-user-plus"></i>Завести сотрудника</h3>
+      <div class="fc-field"><label>Логин</label><input id="u_login"></div>
+      <div class="fc-field"><label>ФИО / отображаемое имя</label><input id="u_fio"></div>
+      <div class="fc-field"><label>Роль</label><select id="u_role"></select></div>
+      <div class="fc-field"><label>Пароль</label><input id="u_pwd" value="fc_user_2026"></div>
+      <button class="btn" id="u_add"><i class="pi pi-check"></i> Создать пользователя</button>
+    </div>
+    <div class="fc-card"><h3><i class="pi pi-users"></i>Пользователи и доступ</h3><div id="ulist"></div></div>
+  </div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  document.getElementById('hero').innerHTML = FC.hero('Пользователи и доступ','Заводите сотрудников, меняйте роли и отключайте доступ');
+  var COL={login:0,role:null,fio:null,roleReq:115,fioReq:33};
+  var roles=[];
+  // карта колонок таблицы 18 из метаданных
+  FC.get('metadata/18?JSON=1').then(function(md){
+    var t=Array.isArray(md)?md.filter(function(x){return String(x.id)==='18';})[0]:md;
+    if(t&&t.reqs){ t.reqs.forEach(function(r,idx){ // r index in r[] = idx+1 (r[0]=login)
+      if(String(r.ref)==='42') COL.role=idx+1;
+      if(String(r.id)==='33') COL.fio=idx+1;
+    }); }
+    load();
+  });
+  FC.list(FC.T_ROLE||42).then(function(){});
+  FC.list(42).then(function(r){ roles=r;
+    document.getElementById('u_role').innerHTML=roles.map(function(x){return '<option value="'+x.i+'">'+FC.esc(x.r[0])+'</option>';}).join('');
+  });
+
+  function load(){
+    FC.list(18).then(function(users){
+      document.getElementById('ulist').innerHTML='<table class="fc-table"><tr><th>Логин</th><th>Роль</th><th></th></tr>'+
+        users.map(function(u){
+          var role=COL.role!=null?FC.refLabel(u.r[COL.role]):'';
+          var roleId=COL.role!=null?FC.refId(u.r[COL.role]):'';
+          var isAdmin=role==='admin'||role==='Администратор'||u.r[0]===FC.DB;
+          var sel='<select data-u="'+u.i+'" class="rsel" style="padding:5px 8px;border-radius:8px;background:var(--input-bg);color:var(--text-primary);border:1px solid var(--input-border)">'+
+            roles.map(function(x){return '<option value="'+x.i+'"'+(String(x.i)===String(roleId)?' selected':'')+'>'+FC.esc(x.r[0])+'</option>';}).join('')+'</select>';
+          return '<tr><td><b>'+FC.esc(u.r[0])+'</b></td><td>'+(isAdmin?('<span class="chip gold">'+FC.esc(role)+'</span>'):sel)+'</td>'+
+            '<td class="num">'+(isAdmin?'<span class="fc-muted">супер-админ</span>':'<button class="btn red" data-del="'+u.i+'" style="padding:5px 10px"><i class="pi pi-ban"></i> доступ</button>')+'</td></tr>';
+        }).join('')+'</table>';
+      document.querySelectorAll('.rsel').forEach(function(s){ s.onchange=function(){
+        FC.update(s.dataset.u, {['t'+COL.roleReq]:s.value}).then(function(){FC.toast('Роль обновлена');}); };});
+      document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick=function(){
+        if(!confirm('Лишить пользователя доступа (удалить учётную запись)?')) return;
+        FC.post('_m_del/'+b.dataset.del,{}).then(function(){FC.toast('Доступ отключён');load();}); };});
+    });
+  }
+
+  document.getElementById('u_add').onclick=function(){
+    var login=document.getElementById('u_login').value.trim();
+    if(!login){ FC.toast('Укажите логин',1); return; }
+    var f={['t18']:login, ['t'+COL.roleReq]:document.getElementById('u_role').value,
+      ['t20']:document.getElementById('u_pwd').value, ['t'+COL.fioReq]:document.getElementById('u_fio').value};
+    FC.create(18, f).then(function(){ FC.toast('Пользователь создан'); document.getElementById('u_login').value=''; load(); });
+  };
+})();
+</script>

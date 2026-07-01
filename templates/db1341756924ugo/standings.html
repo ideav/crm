@@ -1,0 +1,68 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div class="fc-tabs" id="tabs">
+    <div class="fc-tab on" data-t="teams"><i class="pi pi-table"></i> Таблица команд</div>
+    <div class="fc-tab" data-t="scorers"><i class="pi pi-star"></i> Бомбардиры</div>
+    <div class="fc-tab" data-t="tote"><i class="pi pi-dollar"></i> Тотализатор</div>
+  </div>
+  <div class="fc-card"><div id="body"></div></div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  document.getElementById('hero').innerHTML = FC.hero('Турнирные таблицы','Еженедельный кубок G — групповой этап');
+  var DATA={};
+  Promise.all([ FC.list(FC.T.TEAM), FC.list(FC.T.PLR), FC.list(FC.T.MEM) ]).then(function(r){
+    DATA.teams=r[0]; DATA.players=r[1]; DATA.members=r[2]; render('teams');
+  });
+  document.querySelectorAll('.fc-tab').forEach(function(t){ t.onclick=function(){
+    document.querySelectorAll('.fc-tab').forEach(function(x){x.classList.remove('on');});
+    t.classList.add('on'); render(t.dataset.t);
+  };});
+
+  function rankCell(i){ var c=i<3?(' r'+(i+1)):''; return '<td class="fc-rank'+c+'">'+(i+1)+'</td>'; }
+
+  function render(tab){
+    var el=document.getElementById('body'), I;
+    if(tab==='teams'){
+      I=FC.I.TEAM;
+      var rows=DATA.teams.slice().sort(function(a,b){
+        var d=FC.num(b.r[I.pts])-FC.num(a.r[I.pts]); if(d) return d;
+        return (FC.num(b.r[I.gf])-FC.num(b.r[I.ga]))-(FC.num(a.r[I.gf])-FC.num(a.r[I.ga])); });
+      el.innerHTML='<table class="fc-table"><tr><th></th><th>Команда</th><th>Тип</th><th class="num">И</th>'+
+        '<th class="num">В</th><th class="num">Н</th><th class="num">П</th><th class="num">Голы</th><th class="num">Очки</th><th class="num">TR</th><th>Форма</th></tr>'+
+        rows.map(function(t,i){ var g=FC.num(t.r[I.w])+FC.num(t.r[I.d])+FC.num(t.r[I.l]);
+          var kindChip=FC.refLabel(t.r[I.kind])==='Реальная'?'<span class="chip blue">реальная</span>':'<span class="chip green">игроков</span>';
+          return '<tr>'+rankCell(i)+'<td><b>'+(t.r[I.emb]||'')+' '+FC.esc(t.r[I.name])+'</b></td><td>'+kindChip+'</td>'+
+            '<td class="num">'+g+'</td><td class="num">'+t.r[I.w]+'</td><td class="num">'+t.r[I.d]+'</td><td class="num">'+t.r[I.l]+'</td>'+
+            '<td class="num">'+t.r[I.gf]+':'+t.r[I.ga]+'</td><td class="num"><b>'+t.r[I.pts]+'</b></td>'+
+            '<td class="num"><span class="chip gold">'+t.r[I.tr]+'</span></td><td><code>'+FC.esc(t.r[I.form]||'')+'</code></td></tr>';
+        }).join('')+'</table>';
+    } else if(tab==='scorers'){
+      I=FC.I.PLR;
+      var rows=DATA.players.slice().sort(function(a,b){ var d=FC.num(b.r[I.g])-FC.num(a.r[I.g]); if(d)return d; return FC.num(b.r[I.a])-FC.num(a.r[I.a]); });
+      el.innerHTML='<table class="fc-table"><tr><th></th><th>Игрок</th><th>Команда</th><th>Позиция</th><th class="num">Голы</th>'+
+        '<th class="num">Пас</th><th class="num">Карт.</th><th class="num">PR</th></tr>'+
+        rows.slice(0,15).map(function(p,i){
+          var ut=FC.refLabel(p.r[I.kind])==='Реальный'?'':' <span class="chip green" style="font-size:10px">user</span>';
+          return '<tr>'+rankCell(i)+'<td><b>'+FC.esc(p.r[I.name])+'</b>'+ut+'</td><td>'+FC.esc(FC.refLabel(p.r[I.team]))+'</td>'+
+            '<td>'+FC.esc(FC.refLabel(p.r[I.pos]))+'</td><td class="num"><b>'+p.r[I.g]+'</b></td><td class="num">'+p.r[I.a]+'</td>'+
+            '<td class="num">'+p.r[I.card]+'</td><td class="num"><span class="chip gold">'+p.r[I.pr]+'</span></td></tr>';
+        }).join('')+'</table>';
+    } else {
+      I=FC.I.MEM;
+      var rows=DATA.members.slice().sort(function(a,b){ return FC.num(b.r[I.win])-FC.num(a.r[I.win]); });
+      el.innerHTML='<table class="fc-table"><tr><th></th><th>Участник</th><th class="num">Выиграно</th><th class="num">Проиграно</th>'+
+        '<th class="num">ROI</th><th class="num">Серия</th><th>Звание</th></tr>'+
+        rows.map(function(m,i){ var roi=FC.num(m.r[I.roi]);
+          return '<tr>'+rankCell(i)+'<td><b>'+(m.r[I.ava]||'')+' '+FC.esc(m.r[I.nick])+'</b></td>'+
+            '<td class="num gpos">'+m.r[I.win]+' Ǥ</td><td class="num gneg">'+m.r[I.lose]+' Ǥ</td>'+
+            '<td class="num '+(roi>=0?'gpos':'gneg')+'">'+roi+'%</td><td class="num">'+(FC.num(m.r[I.streak])>0?('🔥'+m.r[I.streak]):'—')+'</td>'+
+            '<td><span class="chip">'+FC.esc(m.r[I.rank]||'')+'</span></td></tr>';
+        }).join('')+'</table>';
+    }
+  }
+})();
+</script>
