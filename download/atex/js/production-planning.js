@@ -3322,10 +3322,21 @@
     function shiftPlacementsPastDowntime(items, blocked, dayStart, dayEnd, acc, fitEnd) {
         if (!blocked || !blocked.length || !items || !items.length) return items;
         var cursor = -Infinity;
+        var prevOrigDay = null, prevPlacedDay = null;   // #3951: сохранение границ дней при сдвиге
         items.forEach(function(it) {
             var origWs = acc.windowStart(it);
+            var origDay = Math.floor(origWs / 1440);
             var ws = origWs;
             if (ws < cursor) ws = cursor;
+            // #3951: сегмент, исходно стоявший на БОЛЕЕ ПОЗДНЕМ дне, чем предыдущий, обязан и после
+            // сдвига за простой оказаться на более позднем дне. Иначе встык-курсор паковал продолжение
+            // разбитой по дням резки в ХВОСТ дня её первой части (после длинного «Отпуска» день-сплит
+            // схлопывался в один день → бейдж дня за ёмкость: 490 при 460, а следующий день недобирал,
+            // issue #3951). Сегменты одного исходного дня по-прежнему пакуются встык (заполняют день).
+            if (prevPlacedDay != null && prevOrigDay != null && origDay > prevOrigDay) {
+                var nextDayStart = (prevPlacedDay + 1) * 1440 + dayStart;
+                if (ws < nextDayStart) ws = nextDayStart;
+            }
             var len = acc.length(it);
             // #3934: сегмент «сдвинут простоем» уже если встык-курсор поднял его старт (предыдущий
             // уехал за простой) — тогда к нему применяем потолок нахлёста (#3907); сегмент на своём
@@ -3336,6 +3347,8 @@
             var delta = placed - origWs;
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
+            prevOrigDay = origDay;
+            prevPlacedDay = Math.floor(placed / 1440);
         });
         return items;
     }
