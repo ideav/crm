@@ -5401,6 +5401,33 @@
             return span;
         }
 
+        // #3921: ДРОБНАЯ дата окончания станка (в календарных днях от базы) — как spanDays, но
+        // последний рабочий день заполнен частично (по минутам). Нужна как ТОЧНЫЙ ключ баланса:
+        // span (целые дни, ceil) создаёт «плато» — при отпуске станок может держать хвост работы
+        // ПОСЛЕ отпуска (напр. 13.07), пока другие простаивают, и перенос одного задания не
+        // меняет целый span (1680→1500 мин = те же 4 «дня») → счёт не улучшается, работа
+        // застревает за отпуском. По минутам каждый перенос строго снижает endPos → хвост
+        // «стекает» на свободные станки. Пол — конец ведущего отпуска (пустой станок в отпуске
+        // «занят» до его конца, #3881). Без ёмкости/отпусков — прежнее целое поведение.
+        var endPosMemo = {};
+        function endPos(machineId, min){
+            var work = (min > 0) ? min : 0;
+            if (!machineDayOff) return hasCap ? round3(work / cap) : (work > 0 ? 1 : 0);
+            var memoKey = machineId + ':' + work;
+            if (memoKey in endPosMemo) return endPosMemo[memoKey];
+            var remaining = work, lastPos = 0, guard = 731 + (hasCap ? Math.ceil(work / cap) : 1);
+            for (var d = 0; d <= guard; d++){
+                if (machineDayOff(machineId, d)) { lastPos = d + 1; continue; }   // день отпуска — «занят» до его конца
+                if (remaining <= 0) break;
+                var use = hasCap ? Math.min(cap, remaining) : remaining;
+                remaining -= use;
+                lastPos = d + (hasCap ? (use / cap) : 1);   // рабочий день заполнен частично
+            }
+            var v = round3(lastPos);
+            endPosMemo[memoKey] = v;
+            return v;
+        }
+
         // Назначение подвижных: slitterId → [plan]. Полный набор станка = fixed + movable.
         var byMachine = {};
         machineList.forEach(function(id){ byMachine[id] = []; });
@@ -5415,20 +5442,24 @@
             });
             return snap;
         }
-        // Счёт состояния = [макс. дней, пик минут станка, сумма квадратов минут]; меньше — лучше
-        // (лексикографически). Сумма КВАДРАТОВ (а не просто сумма) штрафует перекос: при равном
+        // Счёт состояния = [макс. дней, макс. ДРОБНАЯ дата окончания, пик минут станка, сумма
+        // квадратов минут]; меньше — лучше (лексикографически). maxDays (#3881) — целая дата
+        // окончания с учётом отпуска; maxEndPos (#3921) — та же дата ДРОБНО (по минутам), ломает
+        // «плато» ceil: когда целый span не меняется, дробный хвост за отпуском всё равно стекает
+        // на свободные станки. Сумма КВАДРАТОВ (а не просто сумма) штрафует перекос: при равном
         // пике она ниже у РОВНОГО распределения — это и выталкивает работу на простаивающий
         // станок. Простая сумма минут, наоборот, росла бы от лишних настроек и склеивала всё на
         // меньшем числе станков (застревание в духе 4/4/0/0) — поэтому не она.
         function scoreFrom(minById){
-            var maxDays = 0, peak = 0, sumSq = 0;
+            var maxDays = 0, maxEndPos = 0, peak = 0, sumSq = 0;
             Object.keys(minById).forEach(function(id){
                 var m = minById[id];
                 sumSq = round3(sumSq + m * m);
                 if (m > peak) peak = m;
                 var d = spanDays(id, m); if (d > maxDays) maxDays = d;   // #3881: дата окончания (span с учётом отпуска)
+                var e = endPos(id, m); if (e > maxEndPos) maxEndPos = e;   // #3921: дробная дата окончания (хвост за отпуском)
             });
-            return [maxDays, round3(peak), sumSq];
+            return [maxDays, maxEndPos, round3(peak), sumSq];
         }
         function lexLess(a, b){
             for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return true; if (a[i] > b[i]) return false; }
