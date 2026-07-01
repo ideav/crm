@@ -1,0 +1,245 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=3">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap" id="duel">
+  <div id="hero"></div>
+  <div id="body"><div class="fc-empty">Загрузка…</div></div>
+</div></div>
+
+<!-- Модалка подведения итогов -->
+<div class="fc-overlay" id="rv-ov" onclick="duelCloseResolve()"></div>
+<div class="fc-modal" id="rv-md">
+  <span class="x" onclick="duelCloseResolve()">&times;</span>
+  <h3>Подвести итоги дуэли</h3>
+  <div class="fc-field"><label>Событие произошло?</label>
+    <select id="rv-actual"><option value="Да">Да — событие случилось</option><option value="Нет">Нет — не случилось</option></select></div>
+  <p class="fc-muted" style="font-size:12px">Угадавшие получат значок «Пророк» (или «Дивергент», если капитан ошибся), остальные — «Афоня». Если угадали все — «Футбольный Оракул».</p>
+  <button class="btn gold" id="rv-go"><i class="pi pi-flag"></i> Завершить и раздать значки</button>
+</div>
+
+<script src="/download/{_global_.z}/fc.js?v=3"></script>
+<script>
+(function(){
+  var IE=FC.I.MEM, IM=FC.I.MATCH, IV=FC.I.VID, ID=FC.I.DUEL, IP=FC.I.DUELP;
+  var q=new URLSearchParams(location.search);
+  document.getElementById('hero').innerHTML = FC.hero('Битва пророков','Вызови друзей на дуэль прогнозов — кто угадает исход');
+  var body=document.getElementById('body');
+
+  if(!FC.duelReady()){ renderSetup(); return; }
+  renderApp();
+
+  // ---------- НАСТРОЙКА (таблицы ещё не созданы) ----------
+  function renderSetup(){
+    var canAdmin = FC.canWrite(FC.T.MEM);
+    body.innerHTML =
+      '<div class="fc-card">'+
+        '<h3><i class="pi pi-cog"></i>Битва пророков ещё не настроена</h3>'+
+        '<p class="fc-muted">Механике нужны две таблицы Интеграма. Создайте их один раз — дальше всё работает автоматически.</p>'+
+        '<div class="fc-grid c2" style="margin-top:6px">'+
+          tbl('Дуэль', ['Капитан → Участник','Матч → Матч','Событие → Вид исхода','Ставка Ǥ (число)','Статус (текст)','Итог (текст)','Создана (дата-время)'])+
+          tbl('Участник дуэли <span class="fc-muted" style="font-weight:400">(подчинённая)</span>', ['Участник → Участник','Прогноз (текст)','Результат (текст)'])+
+        '</div>'+
+        (canAdmin
+          ? '<div style="margin-top:14px"><button class="btn gold" id="prov"><i class="pi pi-bolt"></i> Создать таблицы автоматически</button>'+
+            '<span class="fc-muted" style="font-size:12px;margin-left:10px">нужны права администратора базы</span></div>'+
+            '<pre id="prov-log" style="display:none;white-space:pre-wrap;background:var(--bg-secondary,#0e1626);border-radius:10px;padding:12px;margin-top:12px;font-size:12px"></pre>'+
+            '<div id="prov-cfg"></div>'
+          : '<p class="fc-muted" style="margin-top:12px">Создание таблиц доступно администратору базы. Ручной рецепт — в описании PR/README.</p>')+
+      '</div>';
+    if(canAdmin) document.getElementById('prov').onclick=doProvision;
+  }
+  function tbl(name, cols){
+    return '<div class="fc-card"><h3 style="text-transform:none">📋 '+name+'</h3><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">'+
+      cols.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul></div>';
+  }
+  function doProvision(){
+    if(!confirm('Создать таблицы «Дуэль» и «Участник дуэли» в этой базе? Операция идемпотентна.')) return;
+    var btn=document.getElementById('prov'); btn.disabled=true;
+    var pre=document.getElementById('prov-log'); pre.style.display='block'; pre.textContent='';
+    var log=function(m){ pre.textContent+=m+'\n'; };
+    FC.duelProvision(log).then(function(cfg){
+      document.getElementById('prov-cfg').innerHTML =
+        '<p style="margin-top:12px">Готово. Чтобы механика работала у всех пользователей, вставьте этот JSON в <code>fc.js</code> в строку <code>FC.DUEL_CFG = …</code> и закоммитьте:</p>'+
+        '<pre style="white-space:pre-wrap;background:var(--bg-secondary,#0e1626);border-radius:10px;padding:12px;font-size:12px">FC.DUEL_CFG = '+FC.esc(JSON.stringify(cfg))+';</pre>'+
+        '<button class="btn" onclick="location.reload()"><i class="pi pi-refresh"></i> Открыть Битву пророков</button>';
+    }).catch(function(e){ log('Ошибка: '+(e&&e.message||e)); btn.disabled=false; });
+  }
+
+  // ---------- ОСНОВНОЕ ПРИЛОЖЕНИЕ ----------
+  var members=[], matches=[], vids=[], duels=[], meId=null, memIdx={};
+  function renderApp(){
+    body.innerHTML='<div class="fc-empty">Загрузка…</div>';
+    Promise.all([FC.list(FC.T.MEM), FC.list(FC.T.MATCH), FC.list(FC.T.VID), FC.list(FC.T.DUEL)]).then(function(r){
+      members=r[0]; matches=r[1]; vids=r[2]; duels=r[3]; memIdx=FC.index(members);
+      meId=q.get('me')||localStorage.getItem('fc_me')||(members[0]&&members[0].i);
+      var d=q.get('d');
+      if(d) renderDetail(d); else renderList();
+    });
+  }
+
+  function meSelect(){
+    return '<select id="me" style="max-width:260px;padding:8px 12px;border-radius:10px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary)">'+
+      members.map(function(m){return '<option value="'+m.i+'"'+(String(m.i)===String(meId)?' selected':'')+'>'+FC.esc((m.r[IE.ava]||'')+' '+m.r[IE.nick])+'</option>';}).join('')+'</select>';
+  }
+
+  function renderList(){
+    var openM=matches.filter(function(m){return FC.refLabel(m.r[IM.stat])==='Ставки открыты';});
+    body.innerHTML=
+      '<div class="fc-card" style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+        '<b><i class="pi pi-user"></i> Вы играете как:</b>'+meSelect()+'</div></div>'+
+      '<div class="fc-grid c2" style="align-items:start">'+
+        '<div class="fc-card"><h3><i class="pi pi-bolt"></i>Бросить вызов друзьям</h3>'+
+          '<div class="fc-field"><label>Матч</label><select id="d-match">'+
+            (openM.length?openM:matches).map(function(m){return '<option value="'+m.i+'">'+FC.esc(FC.refLabel(m.r[IM.home])+' — '+FC.refLabel(m.r[IM.away]))+'</option>';}).join('')+'</select></div>'+
+          '<div class="fc-field"><label>Событие-вызов</label><select id="d-vid">'+
+            vids.map(function(v){return '<option value="'+v.i+'">'+FC.esc(v.r[0])+'</option>';}).join('')+'</select></div>'+
+          '<div class="fc-field"><label>Ставка капитана, Ǥ</label><input id="d-stake" type="number" value="100" min="1"></div>'+
+          '<div class="fc-field"><label>Позови команду болельщиков (до 10)</label>'+
+            '<div id="d-friends" style="max-height:180px;overflow:auto;border:1px solid var(--border-color,var(--fc-line));border-radius:10px;padding:8px">'+
+              members.filter(function(m){return String(m.i)!==String(meId);}).map(function(m){
+                return '<label style="display:flex;gap:8px;align-items:center;padding:4px 2px;font-size:13px"><input type="checkbox" class="d-fr" value="'+m.i+'" style="width:16px;flex:0 0 auto;margin:0"> '+FC.esc((m.r[IE.ava]||'')+' '+m.r[IE.nick])+'</label>';
+              }).join('')+'</div></div>'+
+          '<button class="btn gold" id="d-go"><i class="pi pi-send"></i> Бросить вызов</button>'+
+          '<p class="fc-muted" style="font-size:12px;margin-top:8px">Вы как капитан ставите на «Да». Друзья дадут свой прогноз в карточке дуэли.</p>'+
+        '</div>'+
+        '<div class="fc-card"><h3><i class="pi pi-list"></i>Дуэли</h3><div id="d-list"></div></div>'+
+      '</div>';
+    document.getElementById('me').onchange=function(){ meId=this.value; localStorage.setItem('fc_me',meId); renderList(); };
+    document.getElementById('d-go').onclick=createDuel;
+    renderDuelList();
+  }
+
+  function renderDuelList(){
+    var el=document.getElementById('d-list');
+    if(!duels.length){ el.innerHTML='<div class="fc-empty">Дуэлей пока нет. Бросьте первый вызов!</div>'; return; }
+    var sorted=duels.slice().sort(function(a,b){return FC.num(b.r[ID.dt])-FC.num(a.r[ID.dt]);});
+    el.innerHTML='<table class="fc-table"><tr><th>Дуэль</th><th>Капитан</th><th>Статус</th><th></th></tr>'+
+      sorted.map(function(d){
+        var st=d.r[ID.stat]||FC.DUEL_ST.OPEN;
+        var chip = st===FC.DUEL_ST.DONE?'<span class="chip">завершена</span>':(st===FC.DUEL_ST.LIVE?'<span class="chip live">идёт</span>':'<span class="chip green">открыта</span>');
+        return '<tr><td><b>'+FC.esc(FC.refLabel(d.r[ID.vid])||d.r[ID.name])+'</b><div class="fc-muted" style="font-size:11px">'+FC.esc(FC.refLabel(d.r[ID.match]))+' · '+FC.esc(d.r[ID.stake])+' Ǥ</div></td>'+
+          '<td>'+FC.esc(FC.refLabel(d.r[ID.cap]))+'</td><td>'+chip+'</td>'+
+          '<td><button class="btn ghost" onclick="location.href=\'/'+FC.DB+'/duel?d='+d.i+'\'">Открыть</button></td></tr>';
+      }).join('')+'</table>';
+  }
+
+  function createDuel(){
+    var me=memIdx[meId]; if(!me) return;
+    var matchId=document.getElementById('d-match').value, vid=document.getElementById('d-vid').value;
+    var stake=FC.num(document.getElementById('d-stake').value);
+    var friends=[].slice.call(document.querySelectorAll('.d-fr:checked')).map(function(c){return c.value;}).slice(0,10);
+    if(!matchId||!vid||stake<=0){ FC.toast('Заполни поля',1); return; }
+    var btn=document.getElementById('d-go'); btn.disabled=true;
+    var W=FC.W.DUEL, WP=FC.W.DUELP;
+    var name='Дуэль: '+FC.refLabel(me.r[IE.nick]);
+    var f={}; f['t'+FC.T.DUEL]=name;
+    f['t'+W.cap]=meId; f['t'+W.match]=matchId; f['t'+W.vid]=vid; f['t'+W.stake]=stake;
+    f['t'+W.stat]=FC.DUEL_ST.OPEN; f['t'+W.dt]=Math.floor(Date.now()/1000);
+    FC.create(FC.T.DUEL, f).then(function(res){
+      var duelId=res&&(res.id||res.obj); if(!duelId){ FC.toast('Не удалось создать дуэль',1); btn.disabled=false; return; }
+      var rows=[{mem:meId,pred:'Да',cap:true}].concat(friends.map(function(fr){return {mem:fr,pred:'—',cap:false};}));
+      Promise.all(rows.map(function(p){
+        var pf={}; pf['t'+FC.T.DUELP]=FC.refLabel(memIdx[p.mem]?memIdx[p.mem].r[IE.nick]:'');
+        pf['t'+WP.mem]=p.mem; pf['t'+WP.pred]=p.pred; pf['t'+WP.result]='—';
+        return FC.create(FC.T.DUELP, pf, duelId);
+      })).then(function(){ FC.toast('Вызов брошен! Друзей: '+friends.length); location.href='/'+FC.DB+'/duel?d='+duelId; });
+    });
+  }
+
+  // ---------- ДЕТАЛЬ ДУЭЛИ ----------
+  var curDuel=null, curParts=[];
+  function renderDetail(duelId){
+    curDuel=duels.filter(function(x){return String(x.i)===String(duelId);})[0];
+    if(!curDuel){ body.innerHTML='<div class="fc-empty">Дуэль не найдена. <a href="/'+FC.DB+'/duel">К списку</a></div>'; return; }
+    FC.children(FC.T.DUELP, duelId).then(function(parts){
+      curParts=parts;
+      var d=curDuel, st=d.r[ID.stat]||FC.DUEL_ST.OPEN, done=st===FC.DUEL_ST.DONE;
+      var capId=FC.refId(d.r[ID.cap]);
+      var canManage = FC.canWrite(FC.T.DUEL) || String(capId)===String(meId);
+      body.innerHTML=
+        '<div style="margin-bottom:10px"><a class="fc-muted" href="/'+FC.DB+'/duel">← Все дуэли</a></div>'+
+        '<div class="fc-card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">'+
+          '<div><h2 style="margin:0">'+FC.esc(FC.refLabel(d.r[ID.vid])||d.r[ID.name])+'</h2>'+
+            '<div class="fc-muted" style="font-size:13px;margin-top:4px">'+FC.esc(FC.refLabel(d.r[ID.match]))+' · капитан <b>'+FC.esc(FC.refLabel(d.r[ID.cap]))+'</b> · ставка <span class="g">'+FC.esc(d.r[ID.stake])+'</span></div></div>'+
+          '<div>'+(done?'<span class="chip">завершена · итог: '+FC.esc(d.r[ID.res]||'—')+'</span>':'<span class="chip green">идёт приём прогнозов</span>')+'</div>'+
+        '</div></div>'+
+        '<div class="fc-card"><h3><i class="pi pi-users"></i>Прогнозы команды</h3><div id="parts"></div></div>'+
+        (done?'<div id="result-card" style="margin-top:14px"></div>'
+             :(canManage?'<div style="margin-top:14px"><button class="btn gold" id="resolve"><i class="pi pi-flag"></i> Подвести итоги</button></div>':''))+
+        '<div id="duel-nudge"></div>';
+      renderParts(done);
+      if(done) renderResultCard(); else if(canManage) document.getElementById('resolve').onclick=openResolve;
+      FC.constructorNudge('duel-nudge','Такую «Битву друзей» можно собрать под любой спорт или киберспорт на конструкторе Интеграм.');
+    });
+  }
+
+  function renderParts(done){
+    var d=curDuel, capId=FC.refId(d.r[ID.cap]);
+    document.getElementById('parts').innerHTML='<table class="fc-table"><tr><th>Игрок</th><th>Прогноз</th><th>Результат</th></tr>'+
+      curParts.map(function(p){
+        var mid=FC.refId(p.r[IP.mem]), isCap=String(mid)===String(capId), pred=p.r[IP.pred]||'—', result=p.r[IP.result]||'—';
+        var predCell = done ? predChip(pred)
+          : '<select data-pid="'+p.i+'" class="pred-sel" style="padding:5px 8px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary)">'+
+              ['—','Да','Нет'].map(function(o){return '<option'+(o===pred?' selected':'')+'>'+o+'</option>';}).join('')+'</select>';
+        return '<tr><td>'+FC.esc(FC.refLabel(p.r[IP.mem]))+(isCap?' <span class="chip gold" style="font-size:10px">капитан</span>':'')+'</td>'+
+          '<td>'+predCell+'</td><td>'+resultChip(result)+'</td></tr>';
+      }).join('')+'</table>';
+    if(!done) document.querySelectorAll('.pred-sel').forEach(function(sel){
+      sel.onchange=function(){ FC.update(this.getAttribute('data-pid'), {['t'+FC.W.DUELP.pred]:this.value}); FC.toast('Прогноз сохранён'); };
+    });
+  }
+  function predChip(p){ return p==='Да'?'<span class="chip green">Да</span>':(p==='Нет'?'<span class="chip red">Нет</span>':'<span class="chip">—</span>'); }
+  function resultChip(r){
+    if(r==='Пророк') return '<span class="chip gold">🔮 Пророк</span>';
+    if(r==='Дивергент') return '<span class="chip purple">🦄 Дивергент</span>';
+    if(r==='Футбольный Оракул') return '<span class="chip green">⚽ Оракул</span>';
+    if(r==='Афоня') return '<span class="chip red">🐻 Афоня</span>';
+    return '<span class="chip">—</span>';
+  }
+
+  // ---------- Подведение итогов ----------
+  function openResolve(){ document.getElementById('rv-ov').classList.add('on'); document.getElementById('rv-md').classList.add('on'); }
+  window.duelCloseResolve=function(){ document.getElementById('rv-ov').classList.remove('on'); document.getElementById('rv-md').classList.remove('on'); };
+  document.getElementById('rv-go').onclick=function(){
+    var actual=document.getElementById('rv-actual').value;
+    var d=curDuel, capId=FC.refId(d.r[ID.cap]), stake=FC.num(d.r[ID.stake]);
+    var preds=curParts.map(function(p){ return {pid:p.i, mem:FC.refId(p.r[IP.mem]), pred:p.r[IP.pred]||'—', cap:String(FC.refId(p.r[IP.mem]))===String(capId)}; });
+    var out=FC.duelOutcome(preds, actual);
+    var byMem={}; out.forEach(function(o){byMem[o.mem]=o;});
+    var ops=[];
+    // записать результат каждому участнику + выдать значок
+    curParts.forEach(function(p){
+      var o=byMem[FC.refId(p.r[IP.mem])]; if(!o) return;
+      ops.push(FC.update(p.i, {['t'+FC.W.DUELP.result]:o.result}));
+      ops.push(FC.create(FC.T.AWD, {['t'+FC.T.AWD]:o.result}, FC.refId(p.r[IP.mem])));  // значок = результат
+    });
+    // грамы: дивергенты забирают ставку у капитана; пророки/оракулы получают бонус
+    var cap=memIdx[capId]; var capDelta=0;
+    out.forEach(function(o){
+      var m=memIdx[o.mem]; if(!m) return;
+      var delta=0;
+      if(o.result==='Дивергент'){ delta=stake; capDelta-=stake; }
+      else if(o.result==='Пророк'||o.result==='Футбольный Оракул'){ delta=stake; }
+      if(delta){ var nb=FC.num(m.r[IE.bal])+delta; m.r[IE.bal]=nb; ops.push(FC.update(m.i,{['t'+FC.W.MEM.bal]:nb}));
+        ops.push(FC.create(FC.T.TX, {['t'+FC.T.TX]:'Дуэль: '+o.result, ['t613']:delta, ['t615']:'Дуэль', ['t617']:Math.floor(Date.now()/1000)}, m.i)); }
+    });
+    if(cap && capDelta){ var cb=FC.num(cap.r[IE.bal])+capDelta; cap.r[IE.bal]=cb; ops.push(FC.update(cap.i,{['t'+FC.W.MEM.bal]:cb})); }
+    ops.push(FC.update(d.i, {['t'+FC.W.DUEL.stat]:FC.DUEL_ST.DONE, ['t'+FC.W.DUEL.res]:actual}));
+    Promise.all(ops).then(function(){ duelCloseResolve(); FC.toast('Итоги подведены, значки выданы!'); location.reload(); });
+  };
+
+  function renderResultCard(){
+    var d=curDuel, winners=curParts.filter(function(p){var r=p.r[IP.result];return r==='Пророк'||r==='Дивергент'||r==='Футбольный Оракул';});
+    var url=location.origin+'/'+FC.DB+'/duel?d='+d.i;
+    document.getElementById('result-card').innerHTML=
+      '<div class="fc-share-card"><div class="fcc-head"><div class="fcc-brand"><span class="b">Ǥ</span> ИНТЕГРАМ FC</div><div class="fcc-sub">Битва пророков — итог</div></div>'+
+        '<div class="fcc-body"><div class="fcc-nick">'+FC.esc(FC.refLabel(d.r[ID.vid])||d.r[ID.name])+'</div>'+
+          '<div class="fcc-rank"><span class="chip">'+FC.esc(FC.refLabel(d.r[ID.match]))+'</span> <span class="chip gold">итог: '+FC.esc(d.r[ID.res]||'—')+'</span></div>'+
+          '<div class="fcc-badges" style="margin-top:16px">'+
+            (winners.length?winners.map(function(p){return resultChip(p.r[IP.result])+' <b style="font-size:13px">'+FC.esc(FC.refLabel(p.r[IP.mem]))+'</b>';}).join('<br>'):'<span class="fc-muted">Все ошиблись — команда «Афоня» 🐻</span>')+
+          '</div></div>'+
+        '<div class="fcc-foot">Сделано на <b>Интеграм</b> — конструкторе приложений</div></div>'+
+      '<div class="fc-card" style="margin-top:14px"><h3><i class="pi pi-share-alt"></i>Поделиться результатом</h3>'+
+        FC.shareButtons(url, 'Итоги битвы пророков в Интеграм FC! Прими вызов и обыграй нас.')+'</div>';
+  }
+})();
+</script>
