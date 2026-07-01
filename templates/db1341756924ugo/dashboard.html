@@ -9,8 +9,7 @@
   </div>
   <div class="fc-grid c2" style="margin-top:14px">
     <div class="fc-card"><h3><i class="pi pi-dollar"></i>Топ ставок часа</h3><div id="topbets"></div></div>
-    <div class="fc-card"><h3 style="color:var(--fc-cringe)"><i class="pi pi-crown" style="color:var(--fc-cringe)"></i>Стена позора</h3><div class="fc-shame" id="shame"></div>
-      <div id="cringe" style="margin-top:14px"></div></div>
+    <div id="cringe"></div>
   </div>
 </div></div>
 <script src="/download/{_global_.z}/fc.js?v=3"></script>
@@ -74,17 +73,7 @@
           '<td class="num"><span class="g">'+b.r[IB.sum]+'</span></td><td>'+chip+'</td></tr>';
       }).join('')+'</table>';
 
-    // Стена позора: владельцы короны + крупнейшие проигравшие
-    var shamed = members.filter(function(m){ return String(m.r[IE.crown])==='1'||String(m.r[IE.crown]).toLowerCase()==='true'; });
-    if(shamed.length<3){
-      var byLoss = members.slice().sort(function(a,b){ return FC.num(b.r[IE.lose])-FC.num(a.r[IE.lose]); });
-      byLoss.forEach(function(m){ if(shamed.length<3 && shamed.indexOf(m)<0) shamed.push(m); });
-    }
-    document.getElementById('shame').innerHTML = shamed.slice(0,3).map(function(m){
-      return '<div class="it"><div class="av">'+(m.r[IE.ava]||'👤')+'</div><div class="nm">'+FC.esc(m.r[IE.nick])+'</div>'+
-        '<div class="fc-muted" style="font-size:12px">проиграно <span class="gneg">'+m.r[IE.lose]+' Ǥ</span></div>'+
-        '<div style="margin-top:4px">👑</div></div>';
-    }).join('');
+    // Кринж-событие недели (позитивная сенсация — без «стены позора»)
     document.getElementById('cringe').innerHTML =
       '<div class="fc-card" style="background:rgba(255,77,109,.07);border-color:rgba(255,77,109,.3)">'+
       '<h3 style="color:var(--fc-cringe)"><i class="pi pi-exclamation-triangle" style="color:var(--fc-cringe)"></i>Кринж-событие недели</h3>'+
