@@ -33,6 +33,13 @@ services:
       INTEGRAM_ADMIN_EMAIL: ${INTEGRAM_ADMIN_EMAIL:-admin@example.local}
       INTEGRAM_SALT: ${INTEGRAM_SALT:-integram-local-salt}
       INTEGRAM_SMTP_DEBUG: ${INTEGRAM_SMTP_DEBUG:-false}
+      # Почта для писем пользователям (в т.ч. «Забыли пароль?»). Без реальных
+      # SMTP_USERNAME/SMTP_PASSWORD письма не отправляются — вход это не ломает.
+      INTEGRAM_SMTP_HOST: ${INTEGRAM_SMTP_HOST:-ssl://smtp.yandex.ru}
+      INTEGRAM_SMTP_PORT: ${INTEGRAM_SMTP_PORT:-465}
+      INTEGRAM_SMTP_USERNAME: ${INTEGRAM_SMTP_USERNAME:-}
+      INTEGRAM_SMTP_PASSWORD: ${INTEGRAM_SMTP_PASSWORD:-}
+      INTEGRAM_SMTP_FROM: ${INTEGRAM_SMTP_FROM:-Integram}
       INTEGRAM_SMARTCAPTCHA_SERVER_KEY: ${INTEGRAM_SMARTCAPTCHA_SERVER_KEY:-ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}
     ports:
       - "${INTEGRAM_HTTP_PORT:-8080}:80"

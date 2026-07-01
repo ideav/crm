@@ -78,6 +78,17 @@ const CookieUtil = {
 // ============================================================
 // API Configuration
 // ============================================================
+
+// Scheme the front-end talks to the API over. Derived from how the page itself
+// is served (window.location.protocol) rather than a hardcoded 'https://', so an
+// on-prem install reached over plain HTTP — or over self-signed HTTPS the browser
+// hasn't been told to trust — can still log in instead of failing with
+// ERR_CERT_AUTHORITY_INVALID. The public service is served over HTTPS, so behavior
+// there is unchanged. (#3962)
+function apiScheme() {
+    return window.location.protocol === 'http:' ? 'http://' : 'https://';
+}
+
 class ApiConfig {
     constructor() {
         this.host = localStorage.getItem('apiHost') || window.location.hostname;
@@ -85,7 +96,7 @@ class ApiConfig {
     }
 
     getBaseUrl(db) {
-        return 'https://' + this.host + '/' + db;
+        return apiScheme() + this.host + '/' + db;
     }
 
     hasYandexAuth() {
@@ -99,7 +110,7 @@ class ApiConfig {
 async function validateToken(host, dbName) {
     // GET https://{host}/{db}/xsrf?JSON
     // Returns { _xsrf, token, user, ... } on success; on failure logs and deletes cookie
-    const url = 'https://' + host + '/' + dbName + '/xsrf?JSON';
+    const url = apiScheme() + host + '/' + dbName + '/xsrf?JSON';
     try {
         const response = await fetch(url, { method: 'GET', credentials: 'include' });
         if (!response.ok) {
@@ -370,13 +381,13 @@ class AuthManager {
             return;
         }
         CookieUtil.set('last_db', db, 365);
-        window.location.href = 'https://' + host + '/' + db;
+        window.location.href = apiScheme() + host + '/' + db;
     }
 
     async login(email, password, db, captchaToken) {
         const host = this.apiConfig.host;
         const targetDb = db || 'my';
-        const url = 'https://' + host + '/' + targetDb + '/auth?JSON';
+        const url = apiScheme() + host + '/' + targetDb + '/auth?JSON';
         try {
             const formData = new URLSearchParams();
             formData.append('db', targetDb);
@@ -417,7 +428,7 @@ class AuthManager {
 
     async register(email, password, confirmPassword, agree, captchaToken) {
         const host = this.apiConfig.host;
-        const url = 'https://' + host + '/my/register?JSON';
+        const url = apiScheme() + host + '/my/register?JSON';
         try {
             const formData = new URLSearchParams();
             formData.append('email', email);
