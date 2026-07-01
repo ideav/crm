@@ -21,7 +21,7 @@ out="${1:-$root/../integram-local-$(date +%Y%m%d).tar.gz}"
 
 # Что кладём (только генерик-приложение + установка).
 include=(
-    index.php
+    index.php start.html
     include js css i crm templates download assets
     Dockerfile compose.yaml .dockerignore .env.docker.example
     docker
