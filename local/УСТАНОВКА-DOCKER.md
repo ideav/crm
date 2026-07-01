@@ -118,7 +118,52 @@ cp ваш.key docker/certs/local.key
 docker compose --env-file .env.local restart app
 ```
 
-## 8. Обновление, остановка, бэкап
+**Если у сервера нет домена (доступ по IP).** Доверенный сертификат от Let's Encrypt
+для голого IP получить нельзя — остаётся самоподписанный. Чтобы браузер не блокировал
+вход с ошибкой `ERR_CERT_AUTHORITY_INVALID`, выпустите сертификат с этим IP в SAN и
+добавьте его `.crt` в доверенные на машинах пользователей:
+
+```bash
+openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+  -subj "/CN=185.221.155.204" \
+  -addext "subjectAltName=IP:185.221.155.204" \
+  -keyout docker/certs/local.key -out docker/certs/local.crt
+docker compose --env-file .env.local restart app
+```
+
+Затем на каждой машине пользователя добавьте `local.crt` в доверенные корневые
+(Windows: правый клик по файлу → «Установить сертификат» → «Локальный компьютер» →
+«Доверенные корневые центры сертификации»). Как временная мера — принять предупреждение
+в браузере вручную.
+
+Начиная с #3962 фронтенд обращается к API по той же схеме, что и открытая страница,
+поэтому если TLS не нужен — установку можно открыть по `http://<адрес>:8080/` и
+работать без сертификата вообще.
+
+## 8. Почта для сброса пароля
+
+Ссылка «Забыли пароль?» на странице входа отправляет пользователю письмо с новым
+паролем. Чтобы она работала, задайте SMTP в `.env.local` (полный список — в
+`local/files/env.example`) и перезапустите:
+
+```
+INTEGRAM_SMTP_HOST=ssl://smtp.yandex.ru
+INTEGRAM_SMTP_PORT=465
+INTEGRAM_SMTP_USERNAME=box@yourdomain.ru
+INTEGRAM_SMTP_PASSWORD=пароль-приложения
+INTEGRAM_SMTP_FROM=Integram
+```
+
+```bash
+docker compose --env-file .env.local up -d
+```
+
+Без реальных `SMTP_USERNAME`/`SMTP_PASSWORD` вход работает, но письма не отправляются.
+Для Яндекс.Почты используйте **пароль приложения**, а не пароль аккаунта. Для отладки
+поставьте `INTEGRAM_SMTP_DEBUG=true` — детали SMTP появятся в
+`docker compose --env-file .env.local logs app`.
+
+## 9. Обновление, остановка, бэкап
 
 Перезапуск после изменения настроек:
 

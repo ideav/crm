@@ -111,8 +111,8 @@ export INTEGRAM_ADMIN_EMAIL='admin@example.local'
 openssl rand -hex 24
 ```
 
-Значения в одинарных кавычках, без пробелов вокруг `=`. Остальные переменные
-(SMTP, капча и т.п.) не обязательны для запуска.
+Значения в одинарных кавычках, без пробелов вокруг `=`. Капча и т.п. для запуска
+не нужны. Почта (SMTP) нужна только для функции «Забыли пароль?» — настройка в п. 10.
 
 ## 5. Виртуальный хост Apache
 
@@ -150,7 +150,26 @@ sudo chmod 600 /etc/integram/certs/local.key
 ```
 
 Если HTTPS не нужен — уберите или закомментируйте блок `<VirtualHost *:443>` в
-конфиге и работайте по HTTP.
+конфиге и работайте по HTTP. Начиная с #3962 фронтенд обращается к API по той же
+схеме, что и открытая страница, поэтому вход работает и по чистому HTTP.
+
+**Доступ по IP без домена.** Доверенный сертификат Let's Encrypt для голого IP не
+выпускается — используйте самоподписанный с IP в SAN и добавьте его в доверенные на
+машинах пользователей, иначе браузер заблокирует вход ошибкой
+`ERR_CERT_AUTHORITY_INVALID`:
+
+```bash
+sudo openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+  -subj "/CN=185.221.155.204" \
+  -addext "subjectAltName=IP:185.221.155.204" \
+  -keyout /etc/integram/certs/local.key \
+  -out /etc/integram/certs/local.crt
+sudo systemctl restart apache2
+```
+
+`local.crt` затем импортируется в доверенные корневые на каждой клиентской машине
+(Windows: «Установить сертификат» → «Локальный компьютер» → «Доверенные корневые
+центры сертификации»).
 
 ## 7. Запуск и проверка
 
@@ -192,6 +211,28 @@ https://<адрес-сервера>/
 sudo mariadb-dump ideav > integram-backup.sql          # создать копию
 sudo mariadb ideav < integram-backup.sql               # восстановить
 ```
+
+## 10. Почта для сброса пароля
+
+Ссылка «Забыли пароль?» на странице входа отправляет пользователю письмо с новым
+паролем. Для этого задайте SMTP-переменные там же, где `INTEGRAM_DB_*` (в
+`/etc/apache2/envvars`), и выполните **полный** перезапуск Apache:
+
+```bash
+export INTEGRAM_SMTP_HOST='ssl://smtp.yandex.ru'
+export INTEGRAM_SMTP_PORT='465'
+export INTEGRAM_SMTP_USERNAME='box@yourdomain.ru'
+export INTEGRAM_SMTP_PASSWORD='пароль-приложения'
+export INTEGRAM_SMTP_FROM='Integram'
+# export INTEGRAM_SMTP_DEBUG='true'   # детали SMTP в лог — на время отладки
+```
+
+```bash
+sudo systemctl restart apache2
+```
+
+Без реальных `SMTP_USERNAME`/`SMTP_PASSWORD` вход работает, но письма не отправляются.
+Для Яндекс.Почты используйте **пароль приложения**, а не пароль аккаунта.
 
 ## Если что-то пошло не так
 
