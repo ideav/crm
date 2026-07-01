@@ -35,16 +35,17 @@ function mk(id, planDate, seq, materialId, knifeWidths) {
     };
 }
 
-// День 1: A (seq1, M1), B (seq2, M1 — то же сырьё, ДРУГИЕ ножи). День 2: C (seq1, M2).
+// День 1: A (08:00, M1), B (09:00, M1 — то же сырьё, ДРУГИЕ ножи). День 2: C (M2).
+// #3923: порядок внутри дня задаёт planStart (planDate — штамп с временем), не «Очередность».
 var A = mk('A', DAY1, 1, 'M1', [100, 200]);
-var B = mk('B', DAY1, 2, 'M1', [100, 300]);
+var B = mk('B', String(Number(DAY1) + 3600), 2, 'M1', [100, 300]);   // тот же день, 09:00
 var C = mk('C', DAY2, 1, 'M2', [100, 200]);
 
-// ── Фикс: порядок groupBySlitter не перемешивает дни ──
+// ── Фикс: порядок groupBySlitter (planStart) не перемешивает дни ──
 var groups = planning.groupBySlitter([C, B, A]);   // намеренно вперемешку
 assertEqual(groups.length, 1, 'один станок → одна группа');
 assertEqual(groups[0].cuts.map(function (x) { return x.id; }), ['A', 'B', 'C'],
-    'groupBySlitter: день плана → «Очередность» (дни НЕ перемешиваются)');
+    'groupBySlitter: день плана → planStart (дни НЕ перемешиваются)');
 
 var cols = planning.setupActivityColumns(groups[0].cuts, TIMES);
 assertEqual(cols['B'].materialWindingMin, 0, 'B: предшественник A того же дня — то же сырьё → смены сырья НЕТ');

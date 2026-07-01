@@ -31,8 +31,9 @@ function assertEqual(actual, expected, name) {
     }
 }
 
-// Три резки одного станко-дня с РАЗНЫМИ сигнатурами (не сливаются в цепочку) и явной
-// «Очередностью». Оператор поставил их A(1) → C(2) → B(3). Пересборка по SETUP
+// Три резки одного станко-дня с РАЗНЫМИ сигнатурами (не сливаются в цепочку). #3923:
+// ручной порядок оператора хранится в planStart (planDate), а не в «Очередности».
+// Оператор поставил их A(08:00) → C(09:00) → B(10:00). Пересборка по SETUP
 // (ножи по убыванию: 6,16,16 → 16,16,6) дала бы B,C,A.
 function cut(id, material, knifeWidths, runs, sequence, planDate) {
     return { id: id, slitter: { id: 'm3' }, materialId: material,
@@ -42,9 +43,9 @@ function cut(id, material, knifeWidths, runs, sequence, planDate) {
 function widths(pairs) { var o = []; pairs.forEach(function(pr) { for (var i = 0; i < pr[1]; i++) o.push(pr[0]); }); return o; }
 
 var queue = [
-    cut('A', 'MW308', widths([[152, 5], [110, 1]]), 1, 1),   // 6 ножей
-    cut('C', 'MW308', widths([[59, 14], [30, 2]]), 1, 2),    // 16 ножей
-    cut('B', 'MR194', widths([[59, 14], [30, 2]]), 1, 3)     // 16 ножей
+    cut('A', 'MW308', widths([[152, 5], [110, 1]]), 1, 1, '1780963200'),   // 6 ножей, 08:00
+    cut('C', 'MW308', widths([[59, 14], [30, 2]]), 1, 2, '1780966800'),    // 16 ножей, 09:00
+    cut('B', 'MR194', widths([[59, 14], [30, 2]]), 1, 3, '1780970400')     // 16 ножей, 10:00
 ];
 var oneDay = { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
     times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 };
