@@ -4428,10 +4428,13 @@
         // Без scope (оба ключа null) — обрабатываем все (обратная совместимость/тесты).
         var scopeFrom = opts.scopeFromKey, scopeTo = opts.scopeToKey;
         var hasScope = scopeFrom != null || scopeTo != null;
-        function headInScope(c){
+        // #3918: верхняя граница scope, до которой РЕАЛЬНО раскладываем. Расширяется ниже до дня,
+        // куда дотянулось ПРОДОЛЖЕНИЕ разбитой по дням цепочки, если на этих днях есть чужие резки.
+        var effScopeTo = scopeTo;
+        function inScopeUpTo(c, toKey){
             if (!hasScope) return true;
             var fromK = scopeFrom == null ? -Infinity : scopeFrom;
-            var toK = scopeTo == null ? Infinity : scopeTo;
+            var toK = toKey == null ? Infinity : toKey;
             if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }
             var k = planDateDayKey(c && c.planDate);
             if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
@@ -4443,22 +4446,12 @@
             // его на 23 (#3815 ослабляет якорь до дня срока, но только для резок В scope). Так
             // просроченное/срочное по сроку задание затягивается в окно; зафиксированное (#3508)
             // и задание со сроком ПОЗЖЕ окна — остаются на своих днях (#3660 для чужих дат в силе).
-            if (scopeTo != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
+            if (toKey != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
             return false;
         }
-        var byMachine = {}, mOrder = [];
-        merged.cuts.forEach(function(c){
-            var sid = c && c.slitter && c.slitter.id;
-            if (sid == null) return;
-            if (!headInScope(c)) return;   // #3660: чужая дата — не трогаем
-            var key = String(sid);
-            if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
-            byMachine[key].push(c);
-        });
-        var updates = [], creates = [], deletes = [];
-        // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
-        var usedByHead = {};
-        mOrder.forEach(function(key){
+        // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/«Очередности»
+        // #3635; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
+        function planMachineSegs(cutsOfMachine, key){
             // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
             // очереди (сортировка по «Очередности»), а не пересобирая её по стратегии
             // (orderCuts). Нужно, чтобы автозаполнение дней после генерации не перетасовывало
@@ -4477,12 +4470,12 @@
             // генерации делает фольгу последней ПО ИСХОДНОМУ дню, но кросс-дневный re-pack и
             // посменная сборка перемешивали её обратно).
             var ordered = opts.preserveOrder
-                ? byMachine[key].slice().sort(function(a, b){
+                ? cutsOfMachine.slice().sort(function(a, b){
                       return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
                           || (((a && a.isFoil) ? 1 : 0) - ((b && b.isFoil) ? 1 : 0))   // #3717: фольга — в конец дня
                           || ((Number(a.sequence) || 0) - (Number(b.sequence) || 0));
                   })
-                : orderCuts(byMachine[key], opts.weights);
+                : orderCuts(cutsOfMachine, opts.weights);
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var segs = splitMachineQueue(ordered, {
@@ -4500,6 +4493,65 @@
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
             });
+            return segs;
+        }
+        // Сгруппировать резки по станку (в scope [scopeFrom; effTo]) и разложить каждую очередь.
+        // Возвращает { mOrder, segsByMachine, maxSegKey } — maxSegKey = наибольший день (ключ
+        // YYYYMMDD), на который лёг ХОТЬ ОДИН сегмент (учитывая перелив продолжений за конец дня).
+        function planScope(effTo){
+            var bm = {}, mo = [];
+            merged.cuts.forEach(function(c){
+                var sid = c && c.slitter && c.slitter.id;
+                if (sid == null) return;
+                if (!inScopeUpTo(c, effTo)) return;   // #3660/#3918: чужая дата вне (расширенного) окна — не трогаем
+                var key = String(sid);
+                if (!bm[key]) { bm[key] = []; mo.push(key); }
+                bm[key].push(c);
+            });
+            var sbm = {}, maxSegKey = null;
+            mo.forEach(function(key){
+                var segs = planMachineSegs(bm[key], key);
+                sbm[key] = segs;
+                segs.forEach(function(seg){
+                    var kk = planDateDayKey(String(scheduleStartTimestamp(base, seg.windowStartMin)));
+                    if (isFinite(kk) && (maxSegKey == null || kk > maxSegKey)) maxSegKey = kk;
+                });
+            });
+            return { mOrder: mo, segsByMachine: sbm, maxSegKey: maxSegKey };
+        }
+        // #3918: ПРОДОЛЖЕНИЕ разбитой по дням цепочки in-scope переливается на следующий день.
+        // Если этот день ВНЕ scope (узкий фильтр), его собственные резки НЕ перепланируются и
+        // остаются с 08:00 — продолжение садится ПОВЕРХ них: день переполняется (бейдж 571 при
+        // ёмкости 450), карточки лезут за смену (17:01…23:31), scheduleFromStored каскадит их до
+        // 23:31. Оператор #3660: «не лезь в другие даты, ЕСЛИ ТОЛЬКО задание не вылезает из этого
+        // дня в следующий» — спил-день перепланируем вместе с продолжением, дальние (за зазором)
+        // не трогаем. Расширяем верхнюю границу scope до дня самого позднего сегмента, ПОКА на
+        // новых днях появляются чужие (ещё вне scope) резки; сами они могут переливаться дальше.
+        var planned = planScope(effScopeTo);
+        if (hasScope && scopeTo != null) {
+            var guard = 0;
+            while (guard++ < 500) {
+                var reach = planned.maxSegKey;
+                if (reach == null || !(reach > effScopeTo)) break;
+                // есть ли резки ВНЕ текущего окна, чью «Дату план» накрыл перелив (день ≤ reach)?
+                var foreign = false;
+                for (var fi = 0; fi < merged.cuts.length; fi++) {
+                    var fc = merged.cuts[fi];
+                    if (inScopeUpTo(fc, effScopeTo)) continue;
+                    var fk = planDateDayKey(fc && fc.planDate);
+                    if (fk !== Infinity && fk > effScopeTo && fk <= reach) { foreign = true; break; }
+                }
+                if (!foreign) break;
+                effScopeTo = reach;
+                planned = planScope(effScopeTo);
+            }
+        }
+        var mOrder = planned.mOrder, segsByMachine = planned.segsByMachine;
+        var updates = [], creates = [], deletes = [];
+        // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
+        var usedByHead = {};
+        mOrder.forEach(function(key){
+            var segs = segsByMachine[key];
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
             segs.forEach(function(seg, idx){
