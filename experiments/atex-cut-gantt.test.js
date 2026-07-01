@@ -1,6 +1,6 @@
 // Unit tests for the «Диаграмма Ганта (задания)» core (ideav/crm#3638, доработки #3668).
 // Проверяет чистое ядро автономного рабочего места cut-gantt:
-//   • rowsToCuts     — строки отчёта cut_planning → задания (order/sequence/leader/намотка);
+//   • rowsToCuts     — строки отчёта cut_planning → задания (order/leader/намотка);
 //   • cutRowLabel    — подпись строки «{заказ} / {сырьё} · {намотка} · {метраж}» (#3668 п.2);
 //   • ganttRange     — интервал по режиму (день/3 дня/неделя/месяц);
 //   • shiftAnchor    — сдвиг периода назад/вперёд;
@@ -34,7 +34,7 @@ function assertEqual(actual, expected, name) {
     }
 }
 
-// ── rowsToCuts: dedup по cut_id; order/sequence/leader/намотка/метраж; длительность ──
+// ── rowsToCuts: dedup по cut_id; order/leader/намотка/метраж; длительность (#3923: без sequence) ──
 var cuts = gantt.rowsToCuts([
     { cut_id: '10', cut_slitter: 'Станок 1', cut_slitter_id: '101',
       cut_plan_date: '06.05.2026', cut_material: 'MR194', cut_material_id: '5',
@@ -50,11 +50,11 @@ var cuts = gantt.rowsToCuts([
 assertEqual(cuts, [
     { id: '10', number: '06.05.2026', planDate: '06.05.2026', status: 'В работе',
       startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', duration: 70, length: 600,
-      plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, sequence: 2, leader: 'MONOCHROME', orderNo: '3700',
+      plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, leader: 'MONOCHROME', orderNo: '3700',
       materialId: '5', materialName: 'MR194', winding: 'OUT', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: '101', label: 'Станок 1' } },
     { id: '20', number: '27.05.2026', planDate: '27.05.2026', status: 'Ожидает',
       startDate: '', endDate: '', duration: 0, length: 0, plannedRuns: 0, rollerWidth: 0, knifeWidths: [], knifeCount: 0,
-      sequence: null, leader: '', orderNo: '3701',
+      leader: '', orderNo: '3701',
       materialId: '', materialName: '', winding: '', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: null, label: '' } }
 ], 'rowsToCuts: dedup, поля order/sequence/leader/намотка/length/резок/ролик, длительность');
 

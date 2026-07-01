@@ -69,7 +69,6 @@
         defect: 'Брак, м²',
         defectM: 'Брак, м',
         defectPhoto: 'Фото брака',
-        sequence: 'Очередность',
         plannedRuns: 'Кол-во план',
         runLength: 'Метраж, м',
         startedAt: 'Начато',
@@ -313,19 +312,23 @@
         return '';
     }
 
-    function sequenceKey(cut) {
-        var n = Number(cut && cut.sequence);
-        return isFinite(n) ? n : Infinity;
+    // #3923: полный штамп planStart (не срезанный к дню, в отличие от dateKey) — задаёт порядок
+    // резок внутри дня. Принимает unix-штамп (сек/мс) и ISO/строку; пусто/невалид → в конец.
+    function planStartMs(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!s) return Infinity;
+        if (/^\d{9,13}$/.test(s)) { var num = Number(s); return num >= 1e12 ? num : num * 1000; }
+        var parsed = Date.parse(s);
+        return isNaN(parsed) ? Infinity : parsed;
     }
 
-    // #3565 #3: порядок резок — строго по «Очередности», без всплытия незапущенных
-    // над начатыми (раньше факт старта тасовал список «по времени»).
-    // #3646: завершённые БОЛЬШЕ НЕ уходят в конец — остаются на своих местах по очереди
+    // #3923: порядок резок — строго по сохранённому planStart (planDate), как на РМ
+    // «Планирование производства» и «Диаграмма Ганта» (единый источник порядка; «Очередность»
+    // больше не хранится). Факт старта список не тасует.
+    // #3646: завершённые БОЛЬШЕ НЕ уходят в конец — остаются на своих местах по времени
     // (видны в общем порядке вместе с активными).
     function compareCutsForQueue(a, b) {
-        var as = sequenceKey(a), bs = sequenceKey(b);
-        if (as !== bs) return as - bs;
-        var ak = dateKey(a && a.planDate), bk = dateKey(b && b.planDate);
+        var ak = planStartMs(a && a.planDate), bk = planStartMs(b && b.planDate);
         if (ak !== bk) return ak - bk;
         return String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
     }
@@ -418,13 +421,13 @@
 
     // #3609: для выбранной резки — последняя ли она в смене (день+станок) и первая резка
     // СЛЕДУЮЩЕГО дня на этом же станке (ближайший день с резками > текущего). Порядок
-    // внутри дня — по «Очередности» (sequence), затем id. → { isLast, nextCut|null }.
+    // внутри дня — по planStart (#3923), затем id. → { isLast, nextCut|null }.
     function shiftContinuation(cuts, cut) {
         var out = { isLast: false, nextCut: null };
         if (!cut) return out;
         var sl = cutSlitterId(cut), dk = dateKey(cut.planDate);
         function ord(a, b) {
-            return (sequenceKey(a) - sequenceKey(b)) || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
+            return (planStartMs(a && a.planDate) - planStartMs(b && b.planDate)) || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
         }
         var same = (cuts || []).filter(function(c) { return cutSlitterId(c) === sl; });
         var today = same.filter(function(c) { return dateKey(c.planDate) === dk; }).slice().sort(ord);
@@ -805,7 +808,6 @@
                 batchId: firstField(row, ['cut_batch_id']) || null,
                 batch: firstField(row, ['cut_batch']),
                 planDate: planDate,
-                sequence: firstField(row, ['cut_sequence']),
                 plannedRuns: firstField(row, ['cut_planned_runs']),
                 runLength: firstField(row, ['cut_run_length']),
                 startedAt: firstField(row, ['cut_started']),
@@ -1299,7 +1301,6 @@
             var slitterIdx = colIndex(meta, CUT_REQ.slitter);
             var batchIdx = colIndex(meta, CUT_REQ.batch);
             var planDateIdx = colIndex(meta, CUT_REQ.planDate);
-            var sequenceIdx = colIndex(meta, CUT_REQ.sequence);
             var plannedRunsIdx = colIndexAny(meta, CUT_PLANNED_RUNS_NAMES);
             var runLengthIdx = colIndexAny(meta, CUT_RUN_LENGTH_NAMES);
             var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
@@ -1328,7 +1329,6 @@
                     // если colIndex не нашёл реквизит — берём row[0], иначе
                     // prepareCutQueue отфильтрует все резки по пустой дате.
                     planDate: (planDateIdx >= 0 ? row[planDateIdx] : null) || row[0] || '',
-                    sequence: sequenceIdx >= 0 ? row[sequenceIdx] : '',
                     plannedRuns: plannedRunsIdx >= 0 ? row[plannedRunsIdx] : '',
                     runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
                     startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : '',
@@ -1366,7 +1366,6 @@
                 defect: val(CUT_REQ.defect),
                 defectM: val(CUT_REQ.defectM),
                 defectPhoto: val(CUT_REQ.defectPhoto),
-                sequence: val(CUT_REQ.sequence),
                 plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
                 runLength: valAny(CUT_RUN_LENGTH_NAMES),
                 startedAt: valAny(CUT_STARTED_NAMES),

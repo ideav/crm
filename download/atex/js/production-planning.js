@@ -170,7 +170,6 @@
         planDate: 'Дата план',
         status: 'Статус',
         notes: 'Примечания',
-        sequence: 'Очередность',
         plannedRuns: 'Кол-во план',
         duration: 'Длительность, минут',
         timing: 'Тайминг',
@@ -224,7 +223,6 @@
         planDate: CUT_REQ.planDate,
         status: CUT_REQ.status,
         notes: CUT_REQ.notes,
-        sequence: CUT_REQ.sequence,
         winding: CUT_REQ.winding,
         leader: CUT_REQ.leader   // #3569: лидер задания (ссылка)
     };
@@ -486,7 +484,6 @@
             var idx = columnIndex(meta, reqName);
             return idx >= 0 ? (r[idx] == null ? '' : String(r[idx])) : '';
         }
-        var seqRaw = val(CUT_REQ.sequence);
         return {
             id: String(record && record.i),
             number: r[0] == null ? '' : String(r[0]),
@@ -494,7 +491,9 @@
             materialBatch: ref(CUT_REQ.materialBatch),
             planDate: val(CUT_REQ.planDate),
             status: val(CUT_REQ.status),
-            sequence: (seqRaw === '' || seqRaw == null) ? null : Number(seqRaw)
+            // #3923: «Очередность» больше не хранится — порядок задаёт planStart (planDate).
+            // Поле оставлено (=null) как in-memory ординал генерации (orderCuts заполняет копии).
+            sequence: null
         };
     }
 
@@ -513,12 +512,11 @@
             }
             groups[key].cuts.push(c);
         });
-        // Сортировка резок внутри каждой группы: день плана, затем сохранённая
-        // sequence (возр., null/NaN — в конец), затем ножи по убыванию как
-        // fallback для ещё не пронумерованных резок. Sequence теперь сбрасывается
-        // на каждый день, поэтому дата нужна, чтобы одинаковые номера разных дней
-        // не перемешивались при снятом фильтре даты.
-        function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
+        // #3923: сортировка резок внутри группы — день плана, затем сохранённый planStart
+        // (planDate, возр.; пусто/NaN — в конец), затем ножи по убыванию как fallback для
+        // резок без planStart. planStart — единственный источник порядка (совпадает с РМ
+        // «Диаграмма Ганта» и очередью станка), «Очередность» больше не хранится.
+        function planStartKey(c) { var v = c && c.planDate; var n = Number(v); return (v == null || v === '' || !isFinite(n)) ? Infinity : n; }
         function knifeKey(c) { var n = Number(c && c.knifeCount); return isFinite(n) ? n : 0; }
         function cmpCutPlanDay(a, b) {
             // #3258: planDate — unix-штамп DATETIME (с секундами). Сравниваем по
@@ -535,7 +533,7 @@
             groups[k].cuts = groups[k].cuts.map(function(c, i) { return { c: c, i: i }; })
                 .sort(function(a, b) {
                     return cmpCutPlanDay(a.c, b.c)
-                        || seqKey(a.c) - seqKey(b.c)
+                        || (planStartKey(a.c) - planStartKey(b.c))
                         || (knifeKey(b.c) - knifeKey(a.c))
                         || a.i - b.i;
                 })
@@ -1119,7 +1117,6 @@
         (rows || []).forEach(function(row) {
             var cutId = str(row.cut_id);
             if (cutId && !cutsById[cutId]) {
-                var seqVal = row.cut_sequence;
                 cutsById[cutId] = {
                     id: cutId,
                     // #3242: cut_no упразднён; «номер» резки = плановая дата начала
@@ -1133,7 +1130,7 @@
                     materialBatch: { id: null, label: '' },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
-                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    sequence: null,   // #3923: порядок задаёт planStart; поле — in-memory ординал генерации
                     fixed: false,   // #3508: уточняется из object/ в loadPlanning (отчёт флаг не отдаёт)
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
@@ -1860,7 +1857,7 @@
     }
 
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
-    // (порядок исполнения — по «Очередности», как в Ганте orderCutsInGroup). Первая резка —
+    // (порядок исполнения — по planStart, как в Ганте orderCutsInGroup, #3923). Первая резка —
     // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
     // carryOverPrevCut); нет заправки (carryPrevCut=null) → настройка ножей с нуля
     // (firstCutSetup). Зеркалит ветку setup в buildSchedule. → { cutId: { knifeMin, materialWindingMin } }.
@@ -4469,31 +4466,33 @@
             if (toKey != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
             return false;
         }
-        // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/«Очередности»
-        // #3635; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
+        // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
+        // #3635/#3923; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
         function planMachineSegs(cutsOfMachine, key){
             // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
-            // очереди (сортировка по «Очередности»), а не пересобирая её по стратегии
-            // (orderCuts). Нужно, чтобы автозаполнение дней после генерации не перетасовывало
-            // ручной порядок оператора (#3449). Без флага — обычная пересборка по весам (#3421).
-            // #3635 п.1/п.2: сортируем СПЕРВА по дню «Даты план», затем по «Очередности» —
-            // как groupBySlitter (#3616) и planQueues. «Очередность» сбрасывается на каждый
-            // день, поэтому сортировка только по ней перемешивала дни: задание дня D+1 с
-            // очередью 1 вставало перед фольгой дня D с очередью 2 → splitMachineQueue
-            // переупаковывал перемешанную очередь, фольга всплывала в начало дня и ломала
-            // порядок ножей (#3130/#3568), а вид «сразу после планирования» расходился с
-            // видом после перезагрузки (groupBySlitter сортирует день-первым).
+            // очереди, а не пересобирая её по стратегии (orderCuts). Нужно, чтобы автозаполнение
+            // дней после генерации не перетасовывало ручной порядок оператора (#3449). Без флага —
+            // обычная пересборка по весам (#3421).
+            // #3635 п.1/п.2 + #3923: сортируем СПЕРВА по дню «Даты план», затем по СОХРАНЁННОМУ
+            // planStart (planDate) — как groupBySlitter (#3616) и РМ «Диаграмма Ганта» (#3846).
+            // planStart несёт и день, и позицию внутри дня, поэтому день-первым нужен лишь чтобы
+            // сгруппировать; внутри дня время старта задаёт порядок (ручной ↑↓ переставляет
+            // именно planStart, #3923). «Очередность» больше не хранится.
             // #3717: фольга ВСЕГДА в конец дня — критично (медленная намотка, отдельная норма).
             // preserveOrder сохраняет ручной порядок ВНУТРИ группы (день, фольга?), но фольгу
-            // принудительно отправляет за все обычные резки того же дня. Без этого «Очередность»
-            // (сбрасывается на день) могла поставить фольгу в начало/середину дня (orderCuts при
-            // генерации делает фольгу последней ПО ИСХОДНОМУ дню, но кросс-дневный re-pack и
-            // посменная сборка перемешивали её обратно).
+            // принудительно отправляет за все обычные резки того же дня (orderCuts при генерации
+            // делает фольгу последней ПО ИСХОДНОМУ дню, а кросс-дневный re-pack и посменная
+            // сборка иначе перемешивали её обратно).
             var ordered = opts.preserveOrder
                 ? cutsOfMachine.slice().sort(function(a, b){
+                      // #3923: внутри дня ручной порядок оператора хранится в planStart
+                      // (planDate), а не в «Очередности». Пустой planStart — в конец дня.
+                      var pa = Number(a && a.planDate); if (!isFinite(pa) || pa <= 0) pa = Infinity;
+                      var pb = Number(b && b.planDate); if (!isFinite(pb) || pb <= 0) pb = Infinity;
                       return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
                           || (((a && a.isFoil) ? 1 : 0) - ((b && b.isFoil) ? 1 : 0))   // #3717: фольга — в конец дня
-                          || ((Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+                          || (pa - pb)
+                          || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
                   })
                 : orderCuts(cutsOfMachine, opts.weights);
             var runsByCut = {};
@@ -5505,48 +5504,28 @@
         }
     }
 
-    // Переставить резку в очереди станка: swap с соседом (dir -1 вверх / +1 вниз) +
-    // нормализация «Очередности» 1..N по новому порядку. → изменённые [{cutId, sequence}].
-    // На границе → []. Вход не мутирует.
-    function moveInQueue(orderedCuts, index, dir){
-        var arr = (orderedCuts || []).slice();
-        var target = index + dir;
-        if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return [];
-        // #3508 п.3: зафиксированные задания — «стены». Нельзя двигать сам зафиксированный
-        // и нельзя перепрыгивать через зафиксированного соседа: их относительный порядок и
-        // «Очередность» неизменны, нумерация остальных 1..N остаётся сплошной (без дублей).
-        if ((arr[index] && arr[index].fixed) || (arr[target] && arr[target].fixed)) return [];
-        var tmp = arr[index]; arr[index] = arr[target]; arr[target] = tmp;
-        var changed = [];
-        arr.forEach(function(c, i){ var seq = i + 1; if (Number(c.sequence) !== seq) changed.push({ cutId: c.id, sequence: seq }); });
-        return changed;
-    }
-
-    // #3602: перенос задания на другой день. Целевой день — отдельный «бакет» очереди
-    // станка (groupBySlitter сортирует сперва по хранимой «Дате план», затем по
-    // «Очередности»). Чтобы поставить задание В НАЧАЛО/КОНЕЦ дня, достаточно положить его
-    // в этот бакет и пронумеровать «Очередность» 1..N: жадная упаковка buildSchedule сама
-    // сдвинет остальные позже и перельёт переполнение на следующий день (а те задания,
-    // что переехали, имеют меньшую «Дату план» и встают в начало следующего дня — каскад).
-    // Перенос имеет наивысший приоритет: фиксация заданий цели НЕ мешает (перенумеровываем
-    // и зафиксированные), в отличие от ↑↓ (moveInQueue).
+    // #3602/#3923: перенос задания на другой день. Порядок дня задаёт planStart (planDate).
+    // Строим желаемый порядок id внутри целевого дня (перемещаемое — первым/последним, прочие
+    // — по их сохранённому planStart) и присваиваем плейсхолдер-planStart (день + i·минут);
+    // autoSequenceQueue(preserveOrder) затем переупакует день встык по этому порядку. Перенос
+    // имеет наивысший приоритет: фиксация заданий цели НЕ мешает (в отличие от ↑↓).
     //   cutId    — перемещаемое задание;
     //   dayCuts  — задания того же станка на целевом дне (без перемещаемого), любой порядок;
     //   position — 'start' (в начало) | 'end' (в конец).
-    // → { ordered:[id…], seqByCut:{ id: seq 1..N } }. Вход не мутирует.
+    // → { ordered:[id…] } в желаемом порядке. Вход не мутирует.
     function planMoveSequences(cutId, dayCuts, position) {
         var sorted = (dayCuts || []).slice().sort(function(a, b) {
-            var an = Number(a && a.sequence), bn = Number(b && b.sequence);
-            if (!isFinite(an)) an = Infinity;
-            if (!isFinite(bn)) bn = Infinity;
-            return an - bn || ((Number(b && b.knifeCount) || 0) - (Number(a && a.knifeCount) || 0));
+            var an = Number(a && a.planDate), bn = Number(b && b.planDate);
+            if (!isFinite(an) || an <= 0) an = Infinity;
+            if (!isFinite(bn) || bn <= 0) bn = Infinity;
+            return an - bn
+                || ((Number(b && b.knifeCount) || 0) - (Number(a && a.knifeCount) || 0))
+                || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
         });
         var ids = sorted.map(function(c) { return String(c.id); })
             .filter(function(id) { return id !== String(cutId); });
         var ordered = position === 'end' ? ids.concat([String(cutId)]) : [String(cutId)].concat(ids);
-        var seqByCut = {};
-        ordered.forEach(function(id, i) { seqByCut[id] = i + 1; });
-        return { ordered: ordered, seqByCut: seqByCut };
+        return { ordered: ordered };
     }
 
     function cutPlanDayKey(c) {
@@ -5817,8 +5796,7 @@
         knifeWidthSig: knifeWidthSig,   // #3666
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
-        moveInQueue: moveInQueue,
-        planMoveSequences: planMoveSequences,   // #3602
+        planMoveSequences: planMoveSequences,   // #3602/#3923
         unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
         uncoveredPositions: uncoveredPositions,
@@ -6603,31 +6581,23 @@
         });
     };
 
-    // Прямые карты очередности и флага «Зафиксировано» из object/ «Задание в
-    // производство». Нужны как источник истины после _m_set: отчёт cut_planning может
-    // отставать/отдать старый alias и вовсе НЕ содержит «Зафиксировано» (#3508).
-    // Возвращает { seq: { cutId: число|строка }, fixed: { cutId: bool } }.
+    // #3508: прямая карта флага «Зафиксировано» из object/ «Задание в производство».
+    // Нужна как источник истины после _m_set: отчёт cut_planning может отставать/отдать
+    // старый alias и вовсе НЕ содержит «Зафиксировано». (#3923: «Очередность» больше не
+    // читается — порядок задаёт planStart; форма ответа { seq:{}, fixed } сохранена.)
+    // Возвращает { seq: {}, fixed: { cutId: bool } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
         if (!meta) return Promise.resolve({ seq: {}, fixed: {} });
-        var seqIdx = columnIndex(meta, CUT_REQ.sequence);
         var fixedIdx = columnIndex(meta, CUT_REQ.fixed);   // #3508
-        if (seqIdx < 0 && fixedIdx < 0) return Promise.resolve({ seq: {}, fixed: {} });
+        if (fixedIdx < 0) return Promise.resolve({ seq: {}, fixed: {} });
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var seq = {}, fixed = {};
+            var fixed = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                var id = String(rec.i);
-                if (seqIdx >= 0) {
-                    var raw = r[seqIdx];
-                    if (raw != null && String(raw).trim() !== '') {
-                        var n = Number(raw);
-                        seq[id] = isFinite(n) ? n : String(raw);
-                    }
-                }
-                if (fixedIdx >= 0) fixed[id] = truthyFlag(r[fixedIdx]);   // #3508
+                fixed[String(rec.i)] = truthyFlag(r[fixedIdx]);   // #3508
             });
-            return { seq: seq, fixed: fixed };
+            return { seq: {}, fixed: fixed };
         });
     };
 
@@ -6976,7 +6946,6 @@
         ]).then(function(results) {
             var rows = results[0];
             var seqResult = results[1] || {};
-            var sequenceByCut = seqResult.seq || {};
             var fixedByCut = seqResult.fixed || {};   // #3508
             self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
@@ -6985,10 +6954,7 @@
                 var a = agg[String(cut.id)] || {};
                 cut.knifeCount = a.knifeCount || 0;
                 cut.knifeWidths = a.knifeWidths || [];
-                if (Object.prototype.hasOwnProperty.call(sequenceByCut, String(cut.id))) {
-                    cut.sequence = sequenceByCut[String(cut.id)];
-                }
-                cut.fixed = !!fixedByCut[String(cut.id)];   // #3508: флаг «Зафиксировано»
+                cut.fixed = !!fixedByCut[String(cut.id)];   // #3508: флаг «Зафиксировано» (#3923: «Очередность» не читаем)
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -7071,8 +7037,7 @@
             length: reqIdByName(meta, CUT_REQ.length),
             planDate: reqIdByName(meta, CUT_REQ.planDate),
             status: reqIdByName(meta, CUT_REQ.status),
-            notes: reqIdByName(meta, CUT_REQ.notes),
-            sequence: reqIdByName(meta, CUT_REQ.sequence)
+            notes: reqIdByName(meta, CUT_REQ.notes)
         };
         var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, d.isFoil); // #3606
         var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, d.isFoil);
@@ -7088,8 +7053,8 @@
             length: runLength > 0 ? runLength : '',
             planDate: d.planDate,
             status: d.status,
-            notes: d.notes,
-            sequence: nextSequenceForCuts(this.cuts, d.slitterId, d.planDate)
+            notes: d.notes
+            // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение)
         });
         fields = addMainValueField(meta, fields, cutMainValue);
         var requiredWriteKeys = ['plannedRuns'];
@@ -7292,8 +7257,7 @@
                 leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
                 material: reqIdByName(cutMeta, CUT_REQ.material), // #3688: ссылка «Вид сырья» (95358)
                 active: activeReqId(cutMeta),
-                notes: reqIdByName(cutMeta, CUT_REQ.notes),
-                sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
+                notes: reqIdByName(cutMeta, CUT_REQ.notes)
             };
             var cutMainState = { last: self.lastCutMainValue };
             var cutMainValue = (slot && slot.startTs > 0) ? slot.startTs : nextCutMainValue(self.cuts, controllerNowMs(self), cutMainState);
@@ -7308,8 +7272,8 @@
                 leader: self.resolveLeaderId(leaderPos && leaderPos.leader), // #3569: лидер позиции → id
                 material: plan.materialId,   // #3688: «Вид сырья» проспект-резки
                 active: (d.active === false) ? '0' : '1',
-                notes: d.notes,
-                sequence: nextSequenceForCuts(self.cuts, d.slitterId, planDayTs)
+                notes: d.notes
+                // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение)
             });
             fields = addMainValueField(cutMeta, fields, cutMainValue);
 
@@ -7677,11 +7641,11 @@
         this.root.appendChild(overlay);
     };
 
-    // #3602/#3631: применить перенос на ПРОИЗВОЛЬНЫЙ день targetDateStr («ГГГГ-ММ-ДД»).
-    // Перемещаемому заданию пишем «Дату план» (главное значение — DATETIME-колонка →
-    // _m_save с t{tableId}, как в applySplitPlan; _m_set её НЕ задаёт, issue #775) на 08:00
-    // целевого дня и «Очередность» в начало/конец дня, а прочим заданиям дня — пересчитанную
-    // «Очередность» (только изменившиеся). Фиксация (если отмечена) пишется тем же _m_set.
+    // #3602/#3631/#3923: применить перенос на ПРОИЗВОЛЬНЫЙ день targetDateStr («ГГГГ-ММ-ДД»).
+    // Перемещаемому и прочим заданиям целевого дня пишем planStart (главное значение — DATETIME-
+    // колонка → _m_save с t{tableId}, как в applySplitPlan; _m_set её НЕ задаёт, issue #775):
+    // плейсхолдер-время в желаемом порядке (в начало/конец дня); порядок дня задаёт planStart,
+    // отдельной «Очередности» нет. Фиксация (если отмечена) пишется _m_set.
     // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
     AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId) {
@@ -7690,12 +7654,11 @@
         if (!cut) return Promise.resolve(false);
         var cutMeta = this.meta.cut;
         if (!cutMeta) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
-        var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
         var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
         var slitterReqId = reqIdByName(cutMeta, CUT_REQ.slitter);   // #3669 п.1: ссылка «Слиттер»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
-        if (!seqReqId || !mainKey) {
-            this.notify('Не найдены реквизиты резки («' + CUT_REQ.sequence + '»/дата)', 'error');
+        if (!mainKey) {
+            this.notify('Не найден реквизит даты резки', 'error');
             return Promise.resolve(false);
         }
         var dateStr = String(targetDateStr || '').trim();
@@ -7708,10 +7671,9 @@
         var targetDayKey = planDateDayKey(targetTs);
         var dateLabel = formatPlanDayHeading(targetMidnightMs, 0);
 
-        // #3669 п.1: целевой станок — выбранный в диалоге (по умолчанию текущий). Очередь и
-        // соседи для пересчёта «Очередности» берём на станке-ПОЛУЧАТЕЛЕ; смену станка пишем
-        // ссылкой «Слиттер» на самом задании (старый станок пересобирать не нужно — пропуск в
-        // его «Очередности» безвреден, пересчитывается при следующей генерации).
+        // #3669 п.1: целевой станок — выбранный в диалоге (по умолчанию текущий). Порядок дня
+        // задаёт planStart; смену станка пишем ссылкой «Слиттер» на самом задании (старый станок
+        // пересобирать не нужно — пропуск в его дне безвреден, лечится следующей генерацией).
         var curSidStr = String(cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
         var targetSidStr = String(targetSlitterId == null ? '' : targetSlitterId).trim();
         var sidStr = targetSidStr !== '' ? targetSidStr : curSidStr;
@@ -7731,32 +7693,36 @@
             return planDateDayKey(c.planDate) === targetDayKey;
         });
         var plan = planMoveSequences(cut.id, dayCuts, position);
-        var seqByCut = plan.seqByCut;
+        // #3923: желаемый порядок дня → плейсхолдер-planStart (целевой день 08:00 + i·минут).
+        // Точные значения не важны — важен ПОРЯДОК; autoSequenceQueue(preserveOrder) ниже
+        // переупакует и целевой, и исходный день встык по сохранённому planStart.
+        var placeholderByCut = {};
+        plan.ordered.forEach(function(id, i) { placeholderByCut[String(id)] = targetTs + i * 60; });
 
         this.setBusy(true);
         this.showProgress('Перенос задания…', 1 + dayCuts.length);
         var done = 0;
         var fixFieldKey = (fix && fixedReqId) ? 't' + fixedReqId : null;
         var chain = Promise.resolve();
-        // 1) Перемещаемое задание: «Дата план» (главное значение) → _m_save, затем
-        //    «Очередность» (+ фиксация) → _m_set.
+        // 1) Перемещаемое задание: planStart (главное значение) → _m_save; затем фиксация/смена
+        //    станка → _m_set (если есть). «Очередность» больше не пишем.
         chain = chain.then(function() {
-            var mainFields = {}; mainFields[mainKey] = String(targetTs);
+            var mainFields = {}; mainFields[mainKey] = String(placeholderByCut[String(cut.id)] || targetTs);
             return self.post('_m_save/' + encodeURIComponent(cut.id) + '?JSON', mainFields);
         }).then(function() {
             var fields = {};
-            fields['t' + seqReqId] = String(seqByCut[String(cut.id)] || 1);
             if (fixFieldKey) fields[fixFieldKey] = '1';
             if (slitterChanged) fields['t' + slitterReqId] = sidStr;   // #3669 п.1: смена станка
+            if (!Object.keys(fields).length) return;
             return self.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields);
         }).then(function() { self.updateProgress(++done); });
-        // 2) Прочие задания целевого дня — пересчитанная «Очередность» (только изменившиеся).
+        // 2) Прочие задания целевого дня — плейсхолдер-planStart (только изменившиеся).
         dayCuts.forEach(function(c) {
-            var newSeq = seqByCut[String(c.id)];
+            var ph = placeholderByCut[String(c.id)];
             chain = chain.then(function() {
-                if (Number(c.sequence) === Number(newSeq)) { self.updateProgress(++done); return; }
-                var fields = {}; fields['t' + seqReqId] = String(newSeq);
-                return self.post('_m_set/' + encodeURIComponent(c.id) + '?JSON', fields)
+                if (ph == null || Number(c.planDate) === Number(ph)) { self.updateProgress(++done); return; }
+                var mainFields = {}; mainFields[mainKey] = String(ph);
+                return self.post('_m_save/' + encodeURIComponent(c.id) + '?JSON', mainFields)
                     .then(function() { self.updateProgress(++done); });
             });
         });
@@ -8962,8 +8928,7 @@
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
             leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
             material: reqIdByName(cutMeta, CUT_REQ.material), // #3688: ссылка «Вид сырья» (95358)
-            status: reqIdByName(cutMeta, CUT_REQ.status),
-            sequence: reqIdByName(cutMeta, CUT_REQ.sequence)
+            status: reqIdByName(cutMeta, CUT_REQ.status)
         };
         var sleeveMeta = this.meta.sleeveTask;
         var sleeveReqIds = this.sleeveTaskReqIds();
@@ -9210,7 +9175,6 @@
                 if (s === '') return;
                 (bySlitter[s] = bySlitter[s] || []).push(plan);
             });
-            var allSegs = [];
             Object.keys(bySlitter).forEach(function(s) {
                 var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
                 var perPassByCut = {}, runsByCut = {};
@@ -9247,21 +9211,14 @@
                             slitterId: p.slitterId,
                             fullPlannedRuns: p.plannedRuns,
                             segIndex: si,
-                            segRunsAll: segRunsAll,
-                            sequence: ''
+                            segRunsAll: segRunsAll
                         };
-                        allSegs.push({ slitterId: String(p.slitterId), dayKey: cutPlanDayKey({ planDate: unit.cutMainValue }), ts: unit.cutMainValue, unit: unit });
                         return unit;
                     });
                 });
             });
-            // Очерёдность 1..N в пределах (станок, день) по времени старта.
-            var seqGroups = {};
-            allSegs.forEach(function(a) { var k = a.slitterId + ' ' + a.dayKey; (seqGroups[k] = seqGroups[k] || []).push(a); });
-            Object.keys(seqGroups).forEach(function(k) {
-                seqGroups[k].sort(function(a, b) { return Number(a.ts) - Number(b.ts); })
-                    .forEach(function(a, i) { a.unit.sequence = i + 1; });
-            });
+            // #3923: порядок сегментов внутри (станок, день) задаёт planStart (cutMainValue) —
+            // отдельная «Очередность» 1..N больше не проставляется и не пишется в базу.
         })();
 
         this.setBusy(true);
@@ -9287,7 +9244,6 @@
                 var timing = unit.timing;
                 var batchId = unit.batchId;
                 var slitterId = unit.slitterId;
-                var sequence = unit.sequence;
                 var cutMainValue = unit.cutMainValue;
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
@@ -9299,8 +9255,8 @@
                     length: runLength > 0 ? runLength : '',
                     winding: normWinding(lay && lay.windDir),
                     leader: self.resolveLeaderId(lay && lay.leader), // #3569: лидер позиции → id справочника
-                    material: lay && lay.mat,   // #3688: «Вид сырья» резки = сырьё раскладки
-                    sequence: sequence
+                    material: lay && lay.mat   // #3688: «Вид сырья» резки = сырьё раскладки
+                    // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение)
                 });
                 cutFields = addMainValueField(cutMeta, cutFields, cutMainValue);
                 var payloadDiagnostics = traceCutCreatePayload('runGenerateCuts', cutMeta, cutReqIds, cutFields, self, cutCreateRequiredKeys(plannedRuns));
@@ -9579,7 +9535,7 @@
     // мин» (KNIFE), «Сырье/намотка, мин» (MATERIAL_WINDING) и «Резка и Лидер» (намотка + лидер) —
     // чтобы Гант (cut-gantt) и отчёты
     // брали готовые минуты, а не пересчитывали по соседям. Порядок исполнения — по
-    // «Очередности» в пределах станка (как orderCutsInGroup Ганта); первая резка — от текущей
+    // planStart в пределах станка (#3923, как orderCutsInGroup Ганта); первая резка — от текущей
     // заправки станка (prev_cut_setup), нет данных → настройка ножей с нуля. Пишет только
     // изменившиеся (diff против отчётных значений), тихо и БЕЗ reload (свой экран РМ считает
     // наладку на лету). Колонок ещё нет в метаданных → no-op. Ошибки глотает: доп-колонки не
@@ -9614,10 +9570,9 @@
         //  • this.changeTimes — структурированные веса переналадок (MATERIAL_WINDING / KNIFE /
         //    BETWEEN_CUTS). this.opTimes — это raw {КОД: мин} без этих ключей, поэтому
         //    setupBreakdown молча брал DEFAULT-веса (расхождение с планом).
-        //  • Порядок — groupBySlitter (день плана → «Очередность» → ножи), как очередь станка в
-        //    renderQueue. Прежний (sequence, planDate) перемешивал дни («Очередность» сбрасывается
-        //    на день), и у НЕ-первой резки дня предшественником становилась резка другого дня —
-        //    отсюда ложная «смена сырья».
+        //  • Порядок — groupBySlitter (день плана → planStart → ножи), как очередь станка в
+        //    renderQueue (#3923). Иначе у НЕ-первой резки дня предшественником становилась бы
+        //    резка другого дня — отсюда была бы ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
         // #3876: тот же источник заправки, что и план (splitMachineQueue): станок в отпуске на
@@ -9627,7 +9582,7 @@
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
-            var arr = group.cuts;   // уже упорядочены как очередь станка (день → «Очередность» → ножи)
+            var arr = group.cuts;   // уже упорядочены как очередь станка (день → planStart → ножи, #3923)
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
@@ -9687,63 +9642,53 @@
         });
     };
 
-    // DRY-метод сохранения изменённых «Очередностей» (ручная перестановка ↑↓).
-    // pairs = [{cutId, sequence}]. opts.successMessage — если передан, показывается
-    // после reload вместо дефолтного; opts.silent — не показывать уведомление.
-    // Если pairs пуст — уведомляет и возвращает resolved Promise.
-    AtexProductionPlanning.prototype.saveSequences = function(pairs, opts) {
+    // #3923: ручная перестановка ↑↓ внутри дня. Порядок задаёт planStart, поэтому «выше/ниже»
+    // = ОБМЕН сохранённого planStart (главное значение t1078) двух соседних резок дня, после
+    // чего autoSequenceQueue(preserveOrder) переупаковывает день встык по новому порядку (окна
+    // резок разной длины — пересчёт чинит нахлёст/зазор). Зафиксированные — «стены» (не двигаем
+    // и не перепрыгиваем). Совпадающий planStart соседей — след неполной пересборки (#3885):
+    // обмен ничего не даст, подсказываем «Упорядочить».
+    //   sameDayCuts — резки дня в порядке показа (по planStart);
+    //   index, dir  — позиция и направление (-1 вверх / +1 вниз).
+    AtexProductionPlanning.prototype.moveCutInDay = function(sameDayCuts, index, dir) {
         var self = this;
-        var o = opts || {};
-        if (!pairs || !pairs.length) {
-            if (!o.silent) self.notify('Очередь не изменилась', 'info');
-            return Promise.resolve(true);
-        }
-
-        var seqReqId = reqIdByName(this.meta.cut, CUT_REQ.sequence);
-        if (!seqReqId) {
-            self.notify('Реквизит «' + CUT_REQ.sequence + '» не найден в метаданных', 'error');
+        var arr = sameDayCuts || [];
+        var target = index + dir;
+        if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return Promise.resolve(false);
+        var a = arr[index], b = arr[target];
+        if (!a || !b) return Promise.resolve(false);
+        if (a.fixed || b.fixed) { self.notify('Зафиксированное задание нельзя переставить', 'info'); return Promise.resolve(false); }
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
+        if (!mainKey) { self.notify('Не найден реквизит даты резки', 'error'); return Promise.resolve(false); }
+        var tsA = Number(a.planDate), tsB = Number(b.planDate);
+        if (!isFinite(tsA) || tsA <= 0 || !isFinite(tsB) || tsB <= 0 || tsA === tsB) {
+            self.notify('Не удаётся переставить: у соседних заданий одно время старта — нажмите «Упорядочить»', 'info');
             return Promise.resolve(false);
         }
-
         this.setBusy(true);
-
-        // Последовательное сохранение (чтобы не перегружать сервер).
-        var fieldKey = 't' + seqReqId;
-        // #3280: t1078 = главное значение «Производственной резки» (плановое время старта).
-        // Пишется тем же _m_set (docs/kb/crud.md: _m_set задаёт любую колонку, включая первую).
-        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
-        var chain = Promise.resolve();
-        pairs.forEach(function(p) {
-            chain = chain.then(function() {
-                var fields = {};
-                if (p.sequence != null && p.sequence !== '') fields[fieldKey] = String(p.sequence);
-                // #3280: плановое время старта (Unix-штамп) → t1078, если задано и валидно.
-                var ts = Number(p.planStartTs);
-                if (mainKey && isFinite(ts) && ts > 0) fields[mainKey] = String(ts);
-                return self.post('_m_set/' + p.cutId + '?JSON', fields);
+        var fA = {}; fA[mainKey] = String(tsB);
+        var fB = {}; fB[mainKey] = String(tsA);
+        return self.post('_m_save/' + encodeURIComponent(a.id) + '?JSON', fA)
+            .then(function() { return self.post('_m_save/' + encodeURIComponent(b.id) + '?JSON', fB); })
+            .then(function() { return self.reload(); })
+            .then(function() {
+                self.setBusy(false);
+                self.render();   // обмен planStart виден сразу (даже если пересборка ниже без изменений)
+                // Переупаковка дня встык по новому порядку planStart (как перенос/удаление, #3840);
+                // autoSequenceQueue сам делает persistCutSetupColumns + reload/render при изменениях.
+                return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+            })
+            .catch(function(err) {
+                self.setBusy(false);
+                // Частичный обмен (первый _m_save прошёл, второй нет) → перечитываем состояние.
+                self.reload().then(function() { self.render(); }).catch(function() {});
+                self.notify('Ошибка перестановки: ' + (err && err.message || err), 'error');
+                return false;
             });
-        });
-
-        return chain.then(function() {
-            return self.reload();
-        }).then(function() {
-            return self.persistCutSetupColumns();   // #3698: пересчитать хранимые активности под новый порядок
-        }).then(function() {
-            self.setBusy(false);
-            self.render();
-            if (!o.silent) {
-                self.notify(o.successMessage || 'Очередь сохранена', 'success');
-            }
-            return true;
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка сохранения очереди: ' + err.message, 'error');
-            return false;
-        });
     };
 
     // #3280: применить план разбиения резок по дням (planCutOperations):
-    //   updates → _m_set (очередность + t1078 + плановые проходы сегодня);
+    //   updates → _m_save t1078 (planStart) + _m_set плановых проходов сегодня (#3923: без «Очередности»);
     //   creates → _m_new запись-продолжение B (на след. день) + копия Полос (тот же
     //     per-pass раскрой) + Обеспечение долей сегмента (splitSupplyShares, пропорц. проходам);
     //   deletes → _m_del записей-продолжений прежних цепочек (mergeContinuationChains).
@@ -9752,7 +9697,6 @@
         var self = this;
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
-        var seqReqId = reqIdByName(cutMeta, CUT_REQ.sequence);
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
         // #3808: перед резолвом цепочек ЛЕЧИМ «Вид сырья» переходящих сегментов с пустым
@@ -9767,7 +9711,6 @@
             materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
             plannedRuns: runsReqId,
             status: reqIdByName(cutMeta, CUT_REQ.status),
-            sequence: seqReqId,
             winding: reqIdByName(cutMeta, CUT_REQ.winding),
             leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
             length: lengthReqId,   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
@@ -9874,7 +9817,7 @@
                     : Promise.resolve();
                 return saveMain.then(function() {
                     var fields = {};
-                    if (u.sequence != null && seqReqId) fields['t' + seqReqId] = String(u.sequence);
+                    // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение).
                     if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
                     // #3916/#3635 п.5: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
                     // по ЕГО проходам. 0 проходов (setup-сегмент) → 0; уменьшенные проходы дробления
@@ -9969,7 +9912,7 @@
                             // привязаны к нему по «Заданию», поэтому materialByCut его не восстановит.
                             material: parentMaterial,
                             plannedRuns: cr.plannedRuns,
-                            sequence: cr.sequence,
+                            // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение).
                             winding: normWinding(parentCut && parentCut.winding),
                             // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
                             leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : ''),
@@ -10147,17 +10090,18 @@
         (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
         var cutsById = {};
         self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-        // Обновляем только то, что реально изменилось (очередность / время старта / проходы).
+        // #3923: обновляем только реально изменившееся — время старта (planStart) / проходы.
+        // «Очередность» больше не хранится, поэтому переупорядочивание проявляется как смена
+        // planStart (tsChanged), а не отдельным seqChanged (иначе null!==N → churn всех записей).
         var changedUpdates = (ops.updates || []).filter(function(u) {
             if (createParents[String(u.cutId)]) return true;
             var cut = cutsById[String(u.cutId)];
             if (!cut) return false;
-            var seqChanged = Number(cut.sequence) !== u.sequence;
             var tsNew = Number(u.planStartTs);
             var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
             var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
             var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
-            return seqChanged || tsChanged || runsChanged;
+            return tsChanged || runsChanged;
         });
 
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
@@ -11113,13 +11057,11 @@
             if (dayIdx === sameDayCuts.length - 1 || c.fixed) down.disabled = true;
             up.addEventListener('click', function() {
                 if (self.busy || c.fixed) return;
-                var p = moveInQueue(sameDayCuts, dayIdx, -1);
-                if (p.length) self.saveSequences(p);
+                self.moveCutInDay(sameDayCuts, dayIdx, -1);   // #3923: перестановка = обмен planStart + переупаковка
             });
             down.addEventListener('click', function() {
                 if (self.busy || c.fixed) return;
-                var p = moveInQueue(sameDayCuts, dayIdx, 1);
-                if (p.length) self.saveSequences(p);
+                self.moveCutInDay(sameDayCuts, dayIdx, 1);
             });
             // #3706: остаток резки вне допуска → кнопка «Полосы» светло-красная,
             // чтобы отход вне допуска был виден прямо в очереди, без открытия панели.

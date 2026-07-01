@@ -12,7 +12,7 @@
 //
 // Данные — одним отчётом (минимум серверных запросов):
 //   • GET /{db}/report/cut_planning?JSON_KV — задания с плановой датой, фактическими
-//     стартом/финишем, станком, статусом, длительностью, очередностью, лидером,
+//     стартом/финишем, станком, статусом, длительностью, лидером,
 //     заказом и материалом (ссылки резолвятся сервером — доступ к справочникам
 //     ролям не нужен, в т.ч. к «Лидер», ср. #3623).
 //   • GET /{db}/object/{slitter}/?JSON_OBJ — справочник станков для фильтра (при
@@ -844,7 +844,6 @@
                 rollerWidth: stripNum(row.cut_roller_width),
                 knifeWidths: [],
                 knifeCount: 0,
-                sequence: row.cut_sequence == null || row.cut_sequence === '' ? null : stripNum(row.cut_sequence),
                 leader: str(row.cut_leader),
                 orderNo: str(row.order_no),
                 materialId: str(row.cut_material_id),
@@ -863,21 +862,16 @@
         return order.map(function(id) { return byId[id]; });
     }
 
-    // Порядок заданий ВНУТРИ станка: по очередности (пусто — в конец), затем по
-    // визуальному старту, затем по id. Мутирует переданный массив (он локальный в layoutGroups).
-    // #3747: порядок строк станка — по РЕАЛЬНОМУ времени старта (planDate/факт), а НЕ по
-    // «Очередности»: она сбрасывается на каждый день (1..N), поэтому сортировка по ней первой
-    // перемешивала дни (день2-очередь1 вставал над днём1-очередь2) — бары прыгали между днями,
-    // «не лесенкой». По времени старта строки идут строго хронологически (чистая лесенка через
-    // дни). «Очередность» и id — только тай-брейк при равном старте.
+    // Порядок заданий ВНУТРИ станка: по РЕАЛЬНОМУ времени старта (planDate/факт), затем id.
+    // Мутирует переданный массив (он локальный в layoutGroups).
+    // #3747/#3923: строки станка идут строго хронологически по времени старта (чистая лесенка
+    // через дни) — planStart единственный источник порядка (как РМ «Планирование» и пульт
+    // слиттера). id — только тай-брейк при равном старте. «Очередность» больше не хранится.
     function orderCutsInGroup(cuts) {
         cuts.sort(function(a, b) {
             var ta = cutTimeRange(a), tb = cutTimeRange(b);
             var ma = ta ? ta.startMs : Infinity, mb = tb ? tb.startMs : Infinity;
             if (ma !== mb) return ma - mb;
-            var qa = a.sequence == null ? Infinity : a.sequence;
-            var qb = b.sequence == null ? Infinity : b.sequence;
-            if (qa !== qb) return qa - qb;
             return String(a.id).localeCompare(String(b.id));
         });
         return cuts;
