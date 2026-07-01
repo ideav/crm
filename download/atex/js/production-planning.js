@@ -3487,38 +3487,58 @@
     function scheduleFromStored(cuts, baseMidnightMs) {
         var base = Number(baseMidnightMs);
         function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
-        var out = [];
         // #3885: сохранённые planStart двух резок ОДНОГО станка в один день могут совпасть
         // (напр. обе t1078 = 08:00) — след незавершённой пересборки времени старта: перенос
         // до #3840 не пересобирал planStart, а пересборка #3660 идёт только в scope фильтра, и
         // «осиротевший» старт остаётся прежним. Раньше очередь пересчитывала расписание на лету
         // (buildSchedule) и нахлёст не показывала; с #3846 (показ сохранённого) две карточки
-        // вставали в одно время. Резки приходят в порядке очереди (день → «Очередность»),
-        // поэтому раскладываем встык: старт ОКНА резки не раньше конца окна предыдущей резки
-        // ЭТОГО дня. Непересекающиеся сохранённые старты не трогаем (display == сохранённое).
-        var prevWindowEndByDay = {};
+        // вставали в одно время. Раскладываем встык: старт ОКНА резки не раньше конца окна
+        // предыдущей резки ЭТОГО дня. Непересекающиеся сохранённые старты не трогаем (display ==
+        // сохранённое).
+        //
+        // #3920: анти-нахлёст обрабатываем СТРОГО ПО ВРЕМЕНИ сохранённого planStart, а НЕ в
+        // порядке «Очередности», в котором резки приходят из groupBySlitter. После scope-огра-
+        // ниченной пересборки (#3660) «Очередность» и planStart могут разойтись: застрявшая резка
+        // с ранней «Очередностью», но поздним planStart (напр. хвостовая настройка на 15:58, тогда
+        // как остальные резки дня стоят с 08:00). Анти-нахлёст forward-only: попав в обработку
+        // ПЕРВОЙ (по «Очередности»), такая резка выталкивала за собой ВСЕ резки дня в овертайм
+        // (день лез до 23:15 — issue #3920). По времени planStart страница совпадает с РМ «Диаграмма
+        // Ганта», которая рисует бары по сохранённому planStart без пересчёта (#3846: обе РМ — один
+        // источник, сохранённые поля): резка стоит там, где записана, а не выталкивает соседей.
+        var items = [];
         (cuts || []).forEach(function(c) {
             if (!c) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
             if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего ставить на ось
-            var windowStartMin = round3((tsSec * 1000 - base) / 60000);     // окно = начало настройки
-            var setupMin = round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin));
-            var durationMin = round3(num(c.storedCutAndLeaderMin) || num(c.duration));   // намотка + лидер
+            items.push({
+                cutId: String(c.id),
+                windowStartMin: round3((tsSec * 1000 - base) / 60000),   // окно = начало настройки
+                setupMin: round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin)),
+                durationMin: round3(num(c.storedCutAndLeaderMin) || num(c.duration))   // намотка + лидер
+            });
+        });
+        // #3920: по сохранённому старту окна (возр.); равные — стабильно в исходном порядке очереди.
+        items.forEach(function(it, i) { it._i = i; });
+        items.sort(function(a, b) { return (a.windowStartMin - b.windowStartMin) || (a._i - b._i); });
+        var out = [];
+        var prevWindowEndByDay = {};
+        items.forEach(function(it) {
             // #3885: устранить нахлёст с предыдущей резкой того же дня — сдвинуть начало окна к
             // её концу. День берём по СОХРАНЁННОМУ старту (до сдвига), чтобы группировка по дате
             // (заголовок/минуты дня) не уезжала; сдвиг лечит только нахлёст внутри дня.
+            var windowStartMin = it.windowStartMin;
             var day = Math.floor(windowStartMin / 1440);
             var prevEnd = prevWindowEndByDay[day];
             if (prevEnd != null && windowStartMin < prevEnd) windowStartMin = prevEnd;
-            var startMin = round3(windowStartMin + setupMin);               // старт намотки (после настройки)
-            var finishMin = round3(startMin + durationMin);
+            var startMin = round3(windowStartMin + it.setupMin);            // старт намотки (после настройки)
+            var finishMin = round3(startMin + it.durationMin);
             prevWindowEndByDay[day] = finishMin;   // окно занятости = setup + намотка (лидер уже в durationMin)
             out.push({
-                cutId: String(c.id),
+                cutId: it.cutId,
                 startMin: startMin,
                 finishMin: finishMin,
-                setupMin: setupMin,
-                durationMin: durationMin,
+                setupMin: it.setupMin,
+                durationMin: it.durationMin,
                 // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
                 // отдельной величины в сохранённом нет. null (а не 0): окно/минуты считают его 0
                 // (не двойной счёт), а модалка тайминга (buildCutTimingCtx) оценивает лидер для
