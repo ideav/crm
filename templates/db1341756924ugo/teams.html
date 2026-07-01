@@ -1,0 +1,68 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div id="view"></div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  var IT=FC.I.TEAM, IP=FC.I.PLR;
+  document.getElementById('hero').innerHTML = FC.hero('Команды и игроки','Реальные клубы и команды из пользователей — в одном турнире');
+  var canEdit=FC.canWrite(FC.T.TEAM);
+  var params=new URLSearchParams(location.search), openId=params.get('t');
+  var teams=[], players=[];
+  Promise.all([FC.list(FC.T.TEAM),FC.list(FC.T.PLR)]).then(function(r){ teams=r[0]; players=r[1];
+    if(openId){ var t=teams.filter(function(x){return String(x.i)===String(openId);})[0]; if(t) return card(t); }
+    grid();
+  });
+
+  function grid(){
+    teams.sort(function(a,b){return FC.num(b.r[IT.tr])-FC.num(a.r[IT.tr]);});
+    document.getElementById('view').innerHTML='<div class="fc-grid c3">'+teams.map(function(t){
+      var kind=FC.refLabel(t.r[IT.kind]);
+      var owner=FC.refLabel(t.r[IT.owner]);
+      var cnt=players.filter(function(p){return String(FC.refId(p.r[IP.team]))===String(t.i);}).length;
+      return '<div class="fc-card" style="cursor:pointer" onclick="location.href=\'?t='+t.i+'\'">'+
+        '<div style="font-size:38px">'+(t.r[IT.emb]||'⚽')+'</div>'+
+        '<h2 style="margin:6px 0 4px;font-size:17px">'+FC.esc(t.r[IT.name])+'</h2>'+
+        '<div>'+(kind==='Реальная'?'<span class="chip blue">реальная (система)</span>':'<span class="chip green">команда игроков</span>')+'</div>'+
+        '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">'+
+          '<span class="chip gold">TR '+t.r[IT.tr]+'</span><span class="chip">'+t.r[IT.pts]+' очков</span><span class="chip">'+cnt+' игроков</span></div>'+
+        '<div class="fc-muted" style="margin-top:8px;font-size:12px">форма: <code>'+FC.esc(t.r[IT.form]||'—')+'</code>'+(owner?(' · капитан '+FC.esc(owner)):'')+'</div>'+
+      '</div>';
+    }).join('')+'</div>';
+  }
+
+  function card(t){
+    var roster=players.filter(function(p){return String(FC.refId(p.r[IP.team]))===String(t.i);})
+      .sort(function(a,b){return FC.num(b.r[IP.pr])-FC.num(a.r[IP.pr]);});
+    var owner=FC.refLabel(t.r[IT.owner]);
+    var html='<div style="margin-bottom:12px"><a class="btn ghost" href="/'+FC.DB+'/teams"><i class="pi pi-arrow-left"></i> Все команды</a></div>'+
+      '<div class="fc-card"><div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">'+
+        '<div style="font-size:54px">'+(t.r[IT.emb]||'⚽')+'</div>'+
+        '<div style="flex:1"><h2 style="margin:0">'+FC.esc(t.r[IT.name])+'</h2>'+
+          '<div style="margin-top:6px">'+(FC.refLabel(t.r[IT.kind])==='Реальная'?'<span class="chip blue">реальная (система)</span>':'<span class="chip green">команда игроков · капитан '+FC.esc(owner||'—')+'</span>')+'</div></div>'+
+        '<div style="text-align:right"><div class="v g" style="font-size:28px">TR '+t.r[IT.tr]+'</div></div>'+
+      '</div>'+
+      '<div class="fc-grid c4" style="margin-top:14px">'+
+        kpi(t.r[IT.w]+'-'+t.r[IT.d]+'-'+t.r[IT.l],'В-Н-П')+kpi(t.r[IT.gf]+':'+t.r[IT.ga],'голы')+
+        kpi(t.r[IT.pts],'очков')+kpi(t.r[IT.form]||'—','форма')+
+      '</div>'+
+      (FC.refLabel(t.r[IT.kind])==='Реальная'?'<div style="margin-top:12px"><button class="btn gold" onclick="FC.toast(\'Нужно 1000 Ǥ для выкупа управления\')"><i class="pi pi-dollar"></i> Выкупить команду (1000 Ǥ)</button></div>':
+        '<div style="margin-top:12px"><button class="btn" onclick="FC.toast(\'Вызов отправлен капитанам\')"><i class="pi pi-bolt"></i> Вызвать на товарищеский матч</button></div>')+
+      '</div>'+
+      '<div class="fc-card" style="margin-top:14px"><h3><i class="pi pi-users"></i>Состав ('+roster.length+')</h3>'+
+        (roster.length?('<table class="fc-table"><tr><th>Игрок</th><th>Позиция</th><th>Тип</th><th class="num">Голы</th><th class="num">Пас</th><th class="num">Карт.</th><th class="num">PR</th></tr>'+
+          roster.map(function(p){ var ut=FC.refLabel(p.r[IP.kind]);
+            return '<tr><td><b>'+FC.esc(p.r[IP.name])+'</b></td><td>'+FC.esc(FC.refLabel(p.r[IP.pos]))+'</td>'+
+              '<td>'+(ut==='Реальный'?'<span class="chip blue">реальный</span>':'<span class="chip green">игрок</span>')+'</td>'+
+              '<td class="num">'+p.r[IP.g]+'</td><td class="num">'+p.r[IP.a]+'</td><td class="num">'+p.r[IP.card]+'</td>'+
+              '<td class="num"><span class="chip gold">'+p.r[IP.pr]+'</span></td></tr>';
+          }).join('')+'</table>'):'<div class="fc-empty">Состав пуст</div>')+
+      '</div>';
+    document.getElementById('view').innerHTML=html;
+  }
+  function kpi(v,l){ return '<div class="fc-card fc-kpi" style="text-align:center"><div class="v" style="font-size:20px">'+FC.esc(String(v))+'</div><div class="l">'+l+'</div></div>'; }
+})();
+</script>

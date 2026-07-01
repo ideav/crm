@@ -1,0 +1,76 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div class="fc-card" style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <b><i class="pi pi-user"></i> Вы играете как:</b>
+    <select id="me" style="max-width:280px;padding:8px 12px;border-radius:10px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary)"></select>
+    <span class="fc-muted">баланс:</span> <span class="g" id="bal" style="font-size:18px">—</span>
+  </div></div>
+  <div class="fc-grid c2">
+    <div class="fc-card"><h3><i class="pi pi-ticket"></i>Новая ставка (антиформат)</h3>
+      <div class="fc-field"><label>Матч (ставки открыты)</label><select id="match"></select></div>
+      <div class="fc-field"><label>Вариант исхода</label><select id="vid"></select></div>
+      <div class="fc-field"><label>Сумма, Ǥ</label><input id="sum" type="number" value="10" min="1"></div>
+      <button class="btn gold" id="place"><i class="pi pi-check"></i> Поставить</button>
+      <p class="fc-muted" style="margin-top:10px;font-size:12px">Помни: выигрывает ставка на <b>самый непопулярный</b> исход. Чем больше народу поставило как ты — тем хуже.</p>
+    </div>
+    <div class="fc-card"><h3><i class="pi pi-list"></i>Мои ставки</h3><div id="mybets"></div></div>
+  </div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  var IM=FC.I.MATCH, IB=FC.I.BET, IE=FC.I.MEM;
+  document.getElementById('hero').innerHTML = FC.hero('Ставки','Поставь на исход, в который никто не верит');
+  var members=[], matches=[], vids=[], meId=null;
+
+  Promise.all([FC.list(FC.T.MEM), FC.list(FC.T.MATCH), FC.list(FC.T.VID)]).then(function(r){
+    members=r[0]; matches=r[1]; vids=r[2];
+    var sel=document.getElementById('me');
+    sel.innerHTML=members.map(function(m){return '<option value="'+m.i+'">'+(m.r[IE.ava]||'')+' '+FC.esc(m.r[IE.nick])+'</option>';}).join('');
+    meId=localStorage.getItem('fc_me')||(members[0]&&members[0].i);
+    if(meId) sel.value=meId;
+    sel.onchange=function(){ meId=sel.value; localStorage.setItem('fc_me',meId); refreshMe(); };
+    var openM=matches.filter(function(m){return FC.refLabel(m.r[IM.stat])==='Ставки открыты';});
+    document.getElementById('match').innerHTML=(openM.length?openM:matches).map(function(m){
+      return '<option value="'+m.i+'">'+FC.esc(FC.refLabel(m.r[IM.home]))+' — '+FC.esc(FC.refLabel(m.r[IM.away]))+'</option>';}).join('');
+    document.getElementById('vid').innerHTML=vids.map(function(v){return '<option value="'+v.i+'">'+FC.esc(v.r[0])+' · '+FC.esc(v.r[FC.I.VID.cat])+'</option>';}).join('');
+    var pm=new URLSearchParams(location.search).get('m'); if(pm) document.getElementById('match').value=pm;
+    refreshMe();
+  });
+
+  function refreshMe(){
+    var m=members.filter(function(x){return String(x.i)===String(meId);})[0]; if(!m) return;
+    document.getElementById('bal').textContent=m.r[IE.bal];
+    FC.list(FC.T.BET).then(function(bets){
+      var mine=bets.filter(function(b){return String(FC.refId(b.r[IB.mem]))===String(meId);})
+        .sort(function(a,b){return FC.num(b.r[IB.dt])-FC.num(a.r[IB.dt]);});
+      document.getElementById('mybets').innerHTML = mine.length? ('<table class="fc-table"><tr><th>Матч</th><th>Вариант</th><th class="num">Ǥ</th><th>Статус</th></tr>'+
+        mine.map(function(b){ var st=FC.refLabel(b.r[IB.stat]);
+          var chip=st==='Выиграла'?'<span class="chip green">+'+b.r[IB.win]+'</span>':(st==='Проиграла'?'<span class="chip red">–'+b.r[IB.sum]+'</span>':'<span class="chip purple">в игре</span>');
+          return '<tr><td>'+FC.esc(FC.refLabel(b.r[IB.match]))+'</td><td>'+FC.esc(FC.refLabel(b.r[IB.vid]))+'</td><td class="num"><span class="g">'+b.r[IB.sum]+'</span></td><td>'+chip+'</td></tr>';
+        }).join('')+'</table>') : '<div class="fc-empty">Ставок пока нет. Рискни!</div>';
+    });
+  }
+
+  document.getElementById('place').onclick=function(){
+    var m=members.filter(function(x){return String(x.i)===String(meId);})[0];
+    var sum=FC.num(document.getElementById('sum').value);
+    var matchId=document.getElementById('match').value, vid=document.getElementById('vid').value;
+    if(!matchId||!vid||sum<=0){ FC.toast('Заполни поля',1); return; }
+    if(sum>FC.num(m.r[IE.bal])){ FC.toast('Недостаточно Ǥ на балансе',1); return; }
+    var btn=this; btn.disabled=true;
+    var f={}; f['t'+FC.W.BET.match]=matchId; f['t'+FC.W.BET.mem]=meId; f['t'+FC.W.BET.vid]=vid;
+    f['t'+FC.W.BET.sum]=sum; f['t'+FC.W.BET.dt]=Math.floor(Date.now()/1000);
+    FC.create(FC.T.BET, f).then(function(){
+      // списать с баланса + транзакция
+      var nb=FC.num(m.r[IE.bal])-sum; m.r[IE.bal]=nb;
+      FC.update(m.i, {['t'+FC.W.MEM.bal]:nb});
+      FC.create(FC.T.TX, {['t'+FC.T.TX]:'Ставка на матч', ['t613']:(-sum), ['t615']:'Списание', ['t617']:Math.floor(Date.now()/1000)}, m.i);
+      FC.toast('Ставка принята! '+sum+' Ǥ');
+      btn.disabled=false; refreshMe();
+    });
+  };
+})();
+</script>

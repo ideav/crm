@@ -1,0 +1,128 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap">
+  <div id="hero"></div>
+  <div id="view"></div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=2"></script>
+<script>
+(function(){
+  var IM=FC.I.MATCH;
+  document.getElementById('hero').innerHTML = FC.hero('Матчи','Расписание каждые 4 часа · трибуны · лента событий');
+  var canEdit = FC.canWrite(FC.T.MATCH);
+  var params=new URLSearchParams(location.search);
+  var openId=params.get('m');
+  loadList();
+
+  function loadList(){
+    FC.list(FC.T.MATCH).then(function(matches){
+      if(openId){ var m=matches.filter(function(x){return String(x.i)===String(openId);})[0]; if(m){ return card(m); } }
+      var order={'Идёт':0,'Ставки открыты':1,'Ставки закрыты':2,'Завершён':3};
+      matches.sort(function(a,b){ return (order[FC.refLabel(a.r[IM.stat])]??9)-(order[FC.refLabel(b.r[IM.stat])]??9); });
+      document.getElementById('view').innerHTML =
+        '<div class="fc-card"><h3><i class="pi pi-calendar"></i>Все матчи тура</h3>'+
+        matches.map(function(m){ var st=FC.refLabel(m.r[IM.stat]); var live=st==='Идёт'||st==='Завершён';
+          return '<div class="fc-match" onclick="location.href=\'?m='+m.i+'\'">'+
+            '<div class="side"><span class="emb">'+FC.refLabel(m.r[IM.home]).slice(0,2)+'</span>'+FC.esc(FC.refLabel(m.r[IM.home]))+'</div>'+
+            '<div><div class="score">'+(live?(m.r[IM.sh]+':'+m.r[IM.sa]):'<span class="vs">'+FC.fmtDT(m.r[IM.dt]).slice(0,10)+'</span>')+'</div>'+
+            '<div style="text-align:center;margin-top:4px">'+FC.matchStatusChip(st)+' <span class="chip">'+FC.esc(FC.refLabel(m.r[IM.kind])||m.r[IM.kind])+'</span></div></div>'+
+            '<div class="side">'+FC.esc(FC.refLabel(m.r[IM.away]))+'<span class="emb">'+FC.refLabel(m.r[IM.away]).slice(0,2)+'</span></div></div>';
+        }).join('')+'</div>';
+    });
+  }
+
+  function card(m){
+    var st=FC.refLabel(m.r[IM.stat]);
+    var html='<div style="margin-bottom:12px"><a class="btn ghost" href="/'+FC.DB+'/matches"><i class="pi pi-arrow-left"></i> Все матчи</a></div>'+
+      '<div class="fc-card" style="text-align:center">'+
+        '<div style="display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap">'+
+          '<div class="side" style="flex:0 0 160px"><div class="emb" style="font-size:40px">'+FC.refLabel(m.r[IM.home]).slice(0,2)+'</div><b>'+FC.esc(FC.refLabel(m.r[IM.home]))+'</b></div>'+
+          '<div><div class="score" style="font-size:46px">'+m.r[IM.sh]+' : '+m.r[IM.sa]+'</div>'+FC.matchStatusChip(st)+'</div>'+
+          '<div class="side" style="flex:0 0 160px"><div class="emb" style="font-size:40px">'+FC.refLabel(m.r[IM.away]).slice(0,2)+'</div><b>'+FC.esc(FC.refLabel(m.r[IM.away]))+'</b></div>'+
+        '</div>'+
+        '<div class="fc-muted" style="margin-top:10px">'+FC.fmtDT(m.r[IM.dt])+' · '+FC.esc(FC.refLabel(m.r[IM.kind])||m.r[IM.kind])+' · банк <span class="g">'+m.r[IM.bank]+'</span> · 👁 '+m.r[IM.view]+
+        (FC.refLabel(m.r[IM.win])?(' · победный вариант: <span class="chip green">'+FC.esc(FC.refLabel(m.r[IM.win]))+'</span>'):'')+'</div>'+
+        '<div style="margin-top:12px"><a class="btn gold" href="/'+FC.DB+'/bet?m='+m.i+'"><i class="pi pi-ticket"></i> Сделать ставку</a></div>'+
+      '</div>';
+    if(canEdit) html+= adminBox(m);
+    html+= '<div class="fc-grid c2" style="margin-top:14px">'+
+        '<div class="fc-card"><h3><i class="pi pi-megaphone"></i>Лента событий</h3><ul class="fc-feed" id="evf"><li class="fc-muted">загрузка…</li></ul></div>'+
+        '<div class="fc-card"><h3><i class="pi pi-comments"></i>Трибуны</h3><div class="fc-tabs" id="trtabs">'+
+          ['Север','Юг','Запад','Восток'].map(function(t,i){return '<div class="fc-tab'+(i===0?' on':'')+'" data-tr="'+t+'">'+t+'</div>';}).join('')+
+        '</div><div id="msgs"></div></div>'+
+      '</div>';
+    document.getElementById('view').innerHTML=html;
+
+    FC.children(FC.T.EV, m.i).then(function(evs){
+      evs.sort(function(a,b){return FC.num(a.r[FC.I.EV.min])-FC.num(b.r[FC.I.EV.min]);});
+      document.getElementById('evf').innerHTML = evs.map(function(e){ var t=FC.refLabel(e.r[FC.I.EV.type]);
+        var cls=t==='Гол'?'goal':(t==='Сенсация'?'cringe':'');
+        return '<li><span class="min">'+e.r[FC.I.EV.min]+"'</span><span class=\""+cls+'">'+FC.esc(e.r[FC.I.EV.txt])+'</span></li>';
+      }).join('') || '<li class="fc-muted">Событий пока нет</li>';
+    });
+    FC.children(FC.T.MSG, m.i).then(function(msgs){ window.__msgs=msgs; renderMsgs('Север');
+      document.querySelectorAll('#trtabs .fc-tab').forEach(function(t){ t.onclick=function(){
+        document.querySelectorAll('#trtabs .fc-tab').forEach(function(x){x.classList.remove('on');}); t.classList.add('on'); renderMsgs(t.dataset.tr);
+      };});
+    });
+  }
+
+  function renderMsgs(trib){
+    var msgs=(window.__msgs||[]).filter(function(x){return FC.refLabel(x.r[FC.I.MSG.trib])===trib;});
+    document.getElementById('msgs').innerHTML = (msgs.map(function(x){
+      return '<div style="padding:8px 0;border-bottom:1px dashed var(--border-color)"><b>'+FC.esc(x.r[FC.I.MSG.author])+'</b> '+
+        '<span class="fc-muted" style="font-size:11px">'+FC.fmtDT(x.r[FC.I.MSG.time])+'</span><div>'+FC.esc(x.r[FC.I.MSG.txt])+'</div></div>';
+    }).join('')) || '<div class="fc-empty">На трибуне «'+trib+'» пока тихо</div>';
+  }
+
+  function adminBox(m){
+    return '<div class="fc-card" style="margin-top:14px;border-color:var(--fc-gold)"><h3 style="color:var(--fc-gold)"><i class="pi pi-cog" style="color:var(--fc-gold)"></i>Управление матчем (организатор)</h3>'+
+      '<div class="fc-grid c4">'+
+        '<div class="fc-field"><label>Счёт хозяев</label><input id="ed_sh" type="number" value="'+m.r[IM.sh]+'"></div>'+
+        '<div class="fc-field"><label>Счёт гостей</label><input id="ed_sa" type="number" value="'+m.r[IM.sa]+'"></div>'+
+        '<div class="fc-field"><label>Статус</label><select id="ed_st"></select></div>'+
+        '<div class="fc-field"><label>Победный вариант</label><select id="ed_win"></select></div>'+
+      '</div><button class="btn gold" id="ed_save"><i class="pi pi-save"></i> Сохранить результат</button> '+
+      '<button class="btn" id="ed_calc"><i class="pi pi-bolt"></i> Рассчитать антитотализатор</button> '+
+      '<span class="fc-muted" id="ed_msg"></span></div>';
+  }
+  // подгрузка справочников для admin-селектов после отрисовки card
+  document.addEventListener('click', function(e){
+    if(e.target.closest && e.target.closest('#ed_save')) saveResult();
+    if(e.target.closest && e.target.closest('#ed_calc')) calcTote();
+  });
+  // заполняем селекты статусов/вариантов когда они есть
+  var fillTimer=setInterval(function(){
+    var sel=document.getElementById('ed_st'); if(!sel||sel.dataset.f) return; sel.dataset.f=1;
+    var m=window.__curM;
+    FC.list(FC.T.MST).then(function(rows){ sel.innerHTML=rows.map(function(r){ return '<option value="'+r.i+'"'+(FC.refLabel(m.r[IM.stat])===r.r[0]?' selected':'')+'>'+FC.esc(r.r[0])+'</option>';}).join(''); });
+    var w=document.getElementById('ed_win');
+    FC.list(FC.T.VID).then(function(rows){ w.innerHTML='<option value="">— не задан —</option>'+rows.map(function(r){ return '<option value="'+r.i+'"'+(FC.refLabel(m.r[IM.win])===r.r[0]?' selected':'')+'>'+FC.esc(r.r[0])+'</option>';}).join(''); });
+  },300);
+
+  // запоминаем текущий матч для admin
+  var _card=card; card=function(m){ window.__curM=m; _card(m); };
+
+  function saveResult(){
+    var m=window.__curM; var f={};
+    f['t'+FC.W.MATCH.sh]=document.getElementById('ed_sh').value;
+    f['t'+FC.W.MATCH.sa]=document.getElementById('ed_sa').value;
+    f['t'+FC.W.MATCH.stat]=document.getElementById('ed_st').value;
+    var win=document.getElementById('ed_win').value; if(win) f['t'+FC.W.MATCH.win]=win;
+    FC.update(m.i, f).then(function(){ FC.toast('Результат сохранён'); setTimeout(function(){location.reload();},800); });
+  }
+  function calcTote(){
+    var m=window.__curM;
+    FC.list(FC.T.BET,'F_'+FC.W.BET.match+'='+m.i+'&LIMIT=0,300').then(function(bets){
+      // антитотализатор: вариант с наименьшей суммой ставок — победный
+      bets=bets.filter(function(b){return String(FC.refId(b.r[FC.I.BET.match]))===String(m.i);});
+      if(!bets.length){ document.getElementById('ed_msg').textContent='Нет ставок на матч'; return; }
+      var pool={};
+      bets.forEach(function(b){ var k=FC.refId(b.r[FC.I.BET.vid])+':'+FC.refLabel(b.r[FC.I.BET.vid]); pool[k]=(pool[k]||0)+FC.num(b.r[FC.I.BET.sum]); });
+      var min=null; for(var k in pool){ if(min===null||pool[k]<pool[min]) min=k; }
+      document.getElementById('ed_msg').innerHTML=' Наименьший пул: <b>'+FC.esc(min.split(':')[1])+'</b> ('+pool[min]+' Ǥ) → выбери его победным вариантом и сохрани.';
+      var w=document.getElementById('ed_win'); if(w) w.value=min.split(':')[0];
+    });
+  }
+})();
+</script>
