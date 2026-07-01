@@ -85,5 +85,103 @@
   // загрузить участников/матчи/виды как словари {id->row}
   FC.index = function(rows){ var m={}; rows.forEach(function(x){ m[x.i]=x; }); return m; };
 
+  // ---- Виральные карточки достижений и хуки конструктора (issue #3932) ----
+  FC.CONSTRUCTOR_URL = 'https://integram.io';
+
+  // счётчик побед/поражений участника из его ставок
+  FC.winStats = function(memberId, bets){
+    var w=0,l=0,p=0;
+    (bets||[]).forEach(function(b){
+      if(String(FC.refId(b.r[FC.I.BET.mem]))!==String(memberId)) return;
+      var st=FC.refLabel(b.r[FC.I.BET.stat]);
+      if(st==='Выиграла') w++; else if(st==='Проиграла') l++; else p++;
+    });
+    return {w:w,l:l,p:p};
+  };
+
+  // ссылки шеринга в мессенджеры
+  FC.shareUrls = function(url, text){
+    var u=encodeURIComponent(url||''), t=encodeURIComponent(text||'');
+    return {
+      tg:'https://t.me/share/url?url='+u+'&text='+t,
+      wa:'https://wa.me/?text='+t+'%20'+u,
+      vk:'https://vk.com/share.php?url='+u+'&title='+t
+    };
+  };
+  // кнопки шеринга: Telegram / WhatsApp / VK + копировать
+  FC.shareButtons = function(url, text){
+    var s=FC.shareUrls(url, text);
+    return '<div class="fc-share">'+
+      '<a class="btn fc-sh-tg" target="_blank" rel="noopener" href="'+s.tg+'">Telegram</a>'+
+      '<a class="btn fc-sh-wa" target="_blank" rel="noopener" href="'+s.wa+'">WhatsApp</a>'+
+      '<a class="btn fc-sh-vk" target="_blank" rel="noopener" href="'+s.vk+'">VK</a>'+
+      '<button class="btn ghost" type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText('+JSON.stringify(url)+');FC.toast(\'Ссылка скопирована\')"><i class="pi pi-copy"></i> Копировать</button>'+
+    '</div>';
+  };
+
+  // персональная карточка достижений (аватар, ник, счётчик побед, значки) — для шеринга
+  FC.achievementCard = function(m, awards, stats){
+    var IE=FC.I.MEM; awards=awards||[]; stats=stats||{w:0,l:0,p:0};
+    var badges = awards.length
+      ? awards.map(function(a){ return '<span class="chip gold">🏅 '+FC.esc(a.r[FC.I.AWD.name])+'</span>'; }).join(' ')
+      : '<span class="fc-muted" style="font-size:12px">Значков пока нет — играй активнее!</span>';
+    var crown = String(m.r[IE.crown])==='1' ? '<span class="chip red">👑 Капитан Очевидность</span>' : '';
+    var roi=FC.num(m.r[IE.roi]);
+    return '<div class="fc-share-card">'+
+      '<div class="fcc-head"><div class="fcc-brand"><span class="b">Ǥ</span> ИНТЕГРАМ FC</div>'+
+        '<div class="fcc-sub">Антитотализатор пророков</div></div>'+
+      '<div class="fcc-body">'+
+        '<div class="fcc-ava">'+FC.esc(m.r[IE.ava]||'👤')+'</div>'+
+        '<div class="fcc-nick">'+FC.esc(m.r[IE.nick])+'</div>'+
+        '<div class="fcc-rank"><span class="chip">'+FC.esc(m.r[IE.rank]||'Новичок')+'</span> '+crown+'</div>'+
+        '<div class="fcc-score"><span class="gpos">'+stats.w+'</span><span class="fcc-dash">:</span><span class="gneg">'+stats.l+'</span></div>'+
+        '<div class="fcc-score-l">побед : поражений</div>'+
+        '<div class="fcc-kpis">'+
+          '<div><b class="g">'+m.r[IE.bal]+'</b><span>баланс</span></div>'+
+          '<div><b style="color:'+(roi>=0?'var(--fc-green)':'var(--fc-cringe)')+'">'+(roi>=0?'+':'')+roi+'%</b><span>ROI</span></div>'+
+          '<div><b>🔥 '+m.r[IE.streak]+'</b><span>серия</span></div>'+
+        '</div>'+
+        '<div class="fcc-badges">'+badges+'</div>'+
+      '</div>'+
+      '<div class="fcc-foot">Сделано на <b>Интеграм</b> — конструкторе приложений</div>'+
+    '</div>';
+  };
+
+  // публичная ссылка на карточку участника
+  FC.cardUrl = function(m){
+    var ref=m.r[FC.I.MEM.ref];
+    return location.origin+'/'+FC.DB+'/share?me='+m.i+(ref?'&ref='+encodeURIComponent(ref):'');
+  };
+
+  // крупный баннер конструктора (для публичного лендинга карточки)
+  FC.constructorBanner = function(){
+    return '<div class="fc-card fc-constructor">'+
+      '<div class="fcn-title">Интеграм — конструктор, на котором создан этот тотализатор</div>'+
+      '<div class="fcn-text">Хотите так же собрать свою игру под любой спорт или киберспорт? Сделайте свой за 10 минут без кода.</div>'+
+      '<div class="fcn-steps">'+
+        '<div class="fcn-step"><span>1</span>Выбери шаблон</div>'+
+        '<div class="fcn-step"><span>2</span>Добавь события</div>'+
+        '<div class="fcn-step"><span>3</span>Опубликуй</div>'+
+      '</div>'+
+      '<a class="btn gold" target="_blank" rel="noopener" href="'+FC.CONSTRUCTOR_URL+'"><i class="pi pi-bolt"></i> Создать своё приложение</a>'+
+    '</div>';
+  };
+
+  // ненавязчивая контекстная плашка про конструктор: не чаще 1 раза в 3 дня (issue #3932)
+  FC.constructorNudge = function(target, text){
+    var KEY='fc_nudge_'+FC.DB;
+    try{ if(Date.now()-parseInt(localStorage.getItem(KEY)||'0',10) < 3*24*3600*1000) return; }catch(e){}
+    var host = typeof target==='string'?document.getElementById(target):target;
+    if(!host) return;
+    var box=document.createElement('div'); box.className='fc-nudge';
+    box.innerHTML='<i class="pi pi-info-circle"></i>'+
+      '<div class="fc-nudge-t">'+(text||'Кстати, весь этот тотализатор — пример возможностей Интеграм. Хотите собрать свою игру под любой спорт?')+
+      ' <a target="_blank" rel="noopener" href="'+FC.CONSTRUCTOR_URL+'">Открыть конструктор →</a></div>'+
+      '<button class="fc-nudge-x" type="button" aria-label="Закрыть">×</button>';
+    box.querySelector('.fc-nudge-x').onclick=function(){ box.remove(); };
+    host.appendChild(box);
+    try{ localStorage.setItem(KEY, String(Date.now())); }catch(e){}
+  };
+
   document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('fc-loaded'); });
 })();

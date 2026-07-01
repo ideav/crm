@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=2">
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=3">
 <script>window.__FC_GRANTS='{_global_.grants}';</script>
 <div class="fc"><div class="fc-wrap">
   <div id="hero"></div>
@@ -8,18 +8,31 @@
   </div></div>
   <div id="profile"></div>
 </div></div>
-<script src="/download/{_global_.z}/fc.js?v=2"></script>
+
+<!-- Модалка карточки достижений для шеринга (issue #3932) -->
+<div class="fc-overlay" id="card-ov" onclick="closeShareCard()"></div>
+<div class="fc-modal" id="card-md" style="width:min(480px,94vw)">
+  <span class="x" onclick="closeShareCard()">&times;</span>
+  <h3>Ваша карточка пророка</h3>
+  <div id="card-body"></div>
+  <div id="card-share" style="margin-top:14px"></div>
+</div>
+
+<script src="/download/{_global_.z}/fc.js?v=3"></script>
 <script>
 (function(){
   var IE=FC.I.MEM;
   document.getElementById('hero').innerHTML = FC.hero('Личный кабинет','Баланс, история транзакций, значки и реферальная программа');
-  var members=[], meId=null;
-  FC.list(FC.T.MEM).then(function(r){ members=r;
+  var members=[], bets=[], meId=null;
+  var q=new URLSearchParams(location.search);
+  Promise.all([FC.list(FC.T.MEM), FC.list(FC.T.BET)]).then(function(r){ members=r[0]; bets=r[1];
     var sel=document.getElementById('me');
     sel.innerHTML=members.map(function(m){return '<option value="'+m.i+'">'+(m.r[IE.ava]||'')+' '+FC.esc(m.r[IE.nick])+'</option>';}).join('');
-    meId=localStorage.getItem('fc_me')||(members[0]&&members[0].i); if(meId) sel.value=meId;
+    meId=q.get('me')||localStorage.getItem('fc_me')||(members[0]&&members[0].i); if(meId) sel.value=meId;
     sel.onchange=function(){ meId=sel.value; localStorage.setItem('fc_me',meId); render(); };
     render();
+    FC.constructorNudge('profile');            // ненавязчивая плашка про конструктор, ≤1/3 дня
+    if(q.get('card')==='1') openShareCard();    // глубокая ссылка сразу открывает карточку
   });
 
   function render(){
@@ -37,7 +50,10 @@
         '<div class="fc-card"><h3><i class="pi pi-share-alt"></i>Реферальная программа</h3>'+
           '<div>Код: <span class="chip gold">'+FC.esc(m.r[IE.ref]||'')+'</span></div>'+
           '<div style="margin:8px 0"><b style="font-size:22px" class="gpos">'+m.r[IE.inv]+'</b> <span class="fc-muted">друзей приглашено (+10 Ǥ за каждого)</span></div>'+
-          '<button class="btn ghost" onclick="navigator.clipboard&&navigator.clipboard.writeText(\''+link+'\');FC.toast(\'Ссылка скопирована\')"><i class="pi pi-copy"></i> Копировать ссылку</button></div>'+
+          '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+            '<button class="btn gold" onclick="openShareCard()"><i class="pi pi-share-alt"></i> Поделиться карточкой</button>'+
+            '<button class="btn ghost" onclick="navigator.clipboard&&navigator.clipboard.writeText(\''+link+'\');FC.toast(\'Ссылка скопирована\')"><i class="pi pi-copy"></i> Копировать ссылку</button>'+
+          '</div></div>'+
       '</div>'+
       '<div class="fc-grid c4" style="margin-top:14px">'+
         kpi('🎲',m.r[IE.bets],'ставок сделано')+
@@ -63,5 +79,22 @@
     });
   }
   function kpi(ic,v,l,col){ return '<div class="fc-card fc-kpi"><div class="ic">'+ic+'</div><div class="v" style="'+(col?'color:'+col:'')+'">'+v+'</div><div class="l">'+l+'</div></div>'; }
+
+  // Карточка достижений для шеринга (issue #3932)
+  window.openShareCard=function(){
+    var m=members.filter(function(x){return String(x.i)===String(meId);})[0]; if(!m) return;
+    FC.children(FC.T.AWD, m.i).then(function(aws){
+      var stats=FC.winStats(m.i, bets), url=FC.cardUrl(m);
+      document.getElementById('card-body').innerHTML = FC.achievementCard(m, aws, stats);
+      document.getElementById('card-share').innerHTML =
+        FC.shareButtons(url, 'Мой счёт в Интеграм FC: '+stats.w+'–'+stats.l+'. Прими вызов и обыграй меня в битве пророков!');
+      document.getElementById('card-ov').classList.add('on');
+      document.getElementById('card-md').classList.add('on');
+    });
+  };
+  window.closeShareCard=function(){
+    document.getElementById('card-ov').classList.remove('on');
+    document.getElementById('card-md').classList.remove('on');
+  };
 })();
 </script>

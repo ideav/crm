@@ -131,3 +131,50 @@
 .toast{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2000; padding:12px 20px;
   border-radius:12px; background:var(--fc-green); color:#04130c; font-weight:800; box-shadow:0 8px 24px rgba(0,0,0,.3); display:none; }
 .toast.red{ background:var(--fc-cringe); color:#fff; }
+
+/* ---- Виральная карточка достижений (issue #3932) ---- */
+.fc-share-card{ border-radius:18px; overflow:hidden; border:1px solid var(--border-color,var(--fc-line));
+  background:var(--card-bg,var(--input-bg,#141b2d)); box-shadow:0 12px 34px rgba(0,0,0,.30); max-width:420px; margin:0 auto; }
+.fcc-head{ background:linear-gradient(120deg,var(--fc-green-2) 0%,#0c8f5a 45%,#0c1322 100%); color:#fff; padding:16px 20px; }
+.fcc-brand{ font-weight:900; font-size:19px; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
+.fcc-brand .b{ background:#fff; color:var(--fc-green-2); padding:2px 8px; border-radius:8px; }
+.fcc-sub{ font-size:12px; opacity:.9; margin-top:2px; }
+.fcc-body{ padding:20px; text-align:center; }
+.fcc-ava{ font-size:58px; line-height:1; }
+.fcc-nick{ font-size:20px; font-weight:900; margin:6px 0 6px; }
+.fcc-rank{ display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
+.fcc-score{ font-size:46px; font-weight:900; margin:14px 0 0; letter-spacing:1px; }
+.fcc-score .fcc-dash{ color:var(--text-secondary,#9fb0c3); margin:0 6px; }
+.fcc-score-l{ font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-secondary,#9fb0c3); }
+.fcc-kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:16px 0 4px; }
+.fcc-kpis>div{ background:var(--bg-secondary,rgba(255,255,255,.04)); border-radius:10px; padding:8px 4px; }
+.fcc-kpis b{ display:block; font-size:16px; font-weight:900; }
+.fcc-kpis span{ font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary,#9fb0c3); }
+.fcc-badges{ margin-top:14px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
+.fcc-foot{ background:var(--bg-secondary,#0e1626); padding:11px 20px; text-align:center; font-size:12px; color:var(--text-secondary,#9fb0c3); }
+.fcc-foot b{ color:var(--fc-green); }
+
+/* Кнопки шеринга */
+.fc-share{ display:flex; gap:8px; flex-wrap:wrap; }
+.fc-sh-tg{ background:#2aabee; color:#fff; } .fc-sh-tg:hover{ background:#1f95d3; color:#fff; }
+.fc-sh-wa{ background:#25d366; color:#04130c; } .fc-sh-wa:hover{ background:#1db954; color:#fff; }
+.fc-sh-vk{ background:#4a76a8; color:#fff; } .fc-sh-vk:hover{ background:#3d6391; color:#fff; }
+
+/* Баннер конструктора */
+.fc-constructor{ background:linear-gradient(135deg,rgba(22,199,132,.10),rgba(139,92,246,.10)); border-color:rgba(22,199,132,.30); }
+.fcn-title{ font-weight:900; font-size:16px; }
+.fcn-text{ color:var(--text-secondary,#9fb0c3); font-size:13px; margin:6px 0 14px; }
+.fcn-steps{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+.fcn-step{ flex:1; min-width:120px; display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px;
+  background:var(--card-bg,var(--input-bg,#141b2d)); border:1px solid var(--border-color,var(--fc-line)); border-radius:10px; padding:10px 12px; }
+.fcn-step span{ width:22px; height:22px; border-radius:50%; background:var(--fc-green); color:#04130c; font-weight:900;
+  display:inline-flex; align-items:center; justify-content:center; font-size:12px; flex:0 0 auto; }
+
+/* Ненавязчивая плашка про конструктор */
+.fc-nudge{ display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:12px 14px; border-radius:12px;
+  background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.28); font-size:13px; color:var(--text-primary,#e6edf3); }
+.fc-nudge>.pi{ color:var(--fc-blue); margin-top:1px; }
+.fc-nudge .fc-nudge-t{ flex:1; }
+.fc-nudge a{ color:var(--fc-blue); font-weight:700; white-space:nowrap; }
+.fc-nudge-x{ background:none; border:none; color:var(--text-secondary,#9fb0c3); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
+.fc-nudge-x:hover{ color:var(--text-primary,#e6edf3); }
