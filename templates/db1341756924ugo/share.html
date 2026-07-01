@@ -1,0 +1,33 @@
+<link rel="stylesheet" href="/download/{_global_.z}/fc.css?v=3">
+<script>window.__FC_GRANTS='{_global_.grants}';</script>
+<div class="fc"><div class="fc-wrap" id="share">
+  <div id="hero"></div>
+  <div class="fc-grid c2" style="align-items:start">
+    <div id="card-col"><div class="fc-empty">Загрузка карточки…</div></div>
+    <div id="cta-col"></div>
+  </div>
+</div></div>
+<script src="/download/{_global_.z}/fc.js?v=3"></script>
+<script>
+(function(){
+  document.getElementById('hero').innerHTML = FC.hero('Карточка пророка','Поделись результатом и позови друзей в битву');
+  var q=new URLSearchParams(location.search), meId=q.get('me'), ref=q.get('ref');
+  Promise.all([FC.list(FC.T.MEM), FC.list(FC.T.BET)]).then(function(r){
+    var members=r[0], bets=r[1];
+    var m = members.filter(function(x){return String(x.i)===String(meId);})[0]
+         || (ref? members.filter(function(x){return String(x.r[FC.I.MEM.ref])===String(ref);})[0] : null)
+         || members[0];
+    if(!m){ document.getElementById('card-col').innerHTML='<div class="fc-empty">Игрок не найден</div>'; return; }
+    FC.children(FC.T.AWD, m.i).then(function(aws){
+      var stats=FC.winStats(m.i, bets), url=FC.cardUrl(m);
+      document.getElementById('card-col').innerHTML =
+        FC.achievementCard(m, aws, stats)+
+        '<div class="fc-card" style="margin-top:14px"><h3><i class="pi pi-share-alt"></i>Поделиться карточкой</h3>'+
+          FC.shareButtons(url, 'Мой счёт в Интеграм FC: '+stats.w+'–'+stats.l+'. Прими вызов и обыграй меня в битве пророков!')+
+          '<a class="btn" style="margin-top:12px" href="/'+FC.DB+'/bet"><i class="pi pi-bolt"></i> Присоединиться к битве</a>'+
+        '</div>';
+      document.getElementById('cta-col').innerHTML = FC.constructorBanner();
+    });
+  });
+})();
+</script>
