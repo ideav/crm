@@ -5414,6 +5414,16 @@
         var times = planningChangeTimes(weights);
         var cap = Number(opts.dayCapacityMin);
         var hasCap = isFinite(cap) && cap > 0;
+        // #3957: реальное дробление по дням (splitMachineQueue) на КАЖДОМ дне доплачивает
+        // настройку первой резки (#3669) — граница дня рвёт группу одинакового сетапа, и следующий
+        // день ставит ножи заново. poolMinutes считает переналадки один раз на очередь → daysOf
+        // (ceil(min/cap)) НЕДООЦЕНИВАЕТ число дней. Из-за этого станок с отпуском, набитый под
+        // доотпускной потолок (span=конец отпуска), реально ПЕРЕЛИВАЕТСЯ за отпуск тонким хвостом.
+        // Заряжаем подневную настройку: эффективная ёмкость дня = ёмкость − perDaySetupMin, тогда
+        // при poolMinutes P реальные ~P+(дней−1)·setup укладываются в те же дни. Не задан
+        // (тесты/обратная совместимость) → 0, поведение прежнее.
+        var perDaySetup = Number(opts.perDaySetupMin) > 0 ? Number(opts.perDaySetupMin) : 0;
+        var effCap = hasCap ? Math.max(1, cap - perDaySetup) : cap;
         var log = typeof opts.log === 'function' ? opts.log : function(){};
         var maxIters = isFinite(Number(opts.maxIters)) ? Number(opts.maxIters) : 1000;
         var movablePlans = (plans || []).filter(function(p){ return p && p.slitterId != null && String(p.slitterId) !== ''; });
@@ -5449,7 +5459,7 @@
             minutesMemo[sig] = v;
             return v;
         }
-        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / cap) : 1) : 0; }   // содержимое в рабочих днях
+        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / effCap) : 1) : 0; }   // содержимое в рабочих днях (#3957: с подневной настройкой)
         // #3881: «загруженность» станка = ДАТА ОКОНЧАНИЯ последней задачи (у кого позже — тот
         // загружен сильнее). Содержимое (daysOf рабочих дней) кладём по дням от базы, ПРОПУСКАЯ
         // дни отпуска станка → станок с отпуском заканчивает ПОЗЖЕ при тех же минутах (его не
@@ -5488,16 +5498,16 @@
         var endPosMemo = {};
         function endPos(machineId, min){
             var work = (min > 0) ? min : 0;
-            if (!machineDayOff) return hasCap ? round3(work / cap) : (work > 0 ? 1 : 0);
+            if (!machineDayOff) return hasCap ? round3(work / effCap) : (work > 0 ? 1 : 0);
             var memoKey = machineId + ':' + work;
             if (memoKey in endPosMemo) return endPosMemo[memoKey];
-            var remaining = work, lastPos = 0, guard = 731 + (hasCap ? Math.ceil(work / cap) : 1);
+            var remaining = work, lastPos = 0, guard = 731 + (hasCap ? Math.ceil(work / effCap) : 1);
             for (var d = 0; d <= guard; d++){
                 if (machineDayOff(machineId, d)) { lastPos = d + 1; continue; }   // день отпуска — «занят» до его конца
                 if (remaining <= 0) break;
-                var use = hasCap ? Math.min(cap, remaining) : remaining;
+                var use = hasCap ? Math.min(effCap, remaining) : remaining;   // #3957: подневная настройка съедает часть дня
                 remaining -= use;
-                lastPos = d + (hasCap ? (use / cap) : 1);   // рабочий день заполнен частично
+                lastPos = d + (hasCap ? (use / effCap) : 1);   // рабочий день заполнен частично
             }
             var v = round3(lastPos);
             endPosMemo[memoKey] = v;
@@ -9125,6 +9135,13 @@
         var genWindow = self.workingWindow();
         var genDayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0)
             - (Number(genWindow.lunchDurationMin) || 0));
+        // #3957: подневная настройка первой резки (#3669) — на границе дня splitMachineQueue ставит
+        // ножи/сырьё заново (группа сетапа рвётся). Заряжаем её в модель выравнивания как ёмкость
+        // дня − perDaySetupMin, иначе станок с отпуском, набитый под доотпускной потолок, реально
+        // переливается за отпуск тонким хвостом (13–16.07 при отпуске 06–12.07). Полный сетап
+        // границы дня = настройка ножей + смена сырья из тех же весов планирования.
+        var genTimes = planningChangeTimes(planOptions);
+        var genPerDaySetupMin = Math.max(0, (Number(genTimes.KNIFE) || 0) + (Number(genTimes.MATERIAL_WINDING) || 0));
         // #3876: станки в отпуске на день резки не выбираем (мемо по дню — vacations единичны).
         var genVacationByDay = {};
         function vacationSetForDay(dayKey, planDateSec) {
@@ -9235,8 +9252,29 @@
                 machineDayOffMemo[k] = v;
                 return v;
             }
+            // #3957 ДИАГНОСТИКА: что видит модель загрузки по дням (0..20 от базы плана) для
+            // КАЖДОГО станка — рабочий(.) / выходной-праздник(W, #3788) / отпуск(V, #3876) / оба(B).
+            // Плюс machineDayOff(=off?) и spanDays текущей загрузки. Если у станка с отпуском в
+            // строке нет V — отпуск НЕ подхватывается (id/окно/покрытие #3883), и хвост не стекает.
+            try {
+                var DAY_MS_DBG = 86400000;
+                (self.slitters || []).forEach(function(s){
+                    var id = String(s.id), row = '', off = '';
+                    for (var d = 0; d <= 20; d++){
+                        var ms = rebBaseMidnightMs + d * DAY_MS_DBG;
+                        var wk = !self.dayIsWorking(ms), vc = self.slitterOnVacationDay(id, ms);
+                        row += vc && wk ? 'B' : vc ? 'V' : wk ? 'W' : '.';
+                        off += machineDayOff(id, d) ? 'x' : '.';   // что реально вернёт модель загрузки
+                    }
+                    // Если row содержит W/V, а off в тех же позициях '.', значит machineDayOff НЕ
+                    // подхватывает выходной/отпуск (устаревшая сборка call-site / balanceDayOff).
+                    console.log('[pp] ⚖ dayoff ' + (labelById[id] || id) + ' [0..20]: сырьё=' + row +
+                        ' модель=' + off + '  (W=выходной V=отпуск B=оба; x=день занят в балансе)');
+                });
+            } catch (e) { console.warn('[pp] ⚖ dayoff diag error', e); }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
+                perDaySetupMin: genPerDaySetupMin,   // #3957: подневная настройка (#3669) — чтобы отпускной хвост не переливался
                 machineDayOff: machineDayOff,   // #3881: дата окончания с учётом отпуска (span)
                 // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
                 slitterDayBlocked: function(slitterId, plan){
