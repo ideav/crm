@@ -8,9 +8,12 @@
 // в начале дня» и её минуты раздувают бейдж дня за ёмкость (510 > 450). #3846 (показ сохранённого
 // плана) раньше их прятал пересчётом на лету — теперь показывает как есть.
 //
-// Фикс: planCutOperations удаляет сироты — логические резки с 0 проходов (сумма цепочки = 0)
-// В ПРЕДЕЛАХ scope. Реальные резки (проходы>0) и настоящие setup-хвосты (член цепочки, у чьей
-// головы проходы>0) не затрагиваются; сироты ВНЕ окна фильтра не трогаем (#3660).
+// Фикс: planCutOperations удаляет сироты — логические резки с 0 проходов (сумма цепочки = 0).
+// #3943: удаляем ВНЕ ЗАВИСИМОСТИ от scope — это чистый мусор (0 проходов, без обеспечений и ручной
+// раскладки), иначе сирота на дне вне окна пересборки переживала чистку и продолжала пухнуть бейдж
+// («оверворк опять»). Реальные резки (проходы>0) и настоящие setup-хвосты (член цепочки, у чьей
+// головы проходы>0) не затрагиваются; зафиксированные (#3508) не трогаем. #3660 бережёт раскладку
+// РЕАЛЬНЫХ чужих дат (их не двигаем/не удаляем), а не право копить мусор.
 //
 // Run with: node experiments/atex-production-planning-3924.test.js
 
@@ -75,15 +78,18 @@ function opts(extra) { var o = {}; for (var k in COMMON) o[k] = COMMON[k]; for (
     assert(ops.deletes.indexOf('real') < 0, '1: реальная резка НЕ удалена');
 })();
 
-// ── 2: сирота ВНЕ окна фильтра (день позже scopeTo) НЕ трогается (#3660: чужие даты не трогаем).
+// ── 2 (#3943): сирота ВНЕ окна фильтра ВСЁ РАВНО удаляется (мусор чистим везде); при этом
+//       РЕАЛЬНАЯ чужая резка (проходы>0) вне scope НЕ удаляется — #3660 бережёт её раскладку.
 (function () {
     var real = cut('real', 'real', 10, 0, 'O1');
-    var orphanFar = cut('orphanFar', '', 0, 5, 'O2');   // 07.07 — вне scope [02;02]
-    var ops = planCutOperations([real, orphanFar], opts({
-        perPassByCut: { real: 3, orphanFar: 3 }, scopeFromKey: scopeKey, scopeToKey: scopeKey,
-        dayAnchorByCut: { real: 0, orphanFar: 5 }
+    var orphanFar = cut('orphanFar', '', 0, 5, 'O2');   // 07.07 — вне scope [02;02], 0 проходов = мусор
+    var realFar = cut('realFar', 'realFar', 8, 5, 'O3'); // 07.07 — вне scope, но РЕАЛЬНАЯ (проходы>0)
+    var ops = planCutOperations([real, orphanFar, realFar], opts({
+        perPassByCut: { real: 3, orphanFar: 3, realFar: 3 }, scopeFromKey: scopeKey, scopeToKey: scopeKey,
+        dayAnchorByCut: { real: 0, orphanFar: 5, realFar: 5 }
     }));
-    assert(ops.deletes.indexOf('orphanFar') < 0, '2: сирота ВНЕ scope не удалена (#3660)');
+    assert(ops.deletes.indexOf('orphanFar') >= 0, '2: сирота ВНЕ scope тоже удалена (#3943: мусор чистим везде)');
+    assert(ops.deletes.indexOf('realFar') < 0, '2: РЕАЛЬНАЯ чужая резка вне scope НЕ удалена (#3660)');
 })();
 
 // ── 3: настоящий setup-хвост (член цепочки: голова с проходами + продолжение по firstPart) НЕ
