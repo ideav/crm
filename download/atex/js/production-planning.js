@@ -2193,6 +2193,25 @@
         });
     }
 
+    // #3954: есть ли в «Максимальном запасе» хоть одна номенклатура семейства
+    // (сырьё + длина + намотка, БЕЗ учёта ширины). Только по такому семейству добор
+    // ходовыми в принципе возможен — иначе filterStockableWidths отсеет любую ходовую
+    // в пустоту. Служит гейтом: запрашивать отчёт preferable_widths лишь когда его данные
+    // могут пригодиться. Таблица не настроена → true (фича добора выключена, ходовые
+    // применяются как есть, поведение прежнее). family = { material, length, winding }.
+    function maxStockFamilyStockable(index, family) {
+        if (!maxStockConfigured(index)) return true;
+        family = family || {};
+        var mat = String(family.material == null ? '' : family.material).trim();
+        var len = windLengthValue(family.length);
+        var wind = normWinding(family.winding);
+        return (index.list || []).some(function(n) {
+            return String(n.material == null ? '' : n.material).trim() === mat &&
+                windLengthValue(n.length) === len &&
+                normWinding(n.winding) === wind;
+        });
+    }
+
     // ───────── Лимит запаса (#3445): остаток склада + capping ─────────
     // PR #3395/#3391 решал ЧЛЕНСТВО (Склад vs Отходы). #3445 добавляет КОЛИЧЕСТВЕННЫЙ
     // лимит: на склад по номенклатуре нельзя нарезать больше «Максимального запаса»
@@ -5898,6 +5917,7 @@
         isStockableNomenclature: isStockableNomenclature,
         stockStripPurpose: stockStripPurpose,
         filterStockableWidths: filterStockableWidths,
+        maxStockFamilyStockable: maxStockFamilyStockable,
         buildStockBalanceIndex: buildStockBalanceIndex,
         currentStock: currentStock,
         stockHeadroom: stockHeadroom,
@@ -7211,7 +7231,14 @@
         }
         var profile = groupPositionsByPlanningProfile([position])[0] ||
             { key: '', windDir: position.windDir, windLength: position.windLength };
-        return this.loadPreferredWidths(mat, profile.windDir, profile.windLength).then(function(preferred) {
+        // #3954: ходовые (preferable_widths) нужны только для добора остатка джамбо на
+        // склад — а он возможен лишь по семействам из «Максимального запаса». Иначе отчёт
+        // (медленный) не запрашиваем, раскладка идёт без добора (preferred=[]).
+        var prefPromise = planning.maxStockFamilyStockable(this.maxStockIndex,
+                { material: mat, length: profile.windLength, winding: profile.windDir })
+            ? this.loadPreferredWidths(mat, profile.windDir, profile.windLength)
+            : Promise.resolve([]);
+        return prefPromise.then(function(preferred) {
             var res = layoutCore.planLayouts({
                 jumboWidth: effJumbo,
                 positions: [{ id: position.id, width: position.width, qty: qty, dueKey: position.dueKey }],
@@ -8477,18 +8504,28 @@
         // что шире текущего остатка джамбо).
         var matKey = String(cut.materialId == null ? '' : cut.materialId);
         var prefKey = preferredWidthsKey(matKey, cut && cut.winding, cut && cut.length);
+        // #3954: ходовые (preferable_widths) есть смысл грузить только для семейств,
+        // целесообразных к хранению («Максимальный запас»); для прочих любой добор
+        // отсеется в пустоту — отчёт (медленный) не запрашиваем.
+        var prefFamilyStockable = planning.maxStockFamilyStockable(self.maxStockIndex,
+            { material: cut.materialId, length: cut.length, winding: cut.winding });
         var prefWrap = el('div', { class: 'atex-pp-strip-pref' });
         prefWrap.appendChild(el('div', { class: 'atex-pp-strip-pref-title', text: 'Ходовые ширины' }));
         var prefList = el('div', { class: 'atex-pp-strip-pref-list' });
         prefWrap.appendChild(prefList);
         panel.appendChild(prefWrap);
-        var prefLoading = (matKey !== '');
+        var prefLoading = (matKey !== '' && prefFamilyStockable);
 
         // Перерисовать ходовые с фильтром по текущему остатку (ширина ≤ остаток
         // джамбо, если он задан). Вызывается из recalc при каждом изменении полос.
         function renderPreferred() {
             prefList.innerHTML = '';
             if (prefLoading) { prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' })); return; }
+            // #3954: семейство не в «Максимальном запасе» — добор не предлагаем (отчёт не грузили).
+            if (!prefFamilyStockable) {
+                prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет ходовых, целесообразных к хранению (не в «Максимальном запасе»).' }));
+                return;
+            }
             if (!prefWidths.length) { prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' })); return; }
             // #3391: добор предлагаем только из номенклатур, целесообразных к хранению
             // (есть в «Максимальном запасе»); прочие ширины ушли бы в отход, впрок не режем.
@@ -8525,7 +8562,7 @@
 
         if (matKey !== '' && this.preferredByMaterial[prefKey]) {
             prefWidths = this.preferredByMaterial[prefKey]; prefLoading = false;
-        } else if (matKey !== '') {
+        } else if (matKey !== '' && prefFamilyStockable) {
             this.loadPreferredWidths(matKey, cut && cut.winding, cut && cut.length).then(function(list) {
                 prefWidths = list || []; prefLoading = false;
                 if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred();
@@ -8534,7 +8571,7 @@
                 if (panel.parentNode) renderPreferred();
             });
         } else {
-            prefLoading = false;
+            prefLoading = false;   // #3954: семейство вне «Максимального запаса» → отчёт не грузим
         }
 
         // Кнопка «Сохранить полосы» убрана (#3127): сохраняем по мере редактирования
@@ -8774,9 +8811,14 @@
             'профилей:', profiles.map(function(g) { return g.key; }));
 
         // Догрузить ходовые ширины для профиля, у которого их ещё нет в кеше.
+        // #3954: отчёт preferable_widths дёргаем только для семейств, целесообразных к
+        // хранению («Максимальный запас»). Для прочих добор всё равно отфильтруется в
+        // пустоту (filterStockableWidths ниже), а отчёт медленный — экономим ожидание.
         var preloads = [];
         profiles.forEach(function(group) {
-            if (group.materialId !== '' && !self.preferredByMaterial[group.key]) {
+            if (group.materialId !== '' && !self.preferredByMaterial[group.key] &&
+                planning.maxStockFamilyStockable(self.maxStockIndex,
+                    { material: group.materialId, length: group.windLength, winding: group.windDir })) {
                 preloads.push(self.loadPreferredWidths(group.materialId, group.windDir, group.windLength));
             }
         });
