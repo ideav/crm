@@ -183,5 +183,70 @@
     try{ localStorage.setItem(KEY, String(Date.now())); }catch(e){}
   };
 
+  // ---- Битва друзей (дуэль пророков) — issue #3932 ----
+  // Нужны две таблицы: «Дуэль» и подчинённая «Участник дуэли». ID типов/реквизитов
+  // подставляются после создания таблиц: вставьте JSON из мастера настройки в
+  // FC.DUEL_CFG (или он подхватится из localStorage у настроившего администратора).
+  FC.DUEL_CFG = null;
+  FC.I.DUEL  = {name:0, cap:1, match:2, vid:3, stake:4, stat:5, res:6, dt:7};
+  FC.I.DUELP = {name:0, mem:1, pred:2, result:3};
+  FC.DUEL_ST = {OPEN:'Открыта', LIVE:'Идёт', DONE:'Завершена'};
+  (function(){
+    var cfg=FC.DUEL_CFG;
+    if(!cfg){ try{ cfg=JSON.parse(localStorage.getItem('fc_duel_cfg_'+FC.DB)||'null'); }catch(e){} }
+    if(cfg){ FC.T.DUEL=cfg.t; FC.T.DUELP=cfg.tp; FC.W.DUEL=cfg.w; FC.W.DUELP=cfg.wp; }
+  })();
+  FC.duelReady = function(){ return FC.T.DUEL>0 && FC.T.DUELP>0 && !!(FC.W&&FC.W.DUEL&&FC.W.DUELP); };
+
+  // подведение итогов (чистая функция) — кто пророк / дивергент / афоня / оракул.
+  // preds: [{mem, pred:'Да'|'Нет', cap:bool}]; actual:'Да'|'Нет'
+  FC.duelOutcome = function(preds, actual){
+    var cap = preds.filter(function(p){return p.cap;})[0];
+    var capRight = !!(cap && cap.pred===actual);
+    var allRight = preds.length>0 && preds.every(function(p){ return p.pred===actual; });
+    return preds.map(function(p){
+      var right = p.pred===actual, result='Афоня';
+      if(right) result = p.cap ? 'Пророк' : (capRight ? 'Пророк' : 'Дивергент');
+      if(allRight) result='Футбольный Оракул';   // вся команда угадала — коллективный значок
+      return { mem:p.mem, cap:!!p.cap, pred:p.pred, right:right, result:result };
+    });
+  };
+
+  // разовое создание таблиц дуэлей через схемные команды _d_* (только для админа).
+  // Идемпотентно (повторный вызов вернёт существующие id). log(msg) — колбэк прогресса.
+  FC.duelProvision = async function(log){
+    log=log||function(){};
+    async function newType(code,val,uniq){ var f={t:code,val:val}; if(uniq)f.unique=1; var r=await FC.post('_d_new',f); return r&&r.obj; }
+    async function addReq(table,typeId,alias){ var r=await FC.post('_d_req/'+table,{t:typeId}); var id=r&&r.id; if(id&&alias) await FC.post('_d_alias/'+id,{val:alias}); return id; }
+    async function refCol(table,targetTable,alias){ var r=await FC.post('_d_ref/'+targetTable,{}); var rt=r&&(r.obj||r.id); return await addReq(table,rt,alias); }
+
+    log('Создаю таблицу «Дуэль»…');
+    var t=await newType(3,'Дуэль'); if(!t) throw new Error('не удалось создать таблицу Дуэль');
+    var w={};
+    w.cap  =await refCol(t, FC.T.MEM,  'Капитан');                        log('  + Капитан');
+    w.match=await refCol(t, FC.T.MATCH,'Матч');                          log('  + Матч');
+    w.vid  =await refCol(t, FC.T.VID,  'Событие');                       log('  + Событие');
+    w.stake=await addReq(t, await newType(13,'Ставка грамы'),'Ставка Ǥ'); log('  + Ставка');
+    w.stat =await addReq(t, await newType(3,'Статус дуэли'),'Статус');    log('  + Статус');
+    w.res  =await addReq(t, await newType(3,'Итог события'),'Итог');      log('  + Итог');
+    w.dt   =await addReq(t, await newType(4,'Создана дуэль'),'Создана');  log('  + Создана');
+
+    log('Создаю таблицу «Участник дуэли»…');
+    var tp=await newType(3,'Участник дуэли'); if(!tp) throw new Error('не удалось создать таблицу Участник');
+    var wp={};
+    wp.mem   =await refCol(tp, FC.T.MEM,'Участник');                      log('  + Участник');
+    wp.pred  =await addReq(tp, await newType(3,'Прогноз'),'Прогноз');     log('  + Прогноз');
+    wp.result=await addReq(tp, await newType(3,'Результат дуэли'),'Результат'); log('  + Результат');
+
+    log('Связываю как подчинённую таблицу…');
+    await addReq(t, tp, 'Участники');   // id дочерней таблицы как реквизит родителя → подчинённая
+
+    var cfg={t:t, tp:tp, w:w, wp:wp};
+    try{ localStorage.setItem('fc_duel_cfg_'+FC.DB, JSON.stringify(cfg)); }catch(e){}
+    FC.T.DUEL=t; FC.T.DUELP=tp; FC.W.DUEL=w; FC.W.DUELP=wp;
+    log('Готово! Таблицы созданы и подключены.');
+    return cfg;
+  };
+
   document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('fc-loaded'); });
 })();
