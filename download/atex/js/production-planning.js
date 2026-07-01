@@ -50,6 +50,63 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     'use strict';
 
+    // #3914: диагностическая трассировка планирования дня. По умолчанию МОЛЧИТ
+    // (в Node/тестах window нет). Включить в браузере одним из способов:
+    //   • в консоли:  window.PP_TRACE = true   (потом нажать «Сгенерировать»)
+    //   • в адресе:   ...production-planning?pptrace=1
+    // Тогда splitMachineQueue печатает каждый шаг раскладки по дням, applyDowntime —
+    // сдвиги за «Отпуск»/выходной, а бейдж «(N мин)» — из чего складывается сумма дня
+    // и какой день превысил ёмкость (WARN). Это диагностика причины «520 мин» (#3914).
+    function ppTraceOn() {
+        try {
+            if (typeof window === 'undefined') return false;
+            if (window.PP_TRACE) return true;
+            return /[?&]pptrace=1\b/.test(String((window.location && window.location.search) || ''));
+        } catch (e) { return false; }
+    }
+    function ppTrace() {
+        if (!ppTraceOn()) return;
+        try { console.log.apply(console, ['[pp-trace]'].concat([].slice.call(arguments))); } catch (e) {}
+    }
+    function ppTraceWarn() {
+        if (!ppTraceOn()) return;
+        try { console.warn.apply(console, ['[pp-trace] ⚠️'].concat([].slice.call(arguments))); } catch (e) {}
+    }
+    // Мин от полуночи → «ЧЧ:ММ» (для читаемого лога; отрицательные/дробные допустимы).
+    function ppClock(min) {
+        var m = Math.round(Number(min) || 0);
+        var d = Math.floor(m / 1440); m -= d * 1440;
+        var hh = Math.floor(m / 60), mm = m % 60;
+        var s = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+        return d ? (s + '(+' + d + 'д)') : s;
+    }
+    // Свод рабочих минут (setup+намотка) по ДНЮ из сегментов splitMachineQueue или
+    // строк расписания; печатает WARN на днях, превысивших бюджет (cutEnd−dayStart
+    // −обед+нахлёст). Общий помощник для трассировки генерации и бейджа.
+    function ppTraceDaySummary(label, items, getWork, opts) {
+        if (!ppTraceOn()) return;
+        opts = opts || {};
+        var budget = null;
+        if (opts.dayEndMin != null && opts.dayStartMin != null) {
+            budget = (Number(opts.dayEndMin) - Number(opts.dayStartMin))
+                - (Number(opts.lunchDurationMin) || 0)
+                + (Number(opts.maxOverworkTuneMin) || 0);
+        }
+        var byDay = {};
+        (items || []).forEach(function(it) {
+            var d = opts.dayOf ? opts.dayOf(it) : it.day;
+            if (d == null) return;
+            byDay[d] = (byDay[d] || 0) + (Number(getWork(it)) || 0);
+        });
+        var days = Object.keys(byDay).map(Number).sort(function(a, b) { return a - b; });
+        ppTrace(label + ': минут по дням' + (budget != null ? (' (бюджет ≈ ' + Math.round(budget) + ')') : ''));
+        days.forEach(function(d) {
+            var work = Math.round(byDay[d]);
+            var over = (budget != null && work > budget + 1e-6);
+            (over ? ppTraceWarn : ppTrace)('  день ' + d + ': ' + work + ' мин' + (over ? ' — ПРЕВЫШЕНИЕ на ' + Math.round(work - budget) : ''));
+        });
+    }
+
     // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
@@ -3591,6 +3648,14 @@
         var maxOverworkTune = (opts.maxOverworkTuneMin != null && isFinite(Number(opts.maxOverworkTuneMin)))
             ? Math.max(0, Number(opts.maxOverworkTuneMin)) : maxOverworkCuts;
         var overworkOn = maxOverworkCuts != null;
+        // #3914: заголовок трассировки станко-очереди — параметры окна и ёмкости дня.
+        ppTrace('splitMachineQueue: резок=' + (orderedCuts || []).length +
+            ' окно=' + ppClock(dayStart) + '..' + ppClock(dayEnd) + ' (cutEnd, ёмкость ' + Math.round(capacity) + ')' +
+            ' конецСмены=' + ppClock(dayEndHour) +
+            ' нахлёст[резка ' + (maxOverworkCuts != null ? maxOverworkCuts : '—') + ', настр ' + (maxOverworkTune != null ? maxOverworkTune : '—') + ']' +
+            ' обед=' + (opts.lunchStartMin != null ? (ppClock(opts.lunchStartMin) + '×' + (Number(opts.lunchDurationMin) || 0)) : 'нет') +
+            ' gapFill=' + !!opts.gapFill +
+            ' блокировок=' + ((opts.blockedRanges && opts.blockedRanges.length) || 0));
         // #3764: вынести сегменты за окна «Отпуска» станка (общий проход по результату, как в
         // buildSchedule). Окно сегмента — [windowStartMin, +setup+намотка]; пустой blockedRanges
         // → no-op. Вызываем перед каждым return (gapFill-ветка и базовая).
@@ -3601,11 +3666,27 @@
             // Без него сегмент на целый день, сдвинутый простоем/выходным на старт в середине дня,
             // вылезал за смену (#3907: 108 проходов с 10:35 до 17:26) — теперь переносится на завтра.
             var fitEnd = overworkOn ? (dayEnd + maxOverworkCuts) : dayEnd;
+            // #3914: трассировка сдвига за «Отпуск»/выходной — до и после (положения окон меняются).
+            var traceDown = ppTraceOn() && hasWindow && opts.blockedRanges && opts.blockedRanges.length;
+            var before = traceDown ? segs.map(function(s) { return { cut: s.cutId, ws: s.windowStartMin }; }) : null;
+            if (traceDown) {
+                ppTrace('applyDowntime: блокировки станка (мин от базы): ' +
+                    opts.blockedRanges.map(function(r) { return ppClock(r.start != null ? r.start : r[0]) + '..' + ppClock(r.end != null ? r.end : r[1]); }).join(', ') +
+                    ' | fitEnd(потолок конца)=' + ppClock(fitEnd));
+            }
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
                 shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); }
             }, fitEnd);
+            if (traceDown) {
+                segs.forEach(function(s, i) {
+                    var was = before[i];
+                    if (was && Math.abs((was.ws || 0) - (s.windowStartMin || 0)) > 1e-6) {
+                        ppTrace('  сдвиг ' + s.cutId + ': ' + ppClock(was.ws) + ' → ' + ppClock(s.windowStartMin));
+                    }
+                });
+            }
             return segs;
         }
         // #3342: плавающий обед. lunch.startMin — минуты от полуночи; durationMin — длина.
@@ -3817,6 +3898,12 @@
                     day = nextFixedDay; clock = 0; continue;
                 }
                 var st = state[pick], c = st.cut;
+                // #3914: что взяли на размещение и в каком состоянии день (время суток = dayStart+clock).
+                ppTrace('day ' + day + ' ' + ppClock(dayStart + clock) + ' (занято ' + Math.round(clock) + ') → выбрана резка ' + pick +
+                    (c && c.isFoil ? ' [ФОЛЬГА]' : '') +
+                    (st.fixedDay != null ? ' [ЗАФИКСИРОВАНА day=' + st.fixedDay + ']' : '') +
+                    (st.isCont ? ' [продолжение]' : '') +
+                    ' остаток проходов=' + st.remaining + '/проход=' + Math.round(st.perPass));
                 // #3792: фиксированная резка — один сегмент на своём дне, без разбивки; нахлёст за
                 // конец смены допустим (как обычный gapFill-нахлёст). Настройка — переналадка с
                 // предыдущей физической резкой. День не двигаем: переполнение само вытолкнет
@@ -3831,6 +3918,16 @@
                         windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
                         durationMin: round3(durF), isContinuation: false, parentCutId: null });
                     clock += setupF + durF;
+                    // #3914: ФИКС-резка кладётся ЦЕЛИКОМ, без дробления и без лимита ёмкости — если
+                    // её конец за потолком дня, это осознанный «замок на день» (#3792), а не баг
+                    // упаковки. Ключевой кандидат в причину «520»: считаем конец окна.
+                    if (round3(wsF + setupF + durF) - day * 1440 > dayEnd + (maxOverworkCuts || 0) + 1e-6) {
+                        ppTraceWarn('ФИКС-резка ' + pick + ' выходит за потолок дня: конец ' +
+                            ppClock(wsF + setupF + durF) + ' > ' + ppClock(day * 1440 + dayEnd + (maxOverworkCuts || 0)) +
+                            ' (настр ' + Math.round(setupF) + ' + намотка ' + Math.round(durF) + ' мин; занято дня стало ' + Math.round(clock) + ')');
+                    } else {
+                        ppTrace('  ФИКС-резка ' + pick + ' целиком: настр ' + Math.round(setupF) + ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
+                    }
                     prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
                     continue;
                 }
@@ -3864,6 +3961,9 @@
                 // не влезает ни один — настройку в хвост (ветка ниже), проходы — на завтра.
                 var fittingG = (availCutsG >= setupG) ? Math.floor((availCutsG - setupG) / perPassEffG) : 0;
                 if (fittingG < 0) fittingG = 0;
+                // #3914: сколько минут доступно в хвосте дня до потолка нахлёста (резка/настройка).
+                ppTrace('  ёмкость хвоста: до резки=' + Math.round(availCutsG) + ' до настройки=' + Math.round(availTuneG) +
+                    ' | настройка=' + Math.round(setupG) + ' проход=' + round3(perPassEffG) + ' → влезает проходов=' + fittingG);
                 if (fittingG > 0) {
                     var passesNowG = Math.min(st.remaining, fittingG);
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
@@ -3871,8 +3971,8 @@
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
-                    if (st.remaining > 0) { day += 1; clock = 0; }     // остаток проходов — на следующий день
-                    else { clock += setupG + durG; }
+                    if (st.remaining > 0) { day += 1; clock = 0; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин), остаток ' + st.remaining + ' → день ' + day); }     // остаток проходов — на следующий день
+                    else { clock += setupG + durG; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин) целиком, занято дня ' + Math.round(clock) + ' (конец ' + ppClock(dayStart + clock) + ')'); }
                 } else if (clock > 0) {
                     // #3760/#3805/#3821: в хвост дня не влезает ни один проход. ЕСТЬ настройка — кладём её
                     // в хвост: ПОДМНОЖЕСТВО компонентов, дотягивающее до конца смены с минимальным
@@ -3891,6 +3991,9 @@
                             durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
                         clock += tailSetup; prevPhysical = c;
                         st.isCont = true; st.pendingSetup = round3(setupG - tailSetup);
+                        ppTrace('  проход не влез — в хвост дня положена ЧАСТЬ настройки ' + Math.round(tailSetup) + ' мин (остаток настройки ' + Math.round(st.pendingSetup) + ' → завтра), день ' + (day + 1));
+                    } else {
+                        ppTrace('  проход не влез, настройки в хвост нет (setupG=' + Math.round(setupG) + ') → резка целиком на день ' + (day + 1));
                     }
                     day += 1; clock = 0;
                 } else {
@@ -3903,9 +4006,15 @@
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
                         durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
+                    ppTraceWarn('вырожденно: настройка+1 проход (' + Math.round(setupG + perPassEffG) + ' мин) длиннее целого дня — кладём 1 проход с нахлёстом, остаток ' + st.remaining + ' → день ' + (day + 1));
                     day += 1; clock = 0;
                 }
             }
+            // #3914: итог генерации (gapFill) по дням — какие дни превысили бюджет.
+            ppTraceDaySummary('splitMachineQueue[gapFill] ИТОГ', segments,
+                function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
+                { dayOf: function(s) { return Math.floor(Number(s.windowStartMin) / 1440); },
+                  dayStartMin: dayStart, dayEndMin: dayEnd, lunchDurationMin: (lunch ? lunch.durationMin : 0), maxOverworkTuneMin: maxOverworkTune });
             return applyDowntime(segments);   // #3764
         }
         (orderedCuts || []).forEach(function(c){
@@ -3992,6 +4101,11 @@
                 pendingSetup = 0;   // #3635 п.5: остаток настройки применён к этому сегменту — больше не добавляем
             }
         });
+        // #3914: итог базовой ветки по дням (на случай, если gapFill выключен).
+        ppTraceDaySummary('splitMachineQueue[base] ИТОГ', segments,
+            function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
+            { dayOf: function(s) { return Math.floor(Number(s.windowStartMin) / 1440); },
+              dayStartMin: dayStart, dayEndMin: dayEnd, lunchDurationMin: (lunch ? lunch.durationMin : 0), maxOverworkTuneMin: maxOverworkTune });
         return applyDowntime(segments);   // #3764
     }
 
@@ -10686,12 +10800,33 @@
         // расписанию (не по фильтру поиска), выводим в скобках после даты-заголовка. Уборка
         // (#3155) имеет собственную строку с минутами и в сумму заданий не входит.
         var dayMinutesBySched = {};
+        var dayBreakdownBySched = {};   // #3914: разбивка бейджа «(N мин)» по заданиям
         schedule.forEach(function(sc) {
             var d = schedDay(sc);
             if (d == null) return;
             var m = (Number(sc.setupMin) || 0) + (Number(sc.durationMin) || 0) + (Number(sc.leaderMin) || 0);
             dayMinutesBySched[d] = (dayMinutesBySched[d] || 0) + m;
+            (dayBreakdownBySched[d] = dayBreakdownBySched[d] || []).push(sc);
         });
+        // #3914: печать бейджа «(N мин)» по дням активного станка — из чего складывается сумма и
+        // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart
+        // (то, что реально записала последняя генерация), поэтому число совпадает с бейджем на экране.
+        if (ppTraceOn()) {
+            var _budget = (Number(dayWindow.cutEndMin) - Number(dayWindow.startMin))
+                - (Number(dayWindow.lunchDurationMin) || 0) + (Number(dayWindow.maxOverworkTuneMin) || 0);
+            ppTrace('БЕЙДЖ «(N мин)» станка «' + (activeGroup && activeGroup.slitter && activeGroup.slitter.name) + '» (бюджет ≈ ' + Math.round(_budget) + '):');
+            Object.keys(dayMinutesBySched).map(Number).sort(function(a, b) { return a - b; }).forEach(function(d) {
+                var total = Math.round(dayMinutesBySched[d]);
+                var over = total > _budget + 1e-6;
+                (over ? ppTraceWarn : ppTrace)('  день ' + d + ' («' + formatPlanDayHeading(planBaseMidnightMs, d) + '»): ' + total + ' мин' +
+                    (over ? ' — ПРЕВЫШЕНИЕ на ' + Math.round(total - _budget) : '') + ', заданий ' + (dayBreakdownBySched[d] || []).length);
+                (dayBreakdownBySched[d] || []).forEach(function(sc) {
+                    var w = (Number(sc.setupMin) || 0) + (Number(sc.durationMin) || 0) + (Number(sc.leaderMin) || 0);
+                    ppTrace('      резка ' + sc.cutId + ': окно ' + ppClock((Number(sc.startMin) || 0) - (Number(sc.setupMin) || 0)) +
+                        '..' + ppClock(sc.finishMin) + ' = ' + Math.round(w) + ' мин (настр ' + Math.round(Number(sc.setupMin) || 0) + ' + намотка ' + Math.round(Number(sc.durationMin) || 0) + ')');
+                });
+            });
+        }
         var lastDayDateRendered = null;   // #3616: дата-заголовок дня вставляется один раз на рабочий день
 
         activeGroup.cuts.forEach(function(c, idx) {
