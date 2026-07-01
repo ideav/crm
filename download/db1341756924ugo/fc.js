@@ -1,0 +1,89 @@
+/* ИНТЕГРАМ FC — ядро рабочих мест. Чтение/запись через API Интеграм. */
+(function(){
+  var DB = location.pathname.split('/').filter(Boolean)[0] || '';
+  var FC = window.FC = { DB: DB, _xsrf: null };
+
+  // ---- ID таблиц и индексы колонок в r[] (r[0] = первая колонка) ----
+  FC.T = { TUR:471, POS:481, VID:484, BADGE:489, MST:496, BST:497,
+           MEM:498, TEAM:523, PLR:548, MATCH:564, BET:584,
+           EV:597, MSG:603, TX:611, AWD:619 };
+  // индексы внутри массива r[]
+  FC.I = {
+    TUR:{name:0,state:1,start:2,end:3,kind:4,desc:5},
+    VID:{name:0,cat:1,note:2},
+    BADGE:{name:0,icon:1,cond:2,rew:3},
+    MEM:{nick:0,ava:1,bal:2,ref:3,inv:4,bets:5,win:6,lose:7,roi:8,streak:9,reg:10,crown:11,rank:12},
+    TEAM:{name:0,tur:1,owner:2,emb:3,kind:4,tr:5,w:6,d:7,l:8,gf:9,ga:10,pts:11,form:12},
+    PLR:{name:0,team:1,pos:2,user:3,kind:4,pr:5,g:6,a:7,card:8},
+    MATCH:{name:0,tur:1,home:2,away:3,stat:4,win:5,dt:6,kind:7,sh:8,sa:9,bank:10,view:11},
+    BET:{num:0,match:1,mem:2,vid:3,stat:4,sum:5,win:6,dt:7},
+    EV:{min:0,type:1,txt:2},
+    MSG:{author:0,trib:1,txt:2,time:3},
+    TX:{op:0,amt:1,kind:2,dt:3},
+    AWD:{name:0,badge:1,dt:2}
+  };
+  // reqId колонок для записи (_m_new/_m_set)
+  FC.W = {
+    BET:{match:586,mem:587,vid:588,stat:590,sum:592,win:594,dt:596},
+    MEM:{nick:498,bal:502,crown:520},
+    MATCH:{home:566,away:567,stat:569,win:571,sh:577,sa:579,bank:581,view:583},
+    MSG:{trib:605,txt:607,time:609}
+  };
+
+  // ---- утилиты ----
+  FC.refId = function(v){ if(v==null) return null; var s=String(v); var i=s.indexOf(':'); return i<0?(s||null):s.slice(0,i); };
+  FC.refLabel = function(v){ if(v==null) return ''; var s=String(v); var i=s.indexOf(':'); return i<0?s:s.slice(i+1); };
+  FC.num = function(v){ var n=parseFloat(v); return isNaN(n)?0:n; };
+  FC.esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); };
+  FC.fmtDT = function(v){ var n=parseInt(v,10); if(!n||isNaN(n)) return '—';
+    var d=new Date(n*1000); var p=function(x){return(x<10?'0':'')+x;};
+    return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes()); };
+  FC.fmtDate = function(s){ if(!s) return '—'; var m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m?m[3]+'.'+m[2]+'.'+m[1]:s; };
+  FC.gpos = function(n){ n=FC.num(n); var c=n>0?'gpos':(n<0?'gneg':''); return '<span class="'+c+'">'+(n>0?'+':'')+n+' Ǥ</span>'; };
+
+  // ---- API ----
+  FC.get = function(path){
+    return fetch('/'+DB+'/'+path, {credentials:'include', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.text(); })
+      .then(function(t){ try{ return JSON.parse(t); }catch(e){ return null; } });
+  };
+  // список записей таблицы: rows -> [{i,u,o,r}]
+  FC.list = function(typeId, qs){ return FC.get('object/'+typeId+'/?JSON_OBJ'+(qs?'&'+qs:'&LIMIT=0,300'))
+      .then(function(d){ return Array.isArray(d)?d:[]; }); };
+  FC.children = function(typeId, parentId){ return FC.list(typeId, 'F_U='+parentId+'&LIMIT=0,200'); };
+  FC.xsrf = function(){ if(FC._xsrf) return Promise.resolve(FC._xsrf);
+    return FC.get('xsrf?JSON=1').then(function(d){ FC._xsrf=d&&d._xsrf; return FC._xsrf; }); };
+  FC.post = function(endpoint, fields){
+    return FC.xsrf().then(function(x){
+      var fd=new FormData(); fd.append('_xsrf',x);
+      for(var k in fields){ if(fields[k]!=null) fd.append(k, fields[k]); }
+      return fetch('/'+DB+'/'+endpoint+'?JSON=1', {method:'POST', credentials:'include', body:fd})
+        .then(function(r){ return r.json().catch(function(){return{};}); });
+    });
+  };
+  FC.create = function(typeId, fields, up){ fields=fields||{}; fields.up=(up||1); return FC.post('_m_new/'+typeId, fields); };
+  FC.update = function(objId, fields){ return FC.post('_m_set/'+objId, fields); };
+
+  // эффективные права роли (если оболочка их прокинула)
+  FC.grants = (function(){ try{ return JSON.parse(atob(window.__FC_GRANTS||'')); }catch(e){ return {}; } })();
+  FC.canWrite = function(typeId){ var g=FC.grants; return g['1']==='WRITE' || g[String(typeId)]==='WRITE'; };
+
+  // ---- UI helpers ----
+  FC.toast = function(msg, red){ var t=document.querySelector('.toast'); if(!t){ t=document.createElement('div'); t.className='toast'; document.body.appendChild(t);}
+    t.className='toast'+(red?' red':''); t.textContent=msg; t.style.display='block'; setTimeout(function(){t.style.display='none';},2600); };
+  FC.hero = function(title, subtitle){
+    return '<div class="fc-hero"><div class="fc-logo"><span class="b">Ǥ</span>ИНТЕГРАМ FC</div>'+
+      '<div class="sp"></div><div style="text-align:right"><h1>'+FC.esc(title)+'</h1><p>'+FC.esc(subtitle||'')+'</p></div></div>';
+  };
+  FC.matchStatusChip = function(label){
+    var l=(label||'').toLowerCase();
+    if(l.indexOf('идёт')>=0||l.indexOf('идет')>=0) return '<span class="chip live">'+FC.esc(label)+'</span>';
+    if(l.indexOf('открыт')>=0) return '<span class="chip green">'+FC.esc(label)+'</span>';
+    if(l.indexOf('заверш')>=0) return '<span class="chip">'+FC.esc(label)+'</span>';
+    return '<span class="chip gold">'+FC.esc(label)+'</span>';
+  };
+  // загрузить участников/матчи/виды как словари {id->row}
+  FC.index = function(rows){ var m={}; rows.forEach(function(x){ m[x.i]=x; }); return m; };
+
+  document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('fc-loaded'); });
+})();
