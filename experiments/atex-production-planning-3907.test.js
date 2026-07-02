@@ -56,18 +56,25 @@ function seg(s) {
     return { day: day, todStart: ws - day * 1440, todEnd: (ws - day * 1440) + len };
 }
 
-// ── 1) Утренний блок 08:00–10:35: полнодневная резка (108 проходов) НЕ переливается ──
-// Без фикса стартовала бы в 10:35 и закончилась ~17:56 (перелив). С фиксом — на 08:00 след. дня.
+// ── 1) Утренний блок 08:00–10:35: полнодневная резка (108 проходов) ДРОБИТСЯ по ёмкости
+//        частично-простойного дня (#3978) — ни один сегмент не переливается за конец смены, и
+//        день 0 после блока НЕ простаивает. (До #3978 вся резка выталкивалась на день 1 целиком,
+//        а день 0 после утреннего блока стоял пустым — это и был недогруз issue #3978.)
+//        Инвариант #3907 сохранён: КОНЕЦ каждого сегмента ≤ овертайм-кап (перелива нет).
 var bigSegs = planning.splitMachineQueue([cut('BIG', 108)],
     Object.assign({}, opts, { perPassByCut: { BIG: 1.81 }, runsByCut: { BIG: 108 },
         dayAnchorByCut: { BIG: 0 }, blockedRanges: [[480, 635]] }));
-assert(bigSegs.length === 1, '#3907: одна резка → один сегмент');
-var big = seg(bigSegs[0]);
-assert(big.todEnd <= OVERWORK_CAP,
-    '#3907: резка после утреннего блока не выходит за конец смены (todEnd ' +
-    Math.round(big.todEnd) + ' ≤ ' + OVERWORK_CAP + ')');
-assertEqual(big.day, 1, '#3907: переливавшая резка вытолкнута на следующий рабочий день (day 1)');
-assertEqual(big.todStart, DS, '#3907: и стартует с начала смены 08:00 (а не с 10:35)');
+assert(bigSegs.length >= 1, '#3907: резка размещена');
+bigSegs.forEach(function (s) {
+    var g = seg(s);
+    assert(g.todEnd <= OVERWORK_CAP,
+        '#3907: сегмент (день ' + g.day + ') не выходит за конец смены (todEnd ' +
+        Math.round(g.todEnd) + ' ≤ ' + OVERWORK_CAP + ')');
+});
+// #3978: день 0 после утреннего блока заполнен (не простаивает) — часть резки осталась в нём.
+var big0 = bigSegs.filter(function (s) { return Math.floor(s.windowStartMin / 1440) === 0; });
+assert(big0.length >= 1, '#3978: часть резки осталась в дне 0 — день после блока не простаивает');
+assertEqual(seg(big0[0]).todStart, 635, '#3978: сегмент дня 0 стартует сразу после блока (10:35)');
 
 // ── 2) Хирургичность: резка, которая ПОМЕЩАЕТСЯ после блока, остаётся в дне 0 ──
 var smallSegs = planning.splitMachineQueue([cut('SMALL', 20)],
