@@ -5477,15 +5477,26 @@
                 if (c && c.materialId != null && String(c.materialId).trim() !== '') s += matWindTime;   // + смена сырья
                 return s;
             }
-            if (!hasCap){   // без ёмкости — минуты с настройкой каждой резки, дата окончания = 1 «день»
-                var mm = 0; seq.forEach(function(m){ mm += workMin(m) + scratchSetup(m); });
+            // #3968: настройка резки — КАК В РЕАЛЬНОЙ укладке (buildSchedule: setup =
+            // changeoverCost(cuts[i-1], c); splitMachineQueue/selectByConfig группирует одинаковые
+            // конфиги по непрерывности), а НЕ «с нуля» у каждой резки. Реальный день-сплит ставит
+            // соседние одинаковые ножи/сырьё ОДИН раз (переход = 0), поэтому просроченная партия
+            // одного сырья (#3815, один срок) укладывается плотно. Оценка «с нуля» у каждой (было
+            // #3965) завышала настроечно-СГРУППИРОВАННЫЙ станок почти вдвое (Станок 1 #3968: оценка
+            // 1479 при реальных 834) → балансировщик считал его загруженным и не докидывал работу →
+            // станок недогружен, а соседние переливали за ёмкость. changeoverCost честно даёт 0 для
+            // одинаковых конфигов и полную настройку для разных (разные сырьё/намотка/сроки —
+            // сценарий #3965/#3957: настроечно-РАЗНЫЙ станок остаётся тяжёлым, хвост стекает).
+            // Первая резка очереди — настройка с нуля (scratchSetup: ножи+сырьё), прочие — переход.
+            function setupOf(i){ return i === 0 ? scratchSetup(seq[0]) : changeoverCost(seq[i-1], seq[i], times); }
+            if (!hasCap){   // без ёмкости — минуты с настройкой перехода, дата окончания = 1 «день»
+                var mm = 0; for (var j = 0; j < seq.length; j++){ mm += workMin(seq[j]) + setupOf(j); }
                 res = { endPos: mm > 0 ? 1 : 0, days: mm > 0 ? 1 : 0, minutes: round3(mm) };
                 packMemo[sig] = res; return res;
             }
             var day = skipOff(machineId, 0), clock = 0, real = 0;
             for (var i = 0; i < seq.length; i++){
-                var c = seq[i];
-                var need = scratchSetup(c) + workMin(c);
+                var need = setupOf(i) + workMin(seq[i]);
                 if (clock > 0 && clock + need > cap){                 // не влезает в остаток дня → след. рабочий день
                     day = skipOff(machineId, day + 1); clock = 0;
                 }
