@@ -98,7 +98,7 @@ function cutsByMachine(plans) { var o = {}; plans.forEach(function (p) { o[p.sli
     for (var i = 1; i <= 8; i++) plans.push(plan('c' + i, '4'));
     var res = planning.rebalanceSlitterLoad(plans, SL, { weights: null, dayCapacityMin: CAP });
     assertEqual(cutsByMachine(plans), { '1': 2, '2': 2, '3': 2, '4': 2 }, '#3881 без отпусков — ровно 2/2/2/2 (как #3848)');
-    assertEqual(res.loadBefore['4'].days, 4, '#3881 без machineDayOff: дата окончания из реальной укладки (#3965 per-day настройки), баланс всё равно 2/2/2/2');
+    assertEqual(res.loadBefore['4'].days, 3, '#3881 без machineDayOff: дата окончания из реальной укладки (#3968 одинаковые конфиги группируются: 45 + 8×150 = 1245 → 3 дня), баланс всё равно 2/2/2/2');
 })();
 
 console.log('\n' + passed + ' проверок прошло' + (failed ? ', ' + failed + ' упало' : '') + '.');
