@@ -5435,73 +5435,87 @@
             if (isFinite(cl) && cl > 0) return cl;
             return Number(m && m.duration) || 0;
         }
-        // Минуты станка по его участникам (постоянные + подвижные) = намотка всех +
-        // переналадки очереди (orderedChangeoverCost учитывает порядок/фольгу/EDD) + настройка
-        // первой резки с нуля. Мемоизация по сигнатуре набора — orderCuts/переналадка дороги́е.
-        var minutesMemo = {};
-        function poolMinutes(members){
-            if (!members.length) return 0;
-            var ids = members.map(function(m){ return String(m.id); }); ids.sort();
-            var sig = ids.join(',');
-            if (minutesMemo[sig] != null) return minutesMemo[sig];
-            var work = 0; members.forEach(function(m){ work += workMin(m); });
-            var v = round3(work + orderedChangeoverCost(members, weights) + firstSetupCost(members[0], times));
-            minutesMemo[sig] = v;
-            return v;
-        }
-        function daysOf(min){ return (min > 0) ? (hasCap ? Math.ceil(min / cap) : 1) : 0; }   // содержимое в рабочих днях
-        // #3881: «загруженность» станка = ДАТА ОКОНЧАНИЯ последней задачи (у кого позже — тот
-        // загружен сильнее). Содержимое (daysOf рабочих дней) кладём по дням от базы, ПРОПУСКАЯ
-        // дни отпуска станка → станок с отпуском заканчивает ПОЗЖЕ при тех же минутах (его не
-        // грузят на послеотпускное время, пока другие простаивают). Дни отпуска тоже считаются
-        // ЗАНЯТЫМИ: станок в отпуске без задач после него «занят» до конца отпуска (уточнение
-        // заказчика — «дату окончания отпуска считать последней датой задач, если после него
-        // задач нет»). span = число календарных дней от дня 0 до последнего занятого включительно.
-        // opts.machineDayOff(id, dayOffset)→bool — день-смещение от базы у станка нерабочий (отпуск);
-        // не задан → span == daysOf (нет инфо об отпусках; тесты/обратная совместимость).
+        // #3965: загрузка станка = ФАКТИЧЕСКАЯ укладка его заданий по рабочим дням (как
+        // splitMachineQueue: порядок orderCuts, настройка КАЖДОЙ резки «с нуля» — ножи+сырьё,
+        // ёмкость дня cap, пропуск нерабочих дней станка machineDayOff — выходные #3788 + отпуск
+        // #3876). Прежняя оценка poolMinutes считала переналадку по СГРУППИРОВАННОМУ порядку
+        // orderCuts (соседние одинаковые конфиги → ~0), а реальный день-сплит порядок НЕ группирует
+        // → недооценивала настроечно-тяжёлый станок почти вдвое (Станок 1: реально 2757 мин,
+        // оценка ~1214 мин ≈ 3 дня) → балансировщик думал, что станок влезает до отпуска, и даже
+        // докидывал на него, а хвост уезжал за отпуск. opts.machineDayOff(id, dayOffset)→bool —
+        // день-смещение от базы нерабочий; не задан → без пропусков (тесты/обратная совместимость).
         var machineDayOff = typeof opts.machineDayOff === 'function' ? opts.machineDayOff : null;
-        var spanMemo = {};
-        function spanDays(machineId, min){
-            var content = daysOf(min);
-            if (!machineDayOff) return content;   // нет отпусков-инфо — прежнее поведение
-            var memoKey = machineId + ':' + content;
-            if (memoKey in spanMemo) return spanMemo[memoKey];
-            var remaining = content, lastBusy = -1, guard = content + 731;   // защита от зацикливания
-            for (var d = 0; d <= guard; d++){
-                if (machineDayOff(machineId, d)) { lastBusy = d; continue; }   // день отпуска — занят
-                if (remaining > 0) { remaining--; lastBusy = d; continue; }    // рабочий день — кладём содержимое
-                break;   // свободный день, содержимого больше нет → станок свободен
+        function skipOff(machineId, d){ if (machineDayOff) while (machineDayOff(machineId, d)) d++; return d; }
+        // packMachine(id, members) → { endPos: дробная дата окончания (кал. дни от базы), days:
+        // целая дата окончания = span, minutes: реальные минуты с настройками }. #3881: если СРАЗУ
+        // за работой идёт непрерывный блок нерабочих дней (выходные+отпуск) — станок «занят» до
+        // его конца (на него не докидываем, пока он в отпуске); это же «плато» не даёт балансиру
+        // выдёргивать доотпускную работу (перенос одного задания не меняет пол → счёт не лучше).
+        // Мемоизация по (станок|набор id) — orderCuts/переналадка дороги́е.
+        var packMemo = {};
+        function packMachine(machineId, members){
+            if (!members || !members.length){
+                // #3881: пустой станок, у которого отпуск с дня 0, «занят» до конца ведущего
+                // отпуска (не считается свободным раньше времени); иначе — свободен.
+                if (machineDayOff && machineDayOff(machineId, 0)){ var w = skipOff(machineId, 0); return { endPos: w, days: w, minutes: 0 }; }
+                return { endPos: 0, days: 0, minutes: 0 };
             }
-            var span = lastBusy + 1;
-            spanMemo[memoKey] = span;
-            return span;
-        }
-
-        // #3921: ДРОБНАЯ дата окончания станка (в календарных днях от базы) — как spanDays, но
-        // последний рабочий день заполнен частично (по минутам). Нужна как ТОЧНЫЙ ключ баланса:
-        // span (целые дни, ceil) создаёт «плато» — при отпуске станок может держать хвост работы
-        // ПОСЛЕ отпуска (напр. 13.07), пока другие простаивают, и перенос одного задания не
-        // меняет целый span (1680→1500 мин = те же 4 «дня») → счёт не улучшается, работа
-        // застревает за отпуском. По минутам каждый перенос строго снижает endPos → хвост
-        // «стекает» на свободные станки. Пол — конец ведущего отпуска (пустой станок в отпуске
-        // «занят» до его конца, #3881). Без ёмкости/отпусков — прежнее целое поведение.
-        var endPosMemo = {};
-        function endPos(machineId, min){
-            var work = (min > 0) ? min : 0;
-            if (!machineDayOff) return hasCap ? round3(work / cap) : (work > 0 ? 1 : 0);
-            var memoKey = machineId + ':' + work;
-            if (memoKey in endPosMemo) return endPosMemo[memoKey];
-            var remaining = work, lastPos = 0, guard = 731 + (hasCap ? Math.ceil(work / cap) : 1);
-            for (var d = 0; d <= guard; d++){
-                if (machineDayOff(machineId, d)) { lastPos = d + 1; continue; }   // день отпуска — «занят» до его конца
-                if (remaining <= 0) break;
-                var use = hasCap ? Math.min(cap, remaining) : remaining;
-                remaining -= use;
-                lastPos = d + (hasCap ? (use / cap) : 1);   // рабочий день заполнен частично
+            var idsArr = members.map(function(m){ return String(m.id); }); idsArr.sort();
+            var sig = machineId + '|' + idsArr.join(',');
+            if (packMemo[sig]) return packMemo[sig];
+            var seq = orderCuts(members, weights);
+            var res;
+            var matWindTime = Number((times && times.MATERIAL_WINDING != null) ? times.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
+            // Настройка резки «с нуля»: ножи (#3669 firstSetupParts) + смена сырья, если у резки
+            // есть материал. Реальный день-сплит НЕ группирует одинаковые конфиги (сроки #3815 и
+            // направления намотки разносят их по очереди), поэтому почти каждая резка ставит ножи
+            // и сырьё заново. Оценка через changeoverCost в порядке orderCuts группировала соседние
+            // одинаковые конфиги в ~0 и занижала настроечно-тяжёлый станок вдвое (#3965): Станок 1
+            // реально 2757 мин (намотка 625 + настройка ~2130 ≈ 42 мин/резка), оценка ~1214 мин.
+            function scratchSetup(c){
+                var s = firstSetupCost(c, times);   // ножи (KNIFE), если есть
+                if (c && c.materialId != null && String(c.materialId).trim() !== '') s += matWindTime;   // + смена сырья
+                return s;
             }
-            var v = round3(lastPos);
-            endPosMemo[memoKey] = v;
-            return v;
+            // #3968: настройка резки — КАК В РЕАЛЬНОЙ укладке (buildSchedule: setup =
+            // changeoverCost(cuts[i-1], c); splitMachineQueue/selectByConfig группирует одинаковые
+            // конфиги по непрерывности), а НЕ «с нуля» у каждой резки. Реальный день-сплит ставит
+            // соседние одинаковые ножи/сырьё ОДИН раз (переход = 0), поэтому просроченная партия
+            // одного сырья (#3815, один срок) укладывается плотно. Оценка «с нуля» у каждой (было
+            // #3965) завышала настроечно-СГРУППИРОВАННЫЙ станок почти вдвое (Станок 1 #3968: оценка
+            // 1479 при реальных 834) → балансировщик считал его загруженным и не докидывал работу →
+            // станок недогружен, а соседние переливали за ёмкость. changeoverCost честно даёт 0 для
+            // одинаковых конфигов и полную настройку для разных (разные сырьё/намотка/сроки —
+            // сценарий #3965/#3957: настроечно-РАЗНЫЙ станок остаётся тяжёлым, хвост стекает).
+            // Первая резка очереди — настройка с нуля (scratchSetup: ножи+сырьё), прочие — переход.
+            function setupOf(i){ return i === 0 ? scratchSetup(seq[0]) : changeoverCost(seq[i-1], seq[i], times); }
+            if (!hasCap){   // без ёмкости — минуты с настройкой перехода, дата окончания = 1 «день»
+                var mm = 0; for (var j = 0; j < seq.length; j++){ mm += workMin(seq[j]) + setupOf(j); }
+                res = { endPos: mm > 0 ? 1 : 0, days: mm > 0 ? 1 : 0, minutes: round3(mm) };
+                packMemo[sig] = res; return res;
+            }
+            var day = skipOff(machineId, 0), clock = 0, real = 0;
+            for (var i = 0; i < seq.length; i++){
+                var need = setupOf(i) + workMin(seq[i]);
+                if (clock > 0 && clock + need > cap){                 // не влезает в остаток дня → след. рабочий день
+                    day = skipOff(machineId, day + 1); clock = 0;
+                }
+                clock += need; real += need;
+                while (clock > cap){                                  // резка+настройка длиннее дня — дробится по дням (#3280)
+                    clock -= cap; day = skipOff(machineId, day + 1);
+                }
+            }
+            var endPos, span;
+            if (clock <= 0){ endPos = day; span = day; }
+            else {
+                var next = day + 1;
+                if (machineDayOff && machineDayOff(machineId, next)){ // сразу за работой — непрерывный блок нерабочих дней
+                    next = skipOff(machineId, next);
+                    endPos = next; span = next;                       // «занят» до начала след. рабочего дня (#3881)
+                } else { endPos = day + clock / cap; span = day + 1; }
+            }
+            res = { endPos: round3(endPos), days: span, minutes: round3(real) };
+            packMemo[sig] = res; return res;
         }
 
         // Назначение подвижных: slitterId → [plan]. Полный набор станка = fixed + movable.
@@ -5509,33 +5523,32 @@
         machineList.forEach(function(id){ byMachine[id] = []; });
         movablePlans.forEach(function(p){ (byMachine[String(p.slitterId)] = byMachine[String(p.slitterId)] || []).push(p); });
         function membersOf(id){ return (fixedBy[id] || []).concat(byMachine[id] || []); }
-        function curMinutes(){ var o = {}; Object.keys(byMachine).forEach(function(id){ o[id] = poolMinutes(membersOf(id)); }); return o; }
+        function membersMap(){ var o = {}; machineList.forEach(function(id){ o[id] = membersOf(id); }); return o; }
         function snapshot(){
             var snap = {};
             Object.keys(byMachine).forEach(function(id){
-                var m = poolMinutes(membersOf(id));
-                snap[id] = { minutes: m, days: spanDays(id, m), cuts: (byMachine[id] || []).length };   // #3881: span с учётом отпуска
+                var p = packMachine(id, membersOf(id));
+                snap[id] = { minutes: p.minutes, days: p.days, cuts: (byMachine[id] || []).length };   // #3965: реальная укладка
             });
             return snap;
         }
-        // Счёт состояния = [макс. дней, макс. ДРОБНАЯ дата окончания, пик минут станка, сумма
-        // квадратов минут]; меньше — лучше (лексикографически). maxDays (#3881) — целая дата
-        // окончания с учётом отпуска; maxEndPos (#3921) — та же дата ДРОБНО (по минутам), ломает
-        // «плато» ceil: когда целый span не меняется, дробный хвост за отпуском всё равно стекает
-        // на свободные станки. Сумма КВАДРАТОВ (а не просто сумма) штрафует перекос: при равном
-        // пике она ниже у РОВНОГО распределения — это и выталкивает работу на простаивающий
-        // станок. Простая сумма минут, наоборот, росла бы от лишних настроек и склеивала всё на
-        // меньшем числе станков (застревание в духе 4/4/0/0) — поэтому не она.
-        function scoreFrom(minById){
+        // Счёт состояния = [макс. дата окончания (целые дни), та же ДРОБНО, пик реальных минут,
+        // сумма квадратов минут]; меньше — лучше (лексикографически). Дата окончания и минуты — из
+        // ФАКТИЧЕСКОЙ укладки packMachine (#3965), а не из заниженной оценки. maxEndPos (#3921)
+        // дробит «плато» ceil: дробный хвост за отпуском стекает на свободные станки. Сумма
+        // КВАДРАТОВ штрафует перекос: при равном пике она ниже у РОВНОГО распределения — это и
+        // выталкивает работу на простаивающий станок.
+        function scoreFrom(memById){
             var maxDays = 0, maxEndPos = 0, peak = 0, sumSq = 0;
-            Object.keys(minById).forEach(function(id){
-                var m = minById[id];
+            Object.keys(memById).forEach(function(id){
+                var p = packMachine(id, memById[id]);
+                var m = p.minutes;
                 sumSq = round3(sumSq + m * m);
                 if (m > peak) peak = m;
-                var d = spanDays(id, m); if (d > maxDays) maxDays = d;   // #3881: дата окончания (span с учётом отпуска)
-                var e = endPos(id, m); if (e > maxEndPos) maxEndPos = e;   // #3921: дробная дата окончания (хвост за отпуском)
+                if (p.days > maxDays) maxDays = p.days;
+                if (p.endPos > maxEndPos) maxEndPos = p.endPos;
             });
-            return [maxDays, maxEndPos, round3(peak), sumSq];
+            return [maxDays, round3(maxEndPos), round3(peak), sumSq];
         }
         function lexLess(a, b){
             for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return true; if (a[i] > b[i]) return false; }
@@ -5561,11 +5574,11 @@
         var loadBefore = snapshot();
         var visited = {}; visited[stateHash()] = true;
         var moves = [], iter = 0, stopReason = 'no-progress';
-        log({ event: 'start', load: loadBefore, score: scoreFrom(curMinutes()) });
+        log({ event: 'start', load: loadBefore, score: scoreFrom(membersMap()) });
 
         while (iter < maxIters){
-            var baseMin = curMinutes();
-            var baseScore = scoreFrom(baseMin);
+            var baseMembers = membersMap();
+            var baseScore = scoreFrom(baseMembers);
             var best = null;   // { plan, from, to, score, hash }
             Object.keys(byMachine).forEach(function(from){
                 // Переносим ТОЛЬКО со станка, заканчивающего на 2-й день и позже (#3881:
@@ -5573,17 +5586,17 @@
                 // донор, его задания уезжают на простаивающие станки). Вся работа влезает в один
                 // день (и без отпуска) — дробить незачем (лишние настройки). Без заданной ёмкости
                 // (тесты/обратная совместимость) день всегда «1» ⇒ переносов нет, поведение прежнее.
-                if (spanDays(from, baseMin[from]) < 2) return;
+                if (packMachine(from, baseMembers[from]).days < 2) return;
                 (byMachine[from] || []).forEach(function(plan){
                     machineList.forEach(function(to){
                         if (to === from) return;
                         if (isMaterialBlocked(stopBlock[to], plan.materialId)) return;   // станок не варит это сырьё
                         if (slitterDayBlocked && slitterDayBlocked(to, plan)) return;     // #3876: станок в отпуске в день задания
-                        // пробный перенос: меняются минуты только from и to.
+                        // пробный перенос: меняется набор только from и to.
                         var fromMembers = (fixedBy[from] || []).concat((byMachine[from] || []).filter(function(x){ return x !== plan; }));
-                        var trial = {}; Object.keys(baseMin).forEach(function(id){ trial[id] = baseMin[id]; });
-                        trial[from] = poolMinutes(fromMembers);
-                        trial[to] = poolMinutes(membersOf(to).concat([plan]));
+                        var trial = {}; Object.keys(baseMembers).forEach(function(id){ trial[id] = baseMembers[id]; });
+                        trial[from] = fromMembers;
+                        trial[to] = membersOf(to).concat([plan]);
                         var sc = scoreFrom(trial);
                         if (!lexLess(sc, best ? best.score : baseScore)) return;   // не лучше базы/текущего лучшего
                         // не повторяем ранее посещённую комбинацию (страховка от циклов).
@@ -6328,6 +6341,17 @@
         var w = this.workingWindow();
         return slitterDownOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs,
             w && w.startMin, w && w.cutEndMin);
+    };
+
+    // #3957: нерабочий ли день-смещение для ВЫРАВНИВАНИЯ ЗАГРУЗКИ (rebalanceSlitterLoad,
+    // machineDayOff). Станок не работает в день, если это выходной/праздник (#3788 dayIsWorking,
+    // общий для ВСЕХ станков) ИЛИ у станка отпуск (#3876 slitterOnVacationDay). Модель span/endPos
+    // ОБЯЗАНА пропускать те же дни, что и реальное расписание (calendarBlockedRanges +
+    // downtimeBlockedRanges), иначе содержимое, влезающее в рабочие дни ДО выходных перед отпуском,
+    // «не доходит» до отпуска — станок с отпуском выглядит заканчивающим рано (Станок 1 «4д» вместо
+    // «12д»), и хвост за отпуском не стекает на свободные станки.
+    AtexProductionPlanning.prototype.balanceDayOff = function(slitterId, dayMidnightMs) {
+        return !this.dayIsWorking(dayMidnightMs) || this.slitterOnVacationDay(slitterId, dayMidnightMs);
     };
 
     // #3876: id станков, у которых в день dayMidnightMs отпуск → { slitterId: true }. Для
@@ -9162,6 +9186,19 @@
                 setupGroupsByDay[day][slitterId].push(descriptor);
                 loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
             }
+            // #3970: «Срок изготовления» раскладки (самый ранний срок покрываемых позиций, EDD).
+            // Нужен ВЫРАВНИВАНИЮ загрузки: packMachine → orderCuts → sequenceByDue группирует
+            // одинаковые конфиги только ВНУТРИ одного срока, а разные сроки (#3815) разносят их по
+            // очереди (каждая ставит ножи/сырьё заново — как реальный день-сплит). Без dueKey все
+            // раскладки попадали в один «срок» (Infinity) → packMachine группировал глобально и
+            // ЗАНИЖАЛ настройку настроечно-разного станка → балансировщик недооценивал его загрузку,
+            // не разгружал, и работа копилась/переливалась (issue #3970: «набито на Станок 1 после
+            // отпуска», перегруз/недогруз). Оценка теперь совпадает с реальным расписанием.
+            var layoutDueKey = Infinity;
+            (lay.positionsCovered || []).forEach(function(pid){
+                var pp = posById[String(pid)]; var k = pp && pp.dueKey;
+                if (k != null && isFinite(k) && k < layoutDueKey) layoutDueKey = k;
+            });
             layoutPlans.push({
                 id: descriptor.id,
                 materialId: descriptor.materialId,
@@ -9180,6 +9217,7 @@
                 timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
+                dueKey: layoutDueKey,   // #3970: EDD-ключ для packMachine/orderCuts (см. выше)
                 sequence: '',
                 index: layIdx
             });
@@ -9209,20 +9247,44 @@
                     var l = load[id]; return (labelById[id] || id) + ':' + l.days + 'д/' + Math.round(l.minutes) + 'м';
                 }).join('  ');
             }
-            // #3881: «загруженность» = дата окончания с учётом отпуска. machineDayOff(id, dayOffset)
-            // — нерабочий ли день-смещение от базы плана у станка (отпуск). Мемоизируем по дню.
+            // #3881/#3957: «загруженность» = дата окончания с учётом нерабочих дней станка.
+            // machineDayOff(id, dayOffset) — нерабочий ли день-смещение от базы плана: выходной/
+            // праздник (#3788, для всех станков) ИЛИ отпуск станка (#3876). Оба нужны: без выходных
+            // содержимое, влезающее в дни до выходных перед отпуском, «не доходит» до отпуска —
+            // станок с отпуском выглядит заканчивающим рано, хвост за отпуском не стекает (#3957).
+            // Мемоизируем по дню.
             var rebBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
             var machineDayOffMemo = {};
             function machineDayOff(machineId, dayOffset){
                 var k = machineId + ':' + dayOffset;
                 if (k in machineDayOffMemo) return machineDayOffMemo[k];
-                var v = self.slitterOnVacationDay(machineId, rebBaseMidnightMs + dayOffset * 86400000);
+                var v = self.balanceDayOff(machineId, rebBaseMidnightMs + dayOffset * 86400000);
                 machineDayOffMemo[k] = v;
                 return v;
             }
+            // #3957 ДИАГНОСТИКА: что видит модель загрузки по дням (0..20 от базы плана) для
+            // КАЖДОГО станка — рабочий(.) / выходной-праздник(W, #3788) / отпуск(V, #3876) / оба(B).
+            // Плюс machineDayOff(=off?) и spanDays текущей загрузки. Если у станка с отпуском в
+            // строке нет V — отпуск НЕ подхватывается (id/окно/покрытие #3883), и хвост не стекает.
+            try {
+                var DAY_MS_DBG = 86400000;
+                (self.slitters || []).forEach(function(s){
+                    var id = String(s.id), row = '', off = '';
+                    for (var d = 0; d <= 20; d++){
+                        var ms = rebBaseMidnightMs + d * DAY_MS_DBG;
+                        var wk = !self.dayIsWorking(ms), vc = self.slitterOnVacationDay(id, ms);
+                        row += vc && wk ? 'B' : vc ? 'V' : wk ? 'W' : '.';
+                        off += machineDayOff(id, d) ? 'x' : '.';   // что реально вернёт модель загрузки
+                    }
+                    // Если row содержит W/V, а off в тех же позициях '.', значит machineDayOff НЕ
+                    // подхватывает выходной/отпуск (устаревшая сборка call-site / balanceDayOff).
+                    console.log('[pp] ⚖ dayoff ' + (labelById[id] || id) + ' [0..20]: сырьё=' + row +
+                        ' модель=' + off + '  (W=выходной V=отпуск B=оба; x=день занят в балансе)');
+                });
+            } catch (e) { console.warn('[pp] ⚖ dayoff diag error', e); }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
-                machineDayOff: machineDayOff,   // #3881: дата окончания с учётом отпуска (span)
+                machineDayOff: machineDayOff,   // #3881/#3965: дата окончания из реальной укладки по дням
                 // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
                 slitterDayBlocked: function(slitterId, plan){
                     var sec = Number(plan && plan.planDate);
