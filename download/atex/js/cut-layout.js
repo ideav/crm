@@ -13,6 +13,24 @@
   // Округление до 3 знаков, чтобы убрать артефакты float-арифметики.
   function round3(v){ return Math.round(toNumber(v) * 1000) / 1000; }
 
+  // sortStripsByWidthDesc: единый порядок полос резки — по УБЫВАНИЮ ширины (широкие
+  // раньше узких). Заказные/складские/втулочные идут ОДНИМ рядом вперемешку по ширине,
+  // чтобы минимизировать переналадку ножей слиттера и держать единый подход к
+  // формированию раскроя во всех точках (генерация, «Партии ГП», knifeWidths, редактор).
+  // Тай-брейк при равной ширине — назначение (Заказ→Склад→Отходы), поэтому порядок
+  // детерминирован и не опирается на стабильность Array.sort. Полосы без положительной
+  // ширины (пустые/новые строки редактора) уходят в конец. Мутирует и возвращает массив.
+  function sortStripsByWidthDesc(strips){
+    if (!strips || !strips.sort) return strips;
+    function rank(p){ return p === 'Заказ' ? 0 : p === 'Склад' ? 1 : p === 'Отходы' ? 2 : 3; }
+    return strips.sort(function(a, b){
+      var wa = toNumber(a && a.width), wb = toNumber(b && b.width);
+      var pa = wa > 0 ? wa : -Infinity, pb = wb > 0 ? wb : -Infinity;
+      if (pa !== pb) return pb - pa;               // ширина по убыванию
+      return rank(a && a.purpose) - rank(b && b.purpose);
+    });
+  }
+
   // dayDiff: |дни| между двумя ключами ГГГГММДД (нечисло/Infinity → Infinity).
   function dayDiff(a, b){
     if(!isFinite(a) || !isFinite(b)) return Infinity;
@@ -190,7 +208,8 @@
         s.positionIds.forEach(function(pid){ if (m.positionIds.indexOf(pid) < 0) m.positionIds.push(pid); });
       }
     });
-    // (e) used / remainder / withinTolerance
+    // (e) единый ряд полос по убыванию ширины (заказ+склад вперемешку) + used / remainder
+    sortStripsByWidthDesc(merged);
     var usedFinal = round3(merged.reduce(function(a, s){ return a + s.width * s.qty; }, 0));
     var remainderOut = round3(W - usedFinal);
     return {
@@ -387,7 +406,7 @@
   }
 
   var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups,
-                 bestFill: bestFill, composeLayout: composeLayout,
+                 bestFill: bestFill, composeLayout: composeLayout, sortStripsByWidthDesc: sortStripsByWidthDesc,
                  orderStripQty: orderStripQty, layoutRuns: layoutRuns, layoutScrap: layoutScrap,
                  combinationSignature: combinationSignature, planLayouts: planLayouts };
 

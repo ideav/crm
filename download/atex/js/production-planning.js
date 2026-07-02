@@ -2029,6 +2029,24 @@
     // Округление до 3 знаков — убрать артефакты float-арифметики.
     function round3(n) { return Math.round(n * 1000) / 1000; }
 
+    // sortStripsByWidthDesc: единый порядок полос резки — по УБЫВАНИЮ ширины (широкие
+    // раньше узких). Заказ/Склад/втулка идут одним рядом вперемешку по ширине (минимум
+    // переналадки ножей, единый подход к формированию). Миррор sortStripsByWidthDesc в
+    // cut-layout.js — там сортируется генерируемый раскрой, здесь довешенные втулочные
+    // полосы (appendCoreStrip) и полосы редактора (загрузка/ручной добор). Тай-брейк при
+    // равной ширине — назначение (Заказ→Склад→Отходы); полосы без ширины (пустые строки
+    // редактора) — в конец. Мутирует и возвращает массив.
+    function sortStripsByWidthDesc(strips) {
+        if (!strips || !strips.sort) return strips;
+        function rank(p) { return p === 'Заказ' ? 0 : p === 'Склад' ? 1 : p === 'Отходы' ? 2 : 3; }
+        return strips.sort(function(a, b) {
+            var wa = stripNum(a && a.width), wb = stripNum(b && b.width);
+            var pa = wa > 0 ? wa : -Infinity, pb = wb > 0 ? wb : -Infinity;
+            if (pa !== pb) return pb - pa;               // ширина по убыванию
+            return rank(a && a.purpose) - rank(b && b.purpose);
+        });
+    }
+
     function truthyFlag(value) {
         if (value === true) return true;
         if (value === false || value == null) return false;
@@ -2505,6 +2523,7 @@
             }
         }
         layout.strips.push({ width: w, qty: count, purpose: 'Заказ', core: true, positionIds: ids.slice() });
+        sortStripsByWidthDesc(layout.strips);   // единый ряд по убыванию: втулочная полоса встаёт по своей ширине
         return layout;
     }
 
@@ -5649,6 +5668,7 @@
         isSleeveWidthProducible: isSleeveWidthProducible, // #3812
         sleeveCoreStripPlan: sleeveCoreStripPlan,        // #3812
         appendCoreStrip: appendCoreStrip,                // #3812
+        sortStripsByWidthDesc: sortStripsByWidthDesc,    // единый ряд полос по убыванию ширины
         isCoreStripFiller: isCoreStripFiller,            // #3872
         selectCoreStripFillers: selectCoreStripFillers,  // #3872
         coreOnlyStripWidths: coreOnlyStripWidths,        // #3872
@@ -8082,7 +8102,8 @@
         var rollsIdx = columnIndex(sm, FINISHED_BATCH_REQ.rolls);
         var orderIdx = columnIndex(sm, FINISHED_BATCH_REQ.orderId);
         return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
-            return (rows || []).map(function(rec) {
+            // Единый ряд полос по убыванию ширины (порядок записей БД не гарантирован).
+            return sortStripsByWidthDesc((rows || []).map(function(rec) {
                 var r = rec.r || [];
                 var stripsVal = (stripsIdx >= 0 && r[stripsIdx] != null) ? String(r[stripsIdx]) : '';
                 var rollsVal = (rollsIdx >= 0 && r[rollsIdx] != null) ? String(r[rollsIdx]) : '';
@@ -8093,7 +8114,7 @@
                     // #3433: «ID заказа» — копируется в записи-продолжения при дроблении по дням.
                     orderId: (orderIdx >= 0 && r[orderIdx] != null) ? String(r[orderIdx]) : ''
                 };
-            });
+            }));
         });
     };
 
@@ -8431,6 +8452,7 @@
                         return;
                     }
                     strips.push(ns);
+                    sortStripsByWidthDesc(strips);   // добор встаёт по своей ширине (единый ряд по убыванию)
                     renderRows();
                     recalc();
                     self.persistStrip(cut.id, ns);   // авто-сейв (#3127)
