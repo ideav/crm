@@ -3740,9 +3740,31 @@
         // #3342: плавающий обед. lunch.startMin — минуты от полуночи; durationMin — длина.
         var lunch = lunchParams(opts, dayStart, dayEnd);
         var lunchDone = {};
+        // #3978: минуты простоя (blockedRanges) ВНУТРИ рабочего окна дня уменьшают его ёмкость.
+        // Иначе укладчик пакует день логически от dayStart БЕЗ учёта простоя, applyDowntime затем
+        // сдвигает ЦЕЛЫЕ сегменты за простой, и вылезший за конец окна сегмент уезжает на следующий
+        // день ЦЕЛИКОМ (дробить после сдвига нечем) → день с простоем недобирает: issue #3978,
+        // 02.07 после утреннего простоя 08:00–10:00 держал 129 мин вместо достижимых ~330, а работа
+        // каскадом стекала на следующие дни. Учитывая простой в ёмкости, укладчик дробит резку и
+        // добивает частично-простойный день. ПОЛНОСТЬЮ заблокированный день (выходной #3788/отпуск
+        // на всё окно) НЕ трогаем — им занимается applyDowntime/shiftPlacementsPastDowntime
+        // (#3764/#3951), поведение прежнее (иначе задели бы отлаженную раскладку выходных/отпуска).
+        var blockedRangesLocal = opts.blockedRanges || [];
+        function dayLostToBlock(d) {
+            if (!hasWindow || !blockedRangesLocal.length) return 0;
+            var ws = d * 1440 + dayStart, we = d * 1440 + dayEnd, sum = 0;
+            for (var bi = 0; bi < blockedRangesLocal.length; bi++) {
+                var r = blockedRangesLocal[bi];
+                var s = r.start != null ? r.start : r[0], e = r.end != null ? r.end : r[1];
+                var lo = Math.max(ws, s), hi = Math.min(we, e);
+                if (hi > lo) sum += hi - lo;
+            }
+            return (sum < capacity) ? sum : 0;   // полный блок окна — не наш случай (см. выше)
+        }
         // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
         // если обед не получится поставить паузой между резками, день закончится раньше.
-        function effCapacity(d) { return (lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity; }
+        // #3978: и на простой внутри окна (dayLostToBlock).
+        function effCapacity(d) { return ((lunch && !lunchDone[d]) ? (capacity - lunch.durationMin) : capacity) - dayLostToBlock(d); }
         // #3847: доступные минуты от текущего clock до потолка нахлёста для дня d. kind='cuts' —
         // потолок DAY_END_HOUR+maxOverworkCuts (для проходов), 'tune' — DAY_END_HOUR+maxOverworkTune
         // (для настройки). Минус резерв обеда (как effCapacity). Фича выключена → обычная ёмкость до
@@ -3758,7 +3780,8 @@
             // dayEndHour (16:30), и день паковался до 16:35+, копя 475–494 раб. мин (#3910 «494
             // мин во 2 июле»). Теперь потолок 16:15 (резка) / 16:20 (настройка) — буфер уборки
             // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
-            return (dayEnd - dayStart) + margin - lunchRes - clock;
+            // #3978: минус простой внутри окна дня (dayLostToBlock) — как в effCapacity.
+            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - clock;
         }
         // #3974: якорь дня несёт ТОЛЬКО «Зафиксировано» (🔒) — фикс-резка держит свой день
         // (fixedDay ниже). Свободные задания якоря не имеют (dayAnchorByCut #3658 отменён): день
