@@ -664,18 +664,6 @@
         return Math.round((cutMid - base) / 86400000);
     }
 
-    // #3815: «Срок изготовления» (dueKey, YYYYMMDD) → смещение дня от базы — той же базой и в той
-    // же (локальной) полночи, что dayOffsetFromBase для «Даты план», поэтому смещения напрямую
-    // сравнимы. Нет срока/Infinity/невалидный/нет базы → null.
-    function dueDayOffsetFromBase(dueKey, baseMidnightMs) {
-        var k = Number(dueKey);
-        if (!isFinite(k) || k < 10000101 || k > 99991231) return null;
-        var y = Math.floor(k / 10000), m = Math.floor(k / 100) % 100, d = k % 100;
-        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
-        var iso = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
-        return dayOffsetFromBase(iso, baseMidnightMs);
-    }
-
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
@@ -3772,19 +3760,13 @@
             // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
             return (dayEnd - dayStart) + margin - lunchRes - clock;
         }
-        // #3658: якорь дня по «Дате план» — резка ложится на СВОЙ рабочий день, а не паком от
-        // дня «С». Иначе автозаполнение дней (#3619) при генерации с другой даты переписывало
-        // planStartTs истории (задания 30.05 уезжали в выбранную 4.06). Якорь может быть
-        // отрицательным (день раньше базы=дня «С»), поэтому стартовый день = минимальный якорь.
+        // #3974: якорь дня несёт ТОЛЬКО «Зафиксировано» (🔒) — фикс-резка держит свой день
+        // (fixedDay ниже). Свободные задания якоря не имеют (dayAnchorByCut #3658 отменён): день
+        // раскладки начинаем с «С» (day 0) и плотно набиваем вперёд. Фикс-резку с днём РАНЬШЕ «С»
+        // (fixedDay < 0) не размещаем — цикл идёт только вперёд от 0, и она остаётся как есть.
         var anchorByCut = opts.dayAnchorByCut || {};
-        var dueDayByCut = opts.dueDayByCut || {};   // #3826: день срока (смещение от базы) на резку
-        var minAnchor = null;
-        (orderedCuts || []).forEach(function(c){
-            var a = anchorByCut[String(c && c.id)];
-            if (a != null && (minAnchor == null || a < minAnchor)) minAnchor = a;
-        });
         var segments = [];
-        var day = (minAnchor != null ? minAnchor : 0), clock = 0;   // clock — минут занято в текущем дне (от dayStart)
+        var day = 0, clock = 0;   // clock — минут занято в текущем дне (от dayStart)
         var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
         // Обед как пауза перед НОВОЙ резкой: если в этот день он ещё не был и время дня
         // (dayStart+clock) дошло до LUNCH_START — вставляем паузу (clock += длительность).
@@ -3828,11 +3810,10 @@
                     remaining: Math.round(Number(runsByCut[id] != null ? runsByCut[id] : c && c.plannedRuns) || 0),
                     perPass: Number(perPassByCut[id] != null ? perPassByCut[id] : 0) || 0,
                     anchor: anchorByCut[id] != null ? anchorByCut[id] : null,
-                    // #3792: «Зафиксировано» — замок на ДЕНЬ. Якорь дня обязателен (без «Даты
-                    // план» закрепить день нельзя → трактуем как свободную). Внутри дня резку
-                    // оптимизатор переставлять может, на другой день/в разбивку — нет.
+                    // #3792/#3974: «Зафиксировано» (🔒) — замок на ДЕНЬ. fixedDay = якорь дня фикс-резки
+                    // (без 🔒 задание свободно и набивается от «С»). Внутри дня оптимизатор переставляет,
+                    // на другой день/в разбивку — нет.
                     fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
-                    dueDay: dueDayByCut[id] != null ? dueDayByCut[id] : null,   // #3826: день «Срока изготовления»
                     isCont: false, pendingSetup: 0
                 };
                 poolOrder.push(id);
@@ -3840,17 +3821,15 @@
             function pending() {
                 return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
             }
-            // R3: среди кандидатов — приоритет (по убыванию): фольга в конец дня (#3717), затем
-            // более ранний «Срок изготовления» (#3815, EDD: раннему сроку — ранний день), затем
-            // минимальная переналадка от prevPhysical (непрерывность конфигурации, «начинать с той
-            // конфигурации, на которой закончили»), затем исходный порядок очереди. Так срок
-            // определяет ДЕНЬ задания, а переналадка — порядок ВНУТРИ одного срока.
+            // #3974: среди кандидатов — приоритет (по возрастанию ключа): нефольга раньше фольги
+            // (#3717 — фольга в конец дня), затем минимальная переналадка от prevPhysical
+            // (непрерывность конфигурации, «начинать с той конфигурации, на которой закончили»),
+            // затем исходный порядок очереди (idx). Срок (EDD) в раскладке не участвует (#3974).
             function selectByConfig(ids) {
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var due = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;   // #3815: нет срока → в конец
-                    var key = [ (c && c.isFoil) ? 1 : 0, due, setupCostFor(prevPhysical, c), state[id].idx ];
+                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
@@ -3858,22 +3837,6 @@
                     }
                 });
                 return best && best.id;
-            }
-            // #3826: среди фольги «своего срока» (срок ≤ дня) — крупнейшая, чья настройка+намотка
-            // ЦЕЛИКОМ влезает в остаток дня. Кладём такую (фольга — в конец дня, #3717), не дробя
-            // её настройку в хвост (иначе намотка-продолжение встала бы в НАЧАЛО следующего дня
-            // перед нефольгой — нарушение #3717). Ничего не влезает → null (день закрываем).
-            function bestFittingFoil(ids) {
-                var avail = effCapacity(day) - clock;
-                var best = null, bestDur = -1;
-                ids.forEach(function(id){
-                    var st = state[id], c = st.cut;
-                    if (!(st.remaining > 0) || !(st.perPass > 0)) return;
-                    var setup = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
-                    var dur = st.remaining * (st.perPass + leader);
-                    if (setup + dur <= avail && dur > bestDur) { best = id; bestDur = dur; }
-                });
-                return best;
             }
             // Предохранитель от зацикливания: каждая итерация уменьшает remaining либо
             // ставит настройку и двигает день (после чего проход точно ложится). Верхняя
@@ -3896,56 +3859,13 @@
                 var pick;
                 if (inProgress.length) pick = selectByConfig(inProgress);
                 else if (fixedToday.length) pick = selectByConfig(fixedToday);
-                else if (freeDue.length) {
-                    // #3826: фольга всегда в конце дня (#3717) → внутри дня не может вытеснить
-                    // нефольгу. Поэтому если на ЭТОТ день приходится фольга СВОЕГО срока (срок ≤
-                    // дня), нельзя тянуть вперёд будущую (срок > дня) нефольгу: она съедала хвост,
-                    // и фольга своего срока переливалась на следующий день (баг #3826 — фольга со
-                    // сроком 23 уезжала на 24, хотя в дне 23 было место). Резервируем хвост дня под
-                    // работу своего срока: сперва нефольга своего срока, затем фольга своего срока —
-                    // крупнейшая ЦЕЛИКОМ влезающая (без дробления настройки). Когда ни одна фольга
-                    // не влезает в остаток — закрываем день (фольга остаётся в конце), хвост фольги
-                    // переедет на завтра. Нет фольги своего срока → прежнее поведение (можно тянуть).
-                    var dueTodayFoil = freeDue.filter(function(id){
-                        return state[id].cut && state[id].cut.isFoil && state[id].dueDay != null && state[id].dueDay <= day;
-                    });
-                    // фольга уже стоит на этом дне → нефольгу после неё не кладём (#3717).
-                    var foilOnDay = segments.some(function(s){
-                        var ss = state[String(s.cutId)];
-                        return s.dayOffset === day && ss && ss.cut && ss.cut.isFoil;
-                    });
-                    if (!dueTodayFoil.length) {
-                        pick = selectByConfig(freeDue);
-                    } else {
-                        var dueTodayNonFoil = freeDue.filter(function(id){
-                            return !(state[id].cut && state[id].cut.isFoil) && state[id].dueDay != null && state[id].dueDay <= day;
-                        });
-                        if (dueTodayNonFoil.length && !foilOnDay) {
-                            pick = selectByConfig(dueTodayNonFoil);   // сперва нефольга своего срока
-                        } else {
-                            pick = bestFittingFoil(dueTodayFoil);   // фольга своего срока — крупнейшая целиком влезающая
-                            if (pick == null) {
-                                // ни одна фольга своего срока целиком не влезла в остаток дня.
-                                var foilBiggerThanDay = dueTodayFoil.filter(function(id){
-                                    return (state[id].remaining * (state[id].perPass + leader)) > capacity;
-                                });
-                                if (foilBiggerThanDay.length) {
-                                    pick = selectByConfig(foilBiggerThanDay);   // крупнее целого дня → дробим (заполнит остаток)
-                                } else if (!foilOnDay) {
-                                    // фольги на дне ещё нет → остаток дозаполняем нефольгой (тянем
-                                    // вперёд будущую) — фольга уедет на след. день в конец, «фольга в
-                                    // конце» не нарушается (на этом дне фольги нет).
-                                    var fillNonFoil = freeDue.filter(function(id){ return !(state[id].cut && state[id].cut.isFoil); });
-                                    if (fillNonFoil.length) pick = selectByConfig(fillNonFoil);
-                                    else if (clock > 0) { day += 1; clock = 0; continue; }
-                                    else pick = selectByConfig(dueTodayFoil);
-                                } else if (clock > 0) { day += 1; clock = 0; continue; }   // фольга уже на дне → закрываем день
-                                else pick = selectByConfig(dueTodayFoil);
-                            }
-                        }
-                    }
-                }
-                else if (freeAny.length) pick = selectByConfig(freeAny);   // нет «по сроку» → тянем будущую свободную вперёд
+                // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
+                // (isFoil-last key), поэтому фольга уходит в конец дня (#3717) сама: нефольга
+                // не может встать ПОСЛЕ фольги (она всегда выбирается раньше), а хвост дня добьётся
+                // проходами/дроблением ниже. Срока (EDD) в выборе нет — резерв хвоста под фольгу
+                // своего срока (#3826) больше не нужен.
+                else if (freeDue.length) pick = selectByConfig(freeDue);
+                else if (freeAny.length) pick = selectByConfig(freeAny);   // свободных «по дню» нет — тянем будущую свободную вперёд
                 else {
                     // Остались только будущие зафиксированные — прыгаем к ближайшему их дню
                     // (свободных в пуле нет, нахлёст-простой заполнять некем).
@@ -4455,70 +4375,27 @@
         var base = Number(opts.planBaseMidnightMs);
         var merged = mergeContinuationChains(cuts);
         var chainByLogical = merged.chainByLogical || {};
-        // #3815: проставить «Срок изготовления» (самый ранний срок обеспечиваемых позиций,
-        // dueKeyByCut по id головы) на логические резки — чтобы упорядочивание (orderCuts) и
-        // по-дневная раскладка (splitMachineQueue/selectByConfig) ставили задания с более ранним
-        // сроком на более ранние дни (EDD). Нет срока → Infinity (в конец). merged.cuts — копии
-        // голов, поэтому self.cuts не мутируем.
-        var dueKeyByCut = opts.dueKeyByCut || {};
-        merged.cuts.forEach(function(c){
-            var dk = (c && c.id != null) ? dueKeyByCut[String(c.id)] : null;
-            c.dueKey = (dk != null && isFinite(dk)) ? Number(dk) : Infinity;
-        });
-        // #3815: задание не должно «застревать» позже своего «Срока изготовления» из-за прежней
-        // «Даты план». Для НЕзафиксированных резок нижняя граница дня (anchor) ослабляется до дня
-        // срока (но не раньше начала окна, day 0): EDD сможет подтянуть задание с ранним сроком на
-        // ранний день, даже если прежняя раскладка поставила его позже (иначе при по-требованию
-        // пересборке «Упорядочить»/генерации старый якорь дня держал бы баг: на дне N — срок N+1,
-        // на N+1 — срок N). Зафиксированные задания (#3508) остаются на своём дне — якорь не трогаем.
-        // Активно только при наличии срока (есть dueKeyByCut); без сроков effAnchor == исходный.
+        // #3974: «Срок изготовления» (EDD) БОЛЬШЕ НЕ участвует в раскладке — он только красит
+        // строку очереди (dueColorClass, #3769). Раннему сроку НЕ отдаём ранний день: всё
+        // необеспеченное набивается от «С» плотно (splitMachineQueue day 0). c.dueKey не
+        // проставляем — планировщик его не читает (EDD #3815/#3820/#3826 отменён, issue #3974).
+        // #3974: якорь дня оставляем ТОЛЬКО за «Зафиксировано» (🔒) — единственное, что не
+        // двигаем. Фикс-резка держит свой день (fixedDay в splitMachineQueue); свободные задания
+        // якоря «Даты план» не имеют (dayAnchorByCut #3658 отменён) и при «Создать» перепаковываются
+        // от «С». Ручной перенос 🗓 без 🔒 не держится (day-anchor свободных снят).
         var anchorIn = opts.dayAnchorByCut || {};
         var effAnchorByCut = {};
         merged.cuts.forEach(function(c){
             var id = String(c && c.id);
-            var a = anchorIn[id];
-            if (a == null) return;   // нет «Даты план» — без якоря (как было)
-            if (c && c.fixed) { effAnchorByCut[id] = a; return; }   // фикс — на своём дне
-            var dueOff = dueDayOffsetFromBase(c && c.dueKey, base);
-            effAnchorByCut[id] = (dueOff != null) ? Math.min(a, Math.max(0, dueOff)) : a;
-        });
-        // #3826: день «Срока изготовления» (смещение от базы) на каждую резку — нужен
-        // splitMachineQueue, чтобы отличить «резку этого дня по сроку» (срок ≤ дня) от «тянем
-        // вперёд будущую» (срок > дня) и зарезервировать хвост дня под фольгу своего срока.
-        var dueDayByCut = {};
-        merged.cuts.forEach(function(c){
-            var off = dueDayOffsetFromBase(c && c.dueKey, base);
-            if (off != null) dueDayByCut[String(c && c.id)] = off;
+            if (c && c.fixed && anchorIn[id] != null) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
         });
         var perPass = opts.perPassByCut || {};
-        // #3660: НЕ перепланировать чужие даты — обрабатываем только цепочки, чья ГОЛОВА в
-        // выбранном диапазоне «Дата плана» [scopeFromKey; scopeToKey] (ключи YYYYMMDD). Иначе
-        // генерация на 31.05 переписывала очередь/время ВСЕХ будущих заданий. Переполнение дня
-        // (продолжение цепочки на следующий день) сохраняется — это сегменты той же головы.
-        // Без scope (оба ключа null) — обрабатываем все (обратная совместимость/тесты).
-        var scopeFrom = opts.scopeFromKey, scopeTo = opts.scopeToKey;
-        var hasScope = scopeFrom != null || scopeTo != null;
-        // #3918: верхняя граница scope, до которой РЕАЛЬНО раскладываем. Расширяется ниже до дня,
-        // куда дотянулось ПРОДОЛЖЕНИЕ разбитой по дням цепочки, если на этих днях есть чужие резки.
-        var effScopeTo = scopeTo;
-        function inScopeUpTo(c, toKey){
-            if (!hasScope) return true;
-            var fromK = scopeFrom == null ? -Infinity : scopeFrom;
-            var toK = toKey == null ? Infinity : toKey;
-            if (fromK > toK) { var t = fromK; fromK = toK; toK = t; }
-            var k = planDateDayKey(c && c.planDate);
-            if (k === Infinity) return true;   // без «Дата план» (новая, ещё не датирована) — в scope
-            if (k >= fromK && k <= toK) return true;   // «Дата план» в окне фильтра (#3660)
-            // #3820: EDD — НЕзафиксированную резку, чей «Срок изготовления» приходится НА окно
-            // фильтра или РАНЬШЕ него (dueKey ≤ верхняя граница), но «Дата план» которой стоит
-            // ПОЗЖЕ окна (k > toK), всё равно берём в раскладку — иначе задание со сроком 23,
-            // «застрявшее» на 24, при фильтре [23;23] не попадало в scope и EDD не могло подтянуть
-            // его на 23 (#3815 ослабляет якорь до дня срока, но только для резок В scope). Так
-            // просроченное/срочное по сроку задание затягивается в окно; зафиксированное (#3508)
-            // и задание со сроком ПОЗЖЕ окна — остаются на своих днях (#3660 для чужих дат в силе).
-            if (toKey != null && k > toK && c && !c.fixed && isFinite(c.dueKey) && Number(c.dueKey) <= toK) return true;
-            return false;
-        }
+        // #3974: фильтр входа по «Дате план» ∈ [С;По] (#3660 inScopeUpTo / #3918 спил-день)
+        // ОТМЕНЁН. Вход планировщика = всё необеспеченное (открытые задания, отобраны вызывающим:
+        // не «Завершён»), за ЛЮБЫЕ даты. [С;По] — не фильтр входа, а окно РАЗМЕЩЕНИЯ: база = «С»
+        // (day 0), splitMachineQueue набивает дни от неё и переливает за «По». Раскладываем ВСЕ
+        // переданные резки (группировка по станку ниже); ничего не «бережём по чужой дате» —
+        // держит день только 🔒 «Зафиксировано».
         // #3924: осиротевшие сегменты НАСТРОЙКИ (0 проходов) — мусор прежних пересборок. У них
         // пустой/висячий «ID первой части» (голову-резку удалили/перенесли), поэтому
         // mergeContinuationChains не подшивает их к цепочке, а делает ОТДЕЛЬНОЙ логической резкой с
@@ -4578,8 +4455,7 @@
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: effAnchorByCut,   // #3658: привязка к дню «Даты план» (#3815: ослаблена до дня срока для нефикс.)
-                dueDayByCut: dueDayByCut,   // #3826: день срока — резерв хвоста дня под фольгу своего срока
+                dayAnchorByCut: effAnchorByCut,   // #3974: якорь дня ТОЛЬКО за 🔒 (фикс держит свой день); свободные — от «С»
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
@@ -4587,58 +4463,20 @@
             });
             return segs;
         }
-        // Сгруппировать резки по станку (в scope [scopeFrom; effTo]) и разложить каждую очередь.
-        // Возвращает { mOrder, segsByMachine, maxSegKey } — maxSegKey = наибольший день (ключ
-        // YYYYMMDD), на который лёг ХОТЬ ОДИН сегмент (учитывая перелив продолжений за конец дня).
-        function planScope(effTo){
-            var bm = {}, mo = [];
-            merged.cuts.forEach(function(c){
-                var sid = c && c.slitter && c.slitter.id;
-                if (sid == null) return;
-                if (!inScopeUpTo(c, effTo)) return;   // #3660/#3918: чужая дата вне (расширенного) окна — не трогаем
-                var key = String(sid);
-                if (!bm[key]) { bm[key] = []; mo.push(key); }
-                bm[key].push(c);
-            });
-            var sbm = {}, maxSegKey = null;
-            mo.forEach(function(key){
-                var segs = planMachineSegs(bm[key], key);
-                sbm[key] = segs;
-                segs.forEach(function(seg){
-                    var kk = planDateDayKey(String(scheduleStartTimestamp(base, seg.windowStartMin)));
-                    if (isFinite(kk) && (maxSegKey == null || kk > maxSegKey)) maxSegKey = kk;
-                });
-            });
-            return { mOrder: mo, segsByMachine: sbm, maxSegKey: maxSegKey };
-        }
-        // #3918: ПРОДОЛЖЕНИЕ разбитой по дням цепочки in-scope переливается на следующий день.
-        // Если этот день ВНЕ scope (узкий фильтр), его собственные резки НЕ перепланируются и
-        // остаются с 08:00 — продолжение садится ПОВЕРХ них: день переполняется (бейдж 571 при
-        // ёмкости 450), карточки лезут за смену (17:01…23:31), scheduleFromStored каскадит их до
-        // 23:31. Оператор #3660: «не лезь в другие даты, ЕСЛИ ТОЛЬКО задание не вылезает из этого
-        // дня в следующий» — спил-день перепланируем вместе с продолжением, дальние (за зазором)
-        // не трогаем. Расширяем верхнюю границу scope до дня самого позднего сегмента, ПОКА на
-        // новых днях появляются чужие (ещё вне scope) резки; сами они могут переливаться дальше.
-        var planned = planScope(effScopeTo);
-        if (hasScope && scopeTo != null) {
-            var guard = 0;
-            while (guard++ < 500) {
-                var reach = planned.maxSegKey;
-                if (reach == null || !(reach > effScopeTo)) break;
-                // есть ли резки ВНЕ текущего окна, чью «Дату план» накрыл перелив (день ≤ reach)?
-                var foreign = false;
-                for (var fi = 0; fi < merged.cuts.length; fi++) {
-                    var fc = merged.cuts[fi];
-                    if (inScopeUpTo(fc, effScopeTo)) continue;
-                    var fk = planDateDayKey(fc && fc.planDate);
-                    if (fk !== Infinity && fk > effScopeTo && fk <= reach) { foreign = true; break; }
-                }
-                if (!foreign) break;
-                effScopeTo = reach;
-                planned = planScope(effScopeTo);
-            }
-        }
-        var mOrder = planned.mOrder, segsByMachine = planned.segsByMachine;
+        // #3974: группируем ВСЕ переданные резки по станку (без scope-фильтра дат) и раскладываем
+        // каждую очередь от «С». Перелив продолжений за конец дня/«По» — обычная работа
+        // splitMachineQueue (#3280); спец-обработки #3918 «спил-день вне окна» больше не нужно:
+        // окна-фильтра нет, все дни раскладки — наши.
+        var byMachine = {}, mOrder = [];
+        merged.cuts.forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return;
+            var key = String(sid);
+            if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
+            byMachine[key].push(c);
+        });
+        var segsByMachine = {};
+        mOrder.forEach(function(key){ segsByMachine[key] = planMachineSegs(byMachine[key], key); });
         var updates = [], creates = [], deletes = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
@@ -5238,26 +5076,14 @@
     // сроку (по возрастанию), ВНУТРИ каждого срока — выбранная стратегия (минимум переналадок,
     // #3783). Резки без срока (dueKey не число → Infinity) собираются в последнюю группу. Если
     // ни у одной резки срока нет — одна группа = прежнее поведение (полная обратная совместимость).
-    function sequenceByDue(list, opts){
-        var byDue = {}, order = [];
-        (list || []).forEach(function(c){
-            var k = (c && isFinite(c.dueKey)) ? Number(c.dueKey) : Infinity;
-            var sk = String(k);
-            if (!byDue[sk]) { byDue[sk] = { key: k, items: [] }; order.push(sk); }
-            byDue[sk].items.push(c);
-        });
-        order.sort(function(a, b){ return byDue[a].key - byDue[b].key; });
-        var out = [];
-        order.forEach(function(sk){ out = out.concat(sequenceForStrategy(byDue[sk].items, opts)); });
-        return out;
-    }
-
     function orderCuts(cuts, weights){
         var rest = [], foil = [];
         (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
         var opts = makePlanningOptions(weights);
-        // #3717: фольга — отдельной группой в конец. #3815: внутри rest и foil — по сроку (EDD).
-        var seq = sequenceByDue(rest, opts).concat(sequenceByDue(foil, opts));
+        // #3717: фольга — отдельной группой в конец дня. #3974: внутри rest и foil — по стратегии
+        // (SETUP: группировка сырья/ножей — минимум переналадок). Срок изготовления (EDD) в
+        // упорядочивании НЕ участвует (только цвет строки, dueColorClass); отменён #3815.
+        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;
@@ -9186,19 +9012,10 @@
                 setupGroupsByDay[day][slitterId].push(descriptor);
                 loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
             }
-            // #3970: «Срок изготовления» раскладки (самый ранний срок покрываемых позиций, EDD).
-            // Нужен ВЫРАВНИВАНИЮ загрузки: packMachine → orderCuts → sequenceByDue группирует
-            // одинаковые конфиги только ВНУТРИ одного срока, а разные сроки (#3815) разносят их по
-            // очереди (каждая ставит ножи/сырьё заново — как реальный день-сплит). Без dueKey все
-            // раскладки попадали в один «срок» (Infinity) → packMachine группировал глобально и
-            // ЗАНИЖАЛ настройку настроечно-разного станка → балансировщик недооценивал его загрузку,
-            // не разгружал, и работа копилась/переливалась (issue #3970: «набито на Станок 1 после
-            // отпуска», перегруз/недогруз). Оценка теперь совпадает с реальным расписанием.
-            var layoutDueKey = Infinity;
-            (lay.positionsCovered || []).forEach(function(pid){
-                var pp = posById[String(pid)]; var k = pp && pp.dueKey;
-                if (k != null && isFinite(k) && k < layoutDueKey) layoutDueKey = k;
-            });
+            // #3974: выравниванию загрузки НЕ нужен «Срок изготовления» раскладки (dueKey, #3970):
+            // packMachine → orderCuts группирует конфиги по стратегии (сырьё/ножи), БЕЗ разбиения
+            // по срокам (EDD отменён), ровно как реальное расписание (splitMachineQueue от «С»).
+            // Оценка настройки и так совпадает с раскладкой — отдельный dueKey на layoutPlans снят.
             layoutPlans.push({
                 id: descriptor.id,
                 materialId: descriptor.materialId,
@@ -9217,7 +9034,6 @@
                 timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
-                dueKey: layoutDueKey,   // #3970: EDD-ключ для packMachine/orderCuts (см. выше)
                 sequence: '',
                 index: layIdx
             });
@@ -10237,24 +10053,22 @@
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var perPassByCut = {};
-        // #3658: якорь дня по «Дате план» каждого задания (смещение от базы=дня «С»). Без него
-        // автозаполнение дней переписывало planStartTs истории: генерация с 4.06 утаскивала
-        // задания 30.05 в 4.06. Привязываем каждое задание к ЕГО рабочему дню (может быть и
-        // раньше базы → отрицательное смещение). Пустая «Дата план» — без якоря.
+        // #3974: якорь дня по «Дате план» нужен ТОЛЬКО зафиксированным (🔒) резкам — planCutOperations
+        // держит их день, остальное набивает от «С». Смещение считаем для всех (planCutOperations
+        // отберёт фикс.); может быть отрицательным (день раньше базы=«С»). Пустая «Дата план» — без якоря.
         var dayAnchorByCut = {};
-        var dueKeyByCut = {};   // #3815: «Срок изготовления» задания = самый ранний срок обеспечиваемых позиций (EDD)
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
-            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #3815
-            if (dueKeys.length) dueKeyByCut[String(c.id)] = dueKeys[0];
         });
-        // #3660: перепланируем ТОЛЬКО выбранный диапазон дат [С; По] — не лезем в другие даты.
-        // Пустой край → null (без ограничения с этой стороны).
-        var fromStr = String(self.filter && self.filter.date || '').trim();
-        var toStr = String(self.filter && self.filter.dateTo || '').trim();
-        var ops = planCutOperations(self.cuts, {
+        // #3974: вход планировщика = всё НЕОБЕСПЕЧЕННОЕ — открытые задания (статус ≠ «Завершён»),
+        // за ЛЮБЫЕ даты. Фильтра по [С; По] на входе больше нет: раньше scope-диапазон заодно
+        // отсекал прошлое/готовое, теперь отбираем явно по статусу, а [С; По] — окно РАЗМЕЩЕНИЯ
+        // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
+        // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
+        var planInput = (self.cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
+        var ops = planCutOperations(planInput, {
             weights: planOptions,
             times: self.changeTimes,
             dayStartMin: dayWindow.startMin,
@@ -10267,10 +10081,7 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
-            dayAnchorByCut: dayAnchorByCut,   // #3658: привязка к дню «Даты план»
-            dueKeyByCut: dueKeyByCut,   // #3815: EDD — задание с более ранним сроком на более ранний день
-            scopeFromKey: fromStr === '' ? null : planDateDayKey(fromStr),   // #3660: scope = диапазон фильтра
-            scopeToKey: toStr === '' ? null : planDateDayKey(toStr),
+            dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
