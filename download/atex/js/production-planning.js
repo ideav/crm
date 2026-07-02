@@ -4398,10 +4398,18 @@
         var base = Number(opts.planBaseMidnightMs);
         var merged = mergeContinuationChains(cuts);
         var chainByLogical = merged.chainByLogical || {};
-        // #3974: «Срок изготовления» (EDD) БОЛЬШЕ НЕ участвует в раскладке — он только красит
-        // строку очереди (dueColorClass, #3769). Раннему сроку НЕ отдаём ранний день: всё
-        // необеспеченное набивается от «С» плотно (splitMachineQueue day 0). c.dueKey не
-        // проставляем — планировщик его не читает (EDD #3815/#3820/#3826 отменён, issue #3974).
+        // #3974: «Срок изготовления» (EDD) НЕ привязывает день и НЕ фильтрует вход — раннему сроку
+        // НЕ отдаём ранний день, всё необеспеченное набивается от «С» плотно (splitMachineQueue
+        // day 0); day-anchor #3658 и scope #3660 сняты. #3980: срок возвращается ТОЛЬКО как тай-брейк
+        // ПОРЯДКА резки (orderCuts, при равной переналадке — более ранний срок раньше), чтобы
+        // просроченная резка той же конфигурации ножей не стояла после дальней. Проставляем c.dueKey
+        // (самый ранний срок обеспечиваемых позиций, dueKeyByCut по id головы) на логические резки —
+        // его читает только orderCuts; splitMachineQueue/selectByConfig срок по-прежнему игнорируют.
+        var dueKeyByCut = opts.dueKeyByCut || {};
+        merged.cuts.forEach(function(c){
+            var dk = (c && c.id != null) ? Number(dueKeyByCut[String(c.id)]) : NaN;
+            c.dueKey = isFinite(dk) ? dk : Infinity;
+        });
         // #3974: якорь дня оставляем ТОЛЬКО за «Зафиксировано» (🔒) — единственное, что не
         // двигаем. Фикс-резка держит свой день (fixedDay в splitMachineQueue); свободные задания
         // якоря «Даты план» не имеют (dayAnchorByCut #3658 отменён) и при «Создать» перепаковываются
@@ -4982,9 +4990,14 @@
         return healed;
     }
 
-    // #3785: при равной стоимости перехода тай-брейк — число полос (ножей) ПО УБЫВАНИЮ
-    // («при прочих равных» больше полос — раньше), затем уже ширина ролика и id.
-    function startKey(c){ return [-(Number(c.knifeCount) || 0), Number(c.rollerWidth) || 0, String(c.id)]; }
+    // #3980: «Срок изготовления» резки (dueKey, ГГГГММДД) для тай-брейка порядка. Нет срока /
+    // невалидный → Infinity (в конец тай-брейка). Только для сравнения ПОРЯДКА при равной
+    // переналадке; на день/ёмкость/scope не влияет (day-anchor #3658 и scope #3660 сняты #3974).
+    function cutDueKey(c){ var k = Number(c && c.dueKey); return isFinite(k) ? k : Infinity; }
+    // #3785: при равной стоимости перехода тай-брейк — сперва более ранний СРОК (#3980: чтобы
+    // просроченная резка той же конфигурации ножей не встала после дальней), затем число полос
+    // (ножей) ПО УБЫВАНИЮ («при прочих равных» больше полос — раньше), затем ширина ролика и id.
+    function startKey(c){ return [cutDueKey(c), -(Number(c.knifeCount) || 0), Number(c.rollerWidth) || 0, String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
 
     function fatigueComplexityKey(c, machineWidth){
@@ -5024,6 +5037,19 @@
         for (var i = 0; i < n; i++){ var av = a[i] || 0, bv = b[i] || 0; if (av !== bv) return bv - av; }
         return 0;
     }
+    // #3980: ряд «Сроков изготовления» по порядку цепочки. Среди РАВНЫХ по стоимости переналадки
+    // цепочек предпочитаем ту, где более ранний срок стоит раньше (лексикографически меньший ряд):
+    // просроченная/срочная резка не должна оказаться после дальней, если переналадка та же.
+    // Нет срока → Infinity (в конец). Возвращает <0, если ряд a предпочтительнее ряда b.
+    function dueKeySeq(seq){ return (seq || []).map(cutDueKey); }
+    function cmpDueKeySeq(a, b){
+        var n = Math.max(a.length, b.length);
+        for (var i = 0; i < n; i++){
+            var av = i < a.length ? a[i] : Infinity, bv = i < b.length ? b[i] : Infinity;
+            if (av !== bv) return av < bv ? -1 : 1;
+        }
+        return 0;
+    }
     // Лимит полного перебора стартов: при больших очередях остаёмся на одиночном старте
     // (argmin startKey), чтобы не уходить в O(n³). На станко-день очередь маленькая.
     var GREEDY_MULTISTART_LIMIT = 60;
@@ -5039,13 +5065,18 @@
         // #3871: при выравнивании загрузки — цепочка от одного старта (перебор стартов даёт
         // O(n³) и делал «Создать» очень медленным); как и при больших очередях (>limit).
         if (pool.length > GREEDY_MULTISTART_LIMIT || balanceFastChangeover) return greedyFromStart(pool[0], pool.slice(1), weights);
-        var best = null, bestCost = Infinity, bestKnife = null;
+        var best = null, bestCost = Infinity, bestDue = null, bestKnife = null;
         for (var s = 0; s < pool.length; s++){
             var seq = greedyFromStart(pool[s], pool.slice(0, s).concat(pool.slice(s + 1)), weights);
-            var cost = chainChangeoverCost(seq, weights), knife = knifeDescSeq(seq);
-            if (best === null || cost < bestCost || (cost === bestCost && cmpKnifeDescSeq(knife, bestKnife) < 0)){
-                best = seq; bestCost = cost; bestKnife = knife;
+            var cost = chainChangeoverCost(seq, weights), due = dueKeySeq(seq), knife = knifeDescSeq(seq);
+            // Первично — минимум переналадки (#3268/#3783). Среди равных по стоимости: раньше более
+            // ранний срок (#3980), затем ножи по убыванию (#3130). Срок НЕ повышает переналадку.
+            var better = best === null || cost < bestCost;
+            if (!better && cost === bestCost){
+                var byDue = cmpDueKeySeq(due, bestDue);
+                better = byDue < 0 || (byDue === 0 && cmpKnifeDescSeq(knife, bestKnife) < 0);
             }
+            if (better){ best = seq; bestCost = cost; bestDue = due; bestKnife = knife; }
         }
         return best;
     }
@@ -10080,10 +10111,16 @@
         // держит их день, остальное набивает от «С». Смещение считаем для всех (planCutOperations
         // отберёт фикс.); может быть отрицательным (день раньше базы=«С»). Пустая «Дата план» — без якоря.
         var dayAnchorByCut = {};
+        // #3980: «Срок изготовления» задания = самый ранний срок обеспечиваемых позиций (EDD).
+        // Нужен orderCuts как тай-брейк порядка при равной переналадке (просроченная не после
+        // дальней при одинаковых ножах). На день/ёмкость/scope НЕ влияет (day-anchor #3658 снят).
+        var dueKeyByCut = {};
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #3769/#3980
+            if (dueKeys.length) dueKeyByCut[String(c.id)] = dueKeys[0];
         });
         // #3974: вход планировщика = всё НЕОБЕСПЕЧЕННОЕ — открытые задания (статус ≠ «Завершён»),
         // за ЛЮБЫЕ даты. Фильтра по [С; По] на входе больше нет: раньше scope-диапазон заодно
@@ -10105,6 +10142,7 @@
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
+            dueKeyByCut: dueKeyByCut,   // #3980: срок — тай-брейк порядка резки (orderCuts), не день/scope
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
