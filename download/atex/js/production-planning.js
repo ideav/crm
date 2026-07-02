@@ -9186,6 +9186,19 @@
                 setupGroupsByDay[day][slitterId].push(descriptor);
                 loadBySlitterId[slitterId] = (loadBySlitterId[slitterId] || 0) + 1;
             }
+            // #3970: «Срок изготовления» раскладки (самый ранний срок покрываемых позиций, EDD).
+            // Нужен ВЫРАВНИВАНИЮ загрузки: packMachine → orderCuts → sequenceByDue группирует
+            // одинаковые конфиги только ВНУТРИ одного срока, а разные сроки (#3815) разносят их по
+            // очереди (каждая ставит ножи/сырьё заново — как реальный день-сплит). Без dueKey все
+            // раскладки попадали в один «срок» (Infinity) → packMachine группировал глобально и
+            // ЗАНИЖАЛ настройку настроечно-разного станка → балансировщик недооценивал его загрузку,
+            // не разгружал, и работа копилась/переливалась (issue #3970: «набито на Станок 1 после
+            // отпуска», перегруз/недогруз). Оценка теперь совпадает с реальным расписанием.
+            var layoutDueKey = Infinity;
+            (lay.positionsCovered || []).forEach(function(pid){
+                var pp = posById[String(pid)]; var k = pp && pp.dueKey;
+                if (k != null && isFinite(k) && k < layoutDueKey) layoutDueKey = k;
+            });
             layoutPlans.push({
                 id: descriptor.id,
                 materialId: descriptor.materialId,
@@ -9204,6 +9217,7 @@
                 timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
+                dueKey: layoutDueKey,   // #3970: EDD-ключ для packMachine/orderCuts (см. выше)
                 sequence: '',
                 index: layIdx
             });
