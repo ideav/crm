@@ -3090,6 +3090,50 @@
         return isFinite(n) && n >= 0 ? Math.round(n) : null;
     }
 
+    // ---- #3989 Фаза 2 / #3992: настройки нового алгоритма (ТЗ §5, §14) ----------
+    // Значение настройки по имени: приоритет ключа с суффиксом _MN (новый формат «Настройки»),
+    // откат на имя без суффикса (старый формат). Пустое → fallback-ключ.
+    function pickSetting(cfg, primary, fallback){
+        var v = cfg ? cfg[primary] : undefined;
+        if (v != null && String(v).trim() !== '') return v;
+        return cfg ? cfg[fallback] : undefined;
+    }
+    function settingMinutes(cfg, baseName, fallback){
+        var n = Number(pickSetting(cfg, baseName + '_MN', baseName));
+        return isFinite(n) ? n : fallback;
+    }
+    // #3992: лимиты захлёста за конец смены (мин). Ключи получили суффикс _MN
+    // (MAX_OVERWORK_CUTS_MN/MAX_OVERWORK_TUNE_MN), откат на старые имена. Пусто → null (выкл).
+    // Задан только один — второй наследует его (общий смысл «допустимый нахлёст», #3847).
+    function resolveOverworkLimits(settings){
+        var cfg = settings || {};
+        var cuts = parseOverworkMinutes(pickSetting(cfg, 'MAX_OVERWORK_CUTS_MN', 'MAX_OVERWORK_CUTS'));
+        var tune = parseOverworkMinutes(pickSetting(cfg, 'MAX_OVERWORK_TUNE_MN', 'MAX_OVERWORK_TUNE'));
+        return { cutsMin: cuts != null ? cuts : tune, tuneMin: tune != null ? tune : cuts };
+    }
+    // #3989 Фаза 2: явная длительность рабочего дня (мин), ТЗ §5. DAY_DURATION_MN (по умолч. 450).
+    function resolveDayDurationMin(settings){ return settingMinutes(settings, 'DAY_DURATION', 450); }
+    // #3989 Фаза 2: внутридневные паузы — два перерыва (FIRST_INTERVAL/SECCOND_INTERVAL по
+    // INTERVAL_DURATION_MN) и обед — как НЕрабочие интервалы дня. Прозрачны для планирования (не
+    // вычитаются из ёмкости), рисуются на Ганте (ТЗ §5). → отсортированный по началу
+    // [{ startMin, durationMin, kind:'break'|'lunch', label }]. Не заданы → [].
+    function intraDayBreaks(settings){
+        var cfg = settings || {};
+        var out = [];
+        var intervalDur = settingMinutes(cfg, 'INTERVAL_DURATION', 10);
+        function addBreak(startRaw, durMin, kind, label){
+            if (startRaw == null || String(startRaw).trim() === '' || !(durMin > 0)) return;
+            var m = parseClockMinutes(startRaw, NaN);
+            if (isFinite(m)) out.push({ startMin: round3(m), durationMin: round3(durMin), kind: kind, label: label });
+        }
+        addBreak(cfg.FIRST_INTERVAL, intervalDur, 'break', 'Перерыв');
+        // ТЗ пишет ключ с опечаткой SECCOND_INTERVAL — принимаем и корректное написание SECOND_INTERVAL.
+        addBreak(pickSetting(cfg, 'SECCOND_INTERVAL', 'SECOND_INTERVAL'), intervalDur, 'break', 'Перерыв');
+        addBreak(cfg.LUNCH_START, settingMinutes(cfg, 'LUNCH_DURATION', 0), 'lunch', 'Обед');
+        out.sort(function(a, b){ return a.startMin - b.startMin; });
+        return out;
+    }
+
     function resolveWorkingWindow(settings, cleanupMin) {
         var cfg = settings || {};
         var start = parseClockMinutes(cfg.DAY_START_HOUR, DAY_START_MIN);
@@ -3113,8 +3157,8 @@
         // можно положить с нахлёстом, только если она кончится ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS;
         // настройку (ножи/смена сырья) — ≤ DAY_END_HOUR+MAX_OVERWORK_TUNE. Пусто/некорректно →
         // null (фича выключена: планировщик пакует до cutEndMin без сверхнормативного нахлёста).
-        var overCuts = parseOverworkMinutes(cfg.MAX_OVERWORK_CUTS);
-        var overTune = parseOverworkMinutes(cfg.MAX_OVERWORK_TUNE);
+        // #3992: лимиты захлёста читаем по новым ключам с суффиксом _MN (откат на старые имена).
+        var over = resolveOverworkLimits(cfg);
         return {
             startMin: round3(start),
             endMin: round3(end),
@@ -3125,8 +3169,8 @@
             // #3847: лимиты нахлёста (мин за DAY_END_HOUR); null = фича выключена. Если задан только
             // один — второй наследует его (общий смысл «допустимый нахлёст»), чтобы частичная
             // настройка не отключала ограничение целиком.
-            maxOverworkCutsMin: overCuts != null ? overCuts : overTune,
-            maxOverworkTuneMin: overTune != null ? overTune : overCuts
+            maxOverworkCutsMin: over.cutsMin,
+            maxOverworkTuneMin: over.tuneMin
         };
     }
 
@@ -6040,6 +6084,9 @@
         setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
+        resolveOverworkLimits: resolveOverworkLimits,     // #3992: лимиты захлёста (ключи _MN)
+        resolveDayDurationMin: resolveDayDurationMin,     // #3989 Фаза 2: DAY_DURATION_MN
+        intraDayBreaks: intraDayBreaks,                   // #3989 Фаза 2: обед + два перерыва (ТЗ §5)
         buildSchedule: buildSchedule,
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
@@ -11808,4 +11855,4 @@
 
  
  
-// @version 2026-07-03-issue-3989
+// @version 2026-07-03-issue-3992
