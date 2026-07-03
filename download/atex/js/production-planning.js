@@ -5627,6 +5627,197 @@
         '<rect x="4" y="6.7" width="9" height="2.6" rx="1"></rect>' +
         '<rect x="2" y="10.9" width="6" height="2.6" rx="1"></rect></svg>';
 
+    // ============================================================================
+    // #3989 Фаза 1. Целевой алгоритм планирования (ТЗ docs/atex_planning_tz.md).
+    // ЧИСТЫЕ функции: веса штрафов из «Настройки» (ATEH), стоимость размещения слота
+    // (вес + «качество») и оценка качества плана (факт vs идеал). Аддитивно: движок
+    // раскладки пока прежний — эти функции фундамент новой вставочной раскладки.
+    // ============================================================================
+
+    // Веса штрафов и лимиты из «Настройки» (ATEH). Значения по умолчанию — из ТЗ §14.
+    var PLAN_WEIGHT_DEFAULTS = {
+        KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
+        LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
+        CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3, SLOT_SPLIT_COST_MN: 2, MAX_DISTANCE_COST_MN: 25,
+        MAX_SLOTS_DISTANCE_HR: 24, MAX_OUTAGE_PLANNABLE_HR: 48, DAY_DURATION_MN: 450, INTERVAL_DURATION_MN: 10
+    };
+    // Значение веса/лимита: из настроек, иначе дефолт ТЗ. Нечисловое → дефолт.
+    function planWeight(settings, key){
+        var v = settings ? settings[key] : undefined;
+        var n = Number(v);
+        return isFinite(n) ? n : PLAN_WEIGHT_DEFAULTS[key];
+    }
+
+    // Полосы резки как упорядоченный список РАЗНЫХ ширин по убыванию (раскрой формируется по
+    // убыванию ширины — ТЗ §7). Нужен для «качества» перехода и подсчёта числа полос.
+    function orderedStripBands(cut){
+        var set = {};
+        (effKnifeWidths(cut) || []).forEach(function(w){ var n = Number(w); if (isFinite(n) && n > 0) set[String(n)] = 1; });
+        return Object.keys(set).map(Number).sort(function(a, b){ return b - a; });
+    }
+    // Число полос резки (по knifeCount, иначе по числу ненулевых ширин).
+    function stripBandCount(cut){
+        var n = Number(cut && cut.knifeCount) || 0;
+        if (n > 0) return n;
+        return (effKnifeWidths(cut) || []).filter(function(w){ var x = Number(w); return isFinite(x) && x > 0; }).length;
+    }
+
+    // «Качество» перехода по ножам (ТЗ §8): отношение общего числа полос нового слота к числу
+    // полос, совпавших С НАЧАЛА последовательности (ширины по убыванию). Меньше — лучше; всё
+    // совпало → 1. Пример: prev 110×3,60×5,40×10 и next 110×3,60×5,30×13 → 3/2. Нет ножей → 0.
+    function stripPrefixQuality(prev, next){
+        var b = orderedStripBands(next);
+        var total = b.length;
+        if (total === 0) return 0;
+        var a = orderedStripBands(prev), matched = 0, lim = Math.min(a.length, b.length);
+        for (var i = 0; i < lim; i++){ if (a[i] === b[i]) matched++; else break; }
+        return round3(total / Math.max(matched, 0.5));   // matched 0 → 2×total (худшее), совпали все → 1
+    }
+
+    // Нужна ли смена ножей prev→next (набор ширин изменился ИЛИ ролик сузился) — как changeoverParts.
+    function knifeChangeNeeded(prev, next){
+        if (!prev || !next) return false;
+        return knifeMoves(effKnifeWidths(prev), effKnifeWidths(next)) > 0
+            || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
+    }
+    // Нужна ли смена сырья/намотки/партии prev→next — как changeoverParts.
+    function materialChangeNeeded(prev, next){
+        if (!prev || !next) return false;
+        return String(prev.materialId) !== String(next.materialId)
+            || normWinding(prev.winding) !== normWinding(next.winding)
+            || String(prev.batchId) !== String(next.batchId);
+    }
+
+    // Стоимость ОДНОГО направленного перехода prev→next (ТЗ §8): вес (минуты штрафа) + «качество».
+    // Пунктовые факторы (ножи/сырьё/лидер) — по паре; ситуативные — по контексту от движка:
+    //   ctx.settings          — веса из «Настройки»;
+    //   ctx.freeAfterCarry     — переход после «хвоста» прошлого дня → смена бесплатна (ТЗ §8, исключение);
+    //   ctx.foilNotEnd         — next-фольга не в конце дня и не перед фольгой (§8 п.2а);
+    //   ctx.isMove             — это перемещение, а не первичная вставка (§8 п.2б, для фольги);
+    //   ctx.placementDayKey    — день размещения (YYYYMMDD) для сравнения со сроком next.dueKey (§8 п.4/5);
+    //   ctx.distanceExceeded   — простой между станками > MAX_SLOTS_DISTANCE_HR (§8 п.6).
+    function transitionCost(prev, next, ctx){
+        ctx = ctx || {};
+        var s = ctx.settings || {};
+        var byFactor = {}, weight = 0, quality = 0;
+        if (prev && next && !ctx.freeAfterCarry){
+            if (knifeChangeNeeded(prev, next)){
+                // полос стало больше → дороже (KNIVES_INCREASE), иначе KNIVES_CHANGE (ТЗ §8 п.1).
+                var inc = stripBandCount(next) > stripBandCount(prev);
+                var kw = planWeight(s, inc ? 'KNIVES_INCREASE_COST_MN' : 'KNIVES_CHANGE_COST_MN');
+                weight += kw; byFactor.knife = kw;
+                var q = stripPrefixQuality(prev, next); quality += q; byFactor.knifeQuality = q;
+            }
+            if (materialChangeNeeded(prev, next)){
+                var mw = planWeight(s, 'MATERIAL_CHANGE_COST_MN'); weight += mw; byFactor.material = mw;
+            }
+            var leaderChanged = String(prev.leader == null ? '' : prev.leader) !== String(next.leader == null ? '' : next.leader)
+                || String(prev.sleeveId == null ? '' : prev.sleeveId) !== String(next.sleeveId == null ? '' : next.sleeveId);
+            if (leaderChanged){ var lw = planWeight(s, 'LEADER_COST_MN'); weight += lw; byFactor.leader = lw; }
+        }
+        // Фольга не в конце дня (§8 п.2а) / фольгу двигают (§8 п.2б).
+        if (ctx.foilNotEnd){ var fw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fw; byFactor.foilNotEnd = fw; }
+        if (ctx.isMove && next && next.isFoil){ var fmw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fmw; byFactor.foilMove = fmw; }
+        // Срок (§8 п.4/5), дословно по ТЗ: срок ПОЗЖЕ дня размещения → DEADLINE; РАВЕН дню → EXACT_DEADLINE.
+        if (ctx.placementDayKey != null && next && isFinite(next.dueKey)){
+            var due = Number(next.dueKey), day = Number(ctx.placementDayKey);
+            if (due > day){ var dw = planWeight(s, 'DEADLINE_COST_MN'); weight += dw; byFactor.deadline = dw; }
+            else if (due === day){ var ew = planWeight(s, 'EXACT_DEADLINE_COST_MN'); weight += ew; byFactor.exactDeadline = ew; }
+        }
+        // Большой простой между станками (§8 п.6).
+        if (ctx.distanceExceeded){ var xw = planWeight(s, 'MAX_DISTANCE_COST_MN'); weight += xw; byFactor.distance = xw; }
+        return { weight: round3(weight), quality: round3(quality), byFactor: byFactor };
+    }
+
+    // Стоимость ВСТАВКИ слота между prev и next (ТЗ §8): сумма двух переходов prev→slot и slot→next.
+    // ctxPrev/ctxNext — контексты каждого перехода (см. transitionCost). → { weight, quality, before, after }.
+    function insertionCost(prev, slot, next, ctxPrev, ctxNext){
+        var a = transitionCost(prev, slot, ctxPrev);
+        var b = transitionCost(slot, next, ctxNext);
+        return { weight: round3(a.weight + b.weight), quality: round3(a.quality + b.quality), before: a, after: b };
+    }
+
+    // ---- Оценка качества плана (ТЗ §13 + комментарий #3985) --------------------
+    // Набор ширин ножей (конфигурация) и сырьё+намотка резки — для подсчёта РАЗНЫХ конфигураций.
+    function knifeConfigSig(cut){ return knifeWidthSig(cut); }
+    function materialSig(cut){ return String(cut && cut.materialId == null ? '' : cut.materialId).trim() + '|' + normWinding(cut && cut.winding); }
+
+    // Фактические переналадки за два окна + идеальная нижняя граница + близость к идеалу.
+    // slots: [{ id, slitterId, dayKey (YYYYMMDD), planStartMs?, knifeWidths|knifeCount, materialId, winding }].
+    // opts: { settings, scopeFromKey, scopeToKey, prevSetupBySlitter:{slitterId:{materialId,winding,knifeWidths}} }.
+    // → { window:[С;По], all:[С;конец всех задач], ideal, qualityWindow, qualityAll }.
+    function planQuality(slots, opts){
+        opts = opts || {};
+        var s = opts.settings || {};
+        var fromK = opts.scopeFromKey != null ? Number(opts.scopeFromKey) : -Infinity;
+        var toK = opts.scopeToKey != null ? Number(opts.scopeToKey) : Infinity;
+        var prevBy = opts.prevSetupBySlitter || {};
+        var kChange = planWeight(s, 'KNIVES_CHANGE_COST_MN');
+        var kInc = planWeight(s, 'KNIVES_INCREASE_COST_MN');
+        var matW = planWeight(s, 'MATERIAL_CHANGE_COST_MN');
+
+        var byMachine = {};
+        (slots || []).forEach(function(c){
+            var id = String(c.slitterId == null ? '' : c.slitterId);
+            (byMachine[id] = byMachine[id] || []).push(c);
+        });
+        function startKeyOf(c){ var t = Number(c.planStartMs); return isFinite(t) ? t : (Number(c.dayKey) || 0); }
+
+        // Аккумулятор фактики: считает только переналадки, чей день удовлетворяет inWin(dayKey).
+        function actualFor(inWin){
+            var knifeCount = 0, knifeMin = 0, matCount = 0, matMin = 0;
+            Object.keys(byMachine).forEach(function(id){
+                var seq = byMachine[id].slice().sort(function(a, b){
+                    return (Number(a.dayKey) || 0) - (Number(b.dayKey) || 0) || (startKeyOf(a) - startKeyOf(b));
+                });
+                var prev = null, carrySetup = prevBy[id] || null;   // заправка станка на входе окна
+                for (var i = 0; i < seq.length; i++){
+                    var cur = seq[i];
+                    var win = inWin(Number(cur.dayKey) || 0);
+                    if (i === 0 && !carrySetup){
+                        // Первое задание, до него ничего — заложить наладку ножей + смену сырья (§13 п.4).
+                        if (win){
+                            if (stripBandCount(cur) > 0){ knifeCount++; knifeMin += kChange; }
+                            matCount++; matMin += matW;
+                        }
+                    } else {
+                        var prevForCur = (i === 0) ? carryOverPrevCut(carrySetup, cur) : prev;
+                        if (knifeChangeNeeded(prevForCur, cur) && win){
+                            knifeCount++;
+                            knifeMin += (stripBandCount(cur) > stripBandCount(prevForCur) ? kInc : kChange);
+                        }
+                        if (materialChangeNeeded(prevForCur, cur) && win){ matCount++; matMin += matW; }
+                    }
+                    prev = cur;
+                }
+            });
+            return { knifeCount: knifeCount, knifeMin: round3(knifeMin), materialCount: matCount, materialMin: round3(matMin),
+                     changeoverCount: knifeCount + matCount, changeoverMin: round3(knifeMin + matMin) };
+        }
+
+        var window = actualFor(function(dk){ return dk >= fromK && dk <= toK; });   // [С; По]
+        var all = actualFor(function(dk){ return dk >= fromK; });                   // [С; конец всех задач]
+
+        // Идеал: каждая РАЗНАЯ конфигурация ножей и каждое РАЗНОЕ сырьё настраиваются по 1 разу (§13 п.2).
+        var knifeSet = {}, matSet = {};
+        (slots || []).forEach(function(c){
+            var ks = knifeConfigSig(c); if (ks !== '') knifeSet[ks] = 1;
+            matSet[materialSig(c)] = 1;
+        });
+        var K = Object.keys(knifeSet).length, M = Object.keys(matSet).length;
+        var ideal = { knifeConfigs: K, materials: M, count: K + M, minutes: round3(K * kChange + M * matW) };
+
+        function ratio(actual){
+            return {
+                count: ideal.count > 0 ? round3(actual.changeoverCount / ideal.count) : 0,
+                minutes: ideal.minutes > 0 ? round3(actual.changeoverMin / ideal.minutes) : 0,
+                excessCount: actual.changeoverCount - ideal.count,
+                excessMin: round3(actual.changeoverMin - ideal.minutes)
+            };
+        }
+        return { window: window, all: all, ideal: ideal, qualityWindow: ratio(window), qualityAll: ratio(all) };
+    }
+
     var planning = {
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
@@ -5700,6 +5891,11 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
+        planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
+        stripPrefixQuality: stripPrefixQuality,         // #3989: «качество» перехода по ножам
+        transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
+        insertionCost: insertionCost,                   // #3989: стоимость вставки слота между prev и next
+        planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
@@ -11590,4 +11786,4 @@
 
  
  
-// @version 2026-06-29-issue-3865
+// @version 2026-07-03-issue-3989
