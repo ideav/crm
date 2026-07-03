@@ -88,10 +88,11 @@ assertEqual(planning.sleeveCoreStripPlan(0.5, 110, []), { stripWidth: 0, count: 
     planning.appendCoreStrip(lay, 110, 2);
     // «Партия ГП» по ширинам — втулочная полоса 110 присутствует (Σ полос за проход).
     var batches = planning.producedBatchesForLayout(lay, 1000);
+    // appendCoreStrip держит единый ряд полос по УБЫВАНИЮ ширины → 110 раньше 55.
     assertEqual(batches, [
-        { width: 55, strips: 12, length: 1000 },
-        { width: 110, strips: 2, length: 1000 }
-    ], 'producedBatchesForLayout: раскрой = 55×12 + 110×2');
+        { width: 110, strips: 2, length: 1000 },
+        { width: 55, strips: 12, length: 1000 }
+    ], 'producedBatchesForLayout: раскрой = 110×2 + 55×12 (по убыванию ширины)');
 
     // Проходы определяются продуктом (55), втулочная полоса их не меняет.
     var runs = planning.plannedRunsForLayout(lay, [{ id: 'p1', width: 55, qty: 24 }]);
