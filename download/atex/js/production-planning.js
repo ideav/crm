@@ -5746,9 +5746,13 @@
     // Нужна ли смена сырья/намотки/партии prev→next — как changeoverParts.
     function materialChangeNeeded(prev, next){
         if (!prev || !next) return false;
+        // batchId нормализуем null/undefined → '' (carryOverPrevCut так же нейтрализует партию),
+        // иначе первая резка с незаданной партией ложно считалась бы сменой сырья.
+        var pb = prev.batchId == null ? '' : String(prev.batchId);
+        var nb = next.batchId == null ? '' : String(next.batchId);
         return String(prev.materialId) !== String(next.materialId)
             || normWinding(prev.winding) !== normWinding(next.winding)
-            || String(prev.batchId) !== String(next.batchId);
+            || pb !== nb;
     }
 
     // Стоимость ОДНОГО направленного перехода prev→next (ТЗ §8): вес (минуты штрафа) + «качество».
@@ -5881,6 +5885,32 @@
         return { window: window, all: all, ideal: ideal, qualityWindow: ratio(window), qualityAll: ratio(all) };
     }
 
+    // #3989 Фаза 3: качество плана из резок контроллера (mapCutRecord) — маппинг в слоты
+    // planQuality (ТЗ §13). cuts — this.cuts; opts.{settings,scopeFromKey,scopeToKey,prevSetupBySlitter}.
+    function planQualityView(cuts, opts){
+        opts = opts || {};
+        var slots = (cuts || []).map(function(c){
+            return {
+                id: c && c.id,
+                slitterId: c && c.slitter && c.slitter.id,
+                dayKey: planDateDayKey(c && c.planDate),
+                planStartMs: Number(c && c.planStart) || 0,
+                knifeWidths: c && c.knifeWidths, knifeCount: c && c.knifeCount,
+                materialId: c && c.materialId, winding: c && c.winding, dueKey: c && c.dueKey
+            };
+        });
+        return planQuality(slots, {
+            settings: opts.settings,
+            scopeFromKey: opts.scopeFromKey, scopeToKey: opts.scopeToKey,
+            prevSetupBySlitter: opts.prevSetupBySlitter
+        });
+    }
+    // #3989 Фаза 3: короткая подпись избытка «+N» / «0» / «−N» (минус — план лучше идеала).
+    function formatQualityDelta(n){
+        var v = Number(n) || 0;
+        return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(v);
+    }
+
     var planning = {
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
@@ -5960,6 +5990,8 @@
         transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
         insertionCost: insertionCost,                   // #3989: стоимость вставки слота между prev и next
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
+        planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
+        formatQualityDelta: formatQualityDelta,          // #3989 Фаза 3: подпись избытка
         splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
         cutWriteDiagnostics: cutWriteDiagnostics,
@@ -11551,6 +11583,33 @@
             groupEl.appendChild(el('div', { class: 'atex-pp-empty',
                 text: 'Заданий в очереди нет' + (dtNote ? ', ' + dtNote : '') }));
         }
+        // #3989 Фаза 3: панель качества плана — факт vs идеал переналадок за окно [С;По] (ТЗ §13).
+        // Считается по ВСЕМУ плану (всем станкам). Не критична для очереди: ошибку глушим.
+        if ((self.cuts || []).length) {
+            try {
+                var qFromStr = String((self.filter && self.filter.date) || '').trim();
+                var qToStr = String((self.filter && self.filter.dateTo) || '').trim();
+                var pqView = planQualityView(self.cuts, {
+                    settings: self.daySettings,
+                    scopeFromKey: qFromStr === '' ? null : planDateDayKey(qFromStr),
+                    scopeToKey: qToStr === '' ? null : planDateDayKey(qToStr),
+                    prevSetupBySlitter: self.prevSetupBySlitter
+                });
+                var qW = pqView.window, qId = pqView.ideal, qEx = pqView.qualityWindow;
+                var qPanel = el('div', { class: 'atex-pp-quality',
+                    style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
+                        + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
+                    el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
+                    el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
+                    el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
+                    el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' })
+                ]);
+                qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
+                    + pqView.all.changeoverCount + ' (' + pqView.all.changeoverMin + ' мин). '
+                    + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу.';
+                box.appendChild(qPanel);
+            } catch (e) { console.warn('[pp] панель качества плана пропущена:', e && e.message); }
+        }
         box.appendChild(groupEl);
         console.log('[pp] 📊 renderQueue: отрисовано за ' + (Date.now() - t0) + 'мс. групп:', groups.length, 'резок:', self.cuts.length);
         } finally {
@@ -11855,4 +11914,4 @@
 
  
  
-// @version 2026-07-03-issue-3992
+// @version 2026-07-03-issue-3989-p3
