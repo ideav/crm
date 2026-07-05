@@ -540,6 +540,93 @@
         return out;
     }
 
+    // #4007 (ТЗ §5): маркеры коротких перерывов для Ганта. В отличие от обеда (его генерация
+    // ЗАШИВАЕТ в planStart послеобеденных резок), перерывы (FIRST_INTERVAL 10:00 / SECCOND_INTERVAL
+    // 15:00, по INTERVAL_DURATION_MN 10 мин) при планировании НЕ участвуют — их нет в сохранённых
+    // стартах. Поэтому Гант дорисовывает их сам: перерыв попадает в задание, чьё СОХРАНЁННОЕ окно
+    // (наладка+резка) его накрывает («несущее»); это задание визуально раздвигается на длительность
+    // перерыва (см. растяжку в layoutGroups), а все ПОСЛЕДУЮЩИЕ задания того же дня сдвигаются
+    // вправо на ту же длительность (shiftMinByIndex — накопительно по дням). Перерыв без несущего
+    // задания (попал в простой или после последней резки дня) не рисуется и никого не сдвигает.
+    // ordered — резки станка в порядке дорожки; scale — свёрнутая ось; opts.barStarts — старты
+    // баров (dedupeBarStarts), opts.pxPerMin — масштаб. breaks — [{ startMin, durationMin, label }],
+    // startMin — минуты от полуночи. Чистая — покрыта тестом. → { markers: [{ carrierIndex,
+    // beforeIndex, dayMs, startMs, endMs, leftPx, widthPx, durationMin, label }], shiftMinByIndex }.
+    function ganttBreakMarkers(ordered, scale, breaks, opts) {
+        var n = (ordered || []).length;
+        var shiftMinByIndex = [];
+        for (var z = 0; z < n; z++) shiftMinByIndex.push(0);
+        var brks = (breaks || []).filter(function(b) {
+            return b && Number(b.durationMin) > 0 && isFinite(Number(b.startMin));
+        }).slice().sort(function(a, b) { return Number(a.startMin) - Number(b.startMin); });
+        if (!brks.length || !n || !scale || typeof scale.toPx !== 'function') {
+            return { markers: [], shiftMinByIndex: shiftMinByIndex };
+        }
+        var o = opts || {};
+        var ppm = Number(o.pxPerMin) > 0 ? Number(o.pxPerMin)
+            : (Number(scale.pxPerMin) > 0 ? Number(scale.pxPerMin) : GANTT_PX_PER_MIN);
+        var barStarts = o.barStarts || [];
+        // Окно каждого бара по СОХРАНЁННОМУ старту: день, старт-в-дне (мин), длина (наладка+резка).
+        var bars = [];
+        for (var i = 0; i < n; i++) {
+            var tr = cutTimeRange(ordered[i]);
+            var startMs = barStarts[i] != null ? barStarts[i] : (tr ? tr.startMs : null);
+            if (startMs == null) { bars.push(null); continue; }
+            var day = startOfLocalDayMs(startMs);
+            bars.push({
+                index: i, day: day,
+                clockMin: (startMs - day) / 60000,
+                lenMin: cutBarMinutes(ordered[i]) + cutSetupMin(ordered[i]).total
+            });
+        }
+        // Индексы баров по дням (в порядке дорожки).
+        var dayOrder = [], byDay = {};
+        bars.forEach(function(b) {
+            if (!b) return;
+            if (!byDay[b.day]) { byDay[b.day] = []; dayOrder.push(b.day); }
+            byDay[b.day].push(b);
+        });
+        var markers = [];
+        dayOrder.forEach(function(day) {
+            var dayBars = byDay[day];
+            var insertedByCarrier = {};   // индекс несущего → минут перерывов уже вставлено ВНУТРЬ него
+            brks.forEach(function(B) {
+                var dur = Math.round(Number(B.durationMin));
+                // Несущее задание — первое, чьё СОХРАНЁННОЕ окно накрывает время перерыва.
+                var carrier = null;
+                for (var k = 0; k < dayBars.length; k++) {
+                    var cb = dayBars[k];
+                    if (cb.clockMin <= B.startMin && B.startMin < cb.clockMin + cb.lenMin) { carrier = cb; break; }
+                }
+                if (!carrier) return;   // перерыв в простое / после последней резки дня — не рисуем
+                // Сдвигаем все бары дня ПОСЛЕ несущего (в порядке дорожки) на длительность перерыва.
+                var afterCarrier = false;
+                dayBars.forEach(function(cb) {
+                    if (cb === carrier) { afterCarrier = true; return; }
+                    if (afterCarrier) shiftMinByIndex[cb.index] += dur;
+                });
+                var innerInserted = insertedByCarrier[carrier.index] || 0;
+                // Позиция перерыва = px его времени + сдвиг несущего (от более ранних перерывов ВНЕ
+                // несущего) + минуты перерывов, вставленных ВНУТРЬ несущего до этого (compounding).
+                var baseLeftPx = scale.toPx(day + B.startMin * 60000);
+                var offsetPx = (shiftMinByIndex[carrier.index] + innerInserted) * ppm;
+                markers.push({
+                    carrierIndex: carrier.index,
+                    beforeIndex: carrier.index + 1,
+                    dayMs: day,
+                    startMs: day + B.startMin * 60000,
+                    endMs: day + (B.startMin + dur) * 60000,
+                    leftPx: round3(baseLeftPx + offsetPx),
+                    widthPx: Math.max(round3(dur * ppm), 1),
+                    durationMin: dur,
+                    label: B.label || 'Перерыв'
+                });
+                insertedByCarrier[carrier.index] = innerInserted + dur;
+            });
+        });
+        return { markers: markers, shiftMinByIndex: shiftMinByIndex };
+    }
+
     // #3747: рабочие отрезки дорожки — по одному на КАЛЕНДАРНЫЙ день с заданиями, окно
     // [DAY_START_HOUR; DAY_END_HOUR + получас уборки]. Нерабочее время (ночь между сменами)
     // на ось не попадает — отрезки идут встык (дни лесенкой). Бар, вышедший за смену (ранний
@@ -551,6 +638,11 @@
         var startHour = o.startHour != null ? Number(o.startHour) : GANTT_DAY_START_HOUR;
         var endHour = o.endHour != null ? Number(o.endHour) : GANTT_DAY_END_HOUR;
         var tailMin = o.shiftTailMin != null ? Number(o.shiftTailMin) : GANTT_SHIFT_TAIL_MIN;
+        // #4007: перерывы (ТЗ §5) сдвигают бары дня вправо на суммарную длительность перерывов,
+        // а сами перерывы планированию прозрачны (в сохранённые старты не зашиты). Расширяем окно
+        // каждого дня на этот буфер, чтобы сдвинутым барам/маркерам хватило места на оси.
+        var breakBuffer = Number(o.breakBufferMin) > 0 ? Number(o.breakBufferMin) : 0;
+        var tailMs = (tailMin + breakBuffer) * 60000;
         var byDay = {}, order = [];
         (cuts || []).forEach(function(cut) {
             var tr = cutTimeRange(cut);
@@ -560,7 +652,7 @@
             if (!seg) {
                 seg = byDay[dayMs] = {
                     startMs: dayMs + startHour * GANTT_HOUR_MS,
-                    endMs: dayMs + endHour * GANTT_HOUR_MS + tailMin * 60000
+                    endMs: dayMs + endHour * GANTT_HOUR_MS + tailMs
                 };
                 order.push(dayMs);
             }
@@ -570,7 +662,7 @@
         });
         if (!order.length) {
             var dayMs0 = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
-            return [{ startMs: dayMs0 + startHour * GANTT_HOUR_MS, endMs: dayMs0 + endHour * GANTT_HOUR_MS + tailMin * 60000 }];
+            return [{ startMs: dayMs0 + startHour * GANTT_HOUR_MS, endMs: dayMs0 + endHour * GANTT_HOUR_MS + tailMs }];
         }
         return order.sort(function(a, b) { return a - b; }).map(function(d) { return byDay[d]; });
     }
@@ -1152,6 +1244,12 @@
         });
 
         var win = ganttWindow(visible, range, o);
+        // #4007 (ТЗ §5): суммарная длительность перерывов дня — буфер к правому краю окна дня,
+        // чтобы сдвинутым за перерывы барам хватило места (перерывы не зашиты в сохранённые старты).
+        var totalBreakMin = (o.breaks || []).reduce(function(s, b) {
+            return s + (b && Number(b.durationMin) > 0 ? Number(b.durationMin) : 0);
+        }, 0);
+        o.breakBufferMin = totalBreakMin;
         // #3747: ось — только рабочие окна дней [08:00;18:30], нерабочее время (ночь) свёрнуто
         // (ganttScale.toPx). Бар, вышедший за смену, расширяет окно своего дня (workingSegments).
         var segments = workingSegments(visible, range, o);
@@ -1194,6 +1292,11 @@
             // #3887: старты баров со снятым нахлёстом по сохранённому planStart (встык в дне).
             // Для корректных данных barStarts[i] === сохранённый старт — поведение не меняется.
             var barStarts = dedupeBarStarts(ordered);
+            // #4007 (ТЗ §5): перерывы дня — сдвиг каждого бара вправо на сумму перерывов ДО него
+            // (breakShift, мин) + маркеры для отдельных строк «Перерыв». Перерыв планированию
+            // прозрачен: в сохранённые старты не зашит, поэтому сдвигаем только ОТОБРАЖЕНИЕ.
+            var brk = ganttBreakMarkers(ordered, scale, o.breaks, { pxPerMin: pxPerMin, barStarts: barStarts });
+            var breakShift = brk.shiftMinByIndex;
             g.tasks = ordered.map(function(cut, i) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var startMs = barStarts[i] != null ? barStarts[i] : tr.startMs;   // #3887: сдвинутый старт бара
@@ -1203,7 +1306,10 @@
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
                 // #3747: левый край бара — по СВЁРНУТОЙ оси (scale.toPx): нерабочее время не
                 // занимает места, дни идут встык. Ширина — по минутам (наладка+резка), как и раньше.
-                var leftPx = scale.toPx(startMs);
+                // #4007: + сдвиг за перерывы дня (breakShift, мин → px). Ось линейна в пределах дня,
+                // поэтому сдвиг = минуты × pxPerMin (место под сдвиг зарезервировано breakBufferMin).
+                var shiftPx = round3((breakShift[i] || 0) * pxPerMin);
+                var leftPx = round3(scale.toPx(startMs) + shiftPx);
                 var widthPx = seg.totalPx;
                 // #3708: бар не должен заходить за старт следующего задания того же станка —
                 // длительности хранятся вверх (#3635 п.4), а старты по дробному времени, поэтому бар
@@ -1212,13 +1318,16 @@
                 // считаем по свёрнутой оси, чтобы стык дней резал захлёст по краю рабочего окна.
                 // #3887: границу берём по СДВИНУТОМУ старту следующей резки — при коллизии planStart
                 // соседняя резка раздвинута встык, и эта проверка обрезает захлёст к ней.
+                // #4007: границу берём с учётом сдвига следующего бара за перерывы (он ≥ сдвига
+                // текущего, монотонно), иначе перерыв между резками «съедал» бы правый край бара.
                 var nextStartMs = null;
                 if (tr.actualEndMs == null && i + 1 < ordered.length) {
                     var nStart = barStarts[i + 1];
                     if (nStart != null && nStart > startMs) nextStartMs = nStart;
                 }
                 if (nextStartMs != null) {
-                    var maxWidthPx = round3(scale.toPx(nextStartMs) - leftPx);
+                    var nextLeftPx = round3(scale.toPx(nextStartMs) + (breakShift[i + 1] || 0) * pxPerMin);
+                    var maxWidthPx = round3(nextLeftPx - leftPx);
                     if (maxWidthPx > 0 && widthPx > maxWidthPx) widthPx = maxWidthPx;
                 }
                 return {
@@ -1226,6 +1335,7 @@
                     leftPx: leftPx,
                     widthPx: widthPx,
                     startMs: startMs,   // #3909: старт бара (для растяжки «несущего» обед задания)
+                    shiftPx: shiftPx,   // #4007: сдвиг бара за перерывы дня (для растяжки несущего обед)
                     segments: seg,
                     // #3887: подпись времени — по сдвинутому старту, чтобы текст совпал с позицией бара.
                     label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs, startMs),
@@ -1245,12 +1355,24 @@
                 if (lb.carrierIndex == null || lb.postStartMs == null) return;
                 var carrier = g.tasks[lb.carrierIndex];
                 if (!carrier) return;
-                var fillPx = round3(scale.toPx(lb.postStartMs) - carrier.leftPx);
+                // #4007: предел растяжки — сдвинутый старт послеобеденного бара (его сдвиг за
+                // утренние перерывы ≥ сдвига несущего), иначе обед не дотягивался бы до бара.
+                var post = g.tasks[lb.beforeIndex];
+                var postShiftPx = post ? (post.shiftPx || 0) : (carrier.shiftPx || 0);
+                var fillPx = round3(scale.toPx(lb.postStartMs) + postShiftPx - carrier.leftPx);
                 if (fillPx > carrier.widthPx) {
                     carrier.widthPx = fillPx;
                     carrier.barText = formatTime(carrier.startMs) + '-' + formatTime(lb.postStartMs) +
                         ' (' + carrier.barMin + ' мин)';   // пролёт со встроенным обедом; минуты — рабочие
                 }
+            });
+            // #4007 (ТЗ §5): несущее перерыв задание раздвигаем на длительность перерыва (место
+            // освобождено сдвигом последующих баров), чтобы перерыв нарисовался ВНУТРИ его пролёта,
+            // а не дырой после него. Подпись бара (barText/barMin) — рабочая, перерыв в неё не входит.
+            g.breaks = brk.markers;
+            (g.breaks || []).forEach(function(mk) {
+                var carrier = g.tasks[mk.carrierIndex];
+                if (carrier) carrier.widthPx = round3(carrier.widthPx + mk.durationMin * pxPerMin);
             });
             delete g.cuts;
         });
@@ -1330,6 +1452,7 @@
         ganttTrackPx: ganttTrackPx,
         cutBarEndMs: cutBarEndMs,           // #3747
         ganttLunchMarkers: ganttLunchMarkers,   // #3846: маркеры обеда из зазоров расписания
+        ganttBreakMarkers: ganttBreakMarkers,   // #4007 (ТЗ §5): маркеры коротких перерывов + сдвиг баров
         workingSegments: workingSegments,   // #3747
         ganttScale: ganttScale,             // #3747
         chooseHourStep: chooseHourStep,
@@ -1459,12 +1582,18 @@
             .then(function(rows) {
                 var dbKey = String(self.db || '').trim().toUpperCase();
                 // #3846/#3904: \u043E\u0431\u0430 \u043A\u043B\u044E\u0447\u0430 \u0438\u0437 \u00AB\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u00BB \u0441 \u0443\u0447\u0451\u0442\u043E\u043C \u043E\u0431\u043B\u0430\u0441\u0442\u0438 \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
-                var bestRank = { LUNCH_DURATION: -1, LUNCH_START: -1 };
-                var bestVal = { LUNCH_DURATION: null, LUNCH_START: null };
+                // #4007 (\u0422\u0417 \u00A75): \u043F\u043E\u043C\u0438\u043C\u043E \u043E\u0431\u0435\u0434\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u0434\u0432\u0430 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 (FIRST_INTERVAL/
+                // SECCOND_INTERVAL, \u0432\u0440\u0435\u043C\u044F \u00AB\u0427\u0427:\u041C\u041C\u00BB) \u0438 \u0438\u0445 \u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C (INTERVAL_DURATION_MN, \u043E\u0442\u043A\u0430\u0442
+                // \u043D\u0430 INTERVAL_DURATION). \u041A\u043B\u044E\u0447 SECCOND_INTERVAL \u2014 \u043A\u0430\u043A \u0432 \u0422\u0417 (\u0441 \u043E\u043F\u0435\u0447\u0430\u0442\u043A\u043E\u0439), \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u043C
+                // \u0438 \u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u043E\u0435 SECOND_INTERVAL. \u041E\u0431\u043B\u0430\u0441\u0442\u044C \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 \u2014 \u043A\u0430\u043A \u0443 \u043E\u0431\u0435\u0434\u0430 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
+                var KEYS = ['LUNCH_DURATION', 'LUNCH_START', 'FIRST_INTERVAL', 'SECCOND_INTERVAL',
+                            'SECOND_INTERVAL', 'INTERVAL_DURATION', 'INTERVAL_DURATION_MN'];
+                var bestRank = {}, bestVal = {};
+                KEYS.forEach(function(k) { bestRank[k] = -1; bestVal[k] = null; });
                 (rows || []).forEach(function(rec) {
                     var r = (rec && rec.r) || [];
                     var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
-                    if (key !== 'LUNCH_DURATION' && key !== 'LUNCH_START') return;
+                    if (bestRank[key] === undefined) return;
                     var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                     var val = String(r[2] == null ? '' : r[2]).replace(',', '.').trim();
                     if (val === '') return;
@@ -1474,12 +1603,24 @@
                     if (rank >= bestRank[key]) { bestRank[key] = rank; bestVal[key] = val; }
                 });
                 var n = bestVal.LUNCH_DURATION == null ? 0 : Number(bestVal.LUNCH_DURATION);
+                // #4007: \u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 \u2014 INTERVAL_DURATION_MN, \u0438\u043D\u0430\u0447\u0435 INTERVAL_DURATION, \u0438\u043D\u0430\u0447\u0435 10.
+                var intervalDur = bestVal.INTERVAL_DURATION_MN != null ? Number(bestVal.INTERVAL_DURATION_MN)
+                    : (bestVal.INTERVAL_DURATION != null ? Number(bestVal.INTERVAL_DURATION) : 10);
+                if (!(isFinite(intervalDur) && intervalDur > 0)) intervalDur = 10;
+                var breaks = [];
+                var secondRaw = bestVal.SECCOND_INTERVAL != null ? bestVal.SECCOND_INTERVAL : bestVal.SECOND_INTERVAL;
+                [bestVal.FIRST_INTERVAL, secondRaw].forEach(function(raw) {
+                    var startMin = parseLunchStartMinutes(raw);   // \u00AB10:00\u00BB \u2192 600; \u0438\u043D\u0430\u0447\u0435 NaN \u2192 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 \u043D\u0435\u0442
+                    if (isFinite(startMin)) breaks.push({ startMin: startMin, durationMin: Math.round(intervalDur), label: '\u041F\u0435\u0440\u0435\u0440\u044B\u0432' });
+                });
+                breaks.sort(function(a, b) { return a.startMin - b.startMin; });
                 return {
                     durationMin: isFinite(n) && n > 0 ? Math.round(n) : 0,
-                    startMin: parseLunchStartMinutes(bestVal.LUNCH_START)   // #3904: \u00AB12:20\u00BB \u2192 740; \u043F\u0443\u0441\u0442\u043E \u2192 NaN
+                    startMin: parseLunchStartMinutes(bestVal.LUNCH_START),   // #3904: \u00AB12:20\u00BB \u2192 740; \u043F\u0443\u0441\u0442\u043E \u2192 NaN
+                    breaks: breaks   // #4007 (\u0422\u0417 \u00A75): \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u044B \u0434\u043B\u044F \u043E\u0442\u0440\u0438\u0441\u043E\u0432\u043A\u0438 \u043D\u0430 \u0413\u0430\u043D\u0442\u0435
                 };
             })
-            .catch(function() { return { durationMin: 0, startMin: NaN }; });
+            .catch(function() { return { durationMin: 0, startMin: NaN, breaks: [] }; });
     };
 
     // #3875: «Календарь» (#3788) — нерабочие дни (выходные/праздники). Читаем таблицу по имени
@@ -1534,9 +1675,10 @@
             this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
             this.loadCalendar()        // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
         ]).then(function(res) {
-            var lunchCfg = res[5] || {};   // #3846/#3904: { durationMin, startMin } из «Настройки»
+            var lunchCfg = res[5] || {};   // #3846/#3904/#4007: { durationMin, startMin, breaks } из «Настройки»
             self.lunchDurationMin = lunchCfg.durationMin || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
             self.lunchStartMin = lunchCfg.startMin;              // #3904: LUNCH_START (мин), NaN = неизвестно
+            self.breaks = lunchCfg.breaks || [];                 // #4007 (ТЗ §5): короткие перерывы для Ганта
             self.cuts = rowsToCuts(res[0] || []);
             // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
             attachStrips(self.cuts, res[2] || []);
@@ -1682,7 +1824,8 @@
         // #3704: зум по горизонтали + нижняя граница «вписать в экран» (дорожка не уже видимой области).
         var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
             { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin,
-              lunchStartMin: this.lunchStartMin });   // #3904: время обеда — чтобы утренний зазор не помечался обедом
+              lunchStartMin: this.lunchStartMin,   // #3904: время обеда — чтобы утренний зазор не помечался обедом
+              breaks: this.breaks });   // #4007 (ТЗ §5): короткие перерывы 10:00/15:00 — рисуются на Ганте
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
@@ -1771,6 +1914,14 @@
             var lunchByBefore = {};
             (group.lunches || []).forEach(function(l) { lunchByBefore[l.beforeIndex] = l; });
 
+            // #4007 (ТЗ §5): короткие перерывы — строкой ПОСЛЕ несущего задания (по carrierIndex),
+            // тем же зазором, что раздвинул несущий бар; подпись «☕ Перерыв · N мин». Ключ —
+            // carrierIndex (не beforeIndex): несущим может быть и последняя резка дня.
+            var breakByCarrier = {};
+            (group.breaks || []).forEach(function(mk) {
+                (breakByCarrier[mk.carrierIndex] = breakByCarrier[mk.carrierIndex] || []).push(mk);
+            });
+
             group.tasks.forEach(function(t, taskIdx) {
                 var lb = lunchByBefore[taskIdx];
                 if (lb) {
@@ -1824,6 +1975,24 @@
                 barLink.style.width = t.widthPx + 'px';
                 track.appendChild(barLink);
                 body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
+
+                // #4007 (ТЗ §5): перерыв(ы), несущим для которых стало это задание — строкой сразу
+                // ПОСЛЕ него (несущий бар уже раздвинут на длительность перерыва в layoutGroups).
+                (breakByCarrier[taskIdx] || []).forEach(function(mk) {
+                    var brkTrack = el('div', { class: 'atex-cg-track' });
+                    brkTrack.style.minWidth = trackPx + 'px';
+                    appendHours(brkTrack);
+                    var brkBar = el('div', { class: 'atex-cg-break', title: 'Перерыв · ' + mk.durationMin + ' мин' }, [
+                        el('span', { class: 'atex-cg-break-text', text: '☕ Перерыв · ' + mk.durationMin + ' мин' })
+                    ]);
+                    brkBar.style.left = mk.leftPx + 'px';
+                    brkBar.style.width = mk.widthPx + 'px';
+                    brkTrack.appendChild(brkBar);
+                    var brkLabel = el('div', { class: 'atex-cg-label atex-cg-label--break', title: 'Перерыв' }, [
+                        el('span', { class: 'atex-cg-label-main', text: 'Перерыв' })
+                    ]);
+                    body.appendChild(el('div', { class: 'atex-cg-row atex-cg-break-row' }, [brkLabel, brkTrack]));
+                });
             });
         });
 
