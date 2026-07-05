@@ -5897,12 +5897,17 @@
         var all = actualFor(function(dk){ return dk >= fromK; });                   // [С; конец всех задач]
 
         // Идеал: каждая РАЗНАЯ конфигурация ножей и каждое РАЗНОЕ сырьё настраиваются по 1 разу (§13 п.2).
-        var knifeSet = {}, matSet = {};
+        // #4008: заодно считаем уникальные КОМБИНАЦИИ «набор ножей + сырьё + намотка» — сколько
+        // всего разных настроек резки встречается в плане (диагностика разнородности плана).
+        var knifeSet = {}, matSet = {}, comboSet = {};
         (slots || []).forEach(function(c){
             var ks = knifeConfigSig(c); if (ks !== '') knifeSet[ks] = 1;
-            matSet[materialSig(c)] = 1;
+            var ms = materialSig(c);
+            matSet[ms] = 1;
+            comboSet[ks + '::' + ms] = 1;   // #4008: уникальная комбинация ножи+сырьё+намотка
         });
         var K = Object.keys(knifeSet).length, M = Object.keys(matSet).length;
+        var combinations = Object.keys(comboSet).length;   // #4008
         var ideal = { knifeConfigs: K, materials: M, count: K + M, minutes: round3(K * kChange + M * matW) };
 
         function ratio(actual){
@@ -5913,7 +5918,7 @@
                 excessMin: round3(actual.changeoverMin - ideal.minutes)
             };
         }
-        return { window: window, all: all, ideal: ideal, qualityWindow: ratio(window), qualityAll: ratio(all) };
+        return { window: window, all: all, ideal: ideal, combinations: combinations, qualityWindow: ratio(window), qualityAll: ratio(all) };
     }
 
     // #3989 Фаза 3: качество плана из резок контроллера (mapCutRecord) — маппинг в слоты
@@ -11688,12 +11693,20 @@
                         + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
                     el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
                     el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
+                    // #4008: раздельно наладка ножей и смена сырья (составляют переналадки выше).
+                    el('span', { text: 'ножи: ' + qW.knifeCount + ' (' + qW.knifeMin + ' мин)', style: 'opacity:.85;' }),
+                    el('span', { text: 'сырьё: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
                     el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
-                    el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' })
+                    el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' }),
+                    // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка) в плане.
+                    el('span', { text: 'уникальных комбинаций: ' + pqView.combinations, style: 'opacity:.75;' })
                 ]);
                 qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
-                    + pqView.all.changeoverCount + ' (' + pqView.all.changeoverMin + ' мин). '
-                    + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу.';
+                    + pqView.all.changeoverCount + ' (' + pqView.all.changeoverMin + ' мин), из них ножи '
+                    + pqView.all.knifeCount + ' (' + pqView.all.knifeMin + ' мин), сырьё '
+                    + pqView.all.materialCount + ' (' + pqView.all.materialMin + ' мин). '
+                    + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
+                    + 'Уникальных комбинаций (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
                 box.appendChild(qPanel);
             } catch (e) { console.warn('[pp] панель качества плана пропущена:', e && e.message); }
         }

@@ -44,6 +44,7 @@ eq(view.ideal.materials, 2, 'идеал: 2 сырья (A,B)');
 eq(view.ideal.count, 3, 'идеал: 3 переналадки');
 eq(view.ideal.minutes, 60, 'идеал: 1×30 + 2×15 = 60 мин');
 eq(view.qualityWindow.excessCount, 1 - 3, 'избыток окна: 1 − 3 = -2');
+eq(view.combinations, 2, '#4008: уникальных комбинаций 2 ({100}·A, {100}·B)');
 
 // Пустой список — нулевые итоги без падения.
 var empty = planning.planQualityView([], { settings: SETTINGS });
