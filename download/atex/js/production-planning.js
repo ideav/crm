@@ -2395,6 +2395,20 @@
         return false;
     }
 
+    // #4006: ограничение станка по ширине джамбо из поля «Код» слиттера. widthCode —
+    // разобранное parseActualWidthCode условие ({key,op,val}); станок принимает сырьё,
+    // только если его НОМИНАЛЬНАЯ ширина (nominalWidth, рулон) удовлетворяет условию
+    // (контекст 'j', как в actualWidthCodeMatches). Пример: «Станок 4 → j<1000» означает
+    // «только сырьё уже метра»; MWR500L (номинал 1000) на такой станок не ставится.
+    // Пусто / нераспознанный код (key '' или '?') → без ограничения (не блокируем).
+    // Нет номинала (null/битый) → не блокируем — иначе теряли бы резку из-за пробела в справочнике.
+    function isSlitterWidthBlocked(widthCode, nominalWidth) {
+        if (!widthCode || widthCode.key === '' || widthCode.key === '?') return false;
+        var n = Number(nominalWidth);
+        if (!isFinite(n) || n <= 0) return false;
+        return !actualWidthCodeMatches(widthCode, { jumbo: n });
+    }
+
     // rows: [{ actual, order, code }] из справочника → индекс
     // { stripWidthKey(order): [{ actual, parsed }] }. Условные строки идут раньше
     // безусловных — приоритет более специфичного правила при совпадении номинала.
@@ -2848,15 +2862,22 @@
         var points = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
         if (!points.length) return '';
         var oneRun = windingMinutes(length, points);
-        var total = round3(oneRun * runs);
-        if (!(oneRun > 0) || !(total > 0)) return '';
+        if (!(oneRun > 0)) return '';
+        // #4006: лидер между резками (BETWEEN_CUTS) заправляется ПОСЛЕ каждого прохода —
+        // включаем его в тайминг прохода, чтобы «Итого резка» отражало полное время окна
+        // (намотка + лидер), а не только намотку. Норма намотки остаётся отдельной строкой.
+        var t = opTimes || {};
+        var leaderUnit = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        var perPassFull = round3(oneRun + leaderUnit);
+        var total = round3(perPassFull * runs);
+        if (!(total > 0)) return '';
         return [
             'Метраж прохода: ' + formatTimingNumber(length) + ' м',
             'Плановых проходов: ' + formatTimingNumber(runs),
-            'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин',
-            'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
-            formatWindingNorms(relevantWindingNorms(length, points))
-        ].join('\n');
+            formatWindingNorms(relevantWindingNorms(length, points)),
+            'Намотка и лидер: ' + formatTimingNumber(perPassFull) + ' мин',
+            'Итого резка: ' + formatTimingNumber(perPassFull) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин'
+        ].filter(function(x){ return x; }).join('\n');
     }
 
     function cutTimingModalText(cut) {
@@ -2905,10 +2926,16 @@
         }
         lines.push({ text: 'Метраж прохода: ' + formatTimingNumber(length) + ' м' });
         lines.push({ text: 'Плановых проходов: ' + formatTimingNumber(runs) });
+        // #4006: лидер (BETWEEN_CUTS) заправляется после каждого прохода — показываем полное время
+        // прохода «Намотка и лидер» и включаем лидер в «Итого резка» (а не отдельной строкой ниже).
+        // Норма намотки — отдельной строкой выше. Лидер на проход = leaderMin/runs (leaderMin = база×runs).
+        var leaderMin = round3(Number(ctx.leaderMin) || 0);
+        var perPassFull = round3(oneRun + (runs > 0 ? leaderMin / runs : 0));
+        var totalFull = round3(perPassFull * runs);   // #4006: «X * N = Y» самосогласовано (Y от округлённого X)
         if (!setupOnly) {
-            lines.push({ text: 'Намотка 1 прохода: ' + formatTimingNumber(oneRun) + ' мин' });
             var normLine = formatWindingNorms(ctx.norms);
             if (normLine) lines.push({ text: normLine });
+            lines.push({ text: 'Намотка и лидер: ' + formatTimingNumber(perPassFull) + ' мин' });
         }
         lines.push({ text: '' });
         lines.push({ text: 'Тайминг окна:' });
@@ -2932,22 +2959,16 @@
             return lines;
         }
         lines.push({
-            text: cutPrefix + 'Итого резка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин',
+            text: cutPrefix + 'Итого резка: ' + formatTimingNumber(perPassFull) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(totalFull) + ' мин',
             bold: true
         });
-        // #3688: лидер между резками заправляют ПОСЛЕ намотки (в конце резки), не на старте окна.
-        // #3862: если расписание СОХРАНЁННОЕ (scheduleFromStored), лидер ВХОДИТ в окно — finishMin
-        // уже конец лидера. Тогда строка лидера = от (finishMin − лидер), а «готово» = finishMin (тот
-        // же конец окна, что у карточки/Ганта; раньше модалка прибавляла лидер ВТОРОЙ раз → «готово»
-        // выезжало за окно, напр. 08:55 против 08:51). Для live-расписания (buildSchedule, leaderMin
-        // задан числом отдельно) лидер идёт ПОСЛЕ окна намотки: «готово» = finishMin + лидер (как раньше).
+        // #4006: лидер (BETWEEN_CUTS) включён в «Итого резка» — отдельной строкой не показываем.
+        // #3688/#3862: «готово» = конец окна с лидером. Для СОХРАНЁННОГО расписания (scheduleFromStored)
+        // лидер уже ВХОДИТ в окно (finishMin — конец лидера). Для live-расписания (buildSchedule)
+        // лидер идёт ПОСЛЕ намотки: «готово» = finishMin + лидер. Обе ветки дают start + (намотка +
+        // лидер) = тот же конец окна, что у карточки/Ганта.
         var hasFinish = ctx.finishMin != null && isFinite(Number(ctx.finishMin));
-        var leaderMin = round3(Number(ctx.leaderMin) || 0);
         var leaderInWindow = ctx.leaderInWindow === true;
-        if (hasFinish && leaderMin > 0) {
-            var leaderClock = leaderInWindow ? round3(Number(ctx.finishMin) - leaderMin) : Number(ctx.finishMin);
-            lines.push({ text: formatClock(leaderClock) + ' · лидер между резками — ' + formatTimingNumber(leaderMin) + ' мин' });
-        }
         if (hasFinish) {
             var doneClock = leaderInWindow ? Number(ctx.finishMin) : round3(Number(ctx.finishMin) + leaderMin);
             lines.push({ text: formatClock(doneClock) + ' · готово' });
@@ -4875,9 +4896,12 @@
     // Выбрать станок: исключить запрещённые (стоп-лист), среди допустимых —
     // с наименьшей загрузкой (loadBySlitterId: {id→count}), тайбрейк — меньший id.
     // Возвращает String(id) или null если все запрещены.
-    function pickSlitter(slitters, materialId, loadBySlitterId){
+    function pickSlitter(slitters, materialId, loadBySlitterId, nominalWidth){
         var load = loadBySlitterId || {};
-        var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, materialId); });
+        var allowed = (slitters || []).filter(function(s){
+            return !isMaterialBlocked(s.stopMaterialIds, materialId)
+                && !isSlitterWidthBlocked(s.widthCode, nominalWidth);   // #4006: лимит ширины джамбо станка
+        });
         if (!allowed.length) return null;
         allowed.sort(function(a, b){
             var la = Number(load[String(a.id)]) || 0, lb = Number(load[String(b.id)]) || 0;
@@ -5254,13 +5278,18 @@
     // #3876: unavailableSlitterIds (опц.) — { slitterId: true } станков, у которых в день этой
     // резки отпуск; их не выбираем (станок без сырья и ножей). Если после исключения не остаётся
     // ни одного станка (все в отпуске) — откатываемся к полному списку, чтобы не «потерять» резку.
-    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin, unavailableSlitterIds) {
+    function chooseSlitterBySetup(cut, slitters, groupsBySlitterId, loadBySlitterId, weights, dayCapacityMin, unavailableSlitterIds, nominalWidthByMaterial) {
         var groups = groupsBySlitterId || {};
         var load = loadBySlitterId || {};
         var cap = Number(dayCapacityMin);
         var capActive = isFinite(cap) && cap > 0;   // #3830: учитывать ёмкость только если задана
         var unavail = unavailableSlitterIds || {};
-        var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId); });
+        // #4006: номинальная ширина сырья резки — для лимита ширины джамбо станка («Код» j<1000).
+        var nomWidth = (nominalWidthByMaterial || {})[String(cut && cut.materialId)];
+        var allowed = (slitters || []).filter(function(s){
+            return !isMaterialBlocked(s.stopMaterialIds, cut && cut.materialId)   // стоп-лист сырья
+                && !isSlitterWidthBlocked(s.widthCode, nomWidth);                 // #4006: лимит ширины джамбо
+        });
         if (!allowed.length) return null;
         var available = allowed.filter(function(s){ return !unavail[String(s.id)]; });   // #3876: не в отпуске в этот день
         if (available.length) allowed = available;   // все в отпуске → оставляем как было (резку не теряем)
@@ -5367,6 +5396,11 @@
         }
         var stopBlock = {};   // slitterId → stopMaterialIds (станок не варит это сырьё — туда не переносим)
         (slitters || []).forEach(function(s){ stopBlock[String(s.id)] = s.stopMaterialIds; });
+        // #4006: slitterId → условие ширины джамбо («Код» станка) + карта номиналов сырья —
+        // не переносить широкое сырьё на станок с лимитом (напр. MWR500L 1000 на «j<1000»).
+        var widthBlock = {};
+        (slitters || []).forEach(function(s){ widthBlock[String(s.id)] = s.widthCode; });
+        var nominalWidthByMaterial = opts.nominalWidthByMaterial || {};
         // #3876: не переносить задание на станок, у которого в день этого задания отпуск.
         // opts.slitterDayBlocked(slitterId, plan) → bool (контроллер даёт по downtimesBySlitter +
         // plan.planDate). Не задан → null (поведение прежнее; тесты/обратная совместимость).
@@ -5534,6 +5568,7 @@
                     machineList.forEach(function(to){
                         if (to === from) return;
                         if (isMaterialBlocked(stopBlock[to], plan.materialId)) return;   // станок не варит это сырьё
+                        if (isSlitterWidthBlocked(widthBlock[to], nominalWidthByMaterial[String(plan.materialId)])) return;   // #4006: сырьё шире лимита станка
                         if (slitterDayBlocked && slitterDayBlocked(to, plan)) return;     // #3876: станок в отпуске в день задания
                         // пробный перенос: меняется набор только from и to.
                         var fromMembers = (fixedBy[from] || []).concat((byMachine[from] || []).filter(function(x){ return x !== plan; }));
@@ -5995,6 +6030,7 @@
         columnIndex: columnIndex,
         parseActualWidthCode: parseActualWidthCode,      // #3372
         actualWidthCodeMatches: actualWidthCodeMatches,  // #3372
+        isSlitterWidthBlocked: isSlitterWidthBlocked,    // #4006: лимит ширины джамбо станка
         buildActualWidthIndex: buildActualWidthIndex,    // #3372
         resolveCutWidth: resolveCutWidth,                // #3372
         resolveNominalWidth: resolveNominalWidth,        // #3408
@@ -6449,13 +6485,16 @@
         var meta = this.meta.slitter;
         if (!meta) return Promise.resolve([]);
         var stopIdx = columnIndex(meta, 'Стоп-лист сырья');
+        var codeIdx = columnIndex(meta, 'Код');   // #4006: лимит ширины джамбо станка (напр. «j<1000»)
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             return (rows || []).map(function(r) {
                 var raw = (stopIdx >= 0 && r.r) ? r.r[stopIdx] : '';
+                var codeRaw = (codeIdx >= 0 && r.r) ? r.r[codeIdx] : '';
                 return {
                     id: String(r.i),
                     label: (r.r && r.r[0]) || ('#' + r.i),
-                    stopMaterialIds: parseMultiRefIds(raw)
+                    stopMaterialIds: parseMultiRefIds(raw),
+                    widthCode: parseActualWidthCode(codeRaw)   // #4006: условие ширины из «Код»
                 };
             });
         });
@@ -7372,6 +7411,12 @@
                 this.notify('Сырьё «' + ((batch && batch.label) || matId) + '» запрещено на станке «' + ((slit && slit.label) || d.slitterId) + '»', 'error');
                 return;
             }
+            // #4006: лимит ширины джамбо станка («Код» j<1000) — широкое сырьё на такой станок не ставим.
+            if (matId && slit && isSlitterWidthBlocked(slit.widthCode, this.nominalWidthByMaterial && this.nominalWidthByMaterial[String(matId)])) {
+                var batchW = this.materialBatches.filter(function(b) { return String(b.id) === String(d.materialBatchId); })[0];
+                this.notify('Ширина сырья «' + ((batchW && batchW.label) || matId) + '» превышает лимит станка «' + ((slit && slit.label) || d.slitterId) + '»', 'error');
+                return;
+            }
         }
 
         var reqIds = {
@@ -7595,6 +7640,10 @@
             var slit = self.slitters.filter(function(s) { return String(s.id) === String(d.slitterId); })[0];
             if (slit && isMaterialBlocked(slit.stopMaterialIds || [], plan.materialId)) {
                 self.setBusy(false); self.notify('Сырьё позиции запрещено на выбранном станке', 'error'); return null;
+            }
+            // #4006: лимит ширины джамбо станка («Код» j<1000) — широкое сырьё на такой станок не ставим.
+            if (slit && isSlitterWidthBlocked(slit.widthCode, self.nominalWidthByMaterial && self.nominalWidthByMaterial[String(plan.materialId)])) {
+                self.setBusy(false); self.notify('Ширина сырья позиции превышает лимит выбранного станка', 'error'); return null;
             }
             var slot = self.freeSlotForCut(d.slitterId, plan.scheduleCut);
             var planDayTs = slot && slot.startTs > 0 ? String(slot.startTs) : '';
@@ -9395,7 +9444,7 @@
                 // #3830: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
                 duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, !!(lay && lay.isFoil))
             };
-            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin, vacationSetForDay(day, cutMainValue));
+            var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin, vacationSetForDay(day, cutMainValue), self.nominalWidthByMaterial);   // #4006: лимит ширины джамбо станка
             if (slitterId != null) {
                 slitterId = String(slitterId);
                 if (!setupGroupsByDay[day][slitterId]) setupGroupsByDay[day][slitterId] = [];
@@ -9490,6 +9539,7 @@
             } catch (e) { console.warn('[pp] ⚖ dayoff diag error', e); }
             var res = rebalanceSlitterLoad(layoutPlans, self.slitters, {
                 weights: planOptions, dayCapacityMin: genDayCapacityMin, fixedByMachine: fixedByMachine,
+                nominalWidthByMaterial: self.nominalWidthByMaterial,   // #4006: лимит ширины джамбо станка при переносе
                 machineDayOff: machineDayOff,   // #3881/#3965: дата окончания из реальной укладки по дням
                 // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
                 slitterDayBlocked: function(slitterId, plan){
@@ -10941,9 +10991,12 @@
             var pr = d.prospect;
             var slitterSelect = el('select', { class: 'atex-pp-input' });
             slitterSelect.appendChild(el('option', { value: '', text: '— выберите станок —' }));
+            var nomW = self.nominalWidthByMaterial && self.nominalWidthByMaterial[String(pr.materialId)];
             this.slitters.forEach(function(s) {
-                var blocked = isMaterialBlocked(s.stopMaterialIds || [], pr.materialId);
-                var label = blocked ? (s.label + ' — сырьё запрещено')
+                // #4006: станок недоступен по стоп-листу сырья ИЛИ по лимиту ширины джамбо («Код» j<1000).
+                var widthBlocked = isSlitterWidthBlocked(s.widthCode, nomW);
+                var blocked = isMaterialBlocked(s.stopMaterialIds || [], pr.materialId) || widthBlocked;
+                var label = blocked ? (s.label + (widthBlocked ? ' — ширина превышает лимит' : ' — сырьё запрещено'))
                     : (s.label + ' — Свободное окно: ' + formatFreeSlot(self.freeSlotForCut(s.id, pr.scheduleCut)));
                 var op = el('option', { value: String(s.id), text: label });
                 if (blocked) op.disabled = true;
@@ -10970,7 +11023,10 @@
 
         // Превью состава для выбранного станка + свободное окно.
         var chosenSlit = d.slitterId ? this.slitters.filter(function(s) { return String(s.id) === String(d.slitterId); })[0] : null;
-        var chosenBlocked = !!(chosenSlit && prospectReady && isMaterialBlocked(chosenSlit.stopMaterialIds || [], d.prospect.materialId));
+        var chosenBlocked = !!(chosenSlit && prospectReady && (
+            isMaterialBlocked(chosenSlit.stopMaterialIds || [], d.prospect.materialId) ||
+            isSlitterWidthBlocked(chosenSlit.widthCode, this.nominalWidthByMaterial && this.nominalWidthByMaterial[String(d.prospect.materialId)])   // #4006: лимит ширины джамбо
+        ));
         var chosenSlot = (prospectReady && d.slitterId && !chosenBlocked) ? this.freeSlotForCut(d.slitterId, d.prospect.scheduleCut) : null;
         var canCreate = prospectReady && !!d.slitterId && !chosenBlocked;
 

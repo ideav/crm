@@ -66,8 +66,8 @@ var ctxTail = planning.buildCutTimingCtx(tailCut, null, scTail, 500, POINTS, {},
 
 ok(ctxTail.setupOnly === false, 'продолжение: ctx.setupOnly = false (есть проходы)');
 var linesTail = texts(planning.cutTimingTimelineLines(ctxTail));
-ok(has(linesTail, 'Намотка 1 прохода: 2.533'), 'продолжение: «Намотка 1 прохода: 2.533 мин»');
-ok(has(linesTail, 'Итого резка: 2.533 * 23 = 58.259'), 'продолжение: «Итого резка: 2.533 * 23 = 58.259» (как раньше)');
+ok(has(linesTail, 'Намотка и лидер: 4.576'), 'продолжение: «Намотка и лидер: 4.576 мин» (#4006: намотка 2.533 + лидер 47/23)');
+ok(has(linesTail, 'Итого резка: 4.576 * 23 = 105.248'), 'продолжение: «Итого резка: 4.576 * 23 = 105.248» (#4006: лидер включён в итог)');
 ok(!has(linesTail, 'Только настройка станка'), 'продолжение: НЕТ строки настройки');
 ok(!has(linesTail, 'Продолжение резки предыдущего'), 'продолжение: без флага — тега «вчера» нет');
 
@@ -75,7 +75,7 @@ ok(!has(linesTail, 'Продолжение резки предыдущего'), 
 ctxTail.continuesFromPrevDay = true;
 var linesCont = texts(planning.cutTimingTimelineLines(ctxTail));
 ok(has(linesCont, '↩ Продолжение резки предыдущего рабочего дня (ножи на станке).'), 'продолжение+флаг: тег «↩ предыдущего рабочего дня»');
-ok(has(linesCont, 'Итого резка: 2.533 * 23 = 58.259'), 'продолжение+флаг: намотка по-прежнему считается');
+ok(has(linesCont, 'Итого резка: 4.576 * 23 = 105.248'), 'продолжение+флаг: намотка по-прежнему считается (#4006: с лидером)');
 
 // ── Обычная резка с проходами, остаток которых уходит на след. день (дробление по проходам) ──
 ctxTail.continuesFromPrevDay = false;
@@ -83,7 +83,7 @@ ctxTail.continuesNextDay = true;
 var linesNext = texts(planning.cutTimingTimelineLines(ctxTail));
 ok(has(linesNext, '↪ Остаток проходов — продолжение в следующем рабочем дне.'),
     'продолжение вперёд: тег «↪ остаток проходов в следующем дне»');
-ok(has(linesNext, 'Итого резка: 2.533 * 23 = 58.259'), 'продолжение вперёд: намотка считается');
+ok(has(linesNext, 'Итого резка: 4.576 * 23 = 105.248'), 'продолжение вперёд: намотка считается (#4006: с лидером)');
 
 // ── Прямой ctx без buildCutTimingCtx: setupOnly выводится и из runs=0 ──
 var bare = planning.cutTimingTimelineLines({
