@@ -5058,24 +5058,45 @@
         ];
     }
 
-    // Жадная цепочка от заданного старта: далее argmin changeoverCost, tie-break startKey.
+    // #3996: стоимость перехода prev→next для ВЫБОРА ПОРЯДКА (не для тайминга). Физические
+    // минуты переналадки (changeoverCost) считают смену ножей плоско — 30 мин в любую сторону
+    // (#3600) — и это верно для реальной «Наладка ножей, мин» в задании. Но при УПОРЯДОЧИВАНИИ
+    // доставить ножи (полос стало БОЛЬШЕ) дороже, чем снять (ТЗ §8 п.1: KNIVES_INCREASE=50 >
+    // KNIVES_CHANGE=30). Добавляем к физической стоимости направленный штраф за РОСТ числа полос
+    // = planWeight(INCREASE) − planWeight(CHANGE) (веса #3991, ТЗ §14). Так убывание полос
+    // становится СТРОГО дешевле возрастания, а не только тай-брейком (#3130): жадная цепочка сама
+    // ставит наборы по убыванию, и это не сбивается разницей по сырью/партии. Физтайминг
+    // (changeoverParts/setupBreakdown) не трогаем — реальные минуты наладки прежние.
+    function sequencingCost(prev, next, weights){
+        var base = changeoverCost(prev, next, weights);
+        // #3871: во время выравнивания загрузки считаем только быстрый memoized changeoverCost —
+        // направленный штраф (не memoized: knifeChangeNeeded/stripBandCount на каждую пробу переноса)
+        // раздувал O(n³) проход rebalanceSlitterLoad. Для баланса важны дни/минуты, а не направление
+        // ножей; финальный порядок всё равно соберёт orderCuts (balanceFastChangeover=false).
+        if (!balanceFastChangeover && knifeChangeNeeded(prev, next) && stripBandCount(next) > stripBandCount(prev)) {
+            base += planWeight(null, 'KNIVES_INCREASE_COST_MN') - planWeight(null, 'KNIVES_CHANGE_COST_MN');
+        }
+        return round3(base);
+    }
+    // Жадная цепочка от заданного старта: далее argmin sequencingCost, tie-break startKey.
     function greedyFromStart(start, rest, weights){
         var pool = (rest || []).slice();
         var result = [start];
         while (pool.length){
             var cur = result[result.length - 1], bestI = 0, bestCost = Infinity, bestKey = null;
             for (var i = 0; i < pool.length; i++){
-                var c = changeoverCost(cur, pool[i], weights), k = startKey(pool[i]);
+                var c = sequencingCost(cur, pool[i], weights), k = startKey(pool[i]);
                 if (c < bestCost || (c === bestCost && cmpKey(k, bestKey) < 0)){ bestCost = c; bestI = i; bestKey = k; }
             }
             result.push(pool.splice(bestI, 1)[0]);
         }
         return result;
     }
-    // Суммарная переналадка цепочки (Σ changeoverCost соседей).
+    // Суммарная стоимость упорядочивания цепочки (Σ sequencingCost соседей, #3996: с направленным
+    // штрафом за рост числа полос).
     function chainChangeoverCost(seq, weights){
         var total = 0;
-        for (var i = 1; i < (seq || []).length; i++) total += changeoverCost(seq[i - 1], seq[i], weights);
+        for (var i = 1; i < (seq || []).length; i++) total += sequencingCost(seq[i - 1], seq[i], weights);
         return round3(total);
     }
     // Ряд числа ножей по порядку — критерий «ножи по убыванию» (#3130). Среди равных по
