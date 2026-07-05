@@ -5942,6 +5942,44 @@
         return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(v);
     }
 
+    // #3998: пул с ограничением параллелизма. Гоняет thunks (каждый → Promise) не более `limit`
+    // одновременно — генерация заданий бьёт независимые серии запросов по резкам (создание
+    // резки → её «Партии ГП»/втулки/обеспечения последовательны ВНУТРИ резки, но разные резки
+    // независимы), а порядок в базе неважен (сортировка по planStart/первой колонке 1078, #4000).
+    // Семантика ошибки как у прежней последовательной цепочки: при первом реджекте новые задачи
+    // НЕ запускаются, уже запущенные (до `limit`) дорабатывают, затем пул реджектится ПЕРВОЙ
+    // ошибкой. Чистая, синхронно-безопасная (JS однопоточен) — покрыта тестом.
+    function runWithConcurrency(thunks, limit) {
+        var tasks = Array.isArray(thunks) ? thunks.slice() : [];
+        return new Promise(function(resolve, reject) {
+            if (!tasks.length) { resolve(); return; }
+            var max = Math.max(1, Math.min(Number(limit) || 1, tasks.length));
+            var next = 0, active = 0, failed = false, firstError = null, settled = false;
+            function settle() {
+                if (settled) return;
+                settled = true;
+                if (firstError) reject(firstError); else resolve();
+            }
+            function pump() {
+                if (settled) return;
+                if (active === 0 && (failed || next >= tasks.length)) { settle(); return; }
+                while (!failed && active < max && next < tasks.length) {
+                    var thunk = tasks[next++];
+                    active += 1;
+                    Promise.resolve().then(thunk).then(function() {
+                        active -= 1; pump();
+                    }, function(err) {
+                        active -= 1;
+                        if (!firstError) firstError = err;
+                        failed = true;
+                        pump();
+                    });
+                }
+            }
+            pump();
+        });
+    }
+
     var planning = {
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
@@ -5989,6 +6027,7 @@
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
+        runWithConcurrency: runWithConcurrency,   // #3998: пул сохранений с лимитом потоков
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
         splitMachineQueue: splitMachineQueue,
@@ -9582,21 +9621,24 @@
 
         this.setBusy(true);
         this.setGenBusy(true);
-        // Окно прогресса (#3148): генерация идёт последовательными зависимыми
-        // запросами, может занять заметное время.
+        // Окно прогресса (#3148): создание заданий идёт сериями запросов; #3998 — до 5 резок
+        // сохраняются ПАРАЛЛЕЛЬНО (внутри резки запросы зависимы и остаются последовательными).
         // #3280: записей-сегментов может быть больше, чем раскладок (резки длиннее дня дробятся).
         var nRecords = 0;
         Object.keys(segmentsByLayout).forEach(function(k) { nRecords += segmentsByLayout[k].length; });
         if (!nRecords) nRecords = nCuts;
         console.log('[pp] 🔧 runGenerateCuts: начало создания ' + nRecords + ' записей (' + nCuts + ' раскладок)...');
         this.showProgress('Генерация заданий…', nRecords);
-        var chain = Promise.resolve();
-        var startTime = Date.now();
+        // #3998: каждая резка-сегмент — независимая задача (создание резки → её «Партий ГП»/
+        // втулок/обеспечений); собираем задачи и гоняем пулом не более MAX_PARALLEL_SAVES
+        // одновременно. Порядок в базе неважен — сортировка по planStart (первая колонка 1078).
+        var MAX_PARALLEL_SAVES = 5;
+        var saveTasks = [];
         layouts.forEach(function(lay, layIdx) {
           var units = segmentsByLayout[layIdx] || [];
           units.forEach(function(unit) {
-            chain = chain.then(function() {
-                self.updateProgress(doneCuts, 'Создаётся задание ' + (doneCuts + 1) + ' из ' + nRecords + '…');
+            saveTasks.push(function() {
+                self.updateProgress(doneCuts, 'Создание заданий: ' + doneCuts + ' из ' + nRecords + ' (до ' + MAX_PARALLEL_SAVES + ' параллельно)…');
                 var plannedRuns = unit.plannedRuns;
                 var runLength = unit.runLength;
                 var duration = unit.duration;
@@ -9731,14 +9773,15 @@
                 }).then(function() {
                     // Резка со всеми полосами и обеспечениями готова → +1 к прогрессу.
                     doneCuts += 1;
-                    self.updateProgress(doneCuts);
+                    self.updateProgress(doneCuts, 'Создание заданий: ' + doneCuts + ' из ' + nRecords + '…');
                 });
             });
           });   // #3280: конец units.forEach (сегменты резки по дням)
         });
 
         var genStartTime = Date.now();
-        return chain.then(function() {
+        // #3998: пул сохранений — до MAX_PARALLEL_SAVES резок параллельно (внутри резки — последовательно).
+        return runWithConcurrency(saveTasks, MAX_PARALLEL_SAVES).then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
             self.updateProgress(nRecords, 'Обновление очереди…');
