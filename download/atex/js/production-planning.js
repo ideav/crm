@@ -8167,17 +8167,26 @@
         this.setBusy(true);
         this.showProgress('Удаление заданий за ' + dateLabel + '…', total);
         var done = 0;
+        // #4005: удаление, как и сохранение (#3998/#4004), гоняем пулом до MAX_PARALLEL_DELETES
+        // потоков. Порядок «сперва ВСЕ обеспечения, потом резки» (иначе _m_del резки → 409, см.
+        // комментарий выше) держим БАРЬЕРОМ между фазами: сначала параллельно сносим все
+        // «Обеспечение» (независимы друг от друга — листовые записи), дожидаемся ВСЕХ, затем
+        // параллельно сносим резки (backend каскадит подчинённые Партии ГП/Полосы/Расход,
+        // поддеревья разных резок не пересекаются). Порядок _m_del в базе неважен.
+        var MAX_PARALLEL_DELETES = 5;
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
             });
         }
-        // Цепочка: сначала обеспечения, потом резки (см. комментарий выше).
-        var chain = Promise.resolve();
-        supplyIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
-        cutIds.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
-
-        chain.then(function() {
+        function delTasks(ids) {
+            return ids.map(function(id) { return function() { return del(id); }; });
+        }
+        // Фаза 1 — обеспечения (пул), барьер, Фаза 2 — резки (пул). Барьер снимает ссылки
+        // Обеспечений на Партии ГП до удаления резок → 409 исключён.
+        runWithConcurrency(delTasks(supplyIds), MAX_PARALLEL_DELETES).then(function() {
+            return runWithConcurrency(delTasks(cutIds), MAX_PARALLEL_DELETES);
+        }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress();
@@ -8252,17 +8261,21 @@
         this.setBusy(true);
         this.showProgress('Удаление задания «' + label + '»…', total);
         var done = 0;
+        // #4005: обеспечения резки независимы друг от друга — сносим их пулом до
+        // MAX_PARALLEL_DELETES потоков (как сохранение #3998/#4004), затем БАРЬЕР и сама
+        // резка. Порядок «сперва все обеспечения, потом резка» обязателен (иначе _m_del
+        // резки → 409, см. комментарий выше). Порядок _m_del в базе неважен.
+        var MAX_PARALLEL_DELETES = 5;
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
             });
         }
-        // Цепочка: сначала обеспечения, потом резка (см. комментарий выше).
-        var chain = Promise.resolve();
-        ids.forEach(function(id) { chain = chain.then(function() { return del(id); }); });
-        chain = chain.then(function() { return del(cutId); });
-
-        chain.then(function() {
+        var supplyTasks = ids.map(function(id) { return function() { return del(id); }; });
+        // Фаза 1 — обеспечения (пул), барьер, Фаза 2 — сама резка.
+        runWithConcurrency(supplyTasks, MAX_PARALLEL_DELETES).then(function() {
+            return del(cutId);
+        }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress();
