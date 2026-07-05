@@ -34,7 +34,7 @@ var LEN = '197';   // «Метраж, м» в «Задании в произво
 var cutMeta = meta(100, [
     [191, 'Слиттер'], [192, 'Партия сырья'], [193, 'Кол-во план'], [194, 'Статус'],
     [195, 'Очередность'], [196, 'Тип намотки'], [198, 'Лидер'], [LEN, 'Метраж, м'],
-    [199, 'Длительность, минут']
+    [199, 'Длительность, минут'], [189, 'ID первой части']
 ]);
 var fbMeta = meta(200, [[201, 'Ширина, мм'], [202, 'Кол-во полос'], [203, 'Кол-во рулонов'],
     [204, 'Кол-во план'], [205, 'В работе']]);
@@ -45,9 +45,14 @@ var root = { getAttribute: function() { return 'testdb'; } };
 var c = new Controller(root);
 c.meta.cut = cutMeta; c.meta.finishedBatch = fbMeta; c.meta.supply = supMeta;
 
-// Голова цепочки H: длина прогона (Метраж) = 450, 8 рулонов в обеспечении (метраж 450 = на рулон).
-c.cuts = [{ id: 'H', length: 450, status: 'В работе', slitter: { id: 'S1' }, batchId: 'B1',
-    winding: 'IN', leaders: [] }];
+// Цепочка: голова H (Метраж 450, корректна) + реюзнутое продолжение C с ПУСТЫМ «Метраж, м».
+// #4001: неизменившиеся значения не переписываем; C с пустой длиной — лечим (пишем 450).
+c.cuts = [
+    { id: 'H', length: 450, status: 'В работе', slitter: { id: 'S1' }, batchId: 'B1',
+        winding: 'IN', leaders: [], firstPartId: 'H', plannedRuns: 5, number: 1000 },
+    { id: 'C', length: '', status: 'В работе', slitter: { id: 'S1' }, batchId: 'B1',
+        winding: 'IN', leaders: [], firstPartId: 'H', plannedRuns: 3, number: 2000 }
+];
 c.supplies = [{ id: 'SUP1', cutId: 'H', rolls: 8, footage: 450, finishedBatchId: 'FB1', positionId: 'P1' }];
 c.footageBySupply = {};
 
@@ -67,9 +72,14 @@ c.hideProgress = function() {}; c.render = function() {}; c.notify = function() 
 // прогона записей ДОЛЖНА остаться 450.
 applySplitDone();
 function applySplitDone() {
+    // H — без изменений (planStart/проходы совпадают); C — реюзнутое продолжение (пустая длина);
+    // B — новое продолжение (создаётся).
     c.applySplitPlan({
-        updates: [{ cutId: 'H', sequence: 1, planStartTs: 1000, plannedRuns: 5 }],
-        creates: [{ parentCutId: 'H', sequence: 2, planStartTs: 2000, plannedRuns: 3 }],
+        updates: [
+            { cutId: 'H', sequence: 1, planStartTs: 1000, plannedRuns: 5 },
+            { cutId: 'C', sequence: 2, planStartTs: 2000, plannedRuns: 3 }
+        ],
+        creates: [{ parentCutId: 'H', sequence: 3, planStartTs: 3000, plannedRuns: 2 }],
         deletes: []
     }).then(function() {
         var tLen = 't' + LEN;
@@ -80,12 +90,19 @@ function applySplitDone() {
         assert(createCut[0] && String(createCut[0].params[tLen]) === '450',
             '#3781: продолжение получает «Метраж, м» = 450 (длина прогона головы), а не делёный метраж');
 
-        // 2) Обновляемая запись головы тоже несёт «Метраж, м» = 450 (лечит старые пустые длины).
-        var updCut = posts.filter(function(p) { return p.path === '_m_set/H?JSON'; });
-        assert(updCut.length === 1 && String(updCut[0].params[tLen]) === '450',
-            '#3781: обновление записи пишет «Метраж, м» = 450 (восстановление длины)');
+        // 2) Реюзнутое продолжение C с ПУСТОЙ длиной — лечится: обновление пишет «Метраж, м» = 450.
+        var updC = posts.filter(function(p) { return p.path === '_m_set/C?JSON'; });
+        assert(updC.length === 1 && String(updC[0].params[tLen]) === '450',
+            '#3781: продолжение с пустой длиной лечится — обновление пишет «Метраж, м» = 450');
 
-        // 3) Контроль арифметики: 281.25 — это делёный метраж обеспечения (450 × доля проходов),
+        // 3) #4001: голова H с УЖЕ корректной длиной 450 (и неизменными planStart/проходами) —
+        //    БЕЗ записи (не переписываем совпадающее значение).
+        var updH = posts.filter(function(p) { return p.path === '_m_set/H?JSON'; });
+        var saveH = posts.filter(function(p) { return p.path === '_m_save/H?JSON'; });
+        assert(updH.length === 0 && saveH.length === 0,
+            '#4001: неизменившаяся голова H не пишется (ни _m_set, ни _m_save)');
+
+        // 4) Контроль арифметики: 281.25 — это делёный метраж обеспечения (450 × доля проходов),
         //    а НЕ длина прогона. Мы чиним длину РЕЗКИ; деление метража обеспечения не трогаем.
         assert(round3(450 * 5 / 8) === 281.25 && round3(450 * 10 / 16) === 281.25,
             '#3781: 281.25 = 450 × (доля проходов) — делёный метраж обеспечения, не длина прогона');

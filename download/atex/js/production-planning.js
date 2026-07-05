@@ -5602,6 +5602,72 @@
         }
     }
 
+    // #4001: пере-выбор станка для СУЩЕСТВУЮЩИХ логических резок — та же связка, что при
+    // генерации: жадный chooseSlitterBySetup по дням + rebalanceSlitterLoad. Так «Упорядочить»
+    // для каждой задачи ищет более подходящий станок (как «Сгенерировать»), НЕ пересоздавая резки.
+    // movable — логические резки к переназначению; fixed — 🔒 (держат свой станок базовой
+    // загрузкой, не переносятся). Каждый элемент: { id, slitterId (текущий), materialId, winding,
+    // knifeWidths, knifeCount, isFoil, width, planDate (unix-сек), plannedRuns, runLength, duration }.
+    // ctx: { slitters, weights, dayCapacityMin, nominalWidthByMaterial,
+    //        vacationForDay(dayKey, sec)->{sid:true}, slitterDayBlocked(sid, plan)->bool,
+    //        machineDayOff(sid, dayOffset)->bool }.
+    // → { slitterById: { logicalId: slitterId } } для movable (fixed не трогаем). Вход не мутирует
+    // (для баланса берём копии plan-ов).
+    function computeSlitterReassignment(movable, fixed, ctx) {
+        ctx = ctx || {};
+        var slitters = ctx.slitters || [];
+        var weights = ctx.weights;
+        var cap = Number(ctx.dayCapacityMin) || 0;
+        var nomW = ctx.nominalWidthByMaterial;
+        var vacationForDay = typeof ctx.vacationForDay === 'function' ? ctx.vacationForDay : function(){ return {}; };
+        var slitterById = {};
+        if (!movable || !movable.length) return { slitterById: slitterById };
+
+        // Жадное назначение по дням (как generateCuts): setupGroupsByDay + loadBySlitterId.
+        var order = movable.slice().sort(function(a, b){
+            return (Number(a.planDate) || 0) - (Number(b.planDate) || 0)
+                || String(a.id).localeCompare(String(b.id), 'ru');
+        });
+        var setupGroupsByDay = {}, loadBySlitterId = {};
+        order.forEach(function(m){
+            var day = cutPlanDayKey({ planDate: m.planDate });
+            if (!setupGroupsByDay[day]) setupGroupsByDay[day] = {};
+            var sid = chooseSlitterBySetup(m, slitters, setupGroupsByDay[day], loadBySlitterId, weights, cap, vacationForDay(day, m.planDate), nomW);
+            if (sid == null) sid = (m.slitterId != null ? String(m.slitterId) : '');   // некуда поставить — оставляем текущий станок
+            if (sid !== '') {
+                (setupGroupsByDay[day][sid] = setupGroupsByDay[day][sid] || []).push(m);
+                loadBySlitterId[sid] = (loadBySlitterId[sid] || 0) + 1;
+            }
+            slitterById[String(m.id)] = sid;
+        });
+
+        // Баланс загрузки (как generateCuts): movable переносим на менее загруженные станки,
+        // 🔒 держат базовую загрузку (fixedByMachine). Нужна заданная ёмкость и ≥2 станков.
+        if (cap > 0 && slitters.length >= 2) {
+            var plans = order.filter(function(m){ return slitterById[String(m.id)]; }).map(function(m){
+                return {
+                    id: String(m.id), slitterId: slitterById[String(m.id)],
+                    materialId: m.materialId, winding: m.winding, batchId: m.batchId,
+                    knifeWidths: m.knifeWidths, knifeCount: m.knifeCount, isFoil: m.isFoil,
+                    width: m.width, planDate: m.planDate, plannedRuns: m.plannedRuns,
+                    runLength: m.runLength, duration: m.duration
+                };
+            });
+            var fixedByMachine = {};
+            (fixed || []).forEach(function(f){
+                var s = f.slitterId != null ? String(f.slitterId) : '';
+                if (s !== '') (fixedByMachine[s] = fixedByMachine[s] || []).push(f);
+            });
+            rebalanceSlitterLoad(plans, slitters, {
+                weights: weights, dayCapacityMin: cap, fixedByMachine: fixedByMachine,
+                nominalWidthByMaterial: nomW,
+                machineDayOff: ctx.machineDayOff, slitterDayBlocked: ctx.slitterDayBlocked
+            });
+            plans.forEach(function(p){ slitterById[String(p.id)] = String(p.slitterId); });
+        }
+        return { slitterById: slitterById };
+    }
+
     // #3602/#3923: перенос задания на другой день. Порядок дня задаёт planStart (planDate).
     // Строим желаемый порядок id внутри целевого дня (перемещаемое — первым/последним, прочие
     // — по их сохранённому planStart) и присваиваем плейсхолдер-planStart (день + i·минут);
@@ -6165,6 +6231,7 @@
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
         rebalanceSlitterLoad: rebalanceSlitterLoad,   // #3848: выравнивание загрузки станков
+        computeSlitterReassignment: computeSlitterReassignment,   // #4001: пере-выбор станка для существующих резок
         knifeWidthSig: knifeWidthSig,   // #3666
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
@@ -7924,14 +7991,99 @@
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
-        this.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(changed) {
+        // #4001: «Упорядочить» = как «Сгенерировать», но без пересоздания резок. Сначала для КАЖДОЙ
+        // задачи диапазона ищем более подходящий станок (chooseSlitterBySetup) и балансируем загрузку
+        // (rebalanceSlitterLoad) — reassignSlittersForOptimize пишет «Слиттер» только изменившимся
+        // цепочкам. Затем autoSequenceQueue упаковывает дни и порядок (planStart/проходы — только
+        // изменившиеся, applySplitPlan). Раньше «Упорядочить» лишь пересобирал порядок на ТЕКУЩИХ
+        // станках → старые дефекты наполнения дня (задача застревала на перегруженном станке).
+        this.reassignSlittersForOptimize().then(function(r) {
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(seqChanged) {
+                // Станки сменились, но раскладка/порядок — нет: autoSequenceQueue не перечитал экран.
+                if (!seqChanged && r && r.changed) return self.reload().then(function() { self.render(); return true; });
+                return seqChanged || !!(r && r.changed);
+            });
+        }).then(function(changed) {
             self.setBusy(false);
-            self.notify(changed ? 'Очередь упорядочена (минимум переналадок)' : 'Очередь уже оптимальна', 'success');
+            self.notify(changed ? 'Очередь упорядочена (минимум переналадок, баланс станков)' : 'Очередь уже оптимальна', 'success');
         }).catch(function(err) {
             self.setBusy(false);
             console.error('[pp] ⚙️ optimizeQueue: ОШИБКА', err && err.message, err && err.stack);
             self.notify('Ошибка упорядочивания: ' + (err && err.message ? err.message : err), 'error');
         });
+    };
+
+    // #4001: пере-выбор станка для СУЩЕСТВУЮЩИХ логических резок диапазона (как «Сгенерировать»,
+    // но без пересоздания): chooseSlitterBySetup + rebalanceSlitterLoad (computeSlitterReassignment).
+    // 🔒 держат свой станок (базовая загрузка, не переносятся). «Слиттер» (_m_set) пишем ТОЛЬКО
+    // цепочкам с изменившимся станком — всем записям цепочки (голова + продолжения), иначе
+    // continuationSignature рвётся. Мутируем self.cuts, чтобы следующий autoSequenceQueue раскладывал
+    // по НОВОМУ назначению. → Promise<{ changed:bool }>. Нет станков/ёмкости/движимых — {changed:false}.
+    AtexProductionPlanning.prototype.reassignSlittersForOptimize = function() {
+        var self = this;
+        var cutMeta = this.meta.cut;
+        var slitterReqId = cutMeta ? reqIdByName(cutMeta, CUT_REQ.slitter) : null;
+        if (!slitterReqId || !(self.slitters && self.slitters.length >= 2) || !(self.cuts && self.cuts.length)) {
+            return Promise.resolve({ changed: false });
+        }
+        var genWindow = self.workingWindow();
+        var dayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0) - (Number(genWindow.lunchDurationMin) || 0));
+        if (!(dayCapacityMin > 0)) return Promise.resolve({ changed: false });
+        var planOptions = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes);
+        var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
+
+        var merged = mergeContinuationChains(self.cuts || []);
+        var chainByLogical = merged.chainByLogical || {};
+        var openLogical = (merged.cuts || []).filter(function(c) { return String(c && c.status || '').trim() !== 'Завершён'; });
+        function descOf(c) {
+            var runLength = cutRunLength(c, self.supplies, self.footageBySupply);
+            var runs = Number(c.plannedRuns) || 0;
+            return {
+                id: String(c.id),
+                slitterId: (c.slitter && c.slitter.id != null) ? String(c.slitter.id) : '',
+                materialId: c.materialId, winding: c.winding, batchId: c.batchId,
+                knifeWidths: c.knifeWidths, knifeCount: c.knifeCount, isFoil: !!c.isFoil,
+                width: c.width, planDate: c.planDate, plannedRuns: runs, runLength: runLength,
+                duration: plannedCutDurationMinutes(runLength, runs, self.opTimes, !!c.isFoil)
+            };
+        }
+        var movable = openLogical.filter(function(c) { return !c.fixed; }).map(descOf);
+        var fixed = openLogical.filter(function(c) { return !!c.fixed; }).map(descOf);
+        if (!movable.length) return Promise.resolve({ changed: false });
+
+        var vacByDay = {};
+        function vacationForDay(dayKey, sec) {
+            if (!(dayKey in vacByDay)) { var d = new Date(Number(sec) * 1000); d.setHours(0, 0, 0, 0); vacByDay[dayKey] = self.vacationSlitterIdsForDay(d.getTime()); }
+            return vacByDay[dayKey];
+        }
+        var dayOffMemo = {};
+        function machineDayOff(sid, off) { var k = sid + ':' + off; if (k in dayOffMemo) return dayOffMemo[k]; var v = self.balanceDayOff(sid, planBaseMidnightMs + off * 86400000); dayOffMemo[k] = v; return v; }
+        function slitterDayBlocked(sid, plan) { var sec = Number(plan && plan.planDate); if (!isFinite(sec) || sec <= 0) return false; var d = new Date(sec * 1000); d.setHours(0, 0, 0, 0); return self.slitterOnVacationDay(sid, d.getTime()); }
+
+        var res = computeSlitterReassignment(movable, fixed, {
+            slitters: self.slitters, weights: planOptions, dayCapacityMin: dayCapacityMin,
+            nominalWidthByMaterial: self.nominalWidthByMaterial,
+            vacationForDay: vacationForDay, slitterDayBlocked: slitterDayBlocked, machineDayOff: machineDayOff
+        });
+        var slitterById = res.slitterById || {};
+
+        var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var writes = [];
+        movable.forEach(function(m) {
+            var head = String(m.id);
+            var newSid = String(slitterById[head] || '');
+            if (newSid === '' || newSid === String(m.slitterId || '')) return;   // станок не изменился
+            (chainByLogical[head] || [head]).forEach(function(mid) {
+                var fields = {}; fields['t' + slitterReqId] = newSid;
+                writes.push(self.post('_m_set/' + encodeURIComponent(mid) + '?JSON', fields).then(function() {
+                    var cc = cutsById[String(mid)];
+                    if (cc) { if (!cc.slitter) cc.slitter = { id: newSid, label: '' }; else cc.slitter.id = newSid; }
+                }));
+            });
+        });
+        if (!writes.length) return Promise.resolve({ changed: false });
+        console.log('[pp] ⚙️ Упорядочить: смена станка у ' + writes.length + ' записей (#4001)');
+        return Promise.all(writes).then(function() { return { changed: true }; });
     };
 
     // #3508 п.4: иконка «🔒» в карточке — переключить фиксацию одного задания
@@ -10169,6 +10321,11 @@
         if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
+        // #4001: снимок ХРАНИМОГО «Вид сырья» ДО healContinuationMaterials — иначе лечение в
+        // памяти (ниже) затрёт пустой материал в M7, и changed-сравнение решит «не изменилось» →
+        // запись в БД останется пустой. Сравниваем umat с этим снимком (реальным значением БД).
+        var origMaterialById = {};
+        (self.cuts || []).forEach(function(c) { origMaterialById[String(c.id)] = String(c && c.materialId == null ? '' : c.materialId).trim(); });
         // #3808: перед резолвом цепочек ЛЕЧИМ «Вид сырья» переходящих сегментов с пустым
         // материалом (станок|намотка|ножи → единственное непустое сырьё группы). Иначе пустой
         // материал продолжения рвёт continuationSignature → mergeContinuationChains не находит
@@ -10278,44 +10435,44 @@
         // issue #775: _m_set первую колонку НЕ задаёт). Остальные реквизиты — _m_set.
         (ops.updates || []).forEach(function(u) {
             chain = chain.then(function() {
+                var storedCut = cutsById[String(u.cutId)];   // #4001: хранимые значения — для записи ТОЛЬКО изменившихся полей
                 var ts = Number(u.planStartTs);
-                // DATETIME первая колонка: _m_save с t{tableId} (проверено на live: _m_set→403,
-                // _m_save{val} не пишет datetime, _m_save{t1078}=штамп — работает).
-                var mainFields = {}; if (mainKey) mainFields[mainKey] = String(ts);
-                var saveMain = (mainKey && isFinite(ts) && ts > 0)
-                    ? self.post('_m_save/' + u.cutId + '?JSON', mainFields)
+                // #4001: planStart (_m_save, главное значение = planStart #3242) — ТОЛЬКО если изменился.
+                // Раньше writeMain шёл при каждом апдейте (даже когда менялись только проходы) → лишние
+                // _m_save. DATETIME первая колонка пишется ТОЛЬКО _m_save с t{tableId} (issue #775).
+                var tsChanged = !!mainKey && isFinite(ts) && ts > 0 && (!storedCut || ts !== Number(storedCut.number));
+                var saveMain = tsChanged
+                    ? self.post('_m_save/' + u.cutId + '?JSON', (function() { var mf = {}; mf[mainKey] = String(ts); return mf; })())
                     : Promise.resolve();
                 return saveMain.then(function() {
                     var fields = {};
-                    // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение).
-                    if (u.plannedRuns != null && runsReqId) fields['t' + runsReqId] = String(u.plannedRuns);
-                    // #3916/#3635 п.5: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
-                    // по ЕГО проходам. 0 проходов (setup-сегмент) → 0; уменьшенные проходы дробления
-                    // → намотка/лидер сегмента, а не целой резки (иначе голова хранила намотку всех
-                    // проходов → бейдж дня переполнялся, карточка вылезала за смену).
-                    if (u.plannedRuns != null) Object.assign(fields, splitSegTimingFields(u.cutId, u.plannedRuns));
-                    // #3781: восстановить «Метраж, м» = длине прогона головы цепочки. Для головы
-                    // это та же длина (запись no-op по значению), для реюзнутого продолжения —
-                    // лечит ранее пустую длину (иначе очередь брала поделённый метраж обеспечения).
+                    // #3923/#4001: «Очередность» не пишем — порядок задаёт planStart. «Кол-во резок
+                    // план» — только если изменилось (иначе churn всех записей при упорядочивании).
+                    var runsChanged = (u.plannedRuns != null && !!runsReqId && (!storedCut || Number(u.plannedRuns) !== Number(storedCut.plannedRuns)));
+                    if (runsChanged) fields['t' + runsReqId] = String(u.plannedRuns);
+                    // #3916/#3635 п.5 + #4001: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
+                    // по ЕГО проходам — пишем при СМЕНЕ проходов (при неизменных проходах тайминг тот же).
+                    if (runsChanged) Object.assign(fields, splitSegTimingFields(u.cutId, u.plannedRuns));
+                    // #3781 + #4001: «Метраж, м» = длине прогона головы цепочки — лечим ТОЛЬКО если
+                    // хранимое пусто/расходится (реюзнутое продолжение до фикса), а не переписываем совпадающее.
                     if (lengthReqId) {
                         var ulen = runLenForCutId(u.cutId);
-                        if (ulen > 0) fields['t' + lengthReqId] = String(round3(ulen));
+                        var lenOld = storedCut ? String(storedCut.length == null ? '' : storedCut.length).trim() : '';
+                        if (ulen > 0 && (lenOld === '' || round3(Number(lenOld)) !== round3(ulen))) fields['t' + lengthReqId] = String(round3(ulen));
                     }
-                    // #3795: восстановить «Вид сырья» = сырью головы цепочки. Для головы — no-op
-                    // (то же сырьё); для реюзнутого продолжения, созданного до фикса с пустым
-                    // «Вид сырья», лечит пустоту, иначе очередь следующего дня без сырья («—»).
+                    // #3795 + #4001: «Вид сырья» = сырью головы — лечим ТОЛЬКО если хранимое пусто/иное.
                     var matReqId = reqIdByName(cutMeta, CUT_REQ.material);
                     if (matReqId) {
                         var umat = materialForCutId(u.cutId);
-                        if (umat) fields['t' + matReqId] = umat;
+                        var matOld = origMaterialById[String(u.cutId)] || '';   // #4001: ХРАНИМОЕ (до heal в памяти)
+                        if (umat && matOld !== umat) fields['t' + matReqId] = umat;
                     }
-                    // #3892: «ID первой части» — голова цепочки (для головы = собственный id).
-                    // Проставляем явный маркер на существующие записи, чтобы цепочка опознавалась
-                    // без эвристики; в planCutOperations firstPartId всегда задан.
+                    // #3892 + #4001: «ID первой части» = голова цепочки — проставляем ТОЛЬКО если пусто/иное.
                     if (firstPartReqId) {
                         var uHead = (u.firstPartId != null && u.firstPartId !== '')
                             ? String(u.firstPartId) : (chainHeadById[String(u.cutId)] || String(u.cutId));
-                        if (uHead) fields['t' + firstPartReqId] = uHead;
+                        var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
+                        if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
                     }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);

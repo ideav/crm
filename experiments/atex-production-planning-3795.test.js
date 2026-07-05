@@ -37,7 +37,7 @@ var LEN = '197';   // «Метраж, м»
 var cutMeta = meta(100, [
     [MAT, 'Вид сырья'], [191, 'Слиттер'], [192, 'Партия сырья'], [193, 'Кол-во план'],
     [194, 'Статус'], [195, 'Очередность'], [196, 'Тип намотки'], [198, 'Лидер'],
-    [LEN, 'Метраж, м'], [199, 'Длительность, минут']
+    [LEN, 'Метраж, м'], [199, 'Длительность, минут'], [189, 'ID первой части']
 ]);
 var fbMeta = meta(200, [[201, 'Ширина, мм'], [202, 'Кол-во полос'], [203, 'Кол-во рулонов'],
     [204, 'Кол-во план'], [205, 'В работе']]);
@@ -48,9 +48,14 @@ var root = { getAttribute: function() { return 'testdb'; } };
 var c = new Controller(root);
 c.meta.cut = cutMeta; c.meta.finishedBatch = fbMeta; c.meta.supply = supMeta;
 
-// Голова цепочки H: «Вид сырья» = 'M7' (как грузится из cut_material_id). 8 рулонов обеспечения.
-c.cuts = [{ id: 'H', length: 450, materialId: 'M7', status: 'В работе', slitter: { id: 'S1' },
-    batchId: 'B1', winding: 'IN', leaders: [] }];
+// Цепочка: голова H («Вид сырья» = 'M7') + реюзнутое продолжение C с ПУСТЫМ «Вид сырья».
+// #4001: неизменившиеся значения не переписываем; C с пустым сырьём — лечим (пишем M7).
+c.cuts = [
+    { id: 'H', length: 450, materialId: 'M7', status: 'В работе', slitter: { id: 'S1' },
+        batchId: 'B1', winding: 'IN', leaders: [], firstPartId: 'H', plannedRuns: 5, number: 1000 },
+    { id: 'C', length: 450, materialId: '', status: 'В работе', slitter: { id: 'S1' },
+        batchId: 'B1', winding: 'IN', leaders: [], firstPartId: 'H', plannedRuns: 3, number: 2000 }
+];
 c.supplies = [{ id: 'SUP1', cutId: 'H', rolls: 8, footage: 450, finishedBatchId: 'FB1', positionId: 'P1' }];
 c.footageBySupply = {};
 
@@ -67,8 +72,11 @@ c.hideProgress = function() {}; c.render = function() {}; c.notify = function() 
 
 // План: голова H (5 проходов) обновляется, продолжение B (3 прохода) создаётся.
 c.applySplitPlan({
-    updates: [{ cutId: 'H', sequence: 1, planStartTs: 1000, plannedRuns: 5 }],
-    creates: [{ parentCutId: 'H', sequence: 2, planStartTs: 2000, plannedRuns: 3 }],
+    updates: [
+        { cutId: 'H', sequence: 1, planStartTs: 1000, plannedRuns: 5 },
+        { cutId: 'C', sequence: 2, planStartTs: 2000, plannedRuns: 3 }
+    ],
+    creates: [{ parentCutId: 'H', sequence: 3, planStartTs: 3000, plannedRuns: 2 }],
     deletes: []
 }).then(function() {
     var tMat = 't' + MAT;
@@ -79,10 +87,17 @@ c.applySplitPlan({
     assert(createCut[0] && String(createCut[0].params[tMat]) === 'M7',
         '#3795: продолжение получает «Вид сырья» = M7 (сырьё головы цепочки), а не пустоту');
 
-    // 2) Обновляемая запись головы тоже несёт «Вид сырья» = 'M7' (лечит реюзнутые продолжения).
-    var updCut = posts.filter(function(p) { return p.path === '_m_set/H?JSON'; });
-    assert(updCut.length === 1 && String(updCut[0].params[tMat]) === 'M7',
-        '#3795: обновление записи пишет «Вид сырья» = M7 (восстановление сырья реюзнутых продолжений)');
+    // 2) Реюзнутое продолжение C с ПУСТЫМ сырьём — лечится: обновление пишет «Вид сырья» = M7.
+    var updC = posts.filter(function(p) { return p.path === '_m_set/C?JSON'; });
+    assert(updC.length === 1 && String(updC[0].params[tMat]) === 'M7',
+        '#3795: продолжение с пустым сырьём лечится — обновление пишет «Вид сырья» = M7');
+
+    // 3) #4001: голова H с УЖЕ корректным сырьём M7 (и неизменными planStart/проходами) —
+    //    БЕЗ записи (не переписываем совпадающее значение).
+    var updH = posts.filter(function(p) { return p.path === '_m_set/H?JSON'; });
+    var saveH = posts.filter(function(p) { return p.path === '_m_save/H?JSON'; });
+    assert(updH.length === 0 && saveH.length === 0,
+        '#4001: неизменившаяся голова H не пишется (ни _m_set, ни _m_save)');
 
     console.log('\n' + passed + ' assertions passed');
 }).catch(function(err) {
