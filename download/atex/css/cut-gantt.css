@@ -274,4 +274,31 @@
     pointer-events: none;
 }
 
+/* #4007 (ТЗ §5): короткие перерывы (10:00/15:00, по 10 мин) — как обед, но прохладным сине-серым,
+   чтобы не путать с обедом. Планированию прозрачны, дорисованы на Ганте в несущее задание. */
+.atex-cg-break-row { background: repeating-linear-gradient(135deg, transparent, transparent 7px, rgba(120, 150, 190, .08) 7px, rgba(120, 150, 190, .08) 14px); }
+.atex-cg-label--break { color: #3f5c80; font-style: italic; }
+.atex-cg-break {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    min-width: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    background: #eef3fb;
+    border: 1px dashed #8fb0d6;
+    border-radius: 3px;
+    overflow: visible;
+}
+.atex-cg-break-text {
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+    color: #3f5c80;
+    text-shadow: 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg);
+    pointer-events: none;
+}
+
 .atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }
