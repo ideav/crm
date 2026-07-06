@@ -103,9 +103,17 @@
 .atex-cg-legend-item.is-unfinished::before { background: var(--cg-unfinished); }
 .atex-cg-legend-item.is-on-time::before { background: var(--cg-ok); }
 .atex-cg-legend-item.is-late::before { background: var(--cg-late); }
-/* #4052: обед/перерыв — единый серый пункт (накладка поверх баров). Штриховкой, как сама накладка. */
+/* #4052: обед/перерыв — единый серый пункт (накладка поверх баров).
+   #4061: светло-серым, как сама накладка-«дырка» (.atex-cg-brk). */
 .atex-cg-legend-item.is-break::before {
-    background: repeating-linear-gradient(135deg, rgba(100, 116, 139, .85), rgba(100, 116, 139, .85) 3px, rgba(100, 116, 139, .5) 3px, rgba(100, 116, 139, .5) 6px);
+    background: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, .6);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, .18);
+}
+[data-theme="dark"] .atex-cg-legend-item.is-break::before {
+    background: rgba(226, 232, 240, .82);
+    border-color: rgba(148, 163, 184, .5);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
 }
 
 /* ── Тело ── */
@@ -252,8 +260,10 @@
 
 /* #4052: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ баров (отдельных строк больше
    нет). Несущий их бар удлинён на их длительность (js), а сама накладка рисуется на позиции их
-   времени серой диагональной штриховкой (читается как «пауза» поверх цветного бара). Без текста;
-   подпись — в title («Обед 12:20-13:00»). Курсор-help и pointer-events: чтобы всплывал title. */
+   времени поверх цветного бара. Без текста; подпись — в title («Обед 12:20-13:00»). Курсор-help
+   и pointer-events: чтобы всплывал title.
+   #4061: накладка — СВЕТЛО-СЕРАЯ (не тёмная штриховка), чтобы читалась как «дырка»/вырез в баре
+   (пауза, во время которой станок не работает), а не как ещё один тёмный сегмент. */
 .atex-cg-brk {
     position: absolute;
     top: 2px;
@@ -261,11 +271,16 @@
     min-width: 2px;
     box-sizing: border-box;
     border-radius: 2px;
-    background: repeating-linear-gradient(135deg, rgba(100, 116, 139, .78), rgba(100, 116, 139, .78) 4px, rgba(100, 116, 139, .48) 4px, rgba(100, 116, 139, .48) 8px);
-    border: 1px solid rgba(71, 85, 105, .85);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
+    background: #e2e8f0;                                 /* светло-серый вырез */
+    border: 1px solid rgba(148, 163, 184, .6);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, .18);  /* лёгкая тень внутрь — «углубление» в баре */
     z-index: 2;                /* поверх бара, ниже sticky-метки (z-index 3+) */
     cursor: help;
+}
+[data-theme="dark"] .atex-cg-brk {
+    background: rgba(226, 232, 240, .82);               /* светло-серый и на тёмной теме — контраст к цветному бару */
+    border-color: rgba(148, 163, 184, .5);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
 }
 
 .atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }
