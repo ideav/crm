@@ -664,6 +664,18 @@
         return Math.round((cutMid - base) / 86400000);
     }
 
+    // #4050: «Срок изготовления» (dueKey, YYYYMMDD из cutDueKeys) → индекс дня раскладки от базы
+    // «С» (planBaseMidnightMs) — как dayOffsetFromBase для «Даты план». Нужен, чтобы сравнивать срок
+    // с днём размещения (day-индекс splitMachineQueue) в §8-штрафе (DEADLINE/EXACT). Отрицательный
+    // = срок раньше базы (просрочено). Невалидный ключ → null (штраф не применяется).
+    function dueDayOffsetFromBase(dueKey, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return null;
+        var dt = dayKeyToDate(dueKey);
+        if (!dt) return null;
+        return Math.round((dt.getTime() - base) / 86400000);
+    }
+
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
@@ -3778,6 +3790,14 @@
         var leader = Number(opts.leader != null ? opts.leader : (times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS)) || 0;
         var perPassByCut = opts.perPassByCut || {};
         var runsByCut = opts.runsByCut || {};
+        // #4050: ТЗ §8/§11 — «Срок изготовления» влияет на день размещения. dueDayByCut[id] = срок
+        // как индекс дня от базы «С» (dueDayOffsetFromBase). deadlineAware включается вызывающим
+        // ТОЛЬКО при переоптимизации порядка (preserveOrder=false); при ручном переносе — выкл, чтобы
+        // не ломать порядок оператора. Веса из opts.weights (планировочные), дефолт 100/33.
+        var dueDayByCut = opts.dueDayByCut || {};
+        var deadlineAware = !!opts.deadlineAware;
+        var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;
+        var exactDeadlineW = deadlineAware ? planWeight(opts.weights, 'EXACT_DEADLINE_COST_MN') : 0;
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
         // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
@@ -3929,6 +3949,7 @@
                     remaining: Math.round(Number(runsByCut[id] != null ? runsByCut[id] : c && c.plannedRuns) || 0),
                     perPass: Number(perPassByCut[id] != null ? perPassByCut[id] : 0) || 0,
                     anchor: anchorByCut[id] != null ? anchorByCut[id] : null,
+                    dueDay: (dueDayByCut[id] != null && isFinite(Number(dueDayByCut[id]))) ? Number(dueDayByCut[id]) : null,   // #4050: срок как индекс дня от «С»
                     // #3792/#3974: «Зафиксировано» (🔒) — замок на ДЕНЬ. fixedDay = якорь дня фикс-резки
                     // (без 🔒 задание свободно и набивается от «С»). Внутри дня оптимизатор переставляет,
                     // на другой день/в разбивку — нет.
@@ -3954,11 +3975,25 @@
             // равных» (одинаковая переналадка) — суммарной переналадки не ухудшает, но каждый день
             // теперь начинается с бо́льшего числа ножей и убывает к вечеру (#3130). Фольга остаётся в
             // конце дня (isFoil — старший разряд ключа).
+            // #4050: ТЗ §8/§11 — штраф за срок относительно ДНЯ размещения (dayIdx). dueDay и dayIdx —
+            // индексы дня от базы «С». Срок ПОЗЖЕ дня (ставим заранее, занимаем раннюю ёмкость несрочным)
+            // → DEADLINE_COST_MN; РОВНО в день → EXACT_DEADLINE_COST_MN; срок ≤ дня (в срок/просрочено)
+            // → 0 (ставим свободно, самый дешёвый — просрочку добиваем первой). Складывается в стоимость
+            // переналадки (второй разряд ключа) — вес 100 доминирует над сменой ножей/сырья (30–50),
+            // поэтому срочное встаёт на ранние дни, но при РАВНОЙ срочности порядок решает переналадка.
+            function deadlineCostFor(id, dayIdx) {
+                if (!deadlineAware) return 0;
+                var due = state[id] ? state[id].dueDay : null;
+                if (due == null) return 0;
+                if (due > dayIdx) return deadlineW;
+                if (due === dayIdx) return exactDeadlineW;
+                return 0;
+            }
             function selectByConfig(ids) {
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c), -stripBandCount(c), state[id].idx ];
+                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c) + deadlineCostFor(id, day), -stripBandCount(c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
@@ -4585,6 +4620,9 @@
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
                 dayAnchorByCut: effAnchorByCut,   // #3974: якорь дня ТОЛЬКО за 🔒 (фикс держит свой день); свободные — от «С»
+                weights: opts.weights,            // #4050: веса §8 (DEADLINE/EXACT_DEADLINE_COST_MN)
+                dueDayByCut: opts.dueDayByCut,     // #4050: срок каждой резки как индекс дня от «С»
+                deadlineAware: !opts.preserveOrder,   // #4050: срок влияет при переоптимизации; ручной перенос (preserveOrder) не трогаем
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
@@ -10876,10 +10914,18 @@
         // держит их день, остальное набивает от «С». Смещение считаем для всех (planCutOperations
         // отберёт фикс.); может быть отрицательным (день раньше базы=«С»). Пустая «Дата план» — без якоря.
         var dayAnchorByCut = {};
+        // #4050: срок каждой резки (самый ранний из «Сроков изготовления» обеспечиваемых позиций,
+        // cutDueKeys) как индекс дня от базы «С» — для §8-штрафа в splitMachineQueue (selectByConfig).
+        var dueDayByCut = {};
         self.cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #4050
+            if (dueKeys && dueKeys.length) {
+                var dueOff = dueDayOffsetFromBase(dueKeys[0], planBaseMidnightMs);
+                if (dueOff != null) dueDayByCut[String(c.id)] = dueOff;
+            }
         });
         // #3974: вход планировщика = всё НЕОБЕСПЕЧЕННОЕ — открытые задания (статус ≠ «Завершён»),
         // за ЛЮБЫЕ даты. Фильтра по [С; По] на входе больше нет: раньше scope-диапазон заодно
@@ -10901,6 +10947,7 @@
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
+            dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
