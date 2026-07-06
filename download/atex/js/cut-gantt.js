@@ -1380,46 +1380,50 @@
             });
             // #3770: суммарные минуты всех баров станка — для подписи «N (Σ мин)» в заголовке.
             g.tasksMin = g.tasks.reduce(function(sum, t) { return sum + (t.barMin || 0); }, 0);
-            // #3846: маркеры обеда (зазор ≈ LUNCH_DURATION между резками одного дня) — отдельной
-            // строкой перед послеобеденной резкой, чтобы зазор не выглядел «дырой».
+            // #4052: обед (#3342) и перерывы (#4007) рисуются НАКЛАДКАМИ поверх баров (не
+            // отдельными строками), а несущий их бар удлиняется на их длительность — «фрагмент, на
+            // который попал обед/перерыв, расширяется». Так работа не прячется под накладкой, и бар
+            // честно охватывает работу + обед/перерыв. Копим удлинение по несущему заданию и
+            // применяем один раз; подпись бара пересчитываем на удлинённое окно (минуты в скобках —
+            // рабочие, обед/перерыв в сумму не входит). Позиции самих накладок (leftPx/widthPx/
+            // startMs/endMs) — из ganttLunchMarkers/ganttBreakMarkers, рисуются в render.
             g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
-            // #3909: «несущее» обед задание растягиваем до старта послеобеденного (заполняем зазор,
-            // куда генерация зашила +40), чтобы обед нарисовался в 12:20 ВНУТРИ его пролёта, а не
-            // дырой после него. Минуты подписи (barMin) — рабочие, обед в сумму не входит.
-            (g.lunches || []).forEach(function(lb) {
-                if (lb.carrierIndex == null || lb.postStartMs == null) return;
-                var carrier = g.tasks[lb.carrierIndex];
-                if (!carrier) return;
-                // #4007: предел растяжки — сдвинутый старт послеобеденного бара (его сдвиг за
-                // утренние перерывы ≥ сдвига несущего), иначе обед не дотягивался бы до бара.
-                var post = g.tasks[lb.beforeIndex];
-                var postShiftPx = post ? (post.shiftPx || 0) : (carrier.shiftPx || 0);
-                // #4041: антинахлёст (#3887) мог подвинуть несущее обед задание ВПЕРЁД встык за
-                // предыдущим баром, «съев» часть обеденного зазора: бар 12:02→13:42 под работу 65
-                // читался как 100 мин (обед 35) вместо 65 + 40 = 105 (в БД старт 11:58). Обед
-                // детектируется по СОХРАНЁННЫМ временам (ganttLunchMarkers → cutTimeRange), поэтому
-                // и НЕСУЩИЙ якорим на его сохранённый старт — снимаем сдвиг встык #3887, но сохраняем
-                // сдвиг за перерывы #4007 (shiftPx) — тогда пролёт бара честно охватывает работу + обед
-                // (11:58→13:42 ≈ 105). Начатую резку (есть фактический старт) не двигаем.
-                var carrTr = cutTimeRange(carrier.cut);
-                var anchorMs = (carrTr && carrTr.actualStartMs == null) ? carrTr.startMs : carrier.startMs;
-                var anchorLeftPx = round3(scale.toPx(anchorMs) + (carrier.shiftPx || 0));
-                var fillPx = round3(scale.toPx(lb.postStartMs) + postShiftPx - anchorLeftPx);
-                if (fillPx > carrier.widthPx) {
-                    carrier.startMs = anchorMs;
-                    carrier.leftPx = anchorLeftPx;
-                    carrier.widthPx = fillPx;
-                    carrier.barText = formatTime(anchorMs) + '-' + formatTime(lb.postStartMs) +
-                        ' (' + carrier.barMin + ' мин)';   // пролёт со встроенным обедом; минуты — рабочие
-                }
-            });
-            // #4007 (ТЗ §5): несущее перерыв задание раздвигаем на длительность перерыва (место
-            // освобождено сдвигом последующих баров), чтобы перерыв нарисовался ВНУТРИ его пролёта,
-            // а не дырой после него. Подпись бара (barText/barMin) — рабочая, перерыв в неё не входит.
             g.breaks = brk.markers;
+            // Несущее задание накладки: обед с известным LUNCH_START и перерыв несут carrierIndex;
+            // обед без него (зазор-обед) привязан к резке ПЕРЕД зазором (beforeIndex − 1).
+            function overlayCarrierIndex(m, isLunch) {
+                if (m.carrierIndex != null) return m.carrierIndex;
+                return (isLunch && m.beforeIndex != null) ? m.beforeIndex - 1 : null;
+            }
+            var extendMinByTask = {};
+            (g.lunches || []).forEach(function(lb) {
+                var ci = overlayCarrierIndex(lb, true);
+                if (ci != null && g.tasks[ci]) extendMinByTask[ci] = (extendMinByTask[ci] || 0) + lb.durationMin;
+            });
             (g.breaks || []).forEach(function(mk) {
-                var carrier = g.tasks[mk.carrierIndex];
-                if (carrier) carrier.widthPx = round3(carrier.widthPx + mk.durationMin * pxPerMin);
+                var ci = overlayCarrierIndex(mk, false);
+                if (ci != null && g.tasks[ci]) extendMinByTask[ci] = (extendMinByTask[ci] || 0) + mk.durationMin;
+            });
+            Object.keys(extendMinByTask).forEach(function(k) {
+                var idx = Number(k);
+                var carrier = g.tasks[idx];
+                if (!carrier) return;
+                var want = round3(carrier.widthPx + extendMinByTask[k] * pxPerMin);
+                // #3708: не заходить за старт следующего бара станка (иначе бар подразумевал бы
+                // одновременную работу). Если несущий был сдвинут встык антинахлёстом (#3887),
+                // сдвиг «съел» часть зазора — удлинение упирается в следующий бар, не перекрывая его.
+                var next = g.tasks[idx + 1];
+                if (next && next.leftPx > carrier.leftPx) {
+                    var maxW = round3(next.leftPx - carrier.leftPx);
+                    if (want > maxW) want = maxW;
+                }
+                if (want <= carrier.widthPx) return;
+                carrier.widthPx = want;
+                // Конец окна = старт бара + ширина в минутах (ось линейна в пределах рабочего дня).
+                var spanMin = Math.round(carrier.widthPx / pxPerMin);
+                var endMs = carrier.startMs + spanMin * 60000;
+                carrier.barText = formatTime(carrier.startMs) + '-' + formatTime(endMs) +
+                    ' (' + carrier.barMin + ' мин)';   // пролёт с встроенным обедом/перерывом; минуты — рабочие
             });
             delete g.cuts;
         });
@@ -1860,7 +1864,9 @@
             el('span', { class: 'atex-cg-legend-item is-running', text: STATUS_LABELS.running }),
             el('span', { class: 'atex-cg-legend-item is-unfinished', text: STATUS_LABELS.unfinished }),
             el('span', { class: 'atex-cg-legend-item is-on-time', text: STATUS_LABELS['on-time'] }),
-            el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late })
+            el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late }),
+            // #4052: обед и перерывы — единый серый пункт легенды (рисуются накладками поверх баров).
+            el('span', { class: 'atex-cg-legend-item is-break', text: 'Обед / перерыв' })
         ]);
     };
 
@@ -1923,23 +1929,15 @@
             });
         }
 
-        // #3846/#4035: строка обеда «🍽 Обед · N мин» — общий конструктор для зазор-обеда (строкой
-        // ПЕРЕД послеобеденной резкой) и carrier-фолбэка (#4035, строкой ПОСЛЕ несущей резки).
-        // lb — маркер из ganttLunchMarkers (leftPx/widthPx/durationMin).
-        function buildLunchRow(lb) {
-            var lunchTrack = el('div', { class: 'atex-cg-track' });
-            lunchTrack.style.minWidth = trackPx + 'px';
-            appendHours(lunchTrack);
-            var lunchBar = el('div', { class: 'atex-cg-lunch', title: 'Обеденный перерыв · ' + lb.durationMin + ' мин' }, [
-                el('span', { class: 'atex-cg-lunch-text', text: '🍽 Обед · ' + lb.durationMin + ' мин' })
-            ]);
-            lunchBar.style.left = lb.leftPx + 'px';
-            lunchBar.style.width = lb.widthPx + 'px';
-            lunchTrack.appendChild(lunchBar);
-            var lunchLabel = el('div', { class: 'atex-cg-label atex-cg-label--lunch', title: 'Обеденный перерыв' }, [
-                el('span', { class: 'atex-cg-label-main', text: 'Обед' })
-            ]);
-            return el('div', { class: 'atex-cg-row atex-cg-lunch-row' }, [lunchLabel, lunchTrack]);
+        // #4052: обед/перерыв — серая накладка ПОВЕРХ несущего бара (отдельных строк больше нет).
+        // Без текста; title = подпись + диапазон времени, напр. «Обед 12:20-13:00». m — маркер из
+        // ganttLunchMarkers/ganttBreakMarkers (leftPx/widthPx/startMs/endMs); label — «Обед»/«Перерыв».
+        function buildOverlayBand(m, label) {
+            var title = label + ' ' + formatTime(m.startMs) + '-' + formatTime(m.endMs);
+            var band = el('div', { class: 'atex-cg-brk', title: title });
+            band.style.left = m.leftPx + 'px';
+            band.style.width = m.widthPx + 'px';
+            return band;
         }
 
         // Верхняя шкала времени: метки «HH:00», на первом тике суток — дата.
@@ -1974,27 +1972,25 @@
             headTrack.style.minWidth = trackPx + 'px';
             body.appendChild(el('div', { class: 'atex-cg-row atex-cg-machine-head' }, [nameCell, headTrack]));
 
-            // #3846: обед (#3342) рисуем строкой ПЕРЕД послеобеденной резкой (beforeIndex) —
-            // тем же зазором, что виден на оси, но подписанным «🍽 Обед · N мин» (иначе зазор
-            // читается как «дыра в планировании»). Обед уже зашит генерацией в planStart.
-            var lunchByBefore = {};       // #3846: зазор-обед — строкой ПЕРЕД послеобеденной резкой (beforeIndex)
-            var lunchAfterCarrier = {};   // #4035: фолбэк-обед (дыры нет) — строкой ПОСЛЕ несущей резки (carrierIndex)
+            // #4052: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ несущего их бара
+            // (отдельных строк «Обед»/«Перерыв» больше нет; несущий бар уже удлинён на их
+            // длительность в layoutGroups). Копим накладки по индексу несущего задания: обед с
+            // известным LUNCH_START и перерыв несут carrierIndex; зазор-обед (LUNCH_START неизвестен)
+            // привязываем к резке ПЕРЕД зазором (beforeIndex − 1).
+            var overlaysByTask = {};
+            function pushOverlay(idx, band) {
+                if (idx == null) return;
+                (overlaysByTask[idx] = overlaysByTask[idx] || []).push(band);
+            }
             (group.lunches || []).forEach(function(l) {
-                if (l.fallback) (lunchAfterCarrier[l.carrierIndex] = lunchAfterCarrier[l.carrierIndex] || []).push(l);
-                else lunchByBefore[l.beforeIndex] = l;
+                var ci = l.carrierIndex != null ? l.carrierIndex : (l.beforeIndex != null ? l.beforeIndex - 1 : null);
+                pushOverlay(ci, buildOverlayBand(l, 'Обед'));
             });
-
-            // #4007 (ТЗ §5): короткие перерывы — строкой ПОСЛЕ несущего задания (по carrierIndex),
-            // тем же зазором, что раздвинул несущий бар; подпись «☕ Перерыв · N мин». Ключ —
-            // carrierIndex (не beforeIndex): несущим может быть и последняя резка дня.
-            var breakByCarrier = {};
             (group.breaks || []).forEach(function(mk) {
-                (breakByCarrier[mk.carrierIndex] = breakByCarrier[mk.carrierIndex] || []).push(mk);
+                pushOverlay(mk.carrierIndex, buildOverlayBand(mk, mk.label || 'Перерыв'));
             });
 
             group.tasks.forEach(function(t, taskIdx) {
-                var lb = lunchByBefore[taskIdx];
-                if (lb) body.appendChild(buildLunchRow(lb));   // #3846: зазор-обед — строкой ПЕРЕД послеобеденной резкой
                 var statusKey = t.status && t.status.key || 'unknown';
                 var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
                     el('span', { class: 'atex-cg-label-main', text: t.label })
@@ -2030,29 +2026,10 @@
                 barLink.style.left = t.leftPx + 'px';
                 barLink.style.width = t.widthPx + 'px';
                 track.appendChild(barLink);
+                // #4052: накладки обеда/перерыва — поверх бара (после него в DOM → выше по z),
+                // на позиции их времени; подпись только в title.
+                (overlaysByTask[taskIdx] || []).forEach(function(band) { track.appendChild(band); });
                 body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
-
-                // #4035: carrier-фолбэк обеда — строкой ПОСЛЕ несущей резки (дыры в расписании нет,
-                // бар уже накрывает 12:20; строка лишь подписывает обед — как перерыв, #4007).
-                (lunchAfterCarrier[taskIdx] || []).forEach(function(lb2) { body.appendChild(buildLunchRow(lb2)); });
-
-                // #4007 (ТЗ §5): перерыв(ы), несущим для которых стало это задание — строкой сразу
-                // ПОСЛЕ него (несущий бар уже раздвинут на длительность перерыва в layoutGroups).
-                (breakByCarrier[taskIdx] || []).forEach(function(mk) {
-                    var brkTrack = el('div', { class: 'atex-cg-track' });
-                    brkTrack.style.minWidth = trackPx + 'px';
-                    appendHours(brkTrack);
-                    var brkBar = el('div', { class: 'atex-cg-break', title: 'Перерыв · ' + mk.durationMin + ' мин' }, [
-                        el('span', { class: 'atex-cg-break-text', text: '☕ Перерыв · ' + mk.durationMin + ' мин' })
-                    ]);
-                    brkBar.style.left = mk.leftPx + 'px';
-                    brkBar.style.width = mk.widthPx + 'px';
-                    brkTrack.appendChild(brkBar);
-                    var brkLabel = el('div', { class: 'atex-cg-label atex-cg-label--break', title: 'Перерыв' }, [
-                        el('span', { class: 'atex-cg-label-main', text: 'Перерыв' })
-                    ]);
-                    body.appendChild(el('div', { class: 'atex-cg-row atex-cg-break-row' }, [brkLabel, brkTrack]));
-                });
             });
         });
 

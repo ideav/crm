@@ -103,6 +103,10 @@
 .atex-cg-legend-item.is-unfinished::before { background: var(--cg-unfinished); }
 .atex-cg-legend-item.is-on-time::before { background: var(--cg-ok); }
 .atex-cg-legend-item.is-late::before { background: var(--cg-late); }
+/* #4052: обед/перерыв — единый серый пункт (накладка поверх баров). Штриховкой, как сама накладка. */
+.atex-cg-legend-item.is-break::before {
+    background: repeating-linear-gradient(135deg, rgba(100, 116, 139, .85), rgba(100, 116, 139, .85) 3px, rgba(100, 116, 139, .5) 3px, rgba(100, 116, 139, .5) 6px);
+}
 
 /* ── Тело ── */
 /* #3668 п.5: горизонтальный скролл на .atex-cg-scroll; тело БЕЗ overflow, иначе оно
@@ -246,59 +250,22 @@
 .atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-late); }
 .atex-cg-bar.is-unknown { --cg-bar-color: var(--cg-unknown); }
 
-/* #3846: строка-маркер обеда (#3342). Обед уже зашит генерацией в planStart послеобеденных
-   резок — зазор на оси подписываем «🍽 Обед · N мин», иначе он читается как «дыра». Тёплый
-   пунктирный блок, по позиции/ширине = зазор; строка ниже обычных (служебная). */
-.atex-cg-lunch-row { background: repeating-linear-gradient(135deg, transparent, transparent 7px, rgba(240, 197, 116, .08) 7px, rgba(240, 197, 116, .08) 14px); }
-.atex-cg-label--lunch { color: #8a5a00; font-style: italic; }
-.atex-cg-lunch {
+/* #4052: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ баров (отдельных строк больше
+   нет). Несущий их бар удлинён на их длительность (js), а сама накладка рисуется на позиции их
+   времени серой диагональной штриховкой (читается как «пауза» поверх цветного бара). Без текста;
+   подпись — в title («Обед 12:20-13:00»). Курсор-help и pointer-events: чтобы всплывал title. */
+.atex-cg-brk {
     position: absolute;
-    top: 3px;
-    bottom: 3px;
+    top: 2px;
+    bottom: 2px;
     min-width: 2px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     box-sizing: border-box;
-    background: #fff6e6;
-    border: 1px dashed #f0c574;
-    border-radius: 3px;
-    overflow: visible;
-}
-.atex-cg-lunch-text {
-    font-size: 11px;
-    line-height: 1.1;
-    white-space: nowrap;
-    color: #8a5a00;
-    text-shadow: 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg);
-    pointer-events: none;
-}
-
-/* #4007 (ТЗ §5): короткие перерывы (10:00/15:00, по 10 мин) — как обед, но прохладным сине-серым,
-   чтобы не путать с обедом. Планированию прозрачны, дорисованы на Ганте в несущее задание. */
-.atex-cg-break-row { background: repeating-linear-gradient(135deg, transparent, transparent 7px, rgba(120, 150, 190, .08) 7px, rgba(120, 150, 190, .08) 14px); }
-.atex-cg-label--break { color: #3f5c80; font-style: italic; }
-.atex-cg-break {
-    position: absolute;
-    top: 3px;
-    bottom: 3px;
-    min-width: 2px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-    background: #eef3fb;
-    border: 1px dashed #8fb0d6;
-    border-radius: 3px;
-    overflow: visible;
-}
-.atex-cg-break-text {
-    font-size: 11px;
-    line-height: 1.1;
-    white-space: nowrap;
-    color: #3f5c80;
-    text-shadow: 0 0 2px var(--cg-bg), 0 0 2px var(--cg-bg);
-    pointer-events: none;
+    border-radius: 2px;
+    background: repeating-linear-gradient(135deg, rgba(100, 116, 139, .78), rgba(100, 116, 139, .78) 4px, rgba(100, 116, 139, .48) 4px, rgba(100, 116, 139, .48) 8px);
+    border: 1px solid rgba(71, 85, 105, .85);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
+    z-index: 2;                /* поверх бара, ниже sticky-метки (z-index 3+) */
+    cursor: help;
 }
 
 .atex-cg-empty { padding: 24px; text-align: center; color: var(--cg-muted); }
