@@ -10302,12 +10302,21 @@
                 // Продолжение = БЛИЖАЙШАЯ последующая резка в снимке. Она обязана быть той же цепочки:
                 // если между хвостом и его продолжением встала чужая резка, та несёт СВОЮ переналадку
                 // от нового сырья — добавлять к ней ножи хвоста нельзя (двойной счёт), поэтому стоп.
-                var contId = null, nearest = null;
+                var contId = null, nearest = null, nearCols = null;
                 for (var j = i + 1; j < arr.length; j++) {
                     var d = arr[j];
                     if (onlySet && !onlySet[String(d.id)]) continue;  // вне снимка — прозрачно пропускаем
                     nearest = d;
-                    if (chainRoot4026(d) === chainRoot4026(c)) {
+                    nearCols = cols[String(d.id)] || {};
+                    // Продолжение = ближайшая резка ТОЙ ЖЕ конфигурации: её переналадка входа = 0
+                    // (та же смена сырья/ножи, что у хвоста → менять нечего, ножи хвоста и есть её
+                    // заправка). Признак НЕ зависит от firstPartId: в отчёте cut_planning на ateh НЕТ
+                    // колонки cut_first_part → firstPartId всегда пуст (fp=∅), chainRoot по нему не
+                    // сходится — из-за этого #4033 не срабатывал. chainRoot оставляем доп. признаком
+                    // для баз с колонкой. Чужая резка следом даёт changeover > 0 → sameCfg=false → не
+                    // выносим (у неё своя заправка от нового сырья, иначе двойной счёт).
+                    var sameCfg = Math.round(nearCols.knifeMin || 0) === 0 && Math.round(nearCols.materialWindingMin || 0) === 0;
+                    if (sameCfg || chainRoot4026(d) === chainRoot4026(c)) {
                         contId = String(d.id);
                         deferKnifeToCont[contId] = (deferKnifeToCont[contId] || 0) + wkTail;
                         zeroKnifeTail[String(c.id)] = true;
@@ -10318,9 +10327,9 @@
                     ? '#4030 хвост ' + c.id + ': ножи ' + wkTail + ' → продолжение ' + contId + ' (в дне N только сырьё)'
                     : '#4030 хвост ' + c.id + ' (0 проходов, ножи ' + wkTail + '): продолжение НЕ распознано — '
                         + 'ближайшая=' + (nearest ? nearest.id : '∅')
-                        + ' её_корень=' + (nearest ? chainRoot4026(nearest) : '∅')
-                        + ' её_fp=' + (nearest && nearest.firstPartId != null && nearest.firstPartId !== '' ? nearest.firstPartId : '∅')
-                        + ' vs корень_хвоста=' + chainRoot4026(c) + ' → ножи остаются, день раздут');
+                        + ' переналадка[нож/сыр]=' + (nearCols ? Math.round(nearCols.knifeMin || 0) : '∅') + '/' + (nearCols ? Math.round(nearCols.materialWindingMin || 0) : '∅')
+                        + ' корень=' + (nearest ? chainRoot4026(nearest) : '∅') + ' vs ' + chainRoot4026(c)
+                        + ' → ножи остаются, день раздут');
             });
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
