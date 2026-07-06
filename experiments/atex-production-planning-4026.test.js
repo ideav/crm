@@ -38,7 +38,7 @@ function sec(y, mo, d, h, mi) { return Date.UTC(y, mo, d, h, mi, 0) / 1000; }
 function cut(id, plannedRuns, duration, matId, widths, batch, planSec, firstPart) {
     return { id: id, slitter: { id: 'S1' }, plannedRuns: plannedRuns, duration: duration,
              materialId: matId, winding: 'OUT', batchId: batch, knifeWidths: widths, knifeCount: widths.length,
-             number: planSec, planDate: '', firstPartId: firstPart || '',
+             number: planSec, planDate: planSec, firstPartId: firstPart || '',   // #4042: planDate → день (cutPlanDayKey)
              storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '' };
 }
 function makeFake(cuts) {
@@ -145,6 +145,27 @@ eq(byE['HEADe'] && byE['HEADe'].material, 15, 'HEADe: в дне N остаётс
 eq(byE['CONTe'] && byE['CONTe'].knife, 30, 'CONTe (fp пуст): добрало ножи 30 (продолжение по конфигурации)');
 eq((byE['HEADe'] ? byE['HEADe'].knife + byE['HEADe'].material : -1) + (byE['CONTe'] ? byE['CONTe'].knife + byE['CONTe'].material : -1), 45,
    'сумма настройки хвост+продолжение = 45 (fp пуст, ничего не потеряно)');
+
+// ---------------------------------------------------------------------------
+// Часть 1f (#4042) — продолжение на ПОЛНОМ дне N+1: ножи ОСТАЮТСЯ в дне N (день N добиваем максимально,
+// нахлёст ОК), иначе +30 раздули бы день N+1 за потолок. Обратная сторона #4030 (Станок 3: день N=435
+// недобит, день N+1=487 перебор). День N+1 = продолжение (6) + длинная резка ТОЙ ЖЕ конфиг (451) = 457;
+// +30 отложенных ножей → 487 > 460 → перенос отменяется, полная настройка 45 остаётся на хвосте дня N.
+console.log('\n== #4042: день продолжения ПОЛОН → ножи остаются в дне N (день N добиваем) ==');
+var FILLf = cut('FILLf', 3, 380, 'OTHER',  [100], 'B_OTHER', sec(2026, 5, 26, 8, 0),  '');    // день N
+var HEADf = cut('HEADf', 0, 0,   'MR314L', [200], 'B_314',   sec(2026, 5, 26, 15, 35), '');   // хвост setup-only день N
+var CONTf = cut('CONTf', 1, 4,   'MR314L', [200], 'B_314',   sec(2026, 5, 29, 8, 0),  'HEADf'); // продолжение 08:00, та же конфиг
+var LONGf = cut('LONGf', 30, 391, 'MR314L', [200], 'B_314',  sec(2026, 5, 29, 8, 34), '');     // длинная резка той же конфиг → день N+1 = 457
+var resF = Controller.prototype.computeCutSetupUpdates.call(makeFake([FILLf, HEADf, CONTf, LONGf]));
+var byF = {}; resF.updates.forEach(function(u) { byF[u.cutId] = u; });
+eq(byF['HEADf'] && byF['HEADf'].knife, 30, 'HEADf (#4042): ножи ОСТАЮТСЯ в дне N (день продолжения полон) — 30, не 0');
+eq(byF['HEADf'] && byF['HEADf'].material, 15, 'HEADf: смена сырья тоже в дне N (15)');
+eq((byF['HEADf'] ? byF['HEADf'].knife + byF['HEADf'].material : -1), 45,
+   'HEADf: полная настройка 45 в дне N (день N добит, нахлёст допустим)');
+eq(byF['CONTf'] && byF['CONTf'].knife || 0, 0, 'CONTf: продолжение НЕ добирает ножи (день N+1 и так полон)');
+// Контроль баланса: с переносом день N+1 = 487 (перебор), без переноса = 457 (в бюджете).
+function dayF(ids) { return ids.reduce(function(s, id) { var u = byF[id] || {}; return s + (u.knife || 0) + (u.material || 0) + (u.cutTime || 0); }, 0); }
+eq(dayF(['CONTf', 'LONGf']), 457, 'день N+1 без переноса ножей = 457 (в бюджете), а был бы 487');
 
 // ---------------------------------------------------------------------------
 // Часть 2 — контроль: обычная резка с проходами (НЕ setup-only) — настройка целиком на ней, без дележа,
