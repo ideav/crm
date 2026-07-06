@@ -123,15 +123,18 @@ function uiCut(id, planIso, cutTime) {
 }
 
 // Непрерывный день (как на скрине): 08:00–11:48 + 11:48–15:00, зазора у полудня нет.
+// #4052: обед — серая накладка .atex-cg-brk ПОВЕРХ несущего бара (T накрывает 12:20), без строки.
 var uiChain = buildBody([uiCut('H', '2026-06-29 08:00', 228), uiCut('T', '2026-06-29 11:48', 192)]);
-var lunchRows = uiChain.querySelectorAll('.atex-cg-lunch-row');
-assert(lunchRows.length === 1, '#4035 UI: непрерывный день через полдень → одна строка обеда (.atex-cg-lunch-row)');
-var lunchBar = uiChain.querySelector('.atex-cg-lunch');
-assert(lunchBar && /🍽 Обед · 40 мин/.test(lunchBar.textContent), '#4035 UI: подпись «🍽 Обед · 40 мин»');
+assert(uiChain.querySelectorAll('.atex-cg-lunch-row').length === 0, '#4052 UI: отдельной строки обеда больше нет');
+var lunchBands = uiChain.querySelectorAll('.atex-cg-brk');
+assert(lunchBands.length === 1, '#4052 UI: непрерывный день через полдень → одна накладка обеда (.atex-cg-brk)');
+assert(lunchBands[0] && lunchBands[0].attributes.title === 'Обед 12:20-13:00',
+    '#4052 UI: title накладки = «Обед 12:20-13:00»');
+assert(lunchBands[0] && lunchBands[0].textContent === '', '#4052 UI: накладка обеда без текста');
 
-// Контроль: станок кончает до обеда → строки обеда нет.
+// Контроль: станок кончает до обеда → накладки обеда нет.
 var uiEarly = buildBody([uiCut('E', '2026-06-29 08:00', 120)]);
-assert(uiEarly.querySelectorAll('.atex-cg-lunch-row').length === 0, '#4035 UI: работа до 12:20 → строки обеда нет');
+assert(uiEarly.querySelectorAll('.atex-cg-brk').length === 0, '#4052 UI: работа до 12:20 → накладки обеда нет');
 
 console.log('\n' + passed + '/' + total + ' проверок прошло.');
 if (!process.exitCode) console.log('Все проверки #4035 зелёные.');

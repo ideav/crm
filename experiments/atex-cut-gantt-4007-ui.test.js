@@ -63,22 +63,25 @@ function buildBody(breaks) {
     return inst._buildBody(range, gantt.parseDateTimeMs('2026-06-29 12:00'));
 }
 
-// ── С настроенным перерывом: одна строка-перерыв с баром и подписью ──
+// ── #4052: перерыв — серая накладка .atex-cg-brk ПОВЕРХ несущего бара (без отдельной строки) ──
 var on = buildBody([{ startMin: 600, durationMin: 10, label: 'Перерыв' }]);
-var rows = on.querySelectorAll('.atex-cg-break-row');
-assert(rows.length === 1, '#4007 UI: одна строка перерыва (.atex-cg-break-row)');
-var bar = on.querySelector('.atex-cg-break');
-assert(!!bar, '#4007 UI: есть бар перерыва (.atex-cg-break)');
-var txt = on.querySelector('.atex-cg-break-text');
-assert(txt && txt.textContent === '☕ Перерыв · 10 мин', '#4007 UI: подпись «☕ Перерыв · 10 мин»');
-assert(bar && bar.style.width === (10 * 2) + 'px', '#4007 UI: ширина бара перерыва = 10 мин × 2px/мин');
-var brLabel = on.querySelector('.atex-cg-label--break');
-assert(brLabel && brLabel.textContent === 'Перерыв', '#4007 UI: метка строки — «Перерыв»');
+assert(on.querySelectorAll('.atex-cg-break-row').length === 0, '#4052 UI: отдельной строки перерыва больше нет');
+var bands = on.querySelectorAll('.atex-cg-brk');
+assert(bands.length === 1, '#4052 UI: одна накладка перерыва (.atex-cg-brk)');
+var band = bands[0];
+assert(band && band.style.width === (10 * 2) + 'px', '#4052 UI: ширина накладки = 10 мин × 2px/мин');
+assert(band && band.attributes.title === 'Перерыв 10:00-10:10',
+    '#4052 UI: title накладки = «Перерыв 10:00-10:10» (подпись + диапазон), без текста внутри');
+assert(band && band.textContent === '', '#4052 UI: накладка без текста');
+// Накладка лежит В строке несущего бара (C1, 09:00–11:00 накрывает 10:00), а не отдельной строкой.
+var rowsWithBrk = on.querySelectorAll('.atex-cg-row').filter(function(r) { return r.querySelector('.atex-cg-brk'); });
+assert(rowsWithBrk.length === 1 && rowsWithBrk[0].querySelector('.atex-cg-bar'),
+    '#4052 UI: накладка — в строке несущего бара (в той же .atex-cg-row есть и бар)');
 
-// ── Без настройки перерывов: строк-перерывов нет (деградация без поломки Ганта) ──
+// ── Без настройки перерывов: накладок нет (деградация без поломки Ганта) ──
 var off = buildBody([]);
-assert(off.querySelectorAll('.atex-cg-break-row').length === 0, '#4007 UI: без настройки перерывов — строк нет');
+assert(off.querySelectorAll('.atex-cg-brk').length === 0, '#4052 UI: без настройки перерывов — накладок нет');
 // Обычные бары резок при этом на месте.
-assert(off.querySelectorAll('.atex-cg-bar').length === 3, '#4007 UI: без перерывов — три бара резок отрисованы');
+assert(off.querySelectorAll('.atex-cg-bar').length === 3, '#4052 UI: без перерывов — три бара резок отрисованы');
 
 console.log('\n' + passed + '/' + total + ' assertions passed');
