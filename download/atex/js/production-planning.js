@@ -3498,7 +3498,9 @@
                 setup = round3(setup + carrySetupBySig[carrySig]);
                 delete carrySetupBySig[carrySig];
             }
-            var leaderMin = leader * cutLeaderRuns(c);   // #3688: лидер в конце резки
+            // #3688: лидер в конце резки. #4021: setup-only сегмент (0 проходов, хвост дня) намотки и
+            // лидера не несёт — иначе окно/бейдж дня прибавляли фантомный BETWEEN_CUTS (см. computeCutSetupUpdates).
+            var leaderMin = setupIds[String(c && c.id)] ? 0 : leader * cutLeaderRuns(c);
             var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
             // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
@@ -10221,7 +10223,13 @@
                 var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
                 // цуга, cutLeaderRuns). Зависит только от самой резки.
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
+                // #4021: setup-only сегмент (0 проходов — «только настройка станка», хвост дня #3635 п.5)
+                // намотки не несёт, поэтому и лидера у него нет. cutLeaderRuns() возвращает 1 при 0
+                // проходов (фолбэк для реальной резки с несохранённым «Кол-во план»), из-за чего «Резка
+                // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
+                // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
+                var leaderRuns = stripNum(c.plannedRuns) > 0 ? cutLeaderRuns(c) : 0;
+                var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
