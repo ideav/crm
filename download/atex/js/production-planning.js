@@ -1536,6 +1536,15 @@
         return p2(dt.getDate()) + '.' + p2(dt.getMonth() + 1) + '.' + dt.getFullYear();
     }
 
+    // #4064: на сколько ДНЕЙ размещение (placementDayKey, YYYYMMDD) позже срока (dueKey, YYYYMMDD).
+    // В срок/заранее или нет данных → 0. База метрики опоздания плана для выбора кандидата «Упорядочить».
+    function lateDaysOf(placementDayKey, dueKey) {
+        var plan = dayKeyToDate(placementDayKey), due = dayKeyToDate(dueKey);
+        if (!plan || !due) return 0;
+        var diff = Math.round((plan.getTime() - due.getTime()) / 86400000);
+        return diff > 0 ? diff : 0;
+    }
+
     // #3769: класс расцветки строки .atex-pp-strip-row по «Сроку изготовления» позиции
     // (dueKey, YYYYMMDD) относительно «Даты план» задания (planKey, YYYYMMDD):
     //   срок РАНЬШЕ планы            → 'is-overdue' (красный — не успеваем);
@@ -8220,11 +8229,18 @@
         return m;
     }
 
-    // #4047: выбор кандидата «Упорядочить» с ГАРАНТИЕЙ, что суммарная переналадка НЕ вырастет.
-    // before — переналадка текущего плана; objB — кандидат «пересборка на текущих станках»; objA —
-    // кандидат «переназначение станков + пересборка» (Infinity, если переназначения нет). Применяем
-    // ЛУЧШИЙ (строго меньшую переналадку); при равенстве кандидатов берём B (без смены станка). Если
-    // лучший НЕ строго меньше текущего → 'none' (план не трогаем). → { action:'none'|'B'|'A', obj }.
+    // #4064: один день опоздания в объективе «Упорядочить» весит больше любой переналадки — срок
+    // (ТЗ §14) старший критерий. Объектив кандидата = дни_опоздания × LATE_DAY_WEIGHT + переналадка(мин),
+    // поэтому chooseOptimizeCandidate сперва минимизирует опоздания, затем переналадку (лексикографически).
+    var LATE_DAY_WEIGHT = 1e9;
+
+    // #4047/#4064: выбор кандидата «Упорядочить». before/objB/objA — КОМБИНИРОВАННЫЙ объектив
+    // (дни_опоздания × LATE_DAY_WEIGHT + переналадка), objA = Infinity если переназначения нет.
+    // Применяем ЛУЧШИЙ (строго меньший объектив = меньше опозданий, при равных — меньше переналадки);
+    // при равенстве кандидатов берём B (без смены станка). Лучший НЕ строго меньше текущего → 'none'
+    // (план не трогаем). Так «Упорядочить» НЕ увеличивает ни опоздания, ни (при равных опозданиях)
+    // переналадку, но РАДИ сокращения опозданий переналадку увеличить может (срок важнее, #4064).
+    // → { action:'none'|'B'|'A', obj }.
     function chooseOptimizeCandidate(before, objB, objA, reassignChanged) {
         var useA = !!reassignChanged && objA < objB;
         var bestObj = useA ? objA : objB;
@@ -8264,6 +8280,23 @@
         }).all.changeoverMin;
     };
 
+    // #4064: суммарные дни опоздания плана — Σ по резкам max(0, день размещения − срок). День
+    // размещения берём как в planChangeoverMin (override planStart из ops кандидата, иначе хранимый
+    // planStart/planDate резки), срок — dueKey (YYYYMMDD). Старший критерий «Упорядочить» (срок —
+    // ТЗ §14), выше переналадки: см. LATE_DAY_WEIGHT и chooseOptimizeCandidate.
+    AtexProductionPlanning.prototype.planLatenessDays = function(cutsArray, planStartByCutId) {
+        var ov = planStartByCutId || null;
+        var total = 0;
+        (cutsArray || []).forEach(function(c) {
+            var o = ov ? ov[String(c.id)] : null;
+            var ts = (o != null) ? Number(o)
+                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
+            var pKey = ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate);
+            total += lateDaysOf(pKey, c.dueKey);
+        });
+        return round3(total);
+    };
+
     // #4047: «Упорядочить» ГАРАНТИРОВАННО не увеличивает суммарную переналадку. Считаем два
     // плана-кандидата В ПАМЯТИ (без записи в БД) и меряем их суммарную переналадку
     // (planChangeoverMin) против текущего плана; применяем ЛУЧШИЙ и ТОЛЬКО если он СТРОГО меньше:
@@ -8276,13 +8309,23 @@
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
+        // #4064: объектив кандидата — дни_опоздания × LATE_DAY_WEIGHT + переналадка(мин). Срок (ТЗ §14)
+        // старший критерий: сперва минимизируем опоздания, затем переналадку. coX/lateX храним отдельно
+        // для уведомления. combined() собирает объектив для chooseOptimizeCandidate.
         var before, builtB, objB, plan, objA, builtA;
+        var coBefore, lateBefore, coB, lateB, coA = Infinity, lateA = Infinity;
+        function combined(late, co) { return late * LATE_DAY_WEIGHT + co; }
         try {
-            before = self.planChangeoverMin(self.cuts, null);
+            coBefore = self.planChangeoverMin(self.cuts, null);
+            lateBefore = self.planLatenessDays(self.cuts, null);
+            before = combined(lateBefore, coBefore);
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
             builtB = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
-            objB = self.planChangeoverMin(self.cuts, planStartMapFromOps(builtB.ops));
+            var mapB = planStartMapFromOps(builtB.ops);
+            coB = self.planChangeoverMin(self.cuts, mapB);
+            lateB = self.planLatenessDays(self.cuts, mapB);
+            objB = combined(lateB, coB);
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
@@ -8299,7 +8342,10 @@
                     else c.slitter.id = plan.slitterByRecordId[mid];
                 });
                 builtA = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
-                objA = self.planChangeoverMin(self.cuts, planStartMapFromOps(builtA.ops));
+                var mapA = planStartMapFromOps(builtA.ops);
+                coA = self.planChangeoverMin(self.cuts, mapA);
+                lateA = self.planLatenessDays(self.cuts, mapA);
+                objA = combined(lateA, coA);
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             }
         } catch (err) {
@@ -8309,15 +8355,15 @@
             return;
         }
 
-        // Выбор кандидата с ГАРАНТИЕЙ не увеличивать переналадку (строго меньше — иначе не трогаем).
+        // Выбор кандидата: сперва меньше опозданий (срок §14), затем меньше переналадки; иначе не трогаем.
         var choice = chooseOptimizeCandidate(before, objB, objA, plan.changed);
         if (choice.action === 'none') {
             self.setBusy(false);
-            self.notify('Очередь уже оптимальна по переналадке (' + round3(before) + ' мин)', 'success');
+            self.notify('Очередь уже оптимальна (опозданий ' + round3(lateBefore) + ' дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
             return;
         }
         var useA = choice.action === 'A';
-        var bestObj = choice.obj;
+        var coBest = useA ? coA : coB, lateBest = useA ? lateA : lateB;
 
         var applyPromise;
         if (useA) {
@@ -8337,7 +8383,8 @@
 
         applyPromise.then(function() {
             self.setBusy(false);
-            self.notify('Очередь упорядочена: переналадка ' + round3(before) + ' → ' + round3(bestObj) + ' мин'
+            self.notify('Очередь упорядочена: опоздания ' + round3(lateBefore) + ' → ' + round3(lateBest) + ' дн, '
+                + 'переналадка ' + round3(coBefore) + ' → ' + round3(coBest) + ' мин'
                 + (useA ? ' (со сменой станка)' : ''), 'success');
         }).catch(function(err) {
             self.setBusy(false);
