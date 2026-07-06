@@ -10428,13 +10428,23 @@
         }
         this.setBusy(true);
         if (splitTotal > 0) this.showProgress('Сохранение плана резок…', splitTotal);
-        var chain = Promise.resolve();
+        // #4014: раньше update/create/delete применялись ОДНОЙ последовательной цепочкой (chain.then)
+        // — сотни зависимых запросов в один поток, «Сохранение плана резок…» тянулось МИНУТАМИ
+        // (сеть-лесенка, #4014). Распараллеливаем пулом runWithConcurrency(…, MAX_PARALLEL_SPLIT),
+        // как генерацию (#3998/#4004) и удаление (#4005/#4009). Три фазы держим БАРЬЕРАМИ
+        // (updates → creates → deletes) — как было в цепочке; ВНУТРИ фазы задачи независимы (разные
+        // резки / родительские цепочки / удаляемые записи), внутренние запросы задачи остаются
+        // последовательными (первая колонка _m_save→_m_set; дети продолжения по up=<bId>; удаление
+        // обеспечения→Партии ГП→резка). Per-задача softSkip (#3895) глотает «No such record» — не
+        // роняет пул; реальная ошибка реджектит пул ПЕРВОЙ ошибкой (обрыв как у прежней цепочки →
+        // терминальный catch). Счётчик splitDone (++) безопасен — JS однопоточен.
+        var MAX_PARALLEL_SPLIT = 5;
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
         // ⚠️ Первая колонка (плановое время старта) пишется ТОЛЬКО через _m_save (GUIDE
         // issue #775: _m_set первую колонку НЕ задаёт). Остальные реквизиты — _m_set.
-        (ops.updates || []).forEach(function(u) {
-            chain = chain.then(function() {
+        var updateTasks = (ops.updates || []).map(function(u) {
+            return function() { return Promise.resolve().then(function() {
                 var storedCut = cutsById[String(u.cutId)];   // #4001: хранимые значения — для записи ТОЛЬКО изменившихся полей
                 var ts = Number(u.planStartTs);
                 // #4001: planStart (_m_save, главное значение = planStart #3242) — ТОЛЬКО если изменился.
@@ -10477,11 +10487,13 @@
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
-            }).then(splitBump).catch(softSkip);
+            }).then(splitBump).catch(softSkip); };
         });
 
-        // 2) Создать записи-продолжения с копией Полос и долей Обеспечения.
-        Object.keys(createsByParent).forEach(function(parentId) {
+        // 2) Создать записи-продолжения с копией Полос и долей Обеспечения. Каждая родительская
+        // цепочка (parentId) — независимая задача; ВНУТРИ (loadStrips → уменьшить A → Партии ГП →
+        // сегменты B с детьми/обеспечениями) запросы связаны и остаются последовательными.
+        var createTasks = Object.keys(createsByParent).map(function(parentId) {
             var parentCut = cutsById[parentId];
             var crs = createsByParent[parentId];
             var upd = updateByCut[parentId];
@@ -10489,7 +10501,7 @@
             var parentMaterial = materialForCutId(parentId);   // #3795: «Вид сырья» цепочки (для продолжений)
             var aRuns = upd ? (Number(upd.plannedRuns) || 0) : 0;
             var segRuns = [aRuns].concat(crs.map(function(c) { return Number(c.plannedRuns) || 0; }));
-            chain = chain.then(function() { return self.loadStripsForCut(parentId); }).then(function(parentStrips) {
+            return function() { return self.loadStripsForCut(parentId).then(function(parentStrips) {
                 var parentSupplies = (self.supplies || []).filter(function(s) { return String(s.cutId) === String(parentId); });
                 var shareBySupply = parentSupplies.map(function(s) { return { s: s, shares: splitSupplyShares(s.rolls, s.footage, segRuns) }; });
                 // #3433: спрос на «Партию ГП» по сегментам (Σ долей обеспечений этой партии).
@@ -10601,12 +10613,13 @@
                     });
                 });
                 return cChain;
-            }).then(splitBump).catch(softSkip);
+            }).then(splitBump).catch(softSkip); };
         });
 
-        // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся).
-        (ops.deletes || []).forEach(function(cutId) {
-            chain = chain.then(function() {
+        // 3) Удалить записи-продолжения прежних цепочек (их Полосы/дети каскадятся). Каждая
+        // удаляемая резка — независимая задача; ВНУТРИ порядок обеспечения → Партии ГП → резка.
+        var deleteTasks = (ops.deletes || []).map(function(cutId) {
+            return function() { return Promise.resolve().then(function() {
                 var supplies = self.supplies || [];
         
                 // Партии ГП, подчинённые удаляемой резке
@@ -10637,9 +10650,15 @@
                 // 3) удаляем саму резку
                 inner = inner.then(function() { return delMissingOk(cutId); });
                 return inner;
-            }).then(splitBump).catch(softSkip);
+            }).then(splitBump).catch(softSkip); };
         });
-        return chain.then(function() { return self.reload(); }).then(function() {
+        // #4014: три фазы пулом по MAX_PARALLEL_SPLIT, с БАРЬЕРАМИ между ними (updates → creates →
+        // deletes), затем reload + persistCutSetupColumns, как в прежней цепочке.
+        return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT).then(function() {
+            return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT);
+        }).then(function() {
+            return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
+        }).then(function() { return self.reload(); }).then(function() {
             return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render(); return true;
