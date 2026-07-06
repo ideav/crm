@@ -10270,18 +10270,23 @@
         // «Время старта» (planStart) пишет splitMachineQueue/applySplitPlan — единственный
         // источник правды по дню/нахлёсту настройки (#3805, #3635 п.5). Здесь — только тайминг
         // (Наладка ножей / Сырьё-намотка / Резка и Лидер), planStart не трогаем.
-        var chain = Promise.resolve();
-        updates.forEach(function(u) {
-            chain = chain.then(function() {
+        // #4023: разные резки независимы (каждая — свой _m_set/<cutId>?JSON), а порядок в базе
+        // неважен (#4000). Раньше это был последовательный chain.then — «последний набор запросов»
+        // после «Создать»/«Упорядочить» шёл лесенкой в 1 поток (окно висело на 100%). Гоняем пулом
+        // до MAX_PARALLEL_SETUP потоков, как сохранение/удаление/разбиение (#3998/#4005/#4014).
+        var MAX_PARALLEL_SETUP = 5;
+        var tasks = updates.map(function(u) {
+            return function() {
                 var fields = setupTimingFields(reqs, u);
                 if (!Object.keys(fields).length) return;
                 return self.post('_m_set/' + u.cutId + '?JSON', fields);
-            });
+            };
         });
         // #3778: ошибки записи тайминга больше НЕ глотаем молча — раньше тихий catch скрывал,
         // почему «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» оставались пустыми. Сохранение
-        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим.
-        return chain.catch(function(err) {
+        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим. Пул реджектится
+        // ПЕРВОЙ ошибкой (как прежняя цепочка) → единый notify.
+        return runWithConcurrency(tasks, MAX_PARALLEL_SETUP).catch(function(err) {
             self.notify('Не удалось сохранить тайминг заданий (Наладка ножей / Сырье-намотка / '
                 + 'Резка и Лидер): ' + (err && err.message || err), 'error');
         });
