@@ -3369,7 +3369,7 @@
     // сам влезающий в рабочее окно дня, переносится на начало СЛЕДУЮЩЕГО рабочего дня (а не
     // оставляется с нахлёстом за смену). Не задан → прежнее поведение (проверяли только старт).
     // dayEnd по-прежнему граница, ПОСЛЕ которой новый сегмент не начинают.
-    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit) {
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit, skipCeiling) {
         var m = Number(from);
         var L = Number(len) || 0;
         var hasFit = (fitEnd != null && isFinite(Number(fitEnd)));
@@ -3391,7 +3391,12 @@
             // #3907: сегмент должен влезть в рабочее окно дня ЦЕЛИКОМ. Конец за fitEnd, а сам
             // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Только для сдвинутого
             // простоем сегмента (#3934). Сегмент длиннее целого окна разбить нельзя — кладём как есть.
-            if (moved && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
+            // #4021: setup-only хвост дня (skipCeiling) — намеренный нахлёст #3635 п.5, потолком НЕ
+            // выталкиваем (иначе встык-курсор, нудживший хвост на 1 мин, делал movedInit=true и хвост
+            // уезжал за конец смены — а перед выходными за все выходные, оседая ОДИНОКОЙ наладкой на
+            // понедельник и вытесняя #3951 весь дневной объём на вторник: день «недогружен, только наладка»).
+            // Блоки простоя (ниже) хвост по-прежнему обходит; выталкивание касается лишь проходов (#3907).
+            if (moved && !skipCeiling && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
             var bumped = false;
             for (var i = 0; i < (blocked || []).length; i++) {
                 var bS = blocked[i][0], bE = blocked[i][1];
@@ -3433,8 +3438,12 @@
             // уехал за простой) — тогда к нему применяем потолок нахлёста (#3907); сегмент на своём
             // месте (не тронут ни блоком, ни курсором) оставляем как есть (намеренный хвост дня).
             var cursorMoved = (ws !== origWs);
+            // #4021: setup-only хвост — намеренный нахлёст (#3635 п.5), потолок нахлёста к нему не
+            // применяем (иначе одиночная наладка уезжает за выходные, недогружая день). acc.overhangTail
+            // необязателен; нет — прежнее поведение.
+            var skipCeiling = acc.overhangTail ? !!acc.overhangTail(it) : false;
             // #3907: fitEnd — не оставлять сегмент с нахлёстом за смену (см. nextFreeWorkMinute).
-            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved);
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved, skipCeiling);
             var delta = placed - origWs;
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
@@ -3498,7 +3507,9 @@
                 setup = round3(setup + carrySetupBySig[carrySig]);
                 delete carrySetupBySig[carrySig];
             }
-            var leaderMin = leader * cutLeaderRuns(c);   // #3688: лидер в конце резки
+            // #3688: лидер в конце резки. #4021: setup-only сегмент (0 проходов, хвост дня) намотки и
+            // лидера не несёт — иначе окно/бейдж дня прибавляли фантомный BETWEEN_CUTS (см. computeCutSetupUpdates).
+            var leaderMin = setupIds[String(c && c.id)] ? 0 : leader * cutLeaderRuns(c);
             var dur = setupIds[String(c && c.id)] ? 0 : scheduleDurationMinutes(c, Number(runLen[String(c.id)]) || 0, wind);
             // #3562: задания пакуются встык по очереди. Зафиксированные больше не «прикалываются»
             // к плановому старту — автогенерация двигает их по времени в течение дня и меняет
@@ -3809,7 +3820,8 @@
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
-                shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); }
+                shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); },
+                overhangTail: function(s) { return !!s.setupOnly; }   // #4021: setup-only хвост дня — намеренный нахлёст (#3635 п.5), не выталкивать потолком
             }, fitEnd);
             if (traceDown) {
                 segs.forEach(function(s, i) {
@@ -10242,7 +10254,13 @@
                 var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
                 // цуга, cutLeaderRuns). Зависит только от самой резки.
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * cutLeaderRuns(c));
+                // #4021: setup-only сегмент (0 проходов — «только настройка станка», хвост дня #3635 п.5)
+                // намотки не несёт, поэтому и лидера у него нет. cutLeaderRuns() возвращает 1 при 0
+                // проходов (фолбэк для реальной резки с несохранённым «Кол-во план»), из-за чего «Резка
+                // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
+                // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
+                var leaderRuns = stripNum(c.plannedRuns) > 0 ? cutLeaderRuns(c) : 0;
+                var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
