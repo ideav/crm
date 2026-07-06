@@ -495,7 +495,10 @@
     // «Планировании производства», чтобы оба РМ показывали обед одинаково). lunchDurationMin ≤ 0
     // (обед выключен/настройка не загрузилась) → []. ordered — резки станка в порядке очереди;
     // scale — ось ganttScale (нерабочее время свёрнуто). → [{ beforeIndex, leftPx, widthPx,
-    // startMs, endMs, durationMin }], по одному на день с обедом. Чистая — покрыта тестом.
+    // startMs, endMs, durationMin }], по одному на день с обедом. #4035: если у дня зазор-обеда
+    // нет (переходящий/непрерывный день, длинная резка через полдень), но окно резки накрывает
+    // LUNCH_START — добавляем carrier-фолбэк ({ fallback:true, carrierIndex }, рисуется строкой
+    // ПОСЛЕ несущей резки, без сдвига баров). Чистая — покрыта тестом.
     function ganttLunchMarkers(ordered, scale, lunchDurationMin, lunchStartMin) {
         var lunchDur = Number(lunchDurationMin) || 0;
         if (!(lunchDur > 0) || !ordered || !scale || typeof scale.toPx !== 'function') return [];
@@ -536,6 +539,38 @@
                 durationMin: lunchDur
             });
             lunchByDay[day] = true;
+        }
+        // #4035: carrier-фолбэк обеда. Зазор-детектор выше находит обед лишь там, где генерация
+        // оставила «дыру» ≈ LUNCH_DURATION между двумя резками дня. На днях БЕЗ такой дыры
+        // (переходящие/непрерывные дни, одна длинная резка через полдень) обеденная строка
+        // пропадала (#4035). Для каждого такого дня рисуем обед ВНУТРИ «несущей» резки — той, чьё
+        // СОХРАНЁННОЕ окно (наладка+резка) накрывает LUNCH_START — как перерыв (#4007): отдельной
+        // строкой-бэндом на оси, БЕЗ сдвига/растяжки баров (дыры нет — бар уже непрерывно накрывает
+        // 12:20). Нужен известный LUNCH_START (иначе времени привязки нет → фолбэк не строим).
+        if (isFinite(lunchStart)) {
+            for (var j = 0; j < ordered.length; j++) {
+                var trF = cutTimeRange(ordered[j]);
+                if (!trF) continue;
+                var dayF = startOfLocalDayMs(trF.startMs);
+                if (lunchByDay[dayF]) continue;                  // на этот день обед уже есть (зазор/фолбэк)
+                var startInDay = (trF.startMs - dayF) / 60000;
+                var lenMin = cutBarMinutes(ordered[j]) + cutSetupMin(ordered[j]).total;   // как «несущее» у перерывов
+                if (!(startInDay <= lunchStart && lunchStart < startInDay + lenMin)) continue;   // окно не накрывает 12:20
+                var fbStartMs = dayF + lunchStart * 60000;
+                var fbEndMs = dayF + (lunchStart + lunchDur) * 60000;
+                out.push({
+                    fallback: true,               // #4035: обед-бэнд без дыры — строкой ПОСЛЕ несущей резки
+                    beforeIndex: null,
+                    carrierIndex: j,
+                    postStartMs: null,            // растяжка несущей не нужна (дыры нет)
+                    startMs: fbStartMs,
+                    endMs: fbEndMs,
+                    leftPx: scale.toPx(fbStartMs),
+                    widthPx: Math.max(round3(scale.toPx(fbEndMs) - scale.toPx(fbStartMs)), 1),
+                    durationMin: lunchDur
+                });
+                lunchByDay[dayF] = true;
+            }
         }
         return out;
     }
@@ -1876,6 +1911,25 @@
             });
         }
 
+        // #3846/#4035: строка обеда «🍽 Обед · N мин» — общий конструктор для зазор-обеда (строкой
+        // ПЕРЕД послеобеденной резкой) и carrier-фолбэка (#4035, строкой ПОСЛЕ несущей резки).
+        // lb — маркер из ganttLunchMarkers (leftPx/widthPx/durationMin).
+        function buildLunchRow(lb) {
+            var lunchTrack = el('div', { class: 'atex-cg-track' });
+            lunchTrack.style.minWidth = trackPx + 'px';
+            appendHours(lunchTrack);
+            var lunchBar = el('div', { class: 'atex-cg-lunch', title: 'Обеденный перерыв · ' + lb.durationMin + ' мин' }, [
+                el('span', { class: 'atex-cg-lunch-text', text: '🍽 Обед · ' + lb.durationMin + ' мин' })
+            ]);
+            lunchBar.style.left = lb.leftPx + 'px';
+            lunchBar.style.width = lb.widthPx + 'px';
+            lunchTrack.appendChild(lunchBar);
+            var lunchLabel = el('div', { class: 'atex-cg-label atex-cg-label--lunch', title: 'Обеденный перерыв' }, [
+                el('span', { class: 'atex-cg-label-main', text: 'Обед' })
+            ]);
+            return el('div', { class: 'atex-cg-row atex-cg-lunch-row' }, [lunchLabel, lunchTrack]);
+        }
+
         // Верхняя шкала времени: метки «HH:00», на первом тике суток — дата.
         var scaleRow = el('div', { class: 'atex-cg-row atex-cg-scale-row' });
         scaleRow.appendChild(el('div', { class: 'atex-cg-label atex-cg-label--scale', text: 'Время' }));
@@ -1911,8 +1965,12 @@
             // #3846: обед (#3342) рисуем строкой ПЕРЕД послеобеденной резкой (beforeIndex) —
             // тем же зазором, что виден на оси, но подписанным «🍽 Обед · N мин» (иначе зазор
             // читается как «дыра в планировании»). Обед уже зашит генерацией в planStart.
-            var lunchByBefore = {};
-            (group.lunches || []).forEach(function(l) { lunchByBefore[l.beforeIndex] = l; });
+            var lunchByBefore = {};       // #3846: зазор-обед — строкой ПЕРЕД послеобеденной резкой (beforeIndex)
+            var lunchAfterCarrier = {};   // #4035: фолбэк-обед (дыры нет) — строкой ПОСЛЕ несущей резки (carrierIndex)
+            (group.lunches || []).forEach(function(l) {
+                if (l.fallback) (lunchAfterCarrier[l.carrierIndex] = lunchAfterCarrier[l.carrierIndex] || []).push(l);
+                else lunchByBefore[l.beforeIndex] = l;
+            });
 
             // #4007 (ТЗ §5): короткие перерывы — строкой ПОСЛЕ несущего задания (по carrierIndex),
             // тем же зазором, что раздвинул несущий бар; подпись «☕ Перерыв · N мин». Ключ —
@@ -1924,21 +1982,7 @@
 
             group.tasks.forEach(function(t, taskIdx) {
                 var lb = lunchByBefore[taskIdx];
-                if (lb) {
-                    var lunchTrack = el('div', { class: 'atex-cg-track' });
-                    lunchTrack.style.minWidth = trackPx + 'px';
-                    appendHours(lunchTrack);
-                    var lunchBar = el('div', { class: 'atex-cg-lunch', title: 'Обеденный перерыв · ' + lb.durationMin + ' мин' }, [
-                        el('span', { class: 'atex-cg-lunch-text', text: '🍽 Обед · ' + lb.durationMin + ' мин' })
-                    ]);
-                    lunchBar.style.left = lb.leftPx + 'px';
-                    lunchBar.style.width = lb.widthPx + 'px';
-                    lunchTrack.appendChild(lunchBar);
-                    var lunchLabel = el('div', { class: 'atex-cg-label atex-cg-label--lunch', title: 'Обеденный перерыв' }, [
-                        el('span', { class: 'atex-cg-label-main', text: 'Обед' })
-                    ]);
-                    body.appendChild(el('div', { class: 'atex-cg-row atex-cg-lunch-row' }, [lunchLabel, lunchTrack]));
-                }
+                if (lb) body.appendChild(buildLunchRow(lb));   // #3846: зазор-обед — строкой ПЕРЕД послеобеденной резкой
                 var statusKey = t.status && t.status.key || 'unknown';
                 var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
                     el('span', { class: 'atex-cg-label-main', text: t.label })
@@ -1975,6 +2019,10 @@
                 barLink.style.width = t.widthPx + 'px';
                 track.appendChild(barLink);
                 body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
+
+                // #4035: carrier-фолбэк обеда — строкой ПОСЛЕ несущей резки (дыры в расписании нет,
+                // бар уже накрывает 12:20; строка лишь подписывает обед — как перерыв, #4007).
+                (lunchAfterCarrier[taskIdx] || []).forEach(function(lb2) { body.appendChild(buildLunchRow(lb2)); });
 
                 // #4007 (ТЗ §5): перерыв(ы), несущим для которых стало это задание — строкой сразу
                 // ПОСЛЕ него (несущий бар уже раздвинут на длительность перерыва в layoutGroups).
