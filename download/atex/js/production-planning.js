@@ -4294,6 +4294,57 @@
         return Math.floor((base + Math.ceil(min) * 60000) / 1000);
     }
 
+    // #4061: снап НАЧАЛ ОКОН резок к ЦЕЛЫМ минутам, чтобы старт СЛЕДУЮЩЕГО задания = старт
+    // текущего + его ЦЕЛАЯ занятость = сумма сохранённых колонок «Наладка ножей» + «Сырьё/намотка»
+    // + «Резка и Лидер». Упаковщик (splitMachineQueue/buildSchedule) считает намотку ДРОБНОЙ и
+    // решает, что в какой день (это НЕ трогаем), но planStart и колонки пишутся ЦЕЛЫМИ, округляя
+    // вверх (namely #3635 п.4 «Длительность» и #3700 «Резка и Лидер»). Поэтому старт следующего
+    // задания — ceil дробного НАКОПЛЕННОГО окна — расходился с суммой колонок: Гант и очередь,
+    // пакуя бары/карточки встык ПО КОЛОНКАМ, «накидывали» к дню до +N минут (issue #4061). Снап
+    // убирает расхождение в ИСТОЧНИКЕ (planStart), не трогая упаковку/колонки/показ: внутри одного
+    // рабочего дня станка окна идут встык по ЦЕЛОЙ занятости, а ЗАЗОРЫ между резками (обед/простой/
+    // выходной) сохраняются как есть. Дни (floor(окно/1440)) не смешиваем — первое окно дня якорь
+    // (ceil, как scheduleStartTimestamp). items — [{ ws, setup, cutLeader }] в ПОРЯДКЕ расписания
+    // (ws — начало окна, мин; setup — наладка+сырьё; cutLeader — намотка+лидер, дробное). Занятость
+    // целая = round(setup) + ceil(cutLeader) (лидер целый ⇒ ceil(намотка)+лидер = «Резка и Лидер»).
+    // → массив ЦЕЛЫХ начал окон (в том же порядке). Чистая — покрыта тестом.
+    function snapWindowStartsWholeMinutes(items){
+        var out = [];
+        var prevByDay = {};   // день → { start (целое окно), occWhole (целая занятость), origEnd (дробный конец окна) }
+        (items || []).forEach(function(it){
+            var ws = Number(it && it.ws) || 0;
+            var setup = Number(it && it.setup) || 0;
+            var cutLeader = Number(it && it.cutLeader) || 0;
+            var occWhole = Math.round(setup) + Math.ceil(round3(cutLeader));   // = наладка+сырьё+«Резка и Лидер»
+            var day = Math.floor(ws / 1440);
+            var prev = prevByDay[day];
+            var start;
+            if (!prev) {
+                start = Math.ceil(round3(ws));   // якорь дня — вверх до целой минуты (как scheduleStartTimestamp)
+            } else {
+                var gap = Math.max(0, Math.round(ws - prev.origEnd));   // обед/простой/выходной между резками — сохраняем
+                start = prev.start + prev.occWhole + gap;
+            }
+            out.push(start);
+            prevByDay[day] = { start: start, occWhole: occWhole, origEnd: ws + setup + cutLeader };
+        });
+        return out;
+    }
+
+    // #4061: мутирует окна сегментов splitMachineQueue (windowStartMin/startMin) снапом к целым
+    // минутам. durationMin сегмента = намотка + лидер (perPassEff), leaderMin отдельно нет.
+    function snapSplitSegmentWindows(segs){
+        var snapped = snapWindowStartsWholeMinutes((segs || []).map(function(s){
+            return { ws: stripNum(s && s.windowStartMin), setup: stripNum(s && s.setupMin), cutLeader: stripNum(s && s.durationMin) };
+        }));
+        (segs || []).forEach(function(s, i){
+            if (!s) return;
+            s.windowStartMin = snapped[i];
+            s.startMin = round3(snapped[i] + stripNum(s.setupMin));
+        });
+        return segs;
+    }
+
     // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
     // главное значение «Производственной резки»). Группируем по станку, упорядочиваем
     // очередь (orderCuts), строим расписание (buildSchedule) и берём начало окна
@@ -4326,9 +4377,14 @@
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
             });
-            sched.forEach(function(sc){
-                var windowStart = stripNum(sc.startMin) - stripNum(sc.setupMin);
-                out[String(sc.cutId)] = scheduleStartTimestamp(base, windowStart);
+            // #4061: старт окна = целое (снап), чтобы planStart следующей резки = planStart текущей
+            // + сумма её колонок (наладка+сырьё+резка/лидер) — без дрейфа на округлениях (см. helper).
+            var snapped = snapWindowStartsWholeMinutes(sched.map(function(sc){
+                return { ws: stripNum(sc.startMin) - stripNum(sc.setupMin), setup: stripNum(sc.setupMin),
+                         cutLeader: stripNum(sc.durationMin) + stripNum(sc.leaderMin) };
+            }));
+            sched.forEach(function(sc, i){
+                out[String(sc.cutId)] = scheduleStartTimestamp(base, snapped[i]);
             });
         });
         return out;
@@ -4362,15 +4418,23 @@
         });
         var sc = sched.length ? sched[sched.length - 1] : null;
         if (!sc) return null;
+        // #4061: окно последнего сегмента — на целой минуте (снап), как при генерации planStart, чтобы
+        // превью старта новой резки совпало с сохранённой сеткой (старт = сумма колонок предыдущих).
+        var snapped = snapWindowStartsWholeMinutes(sched.map(function(s){
+            return { ws: stripNum(s.startMin) - stripNum(s.setupMin), setup: stripNum(s.setupMin),
+                     cutLeader: stripNum(s.durationMin) + stripNum(s.leaderMin) };
+        }));
         var setup = stripNum(sc.setupMin);
-        var startMin = stripNum(sc.startMin);
+        var windowStartMin = snapped[snapped.length - 1];
+        var startMin = round3(windowStartMin + setup);
+        var delta = startMin - stripNum(sc.startMin);   // сдвиг снапа — окно/финиш двигаем на него же
         return {
-            windowStartMin: round3(startMin - setup),
-            startMin: round3(startMin),
-            finishMin: round3(stripNum(sc.finishMin)),
+            windowStartMin: round3(windowStartMin),
+            startMin: startMin,
+            finishMin: round3(stripNum(sc.finishMin) + delta),   // сохраняем lunchGap/лидер, сдвинутые снапом
             durationMin: round3(stripNum(sc.durationMin)),
             setupMin: round3(setup),
-            day: Math.floor(startMin / 1440)
+            day: Math.floor(windowStartMin / 1440)
         };
     }
 
@@ -4666,6 +4730,9 @@
         var usedByHead = {};
         mOrder.forEach(function(key){
             var segs = segsByMachine[key];
+            // #4061: снап окон к целым минутам — старт следующего сегмента = старт текущего + сумма
+            // его колонок (без дрейфа Ганта/очереди). Упаковку/дни/проходы это не трогает.
+            snapSplitSegmentWindows(segs);
             // headId → индекс продолжения в цепочке (0=голова, 1,2,… — продолжения по дням).
             var contIndexByHead = {};
             segs.forEach(function(seg, idx){
@@ -6413,6 +6480,7 @@
         resolveDayDurationMin: resolveDayDurationMin,     // #3989 Фаза 2: DAY_DURATION_MN
         intraDayBreaks: intraDayBreaks,                   // #3989 Фаза 2: обед + два перерыва (ТЗ §5)
         buildSchedule: buildSchedule,
+        snapWindowStartsWholeMinutes: snapWindowStartsWholeMinutes,   // #4061: снап planStart к целым минутам (= сумма колонок)
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         freeSlotForQueue: freeSlotForQueue,
@@ -10051,6 +10119,7 @@
                     firstCutSetup: true,   // #3669 п.2: первая задача очереди — настройка ножей
                     blockedRanges: self.blockedRangesForSlitter(s, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
                 });
+                snapSplitSegmentWindows(segs);   // #4061: старт следующей резки = старт текущей + сумма её колонок
                 var byPlanId = {};
                 segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
                 plans.forEach(function(p) {
@@ -12638,4 +12707,4 @@
 
  
  
-// @version 2026-07-03-issue-3989-p3
+// @version 2026-07-06-issue-4061
