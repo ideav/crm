@@ -83,11 +83,13 @@ var foil = planning.transitionCost(base, cut({ materialId: 'A', bands: { 100: 2 
 eq(foil.byFactor.foilNotEnd, 60, 'фольга не в конце дня → FOIL_NOTEND 60');
 var mv = planning.transitionCost(base, cut({ materialId: 'A', bands: { 100: 2 }, isFoil: true }), { settings: SETTINGS, isMove: true });
 eq(mv.byFactor.foilMove, 60, 'перемещение фольги → FOIL_NOTEND 60');
-// Срок: позже дня → DEADLINE; равен дню → EXACT_DEADLINE (дословно по ТЗ §8 п.4/5).
-var late = planning.transitionCost(base, cut({ dueKey: 20260710 }), { settings: SETTINGS, placementDayKey: 20260703 });
-eq(late.byFactor.deadline, 100, 'срок позже дня размещения → DEADLINE 100');
+// Срок (issue #4059): размещение ПОСЛЕ срока (день > срок) → штраф опоздания DEADLINE; в срок/заранее — без штрафа.
+var late = planning.transitionCost(base, cut({ dueKey: 20260703 }), { settings: SETTINGS, placementDayKey: 20260710 });
+eq(late.byFactor.deadline, 100, 'размещение ПОСЛЕ срока (день 10.07 > срок 03.07) → DEADLINE 100');
+var early = planning.transitionCost(base, cut({ dueKey: 20260710 }), { settings: SETTINGS, placementDayKey: 20260703 });
+eq(early.byFactor.deadline, undefined, 'размещение ЗАРАНЕЕ (день 03.07 ≤ срок 10.07) → без штрафа');
 var exact = planning.transitionCost(base, cut({ dueKey: 20260703 }), { settings: SETTINGS, placementDayKey: 20260703 });
-eq(exact.byFactor.exactDeadline, 33, 'срок равен дню размещения → EXACT_DEADLINE 33');
+eq(exact.byFactor.deadline, undefined, 'размещение РОВНО в срок (день == срок) → без штрафа');
 var dist = planning.transitionCost(base, cut({}), { settings: SETTINGS, distanceExceeded: true });
 eq(dist.byFactor.distance, 25, 'большой простой между станками → MAX_DISTANCE 25');
 
