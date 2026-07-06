@@ -1953,8 +1953,19 @@
         return fatigueChangeTimes(options) || options || null;
     }
 
-    function makePlanningOptions(strategyOrOptions, times){
+    // #4059: settings — веса/лимиты из «Настройки» (this.daySettings). Их числовые ключи
+    // (DEADLINE_COST_MN, EXACT_DEADLINE_COST_MN, KNIVES_*, MATERIAL_* и т.д.) кладём ПЛОСКО в opts,
+    // чтобы planWeight(opts, …) в жадном упаковщике (splitMachineQueue/orderCuts) видел кастомные
+    // значения из таблицы, а не только PLAN_WEIGHT_DEFAULTS. Копируем ПЕРВЫМИ — стратегия/переданные
+    // опции их перекрывают при совпадении (orderCuts прокидывает уже собранный planOptions обратно
+    // одним аргументом, ключи весов при этом сохраняются).
+    function makePlanningOptions(strategyOrOptions, times, settings){
         var opts = {};
+        if (settings && typeof settings === 'object') {
+            for (var sk in settings) {
+                if (Object.prototype.hasOwnProperty.call(settings, sk)) opts[sk] = settings[sk];
+            }
+        }
         if (strategyOrOptions && typeof strategyOrOptions === 'object') {
             for (var k in strategyOrOptions) {
                 if (Object.prototype.hasOwnProperty.call(strategyOrOptions, k)) opts[k] = strategyOrOptions[k];
@@ -3813,8 +3824,7 @@
         // не ломать порядок оператора. Веса из opts.weights (планировочные), дефолт 100/33.
         var dueDayByCut = opts.dueDayByCut || {};
         var deadlineAware = !!opts.deadlineAware;
-        var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;
-        var exactDeadlineW = deadlineAware ? planWeight(opts.weights, 'EXACT_DEADLINE_COST_MN') : 0;
+        var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;   // #4059: вес EDD-приоритета срока
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
         // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
@@ -3992,19 +4002,22 @@
             // равных» (одинаковая переналадка) — суммарной переналадки не ухудшает, но каждый день
             // теперь начинается с бо́льшего числа ножей и убывает к вечеру (#3130). Фольга остаётся в
             // конце дня (isFoil — старший разряд ключа).
-            // #4050: ТЗ §8/§11 — штраф за срок относительно ДНЯ размещения (dayIdx). dueDay и dayIdx —
-            // индексы дня от базы «С». Срок ПОЗЖЕ дня (ставим заранее, занимаем раннюю ёмкость несрочным)
-            // → DEADLINE_COST_MN; РОВНО в день → EXACT_DEADLINE_COST_MN; срок ≤ дня (в срок/просрочено)
-            // → 0 (ставим свободно, самый дешёвый — просрочку добиваем первой). Складывается в стоимость
-            // переналадки (второй разряд ключа) — вес 100 доминирует над сменой ножей/сырья (30–50),
-            // поэтому срочное встаёт на ранние дни, но при РАВНОЙ срочности порядок решает переналадка.
+            // #4059: приоритет по ВОЗРАСТАНИЮ срока (EDD, ТЗ §14 — «Срок изготовления» самый большой
+            // вес). dueDay — индекс дня срока от базы «С». Стоимость = dueDay * DEADLINE_COST_MN: чем
+            // РАНЬШЕ срок, тем ДЕШЕВЛЕ → резка с более ранним сроком выбирается раньше и занимает более
+            // ранний день. Упаковщик набивает дни от «С» по возрастанию, поэтому EDD-порядок = задание
+            // НЕ уезжает ЗА свой срок, пока раньше есть ёмкость (issue #4059: заказ со сроком 26.06 не
+            // должен попадать на 29.06). Просроченная (dueDay<0) — самая дешёвая (отрицательная),
+            // добивается ПЕРВОЙ и несрочными не задвигается. Складывается в стоимость переналадки (2-й
+            // разряд ключа); вес доминирует над сменой ножей/сырья (30–50) → срок решает порядок дней,
+            // переналадка — лишь при РАВНОМ сроке. Прежний порог (#4050: срок>день→штраф, срок≤день→0)
+            // делал ОБРАТНОЕ — штрафовал раннее размещение, а опоздание было бесплатным (штраф 0), из-за
+            // чего задание уезжало за срок. Явный штраф за фактическое опоздание — в transitionCost.
             function deadlineCostFor(id, dayIdx) {
                 if (!deadlineAware) return 0;
                 var due = state[id] ? state[id].dueDay : null;
                 if (due == null) return 0;
-                if (due > dayIdx) return deadlineW;
-                if (due === dayIdx) return exactDeadlineW;
-                return 0;
+                return due * deadlineW;
             }
             function selectByConfig(ids) {
                 var best = null;
@@ -5984,11 +5997,13 @@
         // Фольга не в конце дня (§8 п.2а) / фольгу двигают (§8 п.2б).
         if (ctx.foilNotEnd){ var fw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fw; byFactor.foilNotEnd = fw; }
         if (ctx.isMove && next && next.isFoil){ var fmw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fmw; byFactor.foilMove = fmw; }
-        // Срок (§8 п.4/5), дословно по ТЗ: срок ПОЗЖЕ дня размещения → DEADLINE; РАВЕН дню → EXACT_DEADLINE.
+        // Срок (ТЗ §8/§14, issue #4059): резку разместили ПОСЛЕ срока (день размещения > срок) → штраф
+        // опоздания DEADLINE_COST_MN. Это недопустимо (заказ уехал за срок) и должно вытесняться из плана
+        // при выборе кандидата (#4047) и в «Качестве плана». В срок/заранее (день ≤ срок) — без штрафа.
+        // dueKey/placementDayKey — YYYYMMDD, сравнение дат корректно.
         if (ctx.placementDayKey != null && next && isFinite(next.dueKey)){
             var due = Number(next.dueKey), day = Number(ctx.placementDayKey);
-            if (due > day){ var dw = planWeight(s, 'DEADLINE_COST_MN'); weight += dw; byFactor.deadline = dw; }
-            else if (due === day){ var ew = planWeight(s, 'EXACT_DEADLINE_COST_MN'); weight += ew; byFactor.exactDeadline = ew; }
+            if (day > due){ var dw = planWeight(s, 'DEADLINE_COST_MN'); weight += dw; byFactor.deadline = dw; }
         }
         // Большой простой между станками (§8 п.6).
         if (ctx.distanceExceeded){ var xw = planWeight(s, 'MAX_DISTANCE_COST_MN'); weight += xw; byFactor.distance = xw; }
@@ -6605,7 +6620,14 @@
     AtexProductionPlanning.prototype.loadDaySettings = function() {
         var self = this;
         var meta = this.meta.settings;
-        if (!meta) { this.daySettings = {}; return Promise.resolve(); }
+        if (!meta) {
+            // #4059: таблицы «Настройка» (ТЗ §14, table/269, код ATEH) нет — НЕ молчим: ошибка в лог и
+            // оператору. Планирование продолжается на значениях по умолчанию, но это надо видеть.
+            this.daySettings = {};
+            console.error('[pp] ❌ loadDaySettings: таблица «Настройка» (ATEH) не найдена — работаю на значениях по умолчанию (ТЗ §14). Проверьте метаданные базы.');
+            if (this.notify) this.notify('Таблица «Настройка» не найдена — планирование на значениях по умолчанию (ТЗ §14)', 'error');
+            return Promise.resolve();
+        }
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             var dbKey = String(self.db || '').trim().toUpperCase();
             var values = {};
@@ -6614,14 +6636,13 @@
                 var r = rec.r || [];
                 var key = String(r[0] == null ? '' : r[0]).replace(/^\uFEFF/, '').trim();
                 // #3342: \u043F\u043E\u043C\u0438\u043C\u043E \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043E\u043A\u043D\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043E\u0431\u0435\u0434\u0430 LUNCH_START/LUNCH_DURATION.
-                if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
-                    key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
-                    key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
-                    key !== 'MAX_OVERWORK_CUTS_MN' &&   // #3992/#4017: макс. нахлёст резки за DAY_END_HOUR (мин), новый ключ с суффиксом _MN
-                    key !== 'MAX_OVERWORK_TUNE_MN' &&   // #3992/#4017: макс. нахлёст настройки за DAY_END_HOUR (мин), новый ключ с суффиксом _MN
-                    key !== 'MAX_OVERWORK_CUTS' &&      // #3847: макс. нахлёст резки за DAY_END_HOUR (мин) — старый ключ (откат)
-                    key !== 'MAX_OVERWORK_TUNE' &&      // #3847: макс. нахлёст настройки за DAY_END_HOUR (мин) — старый ключ (откат)
-                    key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
+                // #4059: белый список ключей убран — «Настройка» читается ЦЕЛИКОМ. Кроме рабочего окна
+                // и обеда (DAY_START_HOUR/DAY_END_HOUR/LUNCH_*, #3342), нахлёста (MAX_OVERWORK_*_MN,
+                // #3847/#3992) и окна срока (DAYS_FORECAST, #3769) сюда попадают веса штрафов
+                // (DEADLINE_COST_MN, EXACT_DEADLINE_COST_MN, KNIVES_*, MATERIAL_* и пр.) — они тоже
+                // настраиваемы (ТЗ §14) и переопределяют PLAN_WEIGHT_DEFAULTS в planWeight. Тип строки
+                // задаёт приоритет ниже (<db> > ATEH > общий). Пустой ключ пропускаем.
+                if (key === '') return;
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
                 if (val === '') return;
@@ -6634,6 +6655,21 @@
                 }
             });
             self.daySettings = values;
+            // #4059: «что-то непонятно» — значение веса/лимита ЕСТЬ в «Настройке», но НЕ число. Не
+            // игнорируем молча: ошибка в лог и оператору (иначе planWeight тихо возьмёт дефолт, и
+            // оператор не узнает, что настройка не применилась — как со сроком в issue #4059).
+            // ОТСУТСТВИЕ ключа — не ошибка, штатный фолбэк на дефолт (ТЗ §14).
+            var badKeys = [];
+            Object.keys(PLAN_WEIGHT_DEFAULTS).forEach(function(k){
+                if (Object.prototype.hasOwnProperty.call(values, k) && !isFinite(Number(values[k]))) {
+                    badKeys.push(k + '=«' + values[k] + '»');
+                }
+            });
+            if (badKeys.length) {
+                console.error('[pp] ❌ loadDaySettings: нечисловые значения в «Настройке» — ' + badKeys.join(', ') +
+                    '; по этим ключам применён дефолт (ТЗ §14).');
+                if (self.notify) self.notify('В «Настройке» нечисловые значения: ' + badKeys.join(', ') + ' — применён дефолт', 'error');
+            }
         });
     };
 
@@ -8258,7 +8294,7 @@
         var genWindow = self.workingWindow();
         var dayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0) - (Number(genWindow.lunchDurationMin) || 0));
         if (!(dayCapacityMin > 0)) return empty;
-        var planOptions = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes);
+        var planOptions = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes, self.daySettings);   // #4059: веса из «Настройки»
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
 
         var merged = mergeContinuationChains(self.cuts || []);
@@ -9746,7 +9782,7 @@
         var cutMeta = this.meta.cut;
         var finishedBatchMeta = this.meta.finishedBatch;   // #3242: состав резки = «Партия ГП»
         var supplyMeta = this.meta.supply;
-        var planOptions = makePlanningOptions(strategy, this.changeTimes);
+        var planOptions = makePlanningOptions(strategy, this.changeTimes, this.daySettings);   // #4059: веса из «Настройки»
 
         var cutReqIds = {
             slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
@@ -11066,7 +11102,7 @@
     AtexProductionPlanning.prototype.buildSequenceOps = function(cutsArray, strategy, preserveOrder) {
         var self = this;
         var cuts = cutsArray || self.cuts || [];
-        var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes);
+        var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes, self.daySettings);   // #4059: веса из «Настройки»
 
         // #3280: план разбиения по дням + плановое время старта (t1078). База — дата
         // из фильтра (.atex-pp-input), без неё — сегодня.
