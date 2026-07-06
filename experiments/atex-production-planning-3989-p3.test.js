@@ -39,11 +39,12 @@ var view = planning.planQualityView(cuts, {
 console.log('\n== planQualityView: маппинг slitter.id/planDate → planQuality ==');
 eq(view.window.changeoverCount, 1, 'окно: 1 переналадка (смена сырья A→B)');
 eq(view.window.changeoverMin, 15, 'окно: 15 мин');
-eq(view.ideal.knifeConfigs, 1, 'идеал: 1 набор ножей ({100})');
-eq(view.ideal.materials, 2, 'идеал: 2 сырья (A,B)');
-eq(view.ideal.count, 3, 'идеал: 3 переналадки');
-eq(view.ideal.minutes, 60, 'идеал: 1×30 + 2×15 = 60 мин');
-eq(view.qualityWindow.excessCount, 1 - 3, 'избыток окна: 1 − 3 = -2');
+eq(view.ideal.knifeConfigs, 1, 'идеал: 1 набор ножей ({100}) — СЫРОЕ разнообразие');
+eq(view.ideal.materials, 2, 'идеал: 2 сырья (A,B) — СЫРОЕ разнообразие');
+// #4029: заправка A/{100} закрывает набор {100} и сырьё A → нужно наладок: 0 ножей + 1 сырьё (B) = 1.
+eq(view.ideal.count, 1, 'идеал: 1 наладка нужна при заправке A/{100} (было 3 без кредита)');
+eq(view.ideal.minutes, 15, 'идеал: 15 мин (1 смена сырья на B; заправка закрыла старт)');
+eq(view.qualityWindow.excessCount, 1 - 1, 'избыток окна: 1 − 1 = 0 (≥ 0, заправка учтена)');
 eq(view.combinations, 2, '#4008: уникальных комбинаций 2 ({100}·A, {100}·B)');
 
 // Пустой список — нулевые итоги без падения.
@@ -54,7 +55,7 @@ eq(empty.ideal.count, 0, 'пустой план → идеал 0');
 console.log('\n== formatQualityDelta ==');
 eq(planning.formatQualityDelta(3), '+3', '+3');
 eq(planning.formatQualityDelta(0), '0', '0');
-eq(planning.formatQualityDelta(-2), '−2', '−2 (минус — план лучше идеала)');
+eq(planning.formatQualityDelta(-2), '−2', '−2 (форматтер обороняется от минуса; после #4029 избыток ≥ 0)');
 
 console.log('\n----------------------------------------');
 console.log('ИТОГО: ' + passed + ' passed, ' + failed + ' failed');
