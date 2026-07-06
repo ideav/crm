@@ -5944,7 +5944,8 @@
     // Фактические переналадки за два окна + идеальная нижняя граница + близость к идеалу.
     // slots: [{ id, slitterId, dayKey (YYYYMMDD), planStartMs?, knifeWidths|knifeCount, materialId, winding }].
     // opts: { settings, scopeFromKey, scopeToKey, prevSetupBySlitter:{slitterId:{materialId,winding,knifeWidths}} }.
-    // → { window:[С;По], all:[С;конец всех задач], ideal, qualityWindow, qualityAll }.
+    // → { window:[С;По], all:[С;конец всех задач], ideal/combinations (весь план),
+    //     idealWindow/combinationsWindow (окно [С;По], #4013 — панель), qualityWindow, qualityAll }.
     function planQuality(slots, opts){
         opts = opts || {};
         var s = opts.settings || {};
@@ -6000,26 +6001,46 @@
         // Идеал: каждая РАЗНАЯ конфигурация ножей и каждое РАЗНОЕ сырьё настраиваются по 1 разу (§13 п.2).
         // #4008: заодно считаем уникальные КОМБИНАЦИИ «набор ножей + сырьё + намотка» — сколько
         // всего разных настроек резки встречается в плане (диагностика разнородности плана).
-        var knifeSet = {}, matSet = {}, comboSet = {};
-        (slots || []).forEach(function(c){
-            var ks = knifeConfigSig(c); if (ks !== '') knifeSet[ks] = 1;
-            var ms = materialSig(c);
-            matSet[ms] = 1;
-            comboSet[ks + '::' + ms] = 1;   // #4008: уникальная комбинация ножи+сырьё+намотка
-        });
-        var K = Object.keys(knifeSet).length, M = Object.keys(matSet).length;
-        var combinations = Object.keys(comboSet).length;   // #4008
-        var ideal = { knifeConfigs: K, materials: M, count: K + M, minutes: round3(K * kChange + M * matW) };
-
-        function ratio(actual){
+        // #4013: помимо идеала/комбинаций ПО ВСЕМУ плану (весь горизонт — для подсказки и qualityAll)
+        // считаем их и ПО ОКНУ [С;По]. Панель «Качество плана» сверяет ФАКТ окна с идеалом ОКНА
+        // (qualityWindow). Раньше факт окна сверялся с идеалом всего плана → день-выходной без
+        // заданий показывал «идеал 48, избыток −48, комбинаций 63» от задач ДРУГИХ дней. Теперь
+        // пустое окно → idealWindow 0, combinationsWindow 0, qualityWindow.excess 0. Отрицательный
+        // избыток при НЕпустом окне сохраняется (план лучше идеала за счёт заправки станка, §3989-p3).
+        function idealFor(inScope){
+            var knifeSet = {}, matSet = {}, comboSet = {};
+            (slots || []).forEach(function(c){
+                if (!inScope(Number(c.dayKey) || 0)) return;
+                var ks = knifeConfigSig(c); if (ks !== '') knifeSet[ks] = 1;
+                var ms = materialSig(c);
+                matSet[ms] = 1;
+                comboSet[ks + '::' + ms] = 1;   // #4008: уникальная комбинация ножи+сырьё+намотка
+            });
+            var K = Object.keys(knifeSet).length, M = Object.keys(matSet).length;
             return {
-                count: ideal.count > 0 ? round3(actual.changeoverCount / ideal.count) : 0,
-                minutes: ideal.minutes > 0 ? round3(actual.changeoverMin / ideal.minutes) : 0,
-                excessCount: actual.changeoverCount - ideal.count,
-                excessMin: round3(actual.changeoverMin - ideal.minutes)
+                ideal: { knifeConfigs: K, materials: M, count: K + M, minutes: round3(K * kChange + M * matW) },
+                combinations: Object.keys(comboSet).length   // #4008
             };
         }
-        return { window: window, all: all, ideal: ideal, combinations: combinations, qualityWindow: ratio(window), qualityAll: ratio(all) };
+        var idAll = idealFor(function(){ return true; });                        // весь план
+        var idWin = idealFor(function(dk){ return dk >= fromK && dk <= toK; });   // окно [С;По] (#4013)
+        var ideal = idAll.ideal, combinations = idAll.combinations;
+
+        function ratio(actual, id){
+            return {
+                count: id.count > 0 ? round3(actual.changeoverCount / id.count) : 0,
+                minutes: id.minutes > 0 ? round3(actual.changeoverMin / id.minutes) : 0,
+                excessCount: actual.changeoverCount - id.count,
+                excessMin: round3(actual.changeoverMin - id.minutes)
+            };
+        }
+        return {
+            window: window, all: all,
+            ideal: ideal, combinations: combinations,                             // весь план (подсказка, qualityAll)
+            idealWindow: idWin.ideal, combinationsWindow: idWin.combinations,      // окно [С;По] (#4013 — панель)
+            qualityWindow: ratio(window, idWin.ideal),   // #4013: факт окна vs идеал ОКНА (было — vs весь план)
+            qualityAll: ratio(all, ideal)                // факт горизонта vs идеал всего плана
+        };
     }
 
     // #3989 Фаза 3: качество плана из резок контроллера (mapCutRecord) — маппинг в слоты
@@ -11910,7 +11931,10 @@
                 text: 'Заданий в очереди нет' + (dtNote ? ', ' + dtNote : '') }));
         }
         // #3989 Фаза 3: панель качества плана — факт vs идеал переналадок за окно [С;По] (ТЗ §13).
-        // Считается по ВСЕМУ плану (всем станкам). Не критична для очереди: ошибку глушим.
+        // Факт/идеал/комбинации/избыток панели — за окно [С;По] (#4013: идеал и комбинации тоже
+        // по окну, иначе пустой день-выходной показывал «идеал 48 / избыток −48 / комбинаций 63»
+        // от задач других дней). Всплывающая подсказка — за весь горизонт. Считается по всем
+        // станкам. Не критична для очереди: ошибку глушим.
         if ((self.cuts || []).length) {
             try {
                 var qFromStr = String((self.filter && self.filter.date) || '').trim();
@@ -11921,7 +11945,8 @@
                     scopeToKey: qToStr === '' ? null : planDateDayKey(qToStr),
                     prevSetupBySlitter: self.prevSetupBySlitter
                 });
-                var qW = pqView.window, qId = pqView.ideal, qEx = pqView.qualityWindow;
+                // #4013: панель — по ОКНУ [С;По] (факт, идеал ОКНА, комбинации ОКНА, избыток окна).
+                var qW = pqView.window, qId = pqView.idealWindow, qEx = pqView.qualityWindow;
                 var qPanel = el('div', { class: 'atex-pp-quality',
                     style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
                         + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
@@ -11932,15 +11957,17 @@
                     el('span', { text: 'сырьё: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
                     el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
                     el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' }),
-                    // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка) в плане.
-                    el('span', { text: 'уникальных комбинаций: ' + pqView.combinations, style: 'opacity:.75;' })
+                    // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка).
+                    // #4013: по ОКНУ (combinationsWindow) — пустое окно даёт 0, а не диверсити всего плана.
+                    el('span', { text: 'уникальных комбинаций: ' + pqView.combinationsWindow, style: 'opacity:.75;' })
                 ]);
                 qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
                     + pqView.all.changeoverCount + ' (' + pqView.all.changeoverMin + ' мин), из них ножи '
                     + pqView.all.knifeCount + ' (' + pqView.all.knifeMin + ' мин), сырьё '
                     + pqView.all.materialCount + ' (' + pqView.all.materialMin + ' мин). '
                     + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
-                    + 'Уникальных комбинаций (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
+                    // #4013: подсказка о всём плане → комбинации всего плана (панель выше — по окну).
+                    + 'Уникальных комбинаций во всём плане (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
                 box.appendChild(qPanel);
             } catch (e) { console.warn('[pp] панель качества плана пропущена:', e && e.message); }
         }
