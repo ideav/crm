@@ -213,6 +213,11 @@
     var CUT_FIRST_PART_COLUMNS = ['cut_first_part', 'cut_first_part_id', 'cut_head_id', 'cut_chain_head'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
+    // #4051: «Срок изготовления» обеспечиваемой позиции прямо из cut_planning — чтобы плашка
+    // срока показывалась и для позиции вне активного positions_list (заказ закрыт/выполнен),
+    // как #3633 сделал для габаритов. Колонка due_date отчёта = «Заказанное количество →
+    // Срок изготовления». Нет колонки → пусто → Infinity → фолбэк на genPositions (как было).
+    var SUPPLY_DUE_DATE_COLUMNS = ['due_date', 'position_due_date', 'supply_due_date', 'supply_position_due_date'];
     var CUT_WRITE_LABELS = {
         slitter: CUT_REQ.slitter,
         materialBatch: CUT_REQ.materialBatch,
@@ -1197,6 +1202,11 @@
                     // добавленная колонка position_length (Заказанное количество → Длина, м).
                     positionWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
                     positionLength: (row.position_length == null || row.position_length === '') ? 0 : Number(row.position_length),
+                    // #4051: «Срок изготовления» позиции прямо из cut_planning (due_date) —
+                    // YYYYMMDD-ключ через batchDateKey (тот же формат, что genPositions.dueKey).
+                    // Нужен фолбэком в cutDueKeys, когда позиция выпала из активного positions_list.
+                    // Нет колонки/пусто → Infinity.
+                    dueKey: batchDateKey(rowValue(row, SUPPLY_DUE_DATE_COLUMNS)),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
                     rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
                 });
@@ -1543,14 +1553,21 @@
 
     // #3769: отсортированные уникальные ключи «Срока изготовления» позиций, которые
     // обеспечивает резка (supplies cutId→positionId → genPositions[pos].dueKey).
-    // Позиции без срока или выпавшие из активного positions_list — пропускаются.
-    function cutDueKeys(cut, supplies, genPositions) {
+    // #4051: includeSupplyFallback — когда позиция выпала из активного positions_list
+    // (genPositions её не содержит) или у неё там нет срока, берём «Срок изготовления»
+    // прямо из обеспечения (supply.dueKey из cut_planning.due_date). Так плашка срока
+    // показывается и для заданий с закрытым/выполненным заказом. Флаг ВЫКЛючён у #4050
+    // (штраф дня размещения в selectByConfig): просроченный срок неактивной позиции не
+    // должен молча менять раскладку — это отдельное решение, не задача #4051.
+    // Без фолбэка (флаг off) поведение прежнее: позиции без срока/вне positions_list пропускаются.
+    function cutDueKeys(cut, supplies, genPositions, includeSupplyFallback) {
         var posMap = positionMap(genPositions);
         var seen = {}, keys = [];
         (supplies || []).forEach(function(s) {
             if (!cut || !s || String(s.cutId) !== String(cut.id)) return;
             var p = s.positionId != null ? posMap[String(s.positionId)] : null;
             var k = p && p.dueKey;
+            if (includeSupplyFallback && (k == null || !isFinite(k) || k === Infinity)) k = s.dueKey;
             if (k == null || !isFinite(k) || k === Infinity) return;
             if (!seen[k]) { seen[k] = true; keys.push(k); }
         });
@@ -11893,7 +11910,9 @@
                 // Срок один на задание (позиции резки кластеризованы по сроку), поэтому
                 // показываем общий набор сроков и красим строку по самому раннему (срочному):
                 // раньше «Даты план» → красный, дальше план+DAYS_FORECAST → жёлтый, в окне → как есть.
-                var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);
+                // #4051: includeSupplyFallback=true — срок берём и из cut_planning.due_date, когда
+                // позиция выпала из активного positions_list (иначе плашка пропадала у таких заданий).
+                var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);
                 var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
                 var dueSuffix = '';
                 if (dueKeys.length) {
