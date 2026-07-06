@@ -10276,8 +10276,52 @@
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
-            function chainRoot4026(x) { return String((x && x.firstPartId != null && x.firstPartId !== '') ? x.firstPartId : (x && x.id)); }
-            var carryTailK = 0, carryTailM = 0;   // #4026: отложенная настройка setup-only хвоста → его продолжению
+            // Нормализуем ТАК ЖЕ, как группировка цепочек #3892 (String(...).trim()) — иначе пробел/
+            // формат из rowValue расходится: голова (fp==id) и продолжение сравнивались бы неравными.
+            function chainRoot4026(x) {
+                var fp = (x && x.firstPartId != null) ? String(x.firstPartId).trim() : '';
+                return fp !== '' ? fp : String(x && x.id != null ? x.id : '').trim();
+            }
+            // #4030: ножи setup-only хвоста дня (0 проходов) уносим на его ПРОДОЛЖЕНИЕ — ближайшую
+            // ПОСЛЕДУЮЩУЮ резку той же цепочки (firstPartId). Продолжение бывает НЕ соседним в очереди,
+            // поэтому ищем сканом вперёд по chainRoot (а не только arr[i+1]) и НЕ требуем нулевой
+            // переналадки входа: сегменты дня-сплита одной конфигурации → она и так 0, а прежняя
+            // эвристика «arr[i+1] + changeover=0» на реальном плане не срабатывала (продолжение
+            // оказывалось не строго соседним → хвост оставался с полными 45 → день 492).
+            var deferKnifeToCont = {};   // id продолжения → перенесённые ножи его хвостов
+            var zeroKnifeTail = {};      // id хвоста → ножи перенесены (в дне N остаётся только смена сырья)
+            arr.forEach(function(c, i) {
+                if (onlySet && !onlySet[String(c.id)]) return;        // только резки снимка (scope)
+                var wkTail = Math.round((cols[String(c.id)] || {}).knifeMin || 0);
+                if (wkTail <= 0) return;                              // нет ножей — переносить нечего
+                var runsTail = stripNum(c.plannedRuns);
+                if (ppTraceOn()) ppTrace('#4030 кандидат-хвост id=' + c.id + ' проходы=' + runsTail
+                    + ' ножи=' + wkTail + ' корень=' + chainRoot4026(c)
+                    + ' fp=' + (c.firstPartId != null && c.firstPartId !== '' ? c.firstPartId : '∅'));
+                if (runsTail !== 0) return;                           // хвост = 0 проходов (setup-only, #3635 п.5)
+                // Продолжение = БЛИЖАЙШАЯ последующая резка в снимке. Она обязана быть той же цепочки:
+                // если между хвостом и его продолжением встала чужая резка, та несёт СВОЮ переналадку
+                // от нового сырья — добавлять к ней ножи хвоста нельзя (двойной счёт), поэтому стоп.
+                var contId = null, nearest = null;
+                for (var j = i + 1; j < arr.length; j++) {
+                    var d = arr[j];
+                    if (onlySet && !onlySet[String(d.id)]) continue;  // вне снимка — прозрачно пропускаем
+                    nearest = d;
+                    if (chainRoot4026(d) === chainRoot4026(c)) {
+                        contId = String(d.id);
+                        deferKnifeToCont[contId] = (deferKnifeToCont[contId] || 0) + wkTail;
+                        zeroKnifeTail[String(c.id)] = true;
+                    }
+                    break;                                            // только ближайшая (в снимке) резка
+                }
+                if (ppTraceOn()) ppTrace(contId
+                    ? '#4030 хвост ' + c.id + ': ножи ' + wkTail + ' → продолжение ' + contId + ' (в дне N только сырьё)'
+                    : '#4030 хвост ' + c.id + ' (0 проходов, ножи ' + wkTail + '): продолжение НЕ распознано — '
+                        + 'ближайшая=' + (nearest ? nearest.id : '∅')
+                        + ' её_корень=' + (nearest ? chainRoot4026(nearest) : '∅')
+                        + ' её_fp=' + (nearest && nearest.firstPartId != null && nearest.firstPartId !== '' ? nearest.firstPartId : '∅')
+                        + ' vs корень_хвоста=' + chainRoot4026(c) + ' → ножи остаются, день раздут');
+            });
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
@@ -10287,27 +10331,13 @@
                 // Налезание баров (#3708) убирает обрезка по старту следующего задания в Ганте
                 // (cut-gantt.js), а не дробная длительность.
                 // #4026: продолжение добирает настройку, отложенную его setup-only хвостом (см. ниже).
-                var wantK = Math.round(want.knifeMin) + carryTailK, wantM = Math.round(want.materialWindingMin) + carryTailM;
-                carryTailK = 0; carryTailM = 0;
-                // #4026/#4030: setup-only хвост дня (#3635 п.5, 0 проходов), у которого СЛЕДУЮЩАЯ в
-                // очереди — его же продолжение (тот же корень цепочки, переналадка входа = 0). Раньше
-                // queue-пересчёт писал ПОЛНУЮ переналадку (ножи+сырьё=45) на голову-хвост, а продолжению — 0:
-                // бейдж дня N раздувался (447+45=492). БЕЗУСЛОВНО оставляем в дне N лишь смену сырья, а ножи
-                // (30/50) уносим на продолжение (день N+1), где резка и идёт: раз резку вынесли на след. день,
-                // настройка не помещалась целиком — держать ножи в дне N незачем. (Прежние гейты — остаток
-                // окна #4026 и бюджет дня #4030 — на реальном плане не срабатывали: голова садилась раньше
-                // cutEnd / бюджет считался по неполной настройке; безусловный вынос ножей надёжнее и проще.)
+                // #4026/#4030: ножи setup-only хвоста дня уносим на его продолжение (см. предпроход
+                // deferKnifeToCont/zeroKnifeTail выше). В дне N у хвоста остаётся только смена сырья, а
+                // ножи (30/50) добирает продолжение (день N+1, где резка) — иначе бейдж дня N раздут (447+45=492).
+                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
+                if (zeroKnifeTail[String(c.id)]) wantK = 0;            // ножи хвоста перенесены на продолжение
+                wantK += (deferKnifeToCont[String(c.id)] || 0);       // продолжение добирает ножи своих хвостов
                 var runsC = stripNum(c.plannedRuns);
-                var nextC = arr[i + 1];
-                var nextCols = nextC ? (cols[String(nextC.id)] || {}) : null;
-                var nextIsCont = !!nextC && chainRoot4026(nextC) === chainRoot4026(c)
-                    && Math.round((nextCols && nextCols.knifeMin) || 0) === 0
-                    && Math.round((nextCols && nextCols.materialWindingMin) || 0) === 0;
-                var nextInScope = !!nextC && !(onlySet && !onlySet[String(nextC.id)]);
-                if (inScope && nextIsCont && nextInScope && runsC === 0 && wantK > 0) {
-                    carryTailK = wantK;                              // ножи → продолжению (день N+1, там резка)
-                    wantK = 0;                                       // в дне N остаётся только смена сырья
-                }
                 if (!inScope) return;
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
                 // цуга, cutLeaderRuns). Зависит только от самой резки.
