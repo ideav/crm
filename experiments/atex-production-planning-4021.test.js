@@ -72,5 +72,45 @@ eq(segB && segB.durationMin, 0, 'B (setup-only): durationMin = 0');
 var badgeB = (Number(segB.setupMin) || 0) + (Number(segB.durationMin) || 0) + (Number(segB.leaderMin) || 0);
 eq(badgeB, 15, 'вклад B в бейдж дня = только наладка сырья 15 (без фантомного лидера)');
 
+// ---------------------------------------------------------------------------
+// Часть 3 (Q2) — «день недогружен, сделана только наладка»: setup-only хвост НЕ выталкивается
+// потолком нахлёста за выходные (иначе оседает одинокой наладкой на понедельник).
+//
+// Реал (issue #4021): Станок 1, база Вт 23.06, выходные Сб/Вс (дни 4-5). Наладочный хвост
+// резки MR314L стоял в конце пятницы (день 3, 16:03, нахлёст #3635 п.5). Предыдущая резка
+// кончалась на минуту ПОЗЖЕ логического старта хвоста → встык-курсор нудживал хвост
+// (cursorMoved=true) → потолок #3907/#3934 выталкивал его за конец смены, а перед выходными —
+// за все выходные, на 08:00 понедельника (день 6) ОДИНОКОЙ наладкой; #3951 сдвигал весь
+// дневной объём на вторник. Итог: день 6 «Пн 29.06» = 47 мин (одна наладка), день 7 = 427.
+// Фикс: setup-only хвост (acc.overhangTail) освобождён от потолка — остаётся в пятнице;
+// блоки простоя он по-прежнему обходит.
+console.log('\n== #4021 (Q2): setup-only хвост не выталкивается за выходные ==');
+function clk(m){ var d=Math.floor(m/1440), t=m-d*1440; return '+'+d+'д '+String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.round(t%60)).padStart(2,'0'); }
+var weekend = [[4 * 1440, 6 * 1440]];   // Сб(4)+Вс(5) целиком (как calendarBlockedRanges)
+function shiftScenario(withOverhangGuard) {
+    // Пятница (день 3): предыдущая резка C кончается 16:05 (курсор двигает хвост); наладочный
+    // хвост Btail в 16:03; продолжение Bcont в субботу (день 4) 08:00.
+    var items = [
+        { id: 'C',     ws: 3 * 1440 + 931, len: 34, so: false },  // 15:31..16:05 (курсор двигает хвост)
+        { id: 'Btail', ws: 3 * 1440 + 963, len: 15, so: true  },  // 16:03 наладочный хвост (setup-only)
+        { id: 'Bcont', ws: 4 * 1440 + 480, len: 38, so: false }   // Сб 08:00 продолжение
+    ];
+    planning.shiftPlacementsPastDowntime(items, weekend, 480, 970, {
+        windowStart: function(s){ return s.ws; }, length: function(s){ return s.len; },
+        shift: function(s, d){ s.ws += d; },
+        overhangTail: function(s){ return withOverhangGuard && !!s.so; }
+    }, 975);   // fitEnd = 16:15
+    var by = {}; items.forEach(function(s){ by[s.id] = Math.floor(s.ws / 1440); });
+    return by;
+}
+var before = shiftScenario(false);   // без фикса — старое поведение (баг)
+var after  = shiftScenario(true);    // с фиксом
+// Демонстрация бага (до фикса): наладочный хвост уезжал на понедельник (день 6) один.
+eq(before.Btail, 6, 'ДО фикса: setup-only хвост выталкивался на понедельник (день 6) — баг');
+// С фиксом: хвост остаётся в пятнице (день 3), продолжение — на понедельник (день 6).
+eq(after.Btail, 3, 'setup-only хвост ОСТАЁТСЯ в пятнице (день 3) — не выталкивается за выходные');
+eq(after.Bcont, 6, 'продолжение (намотка) уезжает на понедельник (день 6) — как и должно');
+assert(after.Btail !== after.Bcont, 'наладка и намотка на РАЗНЫХ днях — понедельник не занят одной наладкой');
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

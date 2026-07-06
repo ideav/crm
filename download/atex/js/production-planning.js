@@ -3369,7 +3369,7 @@
     // сам влезающий в рабочее окно дня, переносится на начало СЛЕДУЮЩЕГО рабочего дня (а не
     // оставляется с нахлёстом за смену). Не задан → прежнее поведение (проверяли только старт).
     // dayEnd по-прежнему граница, ПОСЛЕ которой новый сегмент не начинают.
-    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit) {
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit, skipCeiling) {
         var m = Number(from);
         var L = Number(len) || 0;
         var hasFit = (fitEnd != null && isFinite(Number(fitEnd)));
@@ -3391,7 +3391,12 @@
             // #3907: сегмент должен влезть в рабочее окно дня ЦЕЛИКОМ. Конец за fitEnd, а сам
             // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Только для сдвинутого
             // простоем сегмента (#3934). Сегмент длиннее целого окна разбить нельзя — кладём как есть.
-            if (moved && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
+            // #4021: setup-only хвост дня (skipCeiling) — намеренный нахлёст #3635 п.5, потолком НЕ
+            // выталкиваем (иначе встык-курсор, нудживший хвост на 1 мин, делал movedInit=true и хвост
+            // уезжал за конец смены — а перед выходными за все выходные, оседая ОДИНОКОЙ наладкой на
+            // понедельник и вытесняя #3951 весь дневной объём на вторник: день «недогружен, только наладка»).
+            // Блоки простоя (ниже) хвост по-прежнему обходит; выталкивание касается лишь проходов (#3907).
+            if (moved && !skipCeiling && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
             var bumped = false;
             for (var i = 0; i < (blocked || []).length; i++) {
                 var bS = blocked[i][0], bE = blocked[i][1];
@@ -3433,8 +3438,12 @@
             // уехал за простой) — тогда к нему применяем потолок нахлёста (#3907); сегмент на своём
             // месте (не тронут ни блоком, ни курсором) оставляем как есть (намеренный хвост дня).
             var cursorMoved = (ws !== origWs);
+            // #4021: setup-only хвост — намеренный нахлёст (#3635 п.5), потолок нахлёста к нему не
+            // применяем (иначе одиночная наладка уезжает за выходные, недогружая день). acc.overhangTail
+            // необязателен; нет — прежнее поведение.
+            var skipCeiling = acc.overhangTail ? !!acc.overhangTail(it) : false;
             // #3907: fitEnd — не оставлять сегмент с нахлёстом за смену (см. nextFreeWorkMinute).
-            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved);
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved, skipCeiling);
             var delta = placed - origWs;
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
@@ -3811,7 +3820,8 @@
             if (hasWindow) shiftPlacementsPastDowntime(segs, opts.blockedRanges, dayStart, dayEnd, {
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
-                shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); }
+                shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); },
+                overhangTail: function(s) { return !!s.setupOnly; }   // #4021: setup-only хвост дня — намеренный нахлёст (#3635 п.5), не выталкивать потолком
             }, fitEnd);
             if (traceDown) {
                 segs.forEach(function(s, i) {
