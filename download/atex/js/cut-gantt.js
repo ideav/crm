@@ -1394,10 +1394,22 @@
                 // утренние перерывы ≥ сдвига несущего), иначе обед не дотягивался бы до бара.
                 var post = g.tasks[lb.beforeIndex];
                 var postShiftPx = post ? (post.shiftPx || 0) : (carrier.shiftPx || 0);
-                var fillPx = round3(scale.toPx(lb.postStartMs) + postShiftPx - carrier.leftPx);
+                // #4041: антинахлёст (#3887) мог подвинуть несущее обед задание ВПЕРЁД встык за
+                // предыдущим баром, «съев» часть обеденного зазора: бар 12:02→13:42 под работу 65
+                // читался как 100 мин (обед 35) вместо 65 + 40 = 105 (в БД старт 11:58). Обед
+                // детектируется по СОХРАНЁННЫМ временам (ganttLunchMarkers → cutTimeRange), поэтому
+                // и НЕСУЩИЙ якорим на его сохранённый старт — снимаем сдвиг встык #3887, но сохраняем
+                // сдвиг за перерывы #4007 (shiftPx) — тогда пролёт бара честно охватывает работу + обед
+                // (11:58→13:42 ≈ 105). Начатую резку (есть фактический старт) не двигаем.
+                var carrTr = cutTimeRange(carrier.cut);
+                var anchorMs = (carrTr && carrTr.actualStartMs == null) ? carrTr.startMs : carrier.startMs;
+                var anchorLeftPx = round3(scale.toPx(anchorMs) + (carrier.shiftPx || 0));
+                var fillPx = round3(scale.toPx(lb.postStartMs) + postShiftPx - anchorLeftPx);
                 if (fillPx > carrier.widthPx) {
+                    carrier.startMs = anchorMs;
+                    carrier.leftPx = anchorLeftPx;
                     carrier.widthPx = fillPx;
-                    carrier.barText = formatTime(carrier.startMs) + '-' + formatTime(lb.postStartMs) +
+                    carrier.barText = formatTime(anchorMs) + '-' + formatTime(lb.postStartMs) +
                         ' (' + carrier.barMin + ' мин)';   // пролёт со встроенным обедом; минуты — рабочие
                 }
             });
