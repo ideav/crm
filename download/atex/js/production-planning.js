@@ -10262,24 +10262,12 @@
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
-        // #4026/#4030: setup-only хвост дня (#3635 п.5) физически успевает лишь ПОДМНОЖЕСТВО переналадки;
-        // остаток уходит на продолжение. Критерий дележа — БЮДЖЕТ ДНЯ-БЕЙДЖА, а не остаток окна до cutEnd.
-        // Бюджет = (cutEnd − dayStart) − обед + допустимый нахлёст настройки (тот же расчёт, что трассировка
-        // бейджа «(N мин)»). Если сумма дня (Σ setup+намотка+лидер, как scheduleFromStored) вылезает за
-        // бюджет — крупный кусок настройки (ножи) уносим на продолжение, в хвосте оставляем смену сырья.
-        var win4026 = (typeof this.workingWindow === 'function') ? this.workingWindow() : null;
-        var dayBudget4030 = null;
-        if (win4026) {
-            var _b4030 = (Number(win4026.cutEndMin) - Number(win4026.startMin))
-                - (Number(win4026.lunchDurationMin) || 0) + (Number(win4026.maxOverworkTuneMin) || 0);
-            if (isFinite(_b4030) && _b4030 > 0) dayBudget4030 = round3(_b4030);
-        }
-        function tsSec4030(x) { return Number(x && x.planDate != null && x.planDate !== '' ? x.planDate : x && x.number); }
-        function dayIdx4030(x) {
-            var t = tsSec4030(x);
-            if (!isFinite(t) || t <= 0 || !isFinite(planBaseMidnightMs)) return null;
-            return Math.floor(round3((t * 1000 - planBaseMidnightMs) / 60000) / 1440);
-        }
+        // #4026/#4030: setup-only хвост дня (#3635 п.5, 0 проходов) — это настройка следующей резки,
+        // начатая в конце дня N, а сама резка (проходы) идёт с дня N+1 (продолжение). Настройка = ножи +
+        // смена сырья. В день N оставляем ТОЛЬКО смену сырья (быстрый нахлёст в конце смены), а ножи —
+        // на продолжение (день N+1), где они и нужны прямо перед резкой. БЕЗУСЛОВНО: раз splitMachineQueue
+        // вынес резку на след. день, значит настройка и не помещалась целиком — держать всю (ножи+сырьё)
+        // в дне N нет смысла. Так бейдж дня N не несёт лишние 30 мин ножей.
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
@@ -10289,19 +10277,6 @@
             var cols = setupActivityColumns(arr, times, carryPrevCut);
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
             function chainRoot4026(x) { return String((x && x.firstPartId != null && x.firstPartId !== '') ? x.firstPartId : (x && x.id)); }
-            // #4030: сумма дня-бейджа (Σ setup+намотка+лидер по СЫРОЙ настройке, тот же счёт, что
-            // scheduleFromStored и трассировка бейджа) — чтобы понять, какой день превысил бюджет и
-            // требует выноса ножей на продолжение. Предпроход по группе одного станка.
-            var dayRawSum4030 = {};
-            arr.forEach(function(c) {
-                var w = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
-                var rc = stripNum(c.plannedRuns);
-                var lr = rc > 0 ? cutLeaderRuns(c) : 0;
-                var contrib = Math.round(w.knifeMin) + Math.round(w.materialWindingMin)
-                    + Math.round(stripNum(c.duration) + betweenCuts * lr);
-                var d = dayIdx4030(c);
-                if (d != null) dayRawSum4030[d] = (dayRawSum4030[d] || 0) + contrib;
-            });
             var carryTailK = 0, carryTailM = 0;   // #4026: отложенная настройка setup-only хвоста → его продолжению
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
@@ -10314,14 +10289,14 @@
                 // #4026: продолжение добирает настройку, отложенную его setup-only хвостом (см. ниже).
                 var wantK = Math.round(want.knifeMin) + carryTailK, wantM = Math.round(want.materialWindingMin) + carryTailM;
                 carryTailK = 0; carryTailM = 0;
-                // #4026/#4030: setup-only хвост дня (#3635 п.5, 0 проходов) с продолжением на след. рабочий
-                // день. Раньше queue-пересчёт писал ПОЛНУЮ переналадку на голову-хвост, а продолжению — 0:
-                // бейдж дня раздувался (447+45=492) и вылезал за бюджет 460. #4026 делил хвост по остатку
-                // окна до cutEnd (roomTail), но когда голова садится РАНЬШЕ cutEnd (напр. 15:35 → roomTail 35),
-                // вся настройка 45 «дотягивала» до конца окна и НЕ делилась — день опять 492. Критерий — не
-                // остаток окна, а БЮДЖЕТ ДНЯ: если сумма дня-бейджа > бюджета, крупный кусок (ножи, 30/50 мин)
-                // уносим на продолжение, в хвосте оставляем смену сырья (15, минимальный нахлёст). Сырьё не
-                // делим — это допустимый «+N» за бюджет (#4026), деля лишь неделимую пару ножи↔сырьё.
+                // #4026/#4030: setup-only хвост дня (#3635 п.5, 0 проходов), у которого СЛЕДУЮЩАЯ в
+                // очереди — его же продолжение (тот же корень цепочки, переналадка входа = 0). Раньше
+                // queue-пересчёт писал ПОЛНУЮ переналадку (ножи+сырьё=45) на голову-хвост, а продолжению — 0:
+                // бейдж дня N раздувался (447+45=492). БЕЗУСЛОВНО оставляем в дне N лишь смену сырья, а ножи
+                // (30/50) уносим на продолжение (день N+1), где резка и идёт: раз резку вынесли на след. день,
+                // настройка не помещалась целиком — держать ножи в дне N незачем. (Прежние гейты — остаток
+                // окна #4026 и бюджет дня #4030 — на реальном плане не срабатывали: голова садилась раньше
+                // cutEnd / бюджет считался по неполной настройке; безусловный вынос ножей надёжнее и проще.)
                 var runsC = stripNum(c.plannedRuns);
                 var nextC = arr[i + 1];
                 var nextCols = nextC ? (cols[String(nextC.id)] || {}) : null;
@@ -10329,13 +10304,9 @@
                     && Math.round((nextCols && nextCols.knifeMin) || 0) === 0
                     && Math.round((nextCols && nextCols.materialWindingMin) || 0) === 0;
                 var nextInScope = !!nextC && !(onlySet && !onlySet[String(nextC.id)]);
-                var dHead4030 = dayIdx4030(c);
-                var dayOver4030 = dayBudget4030 != null && dHead4030 != null && dayRawSum4030[dHead4030] != null
-                    && dayRawSum4030[dHead4030] > dayBudget4030 + 1e-6;
-                if (inScope && nextIsCont && nextInScope && runsC === 0 && dayOver4030 && wantK > 0) {
-                    carryTailK = wantK;                              // ножи → продолжению (след. рабочий день)
-                    dayRawSum4030[dHead4030] = round3(dayRawSum4030[dHead4030] - wantK);   // хвост облегчён
-                    wantK = 0;                                       // в хвосте дня остаётся только смена сырья
+                if (inScope && nextIsCont && nextInScope && runsC === 0 && wantK > 0) {
+                    carryTailK = wantK;                              // ножи → продолжению (день N+1, там резка)
+                    wantK = 0;                                       // в дне N остаётся только смена сырья
                 }
                 if (!inScope) return;
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
