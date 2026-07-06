@@ -48,7 +48,7 @@ define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
 define("SECRET", 130);
-define("VERSION", 110);  # cache-bust версия ассетов (?0{_global_.version}); бить при правках js/css — #3418
+define("VERSION", 110);  # ОБЩАЯ cache-bust версия ассетов (?{_global_.version}); бить при правках js/css — один бамп обновляет все ассеты с ?{_global_.version} (#3418). main.html несёт КОМБИНИРОВАННУЮ ?{_global_.version}.<локальная> — локальный суффикс бьётся в самом main.html для сброса кэша ОДНОЙ базы без правки ядра (#4043)
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
