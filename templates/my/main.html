@@ -6,8 +6,8 @@
 <!-- Begin: noAdmin1 --><!--{Role}-->
     <title>Личный кабинет</title>
     <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
-    <link rel="stylesheet" href="/css/styles.css">
-    <link rel="stylesheet" href="/css/cabinet.css">
+    <link rel="stylesheet" href="/css/styles.css?{_global_.version}.1">
+    <link rel="stylesheet" href="/css/cabinet.css?{_global_.version}.1">
 <!-- End: noAdmin1 -->
     <script>
         var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',name='{_global_.user}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
@@ -749,9 +749,9 @@
                 el.style.display = el.style.display === 'none' ? '' : 'none';
             });
     </script>
-    <script src="/js/app.js"></script>
-    <script src="/js/form-submit.js" defer></script>
-    <script src="/js/cabinet.js"></script>
+    <script src="/js/app.js?{_global_.version}.1"></script>
+    <script src="/js/form-submit.js?{_global_.version}.1" defer></script>
+    <script src="/js/cabinet.js?{_global_.version}.1"></script>
     <script>
     function changePwd(){
         var oldPwd=document.getElementById('old-pwd').value;
@@ -847,7 +847,7 @@
     <FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
     <script src="/js/popper1.16.1.min.js"></script>
     <script src="/js/bootstrap4.5.2.min.js"></script>
-    <script src="/js/main.js"></script>
+    <script src="/js/main.js?{_global_.version}.1"></script>
     <script>
     localize();
     function exitLogin(){
