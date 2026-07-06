@@ -6282,6 +6282,7 @@
         insertionCost: insertionCost,                   // #3989: стоимость вставки слота между prev и next
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
+        chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку
         formatQualityDelta: formatQualityDelta,          // #3989 Фаза 3: подпись избытка
         splitSupplyShares: splitSupplyShares,
         addMainValueField: addMainValueField,
@@ -8103,48 +8104,160 @@
         ]);
     };
 
+    // #4047: карта cutId → новое planStart (сек) из ops.updates — для оценки переналадки
+    // плана-кандидата. creates (новые сегменты разбиения) несут ту же конфигурацию, переналадки
+    // не добавляют → в оценке не нужны (запись без апдейта берёт хранимый planStart).
+    function planStartMapFromOps(ops) {
+        var m = {};
+        ((ops && ops.updates) || []).forEach(function(u) {
+            var ts = Number(u.planStartTs);
+            if (isFinite(ts) && ts > 0) m[String(u.cutId)] = ts;
+        });
+        return m;
+    }
+
+    // #4047: выбор кандидата «Упорядочить» с ГАРАНТИЕЙ, что суммарная переналадка НЕ вырастет.
+    // before — переналадка текущего плана; objB — кандидат «пересборка на текущих станках»; objA —
+    // кандидат «переназначение станков + пересборка» (Infinity, если переназначения нет). Применяем
+    // ЛУЧШИЙ (строго меньшую переналадку); при равенстве кандидатов берём B (без смены станка). Если
+    // лучший НЕ строго меньше текущего → 'none' (план не трогаем). → { action:'none'|'B'|'A', obj }.
+    function chooseOptimizeCandidate(before, objB, objA, reassignChanged) {
+        var useA = !!reassignChanged && objA < objB;
+        var bestObj = useA ? objA : objB;
+        if (!(bestObj < before)) return { action: 'none', obj: before };
+        return { action: useA ? 'A' : 'B', obj: bestObj };
+    }
+
+    // #4047: суммарная переналадка (мин) набора резок за весь горизонт [С; конец] — та же метрика,
+    // что тултип «Качество плана» (planQuality.all.changeoverMin). Порядок ВНУТРИ дня берём по
+    // РЕАЛЬНОМУ planStart (c.number либо override из ops кандидата), а не 0 — иначе перестановка
+    // задач внутри дня/станка (главная работа «Упорядочить») в метрике не видна. planStartByCutId
+    // (опц.) — {cutId: planStartTs сек}; нет записи → хранимый planStart резки.
+    AtexProductionPlanning.prototype.planChangeoverMin = function(cutsArray, planStartByCutId) {
+        var self = this;
+        var ov = planStartByCutId || null;
+        var slots = (cutsArray || []).map(function(c) {
+            var o = ov ? ov[String(c.id)] : null;
+            var ts = (o != null) ? Number(o)
+                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
+            return {
+                id: c.id,
+                slitterId: c.slitter && c.slitter.id,
+                dayKey: ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate),
+                planStartMs: ts,
+                knifeWidths: c.knifeWidths, knifeCount: c.knifeCount,
+                materialId: c.materialId, winding: c.winding, dueKey: c.dueKey
+            };
+        });
+        // #4047: считаем по ВСЕМУ открытому горизонту (scope не задаём), а не по окну [С;По]:
+        // «Упорядочить» переставляет ВСЕ открытые задания (окно — лишь размещение, #3974), поэтому
+        // текущий и кандидатный планы сравниваем на ОДНОМ наборе. day-scope дал бы асимметрию —
+        // просроченное задание до «С» в текущем плане выпадало бы из счёта, а кандидат ставит его
+        // ≥ «С» → ложный рост переналадки и напрасный отказ применить хороший план.
+        return planQuality(slots, {
+            settings: self.daySettings,
+            prevSetupBySlitter: self.prevSetupBySlitter
+        }).all.changeoverMin;
+    };
+
+    // #4047: «Упорядочить» ГАРАНТИРОВАННО не увеличивает суммарную переналадку. Считаем два
+    // плана-кандидата В ПАМЯТИ (без записи в БД) и меряем их суммарную переналадку
+    // (planChangeoverMin) против текущего плана; применяем ЛУЧШИЙ и ТОЛЬКО если он СТРОГО меньше:
+    //   B — пересборка порядка/дней на ТЕКУЩИХ станках (минимум переналадки на станок);
+    //   A — переназначение станков (computeSlitterReassignment, как «Сгенерировать») + пересборка.
+    // При равенстве кандидатов берём B (без смены станка). Улучшения нет (min ≥ текущего) → план
+    // НЕ трогаем («уже оптимальна»): смена станка rebalance-ом, добавлявшая переналадку, отсекается.
+    // Пишем только изменившиеся значения (applySplitPlan / _m_set лишь сменившимся цепочкам).
     AtexProductionPlanning.prototype.runOptimizeQueue = function() {
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
-        // #4001: «Упорядочить» = как «Сгенерировать», но без пересоздания резок. Сначала для КАЖДОЙ
-        // задачи диапазона ищем более подходящий станок (chooseSlitterBySetup) и балансируем загрузку
-        // (rebalanceSlitterLoad) — reassignSlittersForOptimize пишет «Слиттер» только изменившимся
-        // цепочкам. Затем autoSequenceQueue упаковывает дни и порядок (planStart/проходы — только
-        // изменившиеся, applySplitPlan). Раньше «Упорядочить» лишь пересобирал порядок на ТЕКУЩИХ
-        // станках → старые дефекты наполнения дня (задача застревала на перегруженном станке).
-        this.reassignSlittersForOptimize().then(function(r) {
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false).then(function(seqChanged) {
-                // Станки сменились, но раскладка/порядок — нет: autoSequenceQueue не перечитал экран.
-                if (!seqChanged && r && r.changed) return self.reload().then(function() { self.render(); return true; });
-                return seqChanged || !!(r && r.changed);
-            });
-        }).then(function(changed) {
+        var before, builtB, objB, plan, objA, builtA;
+        try {
+            before = self.planChangeoverMin(self.cuts, null);
+
+            // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
+            builtB = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
+            objB = self.planChangeoverMin(self.cuts, planStartMapFromOps(builtB.ops));
+
+            // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
+            // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
+            plan = self.computeReassignmentPlan();
+            objA = Infinity;
+            builtA = null;
+            if (plan.changed) {
+                var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+                var saved = {};
+                Object.keys(plan.slitterByRecordId).forEach(function(mid) {
+                    var c = cutsById[mid]; if (!c) return;
+                    saved[mid] = c.slitter ? { id: c.slitter.id, label: c.slitter.label } : null;
+                    if (!c.slitter) c.slitter = { id: plan.slitterByRecordId[mid], label: '' };
+                    else c.slitter.id = plan.slitterByRecordId[mid];
+                });
+                builtA = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
+                objA = self.planChangeoverMin(self.cuts, planStartMapFromOps(builtA.ops));
+                Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
+            }
+        } catch (err) {
             self.setBusy(false);
-            self.notify(changed ? 'Очередь упорядочена (минимум переналадок, баланс станков)' : 'Очередь уже оптимальна', 'success');
+            console.error('[pp] ⚙️ optimizeQueue: ОШИБКА расчёта', err && err.message, err && err.stack);
+            self.notify('Ошибка упорядочивания: ' + (err && err.message ? err.message : err), 'error');
+            return;
+        }
+
+        // Выбор кандидата с ГАРАНТИЕЙ не увеличивать переналадку (строго меньше — иначе не трогаем).
+        var choice = chooseOptimizeCandidate(before, objB, objA, plan.changed);
+        if (choice.action === 'none') {
+            self.setBusy(false);
+            self.notify('Очередь уже оптимальна по переналадке (' + round3(before) + ' мин)', 'success');
+            return;
+        }
+        var useA = choice.action === 'A';
+        var bestObj = choice.obj;
+
+        var applyPromise;
+        if (useA) {
+            applyPromise = self.persistSlitterReassignment(plan.slitterByRecordId, plan.slitterReqId).then(function() {
+                var changed = filterChangedUpdates(builtA.ops, builtA.cutsById);
+                if (!changed.length && !(builtA.ops.creates || []).length && !(builtA.ops.deletes || []).length) {
+                    return self.reload().then(function() { self.render(); });   // станки записаны, порядок/дни — нет
+                }
+                return self.applySplitPlan({ updates: changed, creates: builtA.ops.creates, deletes: builtA.ops.deletes });
+            });
+        } else {
+            var changedB = filterChangedUpdates(builtB.ops, builtB.cutsById);
+            applyPromise = (!changedB.length && !(builtB.ops.creates || []).length && !(builtB.ops.deletes || []).length)
+                ? Promise.resolve(false)
+                : self.applySplitPlan({ updates: changedB, creates: builtB.ops.creates, deletes: builtB.ops.deletes });
+        }
+
+        applyPromise.then(function() {
+            self.setBusy(false);
+            self.notify('Очередь упорядочена: переналадка ' + round3(before) + ' → ' + round3(bestObj) + ' мин'
+                + (useA ? ' (со сменой станка)' : ''), 'success');
         }).catch(function(err) {
             self.setBusy(false);
-            console.error('[pp] ⚙️ optimizeQueue: ОШИБКА', err && err.message, err && err.stack);
+            console.error('[pp] ⚙️ optimizeQueue: ОШИБКА применения', err && err.message, err && err.stack);
             self.notify('Ошибка упорядочивания: ' + (err && err.message ? err.message : err), 'error');
         });
     };
 
-    // #4001: пере-выбор станка для СУЩЕСТВУЮЩИХ логических резок диапазона (как «Сгенерировать»,
-    // но без пересоздания): chooseSlitterBySetup + rebalanceSlitterLoad (computeSlitterReassignment).
-    // 🔒 держат свой станок (базовая загрузка, не переносятся). «Слиттер» (_m_set) пишем ТОЛЬКО
-    // цепочкам с изменившимся станком — всем записям цепочки (голова + продолжения), иначе
-    // continuationSignature рвётся. Мутируем self.cuts, чтобы следующий autoSequenceQueue раскладывал
-    // по НОВОМУ назначению. → Promise<{ changed:bool }>. Нет станков/ёмкости/движимых — {changed:false}.
-    AtexProductionPlanning.prototype.reassignSlittersForOptimize = function() {
+    // #4001/#4047: РАССЧИТАТЬ пере-выбор станка для СУЩЕСТВУЮЩИХ логических резок (как «Сгенерировать»,
+    // без пересоздания): chooseSlitterBySetup + rebalanceSlitterLoad (computeSlitterReassignment).
+    // ЧИСТАЯ — БЕЗ записи в БД и без мутации self.cuts (#4047: runOptimizeQueue сперва оценивает план).
+    // 🔒 держат свой станок (базовая загрузка, не переносятся). → { changed, slitterByRecordId,
+    // slitterReqId }: slitterByRecordId — id КАЖДОЙ записи цепочки (голова+продолжения), сменившей
+    // станок, → новый станок (всем записям цепочки, иначе рвётся continuationSignature). Нет
+    // станков/ёмкости/движимых → changed:false.
+    AtexProductionPlanning.prototype.computeReassignmentPlan = function() {
         var self = this;
         var cutMeta = this.meta.cut;
         var slitterReqId = cutMeta ? reqIdByName(cutMeta, CUT_REQ.slitter) : null;
-        if (!slitterReqId || !(self.slitters && self.slitters.length >= 2) || !(self.cuts && self.cuts.length)) {
-            return Promise.resolve({ changed: false });
-        }
+        var empty = { changed: false, slitterByRecordId: {}, slitterReqId: slitterReqId };
+        if (!slitterReqId || !(self.slitters && self.slitters.length >= 2) || !(self.cuts && self.cuts.length)) return empty;
         var genWindow = self.workingWindow();
         var dayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0) - (Number(genWindow.lunchDurationMin) || 0));
-        if (!(dayCapacityMin > 0)) return Promise.resolve({ changed: false });
+        if (!(dayCapacityMin > 0)) return empty;
         var planOptions = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes);
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
 
@@ -8165,7 +8278,7 @@
         }
         var movable = openLogical.filter(function(c) { return !c.fixed; }).map(descOf);
         var fixed = openLogical.filter(function(c) { return !!c.fixed; }).map(descOf);
-        if (!movable.length) return Promise.resolve({ changed: false });
+        if (!movable.length) return empty;
 
         var vacByDay = {};
         function vacationForDay(dayKey, sec) {
@@ -8183,23 +8296,35 @@
         });
         var slitterById = res.slitterById || {};
 
-        var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
-        var writes = [];
+        var slitterByRecordId = {}; var changed = false;
         movable.forEach(function(m) {
             var head = String(m.id);
             var newSid = String(slitterById[head] || '');
             if (newSid === '' || newSid === String(m.slitterId || '')) return;   // станок не изменился
-            (chainByLogical[head] || [head]).forEach(function(mid) {
-                var fields = {}; fields['t' + slitterReqId] = newSid;
-                writes.push(self.post('_m_set/' + encodeURIComponent(mid) + '?JSON', fields).then(function() {
-                    var cc = cutsById[String(mid)];
-                    if (cc) { if (!cc.slitter) cc.slitter = { id: newSid, label: '' }; else cc.slitter.id = newSid; }
-                }));
+            (chainByLogical[head] || [head]).forEach(function(mid) { slitterByRecordId[String(mid)] = newSid; changed = true; });
+        });
+        return { changed: changed, slitterByRecordId: slitterByRecordId, slitterReqId: slitterReqId };
+    };
+
+    // #4047: применить рассчитанное переназначение станков — _m_set КАЖДОЙ записи цепочки
+    // (голова+продолжения) + мутируем self.cuts, чтобы applySplitPlan/рендер видели новый станок.
+    // → Promise<bool changed>. Пусто — resolve(false).
+    AtexProductionPlanning.prototype.persistSlitterReassignment = function(slitterByRecordId, slitterReqId) {
+        var self = this;
+        if (!slitterReqId) return Promise.resolve(false);
+        var ids = Object.keys(slitterByRecordId || {});
+        if (!ids.length) return Promise.resolve(false);
+        var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        var writes = ids.map(function(mid) {
+            var newSid = slitterByRecordId[mid];
+            var fields = {}; fields['t' + slitterReqId] = newSid;
+            return self.post('_m_set/' + encodeURIComponent(mid) + '?JSON', fields).then(function() {
+                var cc = cutsById[String(mid)];
+                if (cc) { if (!cc.slitter) cc.slitter = { id: newSid, label: '' }; else cc.slitter.id = newSid; }
             });
         });
-        if (!writes.length) return Promise.resolve({ changed: false });
-        console.log('[pp] ⚙️ Упорядочить: смена станка у ' + writes.length + ' записей (#4001)');
-        return Promise.all(writes).then(function() { return { changed: true }; });
+        console.log('[pp] ⚙️ Упорядочить: смена станка у ' + writes.length + ' записей (#4047)');
+        return Promise.all(writes).then(function() { return true; });
     };
 
     // #3508 п.4: иконка «🔒» в карточке — переключить фиксацию одного задания
@@ -10916,9 +11041,31 @@
     // #3619: preserveOrder=true — НЕ пересобирать очередь по стратегии, а только расщепить
     // задания, переходящие границу рабочего дня, на по-дневные сегменты, СОХРАНЯЯ текущий
     // порядок очереди. Без флага (legacy #3421) — полная пересборка «Очередности» по SETUP/FATIGUE.
-    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder) {
+    // #3923/#4001: отобрать из ops.updates только РЕАЛЬНО изменившееся — время старта (planStart)
+    // или проходы; родители разбиений нужны всегда (доли Обеспечения). cutsById — по ХРАНИМЫМ
+    // резкам (tsOld = cut.number). «Очередность» не хранится: переупорядочивание = смена planStart.
+    function filterChangedUpdates(ops, cutsById) {
+        var createParents = {};
+        ((ops && ops.creates) || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
+        return ((ops && ops.updates) || []).filter(function(u) {
+            if (createParents[String(u.cutId)]) return true;
+            var cut = cutsById[String(u.cutId)];
+            if (!cut) return false;
+            var tsNew = Number(u.planStartTs);
+            var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
+            var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
+            var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
+            return tsChanged || runsChanged;
+        });
+    }
+
+    // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,
+    // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
+    // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
+    // (можно временно подменить станок для оценки переназначения). → { ops, cutsById }.
+    AtexProductionPlanning.prototype.buildSequenceOps = function(cutsArray, strategy, preserveOrder) {
         var self = this;
-        if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
+        var cuts = cutsArray || self.cuts || [];
         var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes);
 
         // #3280: план разбиения по дням + плановое время старта (t1078). База — дата
@@ -10934,7 +11081,7 @@
         // #4050: срок каждой резки (самый ранний из «Сроков изготовления» обеспечиваемых позиций,
         // cutDueKeys) как индекс дня от базы «С» — для §8-штрафа в splitMachineQueue (selectByConfig).
         var dueDayByCut = {};
-        self.cuts.forEach(function(c) {
+        cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
@@ -10949,7 +11096,7 @@
         // отсекал прошлое/готовое, теперь отбираем явно по статусу, а [С; По] — окно РАЗМЕЩЕНИЯ
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
-        var planInput = (self.cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
+        var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
         var ops = planCutOperations(planInput, {
             weights: planOptions,
             times: self.changeTimes,
@@ -10971,25 +11118,17 @@
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
         });
 
-        // Родители разбиений нужны в updates всегда (для расчёта долей Обеспечения).
-        var createParents = {};
-        (ops.creates || []).forEach(function(cr) { createParents[String(cr.parentCutId)] = true; });
         var cutsById = {};
-        self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
-        // #3923: обновляем только реально изменившееся — время старта (planStart) / проходы.
-        // «Очередность» больше не хранится, поэтому переупорядочивание проявляется как смена
-        // planStart (tsChanged), а не отдельным seqChanged (иначе null!==N → churn всех записей).
-        var changedUpdates = (ops.updates || []).filter(function(u) {
-            if (createParents[String(u.cutId)]) return true;
-            var cut = cutsById[String(u.cutId)];
-            if (!cut) return false;
-            var tsNew = Number(u.planStartTs);
-            var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
-            var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
-            var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
-            return tsChanged || runsChanged;
-        });
+        cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
+        return { ops: ops, cutsById: cutsById };
+    };
 
+    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder) {
+        var self = this;
+        if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
+        var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder);
+        var ops = built.ops;
+        var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
             return Promise.resolve(false);
         }
