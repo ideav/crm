@@ -6435,8 +6435,10 @@
                 if (key !== 'DAY_START_HOUR' && key !== 'DAY_END_HOUR' &&
                     key !== 'LUNCH_START' && key !== 'LUNCH_DURATION' &&
                     key !== 'TOTAL_INTERVALS' &&        // #3599: буфер перед уборкой (мин)
-                    key !== 'MAX_OVERWORK_CUTS' &&      // #3847: макс. нахлёст резки за DAY_END_HOUR (мин)
-                    key !== 'MAX_OVERWORK_TUNE' &&      // #3847: макс. нахлёст настройки за DAY_END_HOUR (мин)
+                    key !== 'MAX_OVERWORK_CUTS_MN' &&   // #3992/#4017: макс. нахлёст резки за DAY_END_HOUR (мин), новый ключ с суффиксом _MN
+                    key !== 'MAX_OVERWORK_TUNE_MN' &&   // #3992/#4017: макс. нахлёст настройки за DAY_END_HOUR (мин), новый ключ с суффиксом _MN
+                    key !== 'MAX_OVERWORK_CUTS' &&      // #3847: макс. нахлёст резки за DAY_END_HOUR (мин) — старый ключ (откат)
+                    key !== 'MAX_OVERWORK_TUNE' &&      // #3847: макс. нахлёст настройки за DAY_END_HOUR (мин) — старый ключ (откат)
                     key !== 'DAYS_FORECAST') return;    // #3769: окно срока изготовления (дни) для расцветки строк
                 var type = String(r[1] == null ? '' : r[1]).trim().toUpperCase();
                 var val = String(r[2] == null ? '' : r[2]).trim();
