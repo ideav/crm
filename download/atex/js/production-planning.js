@@ -10236,6 +10236,11 @@
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
+        // #4026: setup-only хвост дня (#3635 п.5) физически успевает лишь ПОДМНОЖЕСТВО переналадки —
+        // то, что дотягивает до конца окна резки (cutEndMin); остаток настройки уходит на продолжение.
+        // Нужен потолок дня, чтобы разделить хранимую настройку между хвостом и продолжением.
+        var win4026 = (typeof this.workingWindow === 'function') ? this.workingWindow() : null;
+        var cutEndMin4026 = (win4026 && isFinite(Number(win4026.cutEndMin))) ? Number(win4026.cutEndMin) : null;
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
@@ -10243,15 +10248,49 @@
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
-            arr.forEach(function(c) {
-                if (onlySet && !onlySet[String(c.id)]) return;   // снимок — только выбранные резки
+            // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
+            function chainRoot4026(x) { return String((x && x.firstPartId != null && x.firstPartId !== '') ? x.firstPartId : (x && x.id)); }
+            var carryTailK = 0, carryTailM = 0;   // #4026: отложенная настройка setup-only хвоста → его продолжению
+            arr.forEach(function(c, i) {
+                var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
                 var want = cols[String(c.id)] || { knifeMin: 0, materialWindingMin: 0 };
                 // #3715: пишем ЦЕЛЫЕ минуты (Math.round). Дробные значения (#3708) перестали
                 // записываться — поля не приняли нецелое, _m_set падал и обрывал запись всех трёх
                 // колонок («Наладка ножей»/«Сырье/намотка»/«Резка и Лидер») для всей очереди.
                 // Налезание баров (#3708) убирает обрезка по старту следующего задания в Ганте
                 // (cut-gantt.js), а не дробная длительность.
-                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
+                // #4026: продолжение добирает настройку, отложенную его setup-only хвостом (см. ниже).
+                var wantK = Math.round(want.knifeMin) + carryTailK, wantM = Math.round(want.materialWindingMin) + carryTailM;
+                carryTailK = 0; carryTailM = 0;
+                // #4026: setup-only хвост дня (#3635 п.5) успевает лишь ПОДМНОЖЕСТВО переналадки — то, что
+                // дотягивает до конца окна резки (minOverlapTailSetupMinutes по остатку дня, как в
+                // splitMachineQueue), а НЕ всю. Раньше queue-пересчёт писал ПОЛНУЮ переналадку на голову-хвост,
+                // а продолжению — 0: бейдж дня раздувался (день 447+45=492 вместо 447+15), карточка тянулась до
+                // 16:50 при потолке нахлёста 16:20. Делим ту же резку: голова хранит помещающееся подмножество,
+                // остаток настройки → продолжению (та же резка, следующий рабочий день). roomTail считаем из
+                // сохранённого planStart тем же base, что scheduleFromStored (бейдж) — минуты совпадают.
+                var runsC = stripNum(c.plannedRuns);
+                var nextC = arr[i + 1];
+                var nextCols = nextC ? (cols[String(nextC.id)] || {}) : null;
+                var nextIsCont = !!nextC && chainRoot4026(nextC) === chainRoot4026(c)
+                    && Math.round((nextCols && nextCols.knifeMin) || 0) === 0
+                    && Math.round((nextCols && nextCols.materialWindingMin) || 0) === 0;
+                var nextInScope = !!nextC && !(onlySet && !onlySet[String(nextC.id)]);
+                if (inScope && nextIsCont && nextInScope && runsC === 0 && cutEndMin4026 != null && (wantK + wantM) > 0) {
+                    var tsSec4026 = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+                    if (isFinite(tsSec4026) && tsSec4026 > 0 && isFinite(planBaseMidnightMs)) {
+                        var minFromBase4026 = round3((tsSec4026 * 1000 - planBaseMidnightMs) / 60000);
+                        var minOfDay4026 = ((minFromBase4026 % 1440) + 1440) % 1440;
+                        var roomTail = round3(cutEndMin4026 - minOfDay4026);   // остаток окна резки до конца смены
+                        var totalTail = wantK + wantM;
+                        var keepTail = Math.round(minOverlapTailSetupMinutes([{ minutes: wantK }, { minutes: wantM }], roomTail, totalTail));
+                        if (keepTail < totalTail) {
+                            if (wantK > 0 && keepTail === wantM) { carryTailK = wantK; wantK = 0; }         // хвост держит сырьё, ножи → продолжению
+                            else if (wantM > 0 && keepTail === wantK) { carryTailM = wantM; wantM = 0; }     // хвост держит ножи, сырьё → продолжению
+                        }
+                    }
+                }
+                if (!inScope) return;
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
                 // цуга, cutLeaderRuns). Зависит только от самой резки.
                 // #4021: setup-only сегмент (0 проходов — «только настройка станка», хвост дня #3635 п.5)
@@ -10259,7 +10298,7 @@
                 // проходов (фолбэк для реальной резки с несохранённым «Кол-во план»), из-за чего «Резка
                 // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
-                var leaderRuns = stripNum(c.plannedRuns) > 0 ? cutLeaderRuns(c) : 0;
+                var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
                 var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
