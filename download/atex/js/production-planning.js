@@ -10262,12 +10262,21 @@
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
-        // #4026/#4030: setup-only хвост дня (#3635 п.5, 0 проходов) — это настройка следующей резки,
-        // начатая в конце дня N, а сама резка (проходы) идёт с дня N+1 (продолжение). Настройка = ножи +
-        // смена сырья. В день N оставляем ТОЛЬКО смену сырья (быстрый нахлёст в конце смены), а ножи —
-        // на продолжение (день N+1), где они и нужны прямо перед резкой. БЕЗУСЛОВНО: раз splitMachineQueue
-        // вынес резку на след. день, значит настройка и не помещалась целиком — держать всю (ножи+сырьё)
-        // в дне N нет смысла. Так бейдж дня N не несёт лишние 30 мин ножей.
+        var self = this;
+        // #4026/#4030/#4042: setup-only хвост дня (#3635 п.5, 0 проходов) — это настройка следующей
+        // резки, начатая в конце дня N, а сама резка (проходы) идёт с дня N+1 (продолжение). Настройка
+        // = ножи + смена сырья. Смена сырья ОСТАЁТСЯ в дне N (быстрый нахлёст в конце смены), а ножи по
+        // умолчанию уносим на продолжение (день N+1, где они нужны прямо перед резкой) — чтобы бейдж
+        // дня N не нёс лишние 30 мин. #4042: но перенос УСЛОВНЫЙ — только если день продолжения вмещает
+        // ножи в бюджет+нахлёст. Если день N+1 уже полон (напр. 457), +30 ножей раздули бы его за
+        // потолок (487) — тогда ножи ОСТАЮТСЯ в дне N (его добиваем максимально, нахлёст допустим). В
+        // сценариях #4030/#4039 день продолжения почти пуст → ножи по-прежнему уходят туда.
+        // Бюджет дня (== бейдж, #3914): (cutEnd−start)−обед+нахлёст настройки. Нет окна → перенос
+        // безусловный (прежнее поведение, деградация без поломки).
+        var win4042 = (typeof self.workingWindow === 'function') ? (self.workingWindow() || {}) : {};
+        var budget4042 = (Number(win4042.cutEndMin) - Number(win4042.startMin))
+            - (Number(win4042.lunchDurationMin) || 0) + (Number(win4042.maxOverworkTuneMin) || 0);
+        var hasBudget4042 = isFinite(budget4042) && budget4042 > 0;
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
@@ -10275,6 +10284,22 @@
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
+            // #4042: полные минуты каждого дня (настройка+резка, ДО выноса ножей) — чтобы проверить,
+            // вместит ли день продолжения отложенные ножи. fullCutMin = ножи + сырьё (cols) + резка/
+            // лидер (как во втором проходе ниже). Ключ дня — cutPlanDayKey (как группировка очереди).
+            function fullCutMin4042(x) {
+                var cc = cols[String(x.id)] || {};
+                var lr = stripNum(x.plannedRuns) > 0 ? cutLeaderRuns(x) : 0;
+                return Math.round(cc.knifeMin || 0) + Math.round(cc.materialWindingMin || 0)
+                    + Math.round(stripNum(x.duration) + betweenCuts * lr);
+            }
+            var dayFull4042 = {};
+            arr.forEach(function(x) {
+                if (onlySet && !onlySet[String(x.id)]) return;
+                var dk = cutPlanDayKey(x);
+                dayFull4042[dk] = (dayFull4042[dk] || 0) + fullCutMin4042(x);
+            });
+            var deferredToDay4042 = {};   // #4042: ножей уже отложено на день (аккумулятор нескольких хвостов)
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
             // Нормализуем ТАК ЖЕ, как группировка цепочек #3892 (String(...).trim()) — иначе пробел/
             // формат из rowValue расходится: голова (fp==id) и продолжение сравнивались бы неравными.
@@ -10302,7 +10327,7 @@
                 // Продолжение = БЛИЖАЙШАЯ последующая резка в снимке. Она обязана быть той же цепочки:
                 // если между хвостом и его продолжением встала чужая резка, та несёт СВОЮ переналадку
                 // от нового сырья — добавлять к ней ножи хвоста нельзя (двойной счёт), поэтому стоп.
-                var contId = null, nearest = null, nearCols = null;
+                var contId = null, nearest = null, nearCols = null, keptFullDay4042 = false;
                 for (var j = i + 1; j < arr.length; j++) {
                     var d = arr[j];
                     if (onlySet && !onlySet[String(d.id)]) continue;  // вне снимка — прозрачно пропускаем
@@ -10317,19 +10342,33 @@
                     // выносим (у неё своя заправка от нового сырья, иначе двойной счёт).
                     var sameCfg = Math.round(nearCols.knifeMin || 0) === 0 && Math.round(nearCols.materialWindingMin || 0) === 0;
                     if (sameCfg || chainRoot4026(d) === chainRoot4026(c)) {
-                        contId = String(d.id);
-                        deferKnifeToCont[contId] = (deferKnifeToCont[contId] || 0) + wkTail;
-                        zeroKnifeTail[String(c.id)] = true;
+                        // #4042: вмещает ли день продолжения ножи хвоста (бюджет+нахлёст)? Нет →
+                        // ножи ОСТАЮТСЯ в дне N (его добиваем максимально, нахлёст допустим), а не
+                        // раздувают уже полный день N+1. dayFull4042 — минуты дня ДО выноса, поэтому
+                        // у продолжения-той-же-конфигурации ножи там ещё не учтены; +wkTail = что стало бы.
+                        var contDay4042 = cutPlanDayKey(d);
+                        var contLoad4042 = (dayFull4042[contDay4042] || 0) + (deferredToDay4042[contDay4042] || 0);
+                        if (!hasBudget4042 || contLoad4042 + wkTail <= budget4042 + 1e-6) {
+                            contId = String(d.id);
+                            deferKnifeToCont[contId] = (deferKnifeToCont[contId] || 0) + wkTail;
+                            deferredToDay4042[contDay4042] = (deferredToDay4042[contDay4042] || 0) + wkTail;
+                            zeroKnifeTail[String(c.id)] = true;
+                        } else {
+                            keptFullDay4042 = true;   // продолжение есть, но его день полон → ножи в дне N
+                        }
                     }
                     break;                                            // только ближайшая (в снимке) резка
                 }
                 if (ppTraceOn()) ppTrace(contId
                     ? '#4030 хвост ' + c.id + ': ножи ' + wkTail + ' → продолжение ' + contId + ' (в дне N только сырьё)'
-                    : '#4030 хвост ' + c.id + ' (0 проходов, ножи ' + wkTail + '): продолжение НЕ распознано — '
-                        + 'ближайшая=' + (nearest ? nearest.id : '∅')
-                        + ' переналадка[нож/сыр]=' + (nearCols ? Math.round(nearCols.knifeMin || 0) : '∅') + '/' + (nearCols ? Math.round(nearCols.materialWindingMin || 0) : '∅')
-                        + ' корень=' + (nearest ? chainRoot4026(nearest) : '∅') + ' vs ' + chainRoot4026(c)
-                        + ' → ножи остаются, день раздут');
+                    : keptFullDay4042
+                        ? '#4042 хвост ' + c.id + ': ножи ' + wkTail + ' ОСТАЮТСЯ в дне N — день продолжения '
+                            + (nearest ? nearest.id : '∅') + ' полон (нет места под нахлёст, день N добиваем)'
+                        : '#4030 хвост ' + c.id + ' (0 проходов, ножи ' + wkTail + '): продолжение НЕ распознано — '
+                            + 'ближайшая=' + (nearest ? nearest.id : '∅')
+                            + ' переналадка[нож/сыр]=' + (nearCols ? Math.round(nearCols.knifeMin || 0) : '∅') + '/' + (nearCols ? Math.round(nearCols.materialWindingMin || 0) : '∅')
+                            + ' корень=' + (nearest ? chainRoot4026(nearest) : '∅') + ' vs ' + chainRoot4026(c)
+                            + ' → ножи остаются, день раздут');
             });
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
