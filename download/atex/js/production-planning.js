@@ -6029,8 +6029,34 @@
                 comboSet[ks + '::' + ms] = 1;   // #4008: уникальная комбинация ножи+сырьё+намотка
             });
             var K = Object.keys(knifeSet).length, M = Object.keys(matSet).length;
+            // #4029: конфигурация, УЖЕ СТОЯЩАЯ на станке на входе окна (заправка prevSetupBySlitter
+            // либо последняя дозадача до окна), в ИДЕАЛЕ наладки не требует — ровно как факт
+            // (actualFor) засчитывает её бесплатной первой наладкой. Раньше идеал считал эту наладку
+            // «с нуля»: план, где задачи ПРОДОЛЖАЮТ заправку (факт 0 переналадок), сверялся с идеалом
+            // «сколько-то часов» → ОТРИЦАТЕЛЬНЫЙ избыток, будто «план лучше идеала». Так быть не может.
+            // Кредитуем УНИКАЛЬНЫЕ входные сигнатуры (ножи/сырьё), реально встречающиеся в окне →
+            // избыток ≥ 0 = истинный минимум переналадок ПРИ ТЕКУЩЕЙ ЗАПРАВКЕ.
+            var preKnife = {}, preMat = {};
+            Object.keys(byMachine).forEach(function(mid){
+                var mseq = byMachine[mid].slice().sort(function(a, b){
+                    return (Number(a.dayKey) || 0) - (Number(b.dayKey) || 0) || (startKeyOf(a) - startKeyOf(b));
+                });
+                var entry = prevBy[mid] ? carryOverPrevCut(prevBy[mid], mseq[0] || {}) : null;
+                for (var i = 0; i < mseq.length; i++){
+                    if (inScope(Number(mseq[i].dayKey) || 0)) break;   // первая задача В ОКНЕ — стоп
+                    entry = mseq[i];                                    // дозадача до окна → новый вход станка
+                }
+                if (!entry) return;
+                var ek = knifeConfigSig(entry); if (ek !== '' && knifeSet[ek]) preKnife[ek] = 1;
+                var em = materialSig(entry); if (matSet[em]) preMat[em] = 1;
+            });
+            // knifeConfigs/materials остаются СЫРЫМ разнообразием плана (инвариант #4008
+            // combos ≤ ножи×сырьё). Кредит заправки уменьшает лишь count/minutes — «сколько наладок
+            // РЕАЛЬНО нужно при текущей заправке» (это и есть идеал панели, и база избытка в ratio()).
+            var kNeed = K - Object.keys(preKnife).length; if (kNeed < 0) kNeed = 0;
+            var mNeed = M - Object.keys(preMat).length; if (mNeed < 0) mNeed = 0;
             return {
-                ideal: { knifeConfigs: K, materials: M, count: K + M, minutes: round3(K * kChange + M * matW) },
+                ideal: { knifeConfigs: K, materials: M, count: kNeed + mNeed, minutes: round3(kNeed * kChange + mNeed * matW) },
                 combinations: Object.keys(comboSet).length   // #4008
             };
         }
