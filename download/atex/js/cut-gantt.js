@@ -1365,16 +1365,23 @@
                     var maxWidthPx = round3(nextLeftPx - leftPx);
                     if (maxWidthPx > 0 && widthPx > maxWidthPx) widthPx = maxWidthPx;
                 }
+                // #4066: подпись времени бара — по СДВИНУТОМУ за перерывы старту (breakShift, как и
+                // leftPx). Перерыв прозрачен планированию (в сохранённые старты не зашит), но на Ганте
+                // двигает бар вправо; без сдвига подписи бар рисовался в 15:58–16:39, а его время
+                // показывало дообеденное сохранённое 15:38–16:19 (issue #4066). Границу «не заходить за
+                // следующий бар» тоже берём в сдвинутых координатах (сдвиг следующего ≥ текущего).
+                var labelStartMs = startMs + (breakShift[i] || 0) * 60000;
+                var labelMaxEndMs = nextStartMs != null ? (nextStartMs + (breakShift[i + 1] || 0) * 60000) : null;
                 return {
                     cut: cut, status: status,
                     leftPx: leftPx,
                     widthPx: widthPx,
-                    startMs: startMs,   // #3909: старт бара (для растяжки «несущего» обед задания)
+                    startMs: labelStartMs,   // #3909/#4066: старт бара в отрисованных координатах (сдвиг за перерывы) — для подписи и растяжки «несущего» обед задания
                     shiftPx: shiftPx,   // #4007: сдвиг бара за перерывы дня (для растяжки несущего обед)
                     segments: seg,
-                    // #3887: подпись времени — по сдвинутому старту, чтобы текст совпал с позицией бара.
-                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, nextStartMs, startMs),
-                    barMin: cutBarSpanMin(cut, seg.setupMin, nextStartMs, startMs),   // #3770: минуты подписи бара
+                    // #3887/#4066: подпись времени — по сдвинутому старту (антинахлёст + перерывы), чтобы текст совпал с позицией бара.
+                    label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, labelMaxEndMs, labelStartMs),
+                    barMin: cutBarSpanMin(cut, seg.setupMin, labelMaxEndMs, labelStartMs),   // #3770: минуты подписи бара
                     title: cutBarTitle(cut, tr, status)
                 };
             });
