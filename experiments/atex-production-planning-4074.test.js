@@ -32,17 +32,26 @@ function ecut(id, opts) {
              planDate: opts.day == null ? '' : String(Math.floor((BASE + opts.day * 86400000) / 1000) + 480 * 60),
              status: '', fixed: !!opts.fixed };
 }
-function runPCO(cuts, preserveOrder, dueDayByCut, dayAnchorByCut) {
+function ymd(dayoff) { var d = new Date(BASE + dayoff * 86400000); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+function runPCO(cuts, preserveOrder, dueDayByCut, dayAnchorByCut, slot) {
     var perPass = {};
     cuts.forEach(function (c) { perPass[c.id] = 100; });   // 100 мин/проход
-    return planning.planCutOperations(cuts, {
+    var o = {
         weights: planning.makePlanningOptions('SETUP', { BETWEEN_CUTS: 0 }),
         times: { BETWEEN_CUTS: 0 },
         dayStartMin: 0, dayEndMin: 120, dayEndHourMin: 120,
         perPassByCut: perPass, planBaseMidnightMs: BASE,
         preserveOrder: preserveOrder, dayAnchorByCut: dayAnchorByCut || {},
         dueDayByCut: dueDayByCut || {}, gapFill: true
-    });
+    };
+    // #4085: пересборка «по срокам» идёт на ЖИВОМ пути (slotPlacement) — срок соблюдается ЛОКАЛЬНЫМ
+    // штрафом в слое размещения (не EDD-сортировкой, снятой как дрейф). dueKeyByCut — YYYYMMDD.
+    if (slot) {
+        o.slotPlacement = true; o.slitterIds = ['m1'];
+        var dk = {}; Object.keys(dueDayByCut || {}).forEach(function (id) { dk[id] = ymd(dueDayByCut[id]); });
+        o.dueKeyByCut = dk;
+    }
+    return planning.planCutOperations(cuts, o);
 }
 function opDay(ops, id) {
     var u = (ops.updates || []).filter(function (x) { return String(x.cutId) === id; })[0];
@@ -55,8 +64,8 @@ var U = ecut('U'), B1 = ecut('B1'), B2 = ecut('B2');
 var due = { U: 1, B1: 8, B2: 8 };
 var input = [B1, B2, U];   // U последним — как в очереди при переносе
 
-var blind = runPCO(input, true, due);        // старое поведение (preserveOrder, deadlineAware выкл)
-var byDue = runPCO(input, false, due);       // фикс #4074 (preserveOrder=false, deadlineAware вкл)
+var blind = runPCO(input, true, due);            // preserveOrder — срок игнорируется (U уезжает)
+var byDue = runPCO(input, false, due, null, true);   // фикс #4074 на живом пути (#4085: slotPlacement, срок — штраф)
 
 assert(opDay(blind, 'U') > 1,
     '#4074 репро: слепая (preserveOrder) пересборка гонит срочное U за срок (день ' + opDay(blind, 'U') + ' > 1)');
@@ -68,7 +77,7 @@ assert(opDay(byDue, 'U') <= 1,
 var F = ecut('F', { fixed: true, day: 2, foil: true, length: 305 });
 var U2 = ecut('U2'), B3 = ecut('B3');
 var due2 = { F: 5, U2: 1, B3: 8 };
-var pinned = runPCO([B3, U2, F], false, due2, { F: 2 });
+var pinned = runPCO([B3, U2, F], false, due2, { F: 2 }, true);
 assert(opDay(pinned, 'F') === 2,
     '#4074: закреплённое (fixed) перенесённое задание F держит выбранный день 2');
 assert(opDay(pinned, 'U2') <= 1,

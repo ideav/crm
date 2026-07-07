@@ -75,7 +75,6 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
-        computeFoilDeadlineReservation: computeFoilDeadlineReservation,   // #4068: резерв хвоста дня под дедлайн-фольгу (ТЗ §12)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
         stripPrefixQuality: stripPrefixQuality,         // #3989: «качество» перехода по ножам
         transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
@@ -4936,12 +4935,13 @@
         });
     }
 
-    // #4085: слой размещения (модель #3985) включён? Настройка SLOT_PLACEMENT=1 (по умолчанию ВЫКЛ —
-    // прежний путь chooseSlitterBySetup/rebalance/orderCuts). Флаг позволяет включить и проверить
-    // размещение перебором точек вставки на боевой базе без правки кода.
+    // #4085: слой размещения (модель #3985) — ПО УМОЛЧАНИЮ ВКЛЮЧЁН (размещение перебором всех точек
+    // вставки по минимальному штрафу; срок/фольга — локальные штрафы). Выключается только явным
+    // SLOT_PLACEMENT=0 в «Настройке» — аварийный рубильник на прежний путь без EDD/жёсткой фольги/резерва
+    // (дрейф #4050/#4059/#4068 удалён; при OFF порядок — только по переналадке/полосам).
     AtexProductionPlanning.prototype.slotPlacementOn = function() {
         var v = (this.daySettings || {}).SLOT_PLACEMENT;
-        return String(v == null ? '' : v).trim() === '1';
+        return String(v == null ? '' : v).trim() !== '0';
     };
 
     // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,

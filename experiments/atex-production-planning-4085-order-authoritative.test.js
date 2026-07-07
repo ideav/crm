@@ -1,8 +1,9 @@
 // Тесты #4085 (Стадия 3) — режим orderAuthoritative в splitMachineQueue.
 //
 // Когда порядок задан слоем размещения (модель #3985), splitMachineQueue его НЕ переигрывает:
-// ключ selectByConfig = [idx], роняя isFoil / setupCost+deadlineCost / −stripBandCount. Вся
-// механика тайминга сохранена. Дефолт (флаг выкл) — прежнее поведение (характеризация 8/8).
+// ключ selectByConfig = [idx], роняя −stripBandCount (isFoil-last и EDD `dueDay×вес` уже сняты из
+// фолбэк-ключа как дрейф #4085). Вся механика тайминга сохранена. Контроли ниже фиксируют, что и БЕЗ
+// флага фольга/срок больше НЕ переигрывают порядок (дрейф снят) — контраст остаётся лишь по полосам.
 //
 // Run with: node experiments/atex-production-planning-4085-order-authoritative.test.js
 
@@ -32,15 +33,15 @@ var inF = [cut('F', { foil: true }), cut('A'), cut('B')];
 var authF = byDay(pack(inF, { orderAuthoritative: true }));
 assert(authF.F === 0 && authF.A === 1 && authF.B === 2,
     '#4085 orderAuthoritative: фольга F первой во входе → остаётся день 0 (не в конец)');
-var defaultF = byDay(pack(inF));   // без флага — фольга уходит в конец (день 2)
-assert(defaultF.F === 2, '#4085 контроль: без флага фольга F уходит в конец (день 2) — прежнее поведение');
+var defaultF = byDay(pack(inF));   // #4085: без флага фольга тоже НЕ уходит в конец (жёсткое правило снято)
+assert(defaultF.F === 0, '#4085 контроль: без флага фольга F ТОЖЕ остаётся первой — жёсткое «фольга-last» снято #4085 (foil-last теперь в слое размещения через штраф)');
 
 // ── 2) EDD НЕ переигрывает порядок при orderAuthoritative ────────────────────────────────────────
 var inE = [cut('A'), cut('B')];
 var authE = byDay(pack(inE, { orderAuthoritative: true, dueDayByCut: { A: 5, B: 0 } }));
 assert(authE.A === 0 && authE.B === 1, '#4085 orderAuthoritative: EDD не тянет B (срок0) вперёд — входной порядок A,B сохранён');
-var defaultE = byDay(pack(inE, { dueDayByCut: { A: 5, B: 0 } }));
-assert(defaultE.B === 0 && defaultE.A === 1, '#4085 контроль: без флага EDD ставит B (срок0) первым — прежнее поведение');
+var defaultE = byDay(pack(inE, { dueDayByCut: { A: 5, B: 0 } }));   // #4085: EDD `dueDay×вес` снят — dueDayByCut больше не влияет
+assert(defaultE.A === 0 && defaultE.B === 1, '#4085 контроль: без флага EDD (dueDayByCut) больше НЕ тянет B (срок0) вперёд — срок стал ЛОКАЛЬНЫМ штрафом в слое размещения (#4085)');
 
 // ── 3) Тайминг НЕ меняется: при уже-совпадающем порядке раскладка идентична с флагом и без ───────
 var uniform = [cut('A'), cut('B'), cut('C')];
