@@ -12586,10 +12586,15 @@
                     style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
                         + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
                     el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
+                    // Общее число заданий в плане (весь горизонт, не окно) — контекст к метрикам.
+                    el('span', { text: 'всего заданий: ' + (self.cuts || []).length, style: 'opacity:.75;' }),
                     el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
                     // #4008: раздельно наладка ножей и смена сырья (составляют переналадки выше).
                     el('span', { text: 'ножи: ' + qW.knifeCount + ' (' + qW.knifeMin + ' мин)', style: 'opacity:.85;' }),
-                    el('span', { text: 'сырьё: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
+                    // «Смены сырья» — число ПЕРЕЗАПРАВОК (materialChangeNeeded: смена вида сырья,
+                    // намотки ИЛИ партии сырья), а не количество номенклатуры сырья. Метка была
+                    // «сырьё» и читалась как «сколько сырья».
+                    el('span', { text: 'смены сырья: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
                     el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
                     el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' }),
                     // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка).
@@ -12598,7 +12603,7 @@
                 ]);
                 qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
                     + pqView.all.changeoverCount + ' (' + pqView.all.changeoverMin + ' мин), из них ножи '
-                    + pqView.all.knifeCount + ' (' + pqView.all.knifeMin + ' мин), сырьё '
+                    + pqView.all.knifeCount + ' (' + pqView.all.knifeMin + ' мин), смены сырья '
                     + pqView.all.materialCount + ' (' + pqView.all.materialMin + ' мин). '
                     + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
                     // #4013: подсказка о всём плане → комбинации всего плана (панель выше — по окну).
@@ -12910,4 +12915,4 @@
 
  
  
-// @version 2026-07-06-issue-4061
+// @version 2026-07-07-changeover-label
