@@ -6242,7 +6242,7 @@
 
         // Аккумулятор фактики: считает только переналадки, чей день удовлетворяет inWin(dayKey).
         function actualFor(inWin){
-            var knifeCount = 0, knifeMin = 0, matCount = 0, matMin = 0;
+            var knifeCount = 0, knifeMin = 0, matCount = 0, matMin = 0, taskCount = 0;
             Object.keys(byMachine).forEach(function(id){
                 var seq = byMachine[id].slice().sort(function(a, b){
                     return (Number(a.dayKey) || 0) - (Number(b.dayKey) || 0) || (startKeyOf(a) - startKeyOf(b));
@@ -6251,6 +6251,7 @@
                 for (var i = 0; i < seq.length; i++){
                     var cur = seq[i];
                     var win = inWin(Number(cur.dayKey) || 0);
+                    if (win) taskCount++;   // число заданий, попавших в окно (тот же предикат, что у переналадок)
                     if (i === 0 && !carrySetup){
                         // Первое задание, до него ничего — заложить наладку ножей + смену сырья (§13 п.4).
                         if (win){
@@ -6269,7 +6270,7 @@
                 }
             });
             return { knifeCount: knifeCount, knifeMin: round3(knifeMin), materialCount: matCount, materialMin: round3(matMin),
-                     changeoverCount: knifeCount + matCount, changeoverMin: round3(knifeMin + matMin) };
+                     changeoverCount: knifeCount + matCount, changeoverMin: round3(knifeMin + matMin), taskCount: taskCount };
         }
 
         var window = actualFor(function(dk){ return dk >= fromK && dk <= toK; });   // [С; По]
@@ -12586,8 +12587,9 @@
                     style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
                         + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
                     el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
-                    // Общее число заданий в плане (весь горизонт, не окно) — контекст к метрикам.
-                    el('span', { text: 'всего заданий: ' + (self.cuts || []).length, style: 'opacity:.75;' }),
+                    // Число заданий ЗА ВЫБРАННЫЙ ПЕРИОД [С;По] (тот же оконный предикат, что у
+                    // переналадок/сырья), а не весь план — иначе не совпадало с оконными метриками.
+                    el('span', { text: 'всего заданий: ' + qW.taskCount, style: 'opacity:.75;' }),
                     el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
                     // #4008: раздельно наладка ножей и смена сырья (составляют переналадки выше).
                     el('span', { text: 'ножи: ' + qW.knifeCount + ' (' + qW.knifeMin + ' мин)', style: 'opacity:.85;' }),
@@ -12915,4 +12917,4 @@
 
  
  
-// @version 2026-07-07-changeover-label
+// @version 2026-07-07-window-taskcount
