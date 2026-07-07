@@ -292,17 +292,17 @@
     pointer-events: auto; /* вернуть наведение для подсказки title */
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    min-width: 18px;   /* значок-квадрат, как .atex-pp-cut-span (←/→) */
     height: 18px;
-    padding: 0 6px;
+    padding: 0 4px;
     border-radius: 4px;
     font-size: 12px;
     line-height: 1;
-    font-weight: 600;
-    white-space: nowrap;
     color: var(--pp-muted);
     background: var(--pp-border-soft, #eef1f5);
     cursor: help;
-    font-variant-numeric: tabular-nums;
+    font-variant-emoji: text;   /* #4075: ⏸ монохромом (серым), а не цветным эмодзи */
 }
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
