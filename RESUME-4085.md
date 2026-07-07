@@ -10,6 +10,9 @@
 - **Worktree:** `/tmp/claude-1000/-home-hive-crm/5798dead-618f-4480-a69d-4213862d0cf1/scratchpad/wt-4085`
 - **План (полный):** `/home/hive/.claude/plans/sparkling-greeting-karp.md`
 - **Память:** `atex-pp-4085-slot-engine` (в MEMORY.md).
+- **PR НА КАЖДУЮ СТАДИЮ (стеком):** интеграция копится в `issue-4085-planning-tz`; на каждую стадию
+  режем `issue-4085-s<N>-<slug>` в точке коммита стадии, base = ветка ПРЕДЫДУЩЕЙ стадии (s0 base=main).
+  PR: **#4086 (s0)**, **#4087 (s1)**. Дальше s2 base=`issue-4085-s1-scorer`, и т.д.
 
 ## Суть
 Размещение переписываем на модель #3985: перебор ВСЕХ точек вставки (пары соседних слотов на всех
