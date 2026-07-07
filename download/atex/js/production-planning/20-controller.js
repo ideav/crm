@@ -80,6 +80,11 @@
         stripPrefixQuality: stripPrefixQuality,         // #3989: «качество» перехода по ножам
         transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
         insertionCost: insertionCost,                   // #3989: стоимость вставки слота между prev и next
+        // #4085: слой размещения (модель #3985) — перебор всех точек вставки по мин. штрафу + релокация
+        slotFromCut: slotFromCut, vacationSlot: vacationSlot, seedOccupancy: seedOccupancy,
+        prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
+        placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
+        slotOrderByMachine: slotOrderByMachine,
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
         chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку
