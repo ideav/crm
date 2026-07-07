@@ -3136,18 +3136,25 @@
         // #4085: слой размещения (модель #3985) решает СТАНОК + порядок перебором ВСЕХ точек вставки
         // по мин. штрафу. Включается ТОЛЬКО при opts.slotPlacement && !preserveOrder (врезка стадий
         // 4-5). По умолчанию выкл → прежний путь (orderCuts + текущий станок) не тронут.
-        var slotPlan = null;
+        var slotPlan = null, slotRefineCtx = null;
         if (opts.slotPlacement && !opts.preserveOrder) {
-            var capMin = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
-            slotPlan = computeSlotPlacement(merged.cuts, {
-                settings: opts.weights, times: opts.times,
-                capacityMin: capMin > 0 ? capMin : Infinity,
-                baseMidnightMs: Number(opts.planBaseMidnightMs),
-                perPassByCut: perPass, dueKeyByCut: opts.dueKeyByCut, dueDayByCut: opts.dueDayByCut,
-                dayByCut: opts.dayByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
+            // #4095: capacityMin — ЛИШЬ эвристика оценки дня для ПЕРВИЧНОГО порядка вставки, НЕ арбитр
+            // срока. Раньше = сырое окно (dayEnd−dayStart) без обеда → оптимистично, оценённый день
+            // раньше реального → штраф срока считался против слишком раннего дня → просрочка. Теперь
+            // вычитаем обед (ближе к реальным ≈450); а СРОК держат РЕАЛЬНЫЕ дни splitMachineQueue (§12,
+            // цикл релокации ниже). slotRefineCtx переиспользуем и для той релокации.
+            var winMin = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0) - (Number(opts.lunchDurationMin) || 0);
+            slotRefineCtx = {
+                settings: opts.weights, times: opts.times, capacityMin: winMin > 0 ? winMin : Infinity,
+                baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
                 machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
-                distanceExceededFor: opts.distanceExceededFor
-            });
+                distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut
+            };
+            slotPlan = computeSlotPlacement(merged.cuts, slotExtend(slotRefineCtx, {
+                dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
+                dayByCut: opts.dayByCut, relocate: false,   // #4095/§12: релокация — ниже, по РЕАЛЬНЫМ дням упаковщика
+                trace: slotTraceOn()
+            }));
         }
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
         // #3635/#3923; slotPlan — порядок слоя размещения #4085; иначе — orderCuts) и раскроить по дням.
@@ -3209,18 +3216,66 @@
         // каждую очередь от «С». Перелив продолжений за конец дня/«По» — обычная работа
         // splitMachineQueue (#3280); спец-обработки #3918 «спил-день вне окна» больше не нужно:
         // окна-фильтра нет, все дни раскладки — наши.
-        var byMachine = {}, mOrder = [];
-        merged.cuts.forEach(function(c){
-            var sid = (slotPlan && slotPlan.slitterByCut[String(c && c.id)] != null)
-                ? slotPlan.slitterByCut[String(c && c.id)]   // #4085: станок выбран слоем размещения (перебор точек вставки)
-                : (c && c.slitter && c.slitter.id);
-            if (sid == null) return;
-            var key = String(sid);
-            if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
-            byMachine[key].push(c);
-        });
-        var segsByMachine = {};
-        mOrder.forEach(function(key){ segsByMachine[key] = planMachineSegs(byMachine[key], key); });
+        // Группировка резок по станку (назначение слоя размещения #4085 либо текущий станок) + реальная
+        // упаковка каждой очереди splitMachineQueue. Пере-запускается §12-циклом релокации по реальным дням.
+        function packAll(){
+            var bm = {}, order = [];
+            merged.cuts.forEach(function(c){
+                var sid = (slotPlan && slotPlan.slitterByCut[String(c && c.id)] != null)
+                    ? slotPlan.slitterByCut[String(c && c.id)]   // #4085: станок выбран слоем размещения
+                    : (c && c.slitter && c.slitter.id);
+                if (sid == null) return;
+                var key = String(sid);
+                if (!bm[key]) { bm[key] = []; order.push(key); }
+                bm[key].push(c);
+            });
+            var segsBy = {};
+            order.forEach(function(key){ segsBy[key] = planMachineSegs(bm[key], key); });
+            return { byMachine: bm, mOrder: order, segsByMachine: segsBy };
+        }
+        // cutId → РЕАЛЬНЫЙ день старта (мин dayOffset его сегментов) из реальной упаковки.
+        function realDaysFrom(segsBy){
+            var d = {};
+            Object.keys(segsBy).forEach(function(key){
+                (segsBy[key] || []).forEach(function(s){
+                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                    var id = String(s.cutId);
+                    if (d[id] == null || off < d[id]) d[id] = off;
+                });
+            });
+            return d;
+        }
+        var packed = packAll();
+        // #4095 / ТЗ §12: срок держат РЕАЛЬНЫЕ дни splitMachineQueue, а НЕ ёмкость-оценка размещения.
+        // Пакуем → у кого реальный день ≥ срока (shouldRelocate), релокация тянет раньше, ПОКА ЕСТЬ
+        // ёмкость → пере-пакуем. Монотонно (relocatePass двигает лишь строго дешевле) + cap раундов.
+        // Только при активном слое размещения и заданных сроках; иначе прежнее поведение не тронуто.
+        var refineRounds = 0, refineMoves = 0;
+        if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && slotRefineCtx) {
+            var maxRounds = Number(opts.slotRefineRounds) || 4;
+            for (var rr = 0; rr < maxRounds; rr++) {
+                var rel = relocatePass(slotPlan.occupancy, realDaysFrom(packed.segsByMachine), slotRefineCtx);
+                if (!rel.moves.length) break;
+                refineRounds++; refineMoves += rel.moves.length;
+                var asg = assignmentFromOccupancy(slotPlan.occupancy);
+                slotPlan.slitterByCut = asg.slitterByCut; slotPlan.orderIdxByCut = asg.orderIdxByCut;
+                packed = packAll();
+            }
+        }
+        var byMachine = packed.byMachine, mOrder = packed.mOrder, segsByMachine = packed.segsByMachine;
+        // #4095: дополнить trace РЕАЛЬНЫМИ днями (арбитр §12) и напечатать (slotTrace ВКЛ по умолчанию).
+        if (slotPlan && slotPlan.trace) {
+            var finalReal = realDaysFrom(segsByMachine), overdueLeft = 0;
+            (slotPlan.trace.tasks || []).forEach(function(t){
+                var rd = finalReal[String(t.id)];
+                if (rd == null) return;
+                t.realDay = rd;
+                var due = opts.dueDayByCut ? opts.dueDayByCut[String(t.id)] : null;
+                if (due != null) { t.dueDayOffset = Number(due); t.overdueReal = rd > Number(due); if (t.overdueReal) overdueLeft++; }
+            });
+            slotPlan.trace.refine = { rounds: refineRounds, moves: refineMoves, overdueLeft: overdueLeft };
+            formatSlotPlacementTrace(slotPlan.trace).forEach(function(line){ slotTrace(line); });
+        }
         var updates = [], creates = [], deletes = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};

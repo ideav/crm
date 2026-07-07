@@ -84,6 +84,9 @@
         prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
         placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
         slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,
+        assignmentFromOccupancy: assignmentFromOccupancy,          // #4095: cutId→станок/порядок из занятости
+        formatSlotPlacementTrace: formatSlotPlacementTrace,        // #4095: структурный trace размещения → строки лога
+        slotTraceOn: slotTraceOn,                                  // #4095: трассировка слоя размещения включена?
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
         chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку

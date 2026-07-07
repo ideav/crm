@@ -139,8 +139,15 @@
         var cost = insertionCost(prevCut, slot, nextCut, ctxBefore, ctxAfter);
         var bf = cost.before.byFactor, af = cost.after.byFactor;
         var setupWeight = (bf.knife || 0) + (bf.material || 0) + (af.knife || 0) + (af.material || 0);
+        // #4095: суммарный разбор ВЕСА по факторам (штрафным минутам) для трассировки причины выбора —
+        // ножи/сырьё/лидер/фольга/срок/простой обоих переходов; «качество» (…Quality) не вес — отбрасываем.
+        var byFactor = {};
+        [bf, af].forEach(function(m){ Object.keys(m || {}).forEach(function(k){
+            if (/Quality$/.test(k)) return;
+            byFactor[k] = round3((byFactor[k] || 0) + Number(m[k] || 0));
+        }); });
         return { weight: cost.weight, quality: cost.quality, setupWeight: round3(setupWeight),
-                 dayOffset: dayOff, placementDayKey: placementDayKey };
+                 dayOffset: dayOff, placementDayKey: placementDayKey, byFactor: byFactor };
     }
 
     // Лучший из двух кандидатов: меньше вес → меньше «качество» → меньше день → меньший станок →
@@ -174,25 +181,48 @@
     }
 
     // Вставить slot в САМУЮ ДЕШЁВУЮ точку по ВСЕМ станкам (перебор всех позиций). Мутирует occupancy.
+    // #4095: если ctx.traceTasks задан — пишет туда разбор выбора (первый рассмотренный вариант,
+    // выбранный, число вариантов, дешёвший вариант В СРОК) для трассировки «Почему допущена просрочка».
     function placeSlot(occupancy, slot, ctx){
         ctx = ctx || {};
         var byMachine = occupancy.byMachine;
         var feasible = ctx.feasibleMachine || function(){ return true; };
         var best = null;
+        var tr = ctx.traceTasks ? { id: slot.id, dueKey: isFinite(Number(slot.dueKey)) ? Number(slot.dueKey) : null,
+                                    isFoil: !!slot.isFoil, workMin: round3(slotWorkMin(slot, ctx)),
+                                    variants: 0, skipped: 0, first: null, bestInDue: null } : null;
+        function candOf(sid, idx, sc){
+            return { machineId: sid, index: idx, weight: sc.weight, quality: sc.quality, setupWeight: sc.setupWeight,
+                     dayOffset: sc.dayOffset, placementDayKey: sc.placementDayKey, byFactor: sc.byFactor };
+        }
         Object.keys(byMachine).forEach(function(sid){
             if (!feasible(sid, slot)) return;
             var arr = byMachine[sid];
             for (var idx = 0; idx <= arr.length; idx++){
                 var sc = scorePosition(arr, idx, slot, slotExtend(ctx, { slitterId: sid }));
-                if (!sc) continue;
-                best = betterCand({ machineId: sid, index: idx, weight: sc.weight, quality: sc.quality,
-                                    setupWeight: sc.setupWeight, dayOffset: sc.dayOffset }, best);
+                if (!sc){ if (tr) tr.skipped++; continue; }
+                var cand = candOf(sid, idx, sc);
+                if (tr){
+                    tr.variants++;
+                    if (!tr.first) tr.first = cand;   // ПЕРВЫЙ рассмотренный вариант (порядок перебора)
+                    // Дешёвший вариант, приземляющийся В СРОК (день ≤ срока) — для объяснения просрочки.
+                    if (tr.dueKey != null && sc.placementDayKey != null && Number(sc.placementDayKey) <= tr.dueKey
+                        && (!tr.bestInDue || cand.weight < tr.bestInDue.weight)) tr.bestInDue = cand;
+                }
+                best = betterCand(cand, best);
             }
         });
         var accThreshold = planWeight(ctx.settings, 'KNIVES_CHANGE_COST_MN') + planWeight(ctx.settings, 'MATERIAL_CHANGE_COST_MN');
         if (!best || best.setupWeight > accThreshold){
             var fb = earliestFreeMachine(occupancy, slot, ctx, feasible);
             if (fb && (!best || fb.machineId !== best.machineId)) best = fb;
+        }
+        if (tr){
+            tr.chosen = best ? { machineId: best.machineId, index: best.index, weight: best.weight, quality: best.quality,
+                                 dayOffset: best.dayOffset, placementDayKey: best.placementDayKey,
+                                 byFactor: best.byFactor || {}, fallback: !!best.fallback } : null;
+            tr.overdue = !!(best && tr.dueKey != null && best.placementDayKey != null && Number(best.placementDayKey) > tr.dueKey);
+            ctx.traceTasks.push(tr);
         }
         if (!best) return null;
         byMachine[best.machineId].splice(best.index, 0, tagSlot(slot, best.machineId));
@@ -296,10 +326,88 @@
         return out;
     }
 
+    // cutId→станок и порядок в его очереди из занятости. Общий помощник: финал размещения и
+    // ПЕРЕ-СБОРКА после релокации по реальным дням (§12) в planCutOperations.
+    function assignmentFromOccupancy(occ){
+        var slitterByCut = {}, orderIdxByCut = {};
+        Object.keys(occ.byMachine).forEach(function(sid){
+            var idx = 0;
+            occ.byMachine[sid].forEach(function(s){
+                if (s.kind !== 'cut') return;
+                slitterByCut[s.id] = sid; orderIdxByCut[s.id] = idx++;
+            });
+        });
+        return { slitterByCut: slitterByCut, orderIdxByCut: orderIdxByCut };
+    }
+
+    // #4095: снимок ПЕРЕМЕННЫХ размещения для трассировки — веса штрафов (⚙ из «Настройки» /
+    // ▫ дефолт кода, как решает planWeight) + мета (ёмкость-оценка, станки, счётчики).
+    function buildPlacementVariables(ctx, slitterIds, movableN, fixedN){
+        var s = ctx.settings || {};
+        var KEYS = ['DEADLINE_COST_MN','EXACT_DEADLINE_COST_MN','FOIL_NOTEND_COST_MN','KNIVES_CHANGE_COST_MN',
+                    'KNIVES_INCREASE_COST_MN','MATERIAL_CHANGE_COST_MN','LEADER_COST_MN','MAX_DISTANCE_COST_MN',
+                    'CHANGE_SLITTER_COST_MN','CHANGE_DAY_COST_MN','SLOT_SPLIT_COST_MN','MAX_SLOTS_DISTANCE_HR','MAX_OUTAGE_PLANNABLE_HR'];
+        var vars = KEYS.map(function(k){
+            var raw = s[k];
+            var fromTable = raw != null && String(raw).trim() !== '' && isFinite(Number(raw));
+            return { key: k, value: planWeight(s, k), source: fromTable ? 'Настройка' : 'дефолт' };
+        });
+        return { variables: vars,
+                 meta: { capacityMin: ctx.capacityMin, baseMidnightMs: ctx.baseMidnightMs,
+                         slitterIds: (slitterIds || []).slice(), movable: movableN, fixed: fixedN,
+                         vacations: (ctx.vacationSlots || []).length,
+                         note: 'capacityMin — лишь ЭВРИСТИКА оценки дня для порядка вставки; АРБИТР срока — РЕАЛЬНЫЕ дни splitMachineQueue (§12).' },
+                 tasks: [], refine: null };
+    }
+
+    // #4095: разбор одного кандидата (станок/позиция/вес/оценка дня/факторы штрафа) для лога.
+    function fmtSlotCand(c){
+        if (!c) return '—';
+        var f = c.byFactor || {}, parts = [];
+        Object.keys(f).forEach(function(k){ if (f[k]) parts.push(k + ' +' + f[k]); });
+        return 'станок ' + c.machineId + ' поз ' + c.index + ' → вес ' + c.weight
+             + ' (день~' + (c.placementDayKey == null ? '?' : c.placementDayKey)
+             + (parts.length ? ('; ' + parts.join(', ')) : '; без штрафов') + ')';
+    }
+    // #4095: структурный trace размещения → строки лога (ЧИСТАЯ, покрыта тестом). «день~» — ОЦЕНКА
+    // порядка; «РЕАЛЬНЫЙ день» — из splitMachineQueue (арбитр срока, §12).
+    function formatSlotPlacementTrace(trace){
+        var L = [];
+        if (!trace) return L;
+        L.push('═══ РАЗМЕЩЕНИЕ #3985 (#4085): перебор ВСЕХ точек вставки по мин. штрафу ═══');
+        L.push('ПЕРЕМЕННЫЕ (⚙ = из «Настройки» / ▫ = дефолт кода):');
+        (trace.variables || []).forEach(function(v){
+            L.push('  ' + (v.source === 'Настройка' ? '⚙' : '▫') + ' ' + v.key + ' = ' + v.value + '  [' + v.source + ']');
+        });
+        var m = trace.meta || {};
+        L.push('  ёмкость-ОЦЕНКА дня (эвристика порядка): ' + m.capacityMin + ' мин; станков ' + (m.slitterIds || []).length
+             + '; заданий: подвижных ' + m.movable + ', фикс ' + m.fixed + ', отпусков ' + m.vacations);
+        L.push('  ⚠ ' + (m.note || ''));
+        (trace.tasks || []).forEach(function(t){
+            L.push('── задание ' + t.id + ' (срок ' + (t.dueKey == null ? '—' : t.dueKey) + ', '
+                 + (t.isFoil ? 'фольга' : 'обычн.') + ', работа ' + t.workMin + ' мин): рассмотрено вариантов ' + t.variants
+                 + (t.skipped ? (' (+ ' + t.skipped + ' недопустимых пропущено)') : '') + ' ──');
+            if (t.first) L.push('   ПЕРВЫЙ рассмотренный: ' + fmtSlotCand(t.first));
+            if (t.chosen) L.push('   ВЫБРАН: ' + fmtSlotCand(t.chosen) + (t.chosen.fallback ? ' [фолбэк §8.4: некуда пристроить]' : ''));
+            if (t.overdue){
+                if (t.bestInDue) L.push('   ⚠️ ОЦЕНКА за срок: день~' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
+                     + '; вариант В СРОК БЫЛ (вес ' + t.bestInDue.weight + ' vs выбран ' + t.chosen.weight + ') — переналадка дороже штрафа опоздания');
+                else L.push('   ⚠️ ОЦЕНКА за срок: день~' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
+                     + '; варианта В СРОК НЕТ — ёмкость дней ≤ срока исчерпана (честный конфликт)');
+            }
+            if (t.realDay != null) L.push('   РЕАЛЬНЫЙ день (splitMachineQueue, арбитр §12): ' + t.realDay
+                 + (t.overdueReal ? (' — ⚠️ ПОСЛЕ срока (' + t.dueDayOffset + ') → ПРОСРОЧКА') : ' — в срок ✓'));
+        });
+        if (trace.refine) L.push('§12 релокация по РЕАЛЬНЫМ дням: раундов ' + trace.refine.rounds
+             + ', переносов ' + trace.refine.moves + (trace.refine.overdueLeft ? (', осталось за срок ' + trace.refine.overdueLeft) : ', просрочек нет ✓'));
+        return L;
+    }
+
     // ЕДИНАЯ точка входа размещения (для planCutOperations, стадии 4-5): по резкам контроллера
     // строит занятость (фикс. 🔒 — неподвижные соседи + отпуска), размещает подвижные перебором
-    // всех точек вставки, прогоняет релокацию → { slitterByCut, orderIdxByCut } (назначение станка
-    // и порядок в его очереди). Чистая: dueKey/workMin/ёмкость/нерабочие дни/допустимость — из ctx.
+    // всех точек вставки → { slitterByCut, orderIdxByCut, occupancy, trace }. Чистая: dueKey/workMin/
+    // ёмкость-оценка/нерабочие дни/допустимость — из ctx. Релокацию по РЕАЛЬНЫМ дням (§12) ведёт
+    // planCutOperations после реального splitMachineQueue; здесь ctx.relocate=false → пропускаем.
     function computeSlotPlacement(cutsList, ctx){
         ctx = ctx || {};
         var perPass = ctx.perPassByCut || {};
@@ -320,19 +428,14 @@
         // Стабильная перестановка: исходный порядок §7 внутри «нефольга»/«фольга» сохраняется.
         movable = movable.filter(function(s){ return !s.isFoil; }).concat(movable.filter(function(s){ return s.isFoil; }));
         var occ = seedOccupancy(fixedSlots, ctx.vacationSlots || [], slitterIds);
+        var trace = ctx.trace ? buildPlacementVariables(ctx, slitterIds, movable.length, fixedSlots.length) : null;
         var placeCtx = { settings: ctx.settings, times: ctx.times, capacityMin: ctx.capacityMin,
                          baseMidnightMs: ctx.baseMidnightMs, perPassByCut: perPass,
                          machineDayOffFor: ctx.machineDayOffFor, feasibleMachine: ctx.feasibleMachine,
-                         distanceExceededFor: ctx.distanceExceededFor };
+                         distanceExceededFor: ctx.distanceExceededFor,
+                         traceTasks: trace ? trace.tasks : null };
         placeAllSlots(occ, movable, placeCtx);
         if (ctx.relocate !== false) relocatePass(occ, ctx.dayByCut || null, slotExtend(placeCtx, { dueDayByCut: ctx.dueDayByCut }));
-        var slitterByCut = {}, orderIdxByCut = {};
-        Object.keys(occ.byMachine).forEach(function(sid){
-            var idx = 0;
-            occ.byMachine[sid].forEach(function(s){
-                if (s.kind !== 'cut') return;
-                slitterByCut[s.id] = sid; orderIdxByCut[s.id] = idx++;
-            });
-        });
-        return { slitterByCut: slitterByCut, orderIdxByCut: orderIdxByCut, occupancy: occ };
+        var asg = assignmentFromOccupancy(occ);
+        return { slitterByCut: asg.slitterByCut, orderIdxByCut: asg.orderIdxByCut, occupancy: occ, trace: trace };
     }
