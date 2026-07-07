@@ -4632,13 +4632,15 @@
         // Фольга не в конце дня (§8 п.2а) / фольгу двигают (§8 п.2б).
         if (ctx.foilNotEnd){ var fw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fw; byFactor.foilNotEnd = fw; }
         if (ctx.isMove && next && next.isFoil){ var fmw = planWeight(s, 'FOIL_NOTEND_COST_MN'); weight += fmw; byFactor.foilMove = fmw; }
-        // Срок (ТЗ §8/§14, issue #4059): резку разместили ПОСЛЕ срока (день размещения > срок) → штраф
-        // опоздания DEADLINE_COST_MN. Это недопустимо (заказ уехал за срок) и должно вытесняться из плана
-        // при выборе кандидата (#4047) и в «Качестве плана». В срок/заранее (день ≤ срок) — без штрафа.
+        // Срок (ТЗ §8 п.4/5): ЛОКАЛЬНЫЙ штраф в точке вставки по дню размещения слота.
+        //  • день размещения ПОЗЖЕ срока → DEADLINE_COST_MN (опоздание — недопустимо, вытесняется #4047);
+        //  • день размещения РАВЕН сроку → EXACT_DEADLINE_COST_MN (в притык, дороже раннего, дешевле опоздания);
+        //  • раньше срока (день < срок) → без штрафа.
         // dueKey/placementDayKey — YYYYMMDD, сравнение дат корректно.
         if (ctx.placementDayKey != null && next && isFinite(next.dueKey)){
             var due = Number(next.dueKey), day = Number(ctx.placementDayKey);
             if (day > due){ var dw = planWeight(s, 'DEADLINE_COST_MN'); weight += dw; byFactor.deadline = dw; }
+            else if (day === due){ var ew = planWeight(s, 'EXACT_DEADLINE_COST_MN'); weight += ew; byFactor.exactDeadline = ew; }
         }
         // Большой простой между станками (§8 п.6).
         if (ctx.distanceExceeded){ var xw = planWeight(s, 'MAX_DISTANCE_COST_MN'); weight += xw; byFactor.distance = xw; }
