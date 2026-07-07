@@ -3799,14 +3799,16 @@
     // последней резки дня (несущей нет) — не рисуется и никого не сдвигает.
     //   dayGroups — { schedDayKey → [cut,...] } в порядке дорожки; schedById — cutId → sc
     //   (startMin/setupMin/finishMin/leaderMin, минуты от полуночи дня 0); breaks — intraDayBreaks().
-    // → { markersByCut: { cutId: [{ label, startMin, endMin, kind }] }, shiftByCut: { cutId: минуты } }.
+    // → { markersByCut: { cutId: [{ label, startMin, endMin, kind }] }, shiftByCut: { cutId: минуты },
+    //     extendByCut: { cutId: минуты } }. extendByCut (#4094) — на сколько удлинить КОНЕЦ окна несущей
+    // карточки (сумма длительностей её обедов/перерывов); shiftByCut — на сколько сдвинуть ПОСЛЕДУЮЩИЕ.
     // Чистая (без DOM) — покрыта тестом.
     function computeQueueBreakMarkers(dayGroups, schedById, breaks) {
-        var markersByCut = {}, shiftByCut = {};
+        var markersByCut = {}, shiftByCut = {}, extendByCut = {};
         var brks = (breaks || []).filter(function(b) {
             return b && Number(b.durationMin) > 0 && isFinite(Number(b.startMin));
         }).slice().sort(function(a, b) { return Number(a.startMin) - Number(b.startMin); });
-        if (!brks.length) return { markersByCut: markersByCut, shiftByCut: shiftByCut };
+        if (!brks.length) return { markersByCut: markersByCut, shiftByCut: shiftByCut, extendByCut: extendByCut };
         Object.keys(dayGroups || {}).forEach(function(dayKey) {
             var dayNum = Number(dayKey);
             if (!isFinite(dayNum)) return;   // резки без расписания (ключ ' ') — пропускаем
@@ -3841,6 +3843,10 @@
                 (markersByCut[carrierId] = markersByCut[carrierId] || []).push({
                     label: B.label, startMin: B.startMin, endMin: B.startMin + dur, kind: B.kind
                 });
+                // #4094: несущая карточка «удлиняется» на длительность своего обеда/перерыва — её ОКНО
+                // (конец) честно охватывает работу + перерыв, как бар Ганта (extendMinByTask, cut-gantt
+                // #4052). И обед (зазор/сквозной), и перерыв 10:00/15:00 расширяют конец окна несущей.
+                extendByCut[carrierId] = (extendByCut[carrierId] || 0) + dur;
                 if (B.kind === 'break') {
                     for (var m = carrierIdx + 1; m < cards.length; m++) {
                         var id = String(cards[m].id);
@@ -3849,7 +3855,7 @@
                 }
             });
         });
-        return { markersByCut: markersByCut, shiftByCut: shiftByCut };
+        return { markersByCut: markersByCut, shiftByCut: shiftByCut, extendByCut: extendByCut };
     }
 
     // #3342: параметры плавающего обеда из opts, валидные только если обед попадает
@@ -5019,7 +5025,7 @@
         return 'Намотка: ' + winding;
     }
 
-    function formatScheduleLine(sc, runLength, hasWindingPoints, shiftMin) {
+    function formatScheduleLine(sc, runLength, hasWindingPoints, shiftMin, extendMin) {
         if (!sc) return '';
         var dur = stripNum(sc.durationMin);
         if (dur <= 0) {
@@ -5037,10 +5043,15 @@
         // #4075: сдвиг окна на суммарную длительность перерывов, попавших ДО этой карточки в дне
         // (перерывы не зашиты в planStart — показываем их как визуальный сдвиг, как накладки Ганта).
         var shift = Number(shiftMin) || 0;
+        // #4094: карточка НЕСЁТ обед/перерыв → её КОНЕЦ окна удлиняется на его длительность (окно честно
+        // охватывает работу + перерыв, как бар Ганта). Расширяем ТОЛЬКО конец (старт не трогаем); число
+        // минут «· N мин» остаётся РАБОЧИМ (setup+резка+лидер), как «(N мин)» в скобках у бара Ганта.
+        var extend = Number(extendMin) || 0;
         var windowStart = stripNum(sc.startMin) - setup + shift;
-        var windowEnd = stripNum(sc.finishMin) + leaderMin + shift;
-        // #3635 п.4: минуты окна показываем ЦЕЛЫМ числом, округляя ВВЕРХ (36.264 → 37) —
-        // совпадает с диапазоном по часам (09:03–09:40 ≈ 37 мин), без дробного «хвоста».
+        var windowEnd = stripNum(sc.finishMin) + leaderMin + shift + extend;
+        // #3635 п.4: минуты окна показываем ЦЕЛЫМ числом, округляя ВВЕРХ (36.264 → 37). #4094: при
+        // несомом перерыве диапазон времени длиннее числа минут (диапазон = стенные часы с перерывом,
+        // минуты = чистая работа) — как у Ганта «08:00-12:40 (240 мин)».
         return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(windowEnd) + ' · ' + Math.ceil(setup + dur + leaderMin) + ' мин';
     }
 
@@ -12601,7 +12612,7 @@
         // на длительность перерывов (аналог накладок Ганта). Обед подписан значком на несущей
         // карточке вместо прежней плашки .atex-pp-lunch; перерывы 10:00/15:00 сдвигают времена.
         var _brkInfo = computeQueueBreakMarkers(dayCutsBySched, schedById, intraDayBreaks(self.daySettings));
-        var breakMarkersByCut = _brkInfo.markersByCut, breakShiftByCut = _brkInfo.shiftByCut;
+        var breakMarkersByCut = _brkInfo.markersByCut, breakShiftByCut = _brkInfo.shiftByCut, breakExtendByCut = _brkInfo.extendByCut;
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
@@ -12697,7 +12708,7 @@
                 // (окно = переналадка, минуты вверх), а не строку расписания резки.
                 var scheduleText = isSetupTask
                     ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
-                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)]);
+                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)]);
                 if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
                         cutId: String(c.id),
