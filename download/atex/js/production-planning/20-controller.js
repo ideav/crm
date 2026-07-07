@@ -84,7 +84,7 @@
         slotFromCut: slotFromCut, vacationSlot: vacationSlot, seedOccupancy: seedOccupancy,
         prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
         placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
-        slotOrderByMachine: slotOrderByMachine,
+        slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
         chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку
