@@ -3914,6 +3914,12 @@
         var dueDayByCut = opts.dueDayByCut || {};
         var deadlineAware = !!opts.deadlineAware;
         var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;   // #4059: вес EDD-приоритета срока
+        // #4085: режим «порядок задан извне» — слой размещения (15-slot-placement, модель #3985) уже
+        // выбрал порядок перебором точек вставки; здесь его НЕ переигрываем. Ключ выбора схлопывается в
+        // [idx] (исходный порядок), роняя члены isFoil / setupCost+deadlineCost / −stripBandCount. Вся
+        // механика тайминга (нахлёст, обед, отпуск, дробление, setup-хвост, резерв) — без изменений.
+        // Дефолт выкл → селектор работает как прежде (характеризация Стадии 0 не меняется).
+        var orderAuthoritative = !!opts.orderAuthoritative;
         // #4068: резерв хвоста дня под дедлайн-фольгу (ТЗ §12). Пре-проход (computeFoilDeadlineReservation,
         // planMachineSegs) находит фольгу, оказавшуюся ЗА своим сроком, и резервирует минуты в конце дня
         // ≤ срока: foilReserveByDay[день]=минуты, resFoilDayByCut[cutId]=день. Нефольга (и НЕрезервная
@@ -4123,7 +4129,9 @@
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c) + deadlineCostFor(id, day), -stripBandCount(c), state[id].idx ];
+                    var key = orderAuthoritative
+                        ? [ state[id].idx ]   // #4085: порядок слоя размещения — по исходному индексу
+                        : [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c) + deadlineCostFor(id, day), -stripBandCount(c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
