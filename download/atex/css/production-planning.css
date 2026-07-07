@@ -285,6 +285,25 @@
     background: rgba(19, 65, 116, .12);
     cursor: help;
 }
+/* #4075: серый значок обеда/перерыва в том же углу (левее ←/→). Текст «Обед»/«Перерыв»,
+   диапазон времени — в title (как накладка .atex-cg-brk Ганта). Через --pp-muted/
+   --pp-border-soft тема (в т.ч. тёмная) подхватывается автоматически, как у .atex-pp-cleanup. */
+.atex-pp-cut-break {
+    pointer-events: auto; /* вернуть наведение для подсказки title */
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--pp-muted);
+    background: var(--pp-border-soft, #eef1f5);
+    cursor: help;
+    font-variant-numeric: tabular-nums;
+}
 
 /* Информационная строка резки (клик по всей карточке — выбор резки, #3149). */
 .atex-pp-cut-info {
@@ -424,20 +443,8 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* #3846: маркер обеда (#3342) внутри дня — между резкой до обеда и послеобеденной.
-   Обед уже зашит генерацией в planStart; здесь он подписан, чтобы зазор не выглядел
-   «дырой». Тёплый оттенок отличает его от серого блока уборки. */
-.atex-pp-lunch {
-    margin: 6px 0;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: #8a5a00;
-    background: #fff6e6;
-    border: 1px dashed #f0c574;
-    border-radius: 8px;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-}
+/* #4075: плашка обеда .atex-pp-lunch убрана — обед/перерывы теперь серым значком
+   .atex-pp-cut-break в углу несущей карточки (стиль выше, рядом с .atex-pp-cut-span). */
 
 /* #3616: дата рабочего дня — заголовок перед первой карточкой каждого дня расписания
    (после блока уборки предыдущего дня). Нумерация заданий начинается с 1 на каждый день. */
