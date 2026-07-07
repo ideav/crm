@@ -82,16 +82,21 @@ function isDesc(arr) { return arr.every(function(v,i){ return i === 0 || arr[i-1
     });
 })();
 
-// ── 3) фольга остаётся в конце дня (isFoil — старший разряд ключа, #3717 не нарушен) ──
+// ── 3) фольга — в конец дня через слой размещения #3985 (несмотря на макс. полосы) ──
+// selectByConfig (raw splitMachineQueue) фольгу больше НЕ выделяет (isFoil снят из ключа #4085 как дрейф);
+// инвариант #3717 держит слой размещения: на живом пути (slotPlacement) фольга последняя даже с 40 полосами.
 (function () {
-    var cuts = [ cut('reg1', 'A', 'OUT', 9, 40), cut('reg2', 'A', 'OUT', 29, 30) ];
+    var reg1 = cut('reg1', 'A', 'OUT', 9, 40), reg2 = cut('reg2', 'A', 'OUT', 29, 30);
     var foil = cut('f', 'ФОЛЬГА', 'IN', 40, 20); foil.isFoil = true;   // много полос, но фольга
-    cuts.push(foil);
-    var days = packStripsByDay(cuts, 450);
-    var last = days[0][days[0].length - 1];
-    // фольга (40 полос) НЕ уходит в начало несмотря на макс. полосы — она последняя
-    assertEqual(last, 40, '#3999 фольга: несмотря на 40 полос, фольга в КОНЦЕ дня (#3717 сохранён)');
-    assertEqual(days[0], [29, 9, 40], '#3999 фольга: нефольга по убыванию (29,9), фольга — в конец');
+    var pp = { reg1: 1, reg2: 1, f: 1 };
+    var ops = P.planCutOperations([reg1, reg2, foil], {
+        weights: P.makePlanningOptions('SETUP', TIMES), times: TIMES,
+        dayStartMin: 480, dayEndMin: 480 + 450, dayEndHourMin: 480 + 450,
+        perPassByCut: pp, planBaseMidnightMs: new Date(2026, 0, 1).getTime(),
+        gapFill: true, slotPlacement: true, slitterIds: ['m1']
+    });
+    var order = ops.updates.slice().sort(function(a, b){ return a.sequence - b.sequence; }).map(function(u){ return u.cutId; });
+    assertEqual(order[order.length - 1], 'f', '#3999/#4085: фольга (40 полос) в конце дня через слой размещения (#3717)');
 })();
 
 console.log('\n' + passed + ' checks passed');

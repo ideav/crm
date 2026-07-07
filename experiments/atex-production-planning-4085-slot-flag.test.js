@@ -1,10 +1,8 @@
-// Тесты #4085 (Стадия 5) — флаг SLOT_PLACEMENT включает живой слой размещения (модель #3985).
+// Тесты #4085 (Стадия 6) — слой размещения #3985 ПО УМОЛЧАНИЮ ВКЛЮЧЁН; SLOT_PLACEMENT=0 — рубильник.
 //
-// Слой врезан в buildSequenceOps/runGenerateCuts за ФЛАГОМ контроллера slotPlacementOn(): читает
-// «Настройку» SLOT_PLACEMENT. По умолчанию (нет настройки) — ВЫКЛ → прежний путь (chooseSlitterBySetup/
-// rebalance/orderCuts), контракт неизменен (это доказывает полный existing-прогон, 100/100 зелёных).
-// Здесь проверяем сам гейт: как читается настройка. Живое поведение флаг-ON — на ateh (report/object
-// таймаутят в этой среде).
+// После снятия дрейфа (EDD/жёсткая фольга/резерв #4068) слой размещения стал живым путём по умолчанию.
+// slotPlacementOn() возвращает true, если «Настройка» SLOT_PLACEMENT НЕ равна явному "0". Значение "0" —
+// аварийный откат на прежний путь (без EDD/жёсткой фольги/резерва; порядок только по переналадке/полосам).
 //
 // Run with: node experiments/atex-production-planning-4085-slot-flag.test.js
 
@@ -16,12 +14,14 @@ function assert(cond, name) { total++; console.log((cond ? 'PASS' : 'FAIL') + ' 
 function slotOn(daySettings) { return Controller.prototype.slotPlacementOn.call({ daySettings: daySettings }); }
 
 assert(Controller && typeof Controller.prototype.slotPlacementOn === 'function', '#4085: slotPlacementOn определён на контроллере');
-assert(slotOn({ SLOT_PLACEMENT: '1' }) === true, '#4085: SLOT_PLACEMENT="1" → слой ВКЛ');
-assert(slotOn({ SLOT_PLACEMENT: 1 }) === true, '#4085: SLOT_PLACEMENT=1 (число) → ВКЛ');
-assert(slotOn({ SLOT_PLACEMENT: ' 1 ' }) === true, '#4085: пробелы вокруг "1" тримятся → ВКЛ');
-assert(slotOn({ SLOT_PLACEMENT: '0' }) === false, '#4085: SLOT_PLACEMENT="0" → ВЫКЛ');
-assert(slotOn({ SLOT_PLACEMENT: 'да' }) === false, '#4085: произвольное значение → ВЫКЛ (только "1" включает)');
-assert(slotOn({}) === false, '#4085: настройка отсутствует → ВЫКЛ (безопасный дефолт — прежний путь)');
-assert(slotOn(undefined) === false, '#4085: нет daySettings вовсе → ВЫКЛ (без падения)');
+// Дефолт ВКЛ: настройка отсутствует → слой размещения работает.
+assert(slotOn({}) === true, '#4085: настройка отсутствует → слой ВКЛ (дефолт #3985)');
+assert(slotOn(undefined) === true, '#4085: нет daySettings вовсе → слой ВКЛ (без падения)');
+assert(slotOn({ SLOT_PLACEMENT: '1' }) === true, '#4085: SLOT_PLACEMENT="1" → ВКЛ');
+assert(slotOn({ SLOT_PLACEMENT: 'да' }) === true, '#4085: любое НЕ "0" → ВКЛ (дефолт)');
+// Аварийный рубильник: только явный "0" выключает.
+assert(slotOn({ SLOT_PLACEMENT: '0' }) === false, '#4085: SLOT_PLACEMENT="0" → ВЫКЛ (откат на прежний путь)');
+assert(slotOn({ SLOT_PLACEMENT: 0 }) === false, '#4085: SLOT_PLACEMENT=0 (число) → ВЫКЛ');
+assert(slotOn({ SLOT_PLACEMENT: ' 0 ' }) === false, '#4085: пробелы вокруг "0" тримятся → ВЫКЛ');
 
 console.log('\n' + passed + '/' + total + ' passed');

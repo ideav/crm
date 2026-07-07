@@ -313,6 +313,12 @@
             if (c.fixed){ if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id); fixedSlots.push(s); }
             else movable.push(s);
         });
+        // #3717/#4085: подвижную фольгу размещаем ПОСЛЕ нефольги. Жадная вставка «по одному» не видит
+        // будущих нефольг, если фольгу поставить раньше, и та могла осесть не в конце (штраф FOIL_NOTEND
+        // применяется к УЖЕ стоящим соседям). Разместив всю нефольгу первой, каждая фольга штрафом
+        // уводится в конец своего дня, при этом сама выбирает срок-оптимальный день (deadline-штраф жив).
+        // Стабильная перестановка: исходный порядок §7 внутри «нефольга»/«фольга» сохраняется.
+        movable = movable.filter(function(s){ return !s.isFoil; }).concat(movable.filter(function(s){ return s.isFoil; }));
         var occ = seedOccupancy(fixedSlots, ctx.vacationSlots || [], slitterIds);
         var placeCtx = { settings: ctx.settings, times: ctx.times, capacityMin: ctx.capacityMin,
                          baseMidnightMs: ctx.baseMidnightMs, perPassByCut: perPass,
