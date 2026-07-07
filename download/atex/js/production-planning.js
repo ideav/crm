@@ -10654,6 +10654,7 @@
         // Журнал шагов — в консоль («панель отладки»). Меняем только plan.slitterId; всё
         // последующее (очередь, дробление по дням, запись) идёт по обновлённому назначению.
         (function rebalanceGeneratedLoad(){
+            if (typeof self.slotPlacementOn === 'function' && self.slotPlacementOn()) return;   // #4085: в слот-режиме баланс возникает из штрафа MAX_DISTANCE — отдельная балансировка ретайрится
             if (!(genDayCapacityMin > 0) || !self.slitters || self.slitters.length < 2) return;
             var fixedByMachine = {};
             (self.cuts || []).forEach(function(c){
@@ -11600,6 +11601,12 @@
                         var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
                         if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
                     }
+                    // #4085: слой размещения переназначил станок — пишем «Слиттер» (u.slitterId), только если
+                    // отличается от хранимого (в не-слот-режиме u.slitterId нет → ничего не пишем, контракт прежний).
+                    if (u.slitterId != null && cutReqIds.slitter) {
+                        var curSid = storedCut && storedCut.slitter ? String(storedCut.slitter.id) : '';
+                        if (String(u.slitterId) !== curSid) fields['t' + cutReqIds.slitter] = String(u.slitterId);
+                    }
                     if (!Object.keys(fields).length) return;
                     return self.post('_m_set/' + u.cutId + '?JSON', fields);
                 });
@@ -11660,7 +11667,7 @@
                     cChain = cChain.then(function() {
                         var cutFields = buildFields(cutReqIds, {
                             status: (parentCut && parentCut.status) || CUT_STATUSES[0],
-                            slitter: parentCut && parentCut.slitter && parentCut.slitter.id,
+                            slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
                             materialBatch: parentCut && parentCut.batchId,
                             // #3795: «Вид сырья» цепочки → продолжение. Карточка очереди берёт сырьё
                             // из cut_material (своего реквизита резки), а обеспечения продолжения не
@@ -11814,6 +11821,14 @@
         });
     }
 
+    // #4085: слой размещения (модель #3985) включён? Настройка SLOT_PLACEMENT=1 (по умолчанию ВЫКЛ —
+    // прежний путь chooseSlitterBySetup/rebalance/orderCuts). Флаг позволяет включить и проверить
+    // размещение перебором точек вставки на боевой базе без правки кода.
+    AtexProductionPlanning.prototype.slotPlacementOn = function() {
+        var v = (this.daySettings || {}).SLOT_PLACEMENT;
+        return String(v == null ? '' : v).trim() === '1';
+    };
+
     // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,
     // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
     // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
@@ -11836,6 +11851,7 @@
         // #4050: срок каждой резки (самый ранний из «Сроков изготовления» обеспечиваемых позиций,
         // cutDueKeys) как индекс дня от базы «С» — для §8-штрафа в splitMachineQueue (selectByConfig).
         var dueDayByCut = {};
+        var dueKeyByCut = {};   // #4085: срок как YYYYMMDD (для локального штрафа в scorePosition слоя размещения)
         cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
@@ -11844,8 +11860,28 @@
             if (dueKeys && dueKeys.length) {
                 var dueOff = dueDayOffsetFromBase(dueKeys[0], planBaseMidnightMs);
                 if (dueOff != null) dueDayByCut[String(c.id)] = dueOff;
+                dueKeyByCut[String(c.id)] = dueKeys[0];   // #4085
             }
         });
+        // #4085: слой размещения (модель #3985) — включается настройкой SLOT_PLACEMENT=1 (по умолчанию
+        // ВЫКЛ → прежний путь orderCuts + текущий станок). Даёт planCutOperations допустимость станка
+        // (стоп-лист сырья + лимит ширины джамбо) и нерабочие дни станка (выходные/праздники + отпуск).
+        var slotOn = (self && typeof self.slotPlacementOn === 'function') ? self.slotPlacementOn() : false;   // #4085: защита для стаб-self в юнит-тестах
+        var slittersById = {}; (self.slitters || []).forEach(function(s){ slittersById[String(s.id)] = s; });
+        function feasibleMachineFor(sid, slot){
+            var s = slittersById[String(sid)]; if (!s) return false;
+            var mat = String(slot && slot.materialId == null ? '' : slot.materialId);
+            if ((s.stopMaterialIds || []).map(String).indexOf(mat) >= 0) return false;   // стоп-лист сырья
+            var nomW = self.nominalWidthByMaterial && self.nominalWidthByMaterial[mat];
+            if (isSlitterWidthBlocked(s.widthCode, nomW)) return false;                   // #4006: лимит ширины джамбо
+            return true;
+        }
+        function machineDayOffFor(sid){
+            return function(dayOffset){
+                var ms = planBaseMidnightMs + Number(dayOffset) * 86400000;
+                return !self.dayIsWorking(ms) || self.slitterOnVacationDay(sid, ms);   // выходной/праздник или отпуск станка
+            };
+        }
         // #3974: вход планировщика = всё НЕОБЕСПЕЧЕННОЕ — открытые задания (статус ≠ «Завершён»),
         // за ЛЮБЫЕ даты. Фильтра по [С; По] на входе больше нет: раньше scope-диапазон заодно
         // отсекал прошлое/готовое, теперь отбираем явно по статусу, а [С; По] — окно РАЗМЕЩЕНИЯ
@@ -11888,7 +11924,13 @@
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
-            blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
+            blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
+            // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
+            slotPlacement: slotOn,
+            slitterIds: (self.slitters || []).map(function(s){ return String(s.id); }),
+            dueKeyByCut: dueKeyByCut,
+            feasibleMachineFor: slotOn ? feasibleMachineFor : null,
+            machineDayOffFor: slotOn ? machineDayOffFor : null
         });
         } finally {
             pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
