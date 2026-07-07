@@ -4589,7 +4589,7 @@
 
         // Аккумулятор фактики: считает только переналадки, чей день удовлетворяет inWin(dayKey).
         function actualFor(inWin){
-            var knifeCount = 0, knifeMin = 0, matCount = 0, matMin = 0;
+            var knifeCount = 0, knifeMin = 0, matCount = 0, matMin = 0, taskCount = 0;
             Object.keys(byMachine).forEach(function(id){
                 var seq = byMachine[id].slice().sort(function(a, b){
                     return (Number(a.dayKey) || 0) - (Number(b.dayKey) || 0) || (startKeyOf(a) - startKeyOf(b));
@@ -4598,6 +4598,7 @@
                 for (var i = 0; i < seq.length; i++){
                     var cur = seq[i];
                     var win = inWin(Number(cur.dayKey) || 0);
+                    if (win) taskCount++;   // число заданий, попавших в окно (тот же предикат, что у переналадок)
                     if (i === 0 && !carrySetup){
                         // Первое задание, до него ничего — заложить наладку ножей + смену сырья (§13 п.4).
                         if (win){
@@ -4616,7 +4617,7 @@
                 }
             });
             return { knifeCount: knifeCount, knifeMin: round3(knifeMin), materialCount: matCount, materialMin: round3(matMin),
-                     changeoverCount: knifeCount + matCount, changeoverMin: round3(knifeMin + matMin) };
+                     changeoverCount: knifeCount + matCount, changeoverMin: round3(knifeMin + matMin), taskCount: taskCount };
         }
 
         var window = actualFor(function(dk){ return dk >= fromK && dk <= toK; });   // [С; По]
