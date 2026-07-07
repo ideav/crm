@@ -3834,6 +3834,15 @@
         var dueDayByCut = opts.dueDayByCut || {};
         var deadlineAware = !!opts.deadlineAware;
         var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;   // #4059: вес EDD-приоритета срока
+        // #4068: резерв хвоста дня под дедлайн-фольгу (ТЗ §12). Пре-проход (computeFoilDeadlineReservation,
+        // planMachineSegs) находит фольгу, оказавшуюся ЗА своим сроком, и резервирует минуты в конце дня
+        // ≤ срока: foilReserveByDay[день]=минуты, resFoilDayByCut[cutId]=день. Нефольга (и НЕрезервная
+        // фольга) видит ёмкость МИНУС резерв → поздне-срочная нефольга переливается позже, а резервная
+        // фольга занимает зарезервированный хвост своего срока (конец дня). Действует ТОЛЬКО при
+        // deadlineAware (генерация/«Упорядочить», не ручной перенос). Пусто → поведение прежнее.
+        var foilReserveByDay = (deadlineAware && opts.foilReserveByDay) ? opts.foilReserveByDay : {};
+        var resFoilDayByCut = opts.resFoilDayByCut || {};
+        function reserveForDay(d) { var r = Number(foilReserveByDay[d]); return (isFinite(r) && r > 0) ? r : 0; }
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
         // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
@@ -3990,6 +3999,8 @@
                     // (без 🔒 задание свободно и набивается от «С»). Внутри дня оптимизатор переставляет,
                     // на другой день/в разбивку — нет.
                     fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
+                    // #4068: резервная дедлайн-фольга ставится ТОЛЬКО на этот день (в хвост, конец дня).
+                    resFoilDay: (resFoilDayByCut[id] != null && isFinite(Number(resFoilDayByCut[id]))) ? Number(resFoilDayByCut[id]) : null,
                     isCont: false, pendingSetup: 0
                 };
                 poolOrder.push(id);
@@ -4047,9 +4058,34 @@
             var totalRuns = 0;
             poolOrder.forEach(function(id){ totalRuns += Math.max(0, state[id].remaining); });
             var guard = 0, guardMax = (totalRuns + (orderedCuts || []).length + 8) * 8 + 1024;
+            // #4068: резервная дедлайн-фольга не участвует в обычном выборе, пока не наступил её день.
+            function isReservedFoil(id){ return state[id].resFoilDay != null; }
+            // #4068: влезает ли обычная (нерезервная) резка в ёмкость дня МИНУС резерв под фольгу —
+            // хотя бы один проход или наладочный хвост. false → нефольга в бюджет дня исчерпана, пора
+            // ставить резервную фольгу в зарезервированный хвост (конец дня). Зеркалит логику ниже.
+            function pickFitsReduced(id){
+                var reserve = reserveForDay(day);
+                if (reserve <= 0) return true;
+                var st = state[id], c = st.cut;
+                if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) return true;   // вырожденную кладём всегда
+                var setup = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
+                var perPassEff = st.perPass + leader;
+                if (Math.floor((availFor(day, 'cuts') - reserve - setup) / perPassEff) >= 1) return true;
+                if (clock > 0 && !st.isCont && setup > 0) {   // #3847: наладочный хвост в ёмкость−резерв
+                    var room = round3(effCapacity(day) - reserve - clock);
+                    var tail = minOverlapTailSetupMinutes(setupPartsFor(prevPhysical, c), room, setup);
+                    if (tail > 0 && (availFor(day, 'tune') - reserve) >= tail) return true;
+                }
+                return false;
+            }
             while (guard++ < guardMax) {
                 var rem = pending();
                 if (!rem.length) break;
+                // #4068: резервная фольга дня уже поставлена (в rem её нет), но резерв дня был — день
+                // закрыт для нефольги (она не встаёт ПОСЛЕ фольги), переходим на следующий день.
+                if (reserveForDay(day) > 0 && clock > 0 && !rem.some(function(id){ return state[id].resFoilDay === day; })) {
+                    day += 1; clock = 0; continue;
+                }
                 // Незавершённая резка (продолжение, ножи на станке) — доводим её первой.
                 var inProgress = rem.filter(function(id){ return state[id].isCont && state[id].remaining > 0; });
                 // #3792: «Зафиксировано» — замок на день. Фиксированная резка ложится ТОЛЬКО на
@@ -4057,28 +4093,36 @@
                 // а на своём дне берётся раньше свободных, чтобы её не вытеснил их нахлёст. Свободные
                 // (fixedDay == null) — как прежде: по сроку (anchor ≤ day), иначе тянем будущую вперёд.
                 var fixedToday = rem.filter(function(id){ return state[id].fixedDay != null && state[id].fixedDay === day; });
-                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && (state[id].anchor == null || state[id].anchor <= day); });
-                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null; });
+                // #4068: резервную дедлайн-фольгу исключаем из обычных пулов ДО её дня; на её дне она
+                // берётся ниже (после нефольги, влезающей в ёмкость−резерв) — в хвост, конец дня.
+                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && (state[id].anchor == null || state[id].anchor <= day); });
+                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id); });
+                var resFoilToday = rem.filter(function(id){ return state[id].resFoilDay === day && state[id].fixedDay == null; });
                 var pick;
                 if (inProgress.length) pick = selectByConfig(inProgress);
                 else if (fixedToday.length) pick = selectByConfig(fixedToday);
-                // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
-                // (isFoil-last key), поэтому фольга уходит в конец дня (#3717) сама: нефольга
-                // не может встать ПОСЛЕ фольги (она всегда выбирается раньше), а хвост дня добьётся
-                // проходами/дроблением ниже. Срока (EDD) в выборе нет — резерв хвоста под фольгу
-                // своего срока (#3826) больше не нужен.
-                else if (freeDue.length) pick = selectByConfig(freeDue);
-                else if (freeAny.length) pick = selectByConfig(freeAny);   // свободных «по дню» нет — тянем будущую свободную вперёд
                 else {
-                    // Остались только будущие зафиксированные — прыгаем к ближайшему их дню
-                    // (свободных в пуле нет, нахлёст-простой заполнять некем).
-                    var nextFixedDay = null;
-                    rem.forEach(function(id){
-                        var fd = state[id].fixedDay;
-                        if (fd != null && fd > day && (nextFixedDay == null || fd < nextFixedDay)) nextFixedDay = fd;
-                    });
-                    if (nextFixedDay == null) break;
-                    day = nextFixedDay; clock = 0; continue;
+                    // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
+                    // (isFoil-last key), поэтому фольга уходит в конец дня (#3717) сама.
+                    // #4068: сперва обычная резка, влезающая в ёмкость дня МИНУС резерв под дедлайн-фольгу;
+                    // когда нефольга в этот бюджет больше не влезает — ставим резервную фольгу этого дня
+                    // в зарезервированный хвост (она вытесняет поздне-срочную нефольгу за срок, ТЗ §12).
+                    var cand = freeDue.length ? selectByConfig(freeDue) : (freeAny.length ? selectByConfig(freeAny) : null);
+                    if (cand != null && pickFitsReduced(cand)) pick = cand;
+                    else if (resFoilToday.length) pick = selectByConfig(resFoilToday);
+                    else if (cand != null) pick = cand;   // резерва под сегодня нет — обычное переполнение (day++ ниже)
+                    else {
+                        // Остались только будущие зафиксированные/резервные — прыгаем к ближайшему их дню
+                        // (свободных в пуле нет, нахлёст-простой заполнять некем).
+                        var nextDay = null;
+                        rem.forEach(function(id){
+                            [state[id].fixedDay, state[id].resFoilDay].forEach(function(d){
+                                if (d != null && d > day && (nextDay == null || d < nextDay)) nextDay = d;
+                            });
+                        });
+                        if (nextDay == null) break;
+                        day = nextDay; clock = 0; continue;
+                    }
                 }
                 var st = state[pick], c = st.cut;
                 // #3914: что взяли на размещение и в каком состоянии день (время суток = dayStart+clock).
@@ -4129,14 +4173,19 @@
                     prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
                     continue;
                 }
+                // #4068: обычная (нерезервная) резка не должна заходить в хвост, зарезервированный под
+                // дедлайн-фольгу этого дня — её ёмкость видна МИНУС резерв; сама резервная фольга берёт
+                // полный хвост (reserveNF=0). Так поздне-срочная нефольга переливается позже, а фольга
+                // занимает конец дня своего срока.
+                var reserveNF = (st.resFoilDay === day) ? 0 : reserveForDay(day);
                 var perPassEffG = st.perPass + leader;
                 var setupG = st.isCont ? (Number(st.pendingSetup) || 0) : setupCostFor(prevPhysical, c);
-                var availG = effCapacity(day) - clock;
+                var availG = effCapacity(day) - reserveNF - clock;
                 // #3847: ёмкость хвоста с учётом разрешённого нахлёста. Для проходов потолок —
                 // DAY_END_HOUR+MAX_OVERWORK_CUTS, для настройки — DAY_END_HOUR+MAX_OVERWORK_TUNE
-                // (фича выкл → обычная ёмкость до cutEndMin, как #3821).
-                var availCutsG = availFor(day, 'cuts');
-                var availTuneG = availFor(day, 'tune');
+                // (фича выкл → обычная ёмкость до cutEndMin, как #3821). #4068: минус резерв под фольгу.
+                var availCutsG = availFor(day, 'cuts') - reserveNF;
+                var availTuneG = availFor(day, 'tune') - reserveNF;
                 // #3821/#3847: в хвост дня кладём проходы, влезающие в ёмкость С УЧЁТОМ нахлёста —
                 // последний проход обязан кончиться ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS (нахлёст за
                 // конец смены ограничен, а не «один любой проход» #3760 и не «строго встык» #3821:
@@ -4170,8 +4219,8 @@
                     // → в хвост НЕ кладём, вся резка на следующий день ОДНОЙ карточкой. Так день добит «под
                     // завязку» до допустимого нахлёста (#3955), но не раздут за него (#3939: раньше цель
                     // была availTune без гварда → безграничный нахлёст, бейдж 542).
-                    var roomG = round3(effCapacity(day) - clock);          // до конца окна резки (цель заполнения)
-                    var tailAvailG = availFor(day, 'tune');                // до потолка нахлёста настройки (#3847)
+                    var roomG = round3(effCapacity(day) - reserveNF - clock);   // до конца окна резки (цель заполнения); #4068: минус резерв под фольгу
+                    var tailAvailG = availFor(day, 'tune') - reserveNF;         // до потолка нахлёста настройки (#3847); #4068: минус резерв
                     var setupPartsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
                     var tailSetupG = (setupG > 0) ? minOverlapTailSetupMinutes(setupPartsG, roomG, setupG) : 0;
                     if (tailSetupG > 0 && tailAvailG >= tailSetupG) {
@@ -4637,6 +4686,61 @@
     // в цепочке; удаления — только лишние записи, когда сегментов стало МЕНЬШЕ.
     // Деление Обеспечения и копию Полос на новые продолжения выполняет аппликатор (нужны id
     // новых записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
+    // #4068 (ТЗ §12): по РЕЗУЛЬТАТУ жадной раскладки (probeSegs) находит фольгу, оказавшуюся ЗА своим
+    // сроком, и считает резерв хвоста дня ≤ срока, чтобы во ВТОРОМ проходе упаковщика фольга встала в
+    // срок, вытеснив поздне-срочную нефольгу. Фольга — по типу сырья (`isFoil`, «фольга пачкает станок»,
+    // #3717); срок — индекс дня от базы «С» (dueDayByCut, dueDayOffsetFromBase). Правило:
+    //  - группируем фольгу по дню срока; для дней срока, где ХОТЯ БЫ ОДНА фольга уехала за срок
+    //    (день размещения > срок), резервируем в конце дня-срока суммарные минуты ВСЕХ фолег этого
+    //    срока (обе фольги одного срока сходятся в один день, ТЗ §12) и прикалываем их к этому дню;
+    //  - резерв ставим ТОЛЬКО если на днях [0..день-срока] есть достаточно ВЫТЕСНЯЕМОЙ нефольги
+    //    (срок позже фольги или без срока) — иначе двигать было бы ранне-срочную нефольгу за её срок
+    //    (недопустимо, «только фольга вправе вытеснить»); такого дня фольга не занимает.
+    // capacity — минут резки в окне дня. Чистая (без сайд-эффектов). → { foilReserveByDay,
+    // resFoilDayByCut } или null (резервировать нечего/некуда). Покрыта юнит-тестом.
+    function computeFoilDeadlineReservation(probeSegs, orderedCuts, dueDayByCut, capacity) {
+        if (!(capacity > 0)) return null;
+        var byCut = {};   // cutId → { day: первый день размещения, mins: суммарные setup+намотка }
+        (probeSegs || []).forEach(function(s){
+            var id = String(s && s.cutId);
+            var d = Math.floor(Number(s && s.windowStartMin) / 1440);
+            var mins = (Number(s && s.setupMin) || 0) + (Number(s && s.durationMin) || 0);
+            if (!byCut[id]) byCut[id] = { day: d, mins: 0 };
+            if (d < byCut[id].day) byCut[id].day = d;
+            byCut[id].mins += mins;
+        });
+        function dueOf(id) { var v = dueDayByCut && dueDayByCut[id]; return (v != null && isFinite(Number(v))) ? Number(v) : null; }
+        var foilByDueDay = {}, lateDueDays = {};
+        (orderedCuts || []).forEach(function(c){
+            if (!(c && c.isFoil)) return;
+            var id = String(c.id), due = dueOf(id), pl = byCut[id];
+            if (due == null || !pl) return;
+            (foilByDueDay[due] = foilByDueDay[due] || []).push({ id: id, mins: pl.mins });
+            if (pl.day > due) lateDueDays[due] = true;   // фольга уехала за срок
+        });
+        var foilReserveByDay = {}, resFoilDayByCut = {}, any = false;
+        Object.keys(lateDueDays).forEach(function(k){
+            var due = Number(k), targetDay = Math.max(0, due);
+            var group = foilByDueDay[due] || [];
+            var reserve = Math.min(group.reduce(function(s, g){ return s + g.mins; }, 0), capacity);
+            if (!(reserve > 0)) return;
+            // Вытесняемая нефольга на днях [0..targetDay]: срок позже фольги ИЛИ без срока.
+            var displaceable = 0;
+            (orderedCuts || []).forEach(function(c){
+                if (!c || c.isFoil) return;
+                var id = String(c.id), pl = byCut[id];
+                if (!pl || pl.day > targetDay) return;
+                var nd = dueOf(id);
+                if (nd == null || nd > due) displaceable += pl.mins;
+            });
+            if (displaceable < reserve - 1e-6) return;   // некого вытеснять в срок — не резервируем
+            foilReserveByDay[targetDay] = (foilReserveByDay[targetDay] || 0) + reserve;
+            group.forEach(function(g){ resFoilDayByCut[g.id] = targetDay; });
+            any = true;
+        });
+        return any ? { foilReserveByDay: foilReserveByDay, resFoilDayByCut: resFoilDayByCut } : null;
+    }
+
     function planCutOperations(cuts, opts){
         opts = opts || {};
         var base = Number(opts.planBaseMidnightMs);
@@ -4714,7 +4818,7 @@
                 : orderCuts(cutsOfMachine, opts.weights);
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
-            var segs = splitMachineQueue(ordered, {
+            var packOpts = {
                 dayStartMin: opts.dayStartMin, dayEndMin: opts.dayEndMin,
                 dayEndHourMin: opts.dayEndHourMin,   // #3847: DAY_END_HOUR (реальный конец смены) для лимита нахлёста
                 maxOverworkCutsMin: opts.maxOverworkCutsMin,   // #3847: макс. нахлёст резки за DAY_END_HOUR
@@ -4729,8 +4833,23 @@
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
-                blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
-            });
+                blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
+                foilReserveByDay: null, resFoilDayByCut: null   // #4068: первый (пробный) проход — без резерва
+            };
+            var segs = splitMachineQueue(ordered, packOpts);
+            // #4068 (ТЗ §12): дедлайн-фольга, оказавшаяся ЗА своим сроком, должна вытеснить поздне-срочную
+            // нефольгу и встать в срок. Пробный проход (segs выше) показывает, кто уехал за срок; резервируем
+            // хвост дня ≤ срока и пакуем ЗАНОВО. Только при deadlineAware+gapFill (генерация/«Упорядочить»),
+            // не при ручном переносе (preserveOrder). Резервировать нечего/некуда → второго прохода нет.
+            if (!opts.preserveOrder && opts.gapFill) {
+                var capacity = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
+                var reservation = computeFoilDeadlineReservation(segs, ordered, opts.dueDayByCut, capacity);
+                if (reservation) {
+                    packOpts.foilReserveByDay = reservation.foilReserveByDay;
+                    packOpts.resFoilDayByCut = reservation.resFoilDayByCut;
+                    segs = splitMachineQueue(ordered, packOpts);
+                }
+            }
             return segs;
         }
         // #3974: группируем ВСЕ переданные резки по станку (без scope-фильтра дат) и раскладываем
@@ -6367,6 +6486,7 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
+        computeFoilDeadlineReservation: computeFoilDeadlineReservation,   // #4068: резерв хвоста дня под дедлайн-фольгу (ТЗ §12)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
         stripPrefixQuality: stripPrefixQuality,         // #3989: «качество» перехода по ножам
         transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
