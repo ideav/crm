@@ -215,6 +215,7 @@
         snapWindowStartsWholeMinutes: snapWindowStartsWholeMinutes,   // #4061: снап planStart к целым минутам (= сумма колонок)
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
+        computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
         freeSlotForQueue: freeSlotForQueue,
         dayCleanups: dayCleanups,
         formatClock: formatClock,
@@ -5732,9 +5733,6 @@
         // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
         var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
-        var lunchByDay = {};   // #3846: { schedDay → { startMin, finishMin, durationMin } } обеда
-        lunchBlocksFromSchedule(schedule, { lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin })
-            .forEach(function(lb) { lunchByDay[lb.day] = lb; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }
         // #3616: задания группируем и нумеруем по РАБОЧЕМУ ДНЮ РАСПИСАНИЯ (schedDay) —
@@ -5748,6 +5746,11 @@
             if (!dayCutsBySched[key]) dayCutsBySched[key] = [];
             dayCutsBySched[key].push(c);
         });
+        // #4075: несущие карточки обеда/перерывов (серый значок) + сдвиг последующих окон дня
+        // на длительность перерывов (аналог накладок Ганта). Обед подписан значком на несущей
+        // карточке вместо прежней плашки .atex-pp-lunch; перерывы 10:00/15:00 сдвигают времена.
+        var _brkInfo = computeQueueBreakMarkers(dayCutsBySched, schedById, intraDayBreaks(self.daySettings));
+        var breakMarkersByCut = _brkInfo.markersByCut, breakShiftByCut = _brkInfo.shiftByCut;
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
@@ -5843,7 +5846,7 @@
                 // (окно = переналадка, минуты вверх), а не строку расписания резки.
                 var scheduleText = isSetupTask
                     ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
-                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0);
+                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)]);
                 if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
                         cutId: String(c.id),
@@ -6069,24 +6072,8 @@
                 lastDayDateRendered = cardSchedDay;
             }
 
-            // #3846: блок «Обед» (#3342, плавающий) перед карточкой, идущей сразу после обеденного
-            // зазора. Обед уже сидит в сохранённых planStart (его вставила генерация) — на странице
-            // планирования рисуем его явно, чтобы зазор не выглядел «дырой» и совпадал с Гантом.
-            // Обед привязан к началу послеобеденной резки (lunchByDay[].finishMin == окно карточки),
-            // поэтому матчим один раз — по совпадению с окном (startMin − setupMin) текущей карточки.
-            if (sc && cardSchedDay != null) {
-                var lb = lunchByDay[cardSchedDay];
-                if (lb && !lb._rendered && Math.abs((sc.startMin - sc.setupMin) - lb.finishMin) <= 1) {
-                    // #3909: показываем обед в фиксированные 12:20–13:00 (dispStartMin/dispFinishMin),
-                    // а не в зазоре после несущего задания; привязка строки — по finishMin (зазор).
-                    var lbS = lb.dispStartMin != null ? lb.dispStartMin : lb.startMin;
-                    var lbF = lb.dispFinishMin != null ? lb.dispFinishMin : lb.finishMin;
-                    groupEl.appendChild(el('div', { class: 'atex-pp-lunch',
-                        text: '🍽 Обед · ' + formatClock(lbS) + ' – ' + formatClock(lbF) +
-                              ' · ' + lb.durationMin + ' мин' }));
-                    lb._rendered = true;
-                }
-            }
+            // #4075: прежняя плашка «🍽 Обед …» (.atex-pp-lunch) убрана — обед/перерывы теперь
+            // показываются серым значком в углу несущей карточки (см. блок значков ниже).
 
             groupEl.appendChild(cardPanel);
 
@@ -6132,20 +6119,30 @@
                 timingCtx.continuesNextDay = !!spans.toNext;
                 timingCtx.continuesFromPrevDay = !!spans.fromPrev;
             }
-            if (spans.fromPrev || spans.toNext) {
-                var spanBadges = [];
-                if (spans.fromPrev) spanBadges.push(el('span', {
-                    class: 'atex-pp-cut-span atex-pp-cut-span-prev',
-                    title: 'Начало задания — в предыдущем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
-                    text: '←'
+            var spanBadges = [];
+            // #4075: серый значок обеда/перерыва — ЛЕВЕЕ значков смежности дня (←/→), в том же
+            // углу справа внизу карточки. Несущая — та, чьё окно накрыло перерыв/обед; title
+            // повторяет накладку Ганта («Обед 12:20-13:00» / «Перерыв 10:00-10:10»).
+            (breakMarkersByCut[String(c.id)] || []).forEach(function(bm) {
+                spanBadges.push(el('span', {
+                    class: 'atex-pp-cut-break' + (bm.kind === 'lunch' ? ' is-lunch' : ''),
+                    title: bm.label + ' ' + formatClock(bm.startMin) + '-' + formatClock(bm.endMin),
+                    text: bm.label
                 }));
-                if (spans.toNext) spanBadges.push(el('span', {
-                    class: 'atex-pp-cut-span atex-pp-cut-span-next',
-                    title: (isSetupTask
-                        ? 'Только настройка станка — намотка продолжится в следующем рабочем дне'
-                        : 'Задание продолжается в следующем рабочем дне') + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
-                    text: '→'
-                }));
+            });
+            if (spans.fromPrev) spanBadges.push(el('span', {
+                class: 'atex-pp-cut-span atex-pp-cut-span-prev',
+                title: 'Начало задания — в предыдущем рабочем дне' + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                text: '←'
+            }));
+            if (spans.toNext) spanBadges.push(el('span', {
+                class: 'atex-pp-cut-span atex-pp-cut-span-next',
+                title: (isSetupTask
+                    ? 'Только настройка станка — намотка продолжится в следующем рабочем дне'
+                    : 'Задание продолжается в следующем рабочем дне') + (c.orderId ? ' (заказ ' + c.orderId + ')' : ''),
+                text: '→'
+            }));
+            if (spanBadges.length) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-spans' }, spanBadges));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
@@ -6528,4 +6525,4 @@
 
  
  
-// @version 2026-07-07-window-taskcount
+// @version 2026-07-07-break-marker-4075
