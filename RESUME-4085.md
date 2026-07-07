@@ -24,8 +24,8 @@
 ## Стадии (детали — в плане)
 - [x] **0 — Характеризация** ✅ `...-4085-characterization.test.js` (8/8): дробление, фольга-последней, EDD, обед, нахлёст, отпуск, продолжение
 - [x] **1 — Достроить scorer** ✅ `...-4085-scorer.test.js` (20/20): `EXACT_DEADLINE` (day==due) в `transitionCost`, `dayKeyFromOffset` в 00-core (+экспорт), пример §8.3=3/2. Веса уже плоско в opts (makePlanningOptions). ВСЁ МЁРТВОЕ (нет живого вызова) → поведение не изменилось.
-- [ ] **2 — Модуль `15-slot-placement.js`** (чистый, не врезан) + юнит-тесты ← ТЕКУЩАЯ
-- [ ] 3 — Режим `orderAuthoritative` в `splitMachineQueue` (дефолт off)
+- [x] **2 — Модуль `15-slot-placement.js`** ✅ `...-4085-slot-placement.test.js` (19/19): seedOccupancy, prefixDayOffset (порт packMachine), scorePosition, placeSlot/placeAllSlots (перебор всех точек, §8.4-исключение), canInsertAt (запрет в цепочку), relocatePass (фольга/просрочка). Экспортирован в `planning`. НЕ врезан.
+- [ ] **3 — Режим `orderAuthoritative` в `splitMachineQueue`** (дефолт off) ← ТЕКУЩАЯ
 - [ ] 4 — Врезать Reorder/move (`planMachineSegs` 10:3219)
 - [ ] 5 — Врезать Generate (`runGenerateCuts` 20:3609) + ретайр `rebalanceSlitterLoad`
 - [ ] 6 — Снять дрейф (EDD-терм / фольга / резерв #4068)
