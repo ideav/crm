@@ -2239,22 +2239,18 @@
         var leader = Number(opts.leader != null ? opts.leader : (times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS)) || 0;
         var perPassByCut = opts.perPassByCut || {};
         var runsByCut = opts.runsByCut || {};
-        // #4050: ТЗ §8/§11 — «Срок изготовления» влияет на день размещения. dueDayByCut[id] = срок
-        // как индекс дня от базы «С» (dueDayOffsetFromBase). deadlineAware включается вызывающим
-        // ТОЛЬКО при переоптимизации порядка (preserveOrder=false); при ручном переносе — выкл, чтобы
-        // не ломать порядок оператора. Веса из opts.weights (планировочные), дефолт 100/33.
-        var dueDayByCut = opts.dueDayByCut || {};
-        var deadlineAware = !!opts.deadlineAware;
-        var deadlineW = deadlineAware ? planWeight(opts.weights, 'DEADLINE_COST_MN') : 0;   // #4059: вес EDD-приоритета срока
-        // #4068: резерв хвоста дня под дедлайн-фольгу (ТЗ §12). Пре-проход (computeFoilDeadlineReservation,
-        // planMachineSegs) находит фольгу, оказавшуюся ЗА своим сроком, и резервирует минуты в конце дня
-        // ≤ срока: foilReserveByDay[день]=минуты, resFoilDayByCut[cutId]=день. Нефольга (и НЕрезервная
-        // фольга) видит ёмкость МИНУС резерв → поздне-срочная нефольга переливается позже, а резервная
-        // фольга занимает зарезервированный хвост своего срока (конец дня). Действует ТОЛЬКО при
-        // deadlineAware (генерация/«Упорядочить», не ручной перенос). Пусто → поведение прежнее.
-        var foilReserveByDay = (deadlineAware && opts.foilReserveByDay) ? opts.foilReserveByDay : {};
-        var resFoilDayByCut = opts.resFoilDayByCut || {};
-        function reserveForDay(d) { var r = Number(foilReserveByDay[d]); return (isFinite(r) && r > 0) ? r : 0; }
+        // #4085: режим «порядок задан извне» — слой размещения (15-slot-placement, модель #3985) уже
+        // выбрал порядок перебором точек вставки; здесь его НЕ переигрываем. Ключ выбора схлопывается в
+        // [idx] (исходный порядок), роняя члены переналадка / −stripBandCount. Вся механика тайминга
+        // (нахлёст, обед, отпуск, дробление, setup-хвост) — без изменений.
+        var orderAuthoritative = !!opts.orderAuthoritative;
+        // #4085 (модель #3985): резерв хвоста дня под дедлайн-фольгу (#4068, ТЗ §12) СНЯТ — фольга у
+        // своего срока обеспечивается локальным штрафом в слое размещения, а не резервированием минут.
+        // Карты резерва всегда пусты → ветки reserveForDay/isReservedFoil в цикле упаковки ниже инертны
+        // (сохранены как есть, чтобы не трогать проверенный цикл; это и есть режим, проверенный на ateh).
+        var foilReserveByDay = {};
+        var resFoilDayByCut = {};
+        function reserveForDay(d) { return 0; }
         var capacity = dayEnd - dayStart;            // минут резки в рабочем окне дня
         var hasWindow = capacity > 0;
         // #3847: лимиты нахлёста за конец рабочего дня. dayEndHour = реальный конец смены
@@ -2406,7 +2402,7 @@
                     remaining: Math.round(Number(runsByCut[id] != null ? runsByCut[id] : c && c.plannedRuns) || 0),
                     perPass: Number(perPassByCut[id] != null ? perPassByCut[id] : 0) || 0,
                     anchor: anchorByCut[id] != null ? anchorByCut[id] : null,
-                    dueDay: (dueDayByCut[id] != null && isFinite(Number(dueDayByCut[id]))) ? Number(dueDayByCut[id]) : null,   // #4050: срок как индекс дня от «С»
+                    dueDay: null,   // #4085: EDD-приоритет `dueDay×вес` (#4059) снят — срок стал локальным штрафом в слое размещения; поле инертно
                     // #3792/#3974: «Зафиксировано» (🔒) — замок на ДЕНЬ. fixedDay = якорь дня фикс-резки
                     // (без 🔒 задание свободно и набивается от «С»). Внутри дня оптимизатор переставляет,
                     // на другой день/в разбивку — нет.
@@ -2432,30 +2428,19 @@
             // полос по УБЫВАНИЮ ТАЙ-БРЕЙКОМ — ниже переналадки (группировка сырья/ножей #3783 остаётся
             // главной, «блоки сырья → число полос», ТЗ §14), выше idx. Действует лишь «при прочих
             // равных» (одинаковая переналадка) — суммарной переналадки не ухудшает, но каждый день
-            // теперь начинается с бо́льшего числа ножей и убывает к вечеру (#3130). Фольга остаётся в
-            // конце дня (isFoil — старший разряд ключа).
-            // #4059: приоритет по ВОЗРАСТАНИЮ срока (EDD, ТЗ §14 — «Срок изготовления» самый большой
-            // вес). dueDay — индекс дня срока от базы «С». Стоимость = dueDay * DEADLINE_COST_MN: чем
-            // РАНЬШЕ срок, тем ДЕШЕВЛЕ → резка с более ранним сроком выбирается раньше и занимает более
-            // ранний день. Упаковщик набивает дни от «С» по возрастанию, поэтому EDD-порядок = задание
-            // НЕ уезжает ЗА свой срок, пока раньше есть ёмкость (issue #4059: заказ со сроком 26.06 не
-            // должен попадать на 29.06). Просроченная (dueDay<0) — самая дешёвая (отрицательная),
-            // добивается ПЕРВОЙ и несрочными не задвигается. Складывается в стоимость переналадки (2-й
-            // разряд ключа); вес доминирует над сменой ножей/сырья (30–50) → срок решает порядок дней,
-            // переналадка — лишь при РАВНОМ сроке. Прежний порог (#4050: срок>день→штраф, срок≤день→0)
-            // делал ОБРАТНОЕ — штрафовал раннее размещение, а опоздание было бесплатным (штраф 0), из-за
-            // чего задание уезжало за срок. Явный штраф за фактическое опоздание — в transitionCost.
-            function deadlineCostFor(id, dayIdx) {
-                if (!deadlineAware) return 0;
-                var due = state[id] ? state[id].dueDay : null;
-                if (due == null) return 0;
-                return due * deadlineW;
-            }
+            // теперь начинается с бо́льшего числа ножей и убывает к вечеру (#3130).
+            // #4085 (модель #3985): EDD-приоритет `dueDay × DEADLINE_COST_MN` (#4059) в этом фолбэк-ключе
+            // СНЯТ — срок теперь локальный штраф в слое размещения (scorePosition), а не сортировка дней
+            // здесь. `deadlineCostFor` удалён; порядок фолбэка — только переналадка/полосы (см. ключ ниже).
             function selectByConfig(ids) {
                 var best = null;
                 ids.forEach(function(id){
                     var c = state[id].cut;
-                    var key = [ (c && c.isFoil) ? 1 : 0, setupCostFor(prevPhysical, c) + deadlineCostFor(id, day), -stripBandCount(c), state[id].idx ];
+                    var key = orderAuthoritative
+                        ? [ state[id].idx ]   // #4085: порядок слоя размещения — по исходному индексу
+                        // #4085 (модель #3985): жёсткая «фольга-last» (#3717) и EDD-приоритет `dueDay×вес`
+                        // (#4059) СНЯТЫ — фолбэк-порядок пакера только по переналадке и полосам (#3785).
+                        : [ setupCostFor(prevPhysical, c), -stripBandCount(c), state[id].idx ];
                     if (!best) { best = { id: id, key: key }; return; }
                     for (var k = 0; k < key.length; k++) {
                         if (key[k] < best.key[k]) { best = { id: id, key: key }; return; }
@@ -3098,60 +3083,9 @@
     // в цепочке; удаления — только лишние записи, когда сегментов стало МЕНЬШЕ.
     // Деление Обеспечения и копию Полос на новые продолжения выполняет аппликатор (нужны id
     // новых записей и метаданные ссылок) — здесь только очередь/время/проходы. Вход не мутирует.
-    // #4068 (ТЗ §12): по РЕЗУЛЬТАТУ жадной раскладки (probeSegs) находит фольгу, оказавшуюся ЗА своим
-    // сроком, и считает резерв хвоста дня ≤ срока, чтобы во ВТОРОМ проходе упаковщика фольга встала в
-    // срок, вытеснив поздне-срочную нефольгу. Фольга — по типу сырья (`isFoil`, «фольга пачкает станок»,
-    // #3717); срок — индекс дня от базы «С» (dueDayByCut, dueDayOffsetFromBase). Правило:
-    //  - группируем фольгу по дню срока; для дней срока, где ХОТЯ БЫ ОДНА фольга уехала за срок
-    //    (день размещения > срок), резервируем в конце дня-срока суммарные минуты ВСЕХ фолег этого
-    //    срока (обе фольги одного срока сходятся в один день, ТЗ §12) и прикалываем их к этому дню;
-    //  - резерв ставим ТОЛЬКО если на днях [0..день-срока] есть достаточно ВЫТЕСНЯЕМОЙ нефольги
-    //    (срок позже фольги или без срока) — иначе двигать было бы ранне-срочную нефольгу за её срок
-    //    (недопустимо, «только фольга вправе вытеснить»); такого дня фольга не занимает.
-    // capacity — минут резки в окне дня. Чистая (без сайд-эффектов). → { foilReserveByDay,
-    // resFoilDayByCut } или null (резервировать нечего/некуда). Покрыта юнит-тестом.
-    function computeFoilDeadlineReservation(probeSegs, orderedCuts, dueDayByCut, capacity) {
-        if (!(capacity > 0)) return null;
-        var byCut = {};   // cutId → { day: первый день размещения, mins: суммарные setup+намотка }
-        (probeSegs || []).forEach(function(s){
-            var id = String(s && s.cutId);
-            var d = Math.floor(Number(s && s.windowStartMin) / 1440);
-            var mins = (Number(s && s.setupMin) || 0) + (Number(s && s.durationMin) || 0);
-            if (!byCut[id]) byCut[id] = { day: d, mins: 0 };
-            if (d < byCut[id].day) byCut[id].day = d;
-            byCut[id].mins += mins;
-        });
-        function dueOf(id) { var v = dueDayByCut && dueDayByCut[id]; return (v != null && isFinite(Number(v))) ? Number(v) : null; }
-        var foilByDueDay = {}, lateDueDays = {};
-        (orderedCuts || []).forEach(function(c){
-            if (!(c && c.isFoil)) return;
-            var id = String(c.id), due = dueOf(id), pl = byCut[id];
-            if (due == null || !pl) return;
-            (foilByDueDay[due] = foilByDueDay[due] || []).push({ id: id, mins: pl.mins });
-            if (pl.day > due) lateDueDays[due] = true;   // фольга уехала за срок
-        });
-        var foilReserveByDay = {}, resFoilDayByCut = {}, any = false;
-        Object.keys(lateDueDays).forEach(function(k){
-            var due = Number(k), targetDay = Math.max(0, due);
-            var group = foilByDueDay[due] || [];
-            var reserve = Math.min(group.reduce(function(s, g){ return s + g.mins; }, 0), capacity);
-            if (!(reserve > 0)) return;
-            // Вытесняемая нефольга на днях [0..targetDay]: срок позже фольги ИЛИ без срока.
-            var displaceable = 0;
-            (orderedCuts || []).forEach(function(c){
-                if (!c || c.isFoil) return;
-                var id = String(c.id), pl = byCut[id];
-                if (!pl || pl.day > targetDay) return;
-                var nd = dueOf(id);
-                if (nd == null || nd > due) displaceable += pl.mins;
-            });
-            if (displaceable < reserve - 1e-6) return;   // некого вытеснять в срок — не резервируем
-            foilReserveByDay[targetDay] = (foilReserveByDay[targetDay] || 0) + reserve;
-            group.forEach(function(g){ resFoilDayByCut[g.id] = targetDay; });
-            any = true;
-        });
-        return any ? { foilReserveByDay: foilReserveByDay, resFoilDayByCut: resFoilDayByCut } : null;
-    }
+    // #4085 (модель #3985): функция computeFoilDeadlineReservation (#4068 — резерв хвоста дня под
+    // дедлайн-фольгу) УДАЛЕНА. Фольга у своего срока теперь обеспечивается локальным штрафом в слое
+    // размещения (15-slot-placement, scorePosition), а не пробным проходом с резервированием минут.
 
     function planCutOperations(cuts, opts){
         opts = opts || {};
@@ -3199,8 +3133,24 @@
             (chainByLogical[String(c && c.id)] || [String(c && c.id)]).forEach(function(id){ orphanDeletes.push(String(id)); });
             return false;
         });
+        // #4085: слой размещения (модель #3985) решает СТАНОК + порядок перебором ВСЕХ точек вставки
+        // по мин. штрафу. Включается ТОЛЬКО при opts.slotPlacement && !preserveOrder (врезка стадий
+        // 4-5). По умолчанию выкл → прежний путь (orderCuts + текущий станок) не тронут.
+        var slotPlan = null;
+        if (opts.slotPlacement && !opts.preserveOrder) {
+            var capMin = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
+            slotPlan = computeSlotPlacement(merged.cuts, {
+                settings: opts.weights, times: opts.times,
+                capacityMin: capMin > 0 ? capMin : Infinity,
+                baseMidnightMs: Number(opts.planBaseMidnightMs),
+                perPassByCut: perPass, dueKeyByCut: opts.dueKeyByCut, dueDayByCut: opts.dueDayByCut,
+                dayByCut: opts.dayByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
+                machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
+                distanceExceededFor: opts.distanceExceededFor
+            });
+        }
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
-        // #3635/#3923; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
+        // #3635/#3923; slotPlan — порядок слоя размещения #4085; иначе — orderCuts) и раскроить по дням.
         function planMachineSegs(cutsOfMachine, key){
             // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
             // очереди, а не пересобирая её по стратегии (orderCuts). Нужно, чтобы автозаполнение
@@ -3223,11 +3173,15 @@
                       var pa = Number(a && a.planDate); if (!isFinite(pa) || pa <= 0) pa = Infinity;
                       var pb = Number(b && b.planDate); if (!isFinite(pb) || pb <= 0) pb = Infinity;
                       return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
-                          || (((a && a.isFoil) ? 1 : 0) - ((b && b.isFoil) ? 1 : 0))   // #3717: фольга — в конец дня
+                          // #4085: жёсткое «фольга — в конец дня» (#3717) снято; ручной порядок оператора
+                          // (planStart) сохраняется как есть — фольга оседает в конец дня штрафом при генерации.
                           || (pa - pb)
                           || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
                   })
-                : orderCuts(cutsOfMachine, opts.weights);
+                : (slotPlan   // #4085: порядок слоя размещения (индекс в очереди станка)
+                    ? cutsOfMachine.slice().sort(function(a, b){
+                          return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
+                    : orderCuts(cutsOfMachine, opts.weights));
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -3240,29 +3194,16 @@
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
                 dayAnchorByCut: effAnchorByCut,   // #3974: якорь дня ТОЛЬКО за 🔒 (фикс держит свой день); свободные — от «С»
                 weights: opts.weights,            // #4050: веса §8 (DEADLINE/EXACT_DEADLINE_COST_MN)
-                dueDayByCut: opts.dueDayByCut,     // #4050: срок каждой резки как индекс дня от «С»
-                deadlineAware: !opts.preserveOrder,   // #4050: срок влияет при переоптимизации; ручной перенос (preserveOrder) не трогаем
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
-                foilReserveByDay: null, resFoilDayByCut: null   // #4068: первый (пробный) проход — без резерва
+                orderAuthoritative: !!slotPlan   // #4085: порядок задан слоем размещения — не переигрывать
             };
-            var segs = splitMachineQueue(ordered, packOpts);
-            // #4068 (ТЗ §12): дедлайн-фольга, оказавшаяся ЗА своим сроком, должна вытеснить поздне-срочную
-            // нефольгу и встать в срок. Пробный проход (segs выше) показывает, кто уехал за срок; резервируем
-            // хвост дня ≤ срока и пакуем ЗАНОВО. Только при deadlineAware+gapFill (генерация/«Упорядочить»),
-            // не при ручном переносе (preserveOrder). Резервировать нечего/некуда → второго прохода нет.
-            if (!opts.preserveOrder && opts.gapFill) {
-                var capacity = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
-                var reservation = computeFoilDeadlineReservation(segs, ordered, opts.dueDayByCut, capacity);
-                if (reservation) {
-                    packOpts.foilReserveByDay = reservation.foilReserveByDay;
-                    packOpts.resFoilDayByCut = reservation.resFoilDayByCut;
-                    segs = splitMachineQueue(ordered, packOpts);
-                }
-            }
-            return segs;
+            // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
+            // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation
+            // удалён). Один проход упаковки без пробного второго прохода/резерва.
+            return splitMachineQueue(ordered, packOpts);
         }
         // #3974: группируем ВСЕ переданные резки по станку (без scope-фильтра дат) и раскладываем
         // каждую очередь от «С». Перелив продолжений за конец дня/«По» — обычная работа
@@ -3270,7 +3211,9 @@
         // окна-фильтра нет, все дни раскладки — наши.
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
-            var sid = c && c.slitter && c.slitter.id;
+            var sid = (slotPlan && slotPlan.slitterByCut[String(c && c.id)] != null)
+                ? slotPlan.slitterByCut[String(c && c.id)]   // #4085: станок выбран слоем размещения (перебор точек вставки)
+                : (c && c.slitter && c.slitter.id);
             if (sid == null) return;
             var key = String(sid);
             if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
@@ -3294,7 +3237,7 @@
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
                     usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
-                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                 } else {
                     var head = String(seg.parentCutId);
                     var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
@@ -3302,9 +3245,9 @@
                     var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
                     if (reuseId != null) {
                         usedByHead[head] = k + 1;
-                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                     } else {
-                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                     }
                 }
                 // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
@@ -3908,13 +3851,12 @@
     // #3783). Резки без срока (dueKey не число → Infinity) собираются в последнюю группу. Если
     // ни у одной резки срока нет — одна группа = прежнее поведение (полная обратная совместимость).
     function orderCuts(cuts, weights){
-        var rest = [], foil = [];
-        (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
         var opts = makePlanningOptions(weights);
-        // #3717: фольга — отдельной группой в конец дня. #3974: внутри rest и foil — по стратегии
-        // (SETUP: группировка сырья/ножей — минимум переналадок). Срок изготовления (EDD) в
-        // упорядочивании НЕ участвует (только цвет строки, dueColorClass); отменён #3815.
-        var seq = sequenceForStrategy(rest, opts).concat(sequenceForStrategy(foil, opts));
+        // #4085 (модель #3985): жёсткое «фольга — отдельной группой в конец дня» (#3717) СНЯТО.
+        // Порядок целиком по стратегии (SETUP: группировка сырья/ножей — минимум переналадок). Фольга
+        // в конце дня обеспечивается штрафом FOIL_NOTEND_COST_MN в слое размещения, а не сортировкой.
+        // Срок изготовления (EDD) в упорядочивании НЕ участвует (только цвет строки, dueColorClass).
+        var seq = sequenceForStrategy((cuts || []).slice(), opts);
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
             copy.sequence = i + 1;

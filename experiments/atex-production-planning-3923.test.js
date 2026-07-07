@@ -78,15 +78,17 @@ assertEqual(orderOf(planning.planCutOperations(withSeq, oneDay)),
     orderOf(planning.planCutOperations(noSeq, oneDay)),
     '#3923: порядок раскладки не зависит от хранимого sequence (planStart — единственный ключ)');
 
-// ── 4) фольга остаётся в конце дня (isFoil важнее planStart, #3717) ──
-// N1@08:00, F@09:00 (фольга в СЕРЕДИНЕ по времени), N2@10:00 → фольга уходит в конец.
+// ── 4) preserveOrder уважает ручной порядок planStart — фольгу НЕ пересортировывает (#4085) ──
+// N1@08:00, F@09:00 (фольга в СЕРЕДИНЕ), N2@10:00. Жёсткое «фольга в конец» в preserveOrder (#3717) СНЯТО
+// #4085: ручной путь сохраняет порядок оператора (planStart) как есть. Фольгу в конец дня уводит слой
+// размещения ПРИ ГЕНЕРАЦИИ (штраф FOIL_NOTEND), а не пересортировка сохранённого/ручного порядка.
 var foilDay = { perPassByCut: { N1: 10, F: 10, N2: 10 }, dayStartMin: 0, dayEndMin: 10000,
     times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: BASE_MS, preserveOrder: true };
 var withFoil = [ cut('N1', 0, 1, 'M1', widths([[152, 1]]), false),
                  cut('F', 1, 2, 'MF', widths([[100, 1]]), true),
                  cut('N2', 2, 3, 'M1', widths([[152, 1]]), false) ];
-assertEqual(orderOf(planning.planCutOperations(withFoil, foilDay)), ['N1', 'N2', 'F'],
-    'preserveOrder: фольга (planStart 09:00) уходит в конец дня, isFoil важнее planStart (#3717)');
+assertEqual(orderOf(planning.planCutOperations(withFoil, foilDay)), ['N1', 'F', 'N2'],
+    'preserveOrder: порядок строго по planStart (N1@08→F@09→N2@10) — фольга не пересортировывается (#4085)');
 
 // ── 5) planMoveSequences — желаемый порядок по planStart, возвращает { ordered } ──
 var dayCuts = [ { id: 'b', planDate: ts(2) }, { id: 'a', planDate: ts(1) }, { id: 'c', planDate: ts(3) } ];
