@@ -19,9 +19,9 @@
 жёсткая фольга, резерв #4068) снимаем.
 
 ## Стадии (детали — в плане)
-- [x] **0 — Характеризация** ✅ `experiments/atex-production-planning-4085-characterization.test.js` (8/8): дробление, фольга-последней, EDD, обед, нахлёст, отпуск, продолжение
-- [ ] **1 — Достроить scorer**: `EXACT_DEADLINE` в `transitionCost` (10:4641), `dayKeyFromOffset`, проброс весов; тесты (пример §8.3 = 3/2) ← ТЕКУЩАЯ
-- [ ] 2 — Модуль `15-slot-placement.js` (чистый, не врезан) + юнит-тесты
+- [x] **0 — Характеризация** ✅ `...-4085-characterization.test.js` (8/8): дробление, фольга-последней, EDD, обед, нахлёст, отпуск, продолжение
+- [x] **1 — Достроить scorer** ✅ `...-4085-scorer.test.js` (20/20): `EXACT_DEADLINE` (day==due) в `transitionCost`, `dayKeyFromOffset` в 00-core (+экспорт), пример §8.3=3/2. Веса уже плоско в opts (makePlanningOptions). ВСЁ МЁРТВОЕ (нет живого вызова) → поведение не изменилось.
+- [ ] **2 — Модуль `15-slot-placement.js`** (чистый, не врезан) + юнит-тесты ← ТЕКУЩАЯ
 - [ ] 3 — Режим `orderAuthoritative` в `splitMachineQueue` (дефолт off)
 - [ ] 4 — Врезать Reorder/move (`planMachineSegs` 10:3219)
 - [ ] 5 — Врезать Generate (`runGenerateCuts` 20:3609) + ретайр `rebalanceSlitterLoad`

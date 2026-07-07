@@ -44,6 +44,7 @@
         dueColorClass: dueColorClass,           // #3769
         cutDueKeys: cutDueKeys,                 // #3769
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
+        dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
         buildFields: buildFields,
         runWithConcurrency: runWithConcurrency,   // #3998: пул сохранений с лимитом потоков

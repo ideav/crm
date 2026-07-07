@@ -681,6 +681,20 @@
         return Math.round((dt.getTime() - base) / 86400000);
     }
 
+    // #4085 (ТЗ §8): ОБРАТНОЕ к dueDayOffsetFromBase — индекс дня раскладки от базы «С»
+    // (planBaseMidnightMs) → ключ дня YYYYMMDD. Слой размещения (15-slot-placement) оценивает день
+    // приземления слота (prefixDayOffset) и через этот хелпер получает placementDayKey, чтобы
+    // transitionCost сравнил его со сроком next.dueKey (день>срока → DEADLINE, день=сроку → EXACT).
+    // Считаем по компонентам даты (устойчиво к переводу часов), формат совпадает с dueKey.
+    function dayKeyFromOffset(baseMidnightMs, dayOffset) {
+        var base = Number(baseMidnightMs), off = Number(dayOffset);
+        if (!isFinite(base) || !isFinite(off)) return null;
+        var b = new Date(base);
+        if (isNaN(b.getTime())) return null;
+        var d = new Date(b.getFullYear(), b.getMonth(), b.getDate() + Math.round(off), 0, 0, 0, 0);
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    }
+
     // #3599: видимость по ДИАПАЗОНУ дат [dateFrom; dateTo] (раньше — один день). Пустые
     // оба → дата не фильтрует; задан один край → открытый интервал. Резка без «Дата план»
     // (ещё не запланирована) видна всегда. Сравнение по календарному дню (planDateDayKey).
