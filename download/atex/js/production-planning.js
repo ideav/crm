@@ -8820,16 +8820,19 @@
             }
             self.notify('Задание перенесено на ' + dateLabel +
                 (position === 'end' ? ' (в конец дня)' : ' (в начало дня)') + slitLabel, 'success');
-            // #3840: перенос менял «Дату план»/«Очередность» только переносимого задания и
-            // целевого дня — день-ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте
-            // вынутой (срочной) резки висел простой (РМ «Диаграмма Ганта» рисует сохранённый
-            // planStart). Пересобираем ВРЕМЯ старта затронутых дней, СОХРАНЯЯ ручной порядок
-            // (preserveOrder, #3619): gapFill пакует встык → дыра схлопывается, фольга остаётся
-            // в конце дня (#3717), замки зафиксированных (#3792) не нарушаются. autoSequenceQueue
-            // пишет planStart/«Очередность» только изменившимся (идемпотентно, #3427) и сам делает
-            // persistCutSetupColumns + reload/render — поэтому отдельный persistCutSetupColumns выше
-            // убран. Терминальный шаг — как после генерации (runGenerateCuts).
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+            // #3840: перенос менял «Дату план» только переносимого задания и целевого дня — день-
+            // ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте вынутой резки висел простой
+            // (РМ «Диаграмма Ганта» рисует сохранённый planStart). Терминальный autoSequenceQueue
+            // пересобирает время старта затронутых дней; persistCutSetupColumns + reload/render делает
+            // сам (отдельный persistCutSetupColumns выше убран).
+            // #4074: пересобираем ПО СРОКАМ (preserveOrder=false, deadlineAware — как «Упорядочить»),
+            // чтобы перенос не отправлял задания за срок («несоблюдение сроков»). Раньше терминал был
+            // preserveOrder=true (deadlineAware выкл): паковал всё от «С» без учёта сроков → появлялись
+            // просроченные задания. Перенесённое задание ЗАКРЕПЛЯЕМ на выбранном дне (pinCutIds —
+            // временный замок дня в buildSequenceOps), остальной план раскладывается по срокам вокруг
+            // (перестановка допустима — важно не нарушить сроки, #4074). Фольга остаётся в конце дня
+            // (#3717), фиксации (#3792) не нарушаются; пишутся только изменившиеся записи (#3427).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, { pinCutIds: [String(cut.id)] });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -11337,7 +11340,7 @@
     // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
     // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
     // (можно временно подменить станок для оценки переназначения). → { ops, cutsById }.
-    AtexProductionPlanning.prototype.buildSequenceOps = function(cutsArray, strategy, preserveOrder) {
+    AtexProductionPlanning.prototype.buildSequenceOps = function(cutsArray, strategy, preserveOrder, moveScope) {
         var self = this;
         var cuts = cutsArray || self.cuts || [];
         var planOptions = makePlanningOptions(strategy || PLANNING_STRATEGY_SETUP, self.changeTimes, self.daySettings);   // #4059: веса из «Настройки»
@@ -11371,7 +11374,25 @@
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
         var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
-        var ops = planCutOperations(planInput, {
+        // #4074: ручной перенос 🗓 пересобирает план ПО СРОКАМ (deadlineAware, как «Упорядочить»,
+        // preserveOrder=false), чтобы задания не уезжали за срок. Прежде перенос завершался
+        // preserveOrder-пересборкой (deadlineAware выкл): она паковала всё от «С» вперёд без учёта
+        // сроков и толкала задания за их срок («перенос с несоблюдением сроков», issue #4074).
+        // Перенесённое задание при этом ЗАКРЕПЛЯЕМ на выбранном пользователем дне: временно помечаем
+        // c.fixed (как 🔒 «замок дня») — planCutOperations держит его день (effAnchorByCut от «Даты
+        // план»), остальное раскладывает по срокам вокруг. Замок снимаем в finally (c.fixed мутируем на
+        // общих объектах self.cuts только на время планирования). Без moveScope — прежнее поведение.
+        var pinnedRestore = [];
+        if (moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length) {
+            var pinSet = {};
+            moveScope.pinCutIds.forEach(function(id){ pinSet[String(id)] = true; });
+            planInput.forEach(function(c){
+                if (c && !c.fixed && pinSet[String(c.id)]) { c.fixed = true; pinnedRestore.push(c); }   // временный замок перенесённого
+            });
+        }
+        var ops;
+        try {
+        ops = planCutOperations(planInput, {
             weights: planOptions,
             times: self.changeTimes,
             dayStartMin: dayWindow.startMin,
@@ -11391,16 +11412,19 @@
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs)   // #3764: окна «Отпуска» по станкам
         });
+        } finally {
+            pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
+        }
 
         var cutsById = {};
         cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
         return { ops: ops, cutsById: cutsById };
     };
 
-    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder) {
+    AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder, moveScope) {
         var self = this;
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
-        var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder);
+        var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder, moveScope);   // #4074: moveScope.pinCutIds — закрепить перенесённое задание при пересборке по срокам
         var ops = built.ops;
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
