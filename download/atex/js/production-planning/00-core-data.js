@@ -72,6 +72,23 @@
         if (!ppTraceOn()) return;
         try { console.warn.apply(console, ['[pp-trace] ⚠️'].concat([].slice.call(arguments))); } catch (e) {}
     }
+    // #4095: трассировка СЛОЯ РАЗМЕЩЕНИЯ (#3985/#4085) — отдельный, БОЛЕЕ ГРОМКИЙ канал, чем ppTrace.
+    // По умолчанию ВКЛючён в браузере (заказчик #4095: «включи и не отключай пока не скажу»), чтобы лог
+    // выбора слота печатался на «Сгенерировать»/«Упорядочить» без ручного тумблера. Выключить:
+    //   • в консоли:  window.PP_TRACE_PLACEMENT = false
+    // В Node/тестах МОЛЧИТ, кроме явного форса globalThis.PP_TRACE_PLACEMENT = true (чтобы тест видел лог).
+    function slotTraceOn() {
+        try {
+            if (typeof globalThis !== 'undefined' && globalThis.PP_TRACE_PLACEMENT === true) return true;
+            if (typeof window === 'undefined') return false;
+            if (window.PP_TRACE_PLACEMENT === false) return false;
+            return true;
+        } catch (e) { return false; }
+    }
+    function slotTrace() {
+        if (!slotTraceOn()) return;
+        try { console.log.apply(console, ['[pp-slot]'].concat([].slice.call(arguments))); } catch (e) {}
+    }
     // Мин от полуночи → «ЧЧ:ММ» (для читаемого лога; отрицательные/дробные допустимы).
     function ppClock(min) {
         var m = Math.round(Number(min) || 0);
