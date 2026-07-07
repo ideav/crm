@@ -1,19 +1,12 @@
-// Unit tests for the cut-gantt anti-overlap guard (ideav/crm#3887).
+// Unit tests for cut-gantt bar placement — «РИСУЕМ КАК ЕСТЬ» (ideav/crm#4099, ревизия #3887).
 //
-// Sibling of the production-planning queue guard #3885/#3886. Both РМ — the queue
-// («Планирование производства», scheduleFromStored) and the Gantt diagram («Диаграмма
-// Ганта», layoutGroups) — draw ONE saved plan (planStart = t1078). When two cuts of the
-// SAME machine on one day carry the same / overlapping stored planStart (a leftover of an
-// incomplete start re-pack: a move before #3840, or a re-sequence limited to the filter
-// scope #3660), their bars land on the same axis point → they overlap. #3886 fixed the
-// queue; this fixes the Gantt track the same way.
-//
-// dedupeBarStarts lays same-day cuts edge to edge: a cut's window (setup + cut) never
-// starts before the previous same-day cut's window ends. Only PLANNED bars are moved —
-// started/finished cuts show real time as-is, but their window still pushes the next
-// planned bar. Non-overlapping saved starts (incl. lunch gaps) and cuts on different days
-// stay exactly as stored (display == saved, #3846 philosophy). layoutGroups then positions
-// and labels each bar by the deduped start, so two collided cuts no longer stack.
+// Both РМ — the queue (scheduleFromStored) and the Gantt (layoutGroups/dedupeBarStarts) —
+// draw ONE saved plan (planStart = t1078). #3887 used to lay same-day cuts EDGE TO EDGE
+// (anti-overlap), which hid an over-booked day behind a continuous train running far past
+// the shift end (#4099). The customer asked to draw AS IS: dedupeBarStarts now returns the
+// SAVED start of every bar verbatim (no shift). Because each cut is its own Gantt row,
+// overlapping windows are shown honestly (bars share the same left edge) instead of being
+// serialized into the night.
 //
 // Run with: node experiments/atex-cut-gantt-3887.test.js
 
@@ -36,7 +29,6 @@ function assertEqual(actual, expected, name) {
 var ms = gantt.parseDateTimeMs;
 
 // Планируемая резка: окно = (наладка ножей + смена сырья) + «Резка и Лидер» (cutTimeMin).
-// Главное значение planStart = planDate; нет факт. старта → бар плановый (его и двигаем).
 function cut(id, planDate, knife, material, cutAndLeader, seq) {
     return {
         id: id, number: planDate, planDate: planDate,
@@ -45,8 +37,7 @@ function cut(id, planDate, knife, material, cutAndLeader, seq) {
         setupKnifeMin: knife, setupMaterialMin: material, cutTimeMin: cutAndLeader
     };
 }
-// Начатая резка: есть факт. старт → cutSetupMin/cutBarMinutes берут фактическое окно, бар
-// показывает реальное время и сдвигу не подлежит.
+// Начатая резка: есть факт. старт → бар по фактическому времени.
 function runningCut(id, startDate, endDate) {
     return {
         id: id, number: startDate, planDate: startDate,
@@ -55,29 +46,27 @@ function runningCut(id, startDate, endDate) {
     };
 }
 
-// ── 1. Коллизия #3885 в Ганте: обе резки Станка 4 / 03.07 сохранены на 08:00 ──
-// 188600: наладка 45 (30+15), резка+лидер 475 → окно 08:00–16:40.
-// 191769: наладка 45, резка+лидер 16 → сохранено тоже 08:00, должно встать на 16:40.
+// ── 1. #4099: коллизия (обе на 08:00) — старты КАК ЕСТЬ (обе остаются на 08:00) ──
 (function () {
     var starts = gantt.dedupeBarStarts([
         cut('188600', '03.07.2026 08:00', 30, 15, 475, 1),
         cut('191769', '03.07.2026 08:00', 30, 15, 16, 25)
     ]);
-    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 16:40')],
-        '#3887 коллизия — вторая резка встаёт за концом окна первой (не две в 08:00)');
+    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 08:00')],
+        '#4099 коллизия — обе резки остаются на сохранённом 08:00 (не разносятся встык)');
 })();
 
-// ── 2. Непересекающиеся старты (в т.ч. обеденный зазор) не трогаем (#3846) ──
+// ── 2. Непересекающиеся старты (в т.ч. обеденный зазор) — как есть (#3846) ──
 (function () {
     var starts = gantt.dedupeBarStarts([
         cut('A', '03.07.2026 08:00', 0, 0, 200),   // 08:00–11:20
-        cut('B', '03.07.2026 12:20', 0, 0, 60)     // 12:20–13:20 (зазор 11:20→12:20 = обед, сохраняем)
+        cut('B', '03.07.2026 12:20', 0, 0, 60)     // 12:20–13:20
     ]);
     assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 12:20')],
-        'непересечение — разные старты и обеденный зазор не трогаются');
+        'непересечение — разные старты не трогаются');
 })();
 
-// ── 3. Одинаковое 08:00, но РАЗНЫЕ дни — не объединяем ──
+// ── 3. Одинаковое 08:00, но РАЗНЫЕ дни — раздельно ──
 (function () {
     var starts = gantt.dedupeBarStarts([
         cut('D0', '03.07.2026 08:00', 0, 0, 60),
@@ -87,41 +76,39 @@ function runningCut(id, startDate, endDate) {
         'разные дни — оба в 08:00 остаются раздельными');
 })();
 
-// ── 4. Каскад: три резки сохранены на 08:00 — встают встык в порядке очереди ──
+// ── 4. #4099: три резки на 08:00 — все остаются на 08:00 (как есть) ──
 (function () {
     var starts = gantt.dedupeBarStarts([
-        cut('C1', '03.07.2026 08:00', 0, 0, 100),   // 08:00–09:40
-        cut('C2', '03.07.2026 08:00', 0, 0, 50),    // → 09:40–10:30
-        cut('C3', '03.07.2026 08:00', 0, 0, 30)     // → 10:30–11:00
+        cut('C1', '03.07.2026 08:00', 0, 0, 100),
+        cut('C2', '03.07.2026 08:00', 0, 0, 50),
+        cut('C3', '03.07.2026 08:00', 0, 0, 30)
     ]);
-    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 09:40'), ms('03.07.2026 10:30')],
-        'каскад — три резки с общим стартом встают встык');
+    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 08:00'), ms('03.07.2026 08:00')],
+        '#4099 каскад — три резки с общим стартом остаются на 08:00');
 })();
 
-// ── 5. Частичный нахлёст (не точное совпадение старта) тоже снимается ──
+// ── 5. #4099: частичный нахлёст сохраняется как есть ──
 (function () {
     var starts = gantt.dedupeBarStarts([
         cut('P1', '03.07.2026 08:00', 0, 0, 120),   // 08:00–10:00
-        cut('P2', '03.07.2026 09:00', 0, 0, 40)     // сохранено 09:00 (нахлёст) → на 10:00
+        cut('P2', '03.07.2026 09:00', 0, 0, 40)     // 09:00 → остаётся 09:00 (нахлёст виден)
     ]);
-    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 10:00')],
-        'частичный нахлёст — поздняя резка вытолкнута за конец окна предыдущей');
+    assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 09:00')],
+        '#4099 частичный нахлёст — поздняя резка остаётся на своём сохранённом старте');
 })();
 
-// ── 6. Начатую резку (есть факт. старт) НЕ двигаем — реальное время как есть ──
-// Плановая 08:00–16:40 ставит prevEnd=16:40, но начатая в 08:00 показывает свой реальный
-// старт и сдвигу не подлежит (хотя и пересекается — конфликт виден, время не искажаем).
+// ── 6. Начатую резку (есть факт. старт) показываем по её реальному времени (как есть) ──
 (function () {
     var starts = gantt.dedupeBarStarts([
         cut('PLAN', '03.07.2026 08:00', 30, 15, 475),
         runningCut('RUN', '03.07.2026 08:00', '03.07.2026 08:40')
     ]);
     assertEqual(starts, [ms('03.07.2026 08:00'), ms('03.07.2026 08:00')],
-        'начатая резка не сдвигается — бар по факт. времени');
+        'начатая резка — бар по факт. времени (как есть)');
 })();
 
-// ── 7. Интеграция layoutGroups: коллизия → разные leftPx, встык, подпись по сдвигу ──
-// На дорожке Станка 4 две резки должны идти встык (вторая после первой), а не в одной точке.
+// ── 7. Интеграция layoutGroups: коллизия рисуется КАК ЕСТЬ — оба бара с одного левого края,
+//      реальной ширины, подпись по сохранённому старту; перекрытие видно (#4099). ──
 (function () {
     var range = gantt.ganttRange('2026-07-03', 'day');
     var now = ms('2026-07-03 09:00');
@@ -132,16 +119,16 @@ function runningCut(id, startDate, endDate) {
     var tasks = laid.groups[0].tasks.map(function (t) {
         return [t.cut.id, t.leftPx, t.widthPx, t.barText];
     });
-    // 1-я резка: 08:00, окно 520 мин × 2 = 1040 px (наладка 60+30 + резка 950); подпись 08:00–16:40.
-    // 2-я резка: сдвинута на 16:40 → leftPx 1040 (= конец 1-й), без наложения; подпись 16:40–17:41.
+    // Обе резки — 08:00 (leftPx 0). Ширина реальная: 520 мин × 2 = 1040 px и 61 мин × 2 = 122 px.
+    // Подпись — по сохранённому старту 08:00.
     assertEqual(tasks, [
         ['188600', 0, 1040, '08:00-16:40 (520 мин)'],
-        ['191769', 1040, 122, '16:40-17:41 (61 мин)']
-    ], 'layoutGroups #3887 — бары встык, leftPx и подпись по сдвинутому старту');
-    // Инвариант «нет наложения»: вторая начинается не раньше конца первой.
+        ['191769', 0, 122, '08:00-09:01 (61 мин)']
+    ], 'layoutGroups #4099 — бары как есть: общий левый край, реальная ширина, подпись по старту');
+    // Инвариант «как есть»: перекрытие ВИДНО — 2-я начинается внутри окна 1-й (не вытолкнута).
     var t0 = laid.groups[0].tasks[0], t1 = laid.groups[0].tasks[1];
-    assertEqual(t1.leftPx >= t0.leftPx + t0.widthPx, true,
-        'layoutGroups #3887 — нет наложения: leftPx 2-й ≥ правый край 1-й');
+    assertEqual(t1.leftPx < t0.leftPx + t0.widthPx, true,
+        'layoutGroups #4099 — перекрытие показано как есть (2-я в пределах окна 1-й)');
 })();
 
 console.log('\n' + passed + ' assertions passed.');

@@ -2040,18 +2040,15 @@
         items.forEach(function(it, i) { it._i = i; });
         items.sort(function(a, b) { return (a.windowStartMin - b.windowStartMin) || (a._i - b._i); });
         var out = [];
-        var prevWindowEndByDay = {};
         items.forEach(function(it) {
-            // #3885: устранить нахлёст с предыдущей резкой того же дня — сдвинуть начало окна к
-            // её концу. День берём по СОХРАНЁННОМУ старту (до сдвига), чтобы группировка по дате
-            // (заголовок/минуты дня) не уезжала; сдвиг лечит только нахлёст внутри дня.
+            // #4099: РИСУЕМ КАК ЕСТЬ. Раньше нахлёст сохранённых окон одного дня разносился встык
+            // (#3885/#3920) — это скрывало переполнение дня (сумма > смены), превращая его в цуг,
+            // уходящий далеко за конец смены. Заказчик (#4099): «нефиг сжимать/растягивать — рисуй
+            // как есть». Ставим окно по СОХРАНЁННОМУ старту без сдвига: перекрытие видно как есть,
+            // сразу ясно, что на день назначено больше работы, чем влезает в смену.
             var windowStartMin = it.windowStartMin;
-            var day = Math.floor(windowStartMin / 1440);
-            var prevEnd = prevWindowEndByDay[day];
-            if (prevEnd != null && windowStartMin < prevEnd) windowStartMin = prevEnd;
             var startMin = round3(windowStartMin + it.setupMin);            // старт намотки (после настройки)
             var finishMin = round3(startMin + it.durationMin);
-            prevWindowEndByDay[day] = finishMin;   // окно занятости = setup + намотка (лидер уже в durationMin)
             out.push({
                 cutId: it.cutId,
                 startMin: startMin,
