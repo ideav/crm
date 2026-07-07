@@ -5798,7 +5798,7 @@
         // на длительность перерывов (аналог накладок Ганта). Обед подписан значком на несущей
         // карточке вместо прежней плашки .atex-pp-lunch; перерывы 10:00/15:00 сдвигают времена.
         var _brkInfo = computeQueueBreakMarkers(dayCutsBySched, schedById, intraDayBreaks(self.daySettings));
-        var breakMarkersByCut = _brkInfo.markersByCut, breakShiftByCut = _brkInfo.shiftByCut;
+        var breakMarkersByCut = _brkInfo.markersByCut, breakShiftByCut = _brkInfo.shiftByCut, breakExtendByCut = _brkInfo.extendByCut;
         // Уборка в конце рабочего дня (#3155): блок после последней резки каждого дня.
         var cleanupByDay = {};
         dayCleanups(schedule, { cleanupMin: dayWindow.cleanupMin, shiftEndMin: dayWindow.endMin })   // #3599: уборка ПОСЛЕ DAY_END_HOUR
@@ -5894,7 +5894,7 @@
                 // (окно = переналадка, минуты вверх), а не строку расписания резки.
                 var scheduleText = isSetupTask
                     ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
-                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)]);
+                    : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)]);
                 if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
                         cutId: String(c.id),
