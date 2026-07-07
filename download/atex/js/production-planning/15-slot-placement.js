@@ -83,7 +83,9 @@
         ctx = ctx || {};
         var cap = Number(ctx.capacityMin);
         if (!isFinite(cap) || cap <= 0) cap = Infinity;
-        function skipOff(d){ var g = 0; while (ctx.machineDayOff && ctx.machineDayOff(d) && g++ < 4000) d++; return d; }
+        // Нерабочие дни — этого станка: ctx.machineDayOff (прямо) либо ctx.machineDayOffFor(sid) при переборе.
+        var dayOffFn = ctx.machineDayOff || (ctx.machineDayOffFor && ctx.slitterId != null ? ctx.machineDayOffFor(ctx.slitterId) : null);
+        function skipOff(d){ var g = 0; while (dayOffFn && dayOffFn(d) && g++ < 4000) d++; return d; }
         var day = skipOff(0), clock = 0, startOf = day;
         for (var i = 0; i <= index && i < machineSlots.length; i++){
             var cur = machineSlots[i];
@@ -283,4 +285,48 @@
                                                .map(function(s){ return s.id; });
         });
         return out;
+    }
+
+    function distinctSlitterIds(cutsList){
+        var seen = {}, out = [];
+        (cutsList || []).forEach(function(c){
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid != null && !seen[String(sid)]){ seen[String(sid)] = 1; out.push(String(sid)); }
+        });
+        return out;
+    }
+
+    // ЕДИНАЯ точка входа размещения (для planCutOperations, стадии 4-5): по резкам контроллера
+    // строит занятость (фикс. 🔒 — неподвижные соседи + отпуска), размещает подвижные перебором
+    // всех точек вставки, прогоняет релокацию → { slitterByCut, orderIdxByCut } (назначение станка
+    // и порядок в его очереди). Чистая: dueKey/workMin/ёмкость/нерабочие дни/допустимость — из ctx.
+    function computeSlotPlacement(cutsList, ctx){
+        ctx = ctx || {};
+        var perPass = ctx.perPassByCut || {};
+        var dueKeyBy = ctx.dueKeyByCut || {};
+        var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
+        var fixedSlots = [], movable = [];
+        (cutsList || []).forEach(function(c){
+            var id = String(c.id);
+            var s = slotFromCut(c, dueKeyBy[id]);
+            s.workMin = (Number(perPass[id]) || 0) * (Number(c.plannedRuns) || 0);
+            if (c.fixed){ if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id); fixedSlots.push(s); }
+            else movable.push(s);
+        });
+        var occ = seedOccupancy(fixedSlots, ctx.vacationSlots || [], slitterIds);
+        var placeCtx = { settings: ctx.settings, times: ctx.times, capacityMin: ctx.capacityMin,
+                         baseMidnightMs: ctx.baseMidnightMs, perPassByCut: perPass,
+                         machineDayOffFor: ctx.machineDayOffFor, feasibleMachine: ctx.feasibleMachine,
+                         distanceExceededFor: ctx.distanceExceededFor };
+        placeAllSlots(occ, movable, placeCtx);
+        if (ctx.relocate !== false) relocatePass(occ, ctx.dayByCut || null, slotExtend(placeCtx, { dueDayByCut: ctx.dueDayByCut }));
+        var slitterByCut = {}, orderIdxByCut = {};
+        Object.keys(occ.byMachine).forEach(function(sid){
+            var idx = 0;
+            occ.byMachine[sid].forEach(function(s){
+                if (s.kind !== 'cut') return;
+                slitterByCut[s.id] = sid; orderIdxByCut[s.id] = idx++;
+            });
+        });
+        return { slitterByCut: slitterByCut, orderIdxByCut: orderIdxByCut, occupancy: occ };
     }

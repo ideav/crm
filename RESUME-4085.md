@@ -26,9 +26,9 @@
 - [x] **1 — Достроить scorer** ✅ `...-4085-scorer.test.js` (20/20): `EXACT_DEADLINE` (day==due) в `transitionCost`, `dayKeyFromOffset` в 00-core (+экспорт), пример §8.3=3/2. Веса уже плоско в opts (makePlanningOptions). ВСЁ МЁРТВОЕ (нет живого вызова) → поведение не изменилось.
 - [x] **2 — Модуль `15-slot-placement.js`** ✅ `...-4085-slot-placement.test.js` (19/19): seedOccupancy, prefixDayOffset (порт packMachine), scorePosition, placeSlot/placeAllSlots (перебор всех точек, §8.4-исключение), canInsertAt (запрет в цепочку), relocatePass (фольга/просрочка). Экспортирован в `planning`. НЕ врезан.
 - [x] **3 — Режим `orderAuthoritative` в `splitMachineQueue`** ✅ `...-4085-order-authoritative.test.js` (5/5): ключ selectByConfig → [idx], фольга/EDD не переигрывают порядок; дефолт off (характеризация 8/8, 12 existing green).
-- [ ] **4 — Врезать Reorder/move** (`planMachineSegs` 10:3219, за opts-флагом) ← ТЕКУЩАЯ
-- [ ] 5 — Врезать Generate (`runGenerateCuts` 20:3609) + ретайр `rebalanceSlitterLoad`
-- [ ] 6 — Снять дрейф (EDD-терм / фольга / резерв #4068)
+- [x] **4 — Врезка в движок (gated)** ✅ `...-4085-slotplacement-wiring.test.js` (5/5): `opts.slotPlacement` в `planCutOperations` → `computeSlotPlacement` (станок+порядок), `orderAuthoritative`, без резерва #4068, `slitterId` в updates. Дефолт OFF. Едина для Reorder+Generate (оба через planCutOperations). Живое поведение НЕ тронуто.
+- [ ] **5 — ЖИВОЙ флип в контроллере** ← ТЕКУЩАЯ: buildSequenceOps ставит `slotPlacement`+ctx; `applySplitPlan` пишет `slitterId`; ретайр `rebalanceSlitterLoad`. РИСК: правит write-path; юнит-тест ограничен (report/object таймаутят) → ручная проверка на ateh.
+- [ ] 6 — Удалить мёртвый дрейф (deadlineCostFor/EDD-терм, фольга-concat в orderCuts, computeFoilDeadlineReservation) + доки ТЗ/алгоритм
 - ТЗ `docs/atex_planning_tz.md` + алгоритм-док — в PR соответствующих стадий.
 
 ## Журнал (что сделано)

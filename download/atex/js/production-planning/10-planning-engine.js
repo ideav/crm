@@ -3207,8 +3207,24 @@
             (chainByLogical[String(c && c.id)] || [String(c && c.id)]).forEach(function(id){ orphanDeletes.push(String(id)); });
             return false;
         });
+        // #4085: слой размещения (модель #3985) решает СТАНОК + порядок перебором ВСЕХ точек вставки
+        // по мин. штрафу. Включается ТОЛЬКО при opts.slotPlacement && !preserveOrder (врезка стадий
+        // 4-5). По умолчанию выкл → прежний путь (orderCuts + текущий станок) не тронут.
+        var slotPlan = null;
+        if (opts.slotPlacement && !opts.preserveOrder) {
+            var capMin = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
+            slotPlan = computeSlotPlacement(merged.cuts, {
+                settings: opts.weights, times: opts.times,
+                capacityMin: capMin > 0 ? capMin : Infinity,
+                baseMidnightMs: Number(opts.planBaseMidnightMs),
+                perPassByCut: perPass, dueKeyByCut: opts.dueKeyByCut, dueDayByCut: opts.dueDayByCut,
+                dayByCut: opts.dayByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
+                machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
+                distanceExceededFor: opts.distanceExceededFor
+            });
+        }
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
-        // #3635/#3923; иначе — orderCuts по стратегии) и раскроить по дням (splitMachineQueue).
+        // #3635/#3923; slotPlan — порядок слоя размещения #4085; иначе — orderCuts) и раскроить по дням.
         function planMachineSegs(cutsOfMachine, key){
             // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
             // очереди, а не пересобирая её по стратегии (orderCuts). Нужно, чтобы автозаполнение
@@ -3235,7 +3251,10 @@
                           || (pa - pb)
                           || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
                   })
-                : orderCuts(cutsOfMachine, opts.weights);
+                : (slotPlan   // #4085: порядок слоя размещения (индекс в очереди станка)
+                    ? cutsOfMachine.slice().sort(function(a, b){
+                          return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
+                    : orderCuts(cutsOfMachine, opts.weights));
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -3254,6 +3273,7 @@
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
+                orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать (фольга/EDD)
                 foilReserveByDay: null, resFoilDayByCut: null   // #4068: первый (пробный) проход — без резерва
             };
             var segs = splitMachineQueue(ordered, packOpts);
@@ -3261,7 +3281,7 @@
             // нефольгу и встать в срок. Пробный проход (segs выше) показывает, кто уехал за срок; резервируем
             // хвост дня ≤ срока и пакуем ЗАНОВО. Только при deadlineAware+gapFill (генерация/«Упорядочить»),
             // не при ручном переносе (preserveOrder). Резервировать нечего/некуда → второго прохода нет.
-            if (!opts.preserveOrder && opts.gapFill) {
+            if (!opts.preserveOrder && opts.gapFill && !slotPlan) {   // #4085: в слот-режиме фольга — штрафом, резерв #4068 не нужен
                 var capacity = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0);
                 var reservation = computeFoilDeadlineReservation(segs, ordered, opts.dueDayByCut, capacity);
                 if (reservation) {
@@ -3278,7 +3298,9 @@
         // окна-фильтра нет, все дни раскладки — наши.
         var byMachine = {}, mOrder = [];
         merged.cuts.forEach(function(c){
-            var sid = c && c.slitter && c.slitter.id;
+            var sid = (slotPlan && slotPlan.slitterByCut[String(c && c.id)] != null)
+                ? slotPlan.slitterByCut[String(c && c.id)]   // #4085: станок выбран слоем размещения (перебор точек вставки)
+                : (c && c.slitter && c.slitter.id);
             if (sid == null) return;
             var key = String(sid);
             if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
@@ -3302,7 +3324,7 @@
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
                     usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
-                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                 } else {
                     var head = String(seg.parentCutId);
                     var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
@@ -3310,9 +3332,9 @@
                     var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
                     if (reuseId != null) {
                         usedByHead[head] = k + 1;
-                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                     } else {
-                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs });
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
                     }
                 }
                 // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
