@@ -6120,16 +6120,19 @@
                 timingCtx.continuesFromPrevDay = !!spans.fromPrev;
             }
             var spanBadges = [];
-            // #4075: серый ЗНАЧОК обеда/перерыва (пауза ⏸, не слово) — ЛЕВЕЕ значков смежности
-            // дня (←/→), в том же углу справа внизу карточки. Несущая — та, чьё окно накрыло
-            // перерыв/обед; вид и время — в title, как накладка Ганта («Обед 12:20-13:00» /
-            // «Перерыв 10:00-10:10»). ︎ — текстовое представление, чтобы ⏸ красился в серый,
-            // а не рисовался цветным эмодзи.
+            // #4075: серый ЗНАЧОК обеда/перерыва — ЛЕВЕЕ значков смежности дня (←/→), в том же
+            // углу справа внизу карточки. РАЗНЫЕ глифы, чтобы отличать без наведения: обед —
+            // столовые приборы 🍴, перерыв — пауза ⏸. ︎ (текстовое представление) красит
+            // глиф серым (монохром), а не цветным эмодзи. Вид и время — в data-tip: свой тултип
+            // (.atex-pp-cut-break:hover::after), т.к. нативный title у значка в углу с
+            // pointer-events:none капризен и не всплывал у заказчика. aria-label — для доступности.
             (breakMarkersByCut[String(c.id)] || []).forEach(function(bm) {
+                var breakTip = bm.label + ' ' + formatClock(bm.startMin) + '-' + formatClock(bm.endMin);
                 spanBadges.push(el('span', {
                     class: 'atex-pp-cut-break' + (bm.kind === 'lunch' ? ' is-lunch' : ''),
-                    title: bm.label + ' ' + formatClock(bm.startMin) + '-' + formatClock(bm.endMin),
-                    text: '⏸︎'
+                    'aria-label': breakTip,
+                    dataset: { tip: breakTip },
+                    text: bm.kind === 'lunch' ? '🍴︎' : '⏸︎'
                 }));
             });
             if (spans.fromPrev) spanBadges.push(el('span', {
