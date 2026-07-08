@@ -6730,6 +6730,43 @@
         return { machineId: best.machineId, index: best.index, weight: 0, quality: 0, dayOffset: best.endDay, fallback: true };
     }
 
+    // #4106 (ТЗ §8 п.6): предикат «большой простой между станками». Строит по ЗАНЯТОСТИ функцию
+    // distanceExceeded(candSid, candDayOff): true, если станок-кандидат УЖЕ ушёл вперёд больше чем на
+    // MAX_SLOTS_DISTANCE_HR от самого рано освобождающегося ДРУГОГО станка — то есть класть на него
+    // ещё одно задание значит держать другой станок простаивающим. Тогда transitionCost прибавит
+    // MAX_DISTANCE_COST_MN, и выбор минимального штрафа сам уводит слот на простаивающий — БЕЗ
+    // балансировщика, чисто штрафом (иначе одинаковое сырьё копится на одном станке: совпадение сырья
+    // = вес 0 всегда бьёт смену сырья, а другого спред-штрафа нет, #4106).
+    //
+    // Меру «как далеко ушёл станок» берём как max(день слота-кандидата, СВОБОДНЫЙ день станка):
+    // «текущий старт» ТЗ = день слота при ДОПИСЫВАНИИ в хвост (там он ≈ конец станка); но оценка дня
+    // предпочитает МЕНЬШИЙ день (betterCand), поэтому одинаковое сырьё вставляется в НАЧАЛО дня 0
+    // (candDayOff=0) и литеральный «старт слота» штраф бы не поймал, а станко-день лишь распухал.
+    // Свободный день станка ловит и это: перегруженный станок дорог для ЛЮБОЙ вставки. Для дописывания
+    // обе меры совпадают → согласуется с литералом ТЗ. Свободный день = день старта последнего слота
+    // (как earliestFreeMachine); фиксируем ОДИН раз — за скан позиций занятость не меняется. Порог в
+    // днях = MAX_SLOTS_DISTANCE_HR/24 (сутки). Пустой станок → день 0 (простаивает → штрафа нет).
+    function makeDistanceExceeded(occupancy, ctx){
+        var maxHr = planWeight(ctx.settings, 'MAX_SLOTS_DISTANCE_HR');
+        if (!isFinite(maxHr) || maxHr <= 0) return null;   // выключено (0/пусто) → штраф не начисляем
+        var maxDays = maxHr / 24;
+        var byMachine = occupancy.byMachine, sids = Object.keys(byMachine), freeByMachine = {};
+        sids.forEach(function(sid){
+            var arr = byMachine[sid];
+            freeByMachine[sid] = arr.length ? prefixDayOffset(arr, arr.length - 1, slotExtend(ctx, { slitterId: sid })) : 0;
+        });
+        return function(candSid, candDayOff){
+            var self = Math.max(Number(candDayOff) || 0, Number(freeByMachine[candSid]) || 0);
+            var minOther = Infinity;
+            sids.forEach(function(sid){
+                if (String(sid) === String(candSid)) return;
+                if (freeByMachine[sid] < minOther) minOther = freeByMachine[sid];
+            });
+            if (!isFinite(minOther)) return false;   // других станков нет
+            return (self - minOther) > maxDays;
+        };
+    }
+
     // Вставить slot в САМУЮ ДЕШЁВУЮ точку по ВСЕМ станкам (перебор всех позиций). Мутирует occupancy.
     // #4095: если ctx.traceTasks задан — пишет туда разбор выбора (первый рассмотренный вариант,
     // выбранный, число вариантов, дешёвший вариант В СРОК) для трассировки «Почему допущена просрочка».
@@ -6737,6 +6774,7 @@
         ctx = ctx || {};
         var byMachine = occupancy.byMachine;
         var feasible = ctx.feasibleMachine || function(){ return true; };
+        var distFn = makeDistanceExceeded(occupancy, ctx);   // #4106: спред-штраф §8 п.6 по текущей занятости
         var best = null;
         var tr = ctx.traceTasks ? { id: slot.id, dueKey: isFinite(Number(slot.dueKey)) ? Number(slot.dueKey) : null,
                                     isFoil: !!slot.isFoil, workMin: round3(slotWorkMin(slot, ctx)),
@@ -6749,7 +6787,7 @@
             if (!feasible(sid, slot)) return;
             var arr = byMachine[sid];
             for (var idx = 0; idx <= arr.length; idx++){
-                var sc = scorePosition(arr, idx, slot, slotExtend(ctx, { slitterId: sid }));
+                var sc = scorePosition(arr, idx, slot, slotExtend(ctx, { slitterId: sid, distanceExceededFor: distFn }));
                 if (!sc){ if (tr) tr.skipped++; continue; }
                 var cand = candOf(sid, idx, sc);
                 if (tr){
