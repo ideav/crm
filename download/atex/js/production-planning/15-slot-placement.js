@@ -279,6 +279,16 @@
         ctx = ctx || {};
         var moves = [], maxIters = ctx.maxIters || 500, iter = 0, changed = true;
         var feasible = ctx.feasibleMachine || function(){ return true; };
+        // #4104: каждый слот релоцируем НЕ БОЛЕЕ раза за проход. `dayByCut` (реальные дни от
+        // splitMachineQueue) — ФИКСИРОВАННЫЙ снимок на весь проход: после переезда слота его реальный
+        // день не пересчитывается до следующего пере-пакинга. Цену «остаться» (cur) считаем со штрафом
+        // срока по этому реальному дню (#4098), а цену «переехать» (alt) — по оценке дня-приземления
+        // кандидата. Пока слот РЕАЛЬНО за сроком (снимок фиксирован), cur всегда «дорого», а найдётся
+        // место, что «дешевле» → слот пинг-понгует до cap (лог #4104: «переносов 2000» = 4 раунда × 500,
+        // «он правит время»). Заморозка после первого переноса рвёт этот цикл; внешний цикл §12
+        // (planCutOperations) пере-пакует и обновляет реальные дни — слот получает следующий шанс на
+        // СВЕЖИХ данных (переехав, он мог перестать быть просроченным → штраф уходит → перенос не нужен).
+        var movedIds = {};
         while (changed && iter++ < maxIters){
             changed = false;
             var byMachine = occupancy.byMachine, mids = Object.keys(byMachine);
@@ -286,6 +296,7 @@
                 var sid = mids[mi], arr = byMachine[sid];
                 for (var i = 0; i < arr.length; i++){
                     var s = arr[i];
+                    if (movedIds[String(s.id)]) continue;   // #4104: уже перенесён в этом проходе — не трогаем
                     if (!shouldRelocate(arr, i, s, dayByCut, ctx)) continue;
                     // #4098: если слот РЕАЛЬНО (dayByCut, splitMachineQueue) за своим сроком — цену
                     // «остаться» считаем по реальному дню (штраф DEADLINE в потолок), а не по оценке.
@@ -319,6 +330,7 @@
                         var insIdx = (alt.machineId === sid && alt.index > i) ? alt.index - 1 : alt.index;
                         byMachine[alt.machineId].splice(insIdx, 0, tagSlot(s, alt.machineId));
                         moves.push({ id: s.id, from: sid, to: alt.machineId });
+                        movedIds[String(s.id)] = true;   // #4104: заморозить слот до следующего раунда §12
                         changed = true; break;
                     }
                 }
