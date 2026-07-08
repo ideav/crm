@@ -75,6 +75,7 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         planCutOperations: planCutOperations,
+        filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
         stripPrefixQuality: stripPrefixQuality,         // #3989: «качество» перехода по ножам
         transitionCost: transitionCost,                 // #3989: стоимость перехода prev→next (вес+качество)
@@ -4934,7 +4935,15 @@
             var tsOld = Number(cut.number);   // #3242: главное значение = плановая дата старта (t1078)
             var tsChanged = isFinite(tsNew) && tsNew > 0 && tsNew !== tsOld;
             var runsChanged = Number(cut.plannedRuns) !== Number(u.plannedRuns);
-            return tsChanged || runsChanged;
+            // #4108: слой размещения (#4085) может переназначить СТАНОК, оставив planStart и проходы
+            // прежними — та же позиция дня, но на другом станке (напр. первое задание дня 08:00 на
+            // обоих). Такой апдейт нёс ТОЛЬКО смену «Слиттера»; без этой ветки он отсеивался, станок
+            // в БД оставался прежним, а очередь другого станка пересобиралась БЕЗ него → два задания
+            // в одно время на одном станке (дубль-08:00 на Ганте, issue #4108). u.slitterId есть только
+            // в слот-режиме (#4085); сравнение — как в applySplitPlan (пустой станок → '').
+            var slitterChanged = (u.slitterId != null)
+                && String(u.slitterId) !== (cut.slitter ? String(cut.slitter.id) : '');
+            return tsChanged || runsChanged || slitterChanged;
         });
     }
 
