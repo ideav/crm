@@ -1,12 +1,11 @@
 // Unit tests for #4007 (ТЗ §5) — короткие перерывы на диаграмме Ганта.
 //
-// В отличие от обеда (генерация зашивает +LUNCH_DURATION в planStart послеобеденных резок),
-// перерывы (FIRST_INTERVAL 10:00 / SECCOND_INTERVAL 15:00, по INTERVAL_DURATION_MN 10 мин) при
-// планировании НЕ участвуют — их нет в сохранённых стартах. Гант дорисовывает их сам: перерыв
-// попадает в задание, чьё СОХРАНЁННОЕ окно (наладка+резка) его накрывает («несущее»), это
-// задание раздвигается на длительность перерыва, а ПОСЛЕДУЮЩИЕ задания дня сдвигаются вправо на
-// ту же длительность. Проверяем чистый ganttBreakMarkers (сдвиг + маркеры) и интеграцию в
-// layoutGroups (leftPx баров сдвинут, несущий бар шире, строки-маркеры перерывов в выдаче).
+// Перерывы (FIRST_INTERVAL 10:00 / SECCOND_INTERVAL 15:00, по INTERVAL_DURATION_MN 10 мин) при
+// планировании НЕ участвуют — их нет в сохранённых стартах. Гант рисует их накладкой на несущем
+// задании (чьё СОХРАНЁННОЕ окно накрывает время перерыва) по РЕАЛЬНОМУ времени. #4099 «рисуй как
+// есть»: бары за перерыв БОЛЬШЕ НЕ сдвигаются и несущий бар НЕ раздвигается (shiftMinByIndex = 0,
+// маркер — на своём реальном времени). Проверяем ganttBreakMarkers (маркеры без сдвига) и
+// интеграцию в layoutGroups (leftPx баров не меняются, маркеры перерывов в выдаче).
 //
 // Run with: node experiments/atex-cut-gantt-4007.test.js
 
@@ -50,8 +49,8 @@ var dayCuts = [
 var scale = scaleFor(dayCuts, { breakBufferMin: 20 });
 var br = g.ganttBreakMarkers(dayCuts, scale, BREAKS, { pxPerMin: PPM });
 
-assertEqual(br.shiftMinByIndex, [0, 0, 10, 10],
-    '#4007: сдвиг — C0/C1 (несущий) не двигаются, C2/C3 сдвинуты на 10 мин утренним перерывом');
+assertEqual(br.shiftMinByIndex, [0, 0, 0, 0],
+    '#4099: бары за перерыв НЕ сдвигаются (shiftMinByIndex нулевой)');
 assertEqual(br.markers.length, 2, '#4007: два маркера перерыва (10:00 и 15:00)');
 assertEqual(br.markers[0].carrierIndex, 1, '#4007: несущий перерыва 10:00 — C1 (index 1)');
 assertEqual(br.markers[0].beforeIndex, 2, '#4007: строка перерыва 10:00 — после C1 (перед index 2)');
@@ -62,8 +61,8 @@ assertEqual(br.markers[0].widthPx, 10 * PPM, '#4007: ширина маркера
 // 10:00 = +120 мин от 08:00 → 240px; сдвиг несущего C1 = 0 → маркер на 240.
 assertEqual(br.markers[0].leftPx, 240, '#4007: перерыв 10:00 в несмещённом несущем — на 240px');
 assertEqual(br.markers[1].carrierIndex, 3, '#4007: несущий перерыва 15:00 — C3 (index 3)');
-// 15:00 = +420 мин → 840px; несущий C3 сдвинут утренним перерывом на 10 мин → +20px = 860.
-assertEqual(br.markers[1].leftPx, 840 + 10 * PPM, '#4007: перерыв 15:00 сдвинут за утренний перерыв (860px)');
+// #4099: 15:00 = +420 мин → 840px, БЕЗ сдвига (перерыв на реальном времени).
+assertEqual(br.markers[1].leftPx, 840, '#4099: перерыв 15:00 на реальном времени (840px, без сдвига)');
 
 // ── Перерывов нет / выключены ──
 assertEqual(g.ganttBreakMarkers(dayCuts, scale, [], { pxPerMin: PPM }),
@@ -97,14 +96,14 @@ var range = g.ganttRange('2026-06-29', 'day');
 var base = g.layoutGroups(dayCuts, range, NOW, {}, { pxPerMin: PPM });
 var withBr = g.layoutGroups(dayCuts, range, NOW, {}, { pxPerMin: PPM, breaks: BREAKS });
 var baseTasks = base.groups[0].tasks, brTasks = withBr.groups[0].tasks;
-// C2 (index 2) сдвинут утренним перерывом на 10 мин → +20px.
-assertEqual(round3(brTasks[2].leftPx - baseTasks[2].leftPx), 10 * PPM,
-    '#4007 layoutGroups: C2 сдвинут вправо на длительность перерыва (20px)');
+// #4099: бары НЕ сдвигаются перерывами — leftPx с перерывами и без совпадают.
+assertEqual(round3(brTasks[2].leftPx - baseTasks[2].leftPx), 0,
+    '#4099 layoutGroups: C2 НЕ сдвинут перерывом (рисуем как есть)');
 assertEqual(round3(brTasks[0].leftPx - baseTasks[0].leftPx), 0,
-    '#4007 layoutGroups: C0 (до перерыва) не сдвинут');
-// Несущий C1 (index 1) раздвинут на длительность перерыва (10 мин × 2 = 20px).
-assertEqual(round3(brTasks[1].widthPx - baseTasks[1].widthPx), 10 * PPM,
-    '#4007 layoutGroups: несущий C1 раздвинут на 20px');
+    '#4099 layoutGroups: C0 не сдвинут');
+// #4099: несущий бар НЕ раздвигается — ширина с перерывами и без совпадает.
+assertEqual(round3(brTasks[1].widthPx - baseTasks[1].widthPx), 0,
+    '#4099 layoutGroups: несущий C1 НЕ раздвинут (перерыв — накладка поверх)');
 assertEqual(withBr.groups[0].breaks.length, 2, '#4007 layoutGroups: два маркера перерыва в группе');
 assert(base.groups[0].breaks == null || base.groups[0].breaks.length === 0,
     '#4007 layoutGroups: без настройки перерывов маркеров нет');

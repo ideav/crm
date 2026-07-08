@@ -5782,15 +5782,10 @@
         // план (scheduleFromStored), тот же, что рисует РМ «Диаграмма Ганта» → времена и минуты
         // ВСЕГДА совпадают. Обед (#3342) уже учтён генерацией в сохранённых planStart; здесь он —
         // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
-        // #4099: потолок смены + перенос переполнения на следующий рабочий день — иначе
-        // перекрывающиеся сохранённые planStart (тяжёлые резки) разворачивались анти-нахлёстом в
-        // ночь (бары после 16:30, «параллельно» с уборкой). dayOffAt — те же нерабочие дни станка
-        // (выходные #3788 + отпуск), что и генерация (balanceDayOff).
-        var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs, {
-            dayStartMin: dayWindow.startMin, cutEndMin: dayWindow.cutEndMin,
-            lunchDurationMin: dayWindow.lunchDurationMin, overworkMin: dayWindow.maxOverworkCutsMin || 0,
-            dayOffAt: function(dayIndex) { return self.balanceDayOff(carrySlitterId, planBaseMidnightMs + dayIndex * 86400000); }
-        });
+        // #4099: рисуем КАК ЕСТЬ — окно каждой резки по СОХРАНЁННОМУ planStart без анти-нахлёста и
+        // без потолка смены. Перекрытия переполненного дня видны как есть (та же раскладка, что и на
+        // РМ «Диаграмма Ганта»), а не сжимаются/уносятся в ночь или на следующий день.
+        var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
         function schedDay(sc) { return sc ? Math.floor((Number(sc.startMin) || 0) / 1440) : null; }

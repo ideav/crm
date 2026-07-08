@@ -2003,15 +2003,7 @@
     // Форма результата совпадает с buildSchedule: { cutId, startMin, finishMin, setupMin,
     // durationMin, leaderMin } в минутах от полуночи дня 0 (baseMidnightMs); лидер входит в
     // durationMin (отдельной leaderMin нет — окно = setup + durationMin).
-    // #4099: opts (необяз.) — потолок смены + перенос переполнения на следующий рабочий день.
-    //   { dayStartMin, cutEndMin, lunchDurationMin, overworkMin, dayOffAt(dayIndex) }.
-    // Без opts — прежнее поведение (#3885: анти-нахлёст встык В ПРЕДЕЛАХ дня, без потолка). Сохранённые
-    // planStart тяжёлых резок могут перекрываться (issue #4099: 24 задания=1120 мин на 01.07), и без
-    // потолка анти-нахлёст честно разворачивал цуг в ночь (бары после 16:30, «параллельно» с уборкой
-    // на 16:30). С opts: окно резки не пускаем за конец смены (cutEndMin−обед, +нахлёст), переполнение
-    // уносим на следующий РАБОЧИЙ день к его началу. Показ (queue/badge) группирует по schedDay
-    // (=startMin/1440), поэтому перенос сам перегруппирует карточки на правильный день.
-    function scheduleFromStored(cuts, baseMidnightMs, opts) {
+    function scheduleFromStored(cuts, baseMidnightMs) {
         var base = Number(baseMidnightMs);
         function num(v) { return (v == null || v === '') ? 0 : (Number(v) || 0); }
         // #3885: сохранённые planStart двух резок ОДНОГО станка в один день могут совпасть
@@ -2047,52 +2039,16 @@
         // #3920: по сохранённому старту окна (возр.); равные — стабильно в исходном порядке очереди.
         items.forEach(function(it, i) { it._i = i; });
         items.sort(function(a, b) { return (a.windowStartMin - b.windowStartMin) || (a._i - b._i); });
-        // #4099: потолок смены + перенос. Включается только при переданном окне (opts.cutEndMin).
-        var ceilOn = !!(opts && isFinite(Number(opts.cutEndMin)));
-        var dayStartMin = ceilOn ? Number(opts.dayStartMin) || 0 : 0;
-        var lunchDur = ceilOn ? (Number(opts.lunchDurationMin) || 0) : 0;
-        var overworkMin = ceilOn ? (Number(opts.overworkMin) || 0) : 0;
-        // Потолок конца окна резки = конец резки смены − обед (обед добавит показ #4075) + допуск нахлёста.
-        var placeCeil = ceilOn ? (Number(opts.cutEndMin) - lunchDur + overworkMin) : 0;
-        var dayCap = placeCeil - dayStartMin;   // сколько минут окна помещается в рабочий день
-        function dayOff(d) { return !!(ceilOn && typeof opts.dayOffAt === 'function' && opts.dayOffAt(d)); }
-        function nextWorkDay(d) { var g = 0; while (dayOff(d) && g++ < 4000) d++; return d; }
         var out = [];
-        var prevWindowEndByDay = {};   // прежний путь (#3885, без opts)
-        var flow = null;               // #4099: сквозной конец предыдущего окна (абс. минуты)
         items.forEach(function(it) {
+            // #4099: РИСУЕМ КАК ЕСТЬ. Раньше нахлёст сохранённых окон одного дня разносился встык
+            // (#3885/#3920) — это скрывало переполнение дня (сумма > смены), превращая его в цуг,
+            // уходящий далеко за конец смены. Заказчик (#4099): «нефиг сжимать/растягивать — рисуй
+            // как есть». Ставим окно по СОХРАНЁННОМУ старту без сдвига: перекрытие видно как есть,
+            // сразу ясно, что на день назначено больше работы, чем влезает в смену.
             var windowStartMin = it.windowStartMin;
-            var startMin, finishMin;
-            if (!ceilOn) {
-                // #3885: устранить нахлёст с предыдущей резкой того же дня — сдвинуть начало окна к
-                // её концу. День берём по СОХРАНЁННОМУ старту (до сдвига), чтобы группировка по дате
-                // (заголовок/минуты дня) не уезжала; сдвиг лечит только нахлёст внутри дня.
-                var day = Math.floor(windowStartMin / 1440);
-                var prevEnd = prevWindowEndByDay[day];
-                if (prevEnd != null && windowStartMin < prevEnd) windowStartMin = prevEnd;
-                startMin = round3(windowStartMin + it.setupMin);            // старт намотки (после настройки)
-                finishMin = round3(startMin + it.durationMin);
-                prevWindowEndByDay[day] = finishMin;   // окно занятости = setup + намотка (лидер уже в durationMin)
-            } else {
-                // #4099: forward-only анти-нахлёст СКВОЗЬ дни + потолок смены. Окно не раньше своего
-                // сохранённого старта и не раньше конца предыдущего; если не влезает до потолка —
-                // переносим целиком на следующий рабочий день (к dayStart). Резку длиннее смены (не
-                // разбить на показе) ставим как есть.
-                var winLen = round3(num(it.setupMin) + num(it.durationMin));
-                var ws = windowStartMin;
-                if (flow != null && ws < flow) ws = flow;
-                var d = Math.floor(ws / 1440);
-                if (dayOff(d)) { d = nextWorkDay(d); ws = d * 1440 + dayStartMin; }
-                var tod = ws - d * 1440;
-                if (tod < dayStartMin) { tod = dayStartMin; ws = d * 1440 + dayStartMin; }
-                if (winLen <= dayCap && tod + winLen > placeCeil) {   // не влезает до потолка → следующий рабочий день
-                    d = nextWorkDay(d + 1);
-                    ws = d * 1440 + dayStartMin;
-                }
-                startMin = round3(ws + it.setupMin);
-                finishMin = round3(startMin + it.durationMin);
-                flow = finishMin;
-            }
+            var startMin = round3(windowStartMin + it.setupMin);            // старт намотки (после настройки)
+            var finishMin = round3(startMin + it.durationMin);
             out.push({
                 cutId: it.cutId,
                 startMin: startMin,
