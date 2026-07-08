@@ -101,9 +101,10 @@ assertEqual(round3(brTasks[2].leftPx - baseTasks[2].leftPx), 0,
     '#4099 layoutGroups: C2 НЕ сдвинут перерывом (рисуем как есть)');
 assertEqual(round3(brTasks[0].leftPx - baseTasks[0].leftPx), 0,
     '#4099 layoutGroups: C0 не сдвинут');
-// #4099: несущий бар НЕ раздвигается — ширина с перерывами и без совпадает.
-assertEqual(round3(brTasks[1].widthPx - baseTasks[1].widthPx), 0,
-    '#4099 layoutGroups: несущий C1 НЕ раздвинут (перерыв — накладка поверх)');
+// #4110: несущий бар РАСШИРЯЕТСЯ на длительность своего перерыва (10 мин × PPM), накладка ложится
+// на бар. Старт (leftPx) при этом не двигается (проверено выше) — раздвигаем только ширину несущего.
+assertEqual(round3(brTasks[1].widthPx - baseTasks[1].widthPx), 10 * PPM,
+    '#4110 layoutGroups: несущий C1 расширен на перерыв 10 мин (накладка легла на бар)');
 assertEqual(withBr.groups[0].breaks.length, 2, '#4007 layoutGroups: два маркера перерыва в группе');
 assert(base.groups[0].breaks == null || base.groups[0].breaks.length === 0,
     '#4007 layoutGroups: без настройки перерывов маркеров нет');
