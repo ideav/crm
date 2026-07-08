@@ -1914,6 +1914,39 @@
         return round3(best);
     }
 
+    // #4111: как разложить наладку setup-only ХВОСТА дня (0 проходов, #3635 п.5) между текущим днём N
+    // и продолжением (день N+1), чтобы хвост НЕ вылезал за потолок нахлёста НАСТРОЙКИ
+    // (cutEndMin + MAX_OVERWORK_TUNE). Зеркалит splitMachineQueue (minOverlapTailSetupMinutes + гейт
+    // availFor 'tune'), но работает с ДВУМЯ именованными компонентами (ножи/сырьё) — чтобы поделить их
+    // по хранимым колонкам «Наладка ножей»/«Сырье/намотка». В дне N оставляем МИНИМАЛЬНОЕ подмножество,
+    // добивающее день до cutEndMin, — но только если оно кончается ≤ потолка нахлёста; иначе (даже
+    // минимальный компонент вылезает за потолок) в дне N НИЧЕГО, вся наладка на продолжение.
+    //   tailStartMin — минута старта хвоста (planStart, от полуночи дня); knifeMin/materialMin —
+    //   компоненты наладки; cutEndMin/overTuneMin — окно (мин от полуночи / нахлёст настройки).
+    // → { keepKnife, keepMaterial } — что ОСТАЁТСЯ в дне N (остальное уносится на продолжение).
+    // Нет окна (cutEndMin/tailStartMin не число) → держим всё в дне N (прежнее поведение, без окна).
+    function splitTailSetupAtCeiling(tailStartMin, knifeMin, materialMin, cutEndMin, overTuneMin) {
+        var k = Math.max(0, Math.round(Number(knifeMin) || 0));
+        var m = Math.max(0, Math.round(Number(materialMin) || 0));
+        if (k + m <= 0) return { keepKnife: 0, keepMaterial: 0 };
+        var start = Number(tailStartMin), cutEnd = Number(cutEndMin);
+        if (!isFinite(start) || !isFinite(cutEnd)) return { keepKnife: k, keepMaterial: m };
+        var room = cutEnd - start;                                   // до конца окна резки (цель заполнения)
+        var ceilingRoom = room + (Number(overTuneMin) || 0);         // до потолка нахлёста настройки
+        // Подмножества {ножи?, сырьё?} по возрастанию суммы (как перебор minOverlapTailSetupMinutes).
+        var subsets = [
+            { s: m,     keepKnife: 0, keepMaterial: m },
+            { s: k,     keepKnife: k, keepMaterial: 0 },
+            { s: k + m, keepKnife: k, keepMaterial: m }
+        ].filter(function(x){ return x.s > 0; }).sort(function(a, b){ return a.s - b.s; });
+        // Минимальное подмножество с суммой ≥ room (minOverlap); нет такого → полный набор.
+        var chosen = { s: k + m, keepKnife: k, keepMaterial: m };
+        for (var i = 0; i < subsets.length; i++) { if (subsets[i].s >= room) { chosen = subsets[i]; break; } }
+        // Гейт нахлёста настройки: влезает ≤ потолка → держим; иначе в дне N ничего (всё на продолжение).
+        if (chosen.s <= ceilingRoom) return { keepKnife: chosen.keepKnife, keepMaterial: chosen.keepMaterial };
+        return { keepKnife: 0, keepMaterial: 0 };
+    }
+
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
     // (порядок исполнения — по planStart, как в Ганте orderCutsInGroup, #3923). Первая резка —
     // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
@@ -7196,6 +7229,7 @@
         setupBreakdown: setupBreakdown,
         setupActivityMinutes: setupActivityMinutes,   // #3698
         minOverlapTailSetupMinutes: minOverlapTailSetupMinutes,   // #3760
+        splitTailSetupAtCeiling: splitTailSetupAtCeiling,   // #4111: раскладка наладки хвоста дня по потолку нахлёста
         setupActivityColumns: setupActivityColumns,   // #3698
         planningStrategy: planningStrategy,
         planningStrategyLabel: planningStrategyLabel,
@@ -11373,20 +11407,19 @@
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
         var self = this;
-        // #4026/#4030/#4042: setup-only хвост дня (#3635 п.5, 0 проходов) — это настройка следующей
-        // резки, начатая в конце дня N, а сама резка (проходы) идёт с дня N+1 (продолжение). Настройка
-        // = ножи + смена сырья. Смена сырья ОСТАЁТСЯ в дне N (быстрый нахлёст в конце смены), а ножи по
-        // умолчанию уносим на продолжение (день N+1, где они нужны прямо перед резкой) — чтобы бейдж
-        // дня N не нёс лишние 30 мин. #4042: но перенос УСЛОВНЫЙ — только если день продолжения вмещает
-        // ножи в бюджет+нахлёст. Если день N+1 уже полон (напр. 457), +30 ножей раздули бы его за
-        // потолок (487) — тогда ножи ОСТАЮТСЯ в дне N (его добиваем максимально, нахлёст допустим). В
-        // сценариях #4030/#4039 день продолжения почти пуст → ножи по-прежнему уходят туда.
-        // Бюджет дня (== бейдж, #3914): (cutEnd−start)−обед+нахлёст настройки. Нет окна → перенос
-        // безусловный (прежнее поведение, деградация без поломки).
-        var win4042 = (typeof self.workingWindow === 'function') ? (self.workingWindow() || {}) : {};
-        var budget4042 = (Number(win4042.cutEndMin) - Number(win4042.startMin))
-            - (Number(win4042.lunchDurationMin) || 0) + (Number(win4042.maxOverworkTuneMin) || 0);
-        var hasBudget4042 = isFinite(budget4042) && budget4042 > 0;
+        // #4026/#4030/#4111: setup-only хвост дня (#3635 п.5, 0 проходов) — это НАЛАДКА следующей резки,
+        // начатая в конце дня N; сама резка (проходы) идёт с дня N+1 (продолжение). Наладка = ножи +
+        // смена сырья. В дне N оставляем ТОЛЬКО то, что влезает до потолка нахлёста НАСТРОЙКИ
+        // (cutEndMin + MAX_OVERWORK_TUNE) — ровно как это уже планирует splitMachineQueue
+        // (splitTailSetupAtCeiling зеркалит minOverlapTailSetupMinutes + гейт availFor 'tune'). Остаток
+        // наладки уносим на ПРОДОЛЖЕНИЕ (день N+1, где резка), чтобы бейдж/окно дня N не вылезали за
+        // нахлёст. Прежний #4042 при полном дне N+1 ОСТАВЛЯЛ ножи в дне N — но это ломало потолок дня N
+        // (issue #4111: хвост 45 мин до 16:46 при потолке 16:20). Приоритет — потолок текущего дня N;
+        // переполнение дня N+1 (там реально идёт резка-продолжение) отражаем честно, а не прячем в день N.
+        // Нет окна (cutEndMin не число) → держим наладку в дне N как есть (прежнее поведение).
+        var win4111 = (typeof self.workingWindow === 'function') ? (self.workingWindow() || {}) : {};
+        var cutEndMin4111 = Number(win4111.cutEndMin);
+        var overTuneMin4111 = Number(win4111.maxOverworkTuneMin) || 0;
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
@@ -11394,22 +11427,6 @@
             var carrySetup = prevBySlitter[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
             var cols = setupActivityColumns(arr, times, carryPrevCut);
-            // #4042: полные минуты каждого дня (настройка+резка, ДО выноса ножей) — чтобы проверить,
-            // вместит ли день продолжения отложенные ножи. fullCutMin = ножи + сырьё (cols) + резка/
-            // лидер (как во втором проходе ниже). Ключ дня — cutPlanDayKey (как группировка очереди).
-            function fullCutMin4042(x) {
-                var cc = cols[String(x.id)] || {};
-                var lr = stripNum(x.plannedRuns) > 0 ? cutLeaderRuns(x) : 0;
-                return Math.round(cc.knifeMin || 0) + Math.round(cc.materialWindingMin || 0)
-                    + Math.round(stripNum(x.duration) + betweenCuts * lr);
-            }
-            var dayFull4042 = {};
-            arr.forEach(function(x) {
-                if (onlySet && !onlySet[String(x.id)]) return;
-                var dk = cutPlanDayKey(x);
-                dayFull4042[dk] = (dayFull4042[dk] || 0) + fullCutMin4042(x);
-            });
-            var deferredToDay4042 = {};   // #4042: ножей уже отложено на день (аккумулятор нескольких хвостов)
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
             // Нормализуем ТАК ЖЕ, как группировка цепочек #3892 (String(...).trim()) — иначе пробел/
             // формат из rowValue расходится: голова (fp==id) и продолжение сравнивались бы неравными.
@@ -11417,68 +11434,60 @@
                 var fp = (x && x.firstPartId != null) ? String(x.firstPartId).trim() : '';
                 return fp !== '' ? fp : String(x && x.id != null ? x.id : '').trim();
             }
-            // #4030: ножи setup-only хвоста дня (0 проходов) уносим на его ПРОДОЛЖЕНИЕ — ближайшую
-            // ПОСЛЕДУЮЩУЮ резку той же цепочки (firstPartId). Продолжение бывает НЕ соседним в очереди,
-            // поэтому ищем сканом вперёд по chainRoot (а не только arr[i+1]) и НЕ требуем нулевой
-            // переналадки входа: сегменты дня-сплита одной конфигурации → она и так 0, а прежняя
-            // эвристика «arr[i+1] + changeover=0» на реальном плане не срабатывала (продолжение
-            // оказывалось не строго соседним → хвост оставался с полными 45 → день 492).
-            var deferKnifeToCont = {};   // id продолжения → перенесённые ножи его хвостов
-            var zeroKnifeTail = {};      // id хвоста → ножи перенесены (в дне N остаётся только смена сырья)
+            // #4030/#4111: наладку setup-only хвоста дня (0 проходов) делим по потолку нахлёста настройки.
+            // В дне N остаётся splitTailSetupAtCeiling(...) (то же, что кладёт splitMachineQueue); остаток
+            // (ножи и/или смена сырья) уносим на ПРОДОЛЖЕНИЕ — ближайшую последующую резку ТОЙ ЖЕ цепочки
+            // (chainRoot по firstPartId) с нулевой переналадкой входа (иначе у неё СВОЯ наладка → двойной
+            // счёт). Продолжение бывает НЕ соседним в очереди (между ним и хвостом встают чужие резки,
+            // issue #4111) — поэтому сканируем вперёд по chainRoot, а не только arr[i+1].
+            var deferKnifeToCont = {};      // id продолжения → перенесённые ножи его хвостов
+            var deferMaterialToCont = {};   // id продолжения → перенесённая смена сырья его хвостов
+            var tailKeep = {};              // id хвоста → { knife, material } что ОСТАЁТСЯ в дне N
             arr.forEach(function(c, i) {
                 if (onlySet && !onlySet[String(c.id)]) return;        // только резки снимка (scope)
-                var wkTail = Math.round((cols[String(c.id)] || {}).knifeMin || 0);
-                if (wkTail <= 0) return;                              // нет ножей — переносить нечего
-                var runsTail = stripNum(c.plannedRuns);
-                if (ppTraceOn()) ppTrace('#4030 кандидат-хвост id=' + c.id + ' проходы=' + runsTail
-                    + ' ножи=' + wkTail + ' корень=' + chainRoot4026(c)
-                    + ' fp=' + (c.firstPartId != null && c.firstPartId !== '' ? c.firstPartId : '∅'));
-                if (runsTail !== 0) return;                           // хвост = 0 проходов (setup-only, #3635 п.5)
-                // Продолжение = БЛИЖАЙШАЯ последующая резка в снимке. Она обязана быть той же цепочки:
-                // если между хвостом и его продолжением встала чужая резка, та несёт СВОЮ переналадку
-                // от нового сырья — добавлять к ней ножи хвоста нельзя (двойной счёт), поэтому стоп.
-                var contId = null, nearest = null, nearCols = null, keptFullDay4042 = false;
+                if (stripNum(c.plannedRuns) !== 0) return;            // хвост = 0 проходов (setup-only, #3635 п.5)
+                var cc = cols[String(c.id)] || {};
+                var fullK = Math.round(cc.knifeMin || 0), fullM = Math.round(cc.materialWindingMin || 0);
+                if (fullK + fullM <= 0) return;                       // нет наладки — делить нечего
+                // #4111: минута старта хвоста (из planStart, главное значение) → сколько наладки влезает
+                // до потолка нахлёста настройки. planBaseMidnightMs — полночь дня 0 (мс), c.number — сек.
+                var minsFromBase = (Number(c.number) * 1000 - planBaseMidnightMs) / 60000;
+                var tailStartMin = isFinite(minsFromBase) ? (((minsFromBase % 1440) + 1440) % 1440) : NaN;
+                var keep = splitTailSetupAtCeiling(tailStartMin, fullK, fullM, cutEndMin4111, overTuneMin4111);
+                tailKeep[String(c.id)] = { knife: keep.keepKnife, material: keep.keepMaterial };
+                var defK = fullK - keep.keepKnife, defM = fullM - keep.keepMaterial;
+                if (defK <= 0 && defM <= 0) return;                   // всё влезло в день N — переносить нечего
+                // Продолжение = последующая резка ТОЙ ЖЕ цепочки (chainRoot по firstPartId; голова хвоста
+                // и продолжение делят корень = id головы). Продолжение бывает НЕ соседним в очереди —
+                // сканируем вперёд по chainRoot (issue #4111), а не только arr[i+1]. Добираем к нему остаток
+                // ТОЛЬКО если у него переналадка входа = 0 (иначе у него СВОЯ наладка от нового сырья →
+                // двойной счёт). Нет цепочки (firstPartId пуст) → фолбэк #4030: ближайшая резка той же
+                // конфигурации (переналадка входа = 0).
+                var root = chainRoot4026(c), target = null, sameCfgFallback = null, chainFound = false;
                 for (var j = i + 1; j < arr.length; j++) {
                     var d = arr[j];
-                    if (onlySet && !onlySet[String(d.id)]) continue;  // вне снимка — прозрачно пропускаем
-                    nearest = d;
-                    nearCols = cols[String(d.id)] || {};
-                    // Продолжение = ближайшая резка ТОЙ ЖЕ конфигурации: её переналадка входа = 0
-                    // (та же смена сырья/ножи, что у хвоста → менять нечего, ножи хвоста и есть её
-                    // заправка). Признак НЕ зависит от firstPartId: в отчёте cut_planning на ateh НЕТ
-                    // колонки cut_first_part → firstPartId всегда пуст (fp=∅), chainRoot по нему не
-                    // сходится — из-за этого #4033 не срабатывал. chainRoot оставляем доп. признаком
-                    // для баз с колонкой. Чужая резка следом даёт changeover > 0 → sameCfg=false → не
-                    // выносим (у неё своя заправка от нового сырья, иначе двойной счёт).
-                    var sameCfg = Math.round(nearCols.knifeMin || 0) === 0 && Math.round(nearCols.materialWindingMin || 0) === 0;
-                    if (sameCfg || chainRoot4026(d) === chainRoot4026(c)) {
-                        // #4042: вмещает ли день продолжения ножи хвоста (бюджет+нахлёст)? Нет →
-                        // ножи ОСТАЮТСЯ в дне N (его добиваем максимально, нахлёст допустим), а не
-                        // раздувают уже полный день N+1. dayFull4042 — минуты дня ДО выноса, поэтому
-                        // у продолжения-той-же-конфигурации ножи там ещё не учтены; +wkTail = что стало бы.
-                        var contDay4042 = cutPlanDayKey(d);
-                        var contLoad4042 = (dayFull4042[contDay4042] || 0) + (deferredToDay4042[contDay4042] || 0);
-                        if (!hasBudget4042 || contLoad4042 + wkTail <= budget4042 + 1e-6) {
-                            contId = String(d.id);
-                            deferKnifeToCont[contId] = (deferKnifeToCont[contId] || 0) + wkTail;
-                            deferredToDay4042[contDay4042] = (deferredToDay4042[contDay4042] || 0) + wkTail;
-                            zeroKnifeTail[String(c.id)] = true;
-                        } else {
-                            keptFullDay4042 = true;   // продолжение есть, но его день полон → ножи в дне N
-                        }
+                    if (onlySet && !onlySet[String(d.id)]) continue;
+                    var dc = cols[String(d.id)] || {};
+                    var dZero = Math.round(dc.knifeMin || 0) === 0 && Math.round(dc.materialWindingMin || 0) === 0;
+                    if (chainRoot4026(d) === root && String(d.id) !== String(c.id)) {
+                        chainFound = true;                             // продолжение цепочки нашли — только сюда (или никуда)
+                        if (dZero) target = String(d.id);
+                        break;
                     }
-                    break;                                            // только ближайшая (в снимке) резка
+                    if (sameCfgFallback == null && dZero) sameCfgFallback = String(d.id);   // фолбэк: ближайшая та же конфигурация
                 }
-                if (ppTraceOn()) ppTrace(contId
-                    ? '#4030 хвост ' + c.id + ': ножи ' + wkTail + ' → продолжение ' + contId + ' (в дне N только сырьё)'
-                    : keptFullDay4042
-                        ? '#4042 хвост ' + c.id + ': ножи ' + wkTail + ' ОСТАЮТСЯ в дне N — день продолжения '
-                            + (nearest ? nearest.id : '∅') + ' полон (нет места под нахлёст, день N добиваем)'
-                        : '#4030 хвост ' + c.id + ' (0 проходов, ножи ' + wkTail + '): продолжение НЕ распознано — '
-                            + 'ближайшая=' + (nearest ? nearest.id : '∅')
-                            + ' переналадка[нож/сыр]=' + (nearCols ? Math.round(nearCols.knifeMin || 0) : '∅') + '/' + (nearCols ? Math.round(nearCols.materialWindingMin || 0) : '∅')
-                            + ' корень=' + (nearest ? chainRoot4026(nearest) : '∅') + ' vs ' + chainRoot4026(c)
-                            + ' → ножи остаются, день раздут');
+                if (target == null && !chainFound) target = sameCfgFallback;   // цепочки нет → фолбэк на ближайшую same-config
+                if (target) {
+                    if (defK > 0) deferKnifeToCont[target] = (deferKnifeToCont[target] || 0) + defK;
+                    if (defM > 0) deferMaterialToCont[target] = (deferMaterialToCont[target] || 0) + defM;
+                } else {
+                    // Продолжения нет (или у него своя наладка) → остаток унести некуда: вся наладка
+                    // остаётся на хвосте дня N. Нахлёст здесь неизбежен, но настройку терять нельзя.
+                    tailKeep[String(c.id)] = { knife: fullK, material: fullM };
+                }
+                if (ppTraceOn()) ppTrace('#4111 хвост ' + c.id + ' старт=' + Math.round(tailStartMin) +
+                    ' наладка[нож/сыр]=' + fullK + '/' + fullM + ' → в дне N ' + keep.keepKnife + '/' + keep.keepMaterial +
+                    ', на продолжение ' + (target || '∅') + ' ' + defK + '/' + defM);
             });
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
@@ -11488,13 +11497,15 @@
                 // колонок («Наладка ножей»/«Сырье/намотка»/«Резка и Лидер») для всей очереди.
                 // Налезание баров (#3708) убирает обрезка по старту следующего задания в Ганте
                 // (cut-gantt.js), а не дробная длительность.
-                // #4026: продолжение добирает настройку, отложенную его setup-only хвостом (см. ниже).
-                // #4026/#4030: ножи setup-only хвоста дня уносим на его продолжение (см. предпроход
-                // deferKnifeToCont/zeroKnifeTail выше). В дне N у хвоста остаётся только смена сырья, а
-                // ножи (30/50) добирает продолжение (день N+1, где резка) — иначе бейдж дня N раздут (447+45=492).
-                var wantK = Math.round(want.knifeMin), wantM = Math.round(want.materialWindingMin);
-                if (zeroKnifeTail[String(c.id)]) wantK = 0;            // ножи хвоста перенесены на продолжение
+                // #4026/#4030/#4111: продолжение добирает наладку, отложенную его setup-only хвостом.
+                // В дне N у хвоста остаётся только влезающее до потолка нахлёста (tailKeep, #4111), а
+                // остаток (ножи/смена сырья) добирает продолжение (день N+1, где резка) — иначе окно/бейдж
+                // дня N вылезают за нахлёст (issue #4111: 447+45=492, хвост до 16:46 при потолке 16:20).
+                var tk = tailKeep[String(c.id)];
+                var wantK = tk ? tk.knife : Math.round(want.knifeMin);
+                var wantM = tk ? tk.material : Math.round(want.materialWindingMin);
                 wantK += (deferKnifeToCont[String(c.id)] || 0);       // продолжение добирает ножи своих хвостов
+                wantM += (deferMaterialToCont[String(c.id)] || 0);    // продолжение добирает смену сырья своих хвостов
                 var runsC = stripNum(c.plannedRuns);
                 if (!inScope) return;
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок

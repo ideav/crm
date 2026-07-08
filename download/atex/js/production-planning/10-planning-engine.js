@@ -229,6 +229,39 @@
         return round3(best);
     }
 
+    // #4111: как разложить наладку setup-only ХВОСТА дня (0 проходов, #3635 п.5) между текущим днём N
+    // и продолжением (день N+1), чтобы хвост НЕ вылезал за потолок нахлёста НАСТРОЙКИ
+    // (cutEndMin + MAX_OVERWORK_TUNE). Зеркалит splitMachineQueue (minOverlapTailSetupMinutes + гейт
+    // availFor 'tune'), но работает с ДВУМЯ именованными компонентами (ножи/сырьё) — чтобы поделить их
+    // по хранимым колонкам «Наладка ножей»/«Сырье/намотка». В дне N оставляем МИНИМАЛЬНОЕ подмножество,
+    // добивающее день до cutEndMin, — но только если оно кончается ≤ потолка нахлёста; иначе (даже
+    // минимальный компонент вылезает за потолок) в дне N НИЧЕГО, вся наладка на продолжение.
+    //   tailStartMin — минута старта хвоста (planStart, от полуночи дня); knifeMin/materialMin —
+    //   компоненты наладки; cutEndMin/overTuneMin — окно (мин от полуночи / нахлёст настройки).
+    // → { keepKnife, keepMaterial } — что ОСТАЁТСЯ в дне N (остальное уносится на продолжение).
+    // Нет окна (cutEndMin/tailStartMin не число) → держим всё в дне N (прежнее поведение, без окна).
+    function splitTailSetupAtCeiling(tailStartMin, knifeMin, materialMin, cutEndMin, overTuneMin) {
+        var k = Math.max(0, Math.round(Number(knifeMin) || 0));
+        var m = Math.max(0, Math.round(Number(materialMin) || 0));
+        if (k + m <= 0) return { keepKnife: 0, keepMaterial: 0 };
+        var start = Number(tailStartMin), cutEnd = Number(cutEndMin);
+        if (!isFinite(start) || !isFinite(cutEnd)) return { keepKnife: k, keepMaterial: m };
+        var room = cutEnd - start;                                   // до конца окна резки (цель заполнения)
+        var ceilingRoom = room + (Number(overTuneMin) || 0);         // до потолка нахлёста настройки
+        // Подмножества {ножи?, сырьё?} по возрастанию суммы (как перебор minOverlapTailSetupMinutes).
+        var subsets = [
+            { s: m,     keepKnife: 0, keepMaterial: m },
+            { s: k,     keepKnife: k, keepMaterial: 0 },
+            { s: k + m, keepKnife: k, keepMaterial: m }
+        ].filter(function(x){ return x.s > 0; }).sort(function(a, b){ return a.s - b.s; });
+        // Минимальное подмножество с суммой ≥ room (minOverlap); нет такого → полный набор.
+        var chosen = { s: k + m, keepKnife: k, keepMaterial: m };
+        for (var i = 0; i < subsets.length; i++) { if (subsets[i].s >= room) { chosen = subsets[i]; break; } }
+        // Гейт нахлёста настройки: влезает ≤ потолка → держим; иначе в дне N ничего (всё на продолжение).
+        if (chosen.s <= ceilingRoom) return { keepKnife: chosen.keepKnife, keepMaterial: chosen.keepMaterial };
+        return { keepKnife: 0, keepMaterial: 0 };
+    }
+
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
     // (порядок исполнения — по planStart, как в Ганте orderCutsInGroup, #3923). Первая резка —
     // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
