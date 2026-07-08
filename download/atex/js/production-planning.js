@@ -6672,10 +6672,15 @@
         var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
         var dayOff = prefixDayOffset(withSlot, index, ctx);
         var placementDayKey = (ctx.baseMidnightMs != null) ? dayKeyFromOffset(ctx.baseMidnightMs, dayOff) : undefined;
+        // #4098: штраф срока (DEADLINE/EXACT_DEADLINE) при оценке «остаться» (релокация) считаем по
+        // РЕАЛЬНОМУ дню слота (ctx.selfRealDayKey, из splitMachineQueue), а не по ОЦЕНКЕ дня. Иначе
+        // просрочку, которую упаковка сделала реально (day1), оценка видит как «в притык» (day0) и
+        // штраф в потолок (DEADLINE) не начисляется → просроченное не вытесняется дешёвым местом в срок.
+        var dueDayKey = (ctx.selfRealDayKey != null) ? ctx.selfRealDayKey : placementDayKey;
         var ctxBefore = {   // prev → slot: тут «next» = сам slot → срок/фольга/простой о слоте
             settings: ctx.settings,
             freeAfterCarry: !!(prev && prev.kind === 'vacation') || !!ctx.freeAfterCarry,
-            placementDayKey: placementDayKey,
+            placementDayKey: dueDayKey,
             foilNotEnd: !!(slot.isFoil && nextCut && !nextCut.isFoil),
             isMove: !!ctx.isMove,
             distanceExceeded: !!(ctx.distanceExceededFor && ctx.distanceExceededFor(ctx.slitterId, dayOff, index))
@@ -6781,10 +6786,13 @@
         return { occupancy: occupancy, placements: placements };
     }
 
-    // Стоимость слота НА ТЕКУЩЕЙ позиции (для сравнения с альтернативой в релокации).
-    function positionCost(arr, i, ctx, sid){
+    // Стоимость слота НА ТЕКУЩЕЙ позиции (для сравнения с альтернативой в релокации). #4098:
+    // selfRealDayKey — РЕАЛЬНЫЙ день слота (YYYYMMDD, из splitMachineQueue) для честного штрафа срока.
+    function positionCost(arr, i, ctx, sid, selfRealDayKey){
         var withoutSelf = arr.slice(0, i).concat(arr.slice(i + 1));
-        var sc = scorePosition(withoutSelf, i, arr[i], slotExtend(ctx, { slitterId: sid }));
+        var ext = { slitterId: sid };
+        if (selfRealDayKey != null) ext.selfRealDayKey = selfRealDayKey;
+        var sc = scorePosition(withoutSelf, i, arr[i], slotExtend(ctx, ext));
         return sc ? sc.weight : Infinity;
     }
     // Триггеры релокации (ТЗ §12): слот идёт ПОСЛЕ фольги в своём дне; или день ≥ его срока.
@@ -6824,7 +6832,16 @@
                 for (var i = 0; i < arr.length; i++){
                     var s = arr[i];
                     if (!shouldRelocate(arr, i, s, dayByCut, ctx)) continue;
-                    var cur = positionCost(arr, i, ctx, sid);
+                    // #4098: если слот РЕАЛЬНО (dayByCut, splitMachineQueue) за своим сроком — цену
+                    // «остаться» считаем по реальному дню (штраф DEADLINE в потолок), а не по оценке.
+                    // Тогда штатный выбор самого дешёвого места сам уводит его в срок (день в срок
+                    // дешевле штрафа опоздания). Иначе (в срок / без срока) — прежняя оценка.
+                    var realOff = dayByCut ? dayByCut[s.id] : null;
+                    var dueOff = (ctx.dueDayByCut && ctx.dueDayByCut[s.id] != null) ? Number(ctx.dueDayByCut[s.id]) : null;
+                    var selfKey = (realOff != null && dueOff != null && Number(realOff) > dueOff && ctx.baseMidnightMs != null)
+                        ? dayKeyFromOffset(ctx.baseMidnightMs, Number(realOff)) : null;
+                    var cur = positionCost(arr, i, ctx, sid, selfKey);
+                    var hasDue = isFinite(Number(s.dueKey));
                     var alt = null;
                     Object.keys(byMachine).forEach(function(tid){
                         if (!feasible(tid, s)) return;
@@ -6835,6 +6852,9 @@
                             var adjIdx = (tid === sid && idx > i) ? idx - 1 : idx;
                             var sc = scorePosition(scanArr, adjIdx, s, slotExtend(ctx, { slitterId: tid, isMove: true }));
                             if (!sc) continue;
+                            // #4098 (единственное исключение): не двигаем срочное задание НА место ЗА
+                            // сроком — штраф всё равно вернёт его обратно, это пустой перенос.
+                            if (hasDue && sc.placementDayKey != null && Number(sc.placementDayKey) > Number(s.dueKey)) continue;
                             var total = sc.weight + moveWeight(ctx, sid, tid);
                             if (!alt || total < alt.total){ alt = { machineId: tid, index: idx, total: total }; }
                         }
@@ -12768,6 +12788,9 @@
         // план (scheduleFromStored), тот же, что рисует РМ «Диаграмма Ганта» → времена и минуты
         // ВСЕГДА совпадают. Обед (#3342) уже учтён генерацией в сохранённых planStart; здесь он —
         // отдельный видимый блок (lunchByDay), чтобы зазор не выглядел необъяснённой «дырой».
+        // #4099: рисуем КАК ЕСТЬ — окно каждой резки по СОХРАНЁННОМУ planStart без анти-нахлёста и
+        // без потолка смены. Перекрытия переполненного дня видны как есть (та же раскладка, что и на
+        // РМ «Диаграмма Ганта»), а не сжимаются/уносятся в ночь или на следующий день.
         var schedule = scheduleFromStored(activeGroup.cuts, planBaseMidnightMs);
         schedule.forEach(function(sc) { schedById[sc.cutId] = sc; });
         self._timingByCut = {};   // #3240: пересобираем контекст тайминга модалки для активного станка
