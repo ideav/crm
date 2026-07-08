@@ -1343,12 +1343,62 @@
             });
             // #3770: суммарные минуты всех баров станка — для подписи «N (Σ мин)» в заголовке.
             g.tasksMin = g.tasks.reduce(function(sum, t) { return sum + (t.barMin || 0); }, 0);
-            // #4099: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ баров по реальному
-            // времени (позиции из ganttLunchMarkers/ganttBreakMarkers). Бар за накладку больше НЕ
-            // удлиняем (бывший #4052) — «рисуй как есть»: показываем реальную работу и реальный
-            // перерыв там, где они на самом деле, без растяжки окна задания.
+            // #4110: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ баров; несущий их бар
+            // РАСШИРЯЕМ на длительность накладки, а саму накладку кладём НА бар (заказчик #4110:
+            // «фрагмент, на который они попали, расширять на их длительность», сейчас обед «как будто
+            // пририсован в конце»). #4099 сняла растяжку целиком, и накладка снова висела в зазоре
+            // после бара. Возвращаем ТОЛЬКО локальную растяжку несущего (без сдвига соседних баров и
+            // без анти-нахлёста #3708/#3887, снятых в #4099): день не «разъезжается», перекрытия по-
+            // прежнему видны как есть — просто обед/перерыв честно лежит на своём баре, а бар длиннее
+            // на его время (работа под накладкой не прячется — хвост компенсирует закрытые серым мин).
             g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
             g.breaks = brk.markers;
+            // Несущее задание накладки: обед с известным LUNCH_START и перерыв несут carrierIndex;
+            // обед-зазор (LUNCH_START неизвестен) привязан к резке ПЕРЕД зазором (beforeIndex − 1).
+            function overlayCarrierIndex(m, isLunch) {
+                if (m.carrierIndex != null) return m.carrierIndex;
+                return (isLunch && m.beforeIndex != null) ? m.beforeIndex - 1 : null;
+            }
+            var bandsByCarrier = {};
+            (g.lunches || []).forEach(function(l) {
+                var ci = overlayCarrierIndex(l, true);
+                if (ci != null && g.tasks[ci]) (bandsByCarrier[ci] = bandsByCarrier[ci] || []).push(l);
+            });
+            (g.breaks || []).forEach(function(mk) {
+                var ci = overlayCarrierIndex(mk, false);
+                if (ci != null && g.tasks[ci]) (bandsByCarrier[ci] = bandsByCarrier[ci] || []).push(mk);
+            });
+            Object.keys(bandsByCarrier).forEach(function(key) {
+                var idx = Number(key);
+                var task = g.tasks[idx];
+                if (!task) return;
+                var bands = bandsByCarrier[key].slice().sort(function(a, b) { return a.startMs - b.startMs; });
+                // Растягиваем несущий бар на длительность накладок и вставляем каждую по её реальному
+                // времени. Соседние бары НЕ трогаем и по ним удлинение НЕ обрезаем: если несущий за счёт
+                // обеда/перерыва «наезжает» на следующую резку — перекрытие видно как есть (у Ганта каждая
+                // резка на своей строке; #4099). Обрезка по соседу вернула бы «висящий» хвост накладки
+                // (когда зазор до соседа меньше её длительности) — ровно то, на что жалуется #4110.
+                var tail = round3(task.leftPx + task.widthPx);   // правый край работы (растёт по мере вставки)
+                var addedPx = 0;
+                bands.forEach(function(m) {
+                    var durPx = Math.max(round3(m.durationMin * pxPerMin), 1);
+                    // Позиция накладки = её РЕАЛЬНОЕ время, сдвинутое за ранее вставленные накладки; но не
+                    // оставляем зазор перед хвостом бара — иначе накладка «висит в конце» (#4110).
+                    var realLeft = round3(scale.toPx(m.startMs) + addedPx);
+                    var drawLeft = Math.min(realLeft, tail);
+                    m.leftPx = drawLeft;
+                    m.widthPx = durPx;
+                    tail = round3(tail + durPx);   // вставка накладки двигает всё правее неё на её ширину
+                    addedPx = round3(addedPx + durPx);
+                });
+                if (tail > round3(task.leftPx + task.widthPx)) {
+                    task.widthPx = round3(tail - task.leftPx);
+                    // Подпись бара — на удлинённое окно (start-end); минуты в скобках — рабочие (накладка не входит).
+                    var spanMin = Math.round(task.widthPx / pxPerMin);
+                    var endMs = task.startMs + spanMin * 60000;
+                    task.barText = formatTime(task.startMs) + '-' + formatTime(endMs) + ' (' + task.barMin + ' мин)';
+                }
+            });
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
@@ -1896,10 +1946,11 @@
             headTrack.style.minWidth = trackPx + 'px';
             body.appendChild(el('div', { class: 'atex-cg-row atex-cg-machine-head' }, [nameCell, headTrack]));
 
-            // #4052/#4099: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ бара по их
-            // РЕАЛЬНОМУ времени (бар за них больше не удлиняется — «рисуй как есть», #4099). Кладём
-            // накладку на несущее задание: обед с известным LUNCH_START и перерыв несут carrierIndex;
-            // зазор-обед (LUNCH_START неизвестен) привязываем к резке ПЕРЕД зазором (beforeIndex − 1).
+            // #4110: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ бара; несущий их бар в
+            // layoutGroups уже РАСШИРЕН на их длительность, а leftPx/widthPx накладки пересчитаны так,
+            // чтобы она легла НА бар (не «висела в конце», #4110). Кладём накладку на несущее задание:
+            // обед с известным LUNCH_START и перерыв несут carrierIndex; зазор-обед (LUNCH_START
+            // неизвестен) привязываем к резке ПЕРЕД зазором (beforeIndex − 1) — как в layoutGroups.
             var overlaysByTask = {};
             function pushOverlay(idx, band) {
                 if (idx == null) return;
