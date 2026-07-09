@@ -428,6 +428,13 @@
     var GANTT_HOUR_STEPS = [1, 2, 4, 6, 8, 12, 24];
     var GANTT_TICK_MIN_PX = 50;
     var GANTT_HOUR_MS = 3600000;
+    // #4131: бейдж дня «N (M мин)» в строке-заголовке станка — влезет ли подпись в колонку дня.
+    // Ширину оцениваем по числу символов (как ширину меток оси — GANTT_TICK_MIN_PX): 12px-шрифт
+    // базы неизвестен, поэтому берём с запасом к измеренным 6.7px на символ. Не влезло — подпись
+    // усыхает до числа заданий, затем до пустой (минуты остаются в подсказке): обрезка по
+    // overflow съедала бы текст с ОБЕИХ сторон (бейдж центрирован) — «4 (1298 ми».
+    var GANTT_DAY_STAT_CHAR_PX = 7.5;   // ширина символа подписи (запас к 6.7px при 12px)
+    var GANTT_DAY_STAT_PAD_PX = 10;     // поля бейджа (4+4) + рамка дня слева
 
     function pxPerMinForMode(mode) {
         var m = normalizeMode(mode);
@@ -1478,6 +1485,46 @@
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
     }
 
+    // #4131: число заданий и сумма их минут (barMin, те же минуты, что в подписи бара) ПО КАЖДОМУ
+    // дню оси — для бейджей в строке-заголовке станка. Задание относится к календарному дню своего
+    // старта: по нему же workingSegments строит колонку дня. Дни без заданий станка пропускаем.
+    // → [{ dayMs, leftPx, widthPx, count, min }] в порядке колонок. Чистая — покрыта тестом.
+    function machineDayStats(tasks, scale) {
+        if (!scale || !scale.segments || !scale.segments.length) return [];
+        var byDay = {};
+        (tasks || []).forEach(function(t) {
+            if (!t || t.startMs == null) return;
+            var key = startOfLocalDayMs(t.startMs);
+            var acc = byDay[key] || (byDay[key] = { count: 0, min: 0 });
+            acc.count++;
+            acc.min += Number(t.barMin) || 0;
+        });
+        var out = [];
+        scale.segments.forEach(function(seg) {
+            var dayMs = startOfLocalDayMs(seg.startMs);
+            var acc = byDay[dayMs];
+            if (!acc) return;
+            out.push({ dayMs: dayMs, leftPx: seg.leftPx, widthPx: seg.widthPx, count: acc.count, min: acc.min });
+        });
+        return out;
+    }
+
+    // #4131: оценка ширины подписи бейджа дня в px (см. GANTT_DAY_STAT_*).
+    function dayStatTextPx(text) {
+        return GANTT_DAY_STAT_PAD_PX + String(text).length * GANTT_DAY_STAT_CHAR_PX;
+    }
+
+    // #4131: подпись бейджа дня — самая полная из влезающих в колонку этого дня: «N (M мин)» →
+    // «N» → пусто (минуты читаются в подсказке). Чистая — покрыта тестом.
+    function machineDayStatText(stat) {
+        if (!stat || !(stat.count > 0)) return '';
+        var widthPx = Number(stat.widthPx) || 0;
+        var full = String(stat.count) + (stat.min > 0 ? ' (' + stat.min + ' мин)' : '');
+        if (dayStatTextPx(full) <= widthPx) return full;
+        var count = String(stat.count);
+        return dayStatTextPx(count) <= widthPx ? count : '';
+    }
+
     function slittersFromCuts(cuts) {
         var seen = {};
         var out = [];
@@ -1547,6 +1594,8 @@
         orderCutsInGroup: orderCutsInGroup,
         dedupeBarStarts: dedupeBarStarts,   // #3887
         layoutGroups: layoutGroups,
+        machineDayStats: machineDayStats,       // #4131
+        machineDayStatText: machineDayStatText, // #4131
         ganttWindow: ganttWindow,
         ganttTrackPx: ganttTrackPx,
         cutBarEndMs: cutBarEndMs,           // #3747
@@ -1943,6 +1992,7 @@
             return body;
         }
         var trackPx = data.trackPx;
+        var dayColumns = ((data.scale && data.scale.segments) || []).length;   // #4131
         body.style.minWidth = 'calc(var(--cg-label-w) + ' + trackPx + 'px)';
 
         // #3668 п.6: часовые деления одинаковым пунктиром, шаг подобран по плотности окна.
@@ -2018,6 +2068,22 @@
             ]);
             var headTrack = el('div', { class: 'atex-cg-track atex-cg-machine-track' });
             headTrack.style.minWidth = trackPx + 'px';
+            // #4131: в той же строке — число заданий и сумма минут КАЖДОГО дня, над его колонкой оси
+            // (первая ячейка даёт только итог по всем дням). На одном дне бейдж повторял бы итог —
+            // рисуем, лишь когда дней на оси больше одного.
+            if (dayColumns > 1) {
+                machineDayStats(group.tasks, data.scale).forEach(function(s) {
+                    var title = formatDateShort(s.dayMs) + ' · заданий: ' + s.count + ' · ' + s.min + ' мин';
+                    // Левая граница бейджа = граница дня; у бейджа на самом левом краю дорожки её
+                    // рисует рамка закреплённой ячейки-метки (is-track-start снимает удвоение).
+                    var badge = el('span', {
+                        class: 'atex-cg-machine-day' + (s.leftPx > 0 ? '' : ' is-track-start'),
+                        title: title, text: machineDayStatText(s) });
+                    badge.style.left = s.leftPx + 'px';
+                    badge.style.width = s.widthPx + 'px';
+                    headTrack.appendChild(badge);
+                });
+            }
             body.appendChild(el('div', { class: 'atex-cg-row atex-cg-machine-head' }, [nameCell, headTrack]));
 
             // #4110: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ бара; несущий их бар в

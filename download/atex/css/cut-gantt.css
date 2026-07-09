@@ -137,6 +137,27 @@
 }
 .atex-cg-machine-track { background: var(--cg-surface); }
 .atex-cg-machine-count { font-weight: 400; font-size: 12px; color: var(--cg-muted); }
+/* #4131: бейдж дня — число заданий и сумма минут станка за этот день, по центру колонки дня.
+   Занимает всю колонку (левая граница отделяет её от предыдущего дня), текст не переносится.
+   Подпись усыхает по ширине колонки в JS (machineDayStatText) — сюда она приходит уже влезающей;
+   padding/border тут держит GANTT_DAY_STAT_PAD_PX, шрифт — GANTT_DAY_STAT_CHAR_PX. */
+.atex-cg-machine-day {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border-left: 1px solid var(--cg-border-soft);
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--cg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.atex-cg-machine-day.is-track-start { border-left: none; }
 
 /* Компактные строки задания (метка | дорожка). */
 .atex-cg-row { display: grid; grid-template-columns: var(--cg-label-w) 1fr; border-top: 1px solid var(--cg-border-soft); }
