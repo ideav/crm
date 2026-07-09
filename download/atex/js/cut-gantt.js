@@ -520,6 +520,12 @@
             // короткой переходящей резки) ошибочно помечался обедом. LUNCH_START неизвестен (нет
             // ключа/настройка не загрузилась) → проверку пропускаем (поведение как было).
             if (isFinite(lunchStart) && (curStart - day) / 60000 < lunchStart) continue;
+            // #4121: и ТОЛЬКО если зазор идёт сразу за «несущим» обеда — заданием, начавшимся не
+            // позже LUNCH_START (генерация вставляет обед именно после него). Иначе любой поздний
+            // простой дня (второй «Отпуск» станка, окно ТО) забирал бы себе роль обеда: день
+            // помечался «обед в плане есть», и сквозной обед переставал сдвигать бары (#4121).
+            var prevTr = cutTimeRange(ordered[i - 1]);
+            if (isFinite(lunchStart) && (!prevTr || (prevTr.startMs - day) / 60000 > lunchStart)) continue;
             // #3909: при известном LUNCH_START обед ФИКСИРУЕМ в 12:20 (а не в зазоре после задания,
             // куда генерация зашила +40). Зазор лежит сразу после «несущего» задания (ordered[i-1]),
             // чьё окно содержит 12:20 — его полосу растягиваем до старта послеобеденного задания
@@ -585,7 +591,10 @@
     // задания (попал в простой или после последней резки дня) не рисуется и никого не сдвигает.
     // ordered — резки станка в порядке дорожки; scale — свёрнутая ось; opts.barStarts — старты
     // баров (dedupeBarStarts), opts.pxPerMin — масштаб. breaks — [{ startMin, durationMin, label }],
-    // startMin — минуты от полуночи. Чистая — покрыта тестом. → { markers: [{ carrierIndex,
+    // startMin — минуты от полуночи. #4121: opts.lunches — маркеры ganttLunchMarkers; обед-фолбэк
+    // (#4035, fallback=true) в сохранённые старты НЕ зашит, поэтому сдвигает бары наравне с
+    // перерывом; обед-зазор генерация уже вписала в planStart — он не сдвигает никого.
+    // Чистая — покрыта тестом. → { markers: [{ carrierIndex,
     // beforeIndex, dayMs, startMs, endMs, leftPx, widthPx, durationMin, label }], shiftMinByIndex }.
     function ganttBreakMarkers(ordered, scale, breaks, opts) {
         var n = (ordered || []).length;
@@ -594,10 +603,18 @@
         var brks = (breaks || []).filter(function(b) {
             return b && Number(b.durationMin) > 0 && isFinite(Number(b.startMin));
         }).slice().sort(function(a, b) { return Number(a.startMin) - Number(b.startMin); });
-        if (!brks.length || !n || !scale || typeof scale.toPx !== 'function') {
+        var o = opts || {};
+        // #4121: обед-фолбэк (#4035) — обед, которого НЕТ в сохранённых стартах: генерация не
+        // оставила под него зазор (день после «Отпуска» станка пакуется встык, см. #3764
+        // shiftPlacementsPastDowntime). Станок в обед всё равно стоит, поэтому такой обед двигает
+        // задания дня после несущего — как перерыв (#4114 п.1). Обед-зазор (fallback≠true) уже
+        // зашит в planStart: он растягивает несущий бар, но никого не сдвигает (иначе двойной учёт).
+        var lunches = (o.lunches || []).filter(function(l) {
+            return l && l.fallback && l.carrierIndex != null && Number(l.durationMin) > 0;
+        });
+        if ((!brks.length && !lunches.length) || !n || !scale || typeof scale.toPx !== 'function') {
             return { markers: [], shiftMinByIndex: shiftMinByIndex };
         }
-        var o = opts || {};
         var ppm = Number(o.pxPerMin) > 0 ? Number(o.pxPerMin)
             : (Number(scale.pxPerMin) > 0 ? Number(scale.pxPerMin) : GANTT_PX_PER_MIN);
         var barStarts = o.barStarts || [];
@@ -624,38 +641,55 @@
         var markers = [];
         dayOrder.forEach(function(day) {
             var dayBars = byDay[day];
+            // #4121: события дня, которые двигают бары, — перерывы и обед-фолбэк. Обходим их в
+            // хронологическом порядке: сдвиг накапливается (перерыв 10:00 → обед 12:20 → перерыв
+            // 15:00). У перерыва несущего ищем по сохранённому окну, у обеда он уже известен
+            // (ganttLunchMarkers). Маркер кладём только для перерыва — обед рисуется своим списком.
+            var events = brks.map(function(B) {
+                return { startMin: Number(B.startMin), durationMin: Number(B.durationMin), brk: B };
+            });
+            lunches.forEach(function(l) {
+                if (startOfLocalDayMs(l.startMs) !== day) return;
+                events.push({ startMin: (l.startMs - day) / 60000, durationMin: Number(l.durationMin), lunch: l });
+            });
+            events.sort(function(a, b) { return a.startMin - b.startMin; });
             // #4114 п.1: заказчик исключил обед/перерывы из «рисуй как есть» (#4099) — они
             // ЛЕГАЛЬНО двигают всё, что идёт после них в тот же день (реальный простой станка).
-            // shiftDayMin — накопительный сдвиг ОТ ПРЕДЫДУЩИХ перерывов этого дня; несущий бар
+            // shiftDayMin — накопительный сдвиг ОТ ПРЕДЫДУЩИХ событий этого дня; несущий бар
             // сам не двигается (его раздвигает растяжка в layoutGroups), сдвигаются только
             // задания ПОСЛЕ него.
             var shiftDayMin = 0;
-            brks.forEach(function(B) {
-                var dur = Math.round(Number(B.durationMin));
-                // Несущее задание — первое, чьё СОХРАНЁННОЕ окно накрывает время перерыва.
+            events.forEach(function(E) {
+                var dur = Math.round(E.durationMin);
+                // Несущее задание — первое, чьё СОХРАНЁННОЕ окно накрывает время события. У обеда
+                // несущий вычислен раньше (тем же правилом), берём его по индексу в дорожке.
                 var carrier = null, carrierPos = -1;
                 for (var k = 0; k < dayBars.length; k++) {
                     var cb = dayBars[k];
-                    if (cb.clockMin <= B.startMin && B.startMin < cb.clockMin + cb.lenMin) { carrier = cb; carrierPos = k; break; }
+                    var hit = E.lunch ? (cb.index === E.lunch.carrierIndex)
+                        : (cb.clockMin <= E.startMin && E.startMin < cb.clockMin + cb.lenMin);
+                    if (hit) { carrier = cb; carrierPos = k; break; }
                 }
                 if (!carrier) return;   // перерыв в простое / после последней резки дня — не рисуем
-                // Позиция маркера — реальное время перерыва + сдвиг от предыдущих перерывов ЭТОГО
-                // дня (если несущий бар уже был отодвинут более ранним перерывом).
-                var baseLeftPx = scale.toPx(day + B.startMin * 60000) + round3(shiftDayMin * ppm);
-                markers.push({
-                    carrierIndex: carrier.index,
-                    beforeIndex: carrier.index + 1,
-                    dayMs: day,
-                    startMs: day + B.startMin * 60000,
-                    endMs: day + (B.startMin + dur) * 60000,
-                    leftPx: round3(baseLeftPx),
-                    widthPx: Math.max(round3(dur * ppm), 1),
-                    durationMin: dur,
-                    label: B.label || 'Перерыв'
-                });
+                if (E.brk) {
+                    // Позиция маркера — реальное время перерыва + сдвиг от предыдущих событий ЭТОГО
+                    // дня (если несущий бар уже был отодвинут более ранним перерывом/обедом).
+                    var baseLeftPx = scale.toPx(day + E.startMin * 60000) + round3(shiftDayMin * ppm);
+                    markers.push({
+                        carrierIndex: carrier.index,
+                        beforeIndex: carrier.index + 1,
+                        dayMs: day,
+                        startMs: day + E.startMin * 60000,
+                        endMs: day + (E.startMin + dur) * 60000,
+                        leftPx: round3(baseLeftPx),
+                        widthPx: Math.max(round3(dur * ppm), 1),
+                        durationMin: dur,
+                        label: E.brk.label || 'Перерыв'
+                    });
+                }
                 shiftDayMin += dur;
                 // Все последующие бары ЭТОГО дня (после несущего) сдвигаются на dur; несколько
-                // перерывов в одном дне накапливаются (shiftDayMin растёт по мере обхода).
+                // событий в одном дне накапливаются (shiftDayMin растёт по мере обхода).
                 for (var m = carrierPos + 1; m < dayBars.length; m++) {
                     shiftMinByIndex[dayBars[m].index] += dur;
                 }
@@ -678,7 +712,11 @@
         // #4007: перерывы (ТЗ §5) сдвигают бары дня вправо на суммарную длительность перерывов,
         // а сами перерывы планированию прозрачны (в сохранённые старты не зашиты). Расширяем окно
         // каждого дня на этот буфер, чтобы сдвинутым барам/маркерам хватило места на оси.
+        // #4121: буфер включает и обед (сквозной обед двигает бары дня, см. ganttBreakMarkers) и
+        // добавляется к ЗАХЛЁСТУ тоже: на переполненном дне (#4099) правый край окна равен концу
+        // последнего бара, и без запаса сдвинутый бар уехал бы в окно следующего дня (дни встык).
         var breakBuffer = Number(o.breakBufferMin) > 0 ? Number(o.breakBufferMin) : 0;
+        var bufferMs = breakBuffer * 60000;
         var tailMs = (tailMin + breakBuffer) * 60000;
         var byDay = {}, order = [];
         (cuts || []).forEach(function(cut) {
@@ -695,7 +733,7 @@
             }
             if (tr.startMs < seg.startMs) seg.startMs = tr.startMs;          // ранний старт
             var barEndMs = cutBarEndMs(cut);
-            if (barEndMs != null && barEndMs > seg.endMs) seg.endMs = barEndMs; // захлёст за смену
+            if (barEndMs != null && barEndMs + bufferMs > seg.endMs) seg.endMs = barEndMs + bufferMs; // захлёст за смену
         });
         if (!order.length) {
             var dayMs0 = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
@@ -1283,7 +1321,10 @@
         var totalBreakMin = (o.breaks || []).reduce(function(s, b) {
             return s + (b && Number(b.durationMin) > 0 ? Number(b.durationMin) : 0);
         }, 0);
-        o.breakBufferMin = totalBreakMin;
+        // #4121: сквозной обед (его нет в сохранённых стартах) двигает бары дня наравне с
+        // перерывами — его длительность тоже должна поместиться в окно дня.
+        var lunchBufferMin = Number(o.lunchDurationMin) > 0 ? Number(o.lunchDurationMin) : 0;
+        o.breakBufferMin = totalBreakMin + lunchBufferMin;
         // #3747: ось — только рабочие окна дней [08:00;18:30], нерабочее время (ночь) свёрнуто
         // (ganttScale.toPx). Бар, вышедший за смену, расширяет окно своего дня (workingSegments).
         var segments = workingSegments(visible, range, o);
@@ -1330,7 +1371,11 @@
             // (brk.shiftMinByIndex, накопительно по дню); сам порядок и относительные старты резок
             // друг относительно друга при этом не меняются.
             var barStarts = dedupeBarStarts(ordered);
-            var brk = ganttBreakMarkers(ordered, scale, o.breaks, { pxPerMin: pxPerMin, barStarts: barStarts });
+            // #4121: обед считаем ДО баров — обед-фолбэк (не зашитый в planStart) сдвигает бары дня
+            // наравне с перерывами, поэтому он должен попасть в shiftMinByIndex.
+            var lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
+            var brk = ganttBreakMarkers(ordered, scale, o.breaks,
+                { pxPerMin: pxPerMin, barStarts: barStarts, lunches: lunches });
             g.tasks = ordered.map(function(cut, i) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var startMs = barStarts[i] != null ? barStarts[i] : tr.startMs;   // #4099: сохранённый старт как есть
@@ -1369,7 +1414,7 @@
             // без анти-нахлёста #3708/#3887, снятых в #4099): день не «разъезжается», перекрытия по-
             // прежнему видны как есть — просто обед/перерыв честно лежит на своём баре, а бар длиннее
             // на его время (работа под накладкой не прячется — хвост компенсирует закрытые серым мин).
-            g.lunches = ganttLunchMarkers(ordered, scale, o.lunchDurationMin, o.lunchStartMin);
+            g.lunches = lunches;
             g.breaks = brk.markers;
             // Несущее задание накладки: обед с известным LUNCH_START и перерыв несут carrierIndex;
             // обед-зазор (LUNCH_START неизвестен) привязан к резке ПЕРЕД зазором (beforeIndex − 1).
@@ -1398,12 +1443,15 @@
                 // (когда зазор до соседа меньше её длительности) — ровно то, на что жалуется #4110.
                 var tail = round3(task.leftPx + task.widthPx);   // правый край работы (растёт по мере вставки)
                 var addedPx = 0;
+                // #4121: несущий бар мог сам уехать вправо за более ранние обеды/перерывы дня —
+                // накладку кладём в то же смещение, иначе она вылезает ЛЕВЕЕ своего бара.
+                var carrierShiftMin = (brk.shiftMinByIndex && brk.shiftMinByIndex[idx]) || 0;
                 bands.forEach(function(m) {
                     var durPx = Math.max(round3(m.durationMin * pxPerMin), 1);
                     // Позиция накладки = её РЕАЛЬНОЕ время, сдвинутое за ранее вставленные накладки; но не
                     // оставляем зазор перед хвостом бара — иначе накладка «висит в конце» (#4110).
-                    var realLeft = round3(scale.toPx(m.startMs) + addedPx);
-                    var drawLeft = Math.min(realLeft, tail);
+                    var realLeft = round3(scale.toPx(m.startMs) + carrierShiftMin * pxPerMin + addedPx);
+                    var drawLeft = Math.min(Math.max(realLeft, task.leftPx), tail);
                     m.leftPx = drawLeft;
                     m.widthPx = durPx;
                     tail = round3(tail + durPx);   // вставка накладки двигает всё правее неё на её ширину
