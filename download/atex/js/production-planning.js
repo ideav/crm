@@ -1916,15 +1916,26 @@
 
     // #4111: как разложить наладку setup-only ХВОСТА дня (0 проходов, #3635 п.5) между текущим днём N
     // и продолжением (день N+1), чтобы хвост НЕ вылезал за потолок нахлёста НАСТРОЙКИ
-    // (cutEndMin + MAX_OVERWORK_TUNE). Зеркалит splitMachineQueue (minOverlapTailSetupMinutes + гейт
-    // availFor 'tune'), но работает с ДВУМЯ именованными компонентами (ножи/сырьё) — чтобы поделить их
-    // по хранимым колонкам «Наладка ножей»/«Сырье/намотка». В дне N оставляем МИНИМАЛЬНОЕ подмножество,
-    // добивающее день до cutEndMin, — но только если оно кончается ≤ потолка нахлёста; иначе (даже
-    // минимальный компонент вылезает за потолок) в дне N НИЧЕГО, вся наладка на продолжение.
+    // (cutEndMin + MAX_OVERWORK_TUNE). Считает ХРАНИМЫЕ колонки УЖЕ СУЩЕСТВУЮЩЕГО хвоста-задания
+    // (computeCutSetupUpdates, #4030/#4042) — что оператор увидит в карточке дня N. Роднит с
+    // splitMachineQueue (minOverlapTailSetupMinutes + гейт availFor 'tune'), но работает с ДВУМЯ
+    // именованными компонентами (ножи/сырьё) — чтобы поделить их по колонкам «Наладка ножей»/
+    // «Сырье/намотка». ОТЛИЧИЕ от генерации плана (splitMachineQueue #3939): та решает, СОЗДАВАТЬ ли
+    // хвост вообще (нет — вся резка одной карточкой на завтра); здесь хвост УЖЕ ЕСТЬ, поэтому пустым
+    // (все нули) его не оставляем — держим максимум влезающей наладки (#4116). В дне N оставляем
+    // МИНИМАЛЬНОЕ подмножество,
+    // добивающее день до cutEndMin, — но только если оно кончается ≤ потолка нахлёста. Если ни одно
+    // подмножество не добивает день без выхода за потолок — оставляем в дне N НАИБОЛЬШЕЕ подмножество,
+    // которое ещё влезает под потолок (максимум наладки в дне N, минимум на продолжение), и лишь когда
+    // даже минимальный компонент вылезает за потолок — в дне N НИЧЕГО, вся наладка на продолжение.
     //   tailStartMin — минута старта хвоста (planStart, от полуночи дня); knifeMin/materialMin —
     //   компоненты наладки; cutEndMin/overTuneMin — окно (мин от полуночи / нахлёст настройки).
     // → { keepKnife, keepMaterial } — что ОСТАЁТСЯ в дне N (остальное уносится на продолжение).
     // Нет окна (cutEndMin/tailStartMin не число) → держим всё в дне N (прежнее поведение, без окна).
+    // #4116: раньше при room 31–34 (напр. cutEnd 16:13, хвост 15:40) minOverlap требовал ВСЮ наладку 45
+    // (ни ножи 30, ни сырьё 15 по отдельности не добивали день), а 45 вылезала за потолок → в дне N
+    // клали НИЧЕГО, хотя ножи 30 кончались 16:10 ДО cutEnd (0 нахлёста). Симптом: пустое задание, вся
+    // наладка (в т.ч. настройка ножей, которая влезала) уезжала на следующий день.
     function splitTailSetupAtCeiling(tailStartMin, knifeMin, materialMin, cutEndMin, overTuneMin) {
         var k = Math.max(0, Math.round(Number(knifeMin) || 0));
         var m = Math.max(0, Math.round(Number(materialMin) || 0));
@@ -1939,12 +1950,15 @@
             { s: k,     keepKnife: k, keepMaterial: 0 },
             { s: k + m, keepKnife: k, keepMaterial: m }
         ].filter(function(x){ return x.s > 0; }).sort(function(a, b){ return a.s - b.s; });
-        // Минимальное подмножество с суммой ≥ room (minOverlap); нет такого → полный набор.
-        var chosen = { s: k + m, keepKnife: k, keepMaterial: m };
-        for (var i = 0; i < subsets.length; i++) { if (subsets[i].s >= room) { chosen = subsets[i]; break; } }
-        // Гейт нахлёста настройки: влезает ≤ потолка → держим; иначе в дне N ничего (всё на продолжение).
-        if (chosen.s <= ceilingRoom) return { keepKnife: chosen.keepKnife, keepMaterial: chosen.keepMaterial };
-        return { keepKnife: 0, keepMaterial: 0 };
+        // Кандидаты — только подмножества, кончающиеся ≤ потолка нахлёста настройки (иначе выход за потолок).
+        var underCeiling = subsets.filter(function(x){ return x.s <= ceilingRoom; });
+        if (!underCeiling.length) return { keepKnife: 0, keepMaterial: 0 };   // даже минимум за потолок → всё на продолжение
+        // Минимальное подмножество, добивающее день до cutEndMin (minOverlap, минимальный нахлёст);
+        // #4116: нет такого (ни одно не добивает под потолком) → НАИБОЛЬШЕЕ влезающее (максимум в дне N).
+        var chosen = null;
+        for (var i = 0; i < underCeiling.length; i++) { if (underCeiling[i].s >= room) { chosen = underCeiling[i]; break; } }
+        if (!chosen) chosen = underCeiling[underCeiling.length - 1];   // subsets по возрастанию → последний = наибольший под потолком
+        return { keepKnife: chosen.keepKnife, keepMaterial: chosen.keepMaterial };
     }
 
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
