@@ -16,13 +16,14 @@ const PW = process.env.PW_MODULE || 'playwright';
 const CHROME = process.env.CHROME_PATH || undefined;
 const { chromium } = require(PW);
 
-// Read-only токен обеих баз. Не хранится в репозитории.
+// Read-only токен обеих баз. В репозитории не хранится.
 const TOKEN = process.env.INTEGRAM_TOKEN;
 if (!TOKEN) throw new Error('Задайте INTEGRAM_TOKEN — read-only токен Интеграма');
 const FETCH_TIMEOUT = Number(process.env.FETCH_TIMEOUT || 60000);
 
-// Шрифты нужны для верного вида — пропускаем их через тот же прокси.
-const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+// Внешние хосты, которые приложению реально нужны: шрифты и Chart.js
+// (dash.js подгружает его с jsdelivr). Всё остальное режем.
+const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 
 const APPS = {
   crm: { base: 'https://integram.io/crm', host: 'integram.io', cookie: 'crm' },
@@ -164,7 +165,7 @@ if (require.main === module) {
     const app = APPS[appKey];
     if (!app) throw new Error(`unknown app: ${appKey}`);
 
-    const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] });
+    const browser = await chromium.launch(CHROME ? { executablePath: CHROME, args: ['--no-sandbox'] } : { args: ['--no-sandbox'] });
     try {
       const context = await makeContext(browser, app);
       const page = await openPage(context, app, urlPath, Number(settle));

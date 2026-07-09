@@ -3,11 +3,47 @@
 
 const { APPS, chromium, CHROME, makeContext, openPage, bodyText } = require('./capture.js');
 const S = require('./demo-sz.js');
+const C = require('./demo-charts.js');
 
 const target = process.argv[2];   // clients | dashboard
 const OUT = process.argv[3] || `/tmp/sz-${target}.png`;
 
 const SCENES = {
+  capital: {
+    path: '/dash/1161',
+    viewport: { width: 1600, height: 1000 },
+    settle: 22000,
+    fixtures: [
+      [/\/report\/.*modelID/i, (real) => S.fillDashboard(real)],
+      [/\/report\/158715\b/, (real) => C.asReport(real, C.shareholders())],
+      [/\/report\/158810\b/, (real) => C.asReport(real, C.valuationHistory())],
+    ],
+    after: async (page) => {
+      await page.evaluate(() => {
+        const t = document.getElementById('158685');
+        if (t) (t.matches('a,button') ? t : t.querySelector('a,button') || t).click();
+      });
+      await page.waitForTimeout(14000);
+    },
+  },
+  invest: {
+    path: '/dash/1161',
+    viewport: { width: 1600, height: 1000 },
+    settle: 22000,
+    fixtures: [
+      [/\/report\/.*modelID/i, (real) => S.fillDashboard(real)],
+      [/\/report\/445106\b/, (real) => C.asReport(real, C.threeYearSeries())],
+      [/\/report\/452608\b/, (real) => C.asReport(real, C.currentYearSegments())],
+      [/\/report\/159287\b/, (real) => C.asReport(real, C.loans())],
+    ],
+    after: async (page) => {
+      await page.evaluate(() => {
+        const t = document.getElementById('158931');
+        if (t) (t.matches('a,button') ? t : t.querySelector('a,button') || t).click();
+      });
+      await page.waitForTimeout(14000);
+    },
+  },
   tables: {
     path: '/tables',
     viewport: { width: 1500, height: 860 },
