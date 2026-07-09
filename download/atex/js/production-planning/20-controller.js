@@ -236,6 +236,7 @@
         cutStartWindowMin: cutStartWindowMin,
         formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
+        formatSetupScheduleLine: formatSetupScheduleLine,   // #4121: окно карточки настройки (0 проходов)
         formatFreeSlot: formatFreeSlot,
         DAY_START_MIN: DAY_START_MIN,
         DAY_END_MIN: DAY_END_MIN,
@@ -5884,10 +5885,12 @@
             // отдельным рядом ниже. Клик открывает тайминг и (всплытием) выбирает резку.
             var timeEl = null;
             if (sc) {
-                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · N мин»
+                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · … · N мин»
                 // (окно = переналадка, минуты вверх), а не строку расписания резки.
+                // #4121: у настройки тоже пишем начало и окончание окна — по одному «· N мин» было
+                // непонятно, когда станок занят переналадкой.
                 var scheduleText = isSetupTask
-                    ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
+                    ? formatSetupScheduleLine(sc, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)])
                     : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)]);
                 if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {

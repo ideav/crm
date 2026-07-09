@@ -3848,6 +3848,28 @@
         return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
     }
 
+    // #4121: обед УЖЕ учтён в сохранённых стартах, если генерация оставила под него зазор — то же
+    // правило, что у зазор-детектора Ганта (ganttLunchMarkers): зазор ≈ длительности обеда, идущий
+    // СРАЗУ ЗА заданием, начавшимся не позже LUNCH_START (генерация вставляет обед после него), и
+    // перед заданием, стартующим не раньше LUNCH_START. Оба гарда обязательны: без первого роль
+    // обеда забирает любой поздний простой дня (второй «Отпуск» станка), без второго — утренний
+    // зазор. Нет такого зазора → обед «сквозной»: генерация его потеряла (день после «Отпуска»
+    // пакуется встык, shiftPlacementsPastDowntime) и он обязан двигать карточки после несущей.
+    // wins — окна карточек дня [{ startClock, endClock }]; порядок дорожки («Очередность») может
+    // расходиться с временем (#3920/#3885), поэтому зазоры ищем по времени. Чистая — покрыта тестом.
+    function lunchBakedIntoStarts(wins, lunch) {
+        var byTime = (wins || []).filter(Boolean).slice()
+            .sort(function(a, b) { return a.startClock - b.startClock; });
+        for (var k = 1; k < byTime.length; k++) {
+            var prev = byTime[k - 1], cur = byTime[k];
+            if (cur.startClock - prev.endClock < lunch.durationMin - 1) continue;   // зазор меньше обеда
+            if (prev.startClock > lunch.startMin) continue;                         // зазор не за несущим обеда
+            if (cur.startClock < lunch.startMin) continue;                          // зазор до обеда (утренний)
+            return true;
+        }
+        return false;
+    }
+
     // #4075: несущие карточки обеда/перерывов + сдвиг последующих окон — перенос логики накладок
     // Ганта (ganttBreakMarkers/ganttLunchMarkers) на очередь РМ «Планирование». Для каждого
     // перерыва/обеда дня находим НЕСУЩУЮ карточку — первую, чьё СОХРАНЁННОЕ окно (наладка+резка+
@@ -3858,6 +3880,12 @@
     // 10:00/15:00) в planStart НЕ входит → значок + сдвиг всех ПОСЛЕДУЮЩИХ карточек дня на его
     // длительность (breakShift, накопительно — как shiftMinByIndex Ганта). Перерыв в простое/после
     // последней резки дня (несущей нет) — не рисуется и никого не сдвигает.
+    // #4121: обед зашит в planStart НЕ ВСЕГДА. На дне после «Отпуска» станка (#3764) сдвиг за
+    // простой пакует резки встык (shiftPlacementsPastDowntime) и обеденный зазор схлопывается —
+    // день идёт цугом через 12:20. Такой «сквозной» обед — реальный простой станка, которого нет
+    // в сохранённых стартах, поэтому он двигает карточки после несущей, как перерыв (иначе №3
+    // начинается на 40 мин раньше конца №2 — issue #4121). Отличаем по наличию зазора в дне
+    // (lunchBakedIntoStarts) — тем же правилом, что зазор-детектор Ганта (ganttLunchMarkers).
     //   dayGroups — { schedDayKey → [cut,...] } в порядке дорожки; schedById — cutId → sc
     //   (startMin/setupMin/finishMin/leaderMin, минуты от полуночи дня 0); breaks — intraDayBreaks().
     // → { markersByCut: { cutId: [{ label, startMin, endMin, kind }] }, shiftByCut: { cutId: минуты },
@@ -3908,7 +3936,10 @@
                 // (конец) честно охватывает работу + перерыв, как бар Ганта (extendMinByTask, cut-gantt
                 // #4052). И обед (зазор/сквозной), и перерыв 10:00/15:00 расширяют конец окна несущей.
                 extendByCut[carrierId] = (extendByCut[carrierId] || 0) + dur;
-                if (B.kind === 'break') {
+                // #4121: двигают последующие карточки перерывы (их нет в planStart) и обед, который
+                // генерация в planStart не оставила (нет зазора). Зазор-обед уже сдвинул старты сам.
+                var shiftsFollowing = B.kind === 'break' || (B.kind === 'lunch' && !lunchBakedIntoStarts(wins, B));
+                if (shiftsFollowing) {
                     for (var m = carrierIdx + 1; m < cards.length; m++) {
                         var id = String(cards[m].id);
                         shiftByCut[id] = (shiftByCut[id] || 0) + dur;
@@ -5208,6 +5239,22 @@
         // несомом перерыве диапазон времени длиннее числа минут (диапазон = стенные часы с перерывом,
         // минуты = чистая работа) — как у Ганта «08:00-12:40 (240 мин)».
         return '⏱ ' + formatClock(windowStart) + ' – ' + formatClock(windowEnd) + ' · ' + Math.ceil(setup + dur + leaderMin) + ' мин';
+    }
+
+    // #4121: строка времени карточки НАСТРОЙКИ (setup-only, #3635 п.5 — 0 проходов, намотка с дня
+    // N+1). У неё нет длительности резки, поэтому formatScheduleLine отдал бы «ошибку длительности»,
+    // и карточка показывала только «· N мин» — когда настройка начинается и кончается, было не
+    // видно. Показываем то же ОКНО, что и у обычной карточки: [startMin − setupMin; finishMin],
+    // с теми же сдвигом и удлинением от обеда/перерывов (#4075/#4094/#4121). Чистая — покрыта тестом.
+    function formatSetupScheduleLine(sc, shiftMin, extendMin) {
+        if (!sc) return '';
+        var setup = stripNum(sc.setupMin);
+        var shift = Number(shiftMin) || 0;
+        var extend = Number(extendMin) || 0;
+        var windowStart = stripNum(sc.startMin) - setup + shift;
+        var windowEnd = stripNum(sc.finishMin) + stripNum(sc.leaderMin) + shift + extend;
+        return '⚙ Настройка ножей и сырья · ' + formatClock(windowStart) + ' – ' + formatClock(windowEnd) +
+               ' · ' + Math.ceil(setup) + ' мин';
     }
 
     // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
@@ -7473,6 +7520,7 @@
         cutStartWindowMin: cutStartWindowMin,
         formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
+        formatSetupScheduleLine: formatSetupScheduleLine,   // #4121: окно карточки настройки (0 проходов)
         formatFreeSlot: formatFreeSlot,
         DAY_START_MIN: DAY_START_MIN,
         DAY_END_MIN: DAY_END_MIN,
@@ -13121,10 +13169,12 @@
             // отдельным рядом ниже. Клик открывает тайминг и (всплытием) выбирает резку.
             var timeEl = null;
             if (sc) {
-                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · N мин»
+                // #3635 п.5: для настройки показываем «⚙ Настройка ножей и сырья · … · N мин»
                 // (окно = переналадка, минуты вверх), а не строку расписания резки.
+                // #4121: у настройки тоже пишем начало и окончание окна — по одному «· N мин» было
+                // непонятно, когда станок занят переналадкой.
                 var scheduleText = isSetupTask
-                    ? ('⚙ Настройка ножей и сырья · ' + Math.ceil(stripNum(sc.setupMin)) + ' мин')
+                    ? formatSetupScheduleLine(sc, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)])
                     : formatScheduleLine(sc, runLengthForCut, windPoints.length > 0, breakShiftByCut[String(c.id)], breakExtendByCut[String(c.id)]);
                 if (!isSetupTask && stripNum(sc.durationMin) <= 0 && typeof console !== 'undefined' && console.error) {
                     console.error('[pp] ❌ renderQueue: длительность резки не рассчитана', {
