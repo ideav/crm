@@ -1651,17 +1651,17 @@ class IntegramCreateFormHelper {
                 html += `<tr data-row-id="${recordId}" style="cursor:pointer;">`;
 
                 // Main value column (clickable)
-                const mainValue = values[0] || '';
-                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${this.escapeHtml(mainValue)}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
+                const mainValue = this.formatSubordinateCellDisplay(values[0] || '', metadata.type);
+                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${mainValue}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
 
-                // Requisite columns
+                // Requisite columns. Вложенные (arr_id) колонки не рисуются, но слот в r[]
+                // занимают — valIdx двигается на каждом реквизите, иначе сдвиг (issue #4124)
                 let valIdx = 1;
                 reqs.forEach(req => {
                     if (!req.arr_id) {
-                        const cellValue = values[valIdx] || '';
-                        html += `<td>${this.escapeHtml(cellValue)}</td>`;
-                        valIdx++;
+                        html += `<td>${this.formatSubordinateCellDisplay(values[valIdx] || '', req.type)}</td>`;
                     }
+                    valIdx++;
                 });
 
                 html += `</tr>`;
@@ -1748,6 +1748,39 @@ class IntegramCreateFormHelper {
         const formatted = formatIntegramDateCellPlain(value, this.normalizeFormat(type));
         if (formatted !== null) return formatted;
         return this.stripReferencePrefix(String(value));
+    }
+
+    /**
+     * Значение ячейки подчинённой таблицы для отрисовки (issue #4123). Возвращает HTML.
+     *
+     * Зеркало IntegramTable.formatSubordinateCellValue (19-form-edit): BOOLEAN — иконкой,
+     * DATE/DATETIME — датой (API отдаёт их unix-штампом), FILE — ссылкой, ссылка "id:label" —
+     * меткой (issue #1790). Прочее экранируется как есть.
+     *
+     * @param value сырое значение из record.r[]
+     * @param type тип колонки: req.type для реквизита, metadata.type для главного значения
+     */
+    formatSubordinateCellDisplay(value, type) {
+        if (value === null || value === undefined || value === '') return '';
+
+        const format = this.normalizeFormat(type);
+
+        if (format === 'BOOLEAN') {
+            const boolVal = value !== 0 && value !== '0' && value !== false;
+            return boolVal
+                ? '<span class="boolean-check"><i class="pi pi-check"></i></span>'
+                : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
+        }
+
+        // Значение из object/ приходит готовым тегом <a> — не экранируем, добавляем класс
+        if (format === 'FILE' && typeof value === 'string' && value.trim().startsWith('<a')) {
+            return value.replace('<a', '<a class="file-link"');
+        }
+
+        const date = formatIntegramDateCellPlain(value, format);
+        if (date !== null) return this.escapeHtml(date);
+
+        return this.escapeHtml(this.stripReferencePrefix(String(value)));
     }
 
     /**
