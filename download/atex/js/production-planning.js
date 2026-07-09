@@ -4910,6 +4910,12 @@
                     ? cutsOfMachine.slice().sort(function(a, b){
                           return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
                     : orderCuts(cutsOfMachine, opts.weights));
+            return packOrderedMachine(ordered, key);
+        }
+        // #4118: упаковка УЖЕ упорядоченной очереди станка splitMachineQueue (без пере-сортировки).
+        // Выделено из planMachineSegs, чтобы доп. проход по РЕАЛЬНЫМ дням (relocateOverdueReal) мог
+        // паковать пробные порядки на любом станке теми же параметрами (обед/отпуск/нахлёст/заправка).
+        function packOrderedMachine(ordered, key){
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -4966,6 +4972,22 @@
             });
             return d;
         }
+        // #4118: cutId → объект резки (для доп. прохода: пакуем пробные порядки по РЕАЛЬНЫМ дням).
+        var cutById = {};
+        merged.cuts.forEach(function(c){ if (c && c.id != null) cutById[String(c.id)] = c; });
+        // #4118: реальный день СТАРТА каждого задания при заданном порядке очереди станка (реальная
+        // упаковка splitMachineQueue с параметрами станка). realDayFn(orderIds, machineId) → {id: day}.
+        function realPackFn(orderIds, machineId){
+            var objs = (orderIds || []).map(function(id){ return cutById[String(id)]; }).filter(Boolean);
+            var segs = packOrderedMachine(objs, String(machineId));
+            var d = {};
+            (segs || []).forEach(function(s){
+                var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                var id = String(s.cutId);
+                if (d[id] == null || off < d[id]) d[id] = off;
+            });
+            return d;
+        }
         var packed = packAll();
         // #4095 / ТЗ §12: срок держат РЕАЛЬНЫЕ дни splitMachineQueue, а НЕ ёмкость-оценка размещения.
         // Пакуем → у кого реальный день ≥ срока (shouldRelocate), релокация тянет раньше, ПОКА ЕСТЬ
@@ -4983,6 +5005,23 @@
                 packed = packAll();
             }
         }
+        // #4118: ДОП. ПРОХОД после §12-цикла. Мягкая релокация (relocatePass) оценивает кандидатов
+        // ОПТИМИСТИЧНОЙ оценкой дня (capacityMin) и может «переносить вхолостую», оставив задание
+        // просроченным (лог #4118: 4 раунда / 28 переносов, 458219 всё ещё за сроком). Затолкаем всё
+        // ВСЁ ЕЩЁ просроченное (по РЕАЛЬНЫМ дням) в наименее штрафное место — можно на другой станок —
+        // стандартным перебором точек вставки, но проверяя каждого кандидата РЕАЛЬНОЙ упаковкой
+        // (realPackFn), и НЕ трогая остальные задания (перенос лишь если чужая просрочка не углубится).
+        var overduePass = { moves: 0 };
+        if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && slotRefineCtx) {
+            var rel2 = relocateOverdueReal(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
+                slotExtend(slotRefineCtx, { feasibleMachine: opts.feasibleMachineFor }));
+            overduePass.moves = rel2.moves.length;
+            if (rel2.moves.length) {
+                var asg2 = assignmentFromOccupancy(slotPlan.occupancy);
+                slotPlan.slitterByCut = asg2.slitterByCut; slotPlan.orderIdxByCut = asg2.orderIdxByCut;
+                packed = packAll();
+            }
+        }
         var byMachine = packed.byMachine, mOrder = packed.mOrder, segsByMachine = packed.segsByMachine;
         // #4095: дополнить trace РЕАЛЬНЫМИ днями (арбитр §12) и напечатать (slotTrace ВКЛ по умолчанию).
         if (slotPlan && slotPlan.trace) {
@@ -4994,7 +5033,7 @@
                 var due = opts.dueDayByCut ? opts.dueDayByCut[String(t.id)] : null;
                 if (due != null) { t.dueDayOffset = Number(due); t.overdueReal = rd > Number(due); if (t.overdueReal) overdueLeft++; }
             });
-            slotPlan.trace.refine = { rounds: refineRounds, moves: refineMoves, overdueLeft: overdueLeft };
+            slotPlan.trace.refine = { rounds: refineRounds, moves: refineMoves, overdueLeft: overdueLeft, overdueMoves: overduePass.moves };
             formatSlotPlacementTrace(slotPlan.trace).forEach(function(line){ slotTrace(line); });
         }
         var updates = [], creates = [], deletes = [];
@@ -6955,6 +6994,99 @@
         return { occupancy: occupancy, moves: moves };
     }
 
+    // #4118 — ДОПОЛНИТЕЛЬНЫЙ проход после §12-цикла: всё, что ВСЁ ЕЩЁ просрочено по РЕАЛЬНЫМ дням
+    // (splitMachineQueue), заталкиваем обратно в НАИМЕНЕЕ штрафное место — можно на другой станок —
+    // стандартным механизмом перебора точек вставки. КЛЮЧЕВОЕ отличие от relocatePass: кандидата
+    // оцениваем не ОЦЕНКОЙ дня (эвристика capacityMin, оптимистична — из-за неё §12-цикл может
+    // «переносить вхолостую» и оставить просрочку, issue #4118), а РЕАЛЬНОЙ упаковкой (realDayFn).
+    //
+    // realDayFn(orderIds, machineId) → { cutId: dayOffset } — реальный день СТАРТА каждого задания
+    // очереди при заданном порядке (мин dayOffset его сегментов). Даёт вызывающий (planCutOperations),
+    // прокидывая настоящий splitMachineQueue с параметрами станка (обед/отпуск/нахлёст/заправка).
+    //
+    // Гарантии (чтобы не навредить): двигаем ТОЛЬКО само просроченное задание; принимаем перенос,
+    // лишь если его реальный день СТРОГО меньше (монотонность → сходимость), и лишь если НИ ОДНО
+    // другое задание станка-приёмника от вставки не станет БОЛЬШЕ просрочено (не создаём/не углубляем
+    // чужую просрочку). Среди допустимых мест — наименьший реальный день, затем наименьший штраф §8.
+    function relocateOverdueReal(occupancy, dueDayByCut, realDayFn, ctx){
+        ctx = ctx || {};
+        dueDayByCut = dueDayByCut || {};
+        var byMachine = occupancy.byMachine;
+        var feasible = ctx.feasibleMachine || function(){ return true; };
+        var maxRounds = ctx.maxRounds || 3, moves = [];
+        function cutIdsOf(key){
+            return byMachine[key].filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
+        }
+        function overdueDays(id, real){   // на сколько дней задание id за своим сроком (0 если в срок/без срока)
+            var due = dueDayByCut[id];
+            if (due == null || real[id] == null) return 0;
+            var d = Number(real[id]) - Number(due);
+            return d > 0 ? d : 0;
+        }
+        for (var round = 0; round < maxRounds; round++){
+            var changed = false;
+            // текущие реальные дни по каждому станку (станки независимы — день задания задаёт его очередь)
+            var realBy = {}; Object.keys(byMachine).forEach(function(k){ realBy[k] = realDayFn(cutIdsOf(k), k) || {}; });
+            // собрать просроченные (самые «глубокие» первыми — им труднее найти место)
+            var overdue = [];
+            Object.keys(byMachine).forEach(function(sid){
+                byMachine[sid].forEach(function(s){
+                    if (!s || s.kind !== 'cut' || s.fixed) return;
+                    var od = overdueDays(String(s.id), realBy[sid]);
+                    if (od > 0) overdue.push({ id: String(s.id), sid: sid, curReal: Number(realBy[sid][String(s.id)]), depth: od });
+                });
+            });
+            if (!overdue.length) break;
+            overdue.sort(function(a, b){ return b.depth - a.depth; });
+            for (var oi = 0; oi < overdue.length; oi++){
+                var task = overdue[oi], sid = task.sid, arr = byMachine[sid];
+                var pos = -1;
+                for (var i = 0; i < arr.length; i++){ if (arr[i].kind === 'cut' && String(arr[i].id) === task.id){ pos = i; break; } }
+                if (pos < 0) continue;
+                var slot = arr[pos];
+                arr.splice(pos, 1);   // снять с текущего места — оцениваем ЧИСТЫЕ станки-приёмники
+                var best = null;      // { tid, idx, real, penalty }
+                Object.keys(byMachine).forEach(function(tid){
+                    if (!feasible(tid, slot)) return;
+                    var tarr = byMachine[tid];
+                    var baseIds = cutIdsOf(tid);
+                    var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    for (var idx = 0; idx <= tarr.length; idx++){
+                        if (!canInsertAt(tarr, idx)) continue;
+                        var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
+                        var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
+                        var trialIds = before.concat([task.id], after);
+                        var real = realDayFn(trialIds, tid) || {};
+                        var myReal = real[task.id];
+                        if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает реальный день — мимо
+                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку
+                        for (var bi = 0; bi < baseIds.length && !harms; bi++){
+                            var oid = baseIds[bi];
+                            var wasOd = (Number(baseReal[oid]) - Number(dueDayByCut[oid]));   wasOd = (dueDayByCut[oid] == null || baseReal[oid] == null || wasOd < 0) ? 0 : wasOd;
+                            var nowOd = (Number(real[oid]) - Number(dueDayByCut[oid]));        nowOd = (dueDayByCut[oid] == null || real[oid] == null || nowOd < 0) ? 0 : nowOd;
+                            if (nowOd > wasOd) harms = true;
+                        }
+                        if (harms) continue;
+                        var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
+                        var penalty = (sc ? sc.weight : 0) + moveWeight(ctx, sid, tid);
+                        if (!best || Number(myReal) < best.real || (Number(myReal) === best.real && penalty < best.penalty)){
+                            best = { tid: tid, idx: idx, real: Number(myReal), penalty: penalty };
+                        }
+                    }
+                });
+                if (best){
+                    byMachine[best.tid].splice(best.idx, 0, tagSlot(slot, best.tid));
+                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real });
+                    changed = true;
+                } else {
+                    arr.splice(pos, 0, slot);   // некуда лучше — вернуть на место
+                }
+            }
+            if (!changed) break;
+        }
+        return { occupancy: occupancy, moves: moves };
+    }
+
     // Порядок резок по станкам для splitMachineQueue (отпуска отбрасываются — они не резки).
     function slotOrderByMachine(occupancy){
         var out = {};
@@ -7048,6 +7180,8 @@
         });
         if (trace.refine) L.push('§12 релокация по РЕАЛЬНЫМ дням: раундов ' + trace.refine.rounds
              + ', переносов ' + trace.refine.moves + (trace.refine.overdueLeft ? (', осталось за срок ' + trace.refine.overdueLeft) : ', просрочек нет ✓'));
+        // #4118: доп. проход — затолкать всё ещё просроченное в наименее штрафное место по РЕАЛЬНЫМ дням.
+        if (trace.refine && trace.refine.overdueMoves != null) L.push('#4118 доп. проход (просроченное → наименее штрафное место по РЕАЛЬНЫМ дням): переносов ' + trace.refine.overdueMoves);
         return L;
     }
 
@@ -7173,6 +7307,7 @@
         slotFromCut: slotFromCut, vacationSlot: vacationSlot, seedOccupancy: seedOccupancy,
         prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
         placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
+        relocateOverdueReal: relocateOverdueReal,                  // #4118: доп. проход по РЕАЛЬНЫМ дням
         slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,
         assignmentFromOccupancy: assignmentFromOccupancy,          // #4095: cutId→станок/порядок из занятости
         formatSlotPlacementTrace: formatSlotPlacementTrace,        // #4095: структурный trace размещения → строки лога

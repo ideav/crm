@@ -84,6 +84,7 @@
         slotFromCut: slotFromCut, vacationSlot: vacationSlot, seedOccupancy: seedOccupancy,
         prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
         placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
+        relocateOverdueReal: relocateOverdueReal,                  // #4118: доп. проход по РЕАЛЬНЫМ дням
         slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,
         assignmentFromOccupancy: assignmentFromOccupancy,          // #4095: cutId→станок/порядок из занятости
         formatSlotPlacementTrace: formatSlotPlacementTrace,        // #4095: структурный trace размещения → строки лога
