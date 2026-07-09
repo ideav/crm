@@ -1376,6 +1376,20 @@
         }
 
         /**
+         * Значение ячейки подчинённой таблицы плоским текстом для буфера обмена (issue #4120).
+         * DATE/DATETIME — так же, как в ячейке (DD.MM.YYYY[ hh:mm:ss]), а не unix-штампом;
+         * у ссылок снимается префикс "id:label" (issue #1790).
+         *
+         * @param value сырое значение из record.r[]
+         * @param type тип колонки: req.type для реквизита, metadata.type для главного значения
+         */
+        subordinateCellToPlainText(value, type) {
+            const formatted = formatIntegramDateCellPlain(value, this.normalizeFormat(type));
+            if (formatted !== null) return formatted;
+            return this.stripReferencePrefix(String(value));
+        }
+
+        /**
          * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
          * Uses the currently displayed rows stored on the container element.
          */
@@ -1409,13 +1423,13 @@
                 const values = row.r || [];
                 const cells = [];
                 let valIdx = 0;
-                // Main value (strip "id:label" reference prefix)
-                cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
+                // Main value (dates as in the cell, strip "id:label" reference prefix)
+                cells.push(this.subordinateCellToPlainText(values[valIdx] || '', metadata.type));
                 valIdx++;
                 // Requisite columns (skip nested arr_id columns)
                 reqs.forEach(req => {
                     if (!req.arr_id) {
-                        cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
+                        cells.push(this.subordinateCellToPlainText(values[valIdx] || '', req.type));
                     }
                     valIdx++;
                 });

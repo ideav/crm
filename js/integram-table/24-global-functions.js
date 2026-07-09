@@ -213,6 +213,88 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * Значение даты из API в Date: unix-штамп (секунды, либо миллисекунды при >= 1e12),
+ * YYYYMMDD, DD.MM.YYYY, DD.MM.YYYY hh:mm:ss.
+ *
+ * Штамп требует >= 1e9 и год 2001–2100 — так короткие числа и YYYYMMDD (8 цифр) не
+ * принимаются за штамп (те же границы, что в IntegramTable.parseUnixTimestamp).
+ */
+function parseIntegramDateValue(str) {
+    if (!str) return null;
+
+    if (/^\d+(\.\d+)?$/.test(str)) {
+        const num = parseFloat(str);
+        if (isNaN(num)) return null;
+
+        if (num >= 1e9) {
+            const date = new Date(num >= 1e12 ? num : num * 1000);
+            const year = date.getFullYear();
+            return (year >= 2001 && year <= 2100) ? date : null;
+        }
+
+        if (/^\d{8}$/.test(str)) {
+            const year = parseInt(str.substring(0, 4), 10);
+            const month = parseInt(str.substring(4, 6), 10);
+            const day = parseInt(str.substring(6, 8), 10);
+            if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+            return new Date(year, month - 1, day);
+        }
+
+        return null;
+    }
+
+    const spaceParts = str.split(' ');
+    const dateParts = spaceParts[0].split('.');
+    if (dateParts.length !== 3) return null;
+    const day = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10);
+    const year = parseInt(dateParts[2], 10);
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+
+    let hour = 0, minute = 0, second = 0;
+    if (spaceParts.length > 1) {
+        const timeParts = spaceParts[1].split(':');
+        if (timeParts.length !== 3) return null;
+        hour = parseInt(timeParts[0], 10);
+        minute = parseInt(timeParts[1], 10);
+        second = parseInt(timeParts[2], 10);
+        if (isNaN(hour) || isNaN(minute) || isNaN(second)) return null;
+    }
+
+    return new Date(year, month - 1, day, hour, minute, second);
+}
+
+/**
+ * Ячейка DATE/DATETIME плоским текстом для буфера обмена (issue #4120).
+ *
+ * API отдаёт эти колонки unix-штампом в секундах, поэтому «Копировать в буфер» подчинённой
+ * таблицы клала в clipboard сырой штамп (`1782968400`) вместо `02.07.2026 08:00:00` — того,
+ * что видно в ячейке. Формат совпадает с formatDateDisplay/formatDateTimeDisplay.
+ *
+ * @param {*} value сырое значение из record.r[]
+ * @param {string} format нормализованный формат колонки (normalizeFormat(req.type))
+ * @returns {string|null} DD.MM.YYYY для DATE, DD.MM.YYYY hh:mm:ss для DATETIME; null —
+ *                        колонка не дата либо значение не распознано, вызывающий берёт его как есть
+ */
+function formatIntegramDateCellPlain(value, format) {
+    if (format !== 'DATE' && format !== 'DATETIME') return null;
+    if (value === null || value === undefined || value === '') return null;
+
+    const date = parseIntegramDateValue(String(value).trim());
+    if (!date || isNaN(date.getTime())) return null;
+
+    const pad = (v) => String(v).padStart(2, '0');
+    const dmy = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+    if (format === 'DATE') return dmy;
+    return `${dmy} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+if (typeof window !== 'undefined') {
+    window.parseIntegramDateValue = parseIntegramDateValue;
+    window.formatIntegramDateCellPlain = formatIntegramDateCellPlain;
+}
+
+/**
  * Global function to reload all IntegramTable instances
  * Reloads all table components with their current filter parameters
  * This function is globally accessible and can be called from anywhere on the page

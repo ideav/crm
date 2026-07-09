@@ -1737,6 +1737,20 @@ class IntegramCreateFormHelper {
     }
 
     /**
+     * Значение ячейки подчинённой таблицы плоским текстом для буфера обмена (issue #4120).
+     * DATE/DATETIME — датой (DD.MM.YYYY[ hh:mm:ss]), а не unix-штампом; у ссылок снимается
+     * префикс "id:label" (issue #1790). Как IntegramTable.subordinateCellToPlainText.
+     *
+     * @param value сырое значение из record.r[]
+     * @param type тип колонки: req.type для реквизита, metadata.type для главного значения
+     */
+    subordinateCellToPlainText(value, type) {
+        const formatted = formatIntegramDateCellPlain(value, this.normalizeFormat(type));
+        if (formatted !== null) return formatted;
+        return this.stripReferencePrefix(String(value));
+    }
+
+    /**
      * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
      * Uses the data stored on the container element.
      */
@@ -1754,11 +1768,11 @@ class IntegramCreateFormHelper {
         // Build TAB-delimited text (main column + non-nested req columns)
         const lines = records.map(record => {
             const values = record.r || [];
-            const cells = [this.stripReferencePrefix(String(values[0] || ''))];
+            const cells = [this.subordinateCellToPlainText(values[0] || '', metadata.type)];
             let valIdx = 1;
             reqs.forEach(req => {
                 if (!req.arr_id) {
-                    cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
+                    cells.push(this.subordinateCellToPlainText(values[valIdx] || '', req.type));
                 }
                 valIdx++;
             });
