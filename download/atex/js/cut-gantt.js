@@ -624,18 +624,24 @@
         var markers = [];
         dayOrder.forEach(function(day) {
             var dayBars = byDay[day];
+            // #4114 п.1: заказчик исключил обед/перерывы из «рисуй как есть» (#4099) — они
+            // ЛЕГАЛЬНО двигают всё, что идёт после них в тот же день (реальный простой станка).
+            // shiftDayMin — накопительный сдвиг ОТ ПРЕДЫДУЩИХ перерывов этого дня; несущий бар
+            // сам не двигается (его раздвигает растяжка в layoutGroups), сдвигаются только
+            // задания ПОСЛЕ него.
+            var shiftDayMin = 0;
             brks.forEach(function(B) {
                 var dur = Math.round(Number(B.durationMin));
                 // Несущее задание — первое, чьё СОХРАНЁННОЕ окно накрывает время перерыва.
-                var carrier = null;
+                var carrier = null, carrierPos = -1;
                 for (var k = 0; k < dayBars.length; k++) {
                     var cb = dayBars[k];
-                    if (cb.clockMin <= B.startMin && B.startMin < cb.clockMin + cb.lenMin) { carrier = cb; break; }
+                    if (cb.clockMin <= B.startMin && B.startMin < cb.clockMin + cb.lenMin) { carrier = cb; carrierPos = k; break; }
                 }
                 if (!carrier) return;   // перерыв в простое / после последней резки дня — не рисуем
-                // #4099: «рисуй как есть» — бары за перерыв НЕ двигаем (shiftMinByIndex остаётся
-                // нулевым). Перерыв — накладка по его РЕАЛЬНОМУ времени поверх несущего бара.
-                var baseLeftPx = scale.toPx(day + B.startMin * 60000);
+                // Позиция маркера — реальное время перерыва + сдвиг от предыдущих перерывов ЭТОГО
+                // дня (если несущий бар уже был отодвинут более ранним перерывом).
+                var baseLeftPx = scale.toPx(day + B.startMin * 60000) + round3(shiftDayMin * ppm);
                 markers.push({
                     carrierIndex: carrier.index,
                     beforeIndex: carrier.index + 1,
@@ -647,6 +653,12 @@
                     durationMin: dur,
                     label: B.label || 'Перерыв'
                 });
+                shiftDayMin += dur;
+                // Все последующие бары ЭТОГО дня (после несущего) сдвигаются на dur; несколько
+                // перерывов в одном дне накапливаются (shiftDayMin растёт по мере обхода).
+                for (var m = carrierPos + 1; m < dayBars.length; m++) {
+                    shiftMinByIndex[dayBars[m].index] += dur;
+                }
             });
         });
         return { markers: markers, shiftMinByIndex: shiftMinByIndex };
@@ -1312,8 +1324,11 @@
             orderCutsInGroup(g.cuts);
             var ordered = g.cuts;
             // #4099: старт бара = СОХРАНЁННЫЙ planStart как есть (dedupeBarStarts больше не разносит
-            // встык). Маркеры перерывов оставляем (рисуются накладкой по реальному времени), но бары
-            // за них НЕ двигаем — «рисуй как есть».
+            // встык) — резки между собой не двигаем и не переупорядочиваем. #4114 п.1: заказчик явно
+            // исключил обед/перерывы из «рисуй как есть» — это реальный простой станка, поэтому все
+            // задания дня ПОСЛЕ обеда/перерыва визуально сдвигаются на его длительность
+            // (brk.shiftMinByIndex, накопительно по дню); сам порядок и относительные старты резок
+            // друг относительно друга при этом не меняются.
             var barStarts = dedupeBarStarts(ordered);
             var brk = ganttBreakMarkers(ordered, scale, o.breaks, { pxPerMin: pxPerMin, barStarts: barStarts });
             g.tasks = ordered.map(function(cut, i) {
@@ -1327,9 +1342,12 @@
                 // места, дни идут встык. #4099: ширина — РЕАЛЬНАЯ (наладка+резка), без обрезки по
                 // старту следующего бара: перекрытие с соседней резкой видно как есть (у каждой резки
                 // своя строка, бары не «слипаются»), а не прячется урезанием ширины (бывший #3708).
-                var leftPx = round3(scale.toPx(startMs));
+                // #4114 п.1: shiftMin — сдвиг ОТ ПРЕДЫДУЩИХ обедов/перерывов этого дня (0, если их не
+                // было или задание идёт раньше их всех); двигает и позицию бара, и подпись времени.
+                var shiftMin = (brk.shiftMinByIndex && brk.shiftMinByIndex[i]) || 0;
+                var leftPx = round3(scale.toPx(startMs) + shiftMin * pxPerMin);
                 var widthPx = seg.totalPx;
-                var labelStartMs = startMs;
+                var labelStartMs = startMs + shiftMin * 60000;
                 return {
                     cut: cut, status: status,
                     leftPx: leftPx,
@@ -1393,8 +1411,16 @@
                 });
                 if (tail > round3(task.leftPx + task.widthPx)) {
                     task.widthPx = round3(tail - task.leftPx);
-                    // Подпись бара — на удлинённое окно (start-end); минуты в скобках — рабочие (накладка не входит).
-                    var spanMin = Math.round(task.widthPx / pxPerMin);
+                    // #4114 п.2: конец подписи — по РЕАЛЬНЫМ минутам (task.barMin — уже чистое окно
+                    // наладка+резка, см. cutBarWindow — плюс настоящая длительность накладок), а НЕ
+                    // по ширине в px. cutBarSegments округляет короткие сегменты наладки вверх до
+                    // минимальной видимой ширины (floor 3px/8px — чтобы их было видно на глаз), из-за
+                    // этого widthPx/pxPerMin давал на пару минут больше настоящей длительности
+                    // (пример из #4114: 14:50 + 20 мин работы + 10 мин перерыва отображались как
+                    // 15:23 вместо 15:20 — «пол» короткого сегмента наладки добавлял лишние минуты
+                    // при обратной конвертации ширины в минуты).
+                    var realAddedMin = bands.reduce(function(sum, b) { return sum + (Number(b.durationMin) || 0); }, 0);
+                    var spanMin = (task.barMin || 0) + realAddedMin;
                     var endMs = task.startMs + spanMin * 60000;
                     task.barText = formatTime(task.startMs) + '-' + formatTime(endMs) + ' (' + task.barMin + ' мин)';
                 }
