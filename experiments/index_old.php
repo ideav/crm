@@ -1768,6 +1768,77 @@ function UnHideDelimiters($v)
 {
     return str_replace("%2C", "\,", str_replace("%3B", "\;", str_replace("%3A", "\:", str_replace("%5C", "\\\\", $v))));
 }
+function PlainImportReferenceValues($value, $multi)
+{
+	$value = (string)$value;
+	$colonPos = strpos($value, ":");
+	if($colonPos !== FALSE){
+		$ids = substr($value, 0, $colonPos);
+		if(preg_match("/^[0-9]+(,[0-9]+)*$/", $ids))
+			$value = $ids;
+	}
+	$refs = UnHideDelimiters(explode(",", HideDelimiters($value)));
+	if(!$multi && count($refs) > 1)
+		$refs = array($refs[0]);
+	return $refs;
+}
+function PlainImportReferencePlan($currentRefs, $incomingRefs, $multi)
+{
+	$plan = array("update" => array(), "order" => array(), "delete" => array(), "insert" => array());
+	$resolved = array();
+	$seen = array();
+	foreach($incomingRefs as $refObjID){
+		$refObjID = (int)$refObjID;
+		if($refObjID <= 0 || isset($seen[$refObjID]))
+			continue;
+		$seen[$refObjID] = TRUE;
+		$resolved[] = $refObjID;
+		if(!$multi)
+			break;
+	}
+	if(!count($resolved))
+		return $plan;
+
+	if(!$multi){
+		$refObjID = $resolved[0];
+		$keepId = 0;
+		if(isset($currentRefs[$refObjID]) && count($currentRefs[$refObjID]))
+			$keepId = (int)array_shift($currentRefs[$refObjID]);
+		elseif(count($currentRefs)){
+			reset($currentRefs);
+			$currentRefObjID = key($currentRefs);
+			$keepId = (int)array_shift($currentRefs[$currentRefObjID]);
+			if((int)$currentRefObjID !== $refObjID)
+				$plan["update"][] = array("id" => $keepId, "t" => $refObjID);
+		}
+		if($keepId)
+			$plan["order"][] = array("id" => $keepId, "ord" => 1);
+		else
+			$plan["insert"][] = array("t" => $refObjID, "ord" => 1);
+		foreach($currentRefs as $staleIDs)
+			foreach($staleIDs as $staleID)
+				$plan["delete"][] = (int)$staleID;
+		return $plan;
+	}
+
+	$ord = 1;
+	foreach($resolved as $refObjID){
+		if(isset($currentRefs[$refObjID]) && count($currentRefs[$refObjID])){
+			$keepId = (int)array_shift($currentRefs[$refObjID]);
+			$plan["order"][] = array("id" => $keepId, "ord" => $ord);
+			foreach($currentRefs[$refObjID] as $staleID)
+				$plan["delete"][] = (int)$staleID;
+			unset($currentRefs[$refObjID]);
+		}
+		else
+			$plan["insert"][] = array("t" => $refObjID, "ord" => $ord);
+		$ord++;
+	}
+	foreach($currentRefs as $staleIDs)
+		foreach($staleIDs as $staleID)
+			$plan["delete"][] = (int)$staleID;
+	return $plan;
+}
 function Export_header($id, $parent=0)
 {
 	global $z;
@@ -5443,6 +5514,8 @@ function Get_block_data($block, $exe=TRUE)
     					$buffer = fgets($handle);	# Read the line
     					if(strlen($buffer)==0)
     						continue;
+					if(isset($GLOBALS["SQLbatch"]))
+						Insert_batch("", "", "", "", "Before plain import lookup");
     					$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));	# Get fields array
                         if($object[0] == ""){
                             $GLOBALS["warning"] .= t9n("[RU]Пропущен пустой объект типа $id (строка $count)[EN]Empty object of type $id skipped (string #$count)");
@@ -5544,45 +5617,55 @@ function Get_block_data($block, $exe=TRUE)
                         				while($row = mysqli_fetch_array($data_set))
                 						    Delete($row["id"]);
             						}
-            						else{
-        						        if(isset($GLOBALS["MULTI"][$key]))
-        						            $multies = UnHideDelimiters(explode(",", HideDelimiters($object[$order])));	# Get multiselect items set
-        						        else
-        						            $multies = array($object[$order]);
-        					            $ord = 1;
-                    					foreach($multies as $ref){
-                    					    $ref = trim($ref);
-            							    if(isset($GLOBALS["refs"][$refType]))
-                							    if(isset($GLOBALS["refs"][$refType][$ref])){
-                							        // if(!isset($existing) // It is a ref of a new rec
-                							                // || (isset($GLOBALS["MULTI"][$key]) && !isset($reqs[$GLOBALS["refs"][$refType][$ref]]))) // or multiple ref yet not on the list
-                							        if(!isset($reqs[$GLOBALS["refs"][$refType][$ref]])) // ref yet not on the list
-                        							    //Insert($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                        							    Insert_batch($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                    							    continue;
-                    						    }
-            								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
-            								    $refObjID = $row["id"];
-            								else
-            								    $refObjID = Insert(1, 1, $refType, $ref, "Import plain ref Object");
-            								if(!isset($GLOBALS["MULTI"][$key])){
-                            				    trace("    Check existing ref $key $refType");
-                    						    foreach($reqs as $rid => $req){
-                                				    trace("    rid $rid => req $req ($req === $key)");
-                    						        if($req == $key){
-                                    				    trace("    req $req === key $key, rid $rid === refObjID $refObjID");
-                    						            if($refObjID !== $rid)
-                                							UpdateTyp($ids[$rid], $refObjID);
-                    						            continue 2;
-                    						        }
-                    						    }
-            								}
-            								if(!isset($reqs[$refObjID]))
-                    						//	Insert($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							 Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							$GLOBALS["refs"][$refType][$ref] = $refObjID;
-                    					}
-            						}
+                                else{
+                                    $multiRef = isset($GLOBALS["MULTI"][$key]);
+                                    $multies = PlainImportReferenceValues($object[$order], $multiRef);
+                                    $currentRefs = array();
+                                    if(isset($existing)){
+                                        $data_set = Exec_sql("SELECT req.id, req.t FROM $z req, $z ref"
+                                                ." WHERE req.up=$new_id AND req.val='$key' AND ref.id=req.t AND (ref.t=$refType OR $refType=1)"
+                                                ." ORDER BY req.ord, req.id", "Get current plain refs for import");
+                                        while($row = mysqli_fetch_array($data_set)){
+                                            $currentRef = (int)$row["t"];
+                                            if(!isset($currentRefs[$currentRef]))
+                                                $currentRefs[$currentRef] = array();
+                                            $currentRefs[$currentRef][] = (int)$row["id"];
+                                        }
+                                    }
+                                    $incomingRefs = array();
+                                    foreach($multies as $ref){
+                                        $ref = trim($ref);
+                                        if($ref === "")
+                                            continue;
+                                        $refObjID = 0;
+                                        if(is_numeric($ref) && (int)$ref > 0){
+                                            $refID = (int)$ref;
+                                            if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE id=$refID AND (t=$refType OR $refType=1)", "Check plain ref Obj ID")))
+                                                $refObjID = (int)$row["id"];
+                                        }
+                                        if(!$refObjID && isset($GLOBALS["plain_refs"][$refType]) && isset($GLOBALS["plain_refs"][$refType][$ref]))
+                                            $refObjID = (int)$GLOBALS["plain_refs"][$refType][$ref];
+                                        if(!$refObjID){
+                                            if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
+                                                $refObjID = (int)$row["id"];
+                                            else
+                                                $refObjID = Insert(1, 1, $refType, $ref, "Import plain ref Object");
+                                            if(!isset($GLOBALS["plain_refs"][$refType]))
+                                                $GLOBALS["plain_refs"][$refType] = array();
+                                            $GLOBALS["plain_refs"][$refType][$ref] = $refObjID;
+                                        }
+                                        $incomingRefs[] = $refObjID;
+                                    }
+                                    $referencePlan = PlainImportReferencePlan($currentRefs, $incomingRefs, $multiRef);
+                                    foreach($referencePlan["update"] as $action)
+                                        UpdateTyp($action["id"], $action["t"]);
+                                    foreach($referencePlan["order"] as $action)
+                                        Exec_sql("UPDATE $z SET ord=".$action["ord"]." WHERE id=".$action["id"]." AND ord!=".$action["ord"], "Update plain ref order");
+                                    foreach($referencePlan["delete"] as $staleID)
+                                        Delete($staleID);
+                                    foreach($referencePlan["insert"] as $action)
+                                        Insert_batch($new_id, $action["ord"], $action["t"], $key, "Import plain ref");
+                                }
     						    }
     						    elseif(isset($existing) && isset($reqs[$key])){
     						         # Drop false BOOLEAN: -1 or FALSE
