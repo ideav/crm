@@ -6441,26 +6441,26 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					            $ord = 1;
                     					foreach($multies as $ref){
                     					    $ref = trim($ref);
-            							    if(isset($GLOBALS["refs"][$refType]))
-                							    if(isset($GLOBALS["refs"][$refType][$ref])){
-                							        // if(!isset($existing) // It is a ref of a new rec
-                							                // || (isset($GLOBALS["MULTI"][$key]) && !isset($reqs[$GLOBALS["refs"][$refType][$ref]]))) // or multiple ref yet not on the list
-                							        if(!isset($reqs[$GLOBALS["refs"][$refType][$ref]])) // ref yet not on the list
-                        							    // Insert($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                        							    Insert_batch($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                    							    continue;
-                    						    }
-            								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
+                    					    # issue #4140: сначала разрешаем имя в id цели — из кэша имён этого импорта,
+                    					    # затем из базы, и только потом создаём. Кэш экономит SELECT, но НЕ должен
+                    					    # менять решение «заменить или добавить», которое принимается ниже.
+            							    if(isset($GLOBALS["refs"][$refType][$ref]))
+                							    $refObjID = $GLOBALS["refs"][$refType][$ref];
+            								elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
             								    $refObjID = $row["id"];
             								else
             								    $refObjID = Insert(1, 1, $refType, $ref, "Import plain ref Object");
+            								$GLOBALS["refs"][$refType][$ref] = $refObjID;
+            								# issue #4140: у ссылки без мультивыбора цель всего одна — перенацеливаем
+            								# существующий реквизит, а не дописываем второй. Раньше эта проверка стояла
+            								# после ветки кэша, и повторно встреченное имя вставлялось как новое значение.
             								if(!isset($GLOBALS["MULTI"][$key])){
                             				    trace("    Check existing ref $key $refType");
                     						    foreach($reqs as $rid => $req){
                                 				    trace("    rid $rid => req $req ($req === $key)");
                     						        if($req == $key){
                                     				    trace("    req $req === key $key, rid $rid === refObjID $refObjID");
-                    						            if($refObjID !== $rid)
+                    						            if($refObjID != $rid)
                                 							UpdateTyp($ids[$rid], $refObjID);
                     						            continue 2;
                     						        }
@@ -6469,7 +6469,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             								if(!isset($reqs[$refObjID]))
                     						// Insert($new_id, $ord++, $refObjID, $key, "Import plain ref");
                 							Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							$GLOBALS["refs"][$refType][$ref] = $refObjID;
                     					}
             						}
     						    }
