@@ -2172,13 +2172,24 @@
     // пакуется встык, shiftPlacementsPastDowntime) и он обязан двигать карточки после несущей.
     // wins — окна карточек дня [{ startClock, endClock }]; порядок дорожки («Очередность») может
     // расходиться с временем (#3920/#3885), поэтому зазоры ищем по времени. Чистая — покрыта тестом.
+    // #4132: зазор опознаём ПО ЕГО ДЛИНЕ (≈ обед) и по тому, что он не утренний, — но НЕ по тому,
+    // где начинается несущая его карточка. Прежний гард «prev.startClock > LUNCH_START → не обед»
+    // сравнивал СОХРАНЁННЫЙ старт с 12:20, а генерация решает, где вставить обед, по своим
+    // НЕПРЕРЫВНЫМ минутам (insertLunchBefore: dayStart+clock ≥ LUNCH_START). Хранимые старты
+    // округляются вверх (#4061 снап + целые колонки), поэтому карточка, начавшаяся у генерации в
+    // 12:19, лежит в базе как 12:23 — и гард ошибочно объявлял настоящий обеденный зазор «поздним
+    // простоем». Очередь вставляла обед ВТОРОЙ раз: весь день после обеда уезжал на 40 мин вперёд,
+    // и хвост дня (02.07, Станок 1) рисовался 16:35–17:20 вместо 15:55–16:40 — issue #4132.
+    // Роль «позднего простоя» (второй «Отпуск» станка, #4121) теперь отсекает ВЕРХНЯЯ граница длины:
+    // генерация вставляет ровно lunch.durationMin, а окно «Отпуска» такой длины (±1 мин) — редкость.
     function lunchBakedIntoStarts(wins, lunch) {
         var byTime = (wins || []).filter(Boolean).slice()
             .sort(function(a, b) { return a.startClock - b.startClock; });
         for (var k = 1; k < byTime.length; k++) {
             var prev = byTime[k - 1], cur = byTime[k];
-            if (cur.startClock - prev.endClock < lunch.durationMin - 1) continue;   // зазор меньше обеда
-            if (prev.startClock > lunch.startMin) continue;                         // зазор не за несущим обеда
+            var gap = cur.startClock - prev.endClock;
+            if (gap < lunch.durationMin - 1) continue;   // зазор меньше обеда
+            if (gap > lunch.durationMin + 1) continue;   // #4132: зазор ДЛИННЕЕ обеда — это простой, не обед
             if (cur.startClock < lunch.startMin) continue;                          // зазор до обеда (утренний)
             return true;
         }
