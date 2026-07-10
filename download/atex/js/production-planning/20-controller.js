@@ -152,6 +152,8 @@
         fatigueAwareSequence: fatigueAwareSequence,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
+        cutConfigSig: cutConfigSig,                   // #4139
+        resequenceWithinDays: resequenceWithinDays,   // #4139
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
@@ -4970,6 +4972,14 @@
         return String(v == null ? '' : v).trim() !== '0';
     };
 
+    // #4139: внутридневная пересортировка очереди станка после реальной упаковки — ПО УМОЛЧАНИЮ
+    // ВКЛЮЧЕНА. Выключается INTRA_DAY_RESEQUENCE=0 в «Настройке» (аварийный рубильник на порядок
+    // слоя размещения как есть). Работает только в слот-режиме и не при preserveOrder.
+    AtexProductionPlanning.prototype.intraDayResequenceOn = function() {
+        var v = (this.daySettings || {}).INTRA_DAY_RESEQUENCE;
+        return String(v == null ? '' : v).trim() !== '0';
+    };
+
     // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,
     // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
     // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
@@ -5068,6 +5078,8 @@
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
             // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
             slotPlacement: slotOn,
+            // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)
+            intraDayResequence: (self && typeof self.intraDayResequenceOn === 'function') ? self.intraDayResequenceOn() : true,
             slitterIds: (self.slitters || []).map(function(s){ return String(s.id); }),
             dueKeyByCut: dueKeyByCut,
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,

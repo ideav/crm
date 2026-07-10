@@ -4935,7 +4935,7 @@
         }
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
         // #3635/#3923; slotPlan — порядок слоя размещения #4085; иначе — orderCuts) и раскроить по дням.
-        function planMachineSegs(cutsOfMachine, key){
+        function orderMachineQueue(cutsOfMachine){
             // #3619: preserveOrder — расщеплять задания по дням, СОХРАНЯЯ текущий порядок
             // очереди, а не пересобирая её по стратегии (orderCuts). Нужно, чтобы автозаполнение
             // дней после генерации не перетасовывало ручной порядок оператора (#3449). Без флага —
@@ -4966,7 +4966,10 @@
                     ? cutsOfMachine.slice().sort(function(a, b){
                           return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
                     : orderCuts(cutsOfMachine, opts.weights));
-            return packOrderedMachine(ordered, key);
+            return ordered;
+        }
+        function planMachineSegs(cutsOfMachine, key){
+            return packOrderedMachine(orderMachineQueue(cutsOfMachine), key);
         }
         // #4118: упаковка УЖЕ упорядоченной очереди станка splitMachineQueue (без пере-сортировки).
         // Выделено из planMachineSegs, чтобы доп. проход по РЕАЛЬНЫМ дням (relocateOverdueReal) мог
@@ -5015,6 +5018,22 @@
             var segsBy = {};
             order.forEach(function(key){ segsBy[key] = planMachineSegs(bm[key], key); });
             return { byMachine: bm, mOrder: order, segsByMachine: segsBy };
+        }
+        // #4139/#3717: сколько раз в сегментах станка нефольга идёт ПОСЛЕ фольги в том же дне
+        // (сегменты идут в порядке упаковки, день не убывает). Считаем, а не «да/нет»: #4085 снял
+        // жёсткое правило (фольгу держит штраф FOIL_NOTEND_COST_MN), поэтому нарушения бывают и до
+        // пересортировки — проход не должен их ДОБАВЛЯТЬ, но и отказываться из-за чужих не обязан.
+        function foilNotLastCount(segs, byId){
+            var day = null, foilSeen = false, n = 0;
+            (segs || []).forEach(function(s){
+                var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                if (off !== day){ day = off; foilSeen = false; }
+                var c = byId[String(s.cutId)];
+                if (!c) return;
+                if (c.isFoil) foilSeen = true;
+                else if (foilSeen) n++;
+            });
+            return n;
         }
         // cutId → РЕАЛЬНЫЙ день старта (мин dayOffset его сегментов) из реальной упаковки.
         function realDaysFrom(segsBy){
@@ -5077,6 +5096,52 @@
                 slotPlan.slitterByCut = asg2.slitterByCut; slotPlan.orderIdxByCut = asg2.orderIdxByCut;
                 packed = packAll();
             }
+        }
+        // #4139: ВНУТРИДНЕВНАЯ ПЕРЕСОРТИРОВКА. Слой размещения вставляет резки по одной и собранный
+        // день больше не чинит, поэтому одинаковая конфигурация попадает в день дважды, разорванная
+        // чужим сырьём. День уже назначен реальной упаковкой → перестановка ВНУТРИ дня не двигает
+        // день и не меняет штрафы срока. Цель — sequencingCost (#3996), а не голые минуты: минимум
+        // минут разгоняет РОСТ числа полос вопреки #3130.
+        // Проверяем и применяем ПОСТАНОЧНО: очереди станков пакуются независимо (packOrderedMachine),
+        // поэтому неудача на одном станке не должна отменять выигрыш на остальных. Принимаем новый
+        // порядок станка, только если пере-упаковка не отправила НИ ОДНУ его резку на более поздний
+        // день и не сломала «фольга в конце дня» (#3717).
+        var reseqPass = { machines: 0, skipped: 0 };
+        if (slotPlan && !opts.preserveOrder && opts.intraDayResequence !== false) {
+            var reseqTimes = planningChangeTimes(opts);
+            packed.mOrder.forEach(function(key){
+                var segs = packed.segsByMachine[key] || [];
+                var dayByCut = {}, spanning = {}, seen = {};
+                segs.forEach(function(s){
+                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                    var id = String(s.cutId);
+                    if (dayByCut[id] == null || off < dayByCut[id]) dayByCut[id] = off;
+                    if (!seen[id]) seen[id] = {};
+                    seen[id][off] = 1;
+                    if (Object.keys(seen[id]).length > 1) spanning[id] = true;   // день-сплит: хвост дня закреплён
+                });
+                var ordered = orderMachineQueue(packed.byMachine[key]);
+                if (!ordered.length) return;
+                var prevSetup = (opts.prevSetupBySlitter || {})[key];
+                var entry = prevSetup ? carryOverPrevCut(prevSetup, ordered[0]) : null;
+                var better = resequenceWithinDays(ordered, dayByCut, spanning, entry, reseqTimes);
+                if (!better) return;
+                var trialSegs = packOrderedMachine(better, key);
+                var trialDays = {};
+                (trialSegs || []).forEach(function(s){
+                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                    var id = String(s.cutId);
+                    if (trialDays[id] == null || off < trialDays[id]) trialDays[id] = off;
+                });
+                var later = Object.keys(trialDays).some(function(id){
+                    return dayByCut[id] != null && trialDays[id] > dayByCut[id];
+                });
+                var foilWorse = foilNotLastCount(trialSegs, cutById) > foilNotLastCount(segs, cutById);
+                if (later || foilWorse) { reseqPass.skipped++; return; }   // инвариант важнее экономии
+                better.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
+                packed.segsByMachine[key] = trialSegs;
+                reseqPass.machines++;
+            });
         }
         var byMachine = packed.byMachine, mOrder = packed.mOrder, segsByMachine = packed.segsByMachine;
         // #4095: дополнить trace РЕАЛЬНЫМИ днями (арбитр §12) и напечатать (slotTrace ВКЛ по умолчанию).
@@ -5733,21 +5798,20 @@
         return greedySequence(cuts, planningChangeTimes(opts));
     }
 
-    // Упорядочить резки станка: не-Фольга, затем Фольга; внутри каждой группы —
-    // выбранный оператором вариант (#3272). По умолчанию — реальные минуты
-    // переналадки (#3268); fatigue-вариант ставит сложные резки раньше.
-    // Проставить sequence; вход не мутировать.
-    // #3815: EDD — задания с более ранним «Сроком изготовления» (c.dueKey, YYYYMMDD) идут
-    // раньше, чтобы по-дневная раскладка ставила их на более ранние дни. Резки группируются по
-    // сроку (по возрастанию), ВНУТРИ каждого срока — выбранная стратегия (минимум переналадок,
-    // #3783). Резки без срока (dueKey не число → Infinity) собираются в последнюю группу. Если
-    // ни у одной резки срока нет — одна группа = прежнее поведение (полная обратная совместимость).
+    // Упорядочить резки станка выбранной стратегией (#3272): по умолчанию (SETUP) — минимум
+    // суммарной переналадки в реальных минутах (#3268), что группирует сырьё и наборы ножей
+    // (#3783); fatigue-вариант ставит сложные резки раньше. Проставить sequence; вход не мутировать.
+    //
+    // РЕАЛЬНЫЙ порядок очереди станка при генерации строит слой размещения (#4085,
+    // 15-slot-placement.js): splitMachineQueue читает slotPlan.orderIdxByCut, а orderCuts там —
+    // запасной путь на случай SLOT_PLACEMENT=0. Прочие вызовы orderCuts — оценка стоимости
+    // (orderedChangeoverCost, packMachine) и planQueues/planStartTimestamps.
+    //
+    // Порядок целиком по стратегии: ни «Срок изготовления» (c.dueKey — только цвет строки,
+    // dueColorClass), ни фольга на него не влияют. Срок и «фольга в конец дня» (#3717) — локальные
+    // штрафы DEADLINE_COST_MN / FOIL_NOTEND_COST_MN слоя размещения.
     function orderCuts(cuts, weights){
         var opts = makePlanningOptions(weights);
-        // #4085 (модель #3985): жёсткое «фольга — отдельной группой в конец дня» (#3717) СНЯТО.
-        // Порядок целиком по стратегии (SETUP: группировка сырья/ножей — минимум переналадок). Фольга
-        // в конце дня обеспечивается штрафом FOIL_NOTEND_COST_MN в слое размещения, а не сортировкой.
-        // Срок изготовления (EDD) в упорядочивании НЕ участвует (только цвет строки, dueColorClass).
         var seq = sequenceForStrategy((cuts || []).slice(), opts);
         return seq.map(function(c, i){
             var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
@@ -5762,6 +5826,198 @@
         var total = 0;
         for (var i = 1; i < seq.length; i++) total += changeoverCost(seq[i - 1], seq[i], times);
         return round3(total);
+    }
+
+    // ─── #4139: внутридневная пересортировка очереди станка ──────────────────────────────────
+    // Слой размещения (#4085) вставляет резки по одной по минимуму штрафа вставки и НЕ чинит
+    // собранный день. Одна и та же конфигурация попадает в день дважды, разорванная чужим сырьём
+    // (Станок 1, 02.07: MW308/8 → MWR113L/8 → MW308/8). День каждой резки уже определён реальной
+    // упаковкой, поэтому перестановка ВНУТРИ дня не двигает день и не меняет штрафы срока
+    // (§8 п.4/5) — она только склеивает одинаковые конфигурации.
+
+    // Подпись конфигурации: набор ножей (МУЛЬТИМНОЖЕСТВО, как effKnifeWidths) + ширина ролика
+    // (её сужение — тоже смена ножей, changeoverParts) + сырьё/намотка/партия. Резки с одинаковой
+    // подписью стоят подряд БЕСПЛАТНО (changeoverParts → []), поэтому в переборе они — один узел.
+    function cutConfigSig(c){
+        var w = effKnifeWidths(c).slice().sort();
+        return w.join(',') + '|' + (Number(c && c.rollerWidth) || 0)
+            + '|' + String(c && c.materialId) + '|' + normWinding(c && c.winding)
+            + '|' + ((c && c.batchId) == null ? '' : String(c.batchId));
+    }
+    // Σ стоимости цепочки, считая переход от prev (заправка станка / хвост прошлого дня).
+    // costFn — sequencingCost (цель порядка, #3996) либо changeoverCost (реальные минуты наладки).
+    function runChainCost(seq, prev, times, costFn){
+        var total = 0, cur = prev;
+        for (var i = 0; i < seq.length; i++){
+            if (cur) total += costFn(cur, seq[i], times);
+            cur = seq[i];
+        }
+        return round3(total);
+    }
+    // Держим перебор в разумных рамках: на реальных планах РАЗНЫХ конфигураций в дне ≤ 13.
+    // Дней шире — не переставляем (возвращаем null), порядок слоя размещения остаётся как есть.
+    var RESEQ_MAX_NODES = 12;
+
+    // Схлопнуть резки в ГРУППЫ по подписи, сохраняя исходный относительный порядок внутри группы.
+    function groupBySig(cuts){
+        var groups = [], byId = {};
+        cuts.forEach(function(c){
+            var sig = cutConfigSig(c);
+            if (byId[sig] == null){ byId[sig] = groups.length; groups.push([]); }
+            groups[byId[sig]].push(c);
+        });
+        return groups;
+    }
+
+    // Разложить день на группы и ограничения. → { groups, isFoil[], starts[], ends[] } | null.
+    //   • фольга — после всей нефольги (#3717);
+    //   • резка, переползающая на следующий день (день-сплит), обязана быть последней — иначе
+    //     разрыв «настройка в хвосте дня N, резка с N+1» (#3635 п.5) уедет на другую резку.
+    function dayGroups(run, spanningIds){
+        var pinned = null, body = run.slice();
+        var lastCut = body[body.length - 1];
+        if (spanningIds && spanningIds[String(lastCut.id)]) pinned = lastCut;
+        var hasFoil = body.some(function(c){ return !!(c && c.isFoil); });
+        if (pinned && hasFoil && !pinned.isFoil) return null;   // фольга не сможет стать последней
+
+        var groups = groupBySig(body);
+        var isFoil = groups.map(function(g){ return !!g[0].isFoil; });
+        var pinnedIdx = -1;
+        if (pinned){
+            for (var i = 0; i < groups.length && pinnedIdx < 0; i++){
+                if (groups[i].indexOf(pinned) >= 0) pinnedIdx = i;
+            }
+            // внутри группы подписи одинаковы → переставить закреплённую резку в конец бесплатно
+            var g = groups[pinnedIdx];
+            g.splice(g.indexOf(pinned), 1); g.push(pinned);
+        }
+        if (groups.length > RESEQ_MAX_NODES) return null;
+
+        var idx = groups.map(function(_, i){ return i; });
+        var plain = idx.filter(function(i){ return !isFoil[i]; });
+        var foils = idx.filter(function(i){ return isFoil[i]; });
+        var starts = plain.length ? plain : foils;
+        var ends = pinnedIdx >= 0 ? [pinnedIdx] : (foils.length ? foils : idx);
+        return { groups: groups, isFoil: isFoil, starts: starts, ends: ends };
+    }
+
+    // Точные минимумы гамильтоновых путей по группам дня (Held-Karp по подмножествам) для КАЖДОЙ
+    // пары (начало, конец) из допустимых. Ограничение «вся нефольга раньше любой фольги» вшито в
+    // переход. Стоимость — sequencingCost между представителями групп (внутри группы переходы
+    // бесплатны: подпись одна). → { cost: {s:{e:c}}, path: {s:{e:[gIdx…]}} }.
+    function dayPathTable(day, times){
+        var groups = day.groups, n = groups.length;
+        var rep = groups.map(function(g){ return g[0]; });
+        var foilMask = 0, i;
+        for (i = 0; i < n; i++){ if (day.isFoil[i]) foilMask |= (1 << i); }
+        var full = 1 << n;
+        var cost = {}, path = {};
+        day.starts.forEach(function(s){
+            var dp = new Array(full), par = new Array(full), mask, last, nx;
+            for (mask = 0; mask < full; mask++){
+                dp[mask] = new Array(n); par[mask] = new Array(n);
+                for (i = 0; i < n; i++){ dp[mask][i] = Infinity; par[mask][i] = -1; }
+            }
+            dp[1 << s][s] = 0;
+            for (mask = 0; mask < full; mask++){
+                for (last = 0; last < n; last++){
+                    var cur = dp[mask][last];
+                    if (cur === Infinity || !(mask >> last & 1)) continue;
+                    for (nx = 0; nx < n; nx++){
+                        if (mask >> nx & 1) continue;
+                        // фольга уже началась → дальше только фольга (#3717)
+                        if ((mask & foilMask) && !day.isFoil[nx]) continue;
+                        var nm = mask | (1 << nx);
+                        var c = cur + sequencingCost(rep[last], rep[nx], times);
+                        if (c < dp[nm][nx]){ dp[nm][nx] = c; par[nm][nx] = last; }
+                    }
+                }
+            }
+            cost[s] = {}; path[s] = {};
+            day.ends.forEach(function(e){
+                if (dp[full - 1][e] === Infinity) return;
+                var order = [], m = full - 1, cur2 = e;
+                while (cur2 >= 0){ order.push(cur2); var p = par[m][cur2]; m ^= (1 << cur2); cur2 = p; }
+                cost[s][e] = dp[full - 1][e];
+                path[s][e] = order.reverse();
+            });
+        });
+        return { cost: cost, path: path, rep: rep };
+    }
+
+    // Пересортировать очередь станка ПО ДНЯМ. dayByCut — РЕАЛЬНЫЙ день старта каждой резки из
+    // упаковки; упаковщик заполняет очередь последовательно, поэтому дни идут непрерывными
+    // отрезками. Состав дня и его номер НЕ меняются → штрафы срока (§8 п.4/5) те же.
+    // Оптимум СКВОЗНОЙ: подневная жадность не годится — перестановка дня меняет вход в следующий
+    // день, и локально лучшие дни дают суммарно худшую очередь. Поэтому DP по цепочке дней:
+    // состояние = группа, которой день закончился.
+    // Приёмка ДВОЙНАЯ: цель порядка (sequencingCost, #3996) строго лучше И реальные минуты наладки
+    // (changeoverCost) не выросли — снятие двух «ростов полос» (−20 каждый) окупает лишнюю смену
+    // ножей (+30) по цели, но оператор в цеху заплатит эти 30 минут.
+    // prev — заправка станка (#3853). → новый порядок | null (не улучшилось / не наш случай).
+    function resequenceWithinDays(ordered, dayByCut, spanningIds, prev, times){
+        if (!ordered || ordered.length < 2) return null;
+        var runs = [], curDay = null, i;
+        for (i = 0; i < ordered.length; i++){
+            var d = dayByCut[String(ordered[i].id)];
+            if (d == null) return null;   // резка без реального дня — не рискуем
+            if (!runs.length || d !== curDay){ runs.push([]); curDay = d; }
+            runs[runs.length - 1].push(ordered[i]);
+        }
+        for (i = 1; i < runs.length; i++){   // дни обязаны строго возрастать (иначе не наш случай)
+            if (dayByCut[String(runs[i][0].id)] <= dayByCut[String(runs[i - 1][0].id)]) return null;
+        }
+        var days = [], tables = [];
+        for (i = 0; i < runs.length; i++){
+            var dg = dayGroups(runs[i], spanningIds);
+            if (!dg) return null;
+            days.push(dg); tables.push(dayPathTable(dg, times));
+        }
+        // DP по цепочке дней: state[e] = {cost, s, prevEnd}
+        var state = null;
+        for (i = 0; i < days.length; i++){
+            var tbl = tables[i], day = days[i], next = {};
+            day.starts.forEach(function(s){
+                if (!tbl.cost[s]) return;
+                day.ends.forEach(function(e){
+                    var inner = tbl.cost[s][e];
+                    if (inner == null) return;
+                    if (state === null){
+                        var base = prev ? sequencingCost(prev, tbl.rep[s], times) : 0;
+                        if (next[e] == null || base + inner < next[e].cost) next[e] = { cost: base + inner, s: s, prevEnd: null };
+                    } else {
+                        Object.keys(state).forEach(function(pe){
+                            var prevRep = tables[i - 1].rep[Number(pe)];
+                            var c = state[pe].cost + sequencingCost(prevRep, tbl.rep[s], times) + inner;
+                            if (next[e] == null || c < next[e].cost) next[e] = { cost: c, s: s, prevEnd: Number(pe) };
+                        });
+                    }
+                });
+            });
+            if (!Object.keys(next).length) return null;
+            state = next;
+            days[i]._state = state;
+        }
+        // обратный проход: собрать выбранные (s,e) по дням
+        var endPick = null;
+        Object.keys(state).forEach(function(e){ if (endPick === null || state[e].cost < state[endPick].cost) endPick = e; });
+        var picks = new Array(days.length), curEnd = Number(endPick);
+        for (i = days.length - 1; i >= 0; i--){
+            var st = days[i]._state[curEnd];
+            picks[i] = { s: st.s, e: curEnd };
+            curEnd = st.prevEnd;
+        }
+        var out = [];
+        for (i = 0; i < days.length; i++){
+            var order = tables[i].path[picks[i].s][picks[i].e];
+            order.forEach(function(gIdx){ days[i].groups[gIdx].forEach(function(c){ out.push(c); }); });
+        }
+        if (out.length !== ordered.length) return null;
+        var newSeq = runChainCost(out, prev, times, sequencingCost);
+        var oldSeq = runChainCost(ordered, prev, times, sequencingCost);
+        var newReal = runChainCost(out, prev, times, changeoverCost);
+        var oldReal = runChainCost(ordered, prev, times, changeoverCost);
+        return (newSeq < oldSeq - 1e-9 && newReal <= oldReal + 1e-9) ? out : null;
     }
 
     function bestExistingTransitionCost(group, cut, weights) {
@@ -7447,6 +7703,8 @@
         fatigueAwareSequence: fatigueAwareSequence,
         greedySequence: greedySequence,
         orderCuts: orderCuts,
+        cutConfigSig: cutConfigSig,                   // #4139
+        resequenceWithinDays: resequenceWithinDays,   // #4139
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
@@ -12265,6 +12523,14 @@
         return String(v == null ? '' : v).trim() !== '0';
     };
 
+    // #4139: внутридневная пересортировка очереди станка после реальной упаковки — ПО УМОЛЧАНИЮ
+    // ВКЛЮЧЕНА. Выключается INTRA_DAY_RESEQUENCE=0 в «Настройке» (аварийный рубильник на порядок
+    // слоя размещения как есть). Работает только в слот-режиме и не при preserveOrder.
+    AtexProductionPlanning.prototype.intraDayResequenceOn = function() {
+        var v = (this.daySettings || {}).INTRA_DAY_RESEQUENCE;
+        return String(v == null ? '' : v).trim() !== '0';
+    };
+
     // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,
     // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
     // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
@@ -12363,6 +12629,8 @@
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
             // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
             slotPlacement: slotOn,
+            // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)
+            intraDayResequence: (self && typeof self.intraDayResequenceOn === 'function') ? self.intraDayResequenceOn() : true,
             slitterIds: (self.slitters || []).map(function(s){ return String(s.id); }),
             dueKeyByCut: dueKeyByCut,
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,
