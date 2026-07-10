@@ -142,9 +142,66 @@ assertEqual([minOfDay(tail), tailStored], [964, 967],
 var keepRaw = planning.splitTailSetupAtCeiling(minOfDay(tail), 30, 15, WIN.cutEndMin, WIN.maxOverworkTuneMin);
 var keepStored = planning.splitTailSetupAtCeiling(tailStored, 30, 15, WIN.cutEndMin, WIN.maxOverworkTuneMin);
 assertEqual(keepRaw.keepKnife + keepRaw.keepMaterial, tail.setupMin,
-    'от старта УПАКОВЩИКА (16:04) писатель оставляет в дне те же 15 мин');
-assertEqual(keepStored.keepKnife + keepStored.keepMaterial, tail.setupMin,
-    'от ХРАНИМОГО старта (16:07) писатель обязан оставить те же 15 мин, а не обнулить плашку');
+    'от старта УПАКОВЩИКА (16:04) пересчёт по потолку даёт те же 15 мин');
+assertEqual(keepStored.keepKnife + keepStored.keepMaterial, 0,
+    'от ХРАНИМОГО старта (16:07) пересчёт по потолку схлопывается в ноль — поэтому писатель им не пользуется, когда есть план');
+
+// Упаковщик обязан отдать разложение хвоста по колонкам — писатель возьмёт готовое.
+assertEqual([tail.setupKnifeMin, tail.setupMaterialMin], [0, 15],
+    'сегмент хвоста несёт разложение по колонкам: ножи 0, сырьё 15');
+
+// ── 3b) Писатель колонок берёт решение упаковщика, а не пересчитывает от снапнутого planStart ──
+var api = require('../download/atex/js/production-planning.js');
+var baseSec = Math.floor(new Date(2026, 6, 1, 0, 0, 0).getTime() / 1000);   // полночь 01.07.2026, TZ=UTC
+function ts(dayOffset, minuteOfDay) { return String(baseSec + dayOffset * 86400 + minuteOfDay * 60); }
+var cutMeta = { id: '110', val: 'Задание в производство', reqs: [
+    { id: '96067', val: 'Наладка ножей, мин' },
+    { id: '96069', val: 'Сырье/намотка, мин' },
+    { id: '96778', val: 'Резка и Лидер' }
+] };
+function icut(o) {
+    return { id: o.id, slitter: { id: '1', label: 'Станок 1' },
+        materialId: o.mat, winding: 'OUT', batchId: 'b', knifeWidths: o.kw, knifeCount: o.kw.length,
+        rollerWidth: 0, isFoil: false, plannedRuns: o.runs, duration: o.dur || 0,
+        planDate: ts(o.day, o.min), number: ts(o.day, o.min), firstPartId: o.first || '',
+        storedKnifeSetupMin: o.sk == null ? '' : String(o.sk),
+        storedMaterialWindingMin: o.sm == null ? '' : String(o.sm), storedCutAndLeaderMin: '' };
+}
+// Сценарий из issue: предшественник P кончается в 16:07, хвост T (0 проходов) стоит там же,
+// продолжение C — 08:00 следующего дня. Наладка T от P = ножи 30 + сырьё 15.
+function runWriter(plannedTailSetup, tailStored) {
+    var ctrl = Object.create(api.Controller.prototype);
+    ctrl.meta = { cut: cutMeta };
+    ctrl.cuts = [
+        icut({ id: 'P', mat: 'MW411',  kw: [70], runs: 5, dur: 30, day: 0, min: 15 * 60 + 7 }),
+        icut({ id: 'T', mat: 'MWR200', kw: [50], runs: 0, dur: 0,  day: 0, min: 16 * 60 + 7, first: 'T',
+               sk: tailStored ? tailStored[0] : null, sm: tailStored ? tailStored[1] : null }),
+        icut({ id: 'C', mat: 'MWR200', kw: [50], runs: 4, dur: 13, day: 1, min: 8 * 60, first: 'T' })
+    ];
+    ctrl.changeTimes = { KNIFE: 30, MATERIAL_WINDING: 15, BETWEEN_CUTS: 0, CLEANUP_SHIFT: 30 };
+    ctrl.daySettings = { DAY_START_HOUR: '08:00', DAY_END_HOUR: '16:30', TOTAL_INTERVALS: '20',
+        MAX_OVERWORK_CUTS_MN: '5', MAX_OVERWORK_TUNE_MN: '10' };
+    ctrl.slitters = []; ctrl.prevSetupBySlitter = {}; ctrl.filter = { date: '2026-07-01' };
+    ctrl.plannedTailSetup = plannedTailSetup;
+    var by = {};
+    ctrl.computeCutSetupUpdates(null).updates.forEach(function (u) { by[String(u.cutId)] = { knife: u.knife, material: u.material }; });
+    return by;
+}
+// Упаковщик положил в хвост сырьё 15 (ключ — «станок + плановый старт», как в plannedTailSetup).
+var planMap = {};
+planMap['1|' + ts(0, 16 * 60 + 7)] = { knife: 0, material: 15 };
+var withPlan = runWriter(planMap, null);
+assertEqual(withPlan.T, { knife: 0, material: 15 },
+    'писатель кладёт в хвост решение УПАКОВЩИКА (сырьё 15), хотя от снапнутого старта потолок дал бы ноль');
+assertEqual(withPlan.C, { knife: 30, material: 0 },
+    'продолжение добирает только остаток наладки — ножи 30, а не полные 45 (нет наезда на соседа)');
+
+// Плана под рукой нет («Зафиксировать» по хранимым данным) — записанные колонки не обнуляем.
+var noPlan = runWriter({}, [0, 15]);
+assertEqual(noPlan.T === undefined || JSON.stringify(noPlan.T) === JSON.stringify({ knife: 0, material: 15 }), true,
+    'без плана писатель держит уже записанные колонки хвоста, а не пересчитывает их в ноль');
+assertEqual(noPlan.C, { knife: 30, material: 0 },
+    'без плана продолжение по-прежнему добирает ножи 30');
 
 // ── 4) РАСХОЖДЕНИЕ 2 (Станок 4, 01.07): в хвост влезает смена сырья, а упаковщик не кладёт ничего ──
 // Минимальный воспроизводящий стенд: день заполнен до room = 19 мин, следующей резке нужны ножи 30 +

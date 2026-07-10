@@ -141,6 +141,7 @@
         setupBreakdown: setupBreakdown,
         setupActivityMinutes: setupActivityMinutes,   // #3698
         minOverlapTailSetupMinutes: minOverlapTailSetupMinutes,   // #3760
+        chooseTailSetupSubset: chooseTailSetupSubset,   // #4144: единое правило хвоста дня (упаковщик + колонки)
         splitTailSetupAtCeiling: splitTailSetupAtCeiling,   // #4111: раскладка наладки хвоста дня по потолку нахлёста
         setupActivityColumns: setupActivityColumns,   // #3698
         planningStrategy: planningStrategy,
@@ -3923,6 +3924,7 @@
             // (.atex-pp-input), даже если она в прошлом; без даты — от сегодня.
             var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
             var bySlitter = {};
+            self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам дня (см. computeCutSetupUpdates)
             layoutPlans.forEach(function(plan) {
                 var s = String(plan.slitterId == null ? '' : plan.slitterId);
                 if (s === '') return;
@@ -3946,6 +3948,13 @@
                     blockedRanges: self.blockedRangesForSlitter(s, planBaseMidnightMs)   // #3764: окна «Отпуска» станка
                 });
                 snapSplitSegmentWindows(segs);   // #4061: старт следующей резки = старт текущей + сумма её колонок
+                // #4144: разложение setup-only хвоста дня по колонкам — решение упаковщика (room считан
+                // по дробному окну, ДО снапа). Писатель колонок возьмёт его по «станок + плановый старт».
+                segs.forEach(function(sg) {
+                    if (!sg.setupOnly || sg.setupKnifeMin == null) return;
+                    var tailTs = scheduleStartTimestamp(planBaseMidnightMs, sg.windowStartMin);
+                    self.plannedTailSetup[tailSetupKey(s, tailTs)] = { knife: Math.round(sg.setupKnifeMin), material: Math.round(sg.setupMaterialMin) };
+                });
                 var byPlanId = {};
                 segs.forEach(function(sg) { (byPlanId[String(sg.cutId)] = byPlanId[String(sg.cutId)] || []).push(sg); });
                 plans.forEach(function(p) {
@@ -4300,6 +4309,13 @@
     // должны валить сохранение очереди/плана. Вызывается после сохранений порядка/плана.
     // #3778: тайминг-поля задания (t96067 «Наладка ножей, мин» / t96069 «Сырье/намотка, мин» /
     // t96778 «Резка и Лидер») одним набором реквизитов для _m_set. Отсутствующие reqId не пишем.
+    // #4144: ключ хвоста дня в карте решений упаковщика (plannedTailSetup). Записей ещё может не быть
+    // (генерация создаёт их после упаковки), поэтому ключ — не id, а «станок + плановый старт»: ровно
+    // то, что уйдёт в главное значение резки (planStartTs, сек) и потом вернётся в c.number.
+    function tailSetupKey(slitterId, planStartTs) {
+        return String(slitterId == null ? '' : slitterId) + '|' + Math.round(Number(planStartTs) || 0);
+    }
+
     function setupTimingFields(reqs, u) {
         var fields = {};
         if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
@@ -4338,6 +4354,7 @@
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var prevBySlitter = this.planningPrevSetupBySlitter(planBaseMidnightMs);
         var self = this;
+        var plannedTail = this.plannedTailSetup || {};   // #4144: решение упаковщика по хвостам последнего плана
         // #4026/#4030/#4111: setup-only хвост дня (#3635 п.5, 0 проходов) — это НАЛАДКА следующей резки,
         // начатая в конце дня N; сама резка (проходы) идёт с дня N+1 (продолжение). Наладка = ножи +
         // смена сырья. В дне N оставляем ТОЛЬКО то, что влезает до потолка нахлёста НАСТРОЙКИ
@@ -4380,11 +4397,30 @@
                 var cc = cols[String(c.id)] || {};
                 var fullK = Math.round(cc.knifeMin || 0), fullM = Math.round(cc.materialWindingMin || 0);
                 if (fullK + fullM <= 0) return;                       // нет наладки — делить нечего
-                // #4111: минута старта хвоста (из planStart, главное значение) → сколько наладки влезает
-                // до потолка нахлёста настройки. planBaseMidnightMs — полночь дня 0 (мс), c.number — сек.
+                // #4144: сколько наладки остаётся в дне N, решил УПАКОВЩИК — он один видит ДРОБНОЕ окно.
+                // Хранимый planStart прошёл снап к целым минутам (#4061, накопленный ceil) и лежит ПОЗЖЕ
+                // упаковочного, поэтому пересчёт по нему room занижает: на плане из #4144 хвост 16:04
+                // (room 6, влезала смена намотки 15) превращался в 16:07 (room 3) → в дне N НИЧЕГО,
+                // задание нулевой длительности, а 15 мин всплывали на продолжении и наезжали на соседа.
+                //   • есть решение упаковщика (plannedTailSetup, ключ «станок + плановый старт») — берём его;
+                //   • плана под рукой нет («Зафиксировать» по хранимым данным), но колонки уже записаны —
+                //     держим записанное: последний план и есть источник правды, выдумывать не из чего;
+                //   • ни того, ни другого — фолбэк на пересчёт по потолку (splitTailSetupAtCeiling).
+                // planBaseMidnightMs — полночь дня 0 (мс), c.number — сек.
                 var minsFromBase = (Number(c.number) * 1000 - planBaseMidnightMs) / 60000;
                 var tailStartMin = isFinite(minsFromBase) ? (((minsFromBase % 1440) + 1440) % 1440) : NaN;
-                var keep = splitTailSetupAtCeiling(tailStartMin, fullK, fullM, cutEndMin4111, overTuneMin4111);
+                var storedK = Math.round(stripNum(c.storedKnifeSetupMin)), storedM = Math.round(stripNum(c.storedMaterialWindingMin));
+                var planned = plannedTail[tailSetupKey(sid, stripNum(c.number))];
+                var keep, keepSrc;
+                if (planned && (planned.knife + planned.material) > 0) {
+                    keep = { keepKnife: planned.knife, keepMaterial: planned.material }; keepSrc = 'упаковщик';
+                } else if (!planned && (storedK + storedM) > 0) {
+                    keep = { keepKnife: storedK, keepMaterial: storedM }; keepSrc = 'хранимое';
+                } else {
+                    keep = splitTailSetupAtCeiling(tailStartMin, fullK, fullM, cutEndMin4111, overTuneMin4111); keepSrc = 'потолок';
+                }
+                // Оставить в дне N больше, чем есть в наладке, нельзя (конфигурация могла смениться).
+                keep = { keepKnife: Math.min(keep.keepKnife, fullK), keepMaterial: Math.min(keep.keepMaterial, fullM) };
                 tailKeep[String(c.id)] = { knife: keep.keepKnife, material: keep.keepMaterial };
                 var defK = fullK - keep.keepKnife, defM = fullM - keep.keepMaterial;
                 if (defK <= 0 && defM <= 0) return;                   // всё влезло в день N — переносить нечего
@@ -4418,7 +4454,7 @@
                 }
                 if (ppTraceOn()) ppTrace('#4111 хвост ' + c.id + ' старт=' + Math.round(tailStartMin) +
                     ' наладка[нож/сыр]=' + fullK + '/' + fullM + ' → в дне N ' + keep.keepKnife + '/' + keep.keepMaterial +
-                    ', на продолжение ' + (target || '∅') + ' ' + defK + '/' + defM);
+                    ' (' + keepSrc + '), на продолжение ' + (target || '∅') + ' ' + defK + '/' + defM);
             });
             arr.forEach(function(c, i) {
                 var inScope = !(onlySet && !onlySet[String(c.id)]);   // снимок — только выбранные резки
@@ -5057,7 +5093,9 @@
         }
         var ops;
         try {
+        self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам этого плана (см. computeCutSetupUpdates)
         ops = planCutOperations(planInput, {
+            onTailSetup: function(slitterKey, planStartTs, split) { self.plannedTailSetup[tailSetupKey(slitterKey, planStartTs)] = split; },
             weights: planOptions,
             times: self.changeTimes,
             dayStartMin: dayWindow.startMin,
