@@ -8288,19 +8288,28 @@
     // Нужна как источник истины после _m_set: отчёт cut_planning может отставать/отдать
     // старый alias и вовсе НЕ содержит «Зафиксировано». (#3923: «Очередность» больше не
     // читается — порядок задаёт planStart; форма ответа { seq:{}, fixed } сохранена.)
-    // Возвращает { seq: {}, fixed: { cutId: bool } }.
+    // #4128: оттуда же — СОБСТВЕННЫЙ «Тип намотки» резки. Колонка отчёта cut_winding идёт
+    // цепочкой Обеспечение→Позиция, а обеспечения записи-продолжения привязаны к позиции
+    // (up=positionId) БЕЗ ссылки на «Задание в производство» → у звеньев цепочки дробления
+    // намотка приходит пустой, хотя на самой резке она задана. Та же подмена источника, что
+    // в #3868 для «Вида сырья».
+    // Возвращает { seq: {}, fixed: { cutId: bool }, winding: { cutId: 'IN'|'OUT'|'' } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
-        if (!meta) return Promise.resolve({ seq: {}, fixed: {} });
-        var fixedIdx = columnIndex(meta, CUT_REQ.fixed);   // #3508
-        if (fixedIdx < 0) return Promise.resolve({ seq: {}, fixed: {} });
+        var empty = { seq: {}, fixed: {}, winding: {} };
+        if (!meta) return Promise.resolve(empty);
+        var fixedIdx = columnIndex(meta, CUT_REQ.fixed);    // #3508
+        var windIdx = columnIndex(meta, CUT_REQ.winding);   // #4128
+        if (fixedIdx < 0 && windIdx < 0) return Promise.resolve(empty);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
             var fixed = {};
+            var winding = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
-                fixed[String(rec.i)] = truthyFlag(r[fixedIdx]);   // #3508
+                if (fixedIdx >= 0) fixed[String(rec.i)] = truthyFlag(r[fixedIdx]);    // #3508
+                if (windIdx >= 0) winding[String(rec.i)] = normWinding(r[windIdx]);   // #4128
             });
-            return { seq: {}, fixed: fixed };
+            return { seq: {}, fixed: fixed, winding: winding };
         });
     };
 
@@ -8650,6 +8659,7 @@
             var rows = results[0];
             var seqResult = results[1] || {};
             var fixedByCut = seqResult.fixed || {};   // #3508
+            var windingByCut = seqResult.winding || {};   // #4128
             self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
@@ -8658,6 +8668,12 @@
                 cut.knifeCount = a.knifeCount || 0;
                 cut.knifeWidths = a.knifeWidths || [];
                 cut.fixed = !!fixedByCut[String(cut.id)];   // #3508: флаг «Зафиксировано» (#3923: «Очередность» не читаем)
+                // #4128: собственный «Тип намотки» резки — источник истины. Колонка отчёта
+                // (Обеспечение→Позиция) пуста у setup-сегмента и продолжений цепочки, и эта
+                // пустота копировалась в новые продолжения (applySplitPlan) → намотка терялась
+                // насовсем. Отчёт остаётся фолбэком для записей без своего реквизита.
+                var ownWinding = windingByCut[String(cut.id)];
+                if (ownWinding) cut.winding = ownWinding;
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -11877,6 +11893,14 @@
             var hc = cutsById[head];
             return hc && hc.materialId != null && String(hc.materialId) !== '' ? String(hc.materialId) : '';
         }
+        // #4128: «Тип намотки» цепочки = намотке её ГОЛОВЫ — заправка одна на все сегменты.
+        // Берём у головы, а не у прямого родителя: у реюзнутого продолжения, созданного до
+        // фикса, поле пустое, и пустота расползалась по всей цепочке.
+        function windingForCutId(cutId) {
+            var head = chainHeadById[String(cutId)] || String(cutId);
+            var hc = cutsById[head];
+            return normWinding(hc && hc.winding);
+        }
         // #3916: тайминг записи-СЕГМЕНТА считаем по ЕЁ проходам (plannedRuns), а не по целой
         // резке. Разбивка по дням уменьшала «Кол-во резок план» сегмента, но «Длительность,
         // минут» и «Резка и Лидер» оставались от полной резки (голова 30 из 82 проходов хранила
@@ -11994,6 +12018,14 @@
                         var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
                         if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
                     }
+                    // #4128: «Тип намотки» = намотке головы цепочки. Запись становится сегментом
+                    // этой резки здесь же — намотка в этот момент известна, пишем её. Только если
+                    // хранимое пусто/иное (#4001), иначе лишний _m_set.
+                    if (cutReqIds.winding) {
+                        var uwind = windingForCutId(u.cutId);
+                        var windOld = storedCut ? normWinding(storedCut.winding) : '';
+                        if (uwind && windOld !== uwind) fields['t' + cutReqIds.winding] = uwind;
+                    }
                     // #4085: слой размещения переназначил станок — пишем «Слиттер» (u.slitterId), только если
                     // отличается от хранимого (в не-слот-режиме u.slitterId нет → ничего не пишем, контракт прежний).
                     if (u.slitterId != null && cutReqIds.slitter) {
@@ -12068,7 +12100,9 @@
                             material: parentMaterial,
                             plannedRuns: cr.plannedRuns,
                             // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение).
-                            winding: normWinding(parentCut && parentCut.winding),
+                            // #4128: намотка цепочки (у ГОЛОВЫ, не у прямого родителя) — иначе пустая
+                            // намотка реюзнутого продолжения расползалась на новые сегменты.
+                            winding: windingForCutId(parentId),
                             // #3569: лидер родителя (одна метка из cut_leader) → id справочника.
                             leader: self.resolveLeaderId(parentCut && parentCut.leaders && parentCut.leaders.length === 1 ? parentCut.leaders[0] : ''),
                             // #3781: «Метраж, м» = длина прогона цепочки. Без неё cutRunLength брал
