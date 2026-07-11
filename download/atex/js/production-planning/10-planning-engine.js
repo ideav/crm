@@ -89,6 +89,24 @@
     var balanceFastChangeover = false;   // greedySequence: цепочка от одного старта (без перебора)
     var balancePairCostMemo = null;      // changeoverCost: кэш по паре id { 'prevId>nextId': минуты }
 
+    // #4151: тай-брейк группировки рулона. changeoverParts берёт 15 мин за смену сырья ИЛИ намотки
+    // ИЛИ партии одинаково, поэтому чужой материал (смена РУЛОНА) свободно рвёт группу одного рулона
+    // (жалоба #4151: «MWR233 влез между MR194 — менять рулон, а потом обратно»). При РАВНОЙ реальной
+    // переналадке предпочитаем не перемонтировать рулон: sequencingCost добавляет КРОШЕЧНЫЙ штраф за
+    // смену материала/партии (НЕ намотки — та же катушка), и resequenceWithinDays группирует резки
+    // одного рулона. Штраф — ПОРЯДКА величины ниже любой реальной разницы (0.001 ≪ 15), поэтому лишь
+    // разрешает ничьи; двойная приёмка resequenceWithinDays (newReal ≤ oldReal) не даёт разменять
+    // перемонтаж на лишнюю смену ножей. Флаг включаем ТОЛЬКО вокруг resequenceWithinDays — greedy/
+    // orderCuts не трогаем (их тай-брейк — полосы по убыванию #3785). Смена намотки на том же рулоне
+    // (MR194 OUT↔IN) штрафа НЕ несёт.
+    var ROLL_TIEBREAK_MN = 0.001;
+    var sequencingRollTiebreak = false;
+    function isRollRemount(prev, next){
+        return !!prev && !!next && (
+            String(prev.materialId) !== String(next.materialId) ||
+            String(prev.batchId) !== String(next.batchId));
+    }
+
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
@@ -4083,6 +4101,11 @@
         if (!balanceFastChangeover && knifeChangeNeeded(prev, next) && stripBandCount(next) > stripBandCount(prev)) {
             base += planWeight(null, 'KNIVES_INCREASE_COST_MN') - planWeight(null, 'KNIVES_CHANGE_COST_MN');
         }
+        // #4151: крошечный тай-брейк — смена РУЛОНА (материал/партия) чуть дороже смены намотки, чтобы
+        // при равной реальной переналадке резки одного рулона держались вместе (не рвались чужим
+        // материалом). Активен только в resequenceWithinDays (флаг), где приёмка не даёт вырасти
+        // реальным минутам. round3 сохраняет 3 знака — штраф переживает округление.
+        if (sequencingRollTiebreak && isRollRemount(prev, next)) base += ROLL_TIEBREAK_MN;
         return round3(base);
     }
     // Жадная цепочка от заданного старта: далее argmin sequencingCost, tie-break startKey.
@@ -4339,6 +4362,18 @@
     // ножей (+30) по цели, но оператор в цеху заплатит эти 30 минут.
     // prev — заправка станка (#3853). → новый порядок | null (не улучшилось / не наш случай).
     function resequenceWithinDays(ordered, dayByCut, spanningIds, prev, times){
+        // #4151: тай-брейк группировки рулона активен ТОЛЬКО здесь — sequencingCost добавляет
+        // крошечный штраф за перемонтаж рулона, а двойная приёмка (newReal ≤ oldReal ниже) не даёт
+        // разменять его на реальные минуты. greedySequence/orderCuts (флаг выключен) не трогаем.
+        var prevTiebreak = sequencingRollTiebreak;
+        sequencingRollTiebreak = true;
+        try {
+            return resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times);
+        } finally {
+            sequencingRollTiebreak = prevTiebreak;
+        }
+    }
+    function resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times){
         if (!ordered || ordered.length < 2) return null;
         var runs = [], curDay = null, i;
         for (i = 0; i < ordered.length; i++){
