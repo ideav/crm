@@ -1614,6 +1614,26 @@
         return keys.sort(function(a, b) { return a - b; });
     }
 
+    // #4161: сколько заданий ПРОСРОЧЕНО в окне [scopeFromKey; scopeToKey] — плановый день задания
+    // (planDateDayKey) позже самого раннего «Срока изготовления» обеспечиваемых позиций. Правило
+    // просрочки — dueColorClass → 'is-overdue' (то же, что красит строку карточки #3769/#4051).
+    // Окно — тот же предикат, что storedSetupTotals «всего заданий» (dk >= lo && dk <= hi), чтобы
+    // «просрочено» не превышало показанное число заданий. includeSupplyFallback=true — срок и из
+    // cut_planning для позиций вне активного positions_list (#4051). Чистая — покрыта тестом. → N.
+    function countOverdueCuts(cuts, supplies, genPositions, opts) {
+        var o = opts || {};
+        var lo = o.scopeFromKey != null ? Number(o.scopeFromKey) : -Infinity;
+        var hi = o.scopeToKey != null ? Number(o.scopeToKey) : Infinity;
+        var n = 0;
+        (cuts || []).forEach(function(c) {
+            var dk = planDateDayKey(c && c.planDate);
+            if (!(dk >= lo && dk <= hi)) return;
+            var dueKeys = cutDueKeys(c, supplies, genPositions, true);
+            if (dueKeys.length && dueColorClass(dueKeys[0], dk, o.forecastDays) === 'is-overdue') n++;
+        });
+        return n;
+    }
+
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
     // приходит unix-штампом (секунды) → форматируем как дату-время. Короткие record id
     // и не-штампы не форматируем как 1970-дату.
