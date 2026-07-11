@@ -75,7 +75,8 @@ var HEAD_STRIPS = function() { return Promise.resolve([{ id: 'FBH', width: 154, 
         var delH = pathsOf(c._posts, /_m_del\/H\?/);
         assert(delOrph.length === 1, '#4163 повреждённая сирота (пустая намотка + без Обеспечения) УДАЛЕНА', '(_m_del/ORPH=' + delOrph.length + ')');
         assert(delH.length === 0, '#4163 валидная резка H НЕ удалена', '(_m_del/H=' + delH.length + ')');
-        assert(ops.updates.length === 1 && String(ops.updates[0].cutId) === 'H', '#4163 сирота убрана из updates (не пишем то, что удаляем)');
+        // #4168: чистка переехала в removeCorruptedDaySplitOrphans ПОСЛЕ reload (не в начале applySplitPlan) —
+        // сироту рождает сама пересборка; здесь reload застаблен no-op, поэтому applySplitPlan её всё равно удаляет.
         assert(c._notes.some(function(n) { return n.l === 'error' && /сирот/.test(n.m); }), '#4163 НЕ молча: тост об удалении сирот');
     }).catch(function(e) { assert(false, '(1) threw', String(e && e.stack || e)); }).then(done);
 })();
