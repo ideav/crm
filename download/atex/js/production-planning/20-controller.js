@@ -43,6 +43,7 @@
         formatDayKey: formatDayKey,             // #3769
         dueColorClass: dueColorClass,           // #3769
         cutDueKeys: cutDueKeys,                 // #3769
+        countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
@@ -6459,6 +6460,16 @@
                     scopeToKey: scopeToKey,
                     prevSetupBySlitter: self.prevSetupBySlitter
                 });
+                // #4161: сколько заданий ПРОСРОЧЕНО (плановый день позже самого раннего «Срока
+                // изготовления» позиций — то же правило, что красит строку карточки dueColorClass
+                // 'is-overdue'). По тому же окну [С;По], что «всего заданий», чтобы «просрочено» не
+                // превышало показанное число заданий.
+                var overdueCount = countOverdueCuts(self.cuts, self.supplies, self.genPositions,
+                    { scopeFromKey: scopeFromKey, scopeToKey: scopeToKey, forecastDays: self.daysForecast() });
+                // #4161: красный пункт «просрочено: N» — показываем ТОЛЬКО когда такие есть (>0).
+                var overdueQualitySpan = function() {
+                    return el('span', { text: 'просрочено: ' + overdueCount, style: 'color:#c0392b;font-weight:600;' });
+                };
                 // #4156: ФАКТ (переналадки/ножи/смены сырья) — из ХРАНИМЫХ колонок наладки задания
                 // («Наладка ножей, мин» / «Сырье/намотка, мин», #3698), как суммирует отчёт «Комбинации».
                 var setupTot = self.storedSetupTotals(scopeFromKey, scopeToKey);
@@ -6478,7 +6489,7 @@
                     console.error('[pp] Качество плана: ' + qErr);
                     // Тост один раз на состояние (renderQueue частый) — не спамим, но и не молчим.
                     if (self.notify && self._qualityColsError !== qErr) { self._qualityColsError = qErr; self.notify('Качество плана: ' + qErr, 'error'); }
-                    box.appendChild(el('div', { class: 'atex-pp-quality atex-pp-quality-error',
+                    var qErrPanel = el('div', { class: 'atex-pp-quality atex-pp-quality-error',
                         style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
                             + 'border:1px solid #c0392b;border-radius:6px;font-size:13px;' }, [
                         el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
@@ -6486,7 +6497,10 @@
                         // Идеал/комбинации не зависят от хранимых колонок (считаются по резкам плана) — показываем.
                         el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
                         el('span', { text: 'уникальных комбинаций: ' + pqView.combinationsWindow, style: 'opacity:.75;' })
-                    ]));
+                    ]);
+                    // #4161: «просрочено: N» красным — не зависит от хранимых колонок наладки.
+                    if (overdueCount > 0) qErrPanel.appendChild(overdueQualitySpan());
+                    box.appendChild(qErrPanel);
                 } else {
                     self._qualityColsError = null;   // ошибка снялась — дать снова шуметь, если вернётся
                     // #4013: панель — по ОКНУ [С;По] (факт из хранимых колонок, идеал/комбинации ОКНА).
@@ -6521,6 +6535,8 @@
                         + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
                         // #4013: подсказка о всём плане → комбинации всего плана (панель выше — по окну).
                         + 'Уникальных комбинаций во всём плане (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
+                    // #4161: красный «просрочено: N» — только когда есть просроченные задания.
+                    if (overdueCount > 0) qPanel.appendChild(overdueQualitySpan());
                     box.appendChild(qPanel);
                 }
             } catch (e) { console.warn('[pp] панель качества плана пропущена:', e && e.message); }
