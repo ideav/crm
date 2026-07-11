@@ -4153,8 +4153,26 @@
         // потолок DAY_END_HOUR+maxOverworkCuts (для проходов), 'tune' — DAY_END_HOUR+maxOverworkTune
         // (для настройки). Минус резерв обеда (как effCapacity). Фича выключена → обычная ёмкость до
         // cutEndMin (effCapacity−clock), поведение не меняется. clock/lunchDone — из замыкания.
+        // #4149: занятость дня в ЦЕЛЫХ минутах — ровно то, что уйдёт в колонки/бейдж
+        // (round(наладка) + ceil(намотка) на сегмент, как snapWindowStartsWholeMinutes #4061),
+        // плюс обед, если он уже вставлен. Гейт потолка (availFor) считает по ней, а не по дробному
+        // clock: упаковщик решал, что влезает, ДРОБНОЙ намоткой (день ≤ 460), но хранится/рисуется
+        // ЦЕЛАЯ — накопленный по резкам дня ceil выносил последнюю карточку/хвост за потолок нахлёста
+        // (бейдж 461/462 при допуске 460, issue #4149; ту же природу спец описывает как «447+15=462»).
+        // Считая потолок в ЦЕЛЫХ минутах, упаковщик роняет лишний ceil на следующий день сам.
+        function dayWholeOccupied(d) {
+            var sum = 0;
+            for (var i = 0; i < segments.length; i++) {
+                var s = segments[i];
+                if (s.dayOffset !== d) continue;
+                sum += Math.round(round3(Number(s.setupMin) || 0)) + Math.ceil(round3(Number(s.durationMin) || 0));
+            }
+            if (lunch && lunchDone[d]) sum += lunch.durationMin;   // обед уже вставлен — как в дробном clock
+            return sum;
+        }
         function availFor(d, kind) {
-            var base = effCapacity(d) - clock;
+            var occWhole = dayWholeOccupied(d);   // #4149: потолок считаем по ЦЕЛОЙ занятости (= колонки/бейдж), не по дробному clock
+            var base = effCapacity(d) - occWhole;
             if (!overworkOn || !hasWindow) return base;
             var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
             var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
@@ -4165,7 +4183,8 @@
             // мин во 2 июле»). Теперь потолок 16:15 (резка) / 16:20 (настройка) — буфер уборки
             // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
             // #3978: минус простой внутри окна дня (dayLostToBlock) — как в effCapacity.
-            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - clock;
+            // #4149: минус ЦЕЛАЯ занятость дня (occWhole) — потолок держится на хранимой раскладке.
+            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - occWhole;
         }
         // #3974: якорь дня несёт ТОЛЬКО «Зафиксировано» (🔒) — фикс-резка держит свой день
         // (fixedDay ниже). Свободные задания якоря не имеют (dayAnchorByCut #3658 отменён): день
