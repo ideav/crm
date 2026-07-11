@@ -1001,23 +1001,32 @@
     // (up=positionId) БЕЗ ссылки на «Задание в производство» → у звеньев цепочки дробления
     // намотка приходит пустой, хотя на самой резке она задана. Та же подмена источника, что
     // в #3868 для «Вида сырья».
-    // Возвращает { seq: {}, fixed: { cutId: bool }, winding: { cutId: 'IN'|'OUT'|'' } }.
+    // #4155: оттуда же — СОБСТВЕННАЯ «Партия сырья» резки (ссылка на «Партию сырья», req 192).
+    // Отчёт cut_planning её НЕ отдаёт (rowsToPlanning: batchId:'' — отчётный batch_id это
+    // «Партия ГП», не сырьё), поэтому applySplitPlan создавал продолжение дробления с ПУСТОЙ
+    // «Партией сырья» (materialBatch = parentCut.batchId = ''). Читаем ссылку прямо с записи.
+    // Возвращает { seq: {}, fixed: { cutId: bool }, winding: { cutId: 'IN'|'OUT'|'' },
+    //   materialBatch: { cutId: batchId } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
-        var empty = { seq: {}, fixed: {}, winding: {} };
+        var empty = { seq: {}, fixed: {}, winding: {}, materialBatch: {} };
         if (!meta) return Promise.resolve(empty);
         var fixedIdx = columnIndex(meta, CUT_REQ.fixed);    // #3508
         var windIdx = columnIndex(meta, CUT_REQ.winding);   // #4128
-        if (fixedIdx < 0 && windIdx < 0) return Promise.resolve(empty);
+        var matBatchIdx = columnIndex(meta, CUT_REQ.materialBatch);   // #4155
+        if (fixedIdx < 0 && windIdx < 0 && matBatchIdx < 0) return Promise.resolve(empty);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
             var fixed = {};
             var winding = {};
+            var materialBatch = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 if (fixedIdx >= 0) fixed[String(rec.i)] = truthyFlag(r[fixedIdx]);    // #3508
                 if (windIdx >= 0) winding[String(rec.i)] = normWinding(r[windIdx]);   // #4128
+                // #4155: ref-колонка приходит как «id:Подпись» — берём id через parseRef.
+                if (matBatchIdx >= 0) { var mb = parseRef(r[matBatchIdx]); materialBatch[String(rec.i)] = mb.id ? String(mb.id) : ''; }
             });
-            return { seq: {}, fixed: fixed, winding: winding };
+            return { seq: {}, fixed: fixed, winding: winding, materialBatch: materialBatch };
         });
     };
 
@@ -1368,6 +1377,7 @@
             var seqResult = results[1] || {};
             var fixedByCut = seqResult.fixed || {};   // #3508
             var windingByCut = seqResult.winding || {};   // #4128
+            var materialBatchByCut = seqResult.materialBatch || {};   // #4155
             self.reportCutPlanningDiagnostics(rows || []);
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
@@ -1382,6 +1392,11 @@
                 // насовсем. Отчёт остаётся фолбэком для записей без своего реквизита.
                 var ownWinding = windingByCut[String(cut.id)];
                 if (ownWinding) cut.winding = ownWinding;
+                // #4155: собственная «Партия сырья» резки (отчёт cut_planning её не отдаёт →
+                // batchId:''). Нужна источником истины для продолжений дробления, чтобы
+                // applySplitPlan копировал её в новые сегменты (иначе «Партия сырья» пустая).
+                var ownBatch = materialBatchByCut[String(cut.id)];
+                if (ownBatch) cut.batchId = ownBatch;
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -4644,6 +4659,16 @@
             var hc = cutsById[head];
             return normWinding(hc && hc.winding);
         }
+        // #4155: «Партия сырья» цепочки = партии её ГОЛОВЫ (одно сырьё на все сегменты).
+        // Берём у головы, а не у прямого родителя: продолжение, созданное до фикса, хранит
+        // пустую «Партию сырья», и пустота расползлась бы по новым сегментам. batchId головы
+        // приходит из object/ (loadCutSequences #4155), т.к. отчёт cut_planning его не отдаёт.
+        function batchForCutId(cutId) {
+            var head = chainHeadById[String(cutId)] || String(cutId);
+            var hc = cutsById[head];
+            var b = hc && hc.batchId != null ? String(hc.batchId) : '';
+            return b !== '' ? b : (cutsById[String(cutId)] && cutsById[String(cutId)].batchId ? String(cutsById[String(cutId)].batchId) : '');
+        }
         // #3916: тайминг записи-СЕГМЕНТА считаем по ЕЁ проходам (plannedRuns), а не по целой
         // резке. Разбивка по дням уменьшала «Кол-во резок план» сегмента, но «Длительность,
         // минут» и «Резка и Лидер» оставались от полной резки (голова 30 из 82 проходов хранила
@@ -4836,7 +4861,9 @@
                         var cutFields = buildFields(cutReqIds, {
                             status: (parentCut && parentCut.status) || CUT_STATUSES[0],
                             slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
-                            materialBatch: parentCut && parentCut.batchId,
+                            // #4155: «Партия сырья» головы цепочки (не пустой parentCut.batchId,
+                            // который отчёт cut_planning не отдаёт) — иначе продолжение без сырья.
+                            materialBatch: batchForCutId(parentId),
                             // #3795: «Вид сырья» цепочки → продолжение. Карточка очереди берёт сырьё
                             // из cut_material (своего реквизита резки), а обеспечения продолжения не
                             // привязаны к нему по «Заданию», поэтому materialByCut его не восстановит.
