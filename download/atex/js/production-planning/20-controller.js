@@ -4660,6 +4660,33 @@
         // материал продолжения рвёт continuationSignature → mergeContinuationChains не находит
         // голову → materialForCutId возвращает пусто → продолжение дня N+1 уходит без сырья.
         healContinuationMaterials(self.cuts || []);
+        // #4163: убрать ПОВРЕЖДЁННЫЕ «сироты» дробления по дням. Симптом (#4163): задание висит
+        // «нет связей», хотя его заказ полностью покрыт ДРУГОЙ цепочкой. На ateh (заказ 3966,
+        // 100×154+20×110 = 20 проходов, покрыт цепочкой 484765→486694) рядом осталась резка 484659:
+        // проходы>0, но пустые «Тип намотки»/лидер/ролик, «Кол-во план» Партии ГП рассинхронено с
+        // проходами (5 при 4 проходах), НЕТ ни одного «Обеспечения» — единственная из 114 резок без
+        // него. Это остаток churn'а по-дневного разбиения: обрезанная namotka рвёт continuationSignature
+        // (станок|сырьё|НАМОТКА|ножи), поэтому mergeContinuationChains не подхватывает её в цепочку и
+        // не удаляет как лишний сегмент; заказ уже покрыт, задание спурьёзно.
+        // Признак порчи — НАДЁЖНЫЙ и без ложных срабатываний: у ЛЮБОЙ валидной резки (заказной и
+        // складской) «Тип намотки» заполнен; пустая намотка + отсутствие «Обеспечения» бывает только у
+        // обрезанного остатка. Не молча (ТЗ §14/#4059): логируем и уведомляем. Удаление каскадит её
+        // Партии ГП; «Обеспечений» у неё нет — терять нечего.
+        (function() {
+            var supByCut = {};
+            (self.supplies || []).forEach(function(s) { if (s && s.cutId != null) supByCut[String(s.cutId)] = (supByCut[String(s.cutId)] || 0) + 1; });
+            var orphans = (self.cuts || []).filter(function(c) {
+                return c && stripNum(c.plannedRuns) > 0 && normWinding(c.winding) === '' && !(supByCut[String(c.id)] > 0);
+            }).map(function(c) { return String(c.id); });
+            if (!orphans.length) return;
+            console.error('[pp] #4163 повреждённые задания-сироты дробления (проходы>0, пустая намотка, без Обеспечения) — удаляю: ' + orphans.join(', '));
+            if (self.notify) self.notify('Убрано повреждённых заданий-сирот дробления (без намотки и Обеспечения): ' + orphans.length + ' (id ' + orphans.join(', ') + ')', 'error');
+            var del = {}; orphans.forEach(function(id) { del[id] = true; });
+            ops.updates = (ops.updates || []).filter(function(u) { return !del[String(u && u.cutId)]; });
+            ops.creates = (ops.creates || []).filter(function(cr) { return !del[String(cr && cr.parentCutId)]; });   // продолжения удаляемой головы не создаём
+            if (!ops.deletes) ops.deletes = [];
+            orphans.forEach(function(id) { if (ops.deletes.indexOf(id) < 0) ops.deletes.push(id); });
+        })();
         var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
         var lengthReqId = reqIdByName(cutMeta, CUT_REQ.length);   // #3781: «Метраж, м» (длина прогона)
         var cutReqIds = {
