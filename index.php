@@ -31,6 +31,13 @@ define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
 define("DIR_MASK", "/^[a-z0-9_-]+$/i");  # Mask for the dir name validation
 define("FILE_MASK", "/^[a-z0-9_.-]+$/i");
 define("LOGS_DIR", "logs/");  # Logs files folder
+# The kind of a row queued by Insert_batch() - see its comment. Defined up here because the top-level
+# code calling it runs before the line the function is declared on: functions hoist, define() does not.
+define("BATCH_ASIS", -1);
+define("BATCH_SCALAR", 0);
+define("BATCH_REF", 1);
+define("BATCH_MULTI", 2);
+define("BATCH_LIMIT", 31000);  # Max length of the INSERT the batch is glued into
 define("USER", 18);
 define("DATABASE", 271);
 define("PHONE", 30);
@@ -6345,6 +6352,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					$object[0] = Format_Val($GLOBALS["base"][$id], UnMaskDelimiters($object[0]));
 					    $reqs = Array();
 					    $ids = Array();
+					    $dupKey = NULL;
     					$keyReqs = UniqueKeyReqs($id);
     					if($isUnique || count($keyReqs)){
     					    if(count($keyReqs)){
@@ -6367,7 +6375,17 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					                    ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
     					                    : array("kind" => "value", "value" => "");
     					        }
-    					        if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues, (bool)$isUnique)){
+    					        // issue #4140: a record met earlier in this very file keeps its key requisites in the
+    					        // batch, where FindUniqueRecordDuplicate cannot see them - it would miss the record and
+    					        // create a second one. We inserted it ourselves, so look the key up in our own index
+    					        // first. Flush_batch() drops the index: once the requisites are stored, the query finds
+    					        // them on its own. Maybe_flush_batch() keeps a record from being flushed in halves.
+    					        $dupKey = $parent."\0".($isUnique ? $object[0] : "")."\0".serialize($keyValues);
+    					        if(isset($GLOBALS["SQLbatchKeys"][$dupKey])){
+    					            $existing = $GLOBALS["SQLbatchKeys"][$dupKey];
+    					            trace(" found existing $existing ".$object[0]." (composite key, still in the batch)");
+    					        }
+    					        elseif($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues, (bool)$isUnique)){
     					            $existing = $existingRow["id"];
     					            trace(" found existing $existing ".$object[0]." (composite key)");
     					            $reqs_data = Exec_sql("SELECT reqs.t, reqs.val, reqs.id reqid FROM $z reqs WHERE reqs.up=$existing AND reqs.t!=0", "Load reqs of existing Obj for import");
@@ -6410,8 +6428,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					if(count($keyReqs) && !$isUnique)
         					    Update_Val($existing, $object[0]);
     					}
-    					else
+    					else{
 							$new_id = Insert($parent, (isset($cur_order) ? $cur_order++ : 1), $id, $object[0], "Plain import #$count");
+							if($dupKey !== NULL) // issue #4140: its key requisites are about to go into the batch
+							    $GLOBALS["SQLbatchKeys"][$dupKey] = $new_id;
+    					}
     					#array_pop($object); 	# Cut off the empty item after the last semi-colon
     					$order = 0;
     					foreach($GLOBALS["local_struct"][$id] as $key => $value){
@@ -6432,6 +6453,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         								                    , "Get refs to delete");
                         				while($row = mysqli_fetch_array($data_set))
                 						    Delete($row["id"]);
+                        				# issue #4140: an earlier line of this file might have queued a value the query above cannot see
+                						Drop_batch_column($new_id, BATCH_REF, $key);
+                						Drop_batch_column($new_id, BATCH_MULTI, $key);
             						}
             						else{
         						        if(isset($GLOBALS["MULTI"][$key]))
@@ -6441,26 +6465,26 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					            $ord = 1;
                     					foreach($multies as $ref){
                     					    $ref = trim($ref);
-            							    if(isset($GLOBALS["refs"][$refType]))
-                							    if(isset($GLOBALS["refs"][$refType][$ref])){
-                							        // if(!isset($existing) // It is a ref of a new rec
-                							                // || (isset($GLOBALS["MULTI"][$key]) && !isset($reqs[$GLOBALS["refs"][$refType][$ref]]))) // or multiple ref yet not on the list
-                							        if(!isset($reqs[$GLOBALS["refs"][$refType][$ref]])) // ref yet not on the list
-                        							    // Insert($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                        							    Insert_batch($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                    							    continue;
-                    						    }
-            								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
+                    					    # issue #4140: сначала разрешаем имя в id цели — из кэша имён этого импорта,
+                    					    # затем из базы, и только потом создаём. Кэш экономит SELECT, но НЕ должен
+                    					    # менять решение «заменить или добавить», которое принимается ниже.
+            							    if(isset($GLOBALS["refs"][$refType][$ref]))
+                							    $refObjID = $GLOBALS["refs"][$refType][$ref];
+            								elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
             								    $refObjID = $row["id"];
             								else
             								    $refObjID = Insert(1, 1, $refType, $ref, "Import plain ref Object");
+            								$GLOBALS["refs"][$refType][$ref] = $refObjID;
+            								# issue #4140: у ссылки без мультивыбора цель всего одна — перенацеливаем
+            								# существующий реквизит, а не дописываем второй. Раньше эта проверка стояла
+            								# после ветки кэша, и повторно встреченное имя вставлялось как новое значение.
             								if(!isset($GLOBALS["MULTI"][$key])){
                             				    trace("    Check existing ref $key $refType");
                     						    foreach($reqs as $rid => $req){
                                 				    trace("    rid $rid => req $req ($req === $key)");
                     						        if($req == $key){
                                     				    trace("    req $req === key $key, rid $rid === refObjID $refObjID");
-                    						            if($refObjID !== $rid)
+                    						            if($refObjID != $rid)
                                 							UpdateTyp($ids[$rid], $refObjID);
                     						            continue 2;
                     						        }
@@ -6468,8 +6492,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             								}
             								if(!isset($reqs[$refObjID]))
                     						// Insert($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							$GLOBALS["refs"][$refType][$ref] = $refObjID;
+                							# issue #4140: a single-select column holds one row, so a value queued by an earlier
+                							# line of this file is overwritten here, not appended next to it
+                							Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref"
+                							            , isset($GLOBALS["MULTI"][$key]) ? BATCH_MULTI : BATCH_REF);
                     					}
             						}
     						    }
@@ -6483,15 +6509,22 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     						            else
         						            Update_Val($ids[$key], $val);
     						    }
-    							else // Ordinary attribute of some base type
+    							else{ // Ordinary attribute of some base type
     							    # Skip false BOOLEAN: -1 or FALSE
 						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
-						                ;
+						                # issue #4140: an earlier line of this file may have queued a value for this column
+						                Drop_batch_column($new_id, BATCH_SCALAR, $key);
 						            elseif($val !== " ")
-        							// Insert($new_id, 1, $key, $val, "Import plain req");
-    								Insert_batch($new_id, 1, $key, $val, "Import plain req");
+        							    // Insert($new_id, 1, $key, $val, "Import plain req");
+    								    Insert_batch($new_id, 1, $key, $val, "Import plain req", BATCH_SCALAR);
+    								else
+    								    Drop_batch_column($new_id, BATCH_SCALAR, $key);
+    							}
     						}
     				    }
+    					# issue #4140: the batch is flushed between records only, so the requisites of a record
+    					# are either wholly pending or wholly stored - never half of its unique key
+    					Maybe_flush_batch("Plain import #$count");
     				}
 				}
 				else
@@ -8128,32 +8161,83 @@ function Salt($u, $val){
 	# $u = strtoupper($u);
 	return SALT."$z$val";
 }
-# Inserts new values in a batch
-function Insert_batch($up, $ord, $t, $val, $message){
-	global $connection, $z;
-	if(($up === "") && isset($GLOBALS["SQLbatch"])) // Close the batch
-	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Close batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
-    	unset($GLOBALS["SQLbatchSeen"]);
-    	return;
-	}
-	// Skip exact duplicates within the same batch (closes #2785)
-	$dedupKey = $up."\0".$ord."\0".$t."\0".$val;
-	if(isset($GLOBALS["SQLbatchSeen"][$dedupKey]))
+# Inserts new values in a batch.
+#
+# issue #4140: the batch is a four-level array keyed by the record, the kind of the row, the column
+# and the slot inside the column:
+#
+#     $GLOBALS["SQLbatch"][$up][$multi][column][slot] = array($ord, $t, $val)
+#
+# $multi tells which slot of the tuple holds the column id, and how many rows the column may hold:
+#     BATCH_SCALAR (0) — an ordinary attribute: the column is $t, one row per column
+#     BATCH_REF    (1) — a single-select reference: the column is $val, one row per column
+#     BATCH_MULTI  (2) — a multi-select reference: the column is $val, one row per referenced object
+#     BATCH_ASIS  (-1) — the kind is unknown to the caller: keep every distinct tuple (closes #2785)
+#
+# A pending row of a single-value column is therefore overwritten by the next one instead of being
+# appended next to it, so a record met twice in one import file ends up with one value, not two —
+# the same "the last value wins" rule the flushed path already applies via UpdateTyp / Update_Val.
+function Insert_batch($up, $ord, $t, $val, $message, $multi=BATCH_ASIS){
+	if($up === ""){ // Close the batch
+		if(isset($GLOBALS["SQLbatch"]))
+			Flush_batch($message);
 		return;
-	$GLOBALS["SQLbatchSeen"][$dedupKey] = true;
-	if(isset($GLOBALS["SQLbatch"]))
-    	$GLOBALS["SQLbatch"] .= ",($up,$ord,$t,'".addslashes($val)."')";
-    else
-        $GLOBALS["SQLbatch"] = "($up,$ord,$t,'".addslashes($val)."')";
-#    trace("GLOBAL[SQLbatch] = ".$GLOBALS["SQLbatch"]);
-	if(strlen($GLOBALS["SQLbatch"]) > 31000)
-	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Flush batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
-    	unset($GLOBALS["SQLbatchSeen"]);
 	}
+	if(!isset($GLOBALS["SQLbatchLen"]))
+		$GLOBALS["SQLbatchLen"] = 0;
+	switch($multi){
+		case BATCH_SCALAR: $col = $t;   $slot = 0;  break;
+		case BATCH_REF:    $col = $val; $slot = 0;  break;
+		case BATCH_MULTI:  $col = $val; $slot = $t; break;
+		default:           $col = $ord."\0".$t."\0".$val; $slot = 0;
+	}
+	if(isset($GLOBALS["SQLbatch"][$up][$multi][$col][$slot])){
+		if($multi === BATCH_ASIS) // The very same tuple is already queued
+			return;
+		$GLOBALS["SQLbatchLen"] -= Batch_row_len($up, $GLOBALS["SQLbatch"][$up][$multi][$col][$slot]);
+	}
+	$GLOBALS["SQLbatch"][$up][$multi][$col][$slot] = array($ord, $t, $val);
+	$GLOBALS["SQLbatchLen"] += Batch_row_len($up, array($ord, $t, $val));
+	// Callers with no record boundary of their own cannot postpone the flush, so cap them here.
+	// The plain import instead flushes between records - see Maybe_flush_batch().
+	if(($multi === BATCH_ASIS) && ($GLOBALS["SQLbatchLen"] > BATCH_LIMIT))
+		Flush_batch($message);
+}
+# The length this row takes in the INSERT, the separating comma included
+function Batch_row_len($up, $row){
+	return strlen(Batch_row_sql($up, $row)) + 1;
+}
+function Batch_row_sql($up, $row){
+	return "($up,".$row[0].",".$row[1].",'".addslashes($row[2])."')";
+}
+# Drops the rows of a column still pending in the batch, if any
+function Drop_batch_column($up, $multi, $col){
+	if(!isset($GLOBALS["SQLbatch"][$up][$multi][$col]))
+		return;
+	foreach($GLOBALS["SQLbatch"][$up][$multi][$col] as $row)
+		$GLOBALS["SQLbatchLen"] -= Batch_row_len($up, $row);
+	unset($GLOBALS["SQLbatch"][$up][$multi][$col]);
+}
+# Flushes the batch between records, keeping the requisites of a record either wholly pending
+# or wholly stored: a flush in the middle of one would hide a part of its unique key
+function Maybe_flush_batch($message){
+	if(isset($GLOBALS["SQLbatch"]) && ($GLOBALS["SQLbatchLen"] > BATCH_LIMIT))
+		Flush_batch($message);
+}
+# Glues the batch into a single INSERT and runs it
+function Flush_batch($message){
+	global $z;
+	$values = "";
+	foreach($GLOBALS["SQLbatch"] as $up => $byMulti)
+		foreach($byMulti as $byCol)
+			foreach($byCol as $bySlot)
+				foreach($bySlot as $row)
+					$values .= ($values === "" ? "" : ",").Batch_row_sql($up, $row);
+	unset($GLOBALS["SQLbatch"]);
+	unset($GLOBALS["SQLbatchKeys"]);
+	$GLOBALS["SQLbatchLen"] = 0;
+	if($values !== "")
+    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$values, "Close batch: $message");
 }
 # Inserts a new value and returns the ID it got
 function Insert($up, $ord, $t, $val, $message)
