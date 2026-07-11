@@ -94,7 +94,7 @@ function assert(cond, name) { assertEqual(!!cond, true, name); }
         '#4156 задание без наладки входит в «всего заданий», но не в переналадки');
 })();
 
-// ── 3) База без колонок #3698 → hasStored=false (панель откатывается на planQuality) ──
+// ── 3) База без колонок #3698 → hasStored=false (панель ОРЁТ ошибкой, не откатывается молча) ──
 (function () {
     var d1 = String(Math.floor(Date.UTC(2026, 6, 1) / 1000));
     var ctrl = Object.create(Controller.prototype);
@@ -103,9 +103,15 @@ function assert(cond, name) { assertEqual(!!cond, true, name); }
         { id: 'y', planDate: d1, storedKnifeSetupMin: null, storedMaterialWindingMin: null }
     ];
     var res = ctrl.storedSetupTotals(null, null);
-    assert(res.hasStored === false, '#4156 hasStored=false — нет ни одной заполненной колонки наладки');
+    // hasStored=false → renderQueue выводит ошибку (консоль+тост+красная плашка), НЕ подсовывает planQuality.
+    assert(res.hasStored === false, '#4156 hasStored=false — нет ни одной заполненной колонки наладки → ошибка, не тихий откат');
     assertEqual(res.window.taskCount, 2, '#4156 taskCount считает задания даже без наладки');
     assertEqual([res.window.changeoverMin, res.window.changeoverCount], [0, 0], '#4156 без колонок наладка = 0');
+
+    // Значение "0" в колонке — это ЗАПОЛНЕНО (план без наладки), а не «нет колонок»: hasStored=true.
+    var ctrl0 = Object.create(Controller.prototype);
+    ctrl0.cuts = [{ id: 'z', planDate: d1, storedKnifeSetupMin: '0', storedMaterialWindingMin: '0' }];
+    assert(ctrl0.storedSetupTotals(null, null).hasStored === true, '#4156 хранимый «0» = заполнено (план без наладки), не ошибка');
 })();
 
 console.log('\n' + passed + ' assertions passed.');

@@ -4338,8 +4338,9 @@
     // остаются объективу «Упорядочить» (planChangeoverMin/planQuality), а не показу оператору.
     //   fromK/toK — окно дней [С;По] (YYYYMMDD; null → без границы). Окно/предикат — как planQuality:
     //   window = [С;По] (панель), all = [С; конец всех задач] (тултип).
-    // → { window, all, hasStored }. hasStored=false (у базы нет колонок #3698 / всё пусто) → панель
-    //   откатывается на planQuality (см. renderQueue).
+    // → { window, all, hasStored }. hasStored=false (у базы нет колонок #3698 / все пусты) — панель НЕ
+    //   молчит и НЕ подсовывает оценку planQuality под видом факта, а выводит ОШИБКУ (renderQueue:
+    //   консоль + тост + красная плашка) — это ошибка конфигурации/данных, ТЗ §14/#4059.
     AtexProductionPlanning.prototype.storedSetupTotals = function(fromK, toK) {
         var lo = fromK != null ? Number(fromK) : -Infinity;
         var hi = toK != null ? Number(toK) : Infinity;
@@ -6368,45 +6369,70 @@
                     scopeToKey: scopeToKey,
                     prevSetupBySlitter: self.prevSetupBySlitter
                 });
-                // #4156: ФАКТ (переналадки/ножи/смены сырья) — из ХРАНИМЫХ колонок наладки (как отчёт
-                // «Комбинации»), а не из весов штрафов planQuality. Нет колонок #3698 (hasStored=false) —
-                // откат на planQuality. Идеал/комбинации/окно берём из planQuality (тот же источник).
+                // #4156: ФАКТ (переналадки/ножи/смены сырья) — из ХРАНИМЫХ колонок наладки задания
+                // («Наладка ножей, мин» / «Сырье/намотка, мин», #3698), как суммирует отчёт «Комбинации».
                 var setupTot = self.storedSetupTotals(scopeFromKey, scopeToKey);
-                // #4013: панель — по ОКНУ [С;По] (факт, идеал ОКНА, комбинации ОКНА, избыток окна).
-                var qW = setupTot.hasStored ? setupTot.window : pqView.window;
-                var qAll = setupTot.hasStored ? setupTot.all : pqView.all;
                 var qId = pqView.idealWindow;
-                // Избыток = ФАКТ окна − идеал окна (#4156: факт теперь из хранимых колонок; отрицательный
-                // избыток = план лучше идеала, станок вошёл настроенным — ТЗ §13 п.3).
-                var qEx = { excessCount: qW.changeoverCount - qId.count,
-                            excessMin: round3(qW.changeoverMin - qId.minutes) };
-                var qPanel = el('div', { class: 'atex-pp-quality',
-                    style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
-                        + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
-                    el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
-                    // Число заданий ЗА ВЫБРАННЫЙ ПЕРИОД [С;По] (тот же оконный предикат, что у
-                    // переналадок/сырья), а не весь план — иначе не совпадало с оконными метриками.
-                    el('span', { text: 'всего заданий: ' + qW.taskCount, style: 'opacity:.75;' }),
-                    el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
-                    // #4008: раздельно наладка ножей и смена сырья (составляют переналадки выше).
-                    el('span', { text: 'ножи: ' + qW.knifeCount + ' (' + qW.knifeMin + ' мин)', style: 'opacity:.85;' }),
-                    // «Смены сырья» — число ПЕРЕЗАПРАВОК (смена вида сырья, намотки ИЛИ партии сырья;
-                    // хранимая колонка «Сырье/намотка, мин»), а не количество номенклатуры сырья.
-                    el('span', { text: 'смены сырья: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
-                    el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
-                    el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' }),
-                    // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка).
-                    // #4013: по ОКНУ (combinationsWindow) — пустое окно даёт 0, а не диверсити всего плана.
-                    el('span', { text: 'уникальных комбинаций: ' + pqView.combinationsWindow, style: 'opacity:.75;' })
-                ]);
-                qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
-                    + qAll.changeoverCount + ' (' + qAll.changeoverMin + ' мин), из них ножи '
-                    + qAll.knifeCount + ' (' + qAll.knifeMin + ' мин), смены сырья '
-                    + qAll.materialCount + ' (' + qAll.materialMin + ' мин). '
-                    + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
-                    // #4013: подсказка о всём плане → комбинации всего плана (панель выше — по окну).
-                    + 'Уникальных комбинаций во всём плане (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
-                box.appendChild(qPanel);
+                var metaCut = self.meta && self.meta.cut;
+                var hasSetupCols = !!(metaCut && reqIdByName(metaCut, CUT_REQ.knifeSetupMin)
+                                              && reqIdByName(metaCut, CUT_REQ.materialWindingMin));
+                if (!setupTot.hasStored) {
+                    // #4156: НЕ подсовываем оценку planQuality по весам под видом «факта» (её и чинили —
+                    // она расходилась с отчётом). Нет хранимых колонок наладки — это ошибка конфигурации/
+                    // данных: ОРЁМ (консоль + тост + красная плашка), а не молча откатываемся (ТЗ §14/#4059).
+                    var qErr = hasSetupCols
+                        ? ('колонки наладки #3698 («' + CUT_REQ.knifeSetupMin + '» / «' + CUT_REQ.materialWindingMin
+                            + '») пусты — суммы наладки нечем показать; пересчитайте план («Сгенерировать» / «Упорядочить»)')
+                        : ('в таблице «' + TABLE.cut + '» нет колонок наладки #3698 («' + CUT_REQ.knifeSetupMin
+                            + '» / «' + CUT_REQ.materialWindingMin + '») — добавьте их');
+                    console.error('[pp] Качество плана: ' + qErr);
+                    // Тост один раз на состояние (renderQueue частый) — не спамим, но и не молчим.
+                    if (self.notify && self._qualityColsError !== qErr) { self._qualityColsError = qErr; self.notify('Качество плана: ' + qErr, 'error'); }
+                    box.appendChild(el('div', { class: 'atex-pp-quality atex-pp-quality-error',
+                        style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
+                            + 'border:1px solid #c0392b;border-radius:6px;font-size:13px;' }, [
+                        el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
+                        el('span', { text: '⚠ ' + qErr, style: 'color:#c0392b;font-weight:600;' }),
+                        // Идеал/комбинации не зависят от хранимых колонок (считаются по резкам плана) — показываем.
+                        el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
+                        el('span', { text: 'уникальных комбинаций: ' + pqView.combinationsWindow, style: 'opacity:.75;' })
+                    ]));
+                } else {
+                    self._qualityColsError = null;   // ошибка снялась — дать снова шуметь, если вернётся
+                    // #4013: панель — по ОКНУ [С;По] (факт из хранимых колонок, идеал/комбинации ОКНА).
+                    var qW = setupTot.window, qAll = setupTot.all;
+                    // Избыток = ФАКТ окна − идеал окна (#4156; отрицательный = план лучше идеала, станок
+                    // вошёл настроенным — ТЗ §13 п.3).
+                    var qEx = { excessCount: qW.changeoverCount - qId.count,
+                                excessMin: round3(qW.changeoverMin - qId.minutes) };
+                    var qPanel = el('div', { class: 'atex-pp-quality',
+                        style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:6px 10px;'
+                            + 'border:1px solid rgba(128,128,128,.3);border-radius:6px;font-size:13px;' }, [
+                        el('span', { text: 'Качество плана', style: 'font-weight:600;' }),
+                        // Число заданий ЗА ВЫБРАННЫЙ ПЕРИОД [С;По] (тот же оконный предикат, что у
+                        // переналадок/сырья), а не весь план — иначе не совпадало с оконными метриками.
+                        el('span', { text: 'всего заданий: ' + qW.taskCount, style: 'opacity:.75;' }),
+                        el('span', { text: 'переналадки: ' + qW.changeoverCount + ' (' + qW.changeoverMin + ' мин)' }),
+                        // #4008: раздельно наладка ножей и смена сырья (составляют переналадки выше).
+                        el('span', { text: 'ножи: ' + qW.knifeCount + ' (' + qW.knifeMin + ' мин)', style: 'opacity:.85;' }),
+                        // «Смены сырья» — число ПЕРЕЗАПРАВОК (смена вида сырья, намотки ИЛИ партии сырья;
+                        // хранимая колонка «Сырье/намотка, мин»), а не количество номенклатуры сырья.
+                        el('span', { text: 'смены сырья: ' + qW.materialCount + ' (' + qW.materialMin + ' мин)', style: 'opacity:.85;' }),
+                        el('span', { text: 'идеал: ' + qId.count + ' (' + qId.minutes + ' мин)', style: 'opacity:.75;' }),
+                        el('span', { text: 'избыток: ' + formatQualityDelta(qEx.excessCount) + ' (' + formatQualityDelta(qEx.excessMin) + ' мин)' }),
+                        // #4008: сколько всего разных настроек резки (набор ножей + сырьё + намотка).
+                        // #4013: по ОКНУ (combinationsWindow) — пустое окно даёт 0, а не диверсити всего плана.
+                        el('span', { text: 'уникальных комбинаций: ' + pqView.combinationsWindow, style: 'opacity:.75;' })
+                    ]);
+                    qPanel.title = 'За весь горизонт [С; конец всех задач]: переналадки '
+                        + qAll.changeoverCount + ' (' + qAll.changeoverMin + ' мин), из них ножи '
+                        + qAll.knifeCount + ' (' + qAll.knifeMin + ' мин), смены сырья '
+                        + qAll.materialCount + ' (' + qAll.materialMin + ' мин). '
+                        + 'Идеал — каждая конфигурация ножей и каждое сырьё настраиваются по 1 разу. '
+                        // #4013: подсказка о всём плане → комбинации всего плана (панель выше — по окну).
+                        + 'Уникальных комбинаций во всём плане (набор ножей + сырьё + намотка): ' + pqView.combinations + '.';
+                    box.appendChild(qPanel);
+                }
             } catch (e) { console.warn('[pp] панель качества плана пропущена:', e && e.message); }
         }
         box.appendChild(groupEl);
