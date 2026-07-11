@@ -4638,78 +4638,92 @@
             });
     };
 
-    // #4168: удалить ПОВРЕЖДЁННЫЕ «сироты» дробления по дням — задание висит «нет связей», хотя его
-    // заказ полностью покрыт ДРУГОЙ цепочкой. На ateh (заказ 3966, 100×154+20×110 = 20 проходов,
-    // цепочка 488586→490491) рядом рождается резка-дубль (484659, потом 488485, …): проходы>0, но
-    // ПУСТЫЕ «Тип намотки»/лидер/ролик, «Кол-во план» Партии ГП рассинхронено с проходами, и НЕТ ни
-    // одного «Обеспечения» — единственная из 114 резок без него. Пустая намотка рвёт
-    // continuationSignature (станок|сырьё|НАМОТКА|ножи) → mergeContinuationChains не подшивает её к
-    // цепочке и delete-путь usedByHead не трогает; #3924 ловит только 0-проходные.
-    // ВАЖНО (#4168, почему #4163 не сработал): сироту РОЖДАЕТ САМА applySplitPlan (её пересборка),
-    // поэтому чистить надо ПОСЛЕ её reload, а не в начале — иначе удаляется сирота ПРОШЛОГО прогона,
-    // а текущий создаёт новую (всегда ровно одна висит). Здесь — по СВЕЖЕ загруженным self.cuts.
-    // Признак порчи НАДЁЖНЫЙ и без ложных: у ЛЮБОЙ валидной резки (заказной и складской) намотка
-    // заполнена; пустая намотка + отсутствие Обеспечения = только обрезанный остаток. Удаление
-    // резки каскадит её Партии ГП (BatchDelete), «Обеспечений» у неё нет → терять нечего. Не молча
-    // (ТЗ §14/#4059): console + тост. Есть удаления → reload (чтобы очередь/бейджи были без сироты).
-    // → Promise<число удалённых>.
-    AtexProductionPlanning.prototype.removeCorruptedDaySplitOrphans = function() {
+    // #4175: ВОССТАНОВЛЕНИЕ пропавшей связи «задание ↔ заказ» после дробления по дням.
+    // Симптом (#4163→#4175, «пустой срок / нет связей»): задание ВЫПУСКАЕТ заказ — его «Партия ГП»
+    // несёт «ID заказа» и проходы дают ровно спрос позиции, — но НИ ОДНОГО «Обеспечения» на его
+    // Партиях ГП нет. Отчёт cut_planning join'ит Резка→Обеспечение→Позиция, поэтому у задания без
+    // Обеспечения ПУСТЫ order_id/order_no/cut_winding/срок (они приходят из позиции ЧЕРЕЗ Обеспечение,
+    // не из «Партии ГП») — по ним сироту не отличить от склада.
+    // КОРЕНЬ: day-split (autoSequenceQueue → applySplitPlan) РЕЮЗит существующие резки цепочки как
+    // новые сегменты (reuseId = chain[k], engine); update-путь реюза НЕ создаёт Обеспечений (их
+    // создаёт только create-путь продолжений), а свежесгенерированные сегменты с Обеспечением уходят
+    // в deletes. Итог: проходы уезжают на реюзнутую резку, Обеспечение — на удалённую. (Журнал ateh
+    // заказ 4059: свежие обеспечения 737+220 обнулены/удалены, проходы 43+44 на реюзнутых 497698/497708
+    // без единого Обеспечения.)
+    // НЕ УДАЛЯЕМ: эта резка — ЕДИНСТВЕННЫЙ выпуск заказа (свежая покрывающая удалена), удаление
+    // недокрыло бы заказ. ВОССТАНАВЛИВАЕМ инвариант «выпускает заказ ⇔ привязана»: на позицию заказа
+    // (по «ID заказа»+ширине самой «Партии ГП», не по пустому отчётному order_id) создаём Обеспечение
+    // → «Партия ГП», рулоны = спрос «Партии ГП». Складская Партия ГП (без «ID заказа») законно без
+    // Обеспечения — не трогаем. Идемпотентно: после reload у резки есть Обеспечение → не кандидат.
+    // Не молча (ТЗ §14/#4059): console + тост. → Promise<число восстановленных связей>.
+    AtexProductionPlanning.prototype.reconcileOrphanOrderSupplies = function() {
         var self = this;
+        var fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
+        if (!fbMeta || !supMeta) return Promise.resolve(0);
         var supByCut = {};
         (self.supplies || []).forEach(function(s) { if (s && s.cutId != null) supByCut[String(s.cutId)] = (supByCut[String(s.cutId)] || 0) + 1; });
-        // #4173: диагностика — на живом ateh (v.21) сирота 496122 ВИСИТ, хотя #4168/#4171 задеплоены,
-        // а лог генерации показывает, что чистка «нашла 0». Условие по сырым данным cut_planning
-        // (проходы=4, намотка='', 0 обеспечений) СОВПАДАЕТ, значит на момент чистки self.cuts/supplies
-        // отличаются от отчёта. Логируем ВСЕГДА все резки БЕЗ намотки (кандидаты в сироты) с их
-        // проходами/числом обеспечений/сырьём — на след. прогоне сразу видно: есть ли сирота в self.cuts
-        // на момент чистки и почему условие не срабатывает (например у неё уже есть обеспечение).
-        var emptyWind = (self.cuts || []).filter(function(c) { return c && normWinding(c.winding) === ''; });
-        console.log('[pp] #4173 чистка сирот: резок ' + (self.cuts || []).length + ', обеспечений ' + (self.supplies || []).length
-            + ', без намотки ' + emptyWind.length
-            + (emptyWind.length ? ' → ' + emptyWind.map(function(c) { return c.id + '(проходы=' + c.plannedRuns + ',обесп=' + (supByCut[String(c.id)] || 0) + ',сырьё=' + c.materialId + ')'; }).join(' ') : ''));
-        var orphans = (self.cuts || []).filter(function(c) {
-            return c && stripNum(c.plannedRuns) > 0 && normWinding(c.winding) === '' && !(supByCut[String(c.id)] > 0);
-        }).map(function(c) { return String(c.id); });
-        if (!orphans.length) return Promise.resolve(0);
-        console.error('[pp] #4168 повреждённые задания-сироты дробления (проходы>0, пустая намотка, без Обеспечения) — удаляю: ' + orphans.join(', '));
-        if (self.notify) self.notify('Убрано повреждённых заданий-сирот дробления (без намотки и Обеспечения): ' + orphans.length + ' (id ' + orphans.join(', ') + ')', 'error');
-        var chain = Promise.resolve();
-        orphans.forEach(function(id) {
-            chain = chain.then(function() {
-                return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).catch(function(err) {
-                    var m = (err && err.message != null) ? String(err.message) : String(err);
-                    if (/no such record/i.test(m)) return;   // #3895: уже удалено — ок
-                    console.warn('[pp] #4168 не удалось удалить сироту ' + id + ': ' + m);   // не роняем цепочку
+        // Кандидаты: задания с проходами БЕЗ единого Обеспечения (и складские, и заказные-сироты).
+        // Заказ определяет «ID заказа» самой «Партии ГП» (читаем ниже) — отчётный order_id тут пуст.
+        var suspects = (self.cuts || []).filter(function(c) {
+            return c && stripNum(c.plannedRuns) > 0 && !(supByCut[String(c.id)] > 0);
+        });
+        if (!suspects.length) return Promise.resolve(0);
+        var fbOrderIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.orderId);
+        var fbWidthIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.width);
+        var fbRollsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var fbPlannedIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.planned);
+        // Позиция заказа по (заказ|ширина) — из positions_list; освежаем, если пусто (напр. «Упорядочить»).
+        var ensurePos = (self.genPositions && self.genPositions.length) ? Promise.resolve() : self.loadPositions();
+        return ensurePos.then(function() {
+            var posByOrderWidth = {};
+            (self.genPositions || []).forEach(function(p) {
+                if (p && p.orderId) posByOrderWidth[String(p.orderId) + '|' + stripWidthKey(p.width)] = p;
+            });
+            var restored = [], unmapped = [];
+            // «Партии ГП» подозреваемых читаем последовательно (их единицы) — по реальному «ID заказа».
+            var scan = suspects.reduce(function(chain, c) {
+                return chain.then(function() {
+                    return self.getJson('object/' + fbMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(c.id) + '&LIMIT=0,500').then(function(rows) {
+                        (rows || []).forEach(function(rec) {
+                            var r = rec.r || [];
+                            var oid = (fbOrderIdx >= 0 && r[fbOrderIdx] != null) ? String(r[fbOrderIdx]).trim() : '';
+                            if (!oid) return;   // складская «Партия ГП» без заказа — законно без Обеспечения
+                            var w = (fbWidthIdx >= 0 && r[fbWidthIdx] != null) ? r[fbWidthIdx] : '';
+                            var pos = posByOrderWidth[oid + '|' + stripWidthKey(w)];
+                            var rolls = (fbRollsIdx >= 0 && stripNum(r[fbRollsIdx]) > 0) ? stripNum(r[fbRollsIdx])
+                                      : (fbPlannedIdx >= 0 ? stripNum(r[fbPlannedIdx]) : 0);
+                            if (!pos) { unmapped.push({ cutId: String(c.id), fbId: String(rec.i), orderId: oid, width: String(w) }); return; }
+                            restored.push({ cutId: String(c.id), fbId: String(rec.i), positionId: String(pos.id),
+                                rolls: rolls, footage: pos.length > 0 ? round3(pos.length) : '' });
+                        });
+                    });
                 });
+            }, Promise.resolve());
+
+            return scan.then(function() {
+                if (unmapped.length) {
+                    console.error('[pp] #4175 не восстановить связь (нет позиции заказа «ID заказа|ширина» в positions_list): '
+                        + unmapped.map(function(u) { return 'резка ' + u.cutId + ' Партия ГП ' + u.fbId + ' заказ ' + u.orderId + ' ш' + u.width; }).join('; '));
+                    if (self.notify) self.notify('Задания-сироты дробления: не нашёл позицию заказа для восстановления связи (' + unmapped.length + ') — см. консоль', 'error');
+                }
+                if (!restored.length) return 0;
+                console.error('[pp] #4175 восстанавливаю пропавшие Обеспечения заказных заданий-сирот дробления: '
+                    + restored.map(function(x) { return 'резка ' + x.cutId + '→позиция ' + x.positionId + ' (' + x.rolls + ' рул, Партия ГП ' + x.fbId + ')'; }).join('; '));
+                if (self.notify) self.notify('Восстановлена связь заданий с заказом (Обеспечение по дроблению): ' + restored.length, 'error');
+                var chain = Promise.resolve();
+                restored.forEach(function(x) {
+                    chain = chain.then(function() {
+                        var fields = buildSupplyFieldsForFinishedBatch(supMeta, {
+                            finishedBatchId: x.fbId, footage: x.footage, rolls: x.rolls,
+                            active: '1', status: SUPPLY_STATUSES[0]
+                        });
+                        return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(x.positionId), fields)
+                            .catch(function(err) { console.warn('[pp] #4175 не создалось Обеспечение резки ' + x.cutId + ': ' + ((err && err.message) || err)); });
+                    });
+                });
+                return chain.then(function() { return self.reload(); }).then(function() { return restored.length; });
             });
         });
-        return chain.then(function() { return self.reload(); }).then(function() { return orphans.length; });
-    };
-
-    // #4173: страховка «на показе». Чистки после разбиения (#4168/#4172) на живом ateh сироту 496122 НЕ
-    // поймали (лог генерации: «нашла 0», хотя условие по данным cut_planning совпадает — значит self.cuts на
-    // момент той чистки отличался). renderQueue зовёт это при КАЖДОЙ отрисовке очереди: если висит
-    // повреждённая сирота (проходы>0, пустая намотка, без Обеспечения) — удаляем её и перерисовываем.
-    // Защита от цикла: каждый id пробуем ОДИН раз (`_orphanRenderTried`) — если `_m_del` почему-то не убрал
-    // (после reload сирота осталась), повтор не запускаем; один прогон за раз (`_orphanCleaning`). Удаление
-    // каскадит Партии ГП; «Обеспечений» у сироты нет — терять нечего. Fire-and-forget: текущий рендер идёт
-    // как есть, чистый — следующим (self.render после удаления).
-    AtexProductionPlanning.prototype.maybeCleanOrphansOnRender = function() {
-        var self = this;
-        if (self._orphanCleaning) return;
-        var supCut = {};
-        (self.supplies || []).forEach(function(s) { if (s && s.cutId != null) supCut[String(s.cutId)] = 1; });
-        self._orphanRenderTried = self._orphanRenderTried || {};
-        var fresh = (self.cuts || []).filter(function(c) {
-            return c && stripNum(c.plannedRuns) > 0 && normWinding(c.winding) === '' && !supCut[String(c.id)]
-                && !self._orphanRenderTried[String(c.id)];
-        }).map(function(c) { return String(c.id); });
-        if (!fresh.length) return;
-        fresh.forEach(function(id) { self._orphanRenderTried[id] = true; });
-        self._orphanCleaning = true;
-        self.removeCorruptedDaySplitOrphans()
-            .then(function(n) { self._orphanCleaning = false; if (n > 0 && typeof self.render === 'function') self.render(); })
-            .catch(function() { self._orphanCleaning = false; });
     };
 
     // #3280: применить план разбиения резок по дням (planCutOperations):
@@ -5192,7 +5206,7 @@
         }).then(function() {
             return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
         }).then(function() { return self.reload(); }).then(function() {
-            return self.removeCorruptedDaySplitOrphans();   // #4168: сироты рождаются ЭТИМ разбиением — чистим ПОСЛЕ reload
+            return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
             return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
         }).then(function() {
@@ -5381,11 +5395,11 @@
         var ops = built.ops;
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
-            // #4171: переставлять/дробить нечего (план оптимален), НО повреждённая сирота (#4163/#4168)
-            // не участвует в ops — она не резолвится в цепочку — и висит «нет связей». applySplitPlan
-            // здесь не зовётся, значит его пост-reload чистка (#4168) не сработает. Чистим сирот и тут,
-            // иначе «Упорядочить»/«Сгенерировать» на стабильном плане их не убирает. Удалили → render.
-            return self.removeCorruptedDaySplitOrphans().then(function(n) {
+            // #4175: переставлять/дробить нечего (план оптимален), НО заказное задание-сирота (#4163→#4175)
+            // не участвует в ops и висит «нет связей». applySplitPlan здесь не зовётся, значит его
+            // пост-reload восстановление не сработает. Восстанавливаем связь и тут, иначе «Упорядочить»/
+            // «Сгенерировать» на стабильном плане её не чинит. Восстановили → render.
+            return self.reconcileOrphanOrderSupplies().then(function(n) {
                 if (n > 0) self.render();
                 return n > 0;
             });
@@ -5898,7 +5912,6 @@
         var self = this;
         if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._renderingQueue = true;
-        this.maybeCleanOrphansOnRender();   // #4173: страховка «на показе» — сирота не должна висеть «нет связей»
         try {
         var t0 = Date.now();
         var box = this.queueEl;
