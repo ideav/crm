@@ -23,6 +23,7 @@ out="${1:-$root/../integram-local-$(date +%Y%m%d).tar.gz}"
 include=(
     index.php start.html
     include js css i crm templates download assets
+    ace
     Dockerfile compose.yaml .dockerignore .env.docker.example
     docker
     scripts/install-local-docker.sh
