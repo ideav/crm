@@ -204,6 +204,8 @@
     // #3760: какие компоненты настройки положить в хвост смены, когда настройка целиком
     // не влезает. Берём ПОДМНОЖЕСТВО компонентов с суммой ≥ остатка дня (дотягивает до конца
     // смены) и МИНИМАЛЬНОЙ суммой (минимальный нахлёст). Остальное — на следующий день.
+    // Живёт ради buildSchedule (показ расписания): там потолка нахлёста настройки нет, окно
+    // кончается концом смены. Упаковщик и колонки задания считают хвост по chooseTailSetupSubset.
     //   parts — [{minutes}], avail — остаток дня (мин), total — сумма всех компонентов.
     // Примеры (ножи 30, сырьё 15): avail 8 → сырьё 15 (нахлёст 7); avail 20 → ножи 30
     // (сырьё 15 < 20 не дотягивает, оставило бы простой); avail 35 → ножи+сырьё 45.
@@ -229,51 +231,87 @@
         return round3(best);
     }
 
-    // #4111: как разложить наладку setup-only ХВОСТА дня (0 проходов, #3635 п.5) между текущим днём N
-    // и продолжением (день N+1), чтобы хвост НЕ вылезал за потолок нахлёста НАСТРОЙКИ
-    // (cutEndMin + MAX_OVERWORK_TUNE). Считает ХРАНИМЫЕ колонки УЖЕ СУЩЕСТВУЮЩЕГО хвоста-задания
-    // (computeCutSetupUpdates, #4030/#4042) — что оператор увидит в карточке дня N. Роднит с
-    // splitMachineQueue (minOverlapTailSetupMinutes + гейт availFor 'tune'), но работает с ДВУМЯ
-    // именованными компонентами (ножи/сырьё) — чтобы поделить их по колонкам «Наладка ножей»/
-    // «Сырье/намотка». ОТЛИЧИЕ от генерации плана (splitMachineQueue #3939): та решает, СОЗДАВАТЬ ли
-    // хвост вообще (нет — вся резка одной карточкой на завтра); здесь хвост УЖЕ ЕСТЬ, поэтому пустым
-    // (все нули) его не оставляем — держим максимум влезающей наладки (#4116). В дне N оставляем
-    // МИНИМАЛЬНОЕ подмножество,
-    // добивающее день до cutEndMin, — но только если оно кончается ≤ потолка нахлёста. Если ни одно
-    // подмножество не добивает день без выхода за потолок — оставляем в дне N НАИБОЛЬШЕЕ подмножество,
-    // которое ещё влезает под потолок (максимум наладки в дне N, минимум на продолжение), и лишь когда
-    // даже минимальный компонент вылезает за потолок — в дне N НИЧЕГО, вся наладка на продолжение.
+    // #4144: ЕДИНОЕ правило хвоста дня (setup-only сегмент, #3635 п.5) — «оператор делает МАКСИМУМ
+    // наладки, который успевает в пределах допустимого нахлёста НАСТРОЙКИ» (#3955). Из подмножеств
+    // компонентов наладки (ножи 30 / смена сырья 15) берём НАИБОЛЬШЕЕ с суммой ≤ ceilingRoom
+    // (= остаток окна резки + MAX_OVERWORK_TUNE). Ничего не влезает — null: в дне N НИЧЕГО, вся резка
+    // одной карточкой на следующий день. Остаток наладки уходит на продолжение (pendingSetup).
+    // Примеры (ножи 30, сырьё 15): потолок 30 → ножи 30 (#3858: «сделать что-то одно — настройку
+    // ножей»); потолок 50 → ножи+сырьё 45; потолок 29 → сырьё 15 (ножи не влезают, #4144 Станок 4);
+    // потолок 10 → ничего (#3847).
+    // Одно правило на всех: обе ветки splitMachineQueue (упаковка) и splitTailSetupAtCeiling (колонки).
+    // Раньше ветки расходились: базовая целилась в потолок через minOverlapTailSetupMinutes и при
+    // наладке из двух компонентов почти всегда отказывала; gapFill целилась в конец окна резки и, увидев
+    // выход за потолок, не клала НИЧЕГО — без отката на влезающее подмножество (issue #4144: остаток
+    // окна 19 мин, ножи 30 за потолком 29 → хвоста нет, хотя смена сырья 15 кончалась ДО конца окна).
+    //   parts — [{ code, minutes }]; ceilingRoom — минуты до потолка нахлёста настройки.
+    // → { minutes, keep: [parts] } либо null. Компонентов много (>16) — жадно по убыванию.
+    function chooseTailSetupSubset(parts, ceilingRoom) {
+        var list = (parts || []).filter(function(p){ return (Number(p && p.minutes) || 0) > 0; });
+        if (!list.length) return null;
+        var ceil = Number(ceilingRoom);
+        if (!isFinite(ceil)) ceil = Infinity;
+        var n = list.length, EPS = 1e-9;
+        if (n > 16) {
+            var sorted = list.slice().sort(function(a, b){ return b.minutes - a.minutes; });
+            var acc = 0, keepG = [];
+            for (var g = 0; g < sorted.length; g++) {
+                if (acc + sorted[g].minutes > ceil + EPS) continue;
+                acc += sorted[g].minutes; keepG.push(sorted[g]);
+            }
+            return keepG.length ? { minutes: round3(acc), keep: keepG } : null;
+        }
+        var largest = null;
+        for (var mask = 1; mask < (1 << n); mask++) {
+            var s = 0;
+            for (var b = 0; b < n; b++) if (mask & (1 << b)) s += Number(list[b].minutes) || 0;
+            s = round3(s);
+            if (s > ceil + EPS) continue;                                     // за потолок нахлёста — нельзя
+            if (!largest || s > largest.s) largest = { s: s, mask: mask };
+        }
+        if (!largest) return null;
+        var keep = [];
+        for (var b2 = 0; b2 < n; b2++) if (largest.mask & (1 << b2)) keep.push(list[b2]);
+        return { minutes: largest.s, keep: keep };
+    }
+
+    // #4144: разложить выбранный хвост по ХРАНИМЫМ колонкам «Наладка ножей» / «Сырье-намотка».
+    // Компоненты без кода (слитый остаток настройки продолжения, pendingSetup) разложить нельзя → null.
+    function tailSetupColumns(chosen) {
+        if (!chosen) return { knifeMin: 0, materialWindingMin: 0 };
+        var knife = 0, mat = 0;
+        for (var i = 0; i < chosen.keep.length; i++) {
+            var p = chosen.keep[i];
+            if (p.code === 'KNIFE') knife += Number(p.minutes) || 0;
+            else if (p.code === 'MATERIAL_WINDING') mat += Number(p.minutes) || 0;
+            else return null;
+        }
+        return { knifeMin: round3(knife), materialWindingMin: round3(mat) };
+    }
+
+    // #4111: наладка setup-only ХВОСТА дня, поделённая между днём N и продолжением (день N+1) —
+    // ХРАНИМЫЕ колонки задания, что оператор увидит в карточке дня N (computeCutSetupUpdates).
+    // Правило то же, что у упаковщика (chooseTailSetupSubset — наибольшее подмножество под потолком
+    // нахлёста настройки), только с ДВУМЯ именованными компонентами — чтобы поделить их по колонкам
+    // «Наладка ножей» / «Сырье-намотка».
     //   tailStartMin — минута старта хвоста (planStart, от полуночи дня); knifeMin/materialMin —
     //   компоненты наладки; cutEndMin/overTuneMin — окно (мин от полуночи / нахлёст настройки).
     // → { keepKnife, keepMaterial } — что ОСТАЁТСЯ в дне N (остальное уносится на продолжение).
     // Нет окна (cutEndMin/tailStartMin не число) → держим всё в дне N (прежнее поведение, без окна).
-    // #4116: раньше при room 31–34 (напр. cutEnd 16:13, хвост 15:40) minOverlap требовал ВСЮ наладку 45
-    // (ни ножи 30, ни сырьё 15 по отдельности не добивали день), а 45 вылезала за потолок → в дне N
-    // клали НИЧЕГО, хотя ножи 30 кончались 16:10 ДО cutEnd (0 нахлёста). Симптом: пустое задание, вся
-    // наладка (в т.ч. настройка ножей, которая влезала) уезжала на следующий день.
+    // ВНИМАНИЕ (#4144): tailStartMin из ХРАНИМОГО planStart прошёл снап к целым минутам (#4061) и
+    // позже упаковочного на накопленный ceil — room выходит меньше настоящего, и решение может
+    // «схлопнуться» в ноль. Поэтому писатель зовёт эту функцию только как ФОЛБЭК, когда решения
+    // упаковщика под рукой нет (см. plannedTailSetup в 20-controller.js).
     function splitTailSetupAtCeiling(tailStartMin, knifeMin, materialMin, cutEndMin, overTuneMin) {
         var k = Math.max(0, Math.round(Number(knifeMin) || 0));
         var m = Math.max(0, Math.round(Number(materialMin) || 0));
         if (k + m <= 0) return { keepKnife: 0, keepMaterial: 0 };
         var start = Number(tailStartMin), cutEnd = Number(cutEndMin);
         if (!isFinite(start) || !isFinite(cutEnd)) return { keepKnife: k, keepMaterial: m };
-        var room = cutEnd - start;                                   // до конца окна резки (цель заполнения)
-        var ceilingRoom = room + (Number(overTuneMin) || 0);         // до потолка нахлёста настройки
-        // Подмножества {ножи?, сырьё?} по возрастанию суммы (как перебор minOverlapTailSetupMinutes).
-        var subsets = [
-            { s: m,     keepKnife: 0, keepMaterial: m },
-            { s: k,     keepKnife: k, keepMaterial: 0 },
-            { s: k + m, keepKnife: k, keepMaterial: m }
-        ].filter(function(x){ return x.s > 0; }).sort(function(a, b){ return a.s - b.s; });
-        // Кандидаты — только подмножества, кончающиеся ≤ потолка нахлёста настройки (иначе выход за потолок).
-        var underCeiling = subsets.filter(function(x){ return x.s <= ceilingRoom; });
-        if (!underCeiling.length) return { keepKnife: 0, keepMaterial: 0 };   // даже минимум за потолок → всё на продолжение
-        // Минимальное подмножество, добивающее день до cutEndMin (minOverlap, минимальный нахлёст);
-        // #4116: нет такого (ни одно не добивает под потолком) → НАИБОЛЬШЕЕ влезающее (максимум в дне N).
-        var chosen = null;
-        for (var i = 0; i < underCeiling.length; i++) { if (underCeiling[i].s >= room) { chosen = underCeiling[i]; break; } }
-        if (!chosen) chosen = underCeiling[underCeiling.length - 1];   // subsets по возрастанию → последний = наибольший под потолком
-        return { keepKnife: chosen.keepKnife, keepMaterial: chosen.keepMaterial };
+        var ceilingRoom = (cutEnd - start) + (Number(overTuneMin) || 0);   // до потолка нахлёста настройки
+        var cols = tailSetupColumns(chooseTailSetupSubset(
+            [{ code: 'KNIFE', minutes: k }, { code: 'MATERIAL_WINDING', minutes: m }], ceilingRoom));
+        return { keepKnife: cols.knifeMin, keepMaterial: cols.materialWindingMin };
     }
 
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
@@ -2696,27 +2734,26 @@
                     else { clock += setupG + durG; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин) целиком, занято дня ' + Math.round(clock) + ' (конец ' + ppClock(dayStart + clock) + ')'); }
                 } else if (clock > 0) {
                     // #3760/#3805/#3821: в хвост дня не влезает ни один проход. ЕСТЬ настройка — кладём в
-                    // хвост ПОДМНОЖЕСТВО её компонентов (ножи/сырьё), дотягивающее до конца рабочего окна
-                    // (cutEndMin) с МИНИМАЛЬНЫМ нахлёстом (minOverlapTailSetupMinutes по остатку
-                    // effCapacity−clock). Остаток настройки (pendingSetup) + проходы — на следующий день.
-                    // НЕТ настройки (та же конфигурация, #3821: setupG=0) — ничего в хвост (иначе пустой
-                    // сегмент), резка целиком на следующий день.
-                    // #3955/#3847: «ставим то, что оператор УСПЕЕТ сделать, с ДОПУСТИМЫМ нахлёстом». Хвост
-                    // настройки кладём, ТОЛЬКО если выбранное подмножество кончается ≤ потолка нахлёста
-                    // НАСТРОЙКИ (availFor 'tune' = cutEndMin+MAX_OVERWORK_TUNE). Не влезает в этот потолок
-                    // даже минимальный компонент (напр. атомарные ножи 30 при остатке 5 → нахлёст 25 > 10)
-                    // → в хвост НЕ кладём, вся резка на следующий день ОДНОЙ карточкой. Так день добит «под
-                    // завязку» до допустимого нахлёста (#3955), но не раздут за него (#3939: раньше цель
-                    // была availTune без гварда → безграничный нахлёст, бейдж 542).
-                    var roomG = round3(effCapacity(day) - reserveNF - clock);   // до конца окна резки (цель заполнения); #4068: минус резерв под фольгу
+                    // хвост НАИБОЛЬШЕЕ подмножество её компонентов (ножи/сырьё), влезающее под потолок
+                    // нахлёста НАСТРОЙКИ (availFor 'tune' = cutEndMin+MAX_OVERWORK_TUNE) — единое правило
+                    // хвоста chooseTailSetupSubset (#3955/#4144: «оператор делает максимум того, что успеет
+                    // в пределах допустимого нахлёста»). Ничего не влезает — вся резка на следующий день
+                    // ОДНОЙ карточкой (#3847), день не раздут за нахлёст (#3939). Остаток настройки
+                    // (pendingSetup) + проходы уходят на день N+1. НЕТ настройки (та же конфигурация,
+                    // #3821: setupG=0) — ничего в хвост, иначе пустой сегмент.
                     var tailAvailG = availFor(day, 'tune') - reserveNF;         // до потолка нахлёста настройки (#3847); #4068: минус резерв
+                    // Продолжение несёт слитый остаток настройки (pendingSetup) — компонентов у него нет,
+                    // делить нечего: либо влезает целиком, либо не кладём.
                     var setupPartsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
-                    var tailSetupG = (setupG > 0) ? minOverlapTailSetupMinutes(setupPartsG, roomG, setupG) : 0;
-                    if (tailSetupG > 0 && tailAvailG >= tailSetupG) {
+                    var chosenG = (setupG > 0) ? chooseTailSetupSubset(setupPartsG, tailAvailG) : null;
+                    if (chosenG) {
+                        var tailSetupG = chosenG.minutes;
                         var wsS = day * 1440 + dayStart + clock;
+                        var colsG = tailSetupColumns(chosenG);   // #4144: разложение хвоста по колонкам для писателя
                         segments.push({ cutId: pick, dayOffset: day, runs: 0,
                             windowStartMin: round3(wsS), startMin: round3(wsS + tailSetupG), setupMin: round3(tailSetupG),
-                            durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true });
+                            durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true,
+                            setupKnifeMin: colsG ? colsG.knifeMin : null, setupMaterialMin: colsG ? colsG.materialWindingMin : null });
                         clock += tailSetupG; prevPhysical = c;
                         st.isCont = true; st.pendingSetup = round3(setupG - tailSetupG);
                         ppTrace('  проход не влез — в хвост дня положена настройка ' + Math.round(tailSetupG) +
@@ -2794,20 +2831,26 @@
                     // «и ножи, и сырьё в один день», хотя влезала только часть (заказчик: «надо было
                     // сделать что-то одно — настройку ножей, остальное завтра»).
                     if (clock > 0 && !isCont && setup > 0) {
-                        // #3847: в хвост кладём подмножество настройки, заполняющее ОСТАТОК ДО ПОТОЛКА
-                        // нахлёста настройки (availFor 'tune'), с минимальным нахлёстом. Остаток — завтра.
+                        // #3847/#4144: в хвост кладём наибольшее подмножество настройки, влезающее под
+                        // потолок нахлёста настройки (availFor 'tune') — единое правило хвоста
+                        // chooseTailSetupSubset, то же, что в ветке gapFill и в колонках задания.
+                        // Раньше это место звало minOverlapTailSetupMinutes с ПОТОЛКОМ вместо остатка окна:
+                        // при наладке из двух компонентов (ножи 30 + сырьё 15) она возвращала минимальное
+                        // подмножество, дотягивающее до потолка (ножи 30), а гейт «≤ потолка» его отвергал —
+                        // хвост не клался почти никогда (issue #4144). Остаток настройки (pendingSetup) — на
+                        // продолжение; ничего под потолком — вся резка на чистый следующий день.
                         var tailAvail = availFor(day, 'tune');
                         var setupParts = setupPartsFor(prevPhysical, c);
-                        var tailSetup = minOverlapTailSetupMinutes(setupParts, tailAvail, setup);
-                        // кладём хвост, только если выбранное подмножество реально помещается в потолок
-                        // нахлёста настройки (#3847); иначе — вся резка на чистый следующий день.
-                        // pendingSetup = setup − tailSetup: 0, если влезла вся настройка; >0 — остаток на завтра.
-                        if (tailSetup > 0 && tailAvail >= tailSetup) {
+                        var chosen = chooseTailSetupSubset(setupParts, tailAvail);
+                        if (chosen) {
+                            var tailSetup = chosen.minutes;
                             var wsSet = day * 1440 + dayStart + clock;
+                            var colsT = tailSetupColumns(chosen);   // #4144: разложение хвоста по колонкам для писателя
                             segments.push({ cutId: String(cid), dayOffset: day, runs: 0,
                                 windowStartMin: round3(wsSet), startMin: round3(wsSet + tailSetup),
                                 setupMin: round3(tailSetup), durationMin: 0,
-                                isContinuation: false, parentCutId: null, setupOnly: true });
+                                isContinuation: false, parentCutId: null, setupOnly: true,
+                                setupKnifeMin: colsT ? colsT.knifeMin : null, setupMaterialMin: colsT ? colsT.materialWindingMin : null });
                             clock += tailSetup;
                             prevPhysical = c;
                             isCont = true;                          // проходы дня N+1 — продолжение
@@ -3484,6 +3527,12 @@
             var contIndexByHead = {};
             segs.forEach(function(seg, idx){
                 var ts = scheduleStartTimestamp(base, seg.windowStartMin);
+                // #4144: разложение setup-only ХВОСТА дня по колонкам — решение УПАКОВЩИКА (он считал
+                // room по дробному окну). Отдаём его вызывающему: писатель колонок обязан взять это, а не
+                // пересчитывать от снапнутого planStart (снап позже на накопленный ceil → room меньше).
+                if (seg.setupOnly && seg.setupKnifeMin != null && typeof opts.onTailSetup === 'function') {
+                    opts.onTailSetup(key, ts, { knife: Math.round(seg.setupKnifeMin), material: Math.round(seg.setupMaterialMin) });
+                }
                 if (!seg.isContinuation) {
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
