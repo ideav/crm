@@ -13019,7 +13019,14 @@
         var ops = built.ops;
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
-            return Promise.resolve(false);
+            // #4171: переставлять/дробить нечего (план оптимален), НО повреждённая сирота (#4163/#4168)
+            // не участвует в ops — она не резолвится в цепочку — и висит «нет связей». applySplitPlan
+            // здесь не зовётся, значит его пост-reload чистка (#4168) не сработает. Чистим сирот и тут,
+            // иначе «Упорядочить»/«Сгенерировать» на стабильном плане их не убирает. Удалили → render.
+            return self.removeCorruptedDaySplitOrphans().then(function(n) {
+                if (n > 0) self.render();
+                return n > 0;
+            });
         }
         return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes });
     };

@@ -74,3 +74,25 @@ function done() { if (--pending === 0) console.log('\n' + passed + '/' + total +
         }).catch(function(e) { assert(false, '(2) threw', String(e && e.stack || e)); }).then(done);
     }, 120);
 })();
+
+// ── 3) autoSequenceQueue БЕЗ изменений (план оптимален) всё равно чистит сирот — иначе «Упорядочить»/
+//       «Сгенерировать» на стабильном плане не убирает висящую «нет связей» (applySplitPlan не зовётся). ──
+(function() {
+    pending++;
+    setTimeout(function() {
+        var c = baseController();
+        c.cuts = [ cut('H', { winding: 'OUT' }) ];
+        c.supplies = [ { id: 'SUP_H', cutId: 'H', positionId: 'P1', finishedBatchId: 'FBH', rolls: 100, footage: 1000 } ];
+        c.buildSequenceOps = function() { return { ops: { updates: [], creates: [], deletes: [] }, cutsById: {} }; };   // изменений нет
+        var cleaned = 0, rendered = 0, splitCalls = 0;
+        c.removeCorruptedDaySplitOrphans = function() { cleaned++; return Promise.resolve(1); };   // как будто убрали 1 сироту
+        c.render = function() { rendered++; };
+        c.applySplitPlan = function() { splitCalls++; return Promise.resolve(true); };
+        c.autoSequenceQueue('SETUP', false).then(function(changed) {
+            assert(cleaned === 1, '#4171 no-change autoSequenceQueue ВСЁ РАВНО зовёт чистку сирот', '(cleaned=' + cleaned + ')');
+            assert(splitCalls === 0, '#4171 no-change: applySplitPlan НЕ зовётся (изменений нет)', '(split=' + splitCalls + ')');
+            assert(changed === true, '#4171 убрана сирота → autoSequenceQueue вернул true');
+            assert(rendered === 1, '#4171 после удаления сироты — render');
+        }).catch(function(e) { assert(false, '(3) threw', String(e && e.stack || e)); }).then(done);
+    }, 240);
+})();
