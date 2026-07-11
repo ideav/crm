@@ -4729,18 +4729,40 @@
         }
         // #3795: «Вид сырья» цепочки = сырьё её ГОЛОВЫ (у всех сегментов одно сырьё). Берём
         // у головы, потому что у реюзнутого продолжения, созданного до фикса, поле пустое.
+        // #4171: если ГОЛОВА не резолвится (chainHeadById указал на резку не из self.cuts —
+        // корень сироты #4163/#4168), берём напрямую у резки cutId — иначе продолжение родится с
+        // пустым сырьём и станет сиротой «нет связей».
         function materialForCutId(cutId) {
             var head = chainHeadById[String(cutId)] || String(cutId);
-            var hc = cutsById[head];
+            var hc = cutsById[head] || cutsById[String(cutId)];
             return hc && hc.materialId != null && String(hc.materialId) !== '' ? String(hc.materialId) : '';
         }
         // #4128: «Тип намотки» цепочки = намотке её ГОЛОВЫ — заправка одна на все сегменты.
         // Берём у головы, а не у прямого родителя: у реюзнутого продолжения, созданного до
         // фикса, поле пустое, и пустота расползалась по всей цепочке.
+        // #4171 (КОРЕНЬ сироты #4163/#4168): голова цепочки РЕЗОЛВИТСЯ через chainHeadById; если
+        // она указала на резку, которой НЕТ в self.cuts (cutsById[head] === undefined — напр. голова
+        // удалена/не подгружена/логический id из mergeContinuationChains), то `normWinding(undefined)`
+        // = '' → продолжение создаётся с ПУСТОЙ намоткой → рвёт continuationSignature (станок|сырьё|
+        // НАМОТКА|ножи) → mergeContinuationChains его не подшивает, delete-путь не трогает → висит
+        // «нет связей» (на ateh: заказ 3966, все позиции OUT, но резка-дубль с пустой намоткой и без
+        // Обеспечения). ФИКС: не резолвится голова → берём намотку напрямую у резки cutId (у неё она
+        // есть). Всё ещё пусто (ни у головы, ни у резки) → предупреждаем: тогда пустая намотка
+        // «законная» (позиция без намотки) ЛИБО и резка не подгружена — видно в трейсе.
         function windingForCutId(cutId) {
             var head = chainHeadById[String(cutId)] || String(cutId);
             var hc = cutsById[head];
-            return normWinding(hc && hc.winding);
+            var w = normWinding(hc && hc.winding);
+            if (w === '') {
+                var direct = cutsById[String(cutId)];
+                var dw = normWinding(direct && direct.winding);
+                if (dw !== '') {
+                    console.warn('[pp] #4171 windingForCutId(' + cutId + '): голова "' + head + '" вне self.cuts (' + (hc ? 'намотка пуста' : 'нет в cutsById') + ') — беру намотку у самой резки: ' + dw);
+                    return dw;
+                }
+                if (!direct) console.warn('[pp] #4171 windingForCutId(' + cutId + '): и головы "' + head + '", и резки нет в self.cuts — продолжение может стать сиротой');
+            }
+            return w;
         }
         // #4155: «Партия сырья» цепочки = партии её ГОЛОВЫ (одно сырьё на все сегменты).
         // Берём у головы, а не у прямого родителя: продолжение, созданное до фикса, хранит
@@ -5033,6 +5055,15 @@
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
                             if (!bId) throw new Error('Сервер не вернул id продолжения задания');
+                            // #4171: трасса КОРНЯ сироты (#4163/#4168) — продолжение с ПУСТОЙ намоткой рвёт
+                            // continuationSignature и висит «нет связей». После фикса windingForCutId это НЕ
+                            // должно случаться; если случилось — печатаем, ПОЧЕМУ голова не резолвится.
+                            if (normWinding(windingForCutId(parentId)) === '') {
+                                var trHead = chainHeadById[String(parentId)] || String(parentId);
+                                console.warn('[pp] #4171 продолжение ' + bId + ' СОЗДАНО с ПУСТОЙ намоткой (станет сиротой) — parentId=' + parentId
+                                    + ' head=' + trHead + ' parentInCuts=' + !!cutsById[String(parentId)]
+                                    + ' headInCuts=' + !!cutsById[trHead] + ' проходы=' + cr.plannedRuns);
+                            }
                             var stripMap = {};
                             // Главное значение B (плановое время старта) — _m_save с t{tableId}.
                             var bChain = Promise.resolve().then(function() {
