@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor</title>
+<style type="text/css" media="screen">
+#editor { margin: 0;
+    position: absolute;
+    top: 33px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+}
+</style>
+<script>function byId(i){return document.getElementById(i)}</script>
+</head>
+<body style="margin:0px">
+<table style="background:#333333; color:#EEEEEE; height:33px; font-size:14px; line-height:18px; font-family:'Open Sans',sans-serif; width:100%;">
+<tr>
+<td>
+<div id="menu">
+    <table>
+    <tr>
+        <td><button onclick="menu=byId('menu').innerHTML;byId('menu').innerHTML=byId('more').innerHTML" style="font-weight:bold">...</button> <span id="src"></span></td>
+        <td align="right" id="save"><button onclick="save()" style="font-weight:bold">Save</button></td>
+    </tr>
+    </table>
+</div>
+</td>
+</tr>
+</table>
+<pre id="editor">
+</pre>
+
+<script src="ace.js" type="text/javascript" charset="utf-8"></script>
+<script src="ext-emmet.js" type="text/javascript" charset="utf-8"></script>
+<script src="emmet.js" type="text/javascript" charset="utf-8"></script>
+
+<script>
+var last,menu;
+var t={};
+var r=new Array();
+function get(c,u){
+    var request=new XMLHttpRequest(),div='',h='';
+    console.log(db+u);
+    request.open('GET','/api'+db+u,true);
+    request.setRequestHeader("X-Authorization",token);
+    request.onload=function(){
+        var json=JSON.parse(this.responseText);
+        console.log(json);
+        request.abort();
+        switch(c){
+        case 'type':
+            div='<select id="list" onchange="getReqs()">';
+            for(i in json.edit_types.id){
+                if(t[json.edit_types.id[i]]===undefined)
+                    t[json.edit_types.id[i]]={t:json.edit_types.t[i],r:json.edit_types.ref_val[i],u:json.edit_types.uniq[i],v:json.edit_types.val[i]};
+                if(json.edit_types.ord[i]!=''){
+                    if(r[json.edit_types.id[i]]===undefined)
+                        r[json.edit_types.id[i]]=new Array();
+                    r[json.edit_types.id[i]][json.edit_types.ord[i]]={i:json.edit_types.req_id[i],t:json.edit_types.req_t[i],a:json.edit_types.attrs[i],r:json.edit_types.reft[i]};
+                }
+            }
+            for(i in t)
+                if(r[i]){
+                    div+='<option id="'+i+'" value="'+i+'">'+t[i].v+' ('+i+')</option>';
+                    for(j in r[i])
+                        if(r[r[i][j].t])
+                            div+='<option id="'+r[i][j].i+'" value="'+r[i][j].i+'">'+t[i].v+' - '+t[r[i][j].t].v+' ('+r[i][j].i+')</option>';
+                }
+            console.log(t);
+            console.log(r);
+            byId('menu_item').innerHTML=div+'</select><button onclick="editor.session.insert(editor.getCursorPosition(), byId(\'list\').value)" style="font-weight:bold">Вставить</button>'
+                                    +' <select id="req_list"></select><button onclick="editor.session.insert(editor.getCursorPosition(), byId(\'req_list\').value)" style="font-weight:bold">Вставить</button>';
+            getReqs();
+            break;
+        case 'report':
+            h='<option id=":id:" value=":id:">:val: (:id:)</option>';
+            div='<select id="list">';
+            if(json['&main.a.&uni_obj.&uni_obj_all'])
+                for(i in json['&main.a.&uni_obj.&uni_obj_all'].id)
+                    div+=h.replace(/:id:/g,json['&main.a.&uni_obj.&uni_obj_all'].id[i])
+                        .replace(/:val:/g,json['&main.a.&uni_obj.&uni_obj_all'].val[i]);
+            byId('menu_item').innerHTML=div+'</select> <button onclick="get(\'put_report\',\'object/28/?F_107=%21%25&F_U=\'+byId(\'list\').value)" style="font-weight:bold">Отчет</button>'
+                                        +' <button onclick="get(\'put_table\',\'object/28/?F_U=\'+byId(\'list\').value)" style="font-weight:bold">Таблица</button>'
+                                        +' <button onclick="editor.session.insert(editor.getCursorPosition(),\'/{_global_.z}/report/\'+byId(\'list\').value)" style="font-weight:bold">Ссылка</button>';
+            break;
+        case 'put_report':
+            rep=json.parent.name;
+            div='<!-- Begin:'+rep+' -->\n';
+            for(i in json.object)
+                if(json.reqs[json.object[i].id][100].length)
+                    div+=' {'+json.reqs[json.object[i].id][100]+'}';
+            div+='\n<!-- End:'+rep+' -->\n';
+            editor.session.insert(editor.getCursorPosition(), div);
+            break;
+        case 'put_table':
+            rep=json.parent.name;
+            h='<h3>'+rep+'</h3>\n<table class="table table-bordered">\n<tr style="background-color:#f9f9f9;">\n';
+            div='<!-- Begin:'+rep+' -->\n<tr>\n';
+            for(i in json.object)
+                if(json.reqs[json.object[i].id]&&json.reqs[json.object[i].id][100]&&!json.reqs[json.object[i].id][107]){
+                    h+='<th>'+json.reqs[json.object[i].id][100]+'</th>';
+                    div+='<td>{'+json.reqs[json.object[i].id][100]+'}</td>';
+                }
+            h+='\n</tr>\n';
+            div+='\n</tr>\n<!-- End:'+rep+' -->\n';
+            editor.session.insert(editor.getCursorPosition(), h+div+'</table>\n');
+            break;
+        }
+    };
+    request.send();
+}
+function getReqs(){
+    var j,i=byId('list').value,div='';
+    for(j in r[i])
+        div+='<option id="'+r[i][j].i+'" value="'+r[i][j].i+'">'+t[i].v+' - '+t[r[i][j].t].v+' ('+r[i][j].i+')</option>';
+    byId('req_list').innerHTML=div;
+}
+function codes(){
+    var i,div='<select id="list">';
+    var c=new Array('{_global_.z} - Имя базы', '{_global_.user} - Имя пользователя', '{_global_.token} - Авторизационный токен', '{_global_.xsrf} - Токен CSRF');
+    for(i in c)
+        div+='<option value="'+c[i].split(' - ').shift()+'">'+c[i]+'</option>';
+    byId('menu_item').innerHTML=div+'</select><button onclick="editor.session.insert(editor.getCursorPosition(), byId(\'list\').value)" style="font-weight:bold">Вставить</button>';
+}
+function save(){
+    if(last==editor.getSession().getValue()){
+        alert('В тексте нет изменений для сохранения');
+        return;
+    }
+    var btn=byId('save').innerHTML;
+    byId('save').innerHTML='<img src="/i/ajax.gif">';
+    var obj=new XMLHttpRequest();
+    var fd = new FormData();
+    var file = new File([editor.getSession().getValue()], params['gf'])
+    obj.open('POST',params['src']+(params['download']?'?download=1':'?templates=1')+'&add_path='+params['add_path'],true);
+//    obj.setRequestHeader("Content-Type","multipart/form-data");
+    fd.append("_xsrf", xsrf);
+    fd.append("rewrite", "1");
+    fd.append("upload", "1");
+    fd.append('userfile', file);
+    
+    //fd.append("userfile", editor.getSession().getValue());
+    obj.send(fd);
+    obj.onload=function(e) {
+        if(this.responseText.indexOf('Файл '+params['gf']+' загружен')==this.responseText.indexOf('File '+params['gf']+' uploaded')){
+            byId('src').innerHTML='Ошибка (см. консоль)';
+            console.log(this.responseText)
+        }
+        obj.abort();
+        last=editor.getSession().getValue();
+        byId('save').innerHTML=btn;
+    }
+}
+var editor=ace.edit("editor")
+    ,params=window.location.search.replace('?','').split('&').reduce(
+        function(p,e){var a=e.split('=');p[decodeURIComponent(a[0])]=decodeURIComponent(a[1]);return p;},{});
+var db='/'+params['src'].split('/')[1]+'/';
+
+editor.setTheme("ace/theme/chrome");
+var tgf=params['gf'].split('.').pop().toLowerCase();
+switch(tgf){
+    case 'css':
+        editor.session.setMode("ace/mode/css");
+        break;
+    case 'js':
+        editor.session.setMode("ace/mode/javascript");
+        break;
+    case 'json':
+        editor.session.setMode("ace/mode/json");
+        break;
+    default:
+        editor.session.setMode("ace/mode/html");
+}
+editor.setOption("enableEmmet", true);
+
+var request=new XMLHttpRequest(),xsrf,token;
+byId('src').innerHTML='&nbsp;'+(params['download']?'download':'templates')+params['add_path']+'/'+params['gf'];
+document.title=params['gf'];
+request.open('GET',db+'xsrf',true);
+request.onload=function(){
+    try{
+        var json=JSON.parse(this.responseText);
+    }
+    catch(err){
+        byId('src').innerHTML='Ошибка авторизации '+err;
+        return;
+    }
+    xsrf=json['_xsrf'];
+    token=json['token'];
+    user=json['user'];
+    request.abort();
+    request.open('GET',params['src']+(params['download']?'?download=1':'?templates=1')+'&add_path='+params['add_path']+'&gf='+params['gf'],true);
+    request.onload=function(){
+        var customPosition = { row: 0, column: 0 };
+        editor.session.insert(customPosition,last=request.responseText);
+        editor.getSession().setUndoManager(new ace.UndoManager());
+        request.abort();
+    };
+    request.send(null);
+};
+request.send(null);
+</script>
+<!--Templates-->
+<div style="display:none;">
+<div id="more">
+    <table>
+    <tr>
+        <td align="right"><button onclick="byId('menu').innerHTML=menu" style="font-weight:bold">X</button></td>
+        <td id="menu_item">
+            <button onclick="get('report','object/22?LIMIT=1000')" style="font-weight:bold">Отчет</button>
+            <button onclick="get('type','edit_types')" style="font-weight:bold">Тип</button>
+            <button onclick="codes()" style="font-weight:bold">Коды</button>
+        </td>
+    </tr>
+    </table>
+</div>
+</div>
+<!--/Templates-->
+</body>
+</html>
