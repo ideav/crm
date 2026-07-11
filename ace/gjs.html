@@ -399,11 +399,14 @@
           for (var i in files) {
             var formData = new FormData();
             formData.append('userfile', files[i]);
-            formData.append('_xsrf', '0ac53ef9d6149d47d37fb4');
+            // #4167: тот же XSRF и ТОТ ЖЕ СЕРВЕР, что у saveGJS (относительный params['src']),
+            // а не захардкоженный чужой хост ideav.online со stale-токеном — иначе загрузка
+            // картинок падает на любой установке (в т.ч. локальной).
+            formData.append('_xsrf', xsrf);
             formData.append('add_path', '');
 
             $.ajax({
-              url: 'https://ideav.online/gjs/dir_admin/?templates=1', // Замените на URL вашего сервера
+              url: params['src'] + '?templates=1&add_path=',
               type: 'POST',
               data: formData,
               contentType: false,
