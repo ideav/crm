@@ -12331,6 +12331,16 @@
         var self = this;
         var supByCut = {};
         (self.supplies || []).forEach(function(s) { if (s && s.cutId != null) supByCut[String(s.cutId)] = (supByCut[String(s.cutId)] || 0) + 1; });
+        // #4173: диагностика — на живом ateh (v.21) сирота 496122 ВИСИТ, хотя #4168/#4171 задеплоены,
+        // а лог генерации показывает, что чистка «нашла 0». Условие по сырым данным cut_planning
+        // (проходы=4, намотка='', 0 обеспечений) СОВПАДАЕТ, значит на момент чистки self.cuts/supplies
+        // отличаются от отчёта. Логируем ВСЕГДА все резки БЕЗ намотки (кандидаты в сироты) с их
+        // проходами/числом обеспечений/сырьём — на след. прогоне сразу видно: есть ли сирота в self.cuts
+        // на момент чистки и почему условие не срабатывает (например у неё уже есть обеспечение).
+        var emptyWind = (self.cuts || []).filter(function(c) { return c && normWinding(c.winding) === ''; });
+        console.log('[pp] #4173 чистка сирот: резок ' + (self.cuts || []).length + ', обеспечений ' + (self.supplies || []).length
+            + ', без намотки ' + emptyWind.length
+            + (emptyWind.length ? ' → ' + emptyWind.map(function(c) { return c.id + '(проходы=' + c.plannedRuns + ',обесп=' + (supByCut[String(c.id)] || 0) + ',сырьё=' + c.materialId + ')'; }).join(' ') : ''));
         var orphans = (self.cuts || []).filter(function(c) {
             return c && stripNum(c.plannedRuns) > 0 && normWinding(c.winding) === '' && !(supByCut[String(c.id)] > 0);
         }).map(function(c) { return String(c.id); });
@@ -12348,6 +12358,32 @@
             });
         });
         return chain.then(function() { return self.reload(); }).then(function() { return orphans.length; });
+    };
+
+    // #4173: страховка «на показе». Чистки после разбиения (#4168/#4172) на живом ateh сироту 496122 НЕ
+    // поймали (лог генерации: «нашла 0», хотя условие по данным cut_planning совпадает — значит self.cuts на
+    // момент той чистки отличался). renderQueue зовёт это при КАЖДОЙ отрисовке очереди: если висит
+    // повреждённая сирота (проходы>0, пустая намотка, без Обеспечения) — удаляем её и перерисовываем.
+    // Защита от цикла: каждый id пробуем ОДИН раз (`_orphanRenderTried`) — если `_m_del` почему-то не убрал
+    // (после reload сирота осталась), повтор не запускаем; один прогон за раз (`_orphanCleaning`). Удаление
+    // каскадит Партии ГП; «Обеспечений» у сироты нет — терять нечего. Fire-and-forget: текущий рендер идёт
+    // как есть, чистый — следующим (self.render после удаления).
+    AtexProductionPlanning.prototype.maybeCleanOrphansOnRender = function() {
+        var self = this;
+        if (self._orphanCleaning) return;
+        var supCut = {};
+        (self.supplies || []).forEach(function(s) { if (s && s.cutId != null) supCut[String(s.cutId)] = 1; });
+        self._orphanRenderTried = self._orphanRenderTried || {};
+        var fresh = (self.cuts || []).filter(function(c) {
+            return c && stripNum(c.plannedRuns) > 0 && normWinding(c.winding) === '' && !supCut[String(c.id)]
+                && !self._orphanRenderTried[String(c.id)];
+        }).map(function(c) { return String(c.id); });
+        if (!fresh.length) return;
+        fresh.forEach(function(id) { self._orphanRenderTried[id] = true; });
+        self._orphanCleaning = true;
+        self.removeCorruptedDaySplitOrphans()
+            .then(function(n) { self._orphanCleaning = false; if (n > 0 && typeof self.render === 'function') self.render(); })
+            .catch(function() { self._orphanCleaning = false; });
     };
 
     // #3280: применить план разбиения резок по дням (planCutOperations):
@@ -13536,6 +13572,7 @@
         var self = this;
         if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._renderingQueue = true;
+        this.maybeCleanOrphansOnRender();   // #4173: страховка «на показе» — сирота не должна висеть «нет связей»
         try {
         var t0 = Date.now();
         var box = this.queueEl;
