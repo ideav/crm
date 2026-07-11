@@ -12352,6 +12352,52 @@
         var updateByCut = {};
         (ops.updates || []).forEach(function(u) { updateByCut[u.cutId] = u; });
 
+        // #4158: КОНСЕРВАЦИЯ Обеспечения при СХЛОПЫВАНИИ цепочки. Когда сегментов дробления
+        // становится МЕНЬШЕ, лишние продолжения уходят в ops.deletes вместе со своими
+        // Обеспечениями. Обеспечение головы правит ТОЛЬКО create-путь (2a), а он при схлопывании
+        // не запускается — creates и deletes на голову взаимоисключающи (см. buildSplitDayOps:
+        // сегментов ≤ длины цепочки ⇒ только реюз+delete, без creates). Голова оставалась с УЖЕ
+        // ужатой прошлым разбиением долей, доля удаляемого продолжения ИСЧЕЗАЛА → Σ рулонов цепочки
+        // усыхала ниже спроса позиции заказа: продолжение «не привязано к заказу» / «неполное
+        // Обеспечение» (#4158). Возвращаем доли удаляемых продолжений ОБРАТНО в Обеспечение головы.
+        // Покрытие позиции считается по positionId (suppliedRollsForPosition суммирует ВСЕ
+        // обеспечения позиции, ширина не важна) — поэтому агрегируем по (голова, позиция) и
+        // добавляем к головному обеспечению той же позиции. Инвариант: Σ рулонов/метража цепочки
+        // до и после разбиения совпадает. Рост (creates) уже консервативен (делит долю головы,
+        // реюзнутые продолжения свою долю хранят) — там ничего не меняем.
+        var deleteSet = {};
+        (ops.deletes || []).forEach(function(id) { deleteSet[String(id)] = true; });
+        var absorbByHeadPos = {};   // headId → { positionId → { rolls, footage } } из удаляемых продолжений
+        (self.supplies || []).forEach(function(s) {
+            if (!s || !deleteSet[String(s.cutId)] || s.positionId == null) return;   // обеспечение удаляемого продолжения
+            var head = chainHeadById[String(s.cutId)];
+            if (!head || deleteSet[String(head)]) return;   // голова тоже удаляется/сирота — возвращать некуда
+            var byPos = absorbByHeadPos[head] || (absorbByHeadPos[head] = {});
+            var acc = byPos[String(s.positionId)] || (byPos[String(s.positionId)] = { rolls: 0, footage: 0 });
+            acc.rolls = round3(acc.rolls + (Number(s.rolls) || 0));
+            acc.footage = round3(acc.footage + (Number(s.footage) || 0));
+        });
+        var headSupplyRestore = {};   // headId → [{ supplyId, finishedBatchId, rolls, footage }] (новые значения головных обеспечений)
+        Object.keys(absorbByHeadPos).forEach(function(head) {
+            var byPos = absorbByHeadPos[head];
+            var headSupplies = (self.supplies || []).filter(function(s) { return String(s.cutId) === String(head); });
+            Object.keys(byPos).forEach(function(pos) {
+                var add = byPos[pos];
+                if (!(add.rolls > 0) && !(add.footage > 0)) return;
+                var target = null;
+                for (var i = 0; i < headSupplies.length; i++) {
+                    if (String(headSupplies[i].positionId) === pos) { target = headSupplies[i]; break; }
+                }
+                if (!target) return;   // у головы нет обеспечения этой позиции (не ожидается) — пропускаем
+                (headSupplyRestore[String(head)] = headSupplyRestore[String(head)] || []).push({
+                    supplyId: target.id,
+                    finishedBatchId: target.finishedBatchId,
+                    rolls: round3((Number(target.rolls) || 0) + add.rolls),
+                    footage: round3((Number(target.footage) || 0) + add.footage)
+                });
+            });
+        });
+
         // #3635 п.3: сохранение плана резок (день-заполнение) пишет десятки записей —
         // показываем форму ожидания с прогрессом, а не «зависшую» заблокированную страницу.
         var splitTotal = (ops.updates || []).length + Object.keys(createsByParent).length + (ops.deletes || []).length;
@@ -12454,8 +12500,23 @@
                         var curSid = storedCut && storedCut.slitter ? String(storedCut.slitter.id) : '';
                         if (String(u.slitterId) !== curSid) fields['t' + cutReqIds.slitter] = String(u.slitterId);
                     }
-                    if (!Object.keys(fields).length) return;
-                    return self.post('_m_set/' + u.cutId + '?JSON', fields);
+                    var setFields = Object.keys(fields).length
+                        ? self.post('_m_set/' + u.cutId + '?JSON', fields)
+                        : Promise.resolve();
+                    // #4158: у ГОЛОВЫ схлопнутой цепочки — вернуть в её Обеспечение долю удаляемых
+                    // продолжений (консервация покрытия позиции). headSupplyRestore задан только для
+                    // голов с deletes; у реюзнутых продолжений/несхлопнутых цепочек список пуст → no-op.
+                    var restores = headSupplyRestore[String(u.cutId)] || [];
+                    return restores.reduce(function(chain, rs) {
+                        return chain.then(function() {
+                            var sf = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                finishedBatchId: rs.finishedBatchId,
+                                footage: rs.footage > 0 ? rs.footage : '', rolls: rs.rolls,
+                                active: '1', status: SUPPLY_STATUSES[0]
+                            });
+                            return self.post('_m_set/' + rs.supplyId + '?JSON', sf);
+                        });
+                    }, setFields);
                 });
             }).then(splitBump).catch(softSkip); };
         });
@@ -12571,12 +12632,14 @@
                             shareBySupply.forEach(function(item) {
                                 bChain = bChain.then(function() {
                                     var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
-                                    if (!(sh.rolls > 0) && !(sh.footage > 0)) return;
+                                    // #4158: даже при НУЛЕВОЙ доле (floor=0 и метраж→0) создаём
+                                    // связующее Обеспечение — иначе задание-продолжение не привязано
+                                    // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
                                     if (item.s.positionId == null) return;
                                     var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
                                     var f = buildSupplyFieldsForFinishedBatch(supMeta, {
                                         finishedBatchId: fb,
-                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
                                         active: '1', status: SUPPLY_STATUSES[0]
                                     });
                                     return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
