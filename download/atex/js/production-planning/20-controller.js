@@ -2136,6 +2136,7 @@
         // для уведомления. combined() собирает объектив для chooseOptimizeCandidate.
         var before, builtB, objB, plan, objA, builtA;
         var coBefore, lateBefore, coB, lateB, coA = Infinity, lateA = Infinity;
+        var coC = Infinity, lateC = Infinity, builtC = null, hasC = false;   // #4186: кандидат C (роспуск просроченных фиксаций)
         function combined(late, co) { return late * LATE_DAY_WEIGHT + co; }
         try {
             coBefore = self.planChangeoverMin(self.cuts, null);
@@ -2170,6 +2171,25 @@
                 objA = combined(lateA, coA);
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             }
+
+            // #4186: Кандидат C — распустить фиксации (🔒), которые САМИ уже просрочены, и пересобрать по
+            // срокам. Считаем только если такие фиксации есть (иначе C == B, лишний план не нужен).
+            // Применяем C лишь при СТРОГОМ сокращении опозданий против выбранного фикс-плана (ниже):
+            // «Упорядочить» распускает бессмысленный замок, держащий задание за сроком (§14 > #3792),
+            // но НЕ трогает фиксации, которые сроки не нарушают.
+            var anyLateFixed = (self.cuts || []).some(function(c) {
+                if (!c || !c.fixed) return false;
+                var ts = Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0);
+                var pKey = ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate);
+                return lateDaysOf(pKey, c.dueKey) > 0;
+            });
+            if (anyLateFixed) {
+                builtC = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false, { relaxLateFixed: true });
+                var mapC = planStartMapFromOps(builtC.ops);
+                coC = self.planChangeoverMin(self.cuts, mapC);
+                lateC = self.planLatenessDays(self.cuts, mapC);
+                hasC = true;
+            }
         } catch (err) {
             self.setBusy(false);
             console.error('[pp] ⚙️ optimizeQueue: ОШИБКА расчёта', err && err.message, err && err.stack);
@@ -2179,16 +2199,25 @@
 
         // Выбор кандидата: сперва меньше опозданий (срок §14), затем меньше переналадки; иначе не трогаем.
         var choice = chooseOptimizeCandidate(before, objB, objA, plan.changed);
-        if (choice.action === 'none') {
+        // #4186: кандидат C (роспуск просроченных фиксаций) применяем ТОЛЬКО если он СТРОГО сокращает
+        // опоздания против выбранного фикс-плана. Опоздания фикс-плана: A→lateA, B→lateB, none→lateBefore.
+        var lateFix = choice.action === 'A' ? lateA : (choice.action === 'B' ? lateB : lateBefore);
+        var useC = hasC && lateC < lateFix;
+        if (choice.action === 'none' && !useC) {
             self.setBusy(false);
             self.notify('Очередь уже оптимальна (опозданий ' + round3(lateBefore) + ' дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
             return;
         }
-        var useA = choice.action === 'A';
-        var coBest = useA ? coA : coB, lateBest = useA ? lateA : lateB;
+        var useA = !useC && choice.action === 'A';
+        var coBest = useC ? coC : (useA ? coA : coB), lateBest = useC ? lateC : (useA ? lateA : lateB);
 
         var applyPromise;
-        if (useA) {
+        if (useC) {
+            var changedC = filterChangedUpdates(builtC.ops, builtC.cutsById);
+            applyPromise = (!changedC.length && !(builtC.ops.creates || []).length && !(builtC.ops.deletes || []).length)
+                ? Promise.resolve(false)
+                : self.applySplitPlan({ updates: changedC, creates: builtC.ops.creates, deletes: builtC.ops.deletes });
+        } else if (useA) {
             applyPromise = self.persistSlitterReassignment(plan.slitterByRecordId, plan.slitterReqId).then(function() {
                 var changed = filterChangedUpdates(builtA.ops, builtA.cutsById);
                 if (!changed.length && !(builtA.ops.creates || []).length && !(builtA.ops.deletes || []).length) {
@@ -2207,7 +2236,7 @@
             self.setBusy(false);
             self.notify('Очередь упорядочена: опоздания ' + round3(lateBefore) + ' → ' + round3(lateBest) + ' дн, '
                 + 'переналадка ' + round3(coBefore) + ' → ' + round3(coBest) + ' мин'
-                + (useA ? ' (со сменой станка)' : ''), 'success');
+                + (useC ? ' (с роспуском просроченных фиксаций)' : (useA ? ' (со сменой станка)' : '')), 'success');
         }).catch(function(err) {
             self.setBusy(false);
             console.error('[pp] ⚙️ optimizeQueue: ОШИБКА применения', err && err.message, err && err.stack);
@@ -5422,12 +5451,25 @@
         // c.fixed (как 🔒 «замок дня») — planCutOperations держит его день (effAnchorByCut от «Даты
         // план»), остальное раскладывает по срокам вокруг. Замок снимаем в finally (c.fixed мутируем на
         // общих объектах self.cuts только на время планирования). Без moveScope — прежнее поведение.
-        var pinnedRestore = [];
+        var pinnedRestore = [];   // {c, orig} — вернуть исходный c.fixed в finally
         if (moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length) {
             var pinSet = {};
             moveScope.pinCutIds.forEach(function(id){ pinSet[String(id)] = true; });
             planInput.forEach(function(c){
-                if (c && !c.fixed && pinSet[String(c.id)]) { c.fixed = true; pinnedRestore.push(c); }   // временный замок перенесённого
+                if (c && !c.fixed && pinSet[String(c.id)]) { pinnedRestore.push({ c: c, orig: c.fixed }); c.fixed = true; }   // временный замок перенесённого
+            });
+        }
+        // #4186: «Упорядочить» с relaxLateFixed — РАСПУСТИТЬ фиксации (🔒), которые сами уже просрочены
+        // (день размещения позже срока). Такой замок держит задание ЗА сроком (напр. после невыгодного
+        // ручного переноса), а срок (ТЗ §14) старше фиксации (#3792): временно снимаем c.fixed, чтобы
+        // planCutOperations разложил просроченное по сроку. Замок восстанавливаем в finally; применяем
+        // такой план только при СТРОГОМ сокращении опозданий (см. runOptimizeQueue, кандидат C).
+        if (moveScope && moveScope.relaxLateFixed) {
+            planInput.forEach(function(c){
+                if (!c || !c.fixed) return;
+                var ts = Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0);
+                var pKey = ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate);
+                if (lateDaysOf(pKey, c.dueKey) > 0) { pinnedRestore.push({ c: c, orig: c.fixed }); c.fixed = false; }
             });
         }
         var ops;
@@ -5463,7 +5505,7 @@
             machineDayOffFor: slotOn ? machineDayOffFor : null
         });
         } finally {
-            pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
+            pinnedRestore.forEach(function(r){ r.c.fixed = r.orig; });   // #4074/#4186: вернуть исходный c.fixed
         }
 
         var cutsById = {};
