@@ -5243,6 +5243,66 @@
                 reseqPass.machines++;
             });
         }
+        // #4184: ПОСТПРОХОД устранения лишней переналадки. Одинаковое сырьё+намотка попадает в
+        // ОДИН блок ножей ДВАЖДЫ, не подряд, часто через границу дня — #4139 склеивает такое лишь
+        // ВНУТРИ дня, а тут дубль может лежать в разных днях (напр. первая резка 01.07, группа-дубль
+        // 03.07). Пробуем склеить дубль внутри блока ножей (порядок блоков/ножей не меняем),
+        // притягивая ту сторону дубля, у которой ЕСТЬ запас по сроку, и принимаем перестановку лишь
+        // если РЕАЛЬНАЯ упаковка: (1) снижает минуты наладки (ушла хотя бы одна смена сырья),
+        // (2) не двигает НИ ОДНУ резку на день позже её срока (не плодит и не углубляет просрочку —
+        // иначе штраф опоздания перебьёт экономию), (3) не портит «фольга в конце дня» (#3717).
+        // Обе стороны дубля пробуются (byLast=false/true); безопасную оставляет проверка срока.
+        var dedupPass = { machines: 0 };
+        if (slotPlan && !opts.preserveOrder && opts.intraBlockDedup !== false && opts.dueDayByCut) {
+            var dedupTimes = planningChangeTimes(opts);
+            var dueDay = opts.dueDayByCut;
+            packed.mOrder.forEach(function(key){
+                var segs = packed.segsByMachine[key] || [];
+                var oldDayByCut = {};
+                segs.forEach(function(s){
+                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                    var id = String(s.cutId);
+                    if (oldDayByCut[id] == null || off < oldDayByCut[id]) oldDayByCut[id] = off;
+                });
+                var ordered = orderMachineQueue(packed.byMachine[key]);
+                if (ordered.length < 3) return;
+                var prevSetup = (opts.prevSetupBySlitter || {})[key];
+                var entry = prevSetup ? carryOverPrevCut(prevSetup, ordered[0]) : null;
+                var oldReal = runChainCost(ordered, entry, dedupTimes, changeoverCost);
+                var oldFoil = foilNotLastCount(segs, cutById);
+                var best = null;
+                [false, true].forEach(function(byLast){
+                    var cand = clusterMaterialWithinKnifeBlocks(ordered, byLast);
+                    if (!cand) return;
+                    var newReal = runChainCost(cand, entry, dedupTimes, changeoverCost);
+                    if (!(newReal < oldReal - 1e-9)) return;   // должна уйти хотя бы одна наладка
+                    var trialSegs = packOrderedMachine(cand, key);
+                    var newDayByCut = {};
+                    (trialSegs || []).forEach(function(s){
+                        var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                        var id = String(s.cutId);
+                        if (newDayByCut[id] == null || off < newDayByCut[id]) newDayByCut[id] = off;
+                    });
+                    // ни одна резка не должна уехать на день позже срока (новая/углублённая просрочка)
+                    var worse = Object.keys(newDayByCut).some(function(id){
+                        var due = dueDay[id]; if (due == null) return false;
+                        due = Number(due);
+                        var nd = newDayByCut[id], od = oldDayByCut[id];
+                        if (nd <= due) return false;         // укладывается в срок
+                        if (od == null) return true;         // не было в упаковке — не рискуем
+                        if (od <= due) return true;          // была в срок, стала просрочена — новое опоздание
+                        return nd > od;                      // была просрочена, стала ещё позже — углубление
+                    });
+                    if (worse) return;
+                    if (foilNotLastCount(trialSegs, cutById) > oldFoil) return;
+                    if (!best || newReal < best.newReal) best = { cand: cand, segs: trialSegs, newReal: newReal };
+                });
+                if (!best) return;
+                best.cand.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
+                packed.segsByMachine[key] = best.segs;
+                dedupPass.machines++;
+            });
+        }
         var byMachine = packed.byMachine, mOrder = packed.mOrder, segsByMachine = packed.segsByMachine;
         // #4095: дополнить trace РЕАЛЬНЫМИ днями (арбитр §12) и напечатать (slotTrace ВКЛ по умолчанию).
         if (slotPlan && slotPlan.trace) {
@@ -6141,6 +6201,56 @@
         var newReal = runChainCost(out, prev, times, changeoverCost);
         var oldReal = runChainCost(ordered, prev, times, changeoverCost);
         return (newSeq < oldSeq - 1e-9 && newReal <= oldReal + 1e-9) ? out : null;
+    }
+
+    // #4184: подпись «блока ножей» — набор ширин ножей + ширина ролика. Внутри такого блока
+    // оператор не перенастраивает ножи; отличаться резки могут лишь сырьём/намоткой/партией.
+    function knifeBlockSig(cut){ return knifeWidthSig(cut) + '|' + (Number(cut && cut.rollerWidth) || 0); }
+
+    // #4184: склеить одинаковое сырьё/намотку ВНУТРИ каждого блока ножей, НЕ меняя порядок самих
+    // блоков (порядок ножей неизменен, ТЗ). #4139 чинит разрыв только ВНУТРИ дня; здесь дубль
+    // может лежать через границу дня (напр. первая резка 01.07, группа-дубль 03.07). Кластеризуем
+    // резки блока по полной подписи конфигурации (cutConfigSig — внутри блока отличается лишь
+    // сырьём/намоткой/партией):
+    //   • byLast=false → кластеры в порядке ПЕРВОГО появления (тянет поздний дубль ВВЕРХ, к раннему);
+    //   • byLast=true  → в порядке ПОСЛЕДНЕГО появления (толкает ранний дубль ВНИЗ, к позднему).
+    // Так вызывающий пробует ОБЕ стороны дубля и принимает лишь безопасную (проверка срока/наладки).
+    // Инварианты: фольга держится ПОСЛЕ нефольги в блоке (#3717); блок с зафиксированной (🔒)
+    // резкой не трогаем (у неё якорь дня). Порядок внутри кластера сохраняется. → новый порядок
+    // очереди станка либо null (склеивать нечего).
+    function clusterMaterialWithinKnifeBlocks(ordered, byLast){
+        if (!ordered || ordered.length < 3) return null;
+        var out = [], changed = false, i = 0;
+        while (i < ordered.length){
+            var blkSig = knifeBlockSig(ordered[i]);
+            var j = i;
+            while (j < ordered.length && knifeBlockSig(ordered[j]) === blkSig) j++;
+            var block = ordered.slice(i, j);
+            i = j;
+            var hasFixed = block.some(function(c){ return !!(c && c.fixed); });
+            if (block.length < 3 || hasFixed){ out = out.concat(block); continue; }
+            // Ключ кластера — подпись конфигурации + фольга (cutConfigSig фольгу не различает, а
+            // намотка фольги отдельная и держится в конце дня #3717 — не смешиваем с нефольгой).
+            var firstIdx = {}, lastIdx = {}, foilSig = {}, bySig = {}, keys = [];
+            block.forEach(function(c, idx){
+                var isF = !!(c && c.isFoil);
+                var sig = cutConfigSig(c) + (isF ? '|F' : '');
+                if (firstIdx[sig] == null){ firstIdx[sig] = idx; keys.push(sig); bySig[sig] = []; foilSig[sig] = isF; }
+                lastIdx[sig] = idx;
+                bySig[sig].push(c);
+            });
+            var sigs = keys.slice().sort(function(a, b){
+                // фольга — всегда после нефольги (#3717); затем по первому/последнему появлению
+                var fa = foilSig[a] ? 1 : 0, fb = foilSig[b] ? 1 : 0;
+                if (fa !== fb) return fa - fb;
+                return byLast ? (lastIdx[a] - lastIdx[b]) : (firstIdx[a] - firstIdx[b]);
+            });
+            var newBlock = [];
+            sigs.forEach(function(s){ newBlock = newBlock.concat(bySig[s]); });
+            for (var k = 0; k < newBlock.length; k++){ if (newBlock[k] !== block[k]){ changed = true; break; } }
+            out = out.concat(newBlock);
+        }
+        return changed ? out : null;
     }
 
     function bestExistingTransitionCost(group, cut, weights) {
@@ -7830,6 +7940,7 @@
         orderCuts: orderCuts,
         cutConfigSig: cutConfigSig,                   // #4139
         resequenceWithinDays: resequenceWithinDays,   // #4139
+        clusterMaterialWithinKnifeBlocks: clusterMaterialWithinKnifeBlocks,   // #4184
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
