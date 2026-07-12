@@ -342,6 +342,63 @@
         return '/' + encodeURIComponent(this.db) + '/' + path;
     };
 
+    // #4177: ПОДРОБНАЯ ТРАССА КАЖДОГО СЕРВЕРНОГО ИЗМЕНЕНИЯ. Все POST в этом рабочем месте —
+    // команды `_m_*` (создание/правка/удаление); чтения идут через getJson и НЕ трассируются.
+    // По каждому запросу-изменению печатаем: № по порядку, операцию (NEW/SAVE/SET/DEL), таблицу,
+    // up= (родитель), ВСЕ поля payload (кроме _xsrf), текущую операцию (_ppOp) и цепочку вызвавших
+    // функций из стека — чтобы источник ЛЮБОЙ записи (в т.ч. резки-сироты «нет связей») читался в
+    // консоли без догадок; на ответе — созданный id, на отказе — код и текст ошибки.
+    var _ppWriteSeq = 0;
+    function ppWriteKind(path) {
+        var m = /_m_(\w+)\/([^?]*)/.exec(String(path == null ? '' : path));
+        if (m) return { op: m[1], target: decodeURIComponent(m[2]) };
+        return { op: 'post', target: String(path == null ? '' : path).split('?')[0] };
+    }
+    function ppWriteUp(path) {
+        var m = /[?&]up=([^&]*)/.exec(String(path == null ? '' : path));
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+    function ppWriteCallers(limit) {
+        try {
+            var st = (new Error()).stack;
+            if (!st) return [];
+            var lines = String(st).split('\n');
+            var out = [];
+            for (var i = 0; i < lines.length && out.length < (limit || 8); i++) {
+                var s = lines[i].replace(/^\s+/, '');
+                if (s.indexOf('at ') !== 0 && s.indexOf('@') < 0) continue;   // только кадры стека
+                var fn = /at\s+([^\s(]+)/.exec(s) || /^([^@\s]+)@/.exec(s);
+                var name = fn ? fn[1] : s.slice(0, 80);
+                if (/(^|\.)(post|tracePpWrite|ppWriteCallers)$/.test(name)) continue;   // сами обёртки трассы/post()
+                out.push(name);
+            }
+            return out;
+        } catch (e) { return []; }
+    }
+    function tracePpWrite(path, params, ctx) {
+        var kind = ppWriteKind(path);
+        var seq = ++_ppWriteSeq;
+        var up = ppWriteUp(path);
+        var op = (ctx && ctx._ppOp) ? ctx._ppOp : '?';
+        var fields = {};
+        Object.keys(params || {}).forEach(function(k) {
+            if (k === '_xsrf') return;
+            if (params[k] !== undefined && params[k] !== null && params[k] !== '') fields[k] = params[k];
+        });
+        var head = '[pp][WRITE#' + seq + '] ' + String(kind.op).toUpperCase() + ' t' + kind.target + (up ? ' up=' + up : '');
+        console.log(head + '  [' + op + ']  ← ' + ppWriteCallers(8).join(' ← '), { path: path, fields: fields });
+        return {
+            seq: seq,
+            ok: function(result) {
+                var id = result && (result.obj != null ? result.obj : (result.id != null ? result.id : result.i));
+                console.log(head + (id != null ? ' → id=' + id : ' (ok)'));
+            },
+            fail: function(status, msg) {
+                console.error(head + ' ✗ СБОЙ ' + status + ': ' + (msg == null ? '' : msg), { path: path, fields: fields });
+            }
+        };
+    }
+
     AtexProductionPlanning.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
             return resp.text().then(function(text) {
@@ -369,6 +426,7 @@
         Object.keys(params || {}).forEach(function(k) {
             if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
         });
+        var _trace = tracePpWrite(path, params, this);   // #4177: подробная трасса записи
         return fetch(this.url(path), {
             method: 'POST',
             credentials: 'same-origin',
@@ -379,16 +437,21 @@
                 var result;
                 try { result = text ? JSON.parse(text) : {}; }
                 catch (e) {
-                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
+                    if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
+                    _trace.fail('parse', text.slice(0, 200));
                     throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
                 }
                 // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
                 // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
                 // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
                 // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
-                if (!resp.ok) throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status));
+                if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
+                _trace.ok(result);
                 return result;
             });
+        }, function(err) {
+            _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
+            throw err;
         });
     };
 
@@ -3639,6 +3702,7 @@
     // склад (та же Партия ГП без своего обеспечения). Зависимые _m_new не параллелятся.
     AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped, strategy) {
         var self = this;
+        this._ppOp = 'runGenerateCuts';   // #4177: контекст трассы записей (async)
         // #3865/#3902: окно прогресса показываем сразу по «Создать» И уступаем кадр браузеру,
         // чтобы индикатор успел ОТРИСОВАТЬСЯ перед тяжёлой синхронной подготовкой (раскладка по
         // дням + выравнивание загрузки станков по ВСЕМ резкам выполняются синхронно, до первых
@@ -4658,6 +4722,7 @@
     // Не молча (ТЗ §14/#4059): console + тост. → Promise<число восстановленных связей>.
     AtexProductionPlanning.prototype.reconcileOrphanOrderSupplies = function() {
         var self = this;
+        this._ppOp = 'reconcileOrphanOrderSupplies';   // #4177: контекст трассы записей (async)
         var fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!fbMeta || !supMeta) return Promise.resolve(0);
         var supByCut = {};
@@ -4734,6 +4799,7 @@
     // Обеспечение «сегодня» (A) уменьшается до своей доли. Последовательно (не грузим сервер).
     AtexProductionPlanning.prototype.applySplitPlan = function(ops) {
         var self = this;
+        this._ppOp = 'applySplitPlan';   // #4177: контекст трассы записей (async)
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
@@ -5390,6 +5456,7 @@
 
     AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder, moveScope) {
         var self = this;
+        this._ppOp = 'autoSequenceQueue';   // #4177: контекст трассы записей (async)
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
         var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder, moveScope);   // #4074: moveScope.pinCutIds — закрепить перенесённое задание при пересборке по срокам
         var ops = built.ops;
