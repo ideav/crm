@@ -12034,7 +12034,7 @@
             self.setBusy(false);
             self.setGenBusy(false);
             var renderStart = Date.now();
-            self.render();
+            self.render({ skipQualityCheck: true });
             var renderMs = Date.now() - renderStart;
             console.log('[pp] 🔧 runGenerateCuts: render занял ' + renderMs + 'мс');
             var totalElapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
@@ -14483,7 +14483,8 @@
                             + '») пусты — суммы наладки нечем показать; пересчитайте план («Сгенерировать» / «Упорядочить»)')
                         : ('в таблице «' + TABLE.cut + '» нет колонок наладки #3698 («' + CUT_REQ.knifeSetupMin
                             + '» / «' + CUT_REQ.materialWindingMin + '») — добавьте их');
-                    console.error('[pp] Качество плана: ' + qErr);
+                    if (!options?.skipQualityCheck) 
+                        console.error('[pp] Качество плана: ' + qErr);
                     // Тост один раз на состояние (renderQueue частый) — не спамим, но и не молчим.
                     if (self.notify && self._qualityColsError !== qErr) { self._qualityColsError = qErr; self.notify('Качество плана: ' + qErr, 'error'); }
                     var qErrPanel = el('div', { class: 'atex-pp-quality atex-pp-quality-error',
