@@ -4740,10 +4740,15 @@
             .then(function() { return self.reload(); })
             .then(function() {
                 self.setBusy(false);
-                self.render();   // обмен planStart виден сразу (даже если пересборка ниже без изменений)
-                // Переупаковка дня встык по новому порядку planStart (как перенос/удаление, #3840);
-                // autoSequenceQueue сам делает persistCutSetupColumns + reload/render при изменениях.
-                return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+                // #4189: ↑/↓ — ПРОСТО обмен местами двух соседних заданий (обмен planStart выше), БЕЗ
+                // пере-упаковки дня. autoSequenceQueue (persistCutSetupColumns + пере-раскрой по новому
+                // planStart, #3840) больше НЕ вызываем автоматом. Наладка соседей теперь неактуальна →
+                // метим СТАНОК «грязным»: renderQueue покажет крупную красную «Пересчитать наладку»
+                // (пересчёт по кнопке, не автоматом).
+                var moveSid = (a.slitter && a.slitter.id != null) ? String(a.slitter.id) : '';
+                (self._manualMoveDirty = self._manualMoveDirty || {})[moveSid] = true;
+                self.render();   // обмен planStart + кнопка «Пересчитать наладку» видны сразу
+                return true;
             })
             .catch(function(err) {
                 self.setBusy(false);
@@ -4861,6 +4866,7 @@
     AtexProductionPlanning.prototype.applySplitPlan = function(ops) {
         var self = this;
         this._ppOp = 'applySplitPlan';   // #4177: контекст трассы записей (async)
+        self._manualMoveDirty = {};   // #4189: применение пересчёта плана снимает «грязь» ручной ↑/↓-перестановки (в т.ч. «Упорядочить»)
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!cutMeta) { self.notify('Не найдены метаданные «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);   // live: «Кол-во резок план»
@@ -5519,6 +5525,7 @@
         var self = this;
         this._ppOp = 'autoSequenceQueue';   // #4177: контекст трассы записей (async)
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
+        self._manualMoveDirty = {};   // #4189: пересчёт очереди снимает «грязь» ручной ↑/↓-перестановки (кнопка/генерация/перенос)
         var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder, moveScope);   // #4074: moveScope.pinCutIds — закрепить перенесённое задание при пересборке по срокам
         var ops = built.ops;
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
@@ -6213,6 +6220,25 @@
             this.downtimeActiveSlitter = actId ? { id: actId, label: actSlitter.label } : null;
         }
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
+
+        // #4189: после ручной перестановки ↑/↓ (moveCutInDay) наладка соседей неактуальна — крупная
+        // красная «Пересчитать наладку». Пересчёт (autoSequenceQueue preserveOrder=true) НЕ меняет
+        // порядок, только время наладки затронутых операций (следующие сдвигаются); станки не
+        // переназначаются, пишутся лишь изменившиеся поля → эффект «только на этом станке».
+        var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
+        if (self._manualMoveDirty && self._manualMoveDirty[actDirtyId]) {
+            var recalcBtn = el('button', {
+                class: 'atex-pp-recalc-setup', type: 'button', text: '↻ Пересчитать наладку',
+                title: 'После ручной перестановки: пересчитать время наладки этого станка (порядок не меняется, следующие задания могут сдвинуться)',
+                style: 'display:block;width:100%;margin:6px 0 10px;padding:11px 16px;background:#c0392b;color:#fff;'
+                     + 'font-weight:700;font-size:15px;border:none;border-radius:6px;cursor:pointer;'
+            });
+            recalcBtn.addEventListener('click', function() {
+                if (self.busy) return;
+                self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function() { self.render(); });
+            });
+            groupEl.appendChild(recalcBtn);
+        }
 
         // Расписание активного станка: старт/финиш каждой резки от начала смены (08:00).
         // Длительность — намотка прогона (метраж обеспечений → windingMinutes), плюс
