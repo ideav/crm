@@ -156,6 +156,7 @@
         orderCuts: orderCuts,
         cutConfigSig: cutConfigSig,                   // #4139
         resequenceWithinDays: resequenceWithinDays,   // #4139
+        clusterMaterialWithinKnifeBlocks: clusterMaterialWithinKnifeBlocks,   // #4184
         orderedChangeoverCost: orderedChangeoverCost,
         bestExistingTransitionCost: bestExistingTransitionCost,
         chooseSlitterBySetup: chooseSlitterBySetup,
