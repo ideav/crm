@@ -7929,6 +7929,7 @@
         chooseTailSetupSubset: chooseTailSetupSubset,   // #4144: единое правило хвоста дня (упаковщик + колонки)
         splitTailSetupAtCeiling: splitTailSetupAtCeiling,   // #4111: раскладка наладки хвоста дня по потолку нахлёста
         setupActivityColumns: setupActivityColumns,   // #3698
+        formatEmptySetupIds: formatEmptySetupIds,     // #4188: трасса «где именно пусто»
         planningStrategy: planningStrategy,
         planningStrategyLabel: planningStrategyLabel,
         makePlanningOptions: makePlanningOptions,
@@ -12034,7 +12035,7 @@
             self.setBusy(false);
             self.setGenBusy(false);
             var renderStart = Date.now();
-            self.render({ skipQualityCheck: true });
+            self.render();
             var renderMs = Date.now() - renderStart;
             console.log('[pp] 🔧 runGenerateCuts: render занял ' + renderMs + 'мс');
             var totalElapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
@@ -12211,17 +12212,45 @@
     // остаются объективу «Упорядочить» (planChangeoverMin/planQuality), а не показу оператору.
     //   fromK/toK — окно дней [С;По] (YYYYMMDD; null → без границы). Окно/предикат — как planQuality:
     //   window = [С;По] (панель), all = [С; конец всех задач] (тултип).
-    // → { window, all, hasStored }. hasStored=false (у базы нет колонок #3698 / все пусты) — панель НЕ
-    //   молчит и НЕ подсовывает оценку planQuality под видом факта, а выводит ОШИБКУ (renderQueue:
-    //   консоль + тост + красная плашка) — это ошибка конфигурации/данных, ТЗ §14/#4059.
+    // → { window, all, hasStored, emptyWindow, emptyAll }. hasStored=false (у базы нет колонок #3698 /
+    //   все пусты) — панель НЕ молчит и НЕ подсовывает оценку planQuality под видом факта, а выводит
+    //   ОШИБКУ (renderQueue: консоль + тост + красная плашка) — это ошибка конфигурации/данных, ТЗ §14/#4059.
+    //   emptyWindow/emptyAll (#4188) — какие ИМЕННО задания пусты (id/день/станок/проходы), для трассы.
+
+    // #4188: компактная строка перечня пустых заданий для трассы «где именно пусто».
+    // list — storedSetupTotals().emptyWindow/emptyAll; элемент { id, dayKey, slitter, plannedRuns }.
+    // Печатаем «id@день/ст.N/0прох» (0 проходов = setup-only хвост дробления), первые cap штук + «…ещё K».
+    function formatEmptySetupIds(list, cap) {
+        var lim = cap || 40;
+        var arr = list || [];
+        var head = arr.slice(0, lim).map(function(e) {
+            return String(e.id) + '@' + (e.dayKey || '?') + (e.slitter ? ('/ст.' + e.slitter) : '')
+                + (Number(e.plannedRuns) === 0 ? '/0прох' : '');
+        }).join(', ');
+        var rest = arr.length - lim;
+        return head + (rest > 0 ? ', …ещё ' + rest : '');
+    }
+
     AtexProductionPlanning.prototype.storedSetupTotals = function(fromK, toK) {
         var lo = fromK != null ? Number(fromK) : -Infinity;
         var hi = toK != null ? Number(toK) : Infinity;
         var hasStored = false;
         var rows = (this.cuts || []).map(function(c) {
             var kRaw = c && c.storedKnifeSetupMin, mRaw = c && c.storedMaterialWindingMin;
-            if ((kRaw != null && String(kRaw).trim() !== '') || (mRaw != null && String(mRaw).trim() !== '')) hasStored = true;
-            return { dayKey: planDateDayKey(c && c.planDate), knife: stripNum(kRaw), material: stripNum(mRaw) };
+            var kHas = kRaw != null && String(kRaw).trim() !== '';
+            var mHas = mRaw != null && String(mRaw).trim() !== '';
+            if (kHas || mHas) hasStored = true;
+            return {
+                // #4188: id/станок/проходы — чтобы трасса могла назвать «ГДЕ ИМЕННО» пусто, а не просто «пусто».
+                id: (c && c.id != null) ? String(c.id) : '',
+                dayKey: planDateDayKey(c && c.planDate),
+                slitter: (c && c.slitter && c.slitter.id != null) ? String(c.slitter.id) : '',
+                plannedRuns: stripNum(c && c.plannedRuns),
+                knife: stripNum(kRaw), material: stripNum(mRaw),
+                // #4188: колонки наладки НЕ ЗАПИСАНЫ (обе пусты) — это НЕ то же, что хранимый «0»
+                // (заполненный ноль = «наладки нет»). Пустое = «ещё не посчитано/не сохранено».
+                empty: !kHas && !mHas
+            };
         });
         function acc(inWin) {
             var kc = 0, km = 0, mc = 0, mm = 0, tc = 0;
@@ -12234,10 +12263,24 @@
             return { knifeCount: kc, knifeMin: round3(km), materialCount: mc, materialMin: round3(mm),
                      changeoverCount: kc + mc, changeoverMin: round3(km + mm), taskCount: tc };
         }
+        // #4188: перечень заданий с ПУСТЫМИ (незаписанными) колонками наладки — «где именно пусто».
+        // Каждый — { id, dayKey, slitter, plannedRuns }, чтобы в трассе видеть станок/день/сегмент
+        // (0 проходов = setup-only хвост дробления). Порядок = порядок this.cuts.
+        function emptyList(inWin) {
+            var out = [];
+            rows.forEach(function(e) {
+                if (inWin(e.dayKey) && e.empty) out.push({ id: e.id, dayKey: e.dayKey, slitter: e.slitter, plannedRuns: e.plannedRuns });
+            });
+            return out;
+        }
+        var winPred = function(dk) { return dk >= lo && dk <= hi; };
+        var allPred = function(dk) { return dk >= lo; };
         return {
-            window: acc(function(dk) { return dk >= lo && dk <= hi; }),
-            all: acc(function(dk) { return dk >= lo; }),
-            hasStored: hasStored
+            window: acc(winPred),
+            all: acc(allPred),
+            hasStored: hasStored,
+            emptyWindow: emptyList(winPred),   // #4188: пустые задания в окне [С;По]
+            emptyAll: emptyList(allPred)       // #4188: пустые задания за весь горизонт
         };
     };
 
@@ -14483,8 +14526,20 @@
                             + '») пусты — суммы наладки нечем показать; пересчитайте план («Сгенерировать» / «Упорядочить»)')
                         : ('в таблице «' + TABLE.cut + '» нет колонок наладки #3698 («' + CUT_REQ.knifeSetupMin
                             + '» / «' + CUT_REQ.materialWindingMin + '») — добавьте их');
-                    if (!options?.skipQualityCheck) 
-                        console.error('[pp] Качество плана: ' + qErr);
+                    console.error('[pp] Качество плана: ' + qErr);
+                    // #4188: ГДЕ ИМЕННО пусто и ПОЧЕМУ — перечисляем ID заданий с незаписанными колонками
+                    // наладки (+станок/день/сегмент) и КОНТЕКСТ операции (self._ppOp). Это отвечает на
+                    // «где и почему»: при операции runGenerateCuts колонки ещё НЕ записаны (их пишет
+                    // последующий autoSequenceQueue → persistCutSetupColumns), поэтому пусто ОЖИДАЕМО и
+                    // уйдёт на пере-рендере после пересборки; если же пусто без последующей пересборки —
+                    // колонки реально не сохранены (тогда список ID укажет конкретные задания).
+                    if (hasSetupCols) {
+                        var emptyCuts4188 = setupTot.emptyWindow || [];
+                        console.error('[pp] #4188 пустые колонки наладки: ' + emptyCuts4188.length + ' из '
+                            + setupTot.window.taskCount + ' заданий окна; операция=' + (self._ppOp || '?')
+                            + '; ID: ' + formatEmptySetupIds(emptyCuts4188),
+                            { emptyIds: emptyCuts4188, op: self._ppOp || null });
+                    }
                     // Тост один раз на состояние (renderQueue частый) — не спамим, но и не молчим.
                     if (self.notify && self._qualityColsError !== qErr) { self._qualityColsError = qErr; self.notify('Качество плана: ' + qErr, 'error'); }
                     var qErrPanel = el('div', { class: 'atex-pp-quality atex-pp-quality-error',
@@ -14501,6 +14556,17 @@
                     box.appendChild(qErrPanel);
                 } else {
                     self._qualityColsError = null;   // ошибка снялась — дать снова шуметь, если вернётся
+                    // #4188: ЧАСТИЧНО пусто — часть заданий окна БЕЗ колонок наладки, а часть с ними
+                    // (hasStored=true → красной плашки нет). Такие задания молча дают 0 в суммы наладки —
+                    // «переналадки/ножи/сырьё» окна ЗАНИЖЕНЫ. Не критично для очереди (плашку не рвём),
+                    // но в трассу выводим ГДЕ ИМЕННО (ID+станок+день) под тумблером PP_TRACE, чтобы не
+                    // спамить консоль на каждом рендере. Пустое ≠ хранимый «0» (см. storedSetupTotals).
+                    var partialEmpty4188 = setupTot.emptyWindow || [];
+                    if (partialEmpty4188.length && ppTraceOn()) {
+                        ppTraceWarn('#4188 частично пустые колонки наладки: ' + partialEmpty4188.length + ' из '
+                            + setupTot.window.taskCount + ' заданий окна (суммы наладки занижены); операция='
+                            + (self._ppOp || '?') + '; ID: ' + formatEmptySetupIds(partialEmpty4188));
+                    }
                     // #4013: панель — по ОКНУ [С;По] (факт из хранимых колонок, идеал/комбинации ОКНА).
                     var qW = setupTot.window, qAll = setupTot.all;
                     // Избыток = ФАКТ окна − идеал окна (#4156; отрицательный = план лучше идеала, станок
