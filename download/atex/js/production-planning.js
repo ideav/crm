@@ -13216,7 +13216,13 @@
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
-            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #4050
+            // #4195: срок для планировщика берём ТЕМ ЖЕ источником, что и панель «просрочено»
+            // (countOverdueCuts) и цветовая плашка (#4051) — includeSupplyFallback=true. Иначе у резки,
+            // чья позиция выпала из активного positions_list (genPositions), но срок есть в обеспечении
+            // (cut_planning.due_date), планировщик срока НЕ видел → штраф DEADLINE_COST_MN не применялся →
+            // резка вставала за своим сроком, а панель её считала просроченной («трасса: просрочек нет»
+            // vs «панель: N», задание 527055 «срок —»).
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);   // #4050 + #4195 (fallback как у панели)
             if (dueKeys && dueKeys.length) {
                 var dueOff = dueDayOffsetFromBase(dueKeys[0], planBaseMidnightMs);
                 if (dueOff != null) dueDayByCut[String(c.id)] = dueOff;
