@@ -5428,11 +5428,19 @@
         // cutDueKeys) как индекс дня от базы «С» — для §8-штрафа в splitMachineQueue (selectByConfig).
         var dueDayByCut = {};
         var dueKeyByCut = {};   // #4085: срок как YYYYMMDD (для локального штрафа в scorePosition слоя размещения)
+        // #4195: фолбэк срока из cut_planning (supply.dueKey) в РАЗМЕЩЕНИЕ по дням — ТОЛЬКО на пути
+        // ручного переноса 🗓 (moveScope.pinCutIds, #4074). Задание-сирота дробления (#4163/#4175), чья
+        // позиция выпала из активного positions_list, держит срок ЛИШЬ в обеспечении; без фолбэка слой
+        // размещения его срока не видит → штраф DEADLINE_COST не применяется → перенос+пересборка
+        // уводят сироту ЗА срок (issue #4195). Общий путь (генерация, «Упорядочить») фолбэк НЕ включает:
+        // включённый глобально (PR#4196) он дал заданиям без активной позиции срок «сегодня» → конкуренция
+        // за забитый день 0 → просрочка уже при ПЕРВОМ планировании, которой не было (#4197, откат #4198).
+        var honorSupplyDue = !!(moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length);
         cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
-            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions);   // #4050
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, honorSupplyDue);   // #4050 / #4195: фолбэк только при ручном переносе
             if (dueKeys && dueKeys.length) {
                 var dueOff = dueDayOffsetFromBase(dueKeys[0], planBaseMidnightMs);
                 if (dueOff != null) dueDayByCut[String(c.id)] = dueOff;
