@@ -4130,10 +4130,18 @@
                 var demandByWidth = {};
                 var ordersByWidth = {};
                 segSupplies.forEach(function(s) {
-                    if (!(s.rolls > 0)) return;
                     var key = stripWidthKey(s.width);
+                    // #4179: «ID заказа» партии — по ПОКРЫТИЮ РАСКЛАДКИ (заказы покрытых позиций
+                    // этой ширины), а НЕ по доле рулонов сегмента. У setup-only сегмента дробления
+                    // (0 проходов) доля рулонов = 0, но его «Партия ГП» всё равно ВЫПУСКАЕТ этот
+                    // заказ (та же раскладка) — без «ID заказа» она станет сиротой «нет связей»
+                    // (reconcileOrphanOrderSupplies её не чинит: пустой order id, #4175). Заказ
+                    // определяет покрытие раскладки, число рулонов — доля сегмента: разделяем.
+                    if (s.orderId != null && String(s.orderId) !== '') {
+                        (ordersByWidth[key] = ordersByWidth[key] || []).push(s.orderId);
+                    }
+                    if (!(s.rolls > 0)) return;
                     demandByWidth[key] = round3((demandByWidth[key] || 0) + s.rolls);
-                    (ordersByWidth[key] = ordersByWidth[key] || []).push(s.orderId);
                 });
                 function createFinishedBatches(cutId) {
                     var batchChain = Promise.resolve();
@@ -4737,6 +4745,7 @@
         var fbWidthIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.width);
         var fbRollsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
         var fbPlannedIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.planned);
+        var fbStripsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.strips);   // #4179: полос за проход — для реального выпуска
         // Позиция заказа по (заказ|ширина) — из positions_list; освежаем, если пусто (напр. «Упорядочить»).
         var ensurePos = (self.genPositions && self.genPositions.length) ? Promise.resolve() : self.loadPositions();
         return ensurePos.then(function() {
@@ -4757,6 +4766,14 @@
                             var pos = posByOrderWidth[oid + '|' + stripWidthKey(w)];
                             var rolls = (fbRollsIdx >= 0 && stripNum(r[fbRollsIdx]) > 0) ? stripNum(r[fbRollsIdx])
                                       : (fbPlannedIdx >= 0 ? stripNum(r[fbPlannedIdx]) : 0);
+                            // #4179: реальный выпуск задания = полос × ПРОХОДОВ задания. У реюзнутого
+                            // setup-only сегмента (0 проходов при генерации → runs проставлены позже)
+                            // «Кол-во план/рулонов» партии УСТАРЕЛИ (полос×0=полос), поэтому берём МАКСИМУМ
+                            // из хранимого и реального выпуска — иначе Обеспечение восстановится заниженным
+                            // (5 из 20) и заказ снова «недообеспечен» → повторная генерация (churn).
+                            var strips = fbStripsIdx >= 0 ? stripNum(r[fbStripsIdx]) : 0;
+                            var produced = round3(strips * stripNum(c.plannedRuns));
+                            if (produced > rolls) rolls = produced;
                             if (!pos) { unmapped.push({ cutId: String(c.id), fbId: String(rec.i), orderId: oid, width: String(w) }); return; }
                             restored.push({ cutId: String(c.id), fbId: String(rec.i), positionId: String(pos.id),
                                 rolls: rolls, footage: pos.length > 0 ? round3(pos.length) : '' });
