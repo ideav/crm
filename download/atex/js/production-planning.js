@@ -8770,8 +8770,13 @@
             });
             console.log('[pp] 📅 loadCalendar: дней-исключений в календаре:', Object.keys(self.calendarByDay).length);
         }).catch(function(err) {
-            console.warn('[pp] 📅 loadCalendar: не удалось прочитать «' + TABLE.calendar + '»:', err && err.message);
+            // #4234: НЕ глушим. Пустой/недоступный «Календарь» (нет READ-гранта у роли / ошибка
+            // сервера) молча делал все дни рабочими и ронял план в просрочку — причём в разных
+            // браузерах по-разному (разные сессии/доступы). Роняем загрузку с внятным сообщением
+            // (init → fatal), а не строим расписание на неполном календаре.
+            console.error('[pp] 📅 loadCalendar: не удалось прочитать «' + TABLE.calendar + '»:', err && err.message);
             self.calendarByDay = {};
+            throw new Error('«' + TABLE.calendar + '»: ' + ((err && err.message) || 'ошибка чтения'));
         });
     };
 
@@ -8901,9 +8906,12 @@
     };
 
     // #3391: таблица «Максимальный запас» (object/{id}) → индекс целесообразных к
-    // хранению номенклатур. Таблица необязательна: если её нет в метаданных —
-    // индекс пуст (фича выключена, поведение прежнее). Ошибка чтения не валит
-    // загрузку — лишь логируется (планирование работает и без таблицы).
+    // хранению номенклатур. Таблица необязательна: если её нет в метаданных (meta) —
+    // индекс пуст (фича выключена, поведение прежнее).
+    // #4234: но если meta ЕСТЬ, а чтение упало (нет READ-гранта у роли / ошибка сервера) —
+    // НЕ глушим. Пустой «Максимальный запас» молча менял решения «в запас / в заказ» и
+    // ронял план в просрочку (в разных браузерах — разные сессии/доступы → разный план).
+    // Роняем загрузку с внятным сообщением (init → fatal), а не строим план на неполных данных.
     AtexProductionPlanning.prototype.loadMaxStock = function() {
         var self = this;
         var meta = this.meta.maxStock;
@@ -8913,8 +8921,9 @@
             self.maxStockIndex = planning.buildMaxStockIndex(rows || [], meta);
             console.log('[pp] 📦 loadMaxStock: номенклатур запаса:', self.maxStockIndex.list.length);
         }).catch(function(err) {
-            console.warn('[pp] 📦 loadMaxStock: не удалось прочитать «Максимальный запас»:', err && err.message);
+            console.error('[pp] 📦 loadMaxStock: не удалось прочитать «Максимальный запас»:', err && err.message);
             self.maxStockIndex = planning.buildMaxStockIndex([], meta);
+            throw new Error('«Максимальный запас»: ' + ((err && err.message) || 'ошибка чтения'));
         });
     };
 
