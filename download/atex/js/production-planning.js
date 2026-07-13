@@ -7506,6 +7506,18 @@
         var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
         var dayOff = prefixDayOffset(withSlot, index, ctx);
         var placementDayKey = (ctx.baseMidnightMs != null) ? dayKeyFromOffset(ctx.baseMidnightMs, dayOff) : undefined;
+        // #4202: штраф «фольга не в конце дня» (FOIL_NOTEND) был АСИММЕТРИЧЕН — начислялся только когда
+        // ОЦЕНИВАЕМЫЙ слот сам фольга, а после него нефольга. Тогда РЕШЕНИЕ О ПЕРЕМЕЩЕНИИ нефольги
+        // (её «цена остаться»/«цена встать» ЗА фольгой) штраф НЕ видело → любой перенос считал неполный
+        // набор штрафов и мог оставить/поставить резку после фольги (жалоба юзера: «любое перемещение
+        // должно вычислять ВЕСЬ набор штрафов и их сумму»). Делаем штраф СИММЕТРИЧНЫМ: нефольга сразу
+        // ПОСЛЕ фольги В ТОМ ЖЕ дне тоже несёт FOIL_NOTEND. Гейт «тот же день» обязателен — нефольга в
+        // НАЧАЛЕ следующего дня после фольги, закрывшей прошлый день, нарушением НЕ является (фольга там
+        // последняя). Слой размещения кладёт нефольгу ПЕРВОЙ (movable сортируется), поэтому при вставке
+        // нефольги фольги в занятости ещё нет → на первичное размещение симметричный член не влияет;
+        // он «включается» лишь на РЕЛОКАЦИИ/оценке позиций, где фольга уже стои́т.
+        var prevSameDayFoil = !slot.isFoil && prevCut && prevCut.isFoil
+            && index > 0 && prefixDayOffset(withSlot, index - 1, ctx) === dayOff;
         // #4098: штраф срока (DEADLINE/EXACT_DEADLINE) при оценке «остаться» (релокация) считаем по
         // РЕАЛЬНОМУ дню слота (ctx.selfRealDayKey, из splitMachineQueue), а не по ОЦЕНКЕ дня. Иначе
         // просрочку, которую упаковка сделала реально (day1), оценка видит как «в притык» (day0) и
@@ -7515,7 +7527,7 @@
             settings: ctx.settings,
             freeAfterCarry: !!(prev && prev.kind === 'vacation') || !!ctx.freeAfterCarry,
             placementDayKey: dueDayKey,
-            foilNotEnd: !!(slot.isFoil && nextCut && !nextCut.isFoil),
+            foilNotEnd: !!((slot.isFoil && nextCut && !nextCut.isFoil) || prevSameDayFoil),
             isMove: !!ctx.isMove,
             distanceExceeded: !!(ctx.distanceExceededFor && ctx.distanceExceededFor(ctx.slitterId, dayOff, index))
         };
