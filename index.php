@@ -5859,7 +5859,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					Check_Grant($f_u, $id);  # Check the delete grant
 				}
 				elseif(Check_Grant($f_u, $id, "READ", FALSE) === FALSE)
-					if(isApi())	# #4234: API-чтение без READ-гранта → внятная ошибка, а не молча пустой ответ (иначе клиент молча деградирует)
+					if(isApi())	# #4234: API-чтение без READ-гранта
 						my_die(t9n("[RU]У вас нет доступа на чтение записей объекта $id (родитель $f_u)[EN]You have no READ grant to object $id (parent $f_u)"), "403 Forbidden");
 					else
 						break;
@@ -10245,11 +10245,6 @@ switch($a)  # Check actions, which don't require authentication
 									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
 								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD;
 		$data_set = Exec_sql($sql, "Authenticate user");
-		# #3576/#3581: «превышено при пустом Retries» вызвано НЕ дублями пользователя, а
-		# рассинхроном типа счётчика (исправлено RETRIES=301 выше). Этот гард оставлен как
-		# защита по аналогии с входом по коду: если в битой базе окажется несколько узлов
-		# одного логина, не блокировать вход по протухшей строке. Считаем РАЗНЫЕ u.id (а не
-		# строки: LEFT JOIN tok/act/xsrf/retries может дать несколько строк на одного юзера).
 		$dupUids = [];
 		while($probe = mysqli_fetch_array($data_set))
 			$dupUids[$probe["uid"]] = true;
@@ -10306,10 +10301,7 @@ switch($a)  # Check actions, which don't require authentication
 				wlog(" Failed", "log");
 		}
 		if($row){
-			# #3576: успешный вход обнуляет счётчик неудачных попыток. Раньше retries
-			# только инкрементился (и паролем, и кодом — счётчик общий) и НИГДЕ не
-			# сбрасывался, поэтому, единожды достигнув RETRIES_LIMIT, «превышено попыток»
-			# залипало навсегда — на каждую опечатку, даже после успешных входов.
+			# #3576: успешный вход обнуляет счётчик неудачных попыток
 			if(!empty($row["retries_id"]) && (int)$row["retries"] > 0)
 				Update_Val($row["retries_id"], 0);
 			$GLOBALS["GLOBAL_VARS"]["user"] = $row["val"];
