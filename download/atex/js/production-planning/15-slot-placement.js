@@ -468,10 +468,14 @@
             // текущие реальные дни по каждому станку (станки независимы — день задания задаёт его очередь)
             var realBy = {}; Object.keys(byMachine).forEach(function(k){ realBy[k] = realDayFn(cutIdsOf(k), k) || {}; });
             // собрать просроченные (самые «глубокие» первыми — им труднее найти место)
+            // #4224: рескьюем даже ЗАФИКСИРОВАННОЕ (🔒) просроченное задание. Просрочка недопустима
+            // НИКАКИМ образом; фикс, оставивший задание за сроком, невалиден (пользователь приколол
+            // задание, ожидая его В СРОК, а перестройка увела за срок). НЕ просроченный фикс не трогаем
+            // (od=0 отсеет), а при переносе бережём чужие фиксы — не выталкиваем их на день позже (ниже).
             var overdue = [];
             Object.keys(byMachine).forEach(function(sid){
                 byMachine[sid].forEach(function(s){
-                    if (!s || s.kind !== 'cut' || s.fixed) return;
+                    if (!s || s.kind !== 'cut') return;
                     var od = overdueDays(String(s.id), realBy[sid]);
                     if (od > 0) overdue.push({ id: String(s.id), sid: sid, curReal: Number(realBy[sid][String(s.id)]), depth: od });
                 });
@@ -488,9 +492,14 @@
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
+                    // #4224: зафиксированное (🔒) задание рескьюим ТОЛЬКО в пределах СВОЕГО станка —
+                    // станок выбрал пользователь; чиним лишь день (в срок), не перекидывая на другой станок.
+                    if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
                     var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
+                    tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
                         if (!canInsertAt(tarr, idx)) continue;
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
@@ -499,12 +508,14 @@
                         var real = realDayFn(trialIds, tid) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает реальный день — мимо
-                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку
+                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку И не увести чужой фикс на день позже
                         for (var bi = 0; bi < baseIds.length && !harms; bi++){
                             var oid = baseIds[bi];
                             var wasOd = (Number(baseReal[oid]) - Number(dueDayByCut[oid]));   wasOd = (dueDayByCut[oid] == null || baseReal[oid] == null || wasOd < 0) ? 0 : wasOd;
                             var nowOd = (Number(real[oid]) - Number(dueDayByCut[oid]));        nowOd = (dueDayByCut[oid] == null || real[oid] == null || nowOd < 0) ? 0 : nowOd;
                             if (nowOd > wasOd) harms = true;
+                            // #4224: не ломаем чужой замок дня — фикс не должен переехать на более поздний день
+                            if (fixedOnTid[oid] && baseReal[oid] != null && real[oid] != null && Number(real[oid]) > Number(baseReal[oid])) harms = true;
                         }
                         if (harms) continue;
                         var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
