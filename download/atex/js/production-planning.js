@@ -5031,6 +5031,7 @@
                 dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
                 dayByCut: opts.dayByCut, relocate: false,   // #4095/§12: релокация — ниже, по РЕАЛЬНЫМ дням упаковщика
                 orderIdsByCut: opts.orderIdsByCut,   // #4194: множества заказов заданий (штраф/бонус смежности в scorePosition)
+                dayLockByCut: opts.dayLockByCut,   // #4221: замок дня/станка для переноса 🗓 «По весу» (позиция в дне по весу)
                 trace: slotTraceOn()
             }));
         }
@@ -7635,6 +7636,15 @@
         var feasible = ctx.feasibleMachine || function(){ return true; };
         var distFn = makeDistanceExceeded(occupancy, ctx);   // #4106: спред-штраф §8 п.6 по текущей занятости
         var best = null;
+        // #4221: «замок дня/станка» для ручного переноса 🗓 «По весу». Задание должно остаться на
+        // ВЫБРАННОМ пользователем дне и станке, а ПОЗИЦИЯ в дне — по наилучшему весу (полный набор
+        // штрафов scorePosition). lockSid — единственный допустимый станок; lockDay — единственный
+        // допустимый день-смещение. Кандидаты вне замка отбрасываем; bestAny — страховка, если на
+        // замковом дне нет ни одной точки (день переполнен → любая вставка переливает на след. день):
+        // тогда ставим лучший по весу на замковом станке, чтобы задание не потерялось.
+        var lockSid = slot.lockSlitter != null ? String(slot.lockSlitter) : null;
+        var lockDay = isFinite(Number(slot.lockDay)) ? Number(slot.lockDay) : null;
+        var bestAny = null;
         var tr = ctx.traceTasks ? { id: slot.id, dueKey: isFinite(Number(slot.dueKey)) ? Number(slot.dueKey) : null,
                                     isFoil: !!slot.isFoil, workMin: round3(slotWorkMin(slot, ctx)),
                                     variants: 0, skipped: 0, first: null, bestInDue: null } : null;
@@ -7643,6 +7653,7 @@
                      dayOffset: sc.dayOffset, placementDayKey: sc.placementDayKey, byFactor: sc.byFactor };
         }
         Object.keys(byMachine).forEach(function(sid){
+            if (lockSid != null && String(sid) !== lockSid) return;   // #4221: перенос только в пределах замкового станка
             if (!feasible(sid, slot)) return;
             var arr = byMachine[sid];
             for (var idx = 0; idx <= arr.length; idx++){
@@ -7656,11 +7667,18 @@
                     if (tr.dueKey != null && sc.placementDayKey != null && Number(sc.placementDayKey) <= tr.dueKey
                         && (!tr.bestInDue || cand.weight < tr.bestInDue.weight)) tr.bestInDue = cand;
                 }
+                if (lockDay != null){                                 // #4221: только точки замкового дня
+                    bestAny = betterCand(cand, bestAny);
+                    if (Number(sc.dayOffset) !== lockDay){ if (tr) tr.skipped++; continue; }
+                }
                 best = betterCand(cand, best);
             }
         });
+        if (best == null && bestAny != null) best = bestAny;          // #4221: замковый день переполнен — не терять задание
         var accThreshold = planWeight(ctx.settings, 'KNIVES_CHANGE_COST_MN') + planWeight(ctx.settings, 'MATERIAL_CHANGE_COST_MN');
-        if (!best || best.setupWeight > accThreshold){
+        // #4221: замок дня/станка НЕ отпускаем на «самый свободный станок» — задание держит выбор
+        // пользователя (день+станок), а не уходит на пустой станок ради экономии наладки.
+        if (lockSid == null && lockDay == null && (!best || best.setupWeight > accThreshold)){
             var fb = earliestFreeMachine(occupancy, slot, ctx, feasible);
             if (fb && (!best || fb.machineId !== best.machineId)) best = fb;
         }
@@ -7984,12 +8002,23 @@
         var dueKeyBy = ctx.dueKeyByCut || {};
         var orderIdsBy = ctx.orderIdsByCut || {};   // #4194: cutId → множество заказов (штраф/бонус смежности)
         var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
+        var dayLockBy = ctx.dayLockByCut || {};   // #4221: cutId → день-смещение замка (перенос 🗓 «По весу»)
         var fixedSlots = [], movable = [];
         (cutsList || []).forEach(function(c){
             var id = String(c.id);
             var s = slotFromCut(c, dueKeyBy[id], orderIdsBy[id]);
             s.workMin = (Number(perPass[id]) || 0) * (Number(c.plannedRuns) || 0);
-            if (c.fixed){ if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id); fixedSlots.push(s); }
+            if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id);
+            // #4221: перенос 🗓 «По весу» — задание НЕ приколото позицией (как 🔒), а «замкнуто» на
+            // ВЫБРАННЫЙ день и станок: кладём его как ПОДВИЖНОЕ (позиция в дне по весу scorePosition),
+            // но с lockDay/lockSlitter (placeSlot держит день/станок). Замок ловит день сам (порядок
+            // размещения → упаковка), поэтому c.fixed не нужен (иначе задание осело бы неподвижным).
+            var dl = dayLockBy[id];
+            if (dl != null && isFinite(Number(dl))){
+                s.lockDay = Number(dl);
+                s.lockSlitter = s.slitterId != null ? String(s.slitterId) : null;
+                movable.push(s);
+            } else if (c.fixed){ fixedSlots.push(s); }
             else movable.push(s);
         });
         // #3717/#4085: подвижную фольгу размещаем ПОСЛЕ нефольги. Жадная вставка «по одному» не видит
@@ -7997,7 +8026,15 @@
         // применяется к УЖЕ стоящим соседям). Разместив всю нефольгу первой, каждая фольга штрафом
         // уводится в конец своего дня, при этом сама выбирает срок-оптимальный день (deadline-штраф жив).
         // Стабильная перестановка: исходный порядок §7 внутри «нефольга»/«фольга» сохраняется.
-        movable = movable.filter(function(s){ return !s.isFoil; }).concat(movable.filter(function(s){ return s.isFoil; }));
+        // #4221: задание с замком дня («По весу») размещаем ПОСЛЕДНИМ в своём классе (нефольга/фольга):
+        // оно должно ВСТАТЬ В ЛУЧШУЮ ЩЕЛЬ между уже разложенными соседями (иначе, встав первым, оно
+        // осело бы в индекс 0 пустого дня — не по весу). Замок держит день/станок, вес — позицию.
+        function lockLast(arr){
+            return arr.filter(function(s){ return s.lockDay == null && s.lockSlitter == null; })
+                      .concat(arr.filter(function(s){ return s.lockDay != null || s.lockSlitter != null; }));
+        }
+        movable = lockLast(movable.filter(function(s){ return !s.isFoil; }))
+            .concat(lockLast(movable.filter(function(s){ return s.isFoil; })));
         var occ = seedOccupancy(fixedSlots, ctx.vacationSlots || [], slitterIds);
         var trace = ctx.trace ? buildPlacementVariables(ctx, slitterIds, movable.length, fixedSlots.length) : null;
         var placeCtx = { settings: ctx.settings, times: ctx.times, capacityMin: ctx.capacityMin,
@@ -10391,17 +10428,28 @@
             ]));
         }
 
-        // Положение в дне: в начало / в конец.
+        // #4221: положение в дне: «По весу» (по умолчанию — позиция по наилучшему весу), в начало, в конец.
+        var posWeight = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
+        posWeight.value = 'weight'; posWeight.checked = true;
         var posStart = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
-        posStart.value = 'start'; posStart.checked = true;
+        posStart.value = 'start';
         var posEnd = el('input', { type: 'radio', name: 'atex-pp-move-pos' });
         posEnd.value = 'end';
         content.appendChild(el('div', { class: 'atex-pp-move-field' }, [
             el('span', { class: 'atex-pp-move-label', text: 'Положение' }),
             el('div', { class: 'atex-pp-move-pos' }, [
+                el('label', { class: 'atex-pp-move-radio' }, [posWeight, el('span', { text: ' По весу' })]),
                 el('label', { class: 'atex-pp-move-radio' }, [posStart, el('span', { text: ' В начало дня' })]),
                 el('label', { class: 'atex-pp-move-radio' }, [posEnd, el('span', { text: ' В конец дня' })])
             ])
+        ]));
+
+        // #4221: «В пределах этого станка» — по умолчанию установлена. Перенос трогает ТОЛЬКО целевой
+        // станок (не перекидывает и не заимствует задания у других станков при пересборке по срокам).
+        var withinCb = el('input', { type: 'checkbox' });
+        withinCb.checked = true;
+        content.appendChild(el('label', { class: 'atex-pp-move-fix' }, [
+            withinCb, el('span', { text: ' В пределах этого станка' })
         ]));
 
         // Зафиксировать — по умолчанию установлена.
@@ -10419,7 +10467,8 @@
             if (self.busy) return;
             var dateStr = String(dayInput.value || '').trim();
             if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { self.notify('Выберите день для переноса', 'error'); return; }
-            var position = posEnd.checked ? 'end' : 'start';
+            var position = posEnd.checked ? 'end' : (posStart.checked ? 'start' : 'weight');   // #4221: «По весу» по умолчанию
+            var withinSlitter = !!withinCb.checked;   // #4221: перенос только в пределах целевого станка
             var fix = !!fixCb.checked;
             var targetSlitterId = slitSelect ? String(slitSelect.value || '') : '';   // #3669 п.1
             // #3876: целевой станок в отпуске в выбранный день — не переносим (станок без сырья
@@ -10433,7 +10482,7 @@
                 return;
             }
             close();
-            self.moveCutToDay(cut, dateStr, position, fix, targetSlitterId);
+            self.moveCutToDay(cut, dateStr, position, fix, targetSlitterId, withinSlitter);
         });
         actions.appendChild(cancel);
         actions.appendChild(ok);
@@ -10449,7 +10498,7 @@
     // отдельной «Очередности» нет. Фиксация (если отмечена) пишется _m_set.
     // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
-    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId) {
+    AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId, withinSlitter) {
         var self = this;
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
@@ -10546,8 +10595,9 @@
                 var ts = (self.slitters || []).filter(function(s) { return String(s.id) === sidStr; })[0];
                 slitLabel = ' · станок ' + ((ts && ts.label) || ('#' + sidStr));
             }
-            self.notify('Задание перенесено на ' + dateLabel +
-                (position === 'end' ? ' (в конец дня)' : ' (в начало дня)') + slitLabel, 'success');
+            var posLabel = position === 'end' ? ' (в конец дня)'
+                : (position === 'start' ? ' (в начало дня)' : ' (по весу)');   // #4221
+            self.notify('Задание перенесено на ' + dateLabel + posLabel + slitLabel, 'success');
             // #3840: перенос менял «Дату план» только переносимого задания и целевого дня — день-
             // ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте вынутой резки висел простой
             // (РМ «Диаграмма Ганта» рисует сохранённый planStart). Терминальный autoSequenceQueue
@@ -10560,7 +10610,19 @@
             // временный замок дня в buildSequenceOps), остальной план раскладывается по срокам вокруг
             // (перестановка допустима — важно не нарушить сроки, #4074). Фольга остаётся в конце дня
             // (#3717), фиксации (#3792) не нарушаются; пишутся только изменившиеся записи (#3427).
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, { pinCutIds: [String(cut.id)] });
+            // #4221: положение в дне:
+            //   • 'start'/'end' — задание ПРИКОЛОТО (pinCutIds → временный 🔒-замок дня): в слое
+            //     размещения оно неподвижный сосед на плейсхолдер-позиции (в начало/в конец дня);
+            //   • 'weight' — задание НЕ приколачиваем (иначе оно осело бы неподвижным в плейсхолдер),
+            //     а «замыкаем» на выбранный день/станок (weightPositionCutIds → dayLockByCut): держит
+            //     день+станок, ПОЗИЦИЮ в дне выбирает по наилучшему весу (scorePosition, полный набор
+            //     штрафов). День держит сам замок дня в слое размещения (fixed не нужен).
+            // withinSlitter — пересобираем ТОЛЬКО целевой станок (не трогаем и не заимствуем у других).
+            var moveScope = {};
+            if (position === 'weight') moveScope.weightPositionCutIds = [String(cut.id)];
+            else moveScope.pinCutIds = [String(cut.id)];
+            if (withinSlitter) moveScope.withinSlitterId = sidStr;
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, moveScope);
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -13461,7 +13523,9 @@
         // уводят сироту ЗА срок (issue #4195). Общий путь (генерация, «Упорядочить») фолбэк НЕ включает:
         // включённый глобально (PR#4196) он дал заданиям без активной позиции срок «сегодня» → конкуренция
         // за забитый день 0 → просрочка уже при ПЕРВОМ планировании, которой не было (#4197, откат #4198).
-        var honorSupplyDue = !!(moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length);
+        // #4221: ручной перенос — и приколотый (pinCutIds), и «По весу» (weightPositionCutIds).
+        var honorSupplyDue = !!(moveScope && ((moveScope.pinCutIds && moveScope.pinCutIds.length)
+            || (moveScope.weightPositionCutIds && moveScope.weightPositionCutIds.length)));
         // #4194: множество «заказов» каждой резки (id заказов обеспечиваемых позиций, supply.orderNo) —
         // для штрафа/бонуса смежности заказа в слое размещения (scorePosition). Задание может нести
         // НЕСКОЛЬКО заказов (джамбо на несколько позиций); пустой orderNo (сирота #4175/склад) — пропуск.
@@ -13484,6 +13548,17 @@
                 dueKeyByCut[String(c.id)] = dueKeys[0];   // #4085
             }
         });
+        // #4221: перенос 🗓 «По весу» — задание держим на ВЫБРАННОМ дне и отдаём ПОЗИЦИЮ в дне слою
+        // размещения по наилучшему весу. dayLockByCut[id] = день-смещение (из плейсхолдер-«Даты план»,
+        // dayAnchorByCut) → в computeSlotPlacement задание кладётся ПОДВИЖНЫМ с замком дня/станка. День
+        // держит сам замок (не effAnchor: приколотым fixed задание НЕ помечаем — иначе осело бы в начало).
+        var dayLockByCut = {};
+        if (moveScope && moveScope.weightPositionCutIds && moveScope.weightPositionCutIds.length) {
+            moveScope.weightPositionCutIds.forEach(function(id) {
+                var off = dayAnchorByCut[String(id)];
+                if (off != null) dayLockByCut[String(id)] = off;
+            });
+        }
         // #4085: слой размещения (модель #3985) — включается настройкой SLOT_PLACEMENT=1 (по умолчанию
         // ВЫКЛ → прежний путь orderCuts + текущий станок). Даёт planCutOperations допустимость станка
         // (стоп-лист сырья + лимит ширины джамбо) и нерабочие дни станка (выходные/праздники + отпуск).
@@ -13509,6 +13584,16 @@
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
         var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
+        // #4221: «В пределах этого станка» — пересобираем ТОЛЬКО целевой станок: во вход планировщика
+        // берём лишь его задания (прочие станки не трогаются и не заимствуются), а slitterIds ниже
+        // сужаем до него же. Так перенос не перекидывает задания между станками.
+        var withinSid = (moveScope && moveScope.withinSlitterId != null && String(moveScope.withinSlitterId) !== '')
+            ? String(moveScope.withinSlitterId) : null;
+        if (withinSid != null) {
+            planInput = planInput.filter(function(c){
+                return String(c && c.slitter && c.slitter.id != null ? c.slitter.id : '') === withinSid;
+            });
+        }
         // #4074: ручной перенос 🗓 пересобирает план ПО СРОКАМ (deadlineAware, как «Упорядочить»,
         // preserveOrder=false), чтобы задания не уезжали за срок. Прежде перенос завершался
         // preserveOrder-пересборкой (deadlineAware выкл): она паковала всё от «С» вперёд без учёта
@@ -13543,6 +13628,7 @@
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
+            dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
@@ -13552,7 +13638,7 @@
             slotPlacement: slotOn,
             // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)
             intraDayResequence: (self && typeof self.intraDayResequenceOn === 'function') ? self.intraDayResequenceOn() : true,
-            slitterIds: (self.slitters || []).map(function(s){ return String(s.id); }),
+            slitterIds: withinSid != null ? [withinSid] : (self.slitters || []).map(function(s){ return String(s.id); }),   // #4221: «В пределах этого станка» — только целевой
             dueKeyByCut: dueKeyByCut,
             orderIdsByCut: orderIdsByCut,   // #4194: заказы заданий для штрафа/бонуса смежности (слой размещения)
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,

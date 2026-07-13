@@ -271,6 +271,15 @@
         var feasible = ctx.feasibleMachine || function(){ return true; };
         var distFn = makeDistanceExceeded(occupancy, ctx);   // #4106: спред-штраф §8 п.6 по текущей занятости
         var best = null;
+        // #4221: «замок дня/станка» для ручного переноса 🗓 «По весу». Задание должно остаться на
+        // ВЫБРАННОМ пользователем дне и станке, а ПОЗИЦИЯ в дне — по наилучшему весу (полный набор
+        // штрафов scorePosition). lockSid — единственный допустимый станок; lockDay — единственный
+        // допустимый день-смещение. Кандидаты вне замка отбрасываем; bestAny — страховка, если на
+        // замковом дне нет ни одной точки (день переполнен → любая вставка переливает на след. день):
+        // тогда ставим лучший по весу на замковом станке, чтобы задание не потерялось.
+        var lockSid = slot.lockSlitter != null ? String(slot.lockSlitter) : null;
+        var lockDay = isFinite(Number(slot.lockDay)) ? Number(slot.lockDay) : null;
+        var bestAny = null;
         var tr = ctx.traceTasks ? { id: slot.id, dueKey: isFinite(Number(slot.dueKey)) ? Number(slot.dueKey) : null,
                                     isFoil: !!slot.isFoil, workMin: round3(slotWorkMin(slot, ctx)),
                                     variants: 0, skipped: 0, first: null, bestInDue: null } : null;
@@ -279,6 +288,7 @@
                      dayOffset: sc.dayOffset, placementDayKey: sc.placementDayKey, byFactor: sc.byFactor };
         }
         Object.keys(byMachine).forEach(function(sid){
+            if (lockSid != null && String(sid) !== lockSid) return;   // #4221: перенос только в пределах замкового станка
             if (!feasible(sid, slot)) return;
             var arr = byMachine[sid];
             for (var idx = 0; idx <= arr.length; idx++){
@@ -292,11 +302,18 @@
                     if (tr.dueKey != null && sc.placementDayKey != null && Number(sc.placementDayKey) <= tr.dueKey
                         && (!tr.bestInDue || cand.weight < tr.bestInDue.weight)) tr.bestInDue = cand;
                 }
+                if (lockDay != null){                                 // #4221: только точки замкового дня
+                    bestAny = betterCand(cand, bestAny);
+                    if (Number(sc.dayOffset) !== lockDay){ if (tr) tr.skipped++; continue; }
+                }
                 best = betterCand(cand, best);
             }
         });
+        if (best == null && bestAny != null) best = bestAny;          // #4221: замковый день переполнен — не терять задание
         var accThreshold = planWeight(ctx.settings, 'KNIVES_CHANGE_COST_MN') + planWeight(ctx.settings, 'MATERIAL_CHANGE_COST_MN');
-        if (!best || best.setupWeight > accThreshold){
+        // #4221: замок дня/станка НЕ отпускаем на «самый свободный станок» — задание держит выбор
+        // пользователя (день+станок), а не уходит на пустой станок ради экономии наладки.
+        if (lockSid == null && lockDay == null && (!best || best.setupWeight > accThreshold)){
             var fb = earliestFreeMachine(occupancy, slot, ctx, feasible);
             if (fb && (!best || fb.machineId !== best.machineId)) best = fb;
         }
@@ -620,12 +637,23 @@
         var dueKeyBy = ctx.dueKeyByCut || {};
         var orderIdsBy = ctx.orderIdsByCut || {};   // #4194: cutId → множество заказов (штраф/бонус смежности)
         var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
+        var dayLockBy = ctx.dayLockByCut || {};   // #4221: cutId → день-смещение замка (перенос 🗓 «По весу»)
         var fixedSlots = [], movable = [];
         (cutsList || []).forEach(function(c){
             var id = String(c.id);
             var s = slotFromCut(c, dueKeyBy[id], orderIdsBy[id]);
             s.workMin = (Number(perPass[id]) || 0) * (Number(c.plannedRuns) || 0);
-            if (c.fixed){ if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id); fixedSlots.push(s); }
+            if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id);
+            // #4221: перенос 🗓 «По весу» — задание НЕ приколото позицией (как 🔒), а «замкнуто» на
+            // ВЫБРАННЫЙ день и станок: кладём его как ПОДВИЖНОЕ (позиция в дне по весу scorePosition),
+            // но с lockDay/lockSlitter (placeSlot держит день/станок). Замок ловит день сам (порядок
+            // размещения → упаковка), поэтому c.fixed не нужен (иначе задание осело бы неподвижным).
+            var dl = dayLockBy[id];
+            if (dl != null && isFinite(Number(dl))){
+                s.lockDay = Number(dl);
+                s.lockSlitter = s.slitterId != null ? String(s.slitterId) : null;
+                movable.push(s);
+            } else if (c.fixed){ fixedSlots.push(s); }
             else movable.push(s);
         });
         // #3717/#4085: подвижную фольгу размещаем ПОСЛЕ нефольги. Жадная вставка «по одному» не видит
@@ -633,7 +661,15 @@
         // применяется к УЖЕ стоящим соседям). Разместив всю нефольгу первой, каждая фольга штрафом
         // уводится в конец своего дня, при этом сама выбирает срок-оптимальный день (deadline-штраф жив).
         // Стабильная перестановка: исходный порядок §7 внутри «нефольга»/«фольга» сохраняется.
-        movable = movable.filter(function(s){ return !s.isFoil; }).concat(movable.filter(function(s){ return s.isFoil; }));
+        // #4221: задание с замком дня («По весу») размещаем ПОСЛЕДНИМ в своём классе (нефольга/фольга):
+        // оно должно ВСТАТЬ В ЛУЧШУЮ ЩЕЛЬ между уже разложенными соседями (иначе, встав первым, оно
+        // осело бы в индекс 0 пустого дня — не по весу). Замок держит день/станок, вес — позицию.
+        function lockLast(arr){
+            return arr.filter(function(s){ return s.lockDay == null && s.lockSlitter == null; })
+                      .concat(arr.filter(function(s){ return s.lockDay != null || s.lockSlitter != null; }));
+        }
+        movable = lockLast(movable.filter(function(s){ return !s.isFoil; }))
+            .concat(lockLast(movable.filter(function(s){ return s.isFoil; })));
         var occ = seedOccupancy(fixedSlots, ctx.vacationSlots || [], slitterIds);
         var trace = ctx.trace ? buildPlacementVariables(ctx, slitterIds, movable.length, fixedSlots.length) : null;
         var placeCtx = { settings: ctx.settings, times: ctx.times, capacityMin: ctx.capacityMin,
