@@ -5548,6 +5548,18 @@
         self._manualMoveDirty = {};   // #4189: пересчёт очереди снимает «грязь» ручной ↑/↓-перестановки (кнопка/генерация/перенос)
         var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder, moveScope);   // #4074: moveScope.pinCutIds — закрепить перенесённое задание при пересборке по срокам
         var ops = built.ops;
+        // #4200: после ЛЮБОЙ пересборки (генерация/«Упорядочить»/ручной перенос/«Пересчитать наладку»)
+        // задания, ОСТАВШИЕСЯ за сроком по календарю (рескью #4118 не смог — честный дефицит ёмкости),
+        // ОРЁМ громко (ТЗ §14/#4059, [[crm-no-silent-fallback]]): не молча. Панель «просрочено: N» (#4161)
+        // это же показывает визуально; здесь — безусловный след в консоли (slotTrace могут выключить).
+        if (ops && ops.overdue && ops.overdue.length) {
+            try {
+                console.error('[pp] ⛔ #4200 ПОСЛЕ пересборки (' + (preserveOrder ? 'preserveOrder' : 'по срокам')
+                    + ') осталось за сроком заданий: ' + ops.overdue.length + ' — '
+                    + ops.overdue.map(function(o){ return 'резка ' + o.cutId + ' (кал.день ' + o.realDay + ' > срок(день) ' + o.dueDay + ')'; }).join('; ')
+                    + '. Честный дефицит ёмкости: без вытеснения соседей не размещается.');
+            } catch (e) {}
+        }
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
             // #4175: переставлять/дробить нечего (план оптимален), НО заказное задание-сирота (#4163→#4175)
