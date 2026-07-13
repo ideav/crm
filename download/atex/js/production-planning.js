@@ -5317,8 +5317,20 @@
                 var later = Object.keys(trialDays).some(function(id){
                     return dayByCut[id] != null && trialDays[id] > dayByCut[id];
                 });
-                var foilWorse = foilNotLastCount(trialSegs, cutById) > foilNotLastCount(segs, cutById);
-                if (later || foilWorse) { reseqPass.skipped++; return; }   // инвариант важнее экономии
+                var oldFoilBad = foilNotLastCount(segs, cutById);
+                var newFoilBad = foilNotLastCount(trialSegs, cutById);
+                var foilWorse = newFoilBad > oldFoilBad;
+                // #4224: этот порядок ЧИНИТ «фольга в конец дня» (#3717 — ЖЁСТКОЕ правило). Принимаем
+                // починку, даже если пере-упаковка (фольга в хвост переполненного дня) увела резку на
+                // более поздний день, — НО никогда ЗА СРОК (просрочка недопустима #4224). Иначе
+                // (foil-end не улучшается) — прежняя строгая приёмка: не двигать ничего на день позже.
+                if (newFoilBad < oldFoilBad) {
+                    var dueBy = opts.dueDayByCut || {};
+                    var causesOverdue = Object.keys(trialDays).some(function(id){
+                        return dueBy[id] != null && trialDays[id] > Number(dueBy[id]);
+                    });
+                    if (causesOverdue) { reseqPass.skipped++; return; }
+                } else if (later || foilWorse) { reseqPass.skipped++; return; }   // инвариант важнее экономии
                 better.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
                 packed.segsByMachine[key] = trialSegs;
                 reseqPass.machines++;
@@ -6332,7 +6344,26 @@
         var oldSeq = runChainCost(ordered, prev, times, sequencingCost);
         var newReal = runChainCost(out, prev, times, changeoverCost);
         var oldReal = runChainCost(ordered, prev, times, changeoverCost);
+        // #4224: «фольга ВСЕГДА в конец дня» (#3717) — ЖЁСТКОЕ правило, не оптимизация. Если СТАРЫЙ
+        // порядок его нарушает (напр. §12-релокация по реальным дням впихнула нефольгу ЗА фольгу),
+        // применяем переупорядочивание БЕЗ гейта по стоимости: out гарантированно foil-last (DP вшил
+        // ограничение foilMask), а лишняя наладка — цена соблюдения правила. Прежняя двойная приёмка
+        // (строго дешевле по цели И не дороже по факту, #4151/#3996) остаётся для НЕ нарушающего входа.
+        if (violatesFoilEndOfDay(runs)) return out;
         return (newSeq < oldSeq - 1e-9 && newReal <= oldReal + 1e-9) ? out : null;
+    }
+
+    // #4224: есть ли в каком-либо дне нефольга ПОСЛЕ фольги (нарушение #3717 «фольга в конец дня»)?
+    function violatesFoilEndOfDay(runs){
+        for (var r = 0; r < runs.length; r++){
+            var seenFoil = false;
+            for (var k = 0; k < runs[r].length; k++){
+                var c = runs[r][k];
+                if (c && c.isFoil) seenFoil = true;
+                else if (seenFoil) return true;
+            }
+        }
+        return false;
     }
 
     // #4184: подпись «блока ножей» — набор ширин ножей + ширина ролика. Внутри такого блока
@@ -7833,10 +7864,14 @@
             // текущие реальные дни по каждому станку (станки независимы — день задания задаёт его очередь)
             var realBy = {}; Object.keys(byMachine).forEach(function(k){ realBy[k] = realDayFn(cutIdsOf(k), k) || {}; });
             // собрать просроченные (самые «глубокие» первыми — им труднее найти место)
+            // #4224: рескьюем даже ЗАФИКСИРОВАННОЕ (🔒) просроченное задание. Просрочка недопустима
+            // НИКАКИМ образом; фикс, оставивший задание за сроком, невалиден (пользователь приколол
+            // задание, ожидая его В СРОК, а перестройка увела за срок). НЕ просроченный фикс не трогаем
+            // (od=0 отсеет), а при переносе бережём чужие фиксы — не выталкиваем их на день позже (ниже).
             var overdue = [];
             Object.keys(byMachine).forEach(function(sid){
                 byMachine[sid].forEach(function(s){
-                    if (!s || s.kind !== 'cut' || s.fixed) return;
+                    if (!s || s.kind !== 'cut') return;
                     var od = overdueDays(String(s.id), realBy[sid]);
                     if (od > 0) overdue.push({ id: String(s.id), sid: sid, curReal: Number(realBy[sid][String(s.id)]), depth: od });
                 });
@@ -7853,9 +7888,14 @@
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
+                    // #4224: зафиксированное (🔒) задание рескьюим ТОЛЬКО в пределах СВОЕГО станка —
+                    // станок выбрал пользователь; чиним лишь день (в срок), не перекидывая на другой станок.
+                    if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
                     var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
+                    tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
                         if (!canInsertAt(tarr, idx)) continue;
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
@@ -7864,12 +7904,14 @@
                         var real = realDayFn(trialIds, tid) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает реальный день — мимо
-                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку
+                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку И не увести чужой фикс на день позже
                         for (var bi = 0; bi < baseIds.length && !harms; bi++){
                             var oid = baseIds[bi];
                             var wasOd = (Number(baseReal[oid]) - Number(dueDayByCut[oid]));   wasOd = (dueDayByCut[oid] == null || baseReal[oid] == null || wasOd < 0) ? 0 : wasOd;
                             var nowOd = (Number(real[oid]) - Number(dueDayByCut[oid]));        nowOd = (dueDayByCut[oid] == null || real[oid] == null || nowOd < 0) ? 0 : nowOd;
                             if (nowOd > wasOd) harms = true;
+                            // #4224: не ломаем чужой замок дня — фикс не должен переехать на более поздний день
+                            if (fixedOnTid[oid] && baseReal[oid] != null && real[oid] != null && Number(real[oid]) > Number(baseReal[oid])) harms = true;
                         }
                         if (harms) continue;
                         var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
