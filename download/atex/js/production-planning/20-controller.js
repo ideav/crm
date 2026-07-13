@@ -2395,12 +2395,13 @@
             ])
         ]));
 
-        // #4221: «В пределах этого станка» — по умолчанию установлена. Перенос трогает ТОЛЬКО целевой
-        // станок (не перекидывает и не заимствует задания у других станков при пересборке по срокам).
+        // #4221/#4225: «В пределах одного станка» — по умолчанию установлена. Перенос трогает только
+        // задействованные станки (целевой и, при смене станка, исходный) и не перекидывает задания
+        // между станками при пересборке по срокам.
         var withinCb = el('input', { type: 'checkbox' });
         withinCb.checked = true;
         content.appendChild(el('label', { class: 'atex-pp-move-fix' }, [
-            withinCb, el('span', { text: ' В пределах этого станка' })
+            withinCb, el('span', { text: ' В пределах одного станка' })
         ]));
 
         // Зафиксировать — по умолчанию установлена.
@@ -2568,11 +2569,16 @@
             //     а «замыкаем» на выбранный день/станок (weightPositionCutIds → dayLockByCut): держит
             //     день+станок, ПОЗИЦИЮ в дне выбирает по наилучшему весу (scorePosition, полный набор
             //     штрафов). День держит сам замок дня в слое размещения (fixed не нужен).
-            // withinSlitter — пересобираем ТОЛЬКО целевой станок (не трогаем и не заимствуем у других).
+            // withinSlitter (#4225) — пересобираем ТОЛЬКО задействованные переносом станки: целевой и
+            // (при смене станка) исходный. Прочие станки не трогаем; задания между станками не кидаем
+            // (buildSequenceOps замыкает каждое задание на свой станок при scope >1).
             var moveScope = {};
             if (position === 'weight') moveScope.weightPositionCutIds = [String(cut.id)];
             else moveScope.pinCutIds = [String(cut.id)];
-            if (withinSlitter) moveScope.withinSlitterId = sidStr;
+            if (withinSlitter) {
+                moveScope.withinSlitterIds = (curSidStr !== '' && curSidStr !== sidStr)
+                    ? [sidStr, curSidStr] : [sidStr];   // целевой + исходный (при смене станка)
+            }
             return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, moveScope);
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -5535,15 +5541,28 @@
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
         var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
-        // #4221: «В пределах этого станка» — пересобираем ТОЛЬКО целевой станок: во вход планировщика
-        // берём лишь его задания (прочие станки не трогаются и не заимствуются), а slitterIds ниже
-        // сужаем до него же. Так перенос не перекидывает задания между станками.
-        var withinSid = (moveScope && moveScope.withinSlitterId != null && String(moveScope.withinSlitterId) !== '')
-            ? String(moveScope.withinSlitterId) : null;
-        if (withinSid != null) {
+        // #4221/#4225: «В пределах одного станка» — пересобираем ТОЛЬКО задействованные переносом станки
+        // (исходный + целевой; при переносе в тот же станок — он один). Во вход планировщика берём лишь
+        // их задания (прочие станки не трогаются и не заимствуются), а slitterIds ниже сужаем до них же.
+        // Чтобы перенос НЕ КИДАЛ задания между станками, каждое задание замыкаем на СВОЙ станок
+        // (machineLockByCut → lockSlitter в слое размещения): миграция запрещена, порядок пересобирается
+        // на каждом станке отдельно, а исходный станок при смене станка тоже перепаковывается (его дыра
+        // от ушедшего задания залечивается).
+        var withinSids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
+            ? moveScope.withinSlitterIds.map(String) : null;
+        var machineLockByCut = {};
+        if (withinSids != null) {
             planInput = planInput.filter(function(c){
-                return String(c && c.slitter && c.slitter.id != null ? c.slitter.id : '') === withinSid;
+                return withinSids.indexOf(String(c && c.slitter && c.slitter.id != null ? c.slitter.id : '')) >= 0;
             });
+            // Замок станка нужен, лишь когда в scope >1 станка (иначе мигрировать некуда): держим каждое
+            // задание на его текущем станке, чтобы пересборка по срокам не перекидывала задания A↔B.
+            if (withinSids.length > 1) {
+                planInput.forEach(function(c){
+                    var m = String(c && c.slitter && c.slitter.id != null ? c.slitter.id : '');
+                    if (m !== '') machineLockByCut[String(c.id)] = m;
+                });
+            }
         }
         // #4074: ручной перенос 🗓 пересобирает план ПО СРОКАМ (deadlineAware, как «Упорядочить»,
         // preserveOrder=false), чтобы задания не уезжали за срок. Прежде перенос завершался
@@ -5580,6 +5599,7 @@
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
+            machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
@@ -5589,7 +5609,7 @@
             slotPlacement: slotOn,
             // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)
             intraDayResequence: (self && typeof self.intraDayResequenceOn === 'function') ? self.intraDayResequenceOn() : true,
-            slitterIds: withinSid != null ? [withinSid] : (self.slitters || []).map(function(s){ return String(s.id); }),   // #4221: «В пределах этого станка» — только целевой
+            slitterIds: withinSids != null ? withinSids : (self.slitters || []).map(function(s){ return String(s.id); }),   // #4221/#4225: «В пределах одного станка» — только задействованные станки
             dueKeyByCut: dueKeyByCut,
             orderIdsByCut: orderIdsByCut,   // #4194: заказы заданий для штрафа/бонуса смежности (слой размещения)
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,
