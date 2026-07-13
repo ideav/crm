@@ -1,0 +1,162 @@
+<!-- Рабочее место: XYZ-анализ по данным БД. Данные берутся из отчёта report/xyz_analiz (таблица «Ассортимент XYZ», id 473), метрики считаются на клиенте. Схему БД не меняет. -->
+<script>
+    document.title = 'XYZ-анализ по данным - ' + '{_global_.z}'.charAt(0).toUpperCase() + '{_global_.z}'.slice(1);
+</script>
+<style>
+    .xyzr{ max-width:1180px; margin:0 auto; padding:16px 18px 48px; color:var(--text-primary,#1f2937); }
+    .xyzr *{ box-sizing:border-box; }
+    .xyzr h1{ font-size:1.5rem; margin:0 0 6px; display:flex; align-items:center; gap:.5rem; }
+    .xyzr h1 .pi{ color:#f5a623; }
+    .xyzr-sub{ color:var(--text-secondary,#6b7280); font-size:.95rem; line-height:1.5; max-width:840px; }
+    .xyzr-src{ margin-top:6px; font-size:.85rem; color:var(--text-secondary,#6b7280); }
+    .xyzr-src code{ background:var(--bg-secondary,#f3f4f6); border:1px solid var(--border-color,#e5e7eb); border-radius:4px; padding:1px 6px; }
+    .xyzr-toolbar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:16px 0 12px; }
+    .xyzr-btn{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:.88rem; padding:7px 12px; border-radius:8px;
+        border:1px solid var(--border-color,#d1d5db); background:var(--bg-secondary,#fff); color:var(--text-primary,#111827); cursor:pointer; text-decoration:none; }
+    .xyzr-btn:hover{ border-color:#f5a623; }
+    .xyzr-btn-primary{ background:#f5a623; border-color:#f5a623; color:#1f2937; font-weight:600; }
+    .xyzr-spacer{ flex:1 1 auto; }
+    .xyzr-thr{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:.85rem; color:var(--text-secondary,#6b7280); }
+    .xyzr-thr label{ display:inline-flex; align-items:center; gap:6px; }
+    .xyzr-thr input{ width:58px; padding:5px 6px; border-radius:6px; border:1px solid var(--border-color,#d1d5db); background:var(--bg-primary,#fff); color:var(--text-primary,#111827); font:inherit; text-align:right; }
+    .xyzr-scroll{ overflow-x:auto; border:1px solid var(--border-color,#e5e7eb); border-radius:12px; }
+    table.xyzr-t{ border-collapse:collapse; width:100%; min-width:760px; font-size:.9rem; }
+    .xyzr-t th,.xyzr-t td{ border-bottom:1px solid var(--border-color,#eceff3); padding:9px 11px; text-align:right; white-space:nowrap; }
+    .xyzr-t thead th{ background:var(--bg-secondary,#f3f4f6); font-weight:600; }
+    .xyzr-t th.nm,.xyzr-t td.nm{ text-align:left; }
+    .xyzr-t tbody tr:hover td{ background:var(--bg-secondary,#f8fafc); }
+    .xyzr-t .calc{ color:var(--text-secondary,#6b7280); font-variant-numeric:tabular-nums; }
+    .xyzr-t tfoot td{ font-weight:600; border-top:2px solid var(--border-color,#d1d5db); }
+    .badge{ display:inline-block; min-width:26px; padding:2px 9px; border-radius:999px; font-weight:700; font-size:.82rem; text-align:center; }
+    .bx{ background:rgba(22,163,74,.15); color:#16a34a; } .by{ background:rgba(217,119,6,.16); color:#d97706; } .bz{ background:rgba(220,38,38,.15); color:#dc2626; }
+    .dot{ width:10px; height:10px; border-radius:50%; display:inline-block; } .dx{ background:#16a34a; } .dy{ background:#d97706; } .dz{ background:#dc2626; }
+    .xyzr-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:16px 0; }
+    .xyzr-card{ border:1px solid var(--border-color,#e5e7eb); border-radius:12px; padding:12px 14px; background:var(--bg-secondary,#fff); }
+    .xyzr-card .top{ display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary,#6b7280); }
+    .xyzr-card .val{ font-size:1.6rem; font-weight:700; margin-top:4px; }
+    .xyzr-card .note{ font-size:.78rem; color:var(--text-secondary,#9ca3af); margin-top:2px; }
+    .xyzr-reco{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+    .xyzr-reco div{ border:1px solid var(--border-color,#e5e7eb); border-left-width:4px; border-radius:10px; padding:11px 13px; background:var(--bg-secondary,#fff); font-size:.86rem; line-height:1.5; }
+    .xyzr-reco h4{ margin:0 0 4px; font-size:.95rem; }
+    .rx{ border-left-color:#16a34a; } .ry{ border-left-color:#d97706; } .rz{ border-left-color:#dc2626; }
+    .xyzr-msg{ padding:26px; text-align:center; color:var(--text-secondary,#9ca3af); }
+    .xyzr-err{ color:#dc2626; }
+</style>
+
+<div class="xyzr" id="xyzr-app">
+    <h1><i class="pi pi-chart-bar"></i> XYZ-анализ по данным базы</h1>
+    <div class="xyzr-sub">Отчёт строится по живым данным из таблицы <b>«Ассортимент XYZ»</b>. Стандартное отклонение и коэффициент вариации считаются по продажам за периоды, позиции распределяются по группам <b>X</b>, <b>Y</b>, <b>Z</b>. Меняете данные в таблице — обновляете отчёт.</div>
+    <div class="xyzr-src">Источник: отчёт <code>report/xyz_analiz</code> → таблица «Ассортимент XYZ». Метрики вычисляются на стороне клиента.</div>
+
+    <div class="xyzr-toolbar">
+        <button class="xyzr-btn xyzr-btn-primary" id="xyzr-reload" type="button"><i class="pi pi-refresh"></i> Обновить</button>
+        <a class="xyzr-btn" id="xyzr-edit" href="#" target="_blank"><i class="pi pi-pencil"></i> Редактировать данные</a>
+        <button class="xyzr-btn" id="xyzr-sort" type="button"><i class="pi pi-sort-alt"></i> Сортировать по группе</button>
+        <span class="xyzr-spacer"></span>
+        <div class="xyzr-thr">
+            <label title="CV ниже этого — группа X">Порог X, %&nbsp;<input type="number" id="xyzr-tx" min="0" max="100" step="1" value="10"></label>
+            <label title="CV выше этого — группа Z">Порог Z, %&nbsp;<input type="number" id="xyzr-tz" min="0" max="100" step="1" value="25"></label>
+        </div>
+    </div>
+
+    <div class="xyzr-scroll">
+        <table class="xyzr-t">
+            <thead><tr id="xyzr-head"></tr></thead>
+            <tbody id="xyzr-body"><tr><td class="xyzr-msg" colspan="10"><i class="pi pi-spin pi-spinner"></i> Загрузка данных…</td></tr></tbody>
+            <tfoot id="xyzr-foot"></tfoot>
+        </table>
+    </div>
+
+    <div class="xyzr-cards" id="xyzr-cards"></div>
+
+    <div class="xyzr-reco">
+        <div class="rx"><h4><i class="dot dx"></i> Группа X — опора ассортимента</h4>Спрос стабилен и предсказуем. Держите позиции в наличии, опирайтесь на них при планировании закупок.</div>
+        <div class="ry"><h4><i class="dot dy"></i> Группа Y — есть колебания</h4>Спрос меняется без резких скачков. Можно улучшать спрос или держать умеренный запас с поправкой на сезонность.</div>
+        <div class="rz"><h4><i class="dot dz"></i> Группа Z — нестабильный спрос</h4>Берут нерегулярно. Обычно кандидаты на вывод — но новинке нужно время, а сезонный товар закупайте ближе к сезону.</div>
+    </div>
+</div>
+
+<script>
+(function(){
+    "use strict";
+    var DB = (typeof db !== 'undefined' && db) ? db : 'xyz';
+    var REPORT = 'xyz_analiz';
+    var DATA_TABLE = '473';
+    var PERIOD_LABELS = { q1: '1-й кв.', q2: '2-й кв.', q3: '3-й кв.', q4: '4-й кв.' };
+    var rows = [];
+    var sortByGroup = false;
+
+    var editLink = document.getElementById('xyzr-edit');
+    editLink.setAttribute('href', '/' + DB + '/table/' + DATA_TABLE);
+
+    function num(v){ var n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; }
+    function fmt(n, d){ if(!isFinite(n)){ return '—'; } return n.toFixed(d == null ? 2 : d).replace('.', ','); }
+    function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function periodKeys(row){
+        var ks = [];
+        for(var k in row){ if(row.hasOwnProperty(k) && k !== 'product'){ ks.push(k); } }
+        return ks;
+    }
+    function stats(vals){
+        var n = vals.length, sum = 0, i;
+        for(i = 0; i < n; i++){ sum += vals[i]; }
+        var mean = n ? sum / n : 0, sd = 0;
+        if(n > 1){ var acc = 0; for(i = 0; i < n; i++){ var dv = vals[i] - mean; acc += dv * dv; } sd = Math.sqrt(acc / (n - 1)); }
+        var cv = mean > 0 ? sd / mean : 0;
+        return { sum: sum, mean: mean, sd: sd, cv: cv };
+    }
+    function groupOf(cvPct, tx, tz){ if(cvPct < tx){ return 'X'; } if(cvPct <= tz){ return 'Y'; } return 'Z'; }
+
+    function render(){
+        var body = document.getElementById('xyzr-body');
+        if(!rows.length){ body.innerHTML = '<tr><td class="xyzr-msg" colspan="10">Нет данных в таблице «Ассортимент XYZ».</td></tr>'; document.getElementById('xyzr-head').innerHTML = ''; document.getElementById('xyzr-foot').innerHTML = ''; document.getElementById('xyzr-cards').innerHTML = ''; return; }
+        var tx = num(document.getElementById('xyzr-tx').value), tz = num(document.getElementById('xyzr-tz').value);
+        var keys = periodKeys(rows[0]);
+
+        var h = '<th class="nm">Товар</th>';
+        keys.forEach(function(k){ h += '<th>' + esc(PERIOD_LABELS[k] || k) + '</th>'; });
+        h += '<th class="calc">Итого</th><th class="calc">Средние</th><th class="calc">Ст. откл.</th><th class="calc">Коэф.&nbsp;вар.,&nbsp;%</th><th>Группа</th>';
+        document.getElementById('xyzr-head').innerHTML = h;
+
+        var enriched = rows.map(function(r){
+            var vals = keys.map(function(k){ return num(r[k]); });
+            var s = stats(vals); var cvPct = s.cv * 100; var g = groupOf(cvPct, tx, tz);
+            return { name: r.product, vals: vals, s: s, cvPct: cvPct, g: g };
+        });
+        if(sortByGroup){ var ord = { X: 0, Y: 1, Z: 2 }; enriched.sort(function(a, b){ return ord[a.g] - ord[b.g] || b.s.sum - a.s.sum; }); }
+
+        var counts = { X: 0, Y: 0, Z: 0 }, totalSum = 0, out = '';
+        enriched.forEach(function(e){
+            counts[e.g] += 1; totalSum += e.s.sum;
+            out += '<tr><td class="nm">' + esc(e.name) + '</td>';
+            e.vals.forEach(function(v){ out += '<td>' + fmt(v, 0) + '</td>'; });
+            out += '<td class="calc">' + fmt(e.s.sum, 0) + '</td><td class="calc">' + fmt(e.s.mean, 2) + '</td><td class="calc">' + fmt(e.s.sd, 2) + '</td><td class="calc">' + fmt(e.cvPct, 1) + '</td>';
+            out += '<td><span class="badge b' + e.g.toLowerCase() + '">' + e.g + '</span></td></tr>';
+        });
+        document.getElementById('xyzr-body').innerHTML = out;
+        document.getElementById('xyzr-foot').innerHTML = '<tr><td class="nm">Итого</td><td class="calc" colspan="' + keys.length + '"></td><td class="calc">' + fmt(totalSum, 0) + '</td><td colspan="4"></td></tr>';
+
+        var total = enriched.length;
+        function card(label, cls, val){ var pct = total ? Math.round(val / total * 100) : 0; return '<div class="xyzr-card"><div class="top"><span class="dot d' + cls + '"></span> ' + label + '</div><div class="val">' + val + '</div><div class="note">' + pct + '% ассортимента</div></div>'; }
+        document.getElementById('xyzr-cards').innerHTML =
+            '<div class="xyzr-card"><div class="top"><i class="pi pi-box"></i> Всего позиций</div><div class="val">' + total + '</div><div class="note">из таблицы «Ассортимент XYZ»</div></div>'
+            + card('Группа X', 'x', counts.X) + card('Группа Y', 'y', counts.Y) + card('Группа Z', 'z', counts.Z);
+    }
+
+    function fetchData(){
+        var body = document.getElementById('xyzr-body');
+        body.innerHTML = '<tr><td class="xyzr-msg" colspan="10"><i class="pi pi-spin pi-spinner"></i> Загрузка данных…</td></tr>';
+        fetch('/' + DB + '/report/' + REPORT + '?JSON_KV', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function(r){ if(!r.ok){ throw new Error('HTTP ' + r.status); } return r.json(); })
+            .then(function(data){ rows = Array.isArray(data) ? data : []; render(); })
+            .catch(function(err){ body.innerHTML = '<tr><td class="xyzr-msg xyzr-err" colspan="10">Не удалось загрузить отчёт: ' + esc(err.message) + '</td></tr>'; });
+    }
+
+    document.getElementById('xyzr-reload').addEventListener('click', fetchData);
+    document.getElementById('xyzr-sort').addEventListener('click', function(){ sortByGroup = !sortByGroup; render(); });
+    document.getElementById('xyzr-tx').addEventListener('input', render);
+    document.getElementById('xyzr-tz').addEventListener('input', render);
+
+    fetchData();
+})();
+</script>
