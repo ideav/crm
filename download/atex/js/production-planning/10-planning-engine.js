@@ -3450,17 +3450,30 @@
             var off = Number(s && s.dayOffset);
             return isFinite(off) ? off : null;
         }
-        // cutId → РЕАЛЬНЫЙ (календарный) день старта (мин по сегментам) из реальной упаковки.
-        function realDaysFrom(segsBy){
-            var d = {};
-            Object.keys(segsBy).forEach(function(key){
-                (segsBy[key] || []).forEach(function(s){
-                    var off = segCalDay(s); if (off == null) return;
-                    var id = String(s.cutId);
-                    if (d[id] == null || off < d[id]) d[id] = off;
-                });
+        // cutId → РЕАЛЬНЫЙ (календарный) день ФАКТИЧЕСКОЙ НАМОТКИ из реальной упаковки.
+        // #4209: раньше брали МИН день ПО ВСЕМ сегментам, включая setup-only ХВОСТ (#3889: настройка в
+        // конце дня N, 0 проходов, намотка-продолжение с дня N+k за выходные). Резка с настройкой в день 2
+        // и намоткой в день 5 числилась «день 2, в срок», рескью #4118 её НЕ видел («осталось за срок 0»),
+        // а панель (#4161, planDate ПРОДОЛЖЕНИЯ) — просрочку. Срок держит ДЕНЬ НАМОТКИ: считаем мин среди
+        // сегментов С ПРОХОДАМИ (runs>0 / durationMin>0); если у резки одни setup-сегменты (штатный
+        // setup-рекорд #3635) — фолбэк на общий минимум, чтобы день был определён всегда.
+        function segHasWinding(s){ return (Number(s && s.runs) || 0) > 0 || (Number(s && s.durationMin) || 0) > 0; }
+        function windingDaysFromSegs(segList){
+            var wind = {}, any = {};
+            (segList || []).forEach(function(s){
+                var off = segCalDay(s); if (off == null) return;
+                var id = String(s.cutId);
+                if (any[id] == null || off < any[id]) any[id] = off;
+                if (!segHasWinding(s)) return;                       // #4209: setup-only хвост срок НЕ держит
+                if (wind[id] == null || off < wind[id]) wind[id] = off;
             });
-            return d;
+            Object.keys(any).forEach(function(id){ if (wind[id] == null) wind[id] = any[id]; });   // фолбэк
+            return wind;
+        }
+        function realDaysFrom(segsBy){
+            var all = [];
+            Object.keys(segsBy).forEach(function(key){ (segsBy[key] || []).forEach(function(s){ all.push(s); }); });
+            return windingDaysFromSegs(all);
         }
         // #4118: cutId → объект резки (для доп. прохода: пакуем пробные порядки по РЕАЛЬНЫМ дням).
         var cutById = {};
@@ -3469,14 +3482,8 @@
         // упаковка splitMachineQueue с параметрами станка). realDayFn(orderIds, machineId) → {id: day}.
         function realPackFn(orderIds, machineId){
             var objs = (orderIds || []).map(function(id){ return cutById[String(id)]; }).filter(Boolean);
-            var segs = packOrderedMachine(objs, String(machineId));
-            var d = {};
-            (segs || []).forEach(function(s){
-                var off = segCalDay(s); if (off == null) return;   // #4200: календарный день, не логический dayOffset
-                var id = String(s.cutId);
-                if (d[id] == null || off < d[id]) d[id] = off;
-            });
-            return d;
+            // #4200: календарный день; #4209: по сегментам НАМОТКИ (setup-only хвост срок не держит).
+            return windingDaysFromSegs(packOrderedMachine(objs, String(machineId)));
         }
         var packed = packAll();
         // #4095 / ТЗ §12: срок держат РЕАЛЬНЫЕ дни splitMachineQueue, а НЕ ёмкость-оценка размещения.
