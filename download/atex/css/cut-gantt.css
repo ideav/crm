@@ -20,6 +20,7 @@
     --cg-ok: #15803d;
     --cg-late: #b91c1c;
     --cg-unknown: #64748b;
+    --cg-downtime: #94a3b8;   /* #4229: «Отпуск» станка — нейтральный серый бар отдельной строкой */
     --cg-label-w: 240px;
     display: flex;
     flex-direction: column;
@@ -40,6 +41,7 @@
     --cg-ok: #22c55e;
     --cg-late: #f87171;
     --cg-unknown: #94a3b8;
+    --cg-downtime: #7c899b;   /* #4229: «Отпуск» на тёмной теме — серый чуть темнее фона-трека */
     --cg-dayoff: rgba(248, 113, 113, .14);   /* #3875: подсветка нерабочих дней (тёмная тема) */
 }
 
@@ -278,6 +280,14 @@
 .atex-cg-bar.is-late,
 .atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-late); }
 .atex-cg-bar.is-unknown { --cg-bar-color: var(--cg-unknown); }
+
+/* #4229: «Отпуск» станка — серый бар ОТДЕЛЬНОЙ строкой (не накладка обеда/перерыва): станок стоит,
+   работы нет. Нейтральный серый (--cg-downtime), отличный от статусных цветов задания. Не ссылка —
+   курсор обычный, без hover-подсветки; примечания (≤100 симв.) — справа от бара (.atex-cg-bar-main). */
+.atex-cg-bar--downtime { --cg-bar-color: var(--cg-downtime); cursor: default; }
+.atex-cg-bar--downtime:hover { filter: none; }
+.atex-cg-downtime-row .atex-cg-label { color: var(--cg-muted); font-style: italic; }
+.atex-cg-legend-item.is-downtime::before { background: var(--cg-downtime); }
 
 /* #4052: обед (#3342) и перерывы (#4007) — серые накладки ПОВЕРХ баров (отдельных строк больше
    нет). Несущий их бар удлинён на их длительность (js), а сама накладка рисуется на позиции их

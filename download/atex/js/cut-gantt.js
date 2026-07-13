@@ -742,6 +742,21 @@
             var barEndMs = cutBarEndMs(cut);
             if (barEndMs != null && barEndMs + bufferMs > seg.endMs) seg.endMs = barEndMs + bufferMs; // захлёст за смену
         });
+        // #4229: окна простоя станка («Отпуск») держат колонку КАЖДОГО своего дня на оси, даже если в
+        // этот день нет ни одной резки (станок стоит — работы нет). Иначе серый бар отпуска клампился бы
+        // (toPx) к краю оси. Спаны приходят уже обрезанными по видимому периоду (layoutGroups), окно дня —
+        // стандартная смена [08:00;18:30]; резки того же дня расширяют его как обычно (порядок выше).
+        (o.downtimeSpans || []).forEach(function(span) {
+            if (!span || span.startMs == null || span.endMs == null || !(span.endMs >= span.startMs)) return;
+            var d = startOfLocalDayMs(span.startMs), lastDay = startOfLocalDayMs(span.endMs), guard = 0;
+            while (d <= lastDay && guard++ < 400) {
+                if (!byDay[d]) {
+                    byDay[d] = { startMs: d + startHour * GANTT_HOUR_MS, endMs: d + endHour * GANTT_HOUR_MS + tailMs };
+                    order.push(d);
+                }
+                d = startOfLocalDayMs(d + GANTT_DAY_MS + 2 * GANTT_HOUR_MS);   // следующий день (устойчиво к переводу часов)
+            }
+        });
         if (!order.length) {
             var dayMs0 = range && range.startMs != null ? startOfLocalDayMs(range.startMs) : startOfLocalDayMs(Date.now());
             return [{ startMs: dayMs0 + startHour * GANTT_HOUR_MS, endMs: dayMs0 + endHour * GANTT_HOUR_MS + tailMs }];
@@ -928,6 +943,67 @@
         if (ms == null) ms = parseDateTimeMs(cut && cut.startDate);
         if (ms == null) return false;
         return ms >= range.startMs && ms < range.endMs;
+    }
+
+    // #4229: «Отпуск» станка — окно простоя { id, startMs, endMs, notes } (мс). Конец пустой/раньше
+    // начала → окно длиной в рабочую смену дня начала (просто чтобы бар был видим).
+    var DOWNTIME_NOTES_MAX = 100;
+    function downtimeEndMs(dt) {
+        if (!dt || dt.startMs == null) return null;
+        if (dt.endMs != null && dt.endMs > dt.startMs) return dt.endMs;
+        // конца нет — считаем простой до конца смены дня начала (08:00→18:30)
+        var day = startOfLocalDayMs(dt.startMs);
+        return Math.max(dt.startMs, day + GANTT_DAY_END_HOUR * GANTT_HOUR_MS + GANTT_SHIFT_TAIL_MIN * 60000);
+    }
+    // Примечания, обрезанные до 100 символов (#4229). Пусто → «Отпуск».
+    function downtimeNotesText(notes) {
+        var s = String(notes == null ? '' : notes).trim();
+        if (!s) return 'Отпуск';
+        return s.length > DOWNTIME_NOTES_MAX ? s.slice(0, DOWNTIME_NOTES_MAX) : s;
+    }
+    // Окно простоя пересекает видимый период?
+    function downtimeInRange(dt, range) {
+        if (!dt || dt.startMs == null) return false;
+        if (!range) return true;
+        return downtimeEndMs(dt) >= range.startMs && dt.startMs < range.endMs;
+    }
+    // Спан простоя, обрезанный по видимому периоду (для оси): { startMs, endMs } | null.
+    function downtimeSpanClamped(dt, range) {
+        if (!dt || dt.startMs == null) return null;
+        var s = dt.startMs, e = downtimeEndMs(dt);
+        if (range) {
+            if (s < range.startMs) s = range.startMs;
+            if (e > range.endMs - 1) e = range.endMs - 1;   // endMs период-эксклюзивен → держим в последнем дне
+        }
+        if (!(e >= s)) return null;
+        return { startMs: s, endMs: e };
+    }
+
+    // #4229: резолв таблицы/колонки из метаданных (как tableByName/columnIndex у «Планирования»).
+    // Нужен, чтобы прочитать подчинённую станку таблицу «Отпуск» (id + индексы «Окончание»/«Примечания»).
+    function ganttMatchesName(entry, name) {
+        if (!entry) return false;
+        var t = String(name == null ? '' : name).trim().toLowerCase();
+        if (!t) return false;
+        if (String(entry.val == null ? '' : entry.val).trim().toLowerCase() === t) return true;
+        var alias = entry.alias;
+        if (alias == null && entry.attrs) {
+            try { var a = typeof entry.attrs === 'string' ? JSON.parse(entry.attrs) : entry.attrs; if (a && a.alias != null) alias = a.alias; }
+            catch (e) { /* attrs не JSON */ }
+        }
+        return String(alias == null ? '' : alias).trim().toLowerCase() === t;
+    }
+    function ganttTableByName(list, name) {
+        var arr = Array.isArray(list) ? list : (list == null ? [] : [list]);
+        for (var i = 0; i < arr.length; i++) if (ganttMatchesName(arr[i], name)) return arr[i];
+        return null;
+    }
+    // Индекс колонки реквизита в r[] (r[0] — главное значение, дальше реквизиты в порядке meta.reqs).
+    function ganttColumnIndex(meta, reqName) {
+        if (!meta) return -1;
+        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
+        var req = ganttTableByName((meta && meta.reqs) || [], reqName);
+        return req == null ? -1 : order.indexOf(String(req.id));
     }
 
     function cutBarTitle(cut, tr, status) {
@@ -1322,6 +1398,24 @@
             return true;
         });
 
+        // #4229: окна простоя станков («Отпуск»), пересекающие период (с учётом фильтра станка).
+        // downtimesBySlitter: sid → [{ id, startMs, endMs, notes }] (мс). Спаны (обрезанные по периоду)
+        // отдаём в ось (workingSegments) — колонка дня отпуска держится даже без резок в этот день.
+        var downtimesBySlitter = o.downtimesBySlitter || {};
+        var slitterLabels = o.slitterLabels || {};
+        var visibleDowntimes = {};   // sid → [dt…]
+        var downtimeSpans = [];
+        Object.keys(downtimesBySlitter).forEach(function(sid) {
+            if (slitterFilter && String(sid) !== slitterFilter) return;
+            (downtimesBySlitter[sid] || []).forEach(function(dt) {
+                if (!downtimeInRange(dt, range)) return;
+                (visibleDowntimes[sid] = visibleDowntimes[sid] || []).push(dt);
+                var span = downtimeSpanClamped(dt, range);
+                if (span) downtimeSpans.push(span);
+            });
+        });
+        o.downtimeSpans = downtimeSpans;
+
         var win = ganttWindow(visible, range, o);
         // #4007 (ТЗ §5): суммарная длительность перерывов дня — буфер к правому краю окна дня,
         // чтобы сдвинутым за перерывы барам хватило места (перерывы не зашиты в сохранённые старты).
@@ -1360,6 +1454,14 @@
                 orderKeys.push(key);
             }
             groupsMap[key].cuts.push(cut);
+        });
+
+        // #4229: станок с отпуском, но без резок в периоде, всё равно нужен своей строкой отпуска.
+        Object.keys(visibleDowntimes).forEach(function(sid) {
+            var key = sid === '' ? ' none' : sid;
+            if (groupsMap[key]) return;
+            groupsMap[key] = { slitter: { id: sid === '' ? null : sid, label: slitterLabels[sid] || ('#' + sid) }, cuts: [] };
+            orderKeys.push(key);
         });
 
         var groups = orderKeys.map(function(k) { return groupsMap[k]; }).sort(function(a, b) {
@@ -1480,6 +1582,17 @@
                     task.barText = formatTime(task.startMs) + '-' + formatTime(endMs) + ' (' + task.barMin + ' мин)';
                 }
             });
+            // #4229: бары отпуска станка — серые, по СВЁРНУТОЙ оси (scale.toPx учитывает свёрнутую ночь),
+            // с примечаниями (≤100 симв.). Ширина = разность toPx концов (не минуты×ppm — иначе ночь
+            // раздувала бы бар); минимум 1px, чтобы короткий простой был виден.
+            g.downtimes = (visibleDowntimes[g.slitter.id == null ? '' : String(g.slitter.id)] || []).map(function(dt) {
+                var span = downtimeSpanClamped(dt, range);
+                if (!span) return null;
+                var leftPx = round3(scale.toPx(span.startMs));
+                var widthPx = Math.max(round3(scale.toPx(span.endMs) - leftPx), 1);
+                return { id: dt.id, notes: downtimeNotesText(dt.notes),
+                         leftPx: leftPx, widthPx: widthPx, startMs: span.startMs, endMs: span.endMs };
+            }).filter(Boolean);
             delete g.cuts;
         });
         return { groups: groups, trackPx: trackPx, window: win, scale: scale, pxPerMin: pxPerMin };
@@ -1574,6 +1687,10 @@
         cutStatus: cutStatus,
         cutTimeRange: cutTimeRange,
         cutInRange: cutInRange,
+        downtimeInRange: downtimeInRange,           // #4229
+        downtimeEndMs: downtimeEndMs,               // #4229
+        downtimeSpanClamped: downtimeSpanClamped,   // #4229
+        downtimeNotesText: downtimeNotesText,       // #4229
         cutRowLabel: cutRowLabel,
         cutBarTime: cutBarTime,
         cutBarSpanMin: cutBarSpanMin,   // #3770
@@ -1646,6 +1763,8 @@
         this.busy = false;
         this.cuts = [];
         this.slitters = [];
+        this.slitterLabels = {};          // #4229: sid → метка станка (строки отпуска без резок)
+        this.downtimesBySlitter = {};     // #4229: sid → [{ id, startMs, endMs, notes }] окна простоя («Отпуск»)
         // #3875/#3788: карта нерабочих дней ГГГГММДД → 'Праздничный день'|'Рабочий день'.
         // Фича подсветки выходных включается наличием таблицы «Календарь» (calendarEnabled).
         this.calendarByDay = {};
@@ -1812,6 +1931,43 @@
         });
     };
 
+    // #4229: окна простоя станков («Отпуск», подчинённая станку таблица #3764) — для серых строк
+    // отпуска на Ганте. Таблица читается по метаданным (id + индексы «Окончание»/«Примечания»), затем
+    // по каждому станку (F_U=slitterId, как в «Планировании», #3764). Метаданных/таблицы нет или ошибка
+    // чтения → карта пустая, строки отпуска не рисуются (деградация без поломки Ганта — как «Календарь»).
+    AtexCutGantt.prototype.loadDowntimes = function() {
+        var self = this;
+        this.downtimesBySlitter = {};
+        var slitters = this.slitters || [];
+        if (!slitters.length) return Promise.resolve();
+        return this.getJson('metadata').then(function(all) {
+            var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Отпуск');
+            if (!meta) return;   // таблицы нет (старое окружение) → фича выключена
+            var endIdx = ganttColumnIndex(meta, 'Окончание');
+            var notesIdx = ganttColumnIndex(meta, 'Примечания');
+            return Promise.all(slitters.map(function(s) {
+                return self.getJson('object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(s.id) + '&LIMIT=0,500')
+                    .then(function(rows) {
+                        var out = [];
+                        (rows || []).forEach(function(rec) {
+                            var r = (rec && rec.r) || [];
+                            var startSec = (r[0] == null || r[0] === '') ? null : Number(r[0]);
+                            if (startSec == null || !isFinite(startSec)) return;   // без начала — пропуск
+                            var endSec = (endIdx >= 0 && r[endIdx] != null && r[endIdx] !== '') ? Number(r[endIdx]) : null;
+                            out.push({
+                                id: String(rec.i),
+                                startMs: startSec * 1000,   // #3764: unix-сек → мс (Гант работает в мс)
+                                endMs: (endSec != null && isFinite(endSec)) ? endSec * 1000 : null,
+                                notes: (notesIdx >= 0 && r[notesIdx] != null) ? String(r[notesIdx]) : ''
+                            });
+                        });
+                        self.downtimesBySlitter[String(s.id)] = out;
+                    })
+                    .catch(function() { self.downtimesBySlitter[String(s.id)] = []; });
+            }));
+        }).catch(function() { self.downtimesBySlitter = {}; });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -1846,6 +2002,9 @@
                 ordered.push(merged[key]);
             });
             self.slitters = ordered;
+            self.slitterLabels = {};   // #4229: sid → метка станка для строк отпуска без резок
+            ordered.forEach(function(s) { self.slitterLabels[String(s.id)] = s.label; });
+            return self.loadDowntimes();   // #4229: окна простоя («Отпуск») — после станков (нужны их id)
         });
     };
 
@@ -1963,7 +2122,9 @@
             el('span', { class: 'atex-cg-legend-item is-on-time', text: STATUS_LABELS['on-time'] }),
             el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late }),
             // #4052: обед и перерывы — единый серый пункт легенды (рисуются накладками поверх баров).
-            el('span', { class: 'atex-cg-legend-item is-break', text: 'Обед / перерыв' })
+            el('span', { class: 'atex-cg-legend-item is-break', text: 'Обед / перерыв' }),
+            // #4229: отпуск станка — серый бар отдельной строкой.
+            el('span', { class: 'atex-cg-legend-item is-downtime', text: 'Отпуск' })
         ]);
     };
 
@@ -1975,7 +2136,9 @@
         var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
             { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin,
               lunchStartMin: this.lunchStartMin,   // #3904: время обеда — чтобы утренний зазор не помечался обедом
-              breaks: this.breaks });   // #4007 (ТЗ §5): короткие перерывы 10:00/15:00 — рисуются на Ганте
+              breaks: this.breaks,   // #4007 (ТЗ §5): короткие перерывы 10:00/15:00 — рисуются на Ганте
+              downtimesBySlitter: this.downtimesBySlitter,   // #4229: окна простоя («Отпуск») — серой строкой
+              slitterLabels: this.slitterLabels });          // #4229: метки станков для строк отпуска без резок
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
@@ -2144,6 +2307,28 @@
                 // на позиции их времени; подпись только в title.
                 (overlaysByTask[taskIdx] || []).forEach(function(band) { track.appendChild(band); });
                 body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
+            });
+
+            // #4229: «Отпуск» станка — ОТДЕЛЬНОЙ строкой (не накладкой на баре), серым баром по
+            // времени простоя; в метке слева — «Отпуск», справа от бара — Примечания (≤100 симв.).
+            (group.downtimes || []).forEach(function(dt) {
+                var notes = dt.notes || 'Отпуск';
+                var title = 'Отпуск ' + formatTime(dt.startMs) + '–' + formatTime(dt.endMs)
+                    + (dt.notes && dt.notes !== 'Отпуск' ? ' · ' + dt.notes : '');
+                var labelCell = el('div', { class: 'atex-cg-label', title: 'Отпуск' }, [
+                    el('span', { class: 'atex-cg-label-main', text: 'Отпуск' })
+                ]);
+                var track = el('div', { class: 'atex-cg-track atex-cg-downtime-track' });
+                track.style.minWidth = trackPx + 'px';
+                appendHours(track);
+                var bar = el('div', { class: 'atex-cg-bar atex-cg-bar--downtime', title: title }, [
+                    el('span', { class: 'atex-cg-seg atex-cg-seg--cut' }),
+                    el('span', { class: 'atex-cg-bar-main', text: notes })
+                ]);
+                bar.style.left = dt.leftPx + 'px';
+                bar.style.width = dt.widthPx + 'px';
+                track.appendChild(bar);
+                body.appendChild(el('div', { class: 'atex-cg-row atex-cg-downtime-row' }, [labelCell, track]));
             });
         });
 
