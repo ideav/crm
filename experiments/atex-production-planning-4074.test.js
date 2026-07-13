@@ -64,11 +64,15 @@ var U = ecut('U'), B1 = ecut('B1'), B2 = ecut('B2');
 var due = { U: 1, B1: 8, B2: 8 };
 var input = [B1, B2, U];   // U последним — как в очереди при переносе
 
-var blind = runPCO(input, true, due);            // preserveOrder — срок игнорируется (U уезжает)
+var blind = runPCO(input, true, due);            // preserveOrder — порядок ручной; срок держит рескью #4118 (#4200)
 var byDue = runPCO(input, false, due, null, true);   // фикс #4074 на живом пути (#4085: slotPlacement, срок — штраф)
 
-assert(opDay(blind, 'U') > 1,
-    '#4074 репро: слепая (preserveOrder) пересборка гонит срочное U за срок (день ' + opDay(blind, 'U') + ' > 1)');
+// #4200: preserveOrder-пересборка ТЕПЕРЬ тоже НЕ оставляет срочное U за сроком — доп. проход #4118
+// (relocateOverdueReal) подтягивает просроченное в срок и на этом пути (issue #4200; раньше здесь U
+// уезжал на день 2). moveCutToDay 🗓 всё равно использует preserveOrder=false — пересборку ПО СРОКАМ
+// с закреплением перенесённого (assert ниже): это ОТДЕЛЬНОЕ, более сильное поведение, чем рескью просрочки.
+assert(opDay(blind, 'U') <= 1,
+    '#4200: preserveOrder-пересборка подтягивает срочное U в срок через рескью #4118 (день ' + opDay(blind, 'U') + ' ≤ 1)');
 assert(opDay(byDue, 'U') <= 1,
     '#4074 фикс: пересборка ПО СРОКАМ ставит срочное U в срок (день ' + opDay(byDue, 'U') + ' ≤ 1)');
 

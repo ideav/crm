@@ -3345,21 +3345,25 @@
             // принудительно отправляет за все обычные резки того же дня (orderCuts при генерации
             // делает фольгу последней ПО ИСХОДНОМУ дню, а кросс-дневный re-pack и посменная
             // сборка иначе перемешивали её обратно).
-            var ordered = opts.preserveOrder
+            // #4200: рескью просрочки #4118 (relocateOverdueReal) на preserveOrder-пути даёт НОВЫЙ
+            // порядок (ручной + просроченные подтянуты в срок) в slotPlan.orderIdxByCut с флагом
+            // _rescued — его надо СОХРАНИТЬ при пере-упаковке, а не пере-сортировать по planStart.
+            var useSlotOrder = slotPlan && slotPlan.orderIdxByCut && (slotPlan._rescued || !opts.preserveOrder);
+            var ordered = useSlotOrder   // #4085/#4200: порядок слоя размещения / рескью (индекс в очереди станка)
                 ? cutsOfMachine.slice().sort(function(a, b){
-                      // #3923: внутри дня ручной порядок оператора хранится в planStart
-                      // (planDate), а не в «Очередности». Пустой planStart — в конец дня.
-                      var pa = Number(a && a.planDate); if (!isFinite(pa) || pa <= 0) pa = Infinity;
-                      var pb = Number(b && b.planDate); if (!isFinite(pb) || pb <= 0) pb = Infinity;
-                      return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
-                          // #4085: жёсткое «фольга — в конец дня» (#3717) снято; ручной порядок оператора
-                          // (planStart) сохраняется как есть — фольга оседает в конец дня штрафом при генерации.
-                          || (pa - pb)
-                          || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
-                  })
-                : (slotPlan   // #4085: порядок слоя размещения (индекс в очереди станка)
+                      return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
+                : (opts.preserveOrder
                     ? cutsOfMachine.slice().sort(function(a, b){
-                          return (slotPlan.orderIdxByCut[String(a && a.id)] || 0) - (slotPlan.orderIdxByCut[String(b && b.id)] || 0); })
+                          // #3923: внутри дня ручной порядок оператора хранится в planStart
+                          // (planDate), а не в «Очередности». Пустой planStart — в конец дня.
+                          var pa = Number(a && a.planDate); if (!isFinite(pa) || pa <= 0) pa = Infinity;
+                          var pb = Number(b && b.planDate); if (!isFinite(pb) || pb <= 0) pb = Infinity;
+                          return comparePlanDayKeys(cutPlanDayKey(a), cutPlanDayKey(b))
+                              // #4085: жёсткое «фольга — в конец дня» (#3717) снято; ручной порядок оператора
+                              // (planStart) сохраняется как есть — фольга оседает в конец дня штрафом при генерации.
+                              || (pa - pb)
+                              || String((a && a.id) || '').localeCompare(String((b && b.id) || ''), 'ru');
+                      })
                     : orderCuts(cutsOfMachine, opts.weights));
             return ordered;
         }
@@ -3430,12 +3434,27 @@
             });
             return n;
         }
-        // cutId → РЕАЛЬНЫЙ день старта (мин dayOffset его сегментов) из реальной упаковки.
+        // #4200: РЕАЛЬНЫЙ день = КАЛЕНДАРНЫЙ день приземления сегмента, а НЕ логический dayOffset.
+        // splitMachineQueue пакует по ЛОГИЧЕСКИМ дням (dayOffset 0,1,2…), а нерабочие дни
+        // (выходные/праздники/отпуск) сдвигают ОКНО (windowStartMin) вперёд, НЕ трогая dayOffset
+        // (проверено: блок дней 2-3 → сегмент dayOffset=2, windowStartMin=6240 ⇒ календарный день 4).
+        // Панель просрочки (countOverdueCuts → planDateDayKey(planStart)) и dueDayByCut считают по
+        // КАЛЕНДАРЮ (dueDayOffsetFromBase), поэтому арбитр §12/#4118 ОБЯЗАН сравнивать календарный
+        // день, иначе задание за выходными числится «в срок ✓», а панель — просроченным (issue #4200,
+        // расхождение «§12: просрочек нет» vs «панель: N»). Календарный день = floor(windowStartMin/1440)
+        // = день planStart (scheduleStartTimestamp = base + windowStartMin·60000).
+        function segCalDay(s){
+            var ws = Number(s && s.windowStartMin);
+            if (isFinite(ws)) return Math.floor(ws / 1440);
+            var off = Number(s && s.dayOffset);
+            return isFinite(off) ? off : null;
+        }
+        // cutId → РЕАЛЬНЫЙ (календарный) день старта (мин по сегментам) из реальной упаковки.
         function realDaysFrom(segsBy){
             var d = {};
             Object.keys(segsBy).forEach(function(key){
                 (segsBy[key] || []).forEach(function(s){
-                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                    var off = segCalDay(s); if (off == null) return;
                     var id = String(s.cutId);
                     if (d[id] == null || off < d[id]) d[id] = off;
                 });
@@ -3452,7 +3471,7 @@
             var segs = packOrderedMachine(objs, String(machineId));
             var d = {};
             (segs || []).forEach(function(s){
-                var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                var off = segCalDay(s); if (off == null) return;   // #4200: календарный день, не логический dayOffset
                 var id = String(s.cutId);
                 if (d[id] == null || off < d[id]) d[id] = off;
             });
@@ -3481,13 +3500,42 @@
         // ВСЁ ЕЩЁ просроченное (по РЕАЛЬНЫМ дням) в наименее штрафное место — можно на другой станок —
         // стандартным перебором точек вставки, но проверяя каждого кандидата РЕАЛЬНОЙ упаковкой
         // (realPackFn), и НЕ трогая остальные задания (перенос лишь если чужая просрочка не углубится).
-        var overduePass = { moves: 0 };
-        if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && slotRefineCtx) {
-            var rel2 = relocateOverdueReal(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
-                slotExtend(slotRefineCtx, { feasibleMachine: opts.feasibleMachineFor }));
+        // #4200: раньше #4118 был заперт за (slotPlan && !preserveOrder) → «Пересчитать наладку» после
+        // ручной ↑/↓ (autoSequenceQueue preserveOrder=true) паковал в ручном порядке БЕЗ единой проверки
+        // срока и без трассы → задания уезжали за срок молча (issue #4200). Теперь #4118 идёт на ВСЕХ
+        // путях, где заданы сроки: на preserveOrder строим занятость из ТЕКУЩЕГО (ручного) порядка,
+        // relocateOverdueReal двигает ТОЛЬКО просроченные (по КАЛЕНДАРНЫМ дням, #4200 realDaysFrom),
+        // порядок задач В СРОК не трогает. ctx нужен и без слоя размещения — собираем refineCtx4200.
+        var refineCtx4200 = slotRefineCtx || {
+            settings: opts.weights, times: opts.times,
+            capacityMin: (function(){ var w = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0) - (Number(opts.lunchDurationMin) || 0); return w > 0 ? w : Infinity; })(),
+            baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
+            machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
+            distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut
+        };
+        // #4200: занятость из ТЕКУЩЕГО порядка станков (ручной planStart на preserveOrder) — вход #4118
+        // на пути без слоя размещения. slotFromCut даёт полноценный слот (сырьё/ножи/срок) для scorePosition.
+        function occupancyFromCurrentOrder(){
+            var bm = {};
+            (opts.slitterIds || []).forEach(function(sid){ bm[String(sid)] = []; });   // #4200: и ПУСТЫЕ станки — возможная цель рескью
+            packed.mOrder.forEach(function(key){
+                bm[key] = orderMachineQueue(packed.byMachine[key]).map(function(c){
+                    return slotFromCut(c, opts.dueKeyByCut ? opts.dueKeyByCut[String(c && c.id)] : undefined);
+                });
+            });
+            return { byMachine: bm };
+        }
+        var overduePass = { moves: 0, moveLog: [] };
+        if (opts.dueDayByCut) {
+            var occ4118 = (slotPlan && slotPlan.occupancy) ? slotPlan.occupancy : occupancyFromCurrentOrder();
+            var rel2 = relocateOverdueReal(occ4118, opts.dueDayByCut, realPackFn,
+                slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
             overduePass.moves = rel2.moves.length;
+            overduePass.moveLog = rel2.moves;
             if (rel2.moves.length) {
-                var asg2 = assignmentFromOccupancy(slotPlan.occupancy);
+                var asg2 = assignmentFromOccupancy(occ4118);
+                if (!slotPlan) slotPlan = { occupancy: occ4118 };
+                slotPlan._rescued = true;   // #4200: пере-упаковка обязана взять этот порядок (см. orderMachineQueue)
                 slotPlan.slitterByCut = asg2.slitterByCut; slotPlan.orderIdxByCut = asg2.orderIdxByCut;
                 packed = packAll();
             }
@@ -3612,6 +3660,24 @@
             slotPlan.trace.refine = { rounds: refineRounds, moves: refineMoves, overdueLeft: overdueLeft, overdueMoves: overduePass.moves };
             formatSlotPlacementTrace(slotPlan.trace).forEach(function(line){ slotTrace(line); });
         }
+        // #4200: ГРОМКАЯ трасса рескью просрочки + ОСТАТОК на ВСЕХ путях (вкл. preserveOrder-пересчёт, где
+        // slotPlan.trace нет вовсе). Панель «просрочено: N» (#4161) показывает итог; здесь — КАЖДЫЙ перенос
+        // #4118 и поимённо задания, ОСТАВШИЕСЯ за сроком по КАЛЕНДАРНЫМ дням (честный дефицит ёмкости),
+        // чтобы просрочка не появлялась молча (issue #4200: «проверять КАЖДОЕ перемещение и писать в трейс»).
+        var overdueResidual = [];
+        if (opts.dueDayByCut) {
+            var finalRealAll = realDaysFrom(segsByMachine);
+            Object.keys(finalRealAll).forEach(function(id){
+                var due = opts.dueDayByCut[id];
+                if (due != null && Number(finalRealAll[id]) > Number(due)) overdueResidual.push({ cutId: id, realDay: Number(finalRealAll[id]), dueDay: Number(due) });
+            });
+            if (overduePass.moves || overdueResidual.length) {
+                slotTrace('#4200 доп. проход #4118 (' + (opts.preserveOrder ? 'пересчёт наладки / ручной порядок' : 'генерация / упорядочить')
+                    + '): переносов ' + overduePass.moves + ', осталось за срок ' + overdueResidual.length + (overdueResidual.length ? '' : ' — просрочек нет ✓'));
+                (overduePass.moveLog || []).forEach(function(m){ slotTrace('  ↳ перенос просроченного ' + m.id + ': станок ' + m.from + ' → ' + m.to + (m.real != null ? (', реальный (календарный) день ' + m.real) : '')); });
+                overdueResidual.forEach(function(o){ slotTrace('  ⚠️ ОСТАЁТСЯ ЗА СРОКОМ ' + o.cutId + ': календарный день ' + o.realDay + ' > срок(день) ' + o.dueDay + ' — честный дефицит ёмкости, вручную не разместить без вытеснения'); });
+            }
+        }
         var updates = [], creates = [], deletes = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
@@ -3663,7 +3729,9 @@
         // #3924: осиротевшие setup-сегменты (0 проходов) — на удаление (собраны выше при отсеве
         // из merged.cuts). Дедуп на случай пересечения с delete-путём цепочек.
         orphanDeletes.forEach(function(id){ if (deletes.indexOf(id) < 0) deletes.push(id); });
-        return { updates: updates, creates: creates, deletes: deletes };
+        // #4200: overdue — задания, ОСТАВШИЕСЯ за сроком по календарю после рескью #4118 (для громкого
+        // отчёта в контроллере: console.error + тост, не молча). Пусто → плана без просрочки (гарантия).
+        return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
