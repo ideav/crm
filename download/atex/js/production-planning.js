@@ -6394,13 +6394,23 @@
     // порядок блока сохраняется как есть. Минимальное движение → приёмка проходит там, где глобальная
     // перетасовка ломала чужой срок. Фольгу отдельно не бережём — её держит проверка foilNotLastCount
     // в приёмке. Возвращает список порядков очереди станка (каждый = ordered с одной склейкой).
+    //
+    // #4214: границу блока берём по knifeWidthSig (набор ширин ножей), НЕ по knifeBlockSig
+    // (knifeWidthSig+rollerWidth). Джамбо-ширина (rollerWidth) — отдельное измерение сырья, а не ножей:
+    // одинаковые ножи «110*8» с РАЗНОЙ шириной джамбо давали разные knifeBlockSig и дробили визуально
+    // единый блок ножей на куски. Тогда острова ОДНОГО сырья (напр. единичное MWR200 сроком 01.07 в
+    // начале + тройка MWR200 в конце), разделённые заданиями с ДРУГОЙ шириной джамбо, попадали в разные
+    // прогоны knifeBlockSig и НЕ рассматривались к склейке (жалоба #4214: «разрыв по сырью — ножи и
+    // сырьё идентичны»). По knifeWidthSig они в ОДНОМ блоке. Сужение джамбо — это смена ножей (KNIFE в
+    // changeoverCost), поэтому приёмка (переналадка СТРОГО вниз + без новой просрочки + фольга не хуже)
+    // сама отвергнет склейку, где перенос через границу джамбо стоит дороже экономии на сырье.
     function materialIslandMergeCandidates(ordered){
         if (!ordered || ordered.length < 3) return [];
         function sigOf(c){ return cutConfigSig(c) + ((c && c.isFoil) ? '|F' : ''); }
         var cands = [], i = 0;
         while (i < ordered.length){
-            var blkSig = knifeBlockSig(ordered[i]);
-            var j = i; while (j < ordered.length && knifeBlockSig(ordered[j]) === blkSig) j++;
+            var blkSig = knifeWidthSig(ordered[i]);
+            var j = i; while (j < ordered.length && knifeWidthSig(ordered[j]) === blkSig) j++;
             var start = i, block = ordered.slice(i, j); i = j;
             if (block.length < 3) continue;
             if (block.some(function(c){ return !!(c && c.fixed); })) continue;   // якорь дня (🔒) — не трогаем
