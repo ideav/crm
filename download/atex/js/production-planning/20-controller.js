@@ -2109,6 +2109,7 @@
     // planStart/planDate резки), срок — dueKey (YYYYMMDD). Старший критерий «Упорядочить» (срок —
     // ТЗ §14), выше переналадки: см. LATE_DAY_WEIGHT и chooseOptimizeCandidate.
     AtexProductionPlanning.prototype.planLatenessDays = function(cutsArray, planStartByCutId) {
+        var self = this;
         var ov = planStartByCutId || null;
         var total = 0;
         (cutsArray || []).forEach(function(c) {
@@ -2116,7 +2117,14 @@
             var ts = (o != null) ? Number(o)
                 : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
             var pKey = ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate);
-            total += lateDaysOf(pKey, c.dueKey);
+            // #4211: срок — по тому же правилу, что панель «просрочено: N» (#4161 countOverdueCuts →
+            // cutDueKeys с фолбэком из обеспечения), а НЕ только хранимый c.dueKey. Иначе у продолжения-
+            // перелива (#4209: свой dueKey пуст, срок держит обеспечение головы) опоздание=0, и
+            // «Упорядочить» рапортует «оптимально» при «просрочено:1» в панели. Фолбэк на c.dueKey —
+            // для юнит-стабов без supplies (cutDueKeys без обеспечений → []).
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);
+            var dueKey = (dueKeys && dueKeys.length) ? dueKeys[0] : c.dueKey;
+            total += lateDaysOf(pKey, dueKey);
         });
         return round3(total);
     };
@@ -2183,7 +2191,13 @@
         var choice = chooseOptimizeCandidate(before, objB, objA, plan.changed);
         if (choice.action === 'none') {
             self.setBusy(false);
-            self.notify('Очередь уже оптимальна (опозданий ' + round3(lateBefore) + ' дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
+            // #4211: при НАЛИЧИИ просрочки НЕ рапортовать «очередь оптимальна» — переставить в срок не
+            // удалось (нет свободного места раньше). «Оптимальна» — только когда опозданий реально нет.
+            if (round3(lateBefore) > 0) {
+                self.notify('Просрочка не устранена: опозданий ' + round3(lateBefore) + ' дн — раньше в срок не размещается (нет свободного места). Переналадка ' + round3(coBefore) + ' мин', 'warning');
+            } else {
+                self.notify('Очередь уже оптимальна (опозданий 0 дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
+            }
             return;
         }
         var useA = choice.action === 'A';
