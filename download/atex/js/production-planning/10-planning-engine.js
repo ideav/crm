@@ -3596,55 +3596,66 @@
         // (2) не двигает НИ ОДНУ резку на день позже её срока (не плодит и не углубляет просрочку —
         // иначе штраф опоздания перебьёт экономию), (3) не портит «фольга в конце дня» (#3717).
         // Обе стороны дубля пробуются (byLast=false/true); безопасную оставляет проверка срока.
+        // #4205: глобальная перестановка блока отвергалась, если ХОТЬ ОДНО ЧУЖОЕ задание блока от
+        // неё уезжало за срок — и выгодная ЛОКАЛЬНАЯ склейка дубля не случалась (единичное сырьё в
+        // начале + группа-дубль в конце: byLast роняет свой срок у приколотого сроком единичного,
+        // byFirst — чужой срок соседа при тасовке всего блока). К глобальным кандидатам добавлены
+        // ХИРУРГИЧЕСКИЕ (materialIslandMergeCandidates): склейка островов ОДНОЙ конфигурации, двигающая
+        // ТОЛЬКО её резки — остальной порядок блока цел, чужие сроки не задеты. Per-machine цикл
+        // применяет ЛУЧШИЙ безопасный кандидат, пока есть улучшение (монотонно по наладке → сходится).
         var dedupPass = { machines: 0 };
         if (slotPlan && !opts.preserveOrder && opts.intraBlockDedup !== false && opts.dueDayByCut) {
             var dedupTimes = planningChangeTimes(opts);
             var dueDay = opts.dueDayByCut;
             packed.mOrder.forEach(function(key){
-                var segs = packed.segsByMachine[key] || [];
-                var oldDayByCut = {};
-                segs.forEach(function(s){
-                    var off = Number(s.dayOffset); if (!isFinite(off)) return;
-                    var id = String(s.cutId);
-                    if (oldDayByCut[id] == null || off < oldDayByCut[id]) oldDayByCut[id] = off;
-                });
-                var ordered = orderMachineQueue(packed.byMachine[key]);
-                if (ordered.length < 3) return;
                 var prevSetup = (opts.prevSetupBySlitter || {})[key];
-                var entry = prevSetup ? carryOverPrevCut(prevSetup, ordered[0]) : null;
-                var oldReal = runChainCost(ordered, entry, dedupTimes, changeoverCost);
-                var oldFoil = foilNotLastCount(segs, cutById);
-                var best = null;
-                [false, true].forEach(function(byLast){
-                    var cand = clusterMaterialWithinKnifeBlocks(ordered, byLast);
-                    if (!cand) return;
-                    var newReal = runChainCost(cand, entry, dedupTimes, changeoverCost);
-                    if (!(newReal < oldReal - 1e-9)) return;   // должна уйти хотя бы одна наладка
-                    var trialSegs = packOrderedMachine(cand, key);
-                    var newDayByCut = {};
-                    (trialSegs || []).forEach(function(s){
+                var applied = false, guard = 0, hardCap = (packed.byMachine[key] || []).length + 4;
+                while (guard++ < hardCap){
+                    var segs = packed.segsByMachine[key] || [];
+                    var oldDayByCut = {};
+                    segs.forEach(function(s){
                         var off = Number(s.dayOffset); if (!isFinite(off)) return;
                         var id = String(s.cutId);
-                        if (newDayByCut[id] == null || off < newDayByCut[id]) newDayByCut[id] = off;
+                        if (oldDayByCut[id] == null || off < oldDayByCut[id]) oldDayByCut[id] = off;
                     });
-                    // ни одна резка не должна уехать на день позже срока (новая/углублённая просрочка)
-                    var worse = Object.keys(newDayByCut).some(function(id){
-                        var due = dueDay[id]; if (due == null) return false;
-                        due = Number(due);
-                        var nd = newDayByCut[id], od = oldDayByCut[id];
-                        if (nd <= due) return false;         // укладывается в срок
-                        if (od == null) return true;         // не было в упаковке — не рискуем
-                        if (od <= due) return true;          // была в срок, стала просрочена — новое опоздание
-                        return nd > od;                      // была просрочена, стала ещё позже — углубление
+                    var ordered = orderMachineQueue(packed.byMachine[key]);
+                    if (ordered.length < 3) break;
+                    var entry = prevSetup ? carryOverPrevCut(prevSetup, ordered[0]) : null;
+                    var oldReal = runChainCost(ordered, entry, dedupTimes, changeoverCost);
+                    var oldFoil = foilNotLastCount(segs, cutById);
+                    var cands = [];
+                    [false, true].forEach(function(byLast){ var c = clusterMaterialWithinKnifeBlocks(ordered, byLast); if (c) cands.push(c); });
+                    materialIslandMergeCandidates(ordered).forEach(function(c){ cands.push(c); });
+                    var best = null;
+                    cands.forEach(function(cand){
+                        var newReal = runChainCost(cand, entry, dedupTimes, changeoverCost);
+                        if (!(newReal < oldReal - 1e-9)) return;   // должна уйти хотя бы одна наладка
+                        var trialSegs = packOrderedMachine(cand, key);
+                        var newDayByCut = {};
+                        (trialSegs || []).forEach(function(s){
+                            var off = Number(s.dayOffset); if (!isFinite(off)) return;
+                            var id = String(s.cutId);
+                            if (newDayByCut[id] == null || off < newDayByCut[id]) newDayByCut[id] = off;
+                        });
+                        // ни одна резка не должна уехать на день позже срока (новая/углублённая просрочка)
+                        var worse = Object.keys(newDayByCut).some(function(id){
+                            var due = dueDay[id]; if (due == null) return false;
+                            due = Number(due);
+                            var nd = newDayByCut[id], od = oldDayByCut[id];
+                            if (nd <= due) return false;         // укладывается в срок
+                            if (od == null) return true;         // не было в упаковке — не рискуем
+                            if (od <= due) return true;          // была в срок, стала просрочена — новое опоздание
+                            return nd > od;                      // была просрочена, стала ещё позже — углубление
+                        });
+                        if (worse) return;
+                        if (foilNotLastCount(trialSegs, cutById) > oldFoil) return;
+                        if (!best || newReal < best.newReal) best = { cand: cand, segs: trialSegs, newReal: newReal };
                     });
-                    if (worse) return;
-                    if (foilNotLastCount(trialSegs, cutById) > oldFoil) return;
-                    if (!best || newReal < best.newReal) best = { cand: cand, segs: trialSegs, newReal: newReal };
-                });
-                if (!best) return;
-                best.cand.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
-                packed.segsByMachine[key] = best.segs;
-                dedupPass.machines++;
+                    if (!best) break;
+                    best.cand.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
+                    packed.segsByMachine[key] = best.segs;
+                    if (!applied){ applied = true; dedupPass.machines++; }
+                }
             });
         }
         var byMachine = packed.byMachine, mOrder = packed.mOrder, segsByMachine = packed.segsByMachine;
@@ -4615,6 +4626,50 @@
             out = out.concat(newBlock);
         }
         return changed ? out : null;
+    }
+
+    // #4205: ХИРУРГИЧЕСКАЯ склейка островов ОДНОЙ конфигурации. clusterMaterialWithinKnifeBlocks
+    // переставляет ВЕСЬ блок ножей сразу, поэтому приёмка (проверка срока) отвергает его, если хоть
+    // одно ЧУЖОЕ задание блока от глобальной перетасовки уезжает за свой срок — и выгодная локальная
+    // склейка дубля не случается (жалоба #4205: единичное MWR200 в начале + тройка в конце, слить
+    // −15 мин, но byFirst роняет чужой срок, byLast — свой у приколотого сроком единичного).
+    // Здесь для КАЖДОЙ конфигурации блока с ≥2 островами формируем кандидатов, где к якорному острову
+    // (первому ИЛИ последнему появлению) стягиваются ТОЛЬКО резки этой конфигурации, а остальной
+    // порядок блока сохраняется как есть. Минимальное движение → приёмка проходит там, где глобальная
+    // перетасовка ломала чужой срок. Фольгу отдельно не бережём — её держит проверка foilNotLastCount
+    // в приёмке. Возвращает список порядков очереди станка (каждый = ordered с одной склейкой).
+    function materialIslandMergeCandidates(ordered){
+        if (!ordered || ordered.length < 3) return [];
+        function sigOf(c){ return cutConfigSig(c) + ((c && c.isFoil) ? '|F' : ''); }
+        var cands = [], i = 0;
+        while (i < ordered.length){
+            var blkSig = knifeBlockSig(ordered[i]);
+            var j = i; while (j < ordered.length && knifeBlockSig(ordered[j]) === blkSig) j++;
+            var start = i, block = ordered.slice(i, j); i = j;
+            if (block.length < 3) continue;
+            if (block.some(function(c){ return !!(c && c.fixed); })) continue;   // якорь дня (🔒) — не трогаем
+            var idxsBySig = {}, order = [];
+            block.forEach(function(c, idx){ var s = sigOf(c); if (!idxsBySig[s]){ idxsBySig[s] = []; order.push(s); } idxsBySig[s].push(idx); });
+            order.forEach(function(sig){
+                var idxs = idxsBySig[sig];
+                if (idxs.length < 2) return;                       // одиночная — сливать нечего
+                var contiguous = true;
+                for (var k = 1; k < idxs.length; k++){ if (idxs[k] !== idxs[k - 1] + 1){ contiguous = false; break; } }
+                if (contiguous) return;                            // уже подряд
+                var isMoved = {}; idxs.forEach(function(x){ isMoved[x] = 1; });
+                var moved = idxs.map(function(x){ return block[x]; });
+                var rest = [];
+                block.forEach(function(c, idx){ if (!isMoved[idx]) rest.push({ c: c, idx: idx }); });
+                // якорь = первый / последний остров: вставляем `moved` среди `rest` на место якоря
+                [idxs[0], idxs[idxs.length - 1]].forEach(function(anchor){
+                    var insertAt = rest.filter(function(x){ return x.idx < anchor; }).length;
+                    var newBlock = rest.slice(0, insertAt).map(function(x){ return x.c; })
+                        .concat(moved).concat(rest.slice(insertAt).map(function(x){ return x.c; }));
+                    cands.push(ordered.slice(0, start).concat(newBlock).concat(ordered.slice(start + block.length)));
+                });
+            });
+        }
+        return cands;
     }
 
     function bestExistingTransitionCost(group, cut, weights) {
