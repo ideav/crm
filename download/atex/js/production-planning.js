@@ -1615,6 +1615,26 @@
         return keys.sort(function(a, b) { return a - b; });
     }
 
+    // #4230: ключи ширин полос резки, идущих В ЗАКАЗ. Полоса резки идёт «в заказ», если её
+    // ширина совпадает с шириной обеспечиваемой позиции заказа (supply.positionId → позиция →
+    // width). Всё остальное этой резки (лишние полосы добора джамбо, #3391) идёт на склад или в
+    // отходы — их подпись в карточке красится и вместо срока пишет «Склад»/«Отходы» (stockStripPurpose).
+    // Ширина берётся из позиции активного positions_list, фолбэк — из самого cut_planning
+    // (supply.positionWidth), когда позиция выпала из активного списка (#4051-подобно, как в cutDueKeys).
+    // Чистая (DOM не трогает) — покрыта тестом. → { stripWidthKey(width): true }.
+    function cutOrderedWidthKeys(cut, supplies, genPositions) {
+        var posMap = positionMap(genPositions);
+        var keys = {};
+        (supplies || []).forEach(function(s) {
+            if (!cut || !s || String(s.cutId) !== String(cut.id)) return;
+            var p = s.positionId != null ? posMap[String(s.positionId)] : null;
+            var w = p ? stripNum(p.width) : 0;
+            if (!(w > 0) && s.positionWidth != null) w = stripNum(s.positionWidth);
+            if (w > 0) keys[stripWidthKey(w)] = true;
+        });
+        return keys;
+    }
+
     // #4161: сколько заданий ПРОСРОЧЕНО в окне [scopeFromKey; scopeToKey] — плановый день задания
     // (planDateDayKey) позже самого раннего «Срока изготовления» обеспечиваемых позиций. Правило
     // просрочки — dueColorClass → 'is-overdue' (то же, что красит строку карточки #3769/#4051).
@@ -8144,6 +8164,7 @@
         formatDayKey: formatDayKey,             // #3769
         dueColorClass: dueColorClass,           // #3769
         cutDueKeys: cutDueKeys,                 // #3769
+        cutOrderedWidthKeys: cutOrderedWidthKeys, // #4230: ширины полос, идущих в заказ (остальное — склад/отходы)
         countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
@@ -14707,14 +14728,31 @@
                     var dueLabels = dueKeys.map(formatDayKey).filter(function(s) { return s; });
                     if (dueLabels.length) dueSuffix = ' (' + (dueLabels.length > 1 ? 'сроки: ' : 'срок: ') + dueLabels.join(', ') + ')';
                 }
+                // #4230: полоса идёт «в заказ», если её ширина совпадает с шириной обеспечиваемой
+                // позиции. Полосы НЕ в заказ (лишний добор джамбо, #3391) видно сразу: строка
+                // красная и вместо срока — «Склад» (номенклатура есть в «Максимальном запасе»,
+                // table/67113) или «Отходы» (нарезать впрок нельзя). Классификация по ширине —
+                // у карточки нет id полос (в отличие от редактора полос по orderedBatchIds).
+                var orderedWidthKeys = cutOrderedWidthKeys(c, self.supplies, self.genPositions);
                 var matRows = stripGroups.map(function(g) {
                     // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
                     // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
                     // (обратный резолв по справочнику), а после тире — реальные мм.
                     var ctx = { jumbo: jumboWidth, inches: null };
                     var nominal = resolveNominalWidth(g.width, ctx, self.actualWidthIndex);
-                    return el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
-                        text: formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut) + dueSuffix });
+                    var lineText = formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut);
+                    var ordered = !!(orderedWidthKeys[stripWidthKey(nominal)] || orderedWidthKeys[stripWidthKey(g.width)]);
+                    if (ordered) {
+                        return el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
+                            text: lineText + dueSuffix });
+                    }
+                    // #4230: не в заказ — «Склад»/«Отходы» вместо срока, вся строка красная.
+                    var purpose = stockStripPurpose(self.maxStockIndex, {
+                        material: c.materialId, width: g.width, length: c.length, winding: c.winding
+                    });
+                    var rowEl = el('div', { class: 'atex-pp-strip-row is-nonorder', text: lineText + ' ' });
+                    rowEl.appendChild(el('span', { class: 'atex-pp-strip-nonorder-flag', text: '(' + purpose + ')' }));
+                    return rowEl;
                 });
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-material' }, matRows));
             }

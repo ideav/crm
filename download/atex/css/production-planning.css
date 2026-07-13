@@ -444,6 +444,21 @@
     border-radius: 4px;
     padding: 1px 6px;
 }
+/* #4230: полоса резки идёт НЕ в заказ (на склад/в отходы). Видно сразу — красным,
+   вместо срока в конце строки слово «Склад»/«Отходы». Отдельный класс (не is-overdue):
+   это не просрочка по сроку, а назначение полосы. */
+.atex-pp-cut-material .atex-pp-strip-row.is-nonorder {
+    color: #b91c1c;
+    font-weight: 600;
+    background: rgba(185, 28, 28, .10);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+.atex-pp-cut-material .atex-pp-strip-row.is-nonorder .atex-pp-strip-nonorder-flag {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
 /* #3354 п.1: строка времени резки теперь встроена в первую строку карточки
    (между номером и сырьём), а не отдельным рядом ниже — поэтому без margin-top. */
 .atex-pp-cut-time {
