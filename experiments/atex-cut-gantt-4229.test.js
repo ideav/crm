@@ -46,11 +46,11 @@ function assert(cond, name) {
 
 function utc(y, mo, d, h, mi) { return Date.UTC(y, mo - 1, d, h || 0, mi || 0, 0, 0); }
 
-// ── 1) Обрезка Примечаний до 100 символов; пусто → «Отпуск» ─────────────────────────────────────────
+// ── 1) Обрезка Примечаний до 10 символов (#4238); пусто → «Отпуск» ───────────────────────────────────
 (function () {
     var long = new Array(250).join('я');   // 249 символов
     var t = gantt.downtimeNotesText(long);
-    assert(t.length === 100, '#4229 Примечания обрезаны до 100 символов (было ' + long.length + ', стало ' + t.length + ')');
+    assert(t.length === 10, '#4238 Примечания обрезаны до 10 символов (было ' + long.length + ', стало ' + t.length + ')');
     assert(gantt.downtimeNotesText('') === 'Отпуск', '#4229 пустые примечания → «Отпуск»');
     assert(gantt.downtimeNotesText('  ТО линии  ') === 'ТО линии', '#4229 примечания триммятся');
 })();
@@ -120,7 +120,8 @@ function utc(y, mo, d, h, mi) { return Date.UTC(y, mo - 1, d, h || 0, mi || 0, 0
     var bar = body.querySelector('.atex-cg-bar--downtime');
     assert(!!bar, '#4229 UI: серый бар отпуска (.atex-cg-bar--downtime)');
     var main = bar && bar.querySelector('.atex-cg-bar-main');
-    assert(main && main.textContent === 'Плановое ТО', '#4229 UI: примечания у бара (текст «Плановое ТО»)');
+    assert(main && main.textContent === '08:00-18:00 Плановое Т',
+        '#4238 UI: подпись бара отпуска — диапазон + Примечание ≤10 симв. («08:00-18:00 Плановое Т»), стало «' + (main && main.textContent) + '»');
     var label = rows[0] && rows[0].querySelector('.atex-cg-label-main');
     assert(label && label.textContent === 'Отпуск', '#4229 UI: в метке слева — «Отпуск»');
     // бар спозиционирован (left задан px)

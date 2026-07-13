@@ -947,7 +947,7 @@
 
     // #4229: «Отпуск» станка — окно простоя { id, startMs, endMs, notes } (мс). Конец пустой/раньше
     // начала → окно длиной в рабочую смену дня начала (просто чтобы бар был видим).
-    var DOWNTIME_NOTES_MAX = 100;
+    var DOWNTIME_NOTES_MAX = 10;   // #4238: подпись бара отпуска — диапазон + Примечание ≤10 симв.
     function downtimeEndMs(dt) {
         if (!dt || dt.startMs == null) return null;
         if (dt.endMs != null && dt.endMs > dt.startMs) return dt.endMs;
@@ -955,7 +955,7 @@
         var day = startOfLocalDayMs(dt.startMs);
         return Math.max(dt.startMs, day + GANTT_DAY_END_HOUR * GANTT_HOUR_MS + GANTT_SHIFT_TAIL_MIN * 60000);
     }
-    // Примечания, обрезанные до 100 символов (#4229). Пусто → «Отпуск».
+    // Примечания, обрезанные до DOWNTIME_NOTES_MAX символов (#4229; #4238 — 10). Пусто → «Отпуск».
     function downtimeNotesText(notes) {
         var s = String(notes == null ? '' : notes).trim();
         if (!s) return 'Отпуск';
@@ -977,6 +977,32 @@
         }
         if (!(e >= s)) return null;
         return { startMs: s, endMs: e };
+    }
+
+    // #4238: строки станка — задания в СВОЁМ порядке, «Отпуск» ВСТАВЛЕН в хронологии по старту
+    // (а не всегда внизу дня). Задания сохраняют относительный порядок; каждый отпуск встаёт ПЕРЕД
+    // первым заданием, начинающимся позже него; отпуск без старта или позже всех заданий — в конец.
+    // → [{ kind:'task', task, taskIdx } | { kind:'downtime', downtime }]. Чистая — покрыта тестом.
+    function mergeGroupRows(tasks, downtimes) {
+        var rows = [];
+        var dts = (downtimes || []).filter(Boolean).slice().sort(function(a, b) {
+            var am = a.startMs == null ? Infinity : a.startMs;
+            var bm = b.startMs == null ? Infinity : b.startMs;
+            return am - bm;
+        });
+        var di = 0;
+        (tasks || []).forEach(function(t, taskIdx) {
+            while (di < dts.length && dts[di].startMs != null && t && t.startMs != null && dts[di].startMs < t.startMs) {
+                rows.push({ kind: 'downtime', downtime: dts[di] });
+                di++;
+            }
+            rows.push({ kind: 'task', task: t, taskIdx: taskIdx });
+        });
+        while (di < dts.length) {
+            rows.push({ kind: 'downtime', downtime: dts[di] });
+            di++;
+        }
+        return rows;
     }
 
     // #4229: резолв таблицы/колонки из метаданных (как tableByName/columnIndex у «Планирования»).
@@ -1590,7 +1616,14 @@
                 if (!span) return null;
                 var leftPx = round3(scale.toPx(span.startMs));
                 var widthPx = Math.max(round3(scale.toPx(span.endMs) - leftPx), 1);
-                return { id: dt.id, notes: downtimeNotesText(dt.notes),
+                // #4238: подпись бара — ДИАПАЗОН времени простоя, затем Примечание (≤10 симв.);
+                // пустое примечание не дописываем (в метке слева и так «Отпуск»). notesFull — полный
+                // текст примечания для тултипа (в подписи он обрезан).
+                var note = downtimeNotesText(dt.notes);   // ≤10, пусто → «Отпуск»
+                var notesFull = String(dt.notes == null ? '' : dt.notes).trim();
+                var barText = formatTime(span.startMs) + '-' + formatTime(span.endMs)
+                    + (note && note !== 'Отпуск' ? ' ' + note : '');
+                return { id: dt.id, notes: note, notesFull: notesFull, barText: barText,
                          leftPx: leftPx, widthPx: widthPx, startMs: span.startMs, endMs: span.endMs };
             }).filter(Boolean);
             delete g.cuts;
@@ -1691,6 +1724,7 @@
         downtimeEndMs: downtimeEndMs,               // #4229
         downtimeSpanClamped: downtimeSpanClamped,   // #4229
         downtimeNotesText: downtimeNotesText,       // #4229
+        mergeGroupRows: mergeGroupRows,             // #4238
         cutRowLabel: cutRowLabel,
         cutBarTime: cutBarTime,
         cutBarSpanMin: cutBarSpanMin,   // #3770
@@ -2267,7 +2301,32 @@
                 pushOverlay(mk.carrierIndex, buildOverlayBand(mk, mk.label || 'Перерыв'));
             });
 
-            group.tasks.forEach(function(t, taskIdx) {
+            // #4238: задания и «Отпуск» станка — в ХРОНОЛОГИЧЕСКОМ порядке по старту (отпуск больше не
+            // всегда внизу дня): задания сохраняют свой порядок, отпуск вставлен по времени начала.
+            mergeGroupRows(group.tasks, group.downtimes).forEach(function(row) {
+                // #4229/#4238: «Отпуск» — ОТДЕЛЬНОЙ строкой (не накладкой на баре), серым баром по
+                // времени простоя; в метке слева «Отпуск», подпись бара — диапазон + Примечание (≤10).
+                if (row.kind === 'downtime') {
+                    var dt = row.downtime;
+                    var dtTitle = 'Отпуск ' + formatTime(dt.startMs) + '–' + formatTime(dt.endMs)
+                        + (dt.notesFull ? ' · ' + dt.notesFull : '');
+                    var dtLabel = el('div', { class: 'atex-cg-label', title: 'Отпуск' }, [
+                        el('span', { class: 'atex-cg-label-main', text: 'Отпуск' })
+                    ]);
+                    var dtTrack = el('div', { class: 'atex-cg-track atex-cg-downtime-track' });
+                    dtTrack.style.minWidth = trackPx + 'px';
+                    appendHours(dtTrack);
+                    var dtBar = el('div', { class: 'atex-cg-bar atex-cg-bar--downtime', title: dtTitle }, [
+                        el('span', { class: 'atex-cg-seg atex-cg-seg--cut' }),
+                        el('span', { class: 'atex-cg-bar-main', text: dt.barText })
+                    ]);
+                    dtBar.style.left = dt.leftPx + 'px';
+                    dtBar.style.width = dt.widthPx + 'px';
+                    dtTrack.appendChild(dtBar);
+                    body.appendChild(el('div', { class: 'atex-cg-row atex-cg-downtime-row' }, [dtLabel, dtTrack]));
+                    return;
+                }
+                var t = row.task, taskIdx = row.taskIdx;
                 var statusKey = t.status && t.status.key || 'unknown';
                 var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
                     el('span', { class: 'atex-cg-label-main', text: t.label })
@@ -2307,28 +2366,6 @@
                 // на позиции их времени; подпись только в title.
                 (overlaysByTask[taskIdx] || []).forEach(function(band) { track.appendChild(band); });
                 body.appendChild(el('div', { class: 'atex-cg-row' }, [labelCell, track]));
-            });
-
-            // #4229: «Отпуск» станка — ОТДЕЛЬНОЙ строкой (не накладкой на баре), серым баром по
-            // времени простоя; в метке слева — «Отпуск», справа от бара — Примечания (≤100 симв.).
-            (group.downtimes || []).forEach(function(dt) {
-                var notes = dt.notes || 'Отпуск';
-                var title = 'Отпуск ' + formatTime(dt.startMs) + '–' + formatTime(dt.endMs)
-                    + (dt.notes && dt.notes !== 'Отпуск' ? ' · ' + dt.notes : '');
-                var labelCell = el('div', { class: 'atex-cg-label', title: 'Отпуск' }, [
-                    el('span', { class: 'atex-cg-label-main', text: 'Отпуск' })
-                ]);
-                var track = el('div', { class: 'atex-cg-track atex-cg-downtime-track' });
-                track.style.minWidth = trackPx + 'px';
-                appendHours(track);
-                var bar = el('div', { class: 'atex-cg-bar atex-cg-bar--downtime', title: title }, [
-                    el('span', { class: 'atex-cg-seg atex-cg-seg--cut' }),
-                    el('span', { class: 'atex-cg-bar-main', text: notes })
-                ]);
-                bar.style.left = dt.leftPx + 'px';
-                bar.style.width = dt.widthPx + 'px';
-                track.appendChild(bar);
-                body.appendChild(el('div', { class: 'atex-cg-row atex-cg-downtime-row' }, [labelCell, track]));
             });
         });
 
