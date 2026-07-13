@@ -3327,6 +3327,7 @@
                 dayByCut: opts.dayByCut, relocate: false,   // #4095/§12: релокация — ниже, по РЕАЛЬНЫМ дням упаковщика
                 orderIdsByCut: opts.orderIdsByCut,   // #4194: множества заказов заданий (штраф/бонус смежности в scorePosition)
                 dayLockByCut: opts.dayLockByCut,   // #4221: замок дня/станка для переноса 🗓 «По весу» (позиция в дне по весу)
+                machineLockByCut: opts.machineLockByCut,   // #4225: замок станка (перенос «В пределах одного станка» — без миграции между станками)
                 trace: slotTraceOn()
             }));
         }
