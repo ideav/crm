@@ -3526,19 +3526,43 @@
             });
             return { byMachine: bm };
         }
-        var overduePass = { moves: 0, moveLog: [] };
+        // #4203: рескью #4118 записывает best.real в МОМЕНТ переноса (реальный день кандидата), но
+        // последующие переносы того же раунда пере-упаковывают станок-приёмник, и задание, «положенное в
+        // срок», в ФИНАЛЬНОМ packAll уезжает позже — стейл best.real (реальный лог 543436: «день 2» записан,
+        // финал «день 5», при СВОБОДНОМ станке в срок с тем же сырьём). Внутренний цикл relocateOverdueReal
+        // (maxRounds) снимает дни со СВОЕЙ мутируемой занятости; этого мало, если задание дестабилизируется
+        // на последнем раунде. ВНЕШНИЙ цикл: ПЕРЕ-СЕЯТЬ занятость из АВТОРИТЕТНОГО packAll (occupancyFrom-
+        // CurrentOrder читает packed.byMachine в порядке orderMachineQueue = порядок финальной упаковки) и
+        // повторить рескью, ПОКА остаток за срок по РЕАЛЬНЫМ дням СТРОГО убывает. Монотонно (каждый перенос
+        // строго уменьшает реальный день — см. relocateOverdueReal) ⇒ сходимость; на пере-сев задание видно
+        // на его НАСТОЯЩЕМ (позднем) дне и рескью может увести его на свободный станок в срок.
+        var overduePass = { moves: 0, moveLog: [], rounds: 0 };
         if (opts.dueDayByCut) {
-            var occ4118 = (slotPlan && slotPlan.occupancy) ? slotPlan.occupancy : occupancyFromCurrentOrder();
-            var rel2 = relocateOverdueReal(occ4118, opts.dueDayByCut, realPackFn,
-                slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
-            overduePass.moves = rel2.moves.length;
-            overduePass.moveLog = rel2.moves;
-            if (rel2.moves.length) {
-                var asg2 = assignmentFromOccupancy(occ4118);
-                if (!slotPlan) slotPlan = { occupancy: occ4118 };
-                slotPlan._rescued = true;   // #4200: пере-упаковка обязана взять этот порядок (см. orderMachineQueue)
-                slotPlan.slitterByCut = asg2.slitterByCut; slotPlan.orderIdxByCut = asg2.orderIdxByCut;
-                packed = packAll();
+            var prevResid4203 = Infinity, maxOuter4203 = Number(opts.overdueRescueRounds) || 4;
+            function residualOverdueCount(){
+                var real = realDaysFrom(packed.segsByMachine), n = 0;
+                Object.keys(real).forEach(function(id){ var d = opts.dueDayByCut[id]; if (d != null && Number(real[id]) > Number(d)) n++; });
+                return n;
+            }
+            for (var oR4203 = 0; oR4203 < maxOuter4203; oR4203++) {
+                // Итерация 0 на пути размещения — богатая занятость слоя (#4085); дальше — пере-сев из packed.
+                var occ4118 = (oR4203 === 0 && slotPlan && slotPlan.occupancy) ? slotPlan.occupancy : occupancyFromCurrentOrder();
+                var rel2 = relocateOverdueReal(occ4118, opts.dueDayByCut, realPackFn,
+                    slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
+                if (rel2.moves.length) {
+                    overduePass.moves += rel2.moves.length;
+                    rel2.moves.forEach(function(m){ overduePass.moveLog.push(m); });
+                    var asg2 = assignmentFromOccupancy(occ4118);
+                    if (!slotPlan) slotPlan = { occupancy: occ4118 };
+                    slotPlan._rescued = true;   // #4200: пере-упаковка обязана взять этот порядок (см. orderMachineQueue)
+                    slotPlan.slitterByCut = asg2.slitterByCut; slotPlan.orderIdxByCut = asg2.orderIdxByCut;
+                    packed = packAll();
+                }
+                overduePass.rounds++;
+                var resid4203 = residualOverdueCount();
+                // Стоп: нет ходов / всё в срок / остаток НЕ уменьшился (защита от пинг-понга, монотонность).
+                if (!rel2.moves.length || resid4203 === 0 || resid4203 >= prevResid4203) break;
+                prevResid4203 = resid4203;
             }
         }
         // #4139: ВНУТРИДНЕВНАЯ ПЕРЕСОРТИРОВКА. Слой размещения вставляет резки по одной и собранный
@@ -3688,6 +3712,26 @@
                     + '): переносов ' + overduePass.moves + ', осталось за срок ' + overdueResidual.length + (overdueResidual.length ? '' : ' — просрочек нет ✓'));
                 (overduePass.moveLog || []).forEach(function(m){ slotTrace('  ↳ перенос просроченного ' + m.id + ': станок ' + m.from + ' → ' + m.to + (m.real != null ? (', реальный (календарный) день ' + m.real) : '')); });
                 overdueResidual.forEach(function(o){ slotTrace('  ⚠️ ОСТАЁТСЯ ЗА СРОКОМ ' + o.cutId + ': календарный день ' + o.realDay + ' > срок(день) ' + o.dueDay + ' — честный дефицит ёмкости, вручную не разместить без вытеснения'); });
+                // #4203 ДИАГНОСТИКА: для КАЖДОГО оставшегося за сроком — какой день дал бы ДОЗАКЛАД (append)
+                // на каждый ДОПУСТИМЫЙ станок по АВТОРИТЕТНОЙ упаковке (realPackFn на текущей очереди станка +
+                // резка в конец). Показывает, был ли СВОБОДНЫЙ слот в срок (пропущенный) или это истинный
+                // дефицит: «станок K: день D (в срок ✓ / позже)». Кастомер #4203: «в предыдущие дни полно место».
+                var feas4203 = opts.feasibleMachineFor || function(){ return true; };
+                overdueResidual.forEach(function(o){
+                    var cut = cutById[String(o.cutId)]; if (!cut) return;
+                    var slot4203 = slotFromCut(cut, opts.dueKeyByCut ? opts.dueKeyByCut[String(o.cutId)] : undefined);
+                    var probes = [];
+                    (opts.slitterIds || mOrder).forEach(function(key){
+                        key = String(key);
+                        if (!feas4203(key, slot4203)) { probes.push(key + ':✗недоп'); return; }
+                        var ids = (packed.byMachine[key] ? orderMachineQueue(packed.byMachine[key]) : [])
+                            .map(function(c){ return String(c && c.id); }).filter(function(id){ return id !== String(o.cutId); });
+                        ids.push(String(o.cutId));
+                        var day = (realPackFn(ids, key) || {})[String(o.cutId)];
+                        probes.push(key + ':день' + (day == null ? '?' : day) + (day != null && Number(day) <= o.dueDay ? '✓' : ''));
+                    });
+                    slotTrace('     ↳ #4203 дозаклад ' + o.cutId + ' (срок день ' + o.dueDay + ') по станкам: ' + probes.join('  '));
+                });
             }
         }
         var updates = [], creates = [], deletes = [];
