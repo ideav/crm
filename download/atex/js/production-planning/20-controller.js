@@ -5436,6 +5436,17 @@
         // включённый глобально (PR#4196) он дал заданиям без активной позиции срок «сегодня» → конкуренция
         // за забитый день 0 → просрочка уже при ПЕРВОМ планировании, которой не было (#4197, откат #4198).
         var honorSupplyDue = !!(moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length);
+        // #4194: множество «заказов» каждой резки (id заказов обеспечиваемых позиций, supply.orderNo) —
+        // для штрафа/бонуса смежности заказа в слое размещения (scorePosition). Задание может нести
+        // НЕСКОЛЬКО заказов (джамбо на несколько позиций); пустой orderNo (сирота #4175/склад) — пропуск.
+        var orderIdsByCut = {};
+        (self.supplies || []).forEach(function(s) {
+            if (!s || s.cutId == null) return;
+            var oid = String(s.orderNo == null ? '' : s.orderNo).trim();
+            if (oid === '') return;
+            var cid = String(s.cutId);
+            (orderIdsByCut[cid] = orderIdsByCut[cid] || {})[oid] = true;
+        });
         cuts.forEach(function(c) {
             perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
@@ -5517,6 +5528,7 @@
             intraDayResequence: (self && typeof self.intraDayResequenceOn === 'function') ? self.intraDayResequenceOn() : true,
             slitterIds: (self.slitters || []).map(function(s){ return String(s.id); }),
             dueKeyByCut: dueKeyByCut,
+            orderIdsByCut: orderIdsByCut,   // #4194: заказы заданий для штрафа/бонуса смежности (слой размещения)
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,
             machineDayOffFor: slotOn ? machineDayOffFor : null
         });

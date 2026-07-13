@@ -3325,6 +3325,7 @@
             slotPlan = computeSlotPlacement(merged.cuts, slotExtend(slotRefineCtx, {
                 dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
                 dayByCut: opts.dayByCut, relocate: false,   // #4095/§12: релокация — ниже, по РЕАЛЬНЫМ дням упаковщика
+                orderIdsByCut: opts.orderIdsByCut,   // #4194: множества заказов заданий (штраф/бонус смежности в scorePosition)
                 trace: slotTraceOn()
             }));
         }
@@ -5235,7 +5236,8 @@
         KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
         LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
         CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3, SLOT_SPLIT_COST_MN: 2, MAX_DISTANCE_COST_MN: 25,
-        MAX_SLOTS_DISTANCE_HR: 24, MAX_OUTAGE_PLANNABLE_HR: 48, DAY_DURATION_MN: 450, INTERVAL_DURATION_MN: 10
+        MAX_SLOTS_DISTANCE_HR: 24, MAX_OUTAGE_PLANNABLE_HR: 48, DAY_DURATION_MN: 450, INTERVAL_DURATION_MN: 10,
+        ORDER_DIFF_PENALTY_MN: 10   // #4194: смежность заказа — штраф за разрыв заказа чужой вставкой / бонус за соседство своего заказа
     };
     // Значение веса/лимита: из настроек, иначе дефолт ТЗ. Нечисловое → дефолт.
     function planWeight(settings, key){

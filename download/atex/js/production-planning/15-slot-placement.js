@@ -13,7 +13,7 @@
 
     // Scoring-слот из резки контроллера. dueKey (YYYYMMDD) — из cutDueKeys()[0] (кладёт вызывающий).
     // firstPartId — голова цепочки дробления (продолжение НЕ считается независимым соседом, §9).
-    function slotFromCut(cut, dueKey){
+    function slotFromCut(cut, dueKey, orderIds){
         cut = cut || {};
         var id = String(cut.id);
         var sid = (cut.slitter && cut.slitter.id != null) ? String(cut.slitter.id)
@@ -21,11 +21,15 @@
         var dk = (dueKey != null && isFinite(Number(dueKey))) ? Number(dueKey)
                : (isFinite(Number(cut.dueKey)) ? Number(cut.dueKey) : undefined);
         var fp = (cut.firstPartId != null && String(cut.firstPartId) !== '') ? String(cut.firstPartId) : id;
+        // #4194: множество «заказов» задания (id заказов обеспечиваемых позиций) — для штрафа/бонуса
+        // смежности заказа в scorePosition. Кладёт вызывающий (из обеспечения); нет → cut.orderIds → undefined.
+        var ords = orderIds || (cut.orderIds && typeof cut.orderIds === 'object' ? cut.orderIds : undefined);
         return { kind: 'cut', id: id, slitterId: sid,
                  materialId: cut.materialId, winding: cut.winding, batchId: cut.batchId,
                  knifeWidths: cut.knifeWidths, knifeCount: cut.knifeCount, rollerWidth: cut.rollerWidth,
                  isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId,
                  plannedRuns: Number(cut.plannedRuns) || 0, dueKey: dk, fixed: !!cut.fixed, firstPartId: fp,
+                 orderIds: (ords && Object.keys(ords).length) ? ords : undefined,
                  workMin: isFinite(Number(cut.workMin)) ? Number(cut.workMin) : undefined,
                  dayOffset: isFinite(Number(cut.dayOffset)) ? Number(cut.dayOffset) : undefined };
     }
@@ -117,6 +121,27 @@
 
     // Стоимость вставки slot на позицию index станка (ТЗ §8: вес + «качество» двух переходов) |
     // null если позиция недопустима. Срок/фольга/простой — на переходе prev→slot (о самом слоте).
+    // #4194: пересекаются ли множества «заказов» двух заданий (объекты-множества {orderId: true}).
+    function ordersOverlap(a, b){
+        if (!a || !b) return false;
+        for (var k in a){ if (Object.prototype.hasOwnProperty.call(a, k) && b[k]) return true; }
+        return false;
+    }
+    // #4194: штраф/бонус СМЕЖНОСТИ ЗАКАЗА для вставки slot между prevCut и nextCut (веc минут):
+    //  • slot делит заказ с соседом (prev ИЛИ next) → БОНУС −ORDER_DIFF_PENALTY_MN (тянуть слот к своему
+    //    заказу; вес может стать отрицательным — преимущество перед идентичной конфигурацией ЧУЖОГО заказа,
+    //    чтобы одинаковые конфиги разных заказов не склеивались, ТЗ #4194 п.2);
+    //  • иначе, если prev и next принадлежат ОБЩЕМУ заказу, а slot — НИ ОДНОМУ из их заказов → ШТРАФ
+    //    +ORDER_DIFF_PENALTY_MN (не разрывать смежный заказ чужой вставкой, ТЗ #4194 п.1).
+    // Выкл при ORDER_DIFF_PENALTY_MN=0 / отсутствии заказов у slot. Действует и при вставке, и при релокации.
+    function orderAdjacencyPenalty(prevCut, slot, nextCut, settings){
+        var w = planWeight(settings, 'ORDER_DIFF_PENALTY_MN');
+        if (!isFinite(w) || w === 0 || !slot || !slot.orderIds) return 0;
+        if (ordersOverlap(slot.orderIds, prevCut && prevCut.orderIds)
+            || ordersOverlap(slot.orderIds, nextCut && nextCut.orderIds)) return -w;   // бонус: рядом со своим заказом
+        if (prevCut && nextCut && ordersOverlap(prevCut.orderIds, nextCut.orderIds)) return w;   // штраф: разрывает чужой заказ
+        return 0;
+    }
     function scorePosition(machineSlots, index, slot, ctx){
         ctx = ctx || {};
         if (!canInsertAt(machineSlots, index)) return null;
@@ -151,7 +176,10 @@
             if (/Quality$/.test(k)) return;
             byFactor[k] = round3((byFactor[k] || 0) + Number(m[k] || 0));
         }); });
-        return { weight: cost.weight, quality: cost.quality, setupWeight: round3(setupWeight),
+        // #4194: штраф/бонус смежности заказа — в ВЕС (не в setupWeight: гейт §8.4-фолбэка по setup не трогаем).
+        var orderPenalty = orderAdjacencyPenalty(prevCut, slot, nextCut, ctx.settings);
+        if (orderPenalty) byFactor.order = round3((byFactor.order || 0) + orderPenalty);
+        return { weight: round3(cost.weight + orderPenalty), quality: cost.quality, setupWeight: round3(setupWeight),
                  dayOffset: dayOff, placementDayKey: placementDayKey, byFactor: byFactor };
     }
 
@@ -509,7 +537,8 @@
         var s = ctx.settings || {};
         var KEYS = ['DEADLINE_COST_MN','EXACT_DEADLINE_COST_MN','FOIL_NOTEND_COST_MN','KNIVES_CHANGE_COST_MN',
                     'KNIVES_INCREASE_COST_MN','MATERIAL_CHANGE_COST_MN','LEADER_COST_MN','MAX_DISTANCE_COST_MN',
-                    'CHANGE_SLITTER_COST_MN','CHANGE_DAY_COST_MN','SLOT_SPLIT_COST_MN','MAX_SLOTS_DISTANCE_HR','MAX_OUTAGE_PLANNABLE_HR'];
+                    'CHANGE_SLITTER_COST_MN','CHANGE_DAY_COST_MN','SLOT_SPLIT_COST_MN','MAX_SLOTS_DISTANCE_HR','MAX_OUTAGE_PLANNABLE_HR',
+                    'ORDER_DIFF_PENALTY_MN'];   // #4194: смежность заказа
         var vars = KEYS.map(function(k){
             var raw = s[k];
             var fromTable = raw != null && String(raw).trim() !== '' && isFinite(Number(raw));
@@ -577,11 +606,12 @@
         ctx = ctx || {};
         var perPass = ctx.perPassByCut || {};
         var dueKeyBy = ctx.dueKeyByCut || {};
+        var orderIdsBy = ctx.orderIdsByCut || {};   // #4194: cutId → множество заказов (штраф/бонус смежности)
         var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
         var fixedSlots = [], movable = [];
         (cutsList || []).forEach(function(c){
             var id = String(c.id);
-            var s = slotFromCut(c, dueKeyBy[id]);
+            var s = slotFromCut(c, dueKeyBy[id], orderIdsBy[id]);
             s.workMin = (Number(perPass[id]) || 0) * (Number(c.plannedRuns) || 0);
             if (c.fixed){ if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id); fixedSlots.push(s); }
             else movable.push(s);
