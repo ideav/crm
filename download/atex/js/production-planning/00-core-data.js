@@ -1614,6 +1614,26 @@
         return keys.sort(function(a, b) { return a - b; });
     }
 
+    // #4230: ключи ширин полос резки, идущих В ЗАКАЗ. Полоса резки идёт «в заказ», если её
+    // ширина совпадает с шириной обеспечиваемой позиции заказа (supply.positionId → позиция →
+    // width). Всё остальное этой резки (лишние полосы добора джамбо, #3391) идёт на склад или в
+    // отходы — их подпись в карточке красится и вместо срока пишет «Склад»/«Отходы» (stockStripPurpose).
+    // Ширина берётся из позиции активного positions_list, фолбэк — из самого cut_planning
+    // (supply.positionWidth), когда позиция выпала из активного списка (#4051-подобно, как в cutDueKeys).
+    // Чистая (DOM не трогает) — покрыта тестом. → { stripWidthKey(width): true }.
+    function cutOrderedWidthKeys(cut, supplies, genPositions) {
+        var posMap = positionMap(genPositions);
+        var keys = {};
+        (supplies || []).forEach(function(s) {
+            if (!cut || !s || String(s.cutId) !== String(cut.id)) return;
+            var p = s.positionId != null ? posMap[String(s.positionId)] : null;
+            var w = p ? stripNum(p.width) : 0;
+            if (!(w > 0) && s.positionWidth != null) w = stripNum(s.positionWidth);
+            if (w > 0) keys[stripWidthKey(w)] = true;
+        });
+        return keys;
+    }
+
     // #4161: сколько заданий ПРОСРОЧЕНО в окне [scopeFromKey; scopeToKey] — плановый день задания
     // (planDateDayKey) позже самого раннего «Срока изготовления» обеспечиваемых позиций. Правило
     // просрочки — dueColorClass → 'is-overdue' (то же, что красит строку карточки #3769/#4051).
