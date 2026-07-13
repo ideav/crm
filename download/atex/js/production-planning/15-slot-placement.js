@@ -638,6 +638,7 @@
         var orderIdsBy = ctx.orderIdsByCut || {};   // #4194: cutId → множество заказов (штраф/бонус смежности)
         var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
         var dayLockBy = ctx.dayLockByCut || {};   // #4221: cutId → день-смещение замка (перенос 🗓 «По весу»)
+        var machineLockBy = ctx.machineLockByCut || {};   // #4225: cutId → станок замка (перенос «В пределах одного станка»)
         var fixedSlots = [], movable = [];
         (cutsList || []).forEach(function(c){
             var id = String(c.id);
@@ -654,19 +655,27 @@
                 s.lockSlitter = s.slitterId != null ? String(s.slitterId) : null;
                 movable.push(s);
             } else if (c.fixed){ fixedSlots.push(s); }
-            else movable.push(s);
+            else {
+                // #4225: «В пределах одного станка» — задание НЕ мигрирует на другой станок (только
+                // позиция/день внутри своего станка по весу). lockSlitter без lockDay: день свободен.
+                var ml = machineLockBy[id];
+                if (ml != null && String(ml) !== '') s.lockSlitter = String(ml);
+                movable.push(s);
+            }
         });
         // #3717/#4085: подвижную фольгу размещаем ПОСЛЕ нефольги. Жадная вставка «по одному» не видит
         // будущих нефольг, если фольгу поставить раньше, и та могла осесть не в конце (штраф FOIL_NOTEND
         // применяется к УЖЕ стоящим соседям). Разместив всю нефольгу первой, каждая фольга штрафом
         // уводится в конец своего дня, при этом сама выбирает срок-оптимальный день (deadline-штраф жив).
         // Стабильная перестановка: исходный порядок §7 внутри «нефольга»/«фольга» сохраняется.
-        // #4221: задание с замком дня («По весу») размещаем ПОСЛЕДНИМ в своём классе (нефольга/фольга):
+        // #4221: задание с замком ДНЯ («По весу») размещаем ПОСЛЕДНИМ в своём классе (нефольга/фольга):
         // оно должно ВСТАТЬ В ЛУЧШУЮ ЩЕЛЬ между уже разложенными соседями (иначе, встав первым, оно
-        // осело бы в индекс 0 пустого дня — не по весу). Замок держит день/станок, вес — позицию.
+        // осело бы в индекс 0 пустого дня — не по весу). Ключ — именно замок ДНЯ: замок только СТАНКА
+        // (#4225, «В пределах одного станка») позицию по весу не ищет, его задания сохраняют свой
+        // порядок (иначе last-перестановка коснулась бы всех заданий scope).
         function lockLast(arr){
-            return arr.filter(function(s){ return s.lockDay == null && s.lockSlitter == null; })
-                      .concat(arr.filter(function(s){ return s.lockDay != null || s.lockSlitter != null; }));
+            return arr.filter(function(s){ return s.lockDay == null; })
+                      .concat(arr.filter(function(s){ return s.lockDay != null; }));
         }
         movable = lockLast(movable.filter(function(s){ return !s.isFoil; }))
             .concat(lockLast(movable.filter(function(s){ return s.isFoil; })));
