@@ -1,0 +1,558 @@
+<!-- Рабочее место миграции конфигурации БД (issue #4212). Экспорт неслужебной конфигурации (таблицы+данные, шаблоны/скрипты, запросы, пользователи, меню) в JSON, импорт на другой инстанс с переиспользованием терминов и предотвращением конфликтов имён, откат последнего импорта. Только для роли admin. Служебными считаются объекты с ID меньше порога (по умолчанию 460). -->
+<script>
+    document.title = 'Миграция конфигурации - ' + '{_global_.z}'.charAt(0).toUpperCase() + '{_global_.z}'.slice(1);
+</script>
+<style>
+    .mig{ max-width:1080px; margin:0 auto; padding:16px 18px 60px; color:var(--text-primary,#1f2937); }
+    .mig *{ box-sizing:border-box; }
+    .mig h1{ font-size:1.5rem; margin:0 0 6px; display:flex; align-items:center; gap:.5rem; }
+    .mig h1 .pi{ color:#f5a623; }
+    .mig-sub{ color:var(--text-secondary,#6b7280); font-size:.94rem; line-height:1.5; max-width:860px; }
+    .mig-guard{ margin:24px 0; padding:16px 18px; border:1px solid #dc2626; background:rgba(220,38,38,.08); border-radius:10px; color:#dc2626; font-weight:600; }
+    .mig-card{ border:1px solid var(--border-color,#e5e7eb); border-radius:12px; background:var(--bg-secondary,#fff); margin:16px 0; overflow:hidden; }
+    .mig-card > h2{ font-size:1.05rem; margin:0; padding:12px 16px; border-bottom:1px solid var(--border-color,#eceff3); display:flex; align-items:center; gap:.5rem; }
+    .mig-card > h2 .pi{ color:#f5a623; }
+    .mig-body{ padding:14px 16px; }
+    .mig-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+    .mig-btn{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:.9rem; padding:8px 14px; border-radius:8px; border:1px solid var(--border-color,#d1d5db); background:var(--bg-primary,#fff); color:var(--text-primary,#111827); cursor:pointer; }
+    .mig-btn:hover{ border-color:#f5a623; }
+    .mig-btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .mig-btn-primary{ background:#f5a623; border-color:#f5a623; color:#1f2937; font-weight:600; }
+    .mig-btn-danger{ border-color:#dc2626; color:#dc2626; }
+    .mig-btn-danger:hover{ background:rgba(220,38,38,.08); }
+    .mig-opts{ display:flex; flex-wrap:wrap; gap:14px; font-size:.88rem; color:var(--text-secondary,#4b5563); margin-bottom:8px; }
+    .mig-opts label{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+    .mig-num{ width:86px; padding:6px 8px; border-radius:6px; border:1px solid var(--border-color,#d1d5db); background:var(--bg-primary,#fff); color:var(--text-primary,#111827); font:inherit; }
+    textarea.mig-json{ width:100%; min-height:160px; resize:vertical; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.8rem; padding:10px; border-radius:8px; border:1px solid var(--border-color,#d1d5db); background:var(--bg-primary,#fff); color:var(--text-primary,#111827); }
+    .mig-summary{ font-size:.86rem; color:var(--text-secondary,#4b5563); margin-top:8px; }
+    .mig-summary b{ color:var(--text-primary,#1f2937); }
+    .mig-log{ margin-top:12px; max-height:280px; overflow:auto; background:#0f172a; color:#e2e8f0; border-radius:8px; padding:10px 12px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.78rem; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+    .mig-log .ok{ color:#4ade80; } .mig-log .warn{ color:#fbbf24; } .mig-log .err{ color:#f87171; } .mig-log .dim{ color:#94a3b8; }
+    .mig-badge{ display:inline-block; padding:1px 8px; border-radius:999px; font-size:.78rem; font-weight:600; background:rgba(245,166,35,.16); color:#b45309; }
+    .mig-note{ font-size:.82rem; color:var(--text-secondary,#9ca3af); margin-top:6px; }
+</style>
+
+<div class="mig" id="mig-app">
+    <h1><i class="pi pi-sync"></i> Миграция конфигурации базы</h1>
+    <div class="mig-sub">Экспорт функционала текущей БД в JSON и развёртывание на другом инстансе. Выгружаются неслужебные таблицы с данными, шаблоны и скрипты, запросы, пользователи и пункты меню. Служебными считаются объекты с ID меньше порога. Доступно только роли <b>admin</b>.</div>
+    <div id="mig-guard-slot"></div>
+    <div id="mig-ui" style="display:none">
+
+        <div class="mig-card">
+            <h2><i class="pi pi-download"></i> 1. Экспорт конфигурации</h2>
+            <div class="mig-body">
+                <div class="mig-row">
+                    <label>Порог служебных ID &lt;&nbsp;<input type="number" id="mig-threshold" class="mig-num" value="460" min="1"></label>
+                    <button class="mig-btn mig-btn-primary" id="mig-export-btn" type="button"><i class="pi pi-cog"></i> Сформировать JSON</button>
+                    <button class="mig-btn" id="mig-download-btn" type="button" disabled><i class="pi pi-save"></i> Скачать .json</button>
+                </div>
+                <div class="mig-opts" id="mig-export-opts">
+                    <label><input type="checkbox" class="mig-exp" data-k="data" checked> данные таблиц</label>
+                    <label><input type="checkbox" class="mig-exp" data-k="queries" checked> запросы</label>
+                    <label><input type="checkbox" class="mig-exp" data-k="users" checked> пользователи</label>
+                    <label><input type="checkbox" class="mig-exp" data-k="menus" checked> меню</label>
+                    <label><input type="checkbox" class="mig-exp" data-k="files" checked> файлы (шаблоны/скрипты)</label>
+                </div>
+                <textarea class="mig-json" id="mig-export-json" placeholder="Здесь появится JSON конфигурации…" readonly></textarea>
+                <div class="mig-summary" id="mig-export-summary"></div>
+            </div>
+        </div>
+
+        <div class="mig-card">
+            <h2><i class="pi pi-upload"></i> 2. Импорт / развёртывание</h2>
+            <div class="mig-body">
+                <div class="mig-opts" id="mig-import-opts">
+                    <label><input type="checkbox" class="mig-imp" data-k="tables" checked> таблицы+данные</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="queries" checked> запросы</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="users"> пользователи</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="menus"> меню</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="files"> файлы</label>
+                </div>
+                <textarea class="mig-json" id="mig-import-json" placeholder="Вставьте сюда JSON конфигурации для развёртывания…"></textarea>
+                <div class="mig-row" style="margin-top:10px">
+                    <input type="file" id="mig-import-file" accept=".json,application/json" style="display:none">
+                    <button class="mig-btn" id="mig-load-file-btn" type="button"><i class="pi pi-folder-open"></i> Загрузить из файла</button>
+                    <button class="mig-btn" id="mig-use-export-btn" type="button"><i class="pi pi-arrow-up"></i> Взять из экспорта выше</button>
+                    <button class="mig-btn mig-btn-primary" id="mig-import-btn" type="button"><i class="pi pi-play"></i> Развернуть на этой БД</button>
+                </div>
+                <div class="mig-note">Термины переиспользуются, если свободны; занятые получают суффикс, чтобы не было конфликта имён и полей. Пароли не переносятся — импортированным пользователям нужно задать пароль.</div>
+            </div>
+        </div>
+
+        <div class="mig-card">
+            <h2><i class="pi pi-replay"></i> 3. Откат последнего импорта</h2>
+            <div class="mig-body">
+                <div class="mig-summary" id="mig-rollback-info">Импорт ещё не выполнялся в этом браузере.</div>
+                <div class="mig-row" style="margin-top:8px">
+                    <button class="mig-btn mig-btn-danger" id="mig-rollback-btn" type="button" disabled><i class="pi pi-trash"></i> Удалить объекты последнего импорта</button>
+                </div>
+                <div class="mig-note">Удаляются все объекты и записи с ID ≥ ID первого созданного при импорте — записи, затем колонки, затем типы; несколько циклов с корректной обработкой ссылок (останов, если цикл ничего не удалил или циклов больше 100).</div>
+            </div>
+        </div>
+
+        <div class="mig-log" id="mig-log"><span class="dim">Журнал операций…</span></div>
+    </div>
+</div>
+
+<script>
+(function(){
+    "use strict";
+    var DB = (typeof db !== 'undefined' && db) ? db : (location.pathname.split('/')[1] || 'xyz');
+    var TOKEN = (typeof token !== 'undefined') ? token : '';
+    var XSRF = (typeof xsrf !== 'undefined') ? xsrf : '';
+    var ROLE = (typeof role !== 'undefined') ? String(role).toLowerCase() : '';
+    var LS_KEY = 'migration-last-' + DB;
+    var lastExport = null;
+
+    function el(id){ return document.getElementById(id); }
+    function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    // ---- admin guard ----
+    if(ROLE !== 'admin' && ROLE !== 'админ'){
+        el('mig-guard-slot').innerHTML = '<div class="mig-guard"><i class="pi pi-lock"></i> Импорт и экспорт доступны только пользователю с ролью admin. Ваша роль: ' + esc(ROLE || '—') + '.</div>';
+        return;
+    }
+    el('mig-ui').style.display = '';
+
+    // ---- logging ----
+    var logBox = el('mig-log');
+    function log(msg, cls){
+        var line = document.createElement('div');
+        if(cls){ line.className = cls; }
+        line.textContent = msg;
+        logBox.appendChild(line);
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+    function clearLog(){ logBox.innerHTML = ''; }
+
+    // ---- API helpers ----
+    function apiUrl(path){ return '/' + DB + '/' + path; }
+    async function getJson(path){
+        var res = await fetch(apiUrl(path), { credentials:'same-origin', headers:{ 'Accept':'application/json' } });
+        var txt = await res.text();
+        try{ return JSON.parse(txt); }catch(e){ return null; }
+    }
+    async function getText(path){
+        var res = await fetch(apiUrl(path), { credentials:'same-origin' });
+        return await res.text();
+    }
+    async function post(action, params){
+        var body = new URLSearchParams();
+        body.set('token', TOKEN); body.set('_xsrf', XSRF);
+        Object.keys(params).forEach(function(k){ body.set(k, params[k] == null ? '' : String(params[k])); });
+        var res = await fetch(apiUrl(action) + '?JSON=1', { method:'POST', credentials:'same-origin', headers:{ 'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() });
+        var txt = await res.text();
+        var json = null;
+        try{ json = JSON.parse(txt); }catch(e){ json = null; }
+        return { status: res.status, ok: res.ok, json: json, text: txt };
+    }
+    function firstError(r){
+        if(!r){ return 'нет ответа'; }
+        if(Array.isArray(r.json) && r.json[0] && r.json[0].error){ return r.json[0].error; }
+        if(r.json && r.json.error){ return r.json.error; }
+        if(!r.ok){ return 'HTTP ' + r.status; }
+        return '';
+    }
+    function objId(r){ return r && r.json ? r.json.obj : null; }
+    function recId(r){ return r && r.json ? r.json.id : null; }
+    function warnOf(r){ return r && r.json && r.json.warnings ? String(r.json.warnings) : ''; }
+    function exists(w){ return /существ/i.test(w || ''); }
+
+    async function uploadFile(root, addPath, name, content){
+        var fd = new FormData();
+        fd.append(root, '1');
+        fd.append('add_path', addPath || '');
+        fd.append('upload', 'Загрузить');
+        fd.append('rewrite', '1');
+        fd.append('_xsrf', XSRF);
+        fd.append('token', TOKEN);
+        fd.append('userfile', new Blob([content], { type:'text/plain' }), name);
+        var res = await fetch(apiUrl('dir_admin/'), { method:'POST', credentials:'same-origin', body: fd });
+        return res.ok;
+    }
+
+    // =====================================================================
+    //  EXPORT
+    // =====================================================================
+    async function doExport(){
+        clearLog();
+        var threshold = parseInt(el('mig-threshold').value, 10) || 460;
+        var opt = {};
+        document.querySelectorAll('.mig-exp').forEach(function(c){ opt[c.getAttribute('data-k')] = c.checked; });
+        el('mig-export-btn').disabled = true;
+        log('Экспорт: порог служебных ID < ' + threshold, 'dim');
+        var pkg = { kind:'integram-migration', version:1, created_at: nowIso(), source_db: DB, service_max: threshold, tables:[], queries:[], users:[], menus:[], files:[] };
+        try{
+            // --- tables + records ---
+            var meta = await getJson('metadata');
+            var tables = (Array.isArray(meta) ? meta : []).filter(function(t){ return parseInt(t.id, 10) >= threshold; });
+            for(var ti = 0; ti < tables.length; ti++){
+                var t = tables[ti];
+                var cols = (t.reqs || []).map(function(r){
+                    return { old_req_id:String(r.id), name:String(r.val), type_code:parseInt(r.type, 10) || 3, old_type_id:String(r.orig), ref_target: r.ref_id ? String(r.ref_id) : null, attrs: r.attrs || '' };
+                });
+                var tableObj = { old_id:String(t.id), name:String(t.val), base_code:parseInt(t.type, 10) || 3, unique:(String(t.unique) === '1'), columns:cols, records:[] };
+                if(opt.data){
+                    var recs = await getJson('object/' + t.id + '?JSON_OBJ&LIMIT=0,100000');
+                    tableObj.records = (Array.isArray(recs) ? recs : []).map(function(rec){ return { old_id:String(rec.i), up:String(rec.u), values: rec.r }; });
+                }
+                pkg.tables.push(tableObj);
+                log('таблица «' + t.val + '» (id ' + t.id + '): колонок ' + cols.length + ', записей ' + tableObj.records.length, 'ok');
+            }
+            // --- queries (type 22) + their columns (type 28) ---
+            if(opt.queries){
+                var allQ = await getJson('object/22?JSON_OBJ&LIMIT=0,100000');
+                var qlist = (Array.isArray(allQ) ? allQ : []).filter(function(q){ return parseInt(q.i, 10) >= threshold; });
+                for(var qi = 0; qi < qlist.length; qi++){
+                    var q = qlist[qi];
+                    var qcols = await getJson('object/28?JSON_OBJ&F_U=' + q.i + '&LIMIT=0,100000');
+                    var columns = (Array.isArray(qcols) ? qcols : []).map(function(c){
+                        var src = String(c.r[0] || '');
+                        var srcId = src.indexOf(':') > -1 ? src.split(':')[0] : src;
+                        return { source_old_id:srcId, name:String(c.r[1] || ''), formula:String(c.r[2] || ''), func:String(c.r[5] || ''), format:String(c.r[9] || ''), sort:String(c.r[10] || '') };
+                    });
+                    pkg.queries.push({ old_id:String(q.i), name:String(q.r[0]), columns:columns });
+                    log('запрос «' + q.r[0] + '» (id ' + q.i + '): колонок ' + columns.length, 'ok');
+                }
+            }
+            // --- users (type 18), excluding the db-name owner ---
+            if(opt.users){
+                var allU = await getJson('object/18?JSON_OBJ&LIMIT=0,100000');
+                (Array.isArray(allU) ? allU : []).forEach(function(u){
+                    if(parseInt(u.i, 10) < threshold){ return; }
+                    var login = String(u.r[0] || '');
+                    if(login === DB){ return; }
+                    var roleRaw = String(u.r[1] || '');
+                    var roleId = roleRaw.indexOf(':') > -1 ? roleRaw.split(':')[0] : roleRaw;
+                    pkg.users.push({ old_id:String(u.i), login:login, role_id:roleId });
+                    log('пользователь «' + login + '» (id ' + u.i + ')', 'ok');
+                });
+            }
+            // --- menus (type 151), non-service records ---
+            if(opt.menus){
+                var meta151 = (Array.isArray(meta) ? meta : []).filter(function(x){ return String(x.id) === '151'; })[0];
+                var reqIdx = menuReqIndex(meta151);
+                var allM = await getJson('object/151?JSON_OBJ&F_U=145&LIMIT=0,100000');
+                (Array.isArray(allM) ? allM : []).forEach(function(m){
+                    if(parseInt(m.i, 10) < threshold){ return; }
+                    pkg.menus.push({ old_id:String(m.i), up:String(m.u), name:String(m.r[0] || ''), href:String(reqIdx.href > -1 ? (m.r[reqIdx.href] || '') : ''), icon:String(reqIdx.icon > -1 ? (m.r[reqIdx.icon] || '') : '') });
+                    log('меню «' + m.r[0] + '» (id ' + m.i + ')', 'ok');
+                });
+            }
+            // --- files (templates + download), HTML-scraped ---
+            if(opt.files){
+                await collectFiles('templates', pkg.files);
+                await collectFiles('download', pkg.files);
+                log('файлов собрано: ' + pkg.files.length, 'ok');
+            }
+            lastExport = pkg;
+            var json = JSON.stringify(pkg, null, 2);
+            el('mig-export-json').value = json;
+            el('mig-download-btn').disabled = false;
+            el('mig-export-summary').innerHTML = 'Готово: таблиц <b>' + pkg.tables.length + '</b>, запросов <b>' + pkg.queries.length + '</b>, пользователей <b>' + pkg.users.length + '</b>, меню <b>' + pkg.menus.length + '</b>, файлов <b>' + pkg.files.length + '</b>. Размер JSON: <b>' + Math.round(json.length / 1024) + ' КБ</b>.';
+            log('Экспорт завершён.', 'ok');
+        }catch(err){
+            log('Ошибка экспорта: ' + err.message, 'err');
+        }
+        el('mig-export-btn').disabled = false;
+    }
+
+    function menuReqIndex(meta151){
+        var out = { href:-1, icon:-1 };
+        if(meta151 && meta151.reqs){
+            meta151.reqs.forEach(function(r, i){
+                if(String(r.id) === '153'){ out.href = i + 1; }
+                if(String(r.id) === '391'){ out.icon = i + 1; }
+            });
+        }
+        return out;
+    }
+
+    function normDir(d){ return String(d || '').replace(/^\/+/, '').replace(/\/+$/, ''); }
+    async function collectFiles(root, into){
+        var visited = {};
+        var seenFile = {};
+        async function walk(dir){
+            var norm = normDir(dir);
+            if(visited[norm]){ return; }
+            visited[norm] = 1;
+            var qp = norm ? '/' + norm : '';
+            var html = await getText('dir_admin/?' + root + '=1&add_path=' + encodeURIComponent(qp));
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var links = doc.querySelectorAll('a[href]');
+            var subdirs = [];
+            for(var i = 0; i < links.length; i++){
+                var href = links[i].getAttribute('href') || '';
+                var mFile = href.match(/[?&]gf=([^&"]+)/);
+                if(mFile){
+                    var name = decodeURIComponent(mFile[1]);
+                    var key = root + '|' + norm + '|' + name;
+                    if(seenFile[key]){ continue; }
+                    seenFile[key] = 1;
+                    var content = await getText('dir_admin/?' + root + '=1&add_path=' + encodeURIComponent(qp) + '&gf=' + encodeURIComponent(name));
+                    into.push({ root:root, dir:norm, name:name, content:content });
+                    continue;
+                }
+                var mDir = href.match(/[?&]add_path=([^&"]*)/);
+                if(mDir){
+                    var sub = normDir(decodeURIComponent(mDir[1]));
+                    if(sub && sub !== norm && !visited[sub] && sub.indexOf('backups') === -1 && sub.indexOf('logs') === -1){ subdirs.push(sub); }
+                }
+            }
+            for(var s = 0; s < subdirs.length; s++){ await walk(subdirs[s]); }
+        }
+        await walk('');
+    }
+
+    // =====================================================================
+    //  IMPORT
+    // =====================================================================
+    async function doImport(){
+        clearLog();
+        var raw = el('mig-import-json').value.trim();
+        if(!raw){ log('Вставьте JSON для импорта.', 'err'); return; }
+        var pkg;
+        try{ pkg = JSON.parse(raw); }catch(e){ log('Некорректный JSON: ' + e.message, 'err'); return; }
+        if(!pkg || pkg.kind !== 'integram-migration'){ log('Это не пакет integram-migration.', 'err'); return; }
+        var opt = {};
+        document.querySelectorAll('.mig-imp').forEach(function(c){ opt[c.getAttribute('data-k')] = c.checked; });
+        el('mig-import-btn').disabled = true;
+
+        var created = [];             // { id, kind }  kind: 'record' | 'req' | 'type'
+        var idMap = {};               // old table/req/record id -> new id
+        function track(id, kind){ if(id != null && id !== '' && id !== 0){ created.push({ id:String(id), kind:kind }); } }
+
+        try{
+            // read target structure for term-reuse decisions
+            var meta = await getJson('metadata');
+            var tableIds = {}, origSet = {};
+            (Array.isArray(meta) ? meta : []).forEach(function(t){
+                tableIds[String(t.id)] = true;
+                (t.reqs || []).forEach(function(r){ origSet[String(r.orig)] = true; });
+            });
+
+            // create-or-reuse a global term (type). Returns { id, fresh }.
+            async function getTerm(code, name){
+                var r = await post('_d_new', { t:code, val:name });
+                var id = objId(r);
+                if(!exists(warnOf(r))){ track(id, 'type'); return { id:id, fresh:true }; }
+                // term exists — is it already in use as a table or requisite?
+                if(tableIds[String(id)] || origSet[String(id)]){
+                    for(var i = 1; i < 500; i++){
+                        var rr = await post('_d_new', { t:code, val:name + ' ' + i });
+                        if(!exists(warnOf(rr))){ var nid = objId(rr); track(nid, 'type'); return { id:nid, fresh:true, renamed:name + ' ' + i }; }
+                    }
+                }
+                return { id:id, fresh:false }; // free to reuse (rule 3)
+            }
+
+            // ---- TABLES ----
+            if(opt.tables && Array.isArray(pkg.tables)){
+                for(var ti = 0; ti < pkg.tables.length; ti++){
+                    var t = pkg.tables[ti];
+                    var tterm = await getTerm(t.base_code, t.name);
+                    var newTableId = tterm.id;
+                    if(t.unique){ await post('_d_save', { origId:newTableId, val: tterm.renamed || t.name, t:t.base_code, unique:1 }); }
+                    idMap[t.old_id] = newTableId;
+                    log('таблица «' + t.name + '» → id ' + newTableId + (tterm.renamed ? ' (как «' + tterm.renamed + '»)' : (tterm.fresh ? '' : ' (переиспользована)')), 'ok');
+                    // columns
+                    for(var ci = 0; ci < (t.columns || []).length; ci++){
+                        var c = t.columns[ci];
+                        var newReqId;
+                        if(c.ref_target && idMap[c.ref_target]){
+                            var rf = await post('_d_ref/' + idMap[c.ref_target], {});
+                            var refType = objId(rf); track(refType, 'type');
+                            var rq = await post('_d_req/' + newTableId, { t:refType });
+                            newReqId = recId(rq);
+                        } else {
+                            var colTerm = await getTerm(c.type_code, c.name);
+                            var rq2 = await post('_d_req/' + newTableId, { t:colTerm.id });
+                            newReqId = recId(rq2);
+                        }
+                        track(newReqId, 'req');
+                        await post('_d_alias/' + newReqId, { val:c.name });
+                        idMap[c.old_req_id] = newReqId;
+                    }
+                    // records
+                    for(var ri = 0; ri < (t.records || []).length; ri++){
+                        var rec = t.records[ri];
+                        var params = { up: rec.up === '1' ? 1 : (idMap[rec.up] || 1) };
+                        params['t' + newTableId] = rec.values[0];
+                        for(var vi = 0; vi < (t.columns || []).length; vi++){
+                            var col = t.columns[vi];
+                            var val = rec.values[vi + 1];
+                            if(val == null || val === ''){ continue; }
+                            if(col.ref_target){
+                                var refv = String(val); var refId = refv.indexOf(':') > -1 ? refv.split(':')[0] : refv;
+                                val = idMap[refId] || val;
+                            }
+                            params['t' + idMap[col.old_req_id]] = val;
+                        }
+                        var rr2 = await post('_m_new/' + newTableId, params);
+                        var newRecId = recId(rr2);
+                        track(newRecId, 'record');
+                        if(rec.old_id){ idMap[rec.old_id] = newRecId; }
+                    }
+                    log('  записей создано: ' + (t.records || []).length, 'dim');
+                }
+            }
+
+            // ---- QUERIES ----
+            if(opt.queries && Array.isArray(pkg.queries)){
+                for(var qi = 0; qi < pkg.queries.length; qi++){
+                    var q = pkg.queries[qi];
+                    var qr = await post('_m_new/22', { up:1, t22:q.name });
+                    var newQid = recId(qr); track(newQid, 'record');
+                    log('запрос «' + q.name + '» → id ' + newQid, 'ok');
+                    for(var qci = 0; qci < (q.columns || []).length; qci++){
+                        var qc = q.columns[qci];
+                        var src = idMap[qc.source_old_id] || qc.source_old_id;
+                        var cp = { up:newQid, t28:src, t100:qc.name };
+                        if(qc.formula){ cp.t101 = qc.formula; }
+                        if(qc.func){ cp.t104 = qc.func; }
+                        if(qc.format){ cp.t84 = qc.format; }
+                        if(qc.sort){ cp.t109 = qc.sort; }
+                        var qcr = await post('_m_new/28', cp);
+                        track(recId(qcr), 'record');
+                    }
+                }
+            }
+
+            // ---- USERS ----
+            if(opt.users && Array.isArray(pkg.users)){
+                var existingU = await getJson('object/18?JSON_OBJ&LIMIT=0,100000');
+                var logins = {};
+                (Array.isArray(existingU) ? existingU : []).forEach(function(u){ logins[String(u.r[0])] = true; });
+                for(var ui = 0; ui < pkg.users.length; ui++){
+                    var u = pkg.users[ui];
+                    var login = u.login;
+                    if(logins[login]){ var k = 1; while(logins[login + '_' + k]){ k++; } login = login + '_' + k; }
+                    logins[login] = true;
+                    var ur = await post('_m_new/18', { up:1, t18:login, t115:u.role_id });
+                    track(recId(ur), 'record');
+                    log('пользователь «' + login + '» → id ' + recId(ur) + ' (без пароля)', 'ok');
+                }
+            }
+
+            // ---- MENUS ----
+            if(opt.menus && Array.isArray(pkg.menus)){
+                for(var mi = 0; mi < pkg.menus.length; mi++){
+                    var m = pkg.menus[mi];
+                    var mp = { up: m.up || 145, t151:m.name, t153:m.href };
+                    if(m.icon){ mp.t391 = m.icon; }
+                    var mr = await post('_m_new/151', mp);
+                    track(recId(mr), 'record');
+                    log('меню «' + m.name + '» → id ' + recId(mr), 'ok');
+                }
+            }
+
+            // ---- FILES ----
+            if(opt.files && Array.isArray(pkg.files)){
+                for(var fi = 0; fi < pkg.files.length; fi++){
+                    var f = pkg.files[fi];
+                    var ok = await uploadFile(f.root, f.dir ? '/' + f.dir : '', f.name, f.content);
+                    log((ok ? 'файл загружен: ' : 'не удалось загрузить: ') + f.root + '/' + (f.dir ? f.dir + '/' : '') + f.name, ok ? 'ok' : 'err');
+                }
+            }
+
+            // persist created set for rollback
+            var firstId = created.reduce(function(a, c){ var n = parseInt(c.id, 10); return (a == null || n < a) ? n : a; }, null);
+            var rec = { created:created, firstId:firstId, ts:nowIso(), source_db:pkg.source_db, count:created.length };
+            try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); }catch(e){}
+            refreshRollback();
+            log('Импорт завершён. Создано объектов: ' + created.length + ', первый ID: ' + firstId, 'ok');
+        }catch(err){
+            log('Ошибка импорта: ' + err.message + '. Уже созданные объекты можно удалить откатом.', 'err');
+            var firstId2 = created.reduce(function(a, c){ var n = parseInt(c.id, 10); return (a == null || n < a) ? n : a; }, null);
+            try{ localStorage.setItem(LS_KEY, JSON.stringify({ created:created, firstId:firstId2, ts:nowIso(), source_db:(pkg && pkg.source_db), count:created.length })); }catch(e){}
+            refreshRollback();
+        }
+        el('mig-import-btn').disabled = false;
+    }
+
+    // =====================================================================
+    //  ROLLBACK
+    // =====================================================================
+    async function delOne(item){
+        var r;
+        if(item.kind === 'record'){ r = await post('_m_del/' + item.id, {}); }
+        else if(item.kind === 'req'){ r = await post('_d_del_req/' + item.id, { forced:1 }); }
+        else { r = await post('_d_del/' + item.id, {}); }
+        var err = firstError(r);
+        return { ok: r.ok && !err, err: err };
+    }
+    async function doRollback(){
+        var rec;
+        try{ rec = JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){ rec = null; }
+        if(!rec || !rec.created || !rec.created.length){ log('Нет сохранённого импорта для отката.', 'err'); return; }
+        if(!confirm('Удалить ' + rec.created.length + ' объектов последнего импорта (ID ≥ ' + rec.firstId + ')?')){ return; }
+        clearLog();
+        el('mig-rollback-btn').disabled = true;
+        // order within a cycle: records first (desc id), then reqs, then types
+        var kindRank = { record:0, req:1, type:2 };
+        var remaining = rec.created.slice();
+        var cycle = 0, totalDeleted = 0;
+        while(remaining.length && cycle < 100){
+            cycle++;
+            remaining.sort(function(a, b){ return (kindRank[a.kind] - kindRank[b.kind]) || (parseInt(b.id, 10) - parseInt(a.id, 10)); });
+            var deletedThis = 0;
+            var next = [];
+            for(var i = 0; i < remaining.length; i++){
+                var res = await delOne(remaining[i]);
+                if(res.ok){ deletedThis++; totalDeleted++; }
+                else { next.push(remaining[i]); }
+            }
+            log('цикл ' + cycle + ': удалено ' + deletedThis + ', осталось ' + next.length, deletedThis ? 'ok' : 'warn');
+            remaining = next;
+            if(deletedThis === 0){ break; }
+        }
+        if(remaining.length){
+            log('Остались объекты (внешние ссылки / служебные зависимости): ' + remaining.map(function(x){ return x.id; }).join(', '), 'warn');
+            rec.created = remaining;
+            try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); }catch(e){}
+        } else {
+            log('Откат завершён: удалено ' + totalDeleted + ' объектов за ' + cycle + ' циклов.', 'ok');
+            try{ localStorage.removeItem(LS_KEY); }catch(e){}
+        }
+        refreshRollback();
+    }
+
+    function refreshRollback(){
+        var rec = null;
+        try{ rec = JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){ rec = null; }
+        if(rec && rec.created && rec.created.length){
+            el('mig-rollback-info').innerHTML = 'Последний импорт из «<b>' + esc(rec.source_db || '?') + '</b>» (' + esc(rec.ts || '') + '): создано объектов <b>' + rec.created.length + '</b>, первый ID <b>' + rec.firstId + '</b>.';
+            el('mig-rollback-btn').disabled = false;
+        } else {
+            el('mig-rollback-info').textContent = 'Импорт ещё не выполнялся в этом браузере (или откат уже выполнен).';
+            el('mig-rollback-btn').disabled = true;
+        }
+    }
+
+    // ---- misc ----
+    function nowIso(){ var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+    function pad(n){ return (n < 10 ? '0' : '') + n; }
+    function download(name, text){
+        var blob = new Blob([text], { type:'application/json' });
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    // ---- wiring ----
+    el('mig-export-btn').addEventListener('click', doExport);
+    el('mig-download-btn').addEventListener('click', function(){ download('migration-' + DB + '.json', el('mig-export-json').value); });
+    el('mig-import-btn').addEventListener('click', doImport);
+    el('mig-rollback-btn').addEventListener('click', doRollback);
+    el('mig-use-export-btn').addEventListener('click', function(){ el('mig-import-json').value = el('mig-export-json').value; });
+    el('mig-load-file-btn').addEventListener('click', function(){ el('mig-import-file').click(); });
+    el('mig-import-file').addEventListener('change', function(e){
+        var f = e.target.files && e.target.files[0]; if(!f){ return; }
+        var reader = new FileReader();
+        reader.onload = function(){ el('mig-import-json').value = String(reader.result); e.target.value = ''; };
+        reader.readAsText(f, 'utf-8');
+    });
+
+    refreshRollback();
+})();
+</script>
