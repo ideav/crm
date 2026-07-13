@@ -5859,7 +5859,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					Check_Grant($f_u, $id);  # Check the delete grant
 				}
 				elseif(Check_Grant($f_u, $id, "READ", FALSE) === FALSE)
-					break;
+					if(isApi())	# #4234: API-чтение без READ-гранта → внятная ошибка, а не молча пустой ответ (иначе клиент молча деградирует)
+						my_die(t9n("[RU]У вас нет доступа на чтение записей объекта $id (родитель $f_u)[EN]You have no READ grant to object $id (parent $f_u)"), "403 Forbidden");
+					else
+						break;
 			}
 			elseif(isset($_REQUEST["_m_del_select"])){ # The user tries to drop the selection
 				check();
@@ -5869,6 +5872,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			elseif(Grant_1level($id) === FALSE)
 				if($blocks["&main"]["CUR_VARS"]["parent_obj"])	# Array req via links
 					Check_Grant($blocks["&main"]["CUR_VARS"]["parent_obj"], $id, "READ");
+				elseif(isApi())	# #4234: API-чтение таблицы без READ-гранта верхнего уровня → внятная ошибка, а не пустой ответ
+					my_die(t9n("[RU]У вас нет доступа на чтение этой таблицы ($id)[EN]You have no READ grant to this table ($id)"), "403 Forbidden");
 				else
 					break;
 			if((Grant_1level($id) == "WRITE") || Check_Grant($f_u, $id, "WRITE", FALSE))
