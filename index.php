@@ -120,11 +120,20 @@ $billing = mysqli_query($connection
 				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
 				LIMIT 1");
 if(!$billing && ($z !== "auth.asp")){
-	if ((int)$errno === 1146)
-		login($dbName, "", "dBNotExists", t9n("[RU]База $dbName не найдена[EN]The $dbName database was not found"));
-	
-	header("HTTP/1.0 404 Not found");
-	die("$dbName does not exist");
+	# Проверочный запрос упал. mysqli_errno()===1146 (нет таблицы $z) означает, что
+	# запрошенной базы не существует: API-клиенту — структурированная ошибка [{error}] + 404,
+	# браузеру — дружелюбная страница входа start.html (login → r=dBNotExists, тост «База …
+	# не найдена» в js/app.js). Имя берём из $z (запрошенная база из URL), а не из $dbName
+	# (имя MySQL-подключения). Иная ошибка SQL при проверке базы — это сбой сервера (500),
+	# а не отсутствие базы. #4247 (регресс #2479: раньше $errno не присваивался → ветка
+	# login() была мёртвой, а die() печатал пустой $dbName вместо запрошенной базы).
+	$errno = mysqli_errno($connection);
+	if($errno === 1146){
+		if(isApi())
+			my_die(t9n("[RU]База «{$z}» не найдена[EN]The «{$z}» database was not found"), "404 Not Found");
+		login($z, "", "dBNotExists", t9n("[RU]База «{$z}» не найдена[EN]The «{$z}» database was not found"));
+	}
+	my_die(t9n("[RU]Не удалось открыть базу «{$z}»[EN]Failed to open the «{$z}» database"), "500 Internal Server Error");
 }
 																									
 # The trace cookie to be deleted upon the session close
