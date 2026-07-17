@@ -166,6 +166,7 @@
                 delete this.metadataCache[tableId];
                 this.globalMetadata = null;
                 this.globalMetadataPromise = null;
+                this.clearSharedGlobalMetadata();  // schema changed — refetch fresh, not the page-shared copy (issue #4252)
                 const refreshedMetadata = await this.fetchMetadata(tableId);
                 columns.length = 0;
                 columns.push({
