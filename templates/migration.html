@@ -2,6 +2,7 @@
 <script>
     document.title = 'Миграция конфигурации - ' + '{_global_.z}'.charAt(0).toUpperCase() + '{_global_.z}'.slice(1);
 </script>
+<script src="/js/migr-obfuscate.js?{_global_.version}"></script>
 <style>
     .mig{ max-width:1080px; margin:0 auto; padding:16px 18px 60px; color:var(--text-primary,#1f2937); }
     .mig *{ box-sizing:border-box; }
@@ -52,6 +53,11 @@
                     <label><input type="checkbox" class="mig-exp" data-k="users" checked> пользователи</label>
                     <label><input type="checkbox" class="mig-exp" data-k="menus" checked> меню</label>
                     <label><input type="checkbox" class="mig-exp" data-k="files" checked> файлы (шаблоны/скрипты)</label>
+                </div>
+                <div class="mig-opts" id="mig-obfuscate-opts">
+                    <label title="Обезличить неслужебные данные: не более 200 записей на таблицу, суммы × случайное число, тексты забиваются «x»; справочники категорий/статусов/типов (≤30 значений) сохраняются как есть.">
+                        <input type="checkbox" id="mig-obfuscate"> <b>обфускация данных</b> (обезличить суммы, названия и тексты)
+                    </label>
                 </div>
                 <textarea class="mig-json" id="mig-export-json" placeholder="Здесь появится JSON конфигурации…" readonly></textarea>
                 <div class="mig-summary" id="mig-export-summary"></div>
@@ -179,12 +185,17 @@
         var threshold = parseInt(el('mig-threshold').value, 10) || 460;
         var opt = {};
         document.querySelectorAll('.mig-exp').forEach(function(c){ opt[c.getAttribute('data-k')] = c.checked; });
+        var obfuscate = !!(el('mig-obfuscate') && el('mig-obfuscate').checked); // issue #4253
+        var OBF = window.MigrationObfuscate;
+        if(obfuscate && !OBF){ log('Модуль обфускации не загружен (js/migr-obfuscate.js) — экспорт без обезличивания.', 'warn'); obfuscate = false; }
         el('mig-export-btn').disabled = true;
-        log('Экспорт: порог служебных ID < ' + threshold, 'dim');
-        var pkg = { kind:'integram-migration', version:1, created_at: nowIso(), source_db: DB, service_max: threshold, tables:[], queries:[], users:[], menus:[], files:[] };
+        log('Экспорт: порог служебных ID < ' + threshold + (obfuscate ? '; обфускация ВКЛ (≤' + OBF.OBF_MAX_RECORDS + ' записей/таблицу)' : ''), 'dim');
+        var pkg = { kind:'integram-migration', version:1, created_at: nowIso(), source_db: DB, service_max: threshold, obfuscated: obfuscate, tables:[], queries:[], users:[], menus:[], files:[] };
         try{
             // --- tables + records ---
             var meta = await getJson('metadata');
+            var refTargets = obfuscate ? OBF.buildRefTargets(meta) : {}; // id справочников (rule 5)
+            var dictKept = []; // названия справочников, сохранённых как есть (rule 5)
             var tables = (Array.isArray(meta) ? meta : []).filter(function(t){ return parseInt(t.id, 10) >= threshold; });
             for(var ti = 0; ti < tables.length; ti++){
                 var t = tables[ti];
@@ -192,12 +203,24 @@
                     return { old_req_id:String(r.id), name:String(r.val), type_code:parseInt(r.type, 10) || 3, old_type_id:String(r.orig), ref_target: r.ref_id ? String(r.ref_id) : null, attrs: r.attrs || '' };
                 });
                 var tableObj = { old_id:String(t.id), name:String(t.val), base_code:parseInt(t.type, 10) || 3, unique:(String(t.unique) === '1'), columns:cols, records:[] };
+                var obfNote = '';
                 if(opt.data){
-                    var recs = await getJson('object/' + t.id + '?JSON_OBJ&LIMIT=0,100000');
-                    tableObj.records = (Array.isArray(recs) ? recs : []).map(function(rec){ return { old_id:String(rec.i), up:String(rec.u), values: rec.r }; });
+                    // при обфускации тянем максимум 200 записей (rule 2); >30 достаточно, чтобы решить судьбу справочника (rule 5)
+                    var limit = obfuscate ? ('0,' + OBF.OBF_MAX_RECORDS) : '0,100000';
+                    var recs = await getJson('object/' + t.id + '?JSON_OBJ&LIMIT=' + limit);
+                    var mapped = (Array.isArray(recs) ? recs : []).map(function(rec){ return { old_id:String(rec.i), up:String(rec.u), values: rec.r }; });
+                    if(obfuscate){
+                        var res = OBF.processTable({ records:mapped, columns:cols, tableId:t.id, tableName:t.val, tableBaseCode:tableObj.base_code, refTargets:refTargets });
+                        tableObj.records = res.records;
+                        tableObj.obf_mode = res.mode;
+                        if(res.mode === 'keep'){ dictKept.push(String(t.val)); obfNote = ' [справочник — как есть]'; }
+                        else { obfNote = ' [обезличено]'; }
+                    } else {
+                        tableObj.records = mapped;
+                    }
                 }
                 pkg.tables.push(tableObj);
-                log('таблица «' + t.val + '» (id ' + t.id + '): колонок ' + cols.length + ', записей ' + tableObj.records.length, 'ok');
+                log('таблица «' + t.val + '» (id ' + t.id + '): колонок ' + cols.length + ', записей ' + tableObj.records.length + obfNote, 'ok');
             }
             // --- queries (type 22) + their columns (type 28) ---
             if(opt.queries){
@@ -245,11 +268,15 @@
                 await collectFiles('download', pkg.files);
                 log('файлов собрано: ' + pkg.files.length, 'ok');
             }
+            if(obfuscate){
+                pkg.dictionaries = dictKept; // rule 5: список названий справочников, сохранённых как есть
+                log('Справочников сохранено как есть (' + dictKept.length + '): ' + (dictKept.length ? dictKept.join(', ') : '—'), 'dim');
+            }
             lastExport = pkg;
             var json = JSON.stringify(pkg, null, 2);
             el('mig-export-json').value = json;
             el('mig-download-btn').disabled = false;
-            el('mig-export-summary').innerHTML = 'Готово: таблиц <b>' + pkg.tables.length + '</b>, запросов <b>' + pkg.queries.length + '</b>, пользователей <b>' + pkg.users.length + '</b>, меню <b>' + pkg.menus.length + '</b>, файлов <b>' + pkg.files.length + '</b>. Размер JSON: <b>' + Math.round(json.length / 1024) + ' КБ</b>.';
+            el('mig-export-summary').innerHTML = 'Готово: таблиц <b>' + pkg.tables.length + '</b>, запросов <b>' + pkg.queries.length + '</b>, пользователей <b>' + pkg.users.length + '</b>, меню <b>' + pkg.menus.length + '</b>, файлов <b>' + pkg.files.length + '</b>. Размер JSON: <b>' + Math.round(json.length / 1024) + ' КБ</b>.' + (obfuscate ? ' <span class="mig-badge">обезличено</span> справочников как есть: <b>' + dictKept.length + '</b>.' : '');
             log('Экспорт завершён.', 'ok');
         }catch(err){
             log('Ошибка экспорта: ' + err.message, 'err');
