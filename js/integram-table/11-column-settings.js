@@ -44,6 +44,7 @@
             delete this.metadataFetchPromises[tableId];
             this.globalMetadata = null;
             this.globalMetadataPromise = null;
+            this.clearSharedGlobalMetadata();  // refetch fresh, not the page-shared copy (issue #4252)
 
             const metadata = await this.fetchMetadata(tableId);
             const req = metadata && Array.isArray(metadata.reqs)
@@ -452,6 +453,7 @@
                 this.metadataFetchPromises = {};
                 this.globalMetadata = null;
                 this.globalMetadataPromise = null;
+                this.clearSharedGlobalMetadata();  // refetch fresh, not the page-shared copy (issue #4252)
                 this.columns = [];
                 this.closeColumnSettings();
                 closeColEdit();
@@ -591,6 +593,7 @@
                     // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1400)
                     this.globalMetadata = null;
                     this.globalMetadataPromise = null;
+                    this.clearSharedGlobalMetadata();  // refetch fresh, not the page-shared copy (issue #4252)
                     // Clear columns so loadDataFromTable() re-fetches metadata (issue #1400)
                     this.columns = [];
                     // Close only the col-edit modal and reopen the parent column settings so the user
@@ -1477,6 +1480,7 @@
                         // (issue #1424, issue #2138)
                         this.globalMetadata = null;
                         this.globalMetadataPromise = null;
+                        this.clearSharedGlobalMetadata();  // refetch fresh, not the page-shared copy (issue #4252)
                         this.globalMetadataPromise = this.loadGlobalMetadata();
 
                         // Close the add column modal but keep the parent column settings modal open

@@ -7,7 +7,7 @@
 
         getApiBase() {
             // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, /metadata/, or /object/
-            const url = this.options.apiUrl;
+            const url = this.options && this.options.apiUrl;
             if (!url) {
                 // Fallback: construct API base from current page URL using the database path segment
                 const pathParts = window.location.pathname.split('/');

@@ -278,6 +278,7 @@
             this.metadataFetchPromises = {};
             this.globalMetadata = null;
             this.globalMetadataPromise = null;
+            this.clearSharedGlobalMetadata();  // refetch fresh, don't reuse the page-shared copy (issue #4252)
             this.columns = [];
         }
 
@@ -296,34 +297,91 @@
         }
 
         async loadGlobalMetadata() {
-            // If already loaded, return immediately (issue #1455)
+            // If already loaded on this instance, return immediately (issue #1455)
             if (this.globalMetadata) {
                 return;
             }
 
-            // If loading is already in progress, wait for it instead of starting a new fetch (issue #1455)
+            // If a load for this instance is already in progress, wait for it
+            // instead of starting a new one (issue #1455)
             if (this.globalMetadataPromise) {
                 return this.globalMetadataPromise;
             }
 
-            try {
-                const apiBase = this.getApiBase();
-                const response = await fetch(`${ apiBase }/metadata`);
-                if (!response.ok) {
-                    console.error('Failed to fetch global metadata');
-                    return;
-                }
-                const metadata = await response.json();
-                this.globalMetadata = metadata;
-                // Re-render if data is already loaded, so column-add-btn visibility
-                // can be recalculated based on the metadata ids.
-                // Preserve scroll position since this resolves asynchronously and may
-                // fire after the user has scrolled the table (issue #2744).
-                if (this.columns.length > 0) {
-                    this.renderPreservingScroll(() => this.render());
-                }
-            } catch (error) {
-                console.error('Error loading global metadata:', error);
+            // The /metadata payload is identical for every table in the same
+            // database, so share it across all IntegramTable instances on the
+            // page: a page with several tables must issue ONE /metadata request,
+            // not one per table (issue #4252). Keyed by apiBase since each
+            // database has its own schema.
+            const apiBase = this.getApiBase();
+            const sharedStore = IntegramTable._sharedGlobalMetadata || (IntegramTable._sharedGlobalMetadata = {});
+            const sharedPromises = IntegramTable._sharedGlobalMetadataPromises || (IntegramTable._sharedGlobalMetadataPromises = {});
+
+            // Already fetched by another instance — reuse it without a network request.
+            if (sharedStore[apiBase]) {
+                this.applyGlobalMetadata(sharedStore[apiBase]);
+                return;
+            }
+
+            // Start a single shared fetch for this apiBase, or piggyback on the
+            // in-flight one a sibling table already started.
+            let fetchPromise = sharedPromises[apiBase];
+            if (!fetchPromise) {
+                fetchPromise = (async () => {
+                    try {
+                        const response = await fetch(`${ apiBase }/metadata`);
+                        if (!response.ok) {
+                            console.error('Failed to fetch global metadata');
+                            return null;
+                        }
+                        const metadata = await response.json();
+                        // Publish to the shared store before clearing the in-flight
+                        // marker so a late-arriving sibling finds it and never refetches.
+                        sharedStore[apiBase] = metadata;
+                        return metadata;
+                    } catch (error) {
+                        console.error('Error loading global metadata:', error);
+                        return null;
+                    } finally {
+                        delete sharedPromises[apiBase];
+                    }
+                })();
+                sharedPromises[apiBase] = fetchPromise;
+            }
+
+            const metadata = await fetchPromise;
+            if (metadata) {
+                this.applyGlobalMetadata(metadata);
+            }
+        }
+
+        /**
+         * Apply a fetched/shared global metadata payload to this instance. Re-render
+         * if rows are already on screen, so column-add-btn visibility is recalculated
+         * from the metadata ids. Preserve scroll position since this resolves
+         * asynchronously and may fire after the user has scrolled (issue #2744).
+         */
+        applyGlobalMetadata(metadata) {
+            this.globalMetadata = metadata;
+            if (this.columns.length > 0) {
+                this.renderPreservingScroll(() => this.render());
+            }
+        }
+
+        /**
+         * Drop the page-shared global metadata for this instance's apiBase so the
+         * next load refetches a fresh schema. Called alongside the per-instance
+         * globalMetadata reset after column add/edit/delete and on metadata drift
+         * (issue #4252, #2526) — otherwise a "refresh" would reuse the stale
+         * shared copy.
+         */
+        clearSharedGlobalMetadata() {
+            const apiBase = this.getApiBase();
+            if (IntegramTable._sharedGlobalMetadata) {
+                delete IntegramTable._sharedGlobalMetadata[apiBase];
+            }
+            if (IntegramTable._sharedGlobalMetadataPromises) {
+                delete IntegramTable._sharedGlobalMetadataPromises[apiBase];
             }
         }
 
