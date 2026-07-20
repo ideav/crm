@@ -187,19 +187,28 @@
         return round3(changeoverParts(prev, next, times).reduce(function(sum, p){ return sum + (Number(p.minutes) || 0); }, 0));
     }
 
-    // #3669 п.2: первая задача дня требует НАСТРОЙКИ НОЖЕЙ (их ставят с нуля). Для первой
-    // задачи каждого дня, кроме первого, настройка уже считается переналадкой с последней
-    // задачей предыдущего дня (changeoverParts) — «той же конфигурацией → 0». А у самой
-    // первой задачи загруженной очереди предыдущего дня нет (история не подгружена), поэтому
-    // настройку планируем консервативно (лучше учесть время, чем потерять). Включается флагом
-    // firstCutSetup (см. buildSchedule/splitMachineQueue/setupBreakdown); возвращает компонент
-    // KNIFE как у changeoverParts. [] — если у резки нет ножей или время KNIFE = 0.
+    // #3669 п.2: первая задача очереди станка требует настройки С НУЛЯ на ПУСТОМ станке (нет
+    // prev_cut_setup — история не подгружена / станок пуст). Прочие задачи считают переналадку с
+    // предыдущей (changeoverParts, «та же конфигурация → 0»), а первая резка станка с ИЗВЕСТНОЙ
+    // заправкой (#3688/#3853) — от неё (вызывающий передаёт carry как prev). Включается флагом
+    // firstCutSetup (см. buildSchedule/splitMachineQueue/setupBreakdown).
+    // #4296: на пустом станке первая резка СТАВИТ И НОЖИ, И СЫРЬЁ (заправка сырья на станок с нуля —
+    // реальная наладка, а не «менять не с чего»): совпадает с моделью §13 (planQuality.actualFor
+    // засчитывает первой резке ножи+сырьё) и с оценками дня/загрузки (scratchSetupMin, packMachine),
+    // которые уже добавляли сырьё. Раньше был ТОЛЬКО KNIFE (#3669/#4156) → «смены сырья: 0» и факт<идеал
+    // («план лучше идеала», отрицательный избыток), хотя сырьё надо заправлять (issue #4296). [] — если
+    // у резки нет ни ножей, ни сырья (или соответствующее время 0).
     function firstSetupParts(next, times){
         var t = times || DEFAULT_OP_TIMES;
         var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
-        if (!next || !(knifeTime > 0)) return [];
+        var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
+        if (!next) return [];
+        var parts = [];
         var hasKnives = (Number(next.knifeCount) || 0) > 0 || ((next.knifeWidths || []).length > 0);
-        return hasKnives ? [{ code: 'KNIFE', label: 'настройка ножей', minutes: round3(knifeTime) }] : [];
+        if (hasKnives && knifeTime > 0) parts.push({ code: 'KNIFE', label: 'настройка ножей', minutes: round3(knifeTime) });
+        var hasMaterial = next.materialId != null && String(next.materialId).trim() !== '';
+        if (hasMaterial && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'заправка сырья', minutes: round3(matWind) });
+        return parts;
     }
 
     function firstSetupCost(next, times){
@@ -5021,17 +5030,15 @@
             if (packMemo[sig]) return packMemo[sig];
             var seq = orderCuts(members, weights);
             var res;
-            var matWindTime = Number((times && times.MATERIAL_WINDING != null) ? times.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
-            // Настройка резки «с нуля»: ножи (#3669 firstSetupParts) + смена сырья, если у резки
-            // есть материал. Реальный день-сплит НЕ группирует одинаковые конфиги (сроки #3815 и
-            // направления намотки разносят их по очереди), поэтому почти каждая резка ставит ножи
-            // и сырьё заново. Оценка через changeoverCost в порядке orderCuts группировала соседние
-            // одинаковые конфиги в ~0 и занижала настроечно-тяжёлый станок вдвое (#3965): Станок 1
-            // реально 2757 мин (намотка 625 + настройка ~2130 ≈ 42 мин/резка), оценка ~1214 мин.
+            // Настройка резки «с нуля»: ножи + заправка сырья (#4296: firstSetupParts/firstSetupCost
+            // теперь даёт ОБА компонента на пустом станке — отдельно сырьё не добавляем, двойной счёт).
+            // Реальный день-сплит НЕ группирует одинаковые конфиги (сроки #3815 и направления намотки
+            // разносят их по очереди), поэтому почти каждая резка ставит ножи и сырьё заново. Оценка
+            // через changeoverCost в порядке orderCuts группировала соседние одинаковые конфиги в ~0 и
+            // занижала настроечно-тяжёлый станок вдвое (#3965): Станок 1 реально 2757 мин (намотка 625 +
+            // настройка ~2130 ≈ 42 мин/резка), оценка ~1214 мин.
             function scratchSetup(c){
-                var s = firstSetupCost(c, times);   // ножи (KNIFE), если есть
-                if (c && c.materialId != null && String(c.materialId).trim() !== '') s += matWindTime;   // + смена сырья
-                return s;
+                return firstSetupCost(c, times);   // ножи + сырьё (firstSetupParts, #4296)
             }
             // #3968: настройка резки — КАК В РЕАЛЬНОЙ укладке (buildSchedule: setup =
             // changeoverCost(cuts[i-1], c); splitMachineQueue/selectByConfig группирует одинаковые

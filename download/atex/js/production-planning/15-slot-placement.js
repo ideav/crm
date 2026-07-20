@@ -74,10 +74,9 @@
     // Настройка «с нуля» первой резки очереди (ножи + смена сырья) — как packMachine.scratchSetup.
     function scratchSetupMin(slot, ctx){
         ctx = ctx || {};
-        var s = firstSetupCost(slot, ctx.times);
-        var mw = (ctx.times && ctx.times.MATERIAL_WINDING != null) ? Number(ctx.times.MATERIAL_WINDING) : DEFAULT_OP_TIMES.MATERIAL_WINDING;
-        if (slot && slot.materialId != null && String(slot.materialId).trim() !== '') s += (Number(mw) || 0);
-        return s;
+        // #4296: сырьё теперь ВНУТРИ firstSetupCost (firstSetupParts даёт KNIFE + MATERIAL_WINDING на
+        // пустом станке) — отдельно не добавляем, иначе двойной счёт сырья.
+        return firstSetupCost(slot, ctx.times);
     }
 
     // Оценка ДНЯ СТАРТА слота на позиции index (порт packMachine): пакуем префикс [0..index] по

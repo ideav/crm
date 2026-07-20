@@ -66,8 +66,9 @@ var genStep = genBuggy[1].windowStartMin - genBuggy[0].windowStartMin;
 // Сохранённое окно c1 = setup(stored) + cut_time(=ceil(dur)+leader). dur c1 = 10×5 = 50.
 var storedWindowC1 = storedSetup.c1.knifeMin + storedSetup.c1.materialWindingMin + (50 + 0);
 assertEqual(storedSetup.c1, { knifeMin: 0, materialWindingMin: 15 }, '#3853 окно: первая резка несёт смену сырья 15 (от заправки станка)');
-assert(genBuggy[0].setupMin === 30, '#3853 баг: генерация ставит первой резке «ножи с нуля» = 30');
-assert(genStep - storedWindowC1 === 15, '#3853 баг: шаг planStart (95) − окно (80) = 15 мин разрыва на первой карточке');
+// #4296: без carryPrevSetup первая резка = настройка с нуля НОЖИ 30 + ЗАПРАВКА СЫРЬЯ 15 = 45 (было 30).
+assert(genBuggy[0].setupMin === 45, '#3853 баг: генерация ставит первой резке настройку с нуля (ножи+сырьё) = 45 (#4296)');
+assert(genStep - storedWindowC1 === 30, '#3853 баг: шаг planStart (95) − окно (65) = 30 мин разрыва на первой карточке (#4296)');
 
 // ────────────────────────────────────────────────────────────────────────────────────
 // 2. ФИКС: splitMachineQueue получает заправку станка (carryPrevSetup) и считает первую
@@ -90,8 +91,8 @@ var genFixedBase = planning.splitMachineQueue(queue, {
 });
 assert(genFixedBase[0].setupMin === 15, '#3853 фикс (база): первая резка = 15');
 
-// carryPrevSetup отсутствует → поведение прежнее (ножи с нуля 30) — обратная совместимость.
-assert(genBuggy[0].setupMin === 30, '#3853 совместимость: без carryPrevSetup — firstCutSetup как раньше');
+// carryPrevSetup отсутствует → firstCutSetup «с нуля» (ножи+сырьё 45, #4296) — обратная совместимость.
+assert(genBuggy[0].setupMin === 45, '#3853 совместимость: без carryPrevSetup — firstCutSetup с нуля (ножи+сырьё)');
 
 // ────────────────────────────────────────────────────────────────────────────────────
 // 3. Интеграция: planCutOperations с prevSetupBySlitter кладёт planStart так, что окно
@@ -123,7 +124,7 @@ assertEqual(storedSame.s1, { knifeMin: 0, materialWindingMin: 0 }, '#3853 худ
 var genSameBuggy = planning.splitMachineQueue(qSame, {
     dayStartMin: DAY_START, dayEndMin: CUT_END, leader: 0, times: TIMES,
     perPassByCut: { s1: 10, s2: 10 }, runsByCut: { s1: 5, s2: 5 }, firstCutSetup: true, gapFill: true });
-assert(genSameBuggy[0].setupMin === 30, '#3853 худший (баг): firstCutSetup резервирует 30 — фантомный разрыв');
+assert(genSameBuggy[0].setupMin === 45, '#3853 худший (баг): firstCutSetup резервирует 45 (ножи+сырьё, #4296) — фантомный разрыв');
 
 var genSameFixed = planning.splitMachineQueue(qSame, {
     dayStartMin: DAY_START, dayEndMin: CUT_END, leader: 0, times: TIMES,
@@ -132,6 +133,6 @@ var genSameFixed = planning.splitMachineQueue(qSame, {
 assert(genSameFixed[0].setupMin === 0, '#3853 худший (фикс): первая резка 0 настройки — встык, без фантомного разрыва');
 // Сумма минут дня (бейдж) больше не раздувается на 30 фантомных минут.
 function daySum(segs){ return segs.reduce(function(s, x){ return s + x.setupMin + x.durationMin; }, 0); }
-assert(daySum(genSameBuggy) - daySum(genSameFixed) === 30, '#3853 худший: фикс убирает 30 фантомных минут из суммы дня (меньше ложных переполнений/дроблений)');
+assert(daySum(genSameBuggy) - daySum(genSameFixed) === 45, '#3853 худший: фикс убирает 45 фантомных минут (ножи 30 + сырьё 15, #4296) из суммы дня');
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

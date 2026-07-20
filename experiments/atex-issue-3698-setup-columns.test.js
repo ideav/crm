@@ -45,13 +45,14 @@ assertEqual(planning.setupActivityMinutes(A, matOnly, TIMES), { knifeMin: 0, mat
 assertEqual(planning.setupActivityMinutes(A, knifeOnly, TIMES), { knifeMin: 30, materialWindingMin: 0 }, 'минуты: смена ножей → 30/0');
 assertEqual(planning.setupActivityMinutes(A, both, TIMES), { knifeMin: 30, materialWindingMin: 15 }, 'минуты: смена сырья и ножей → 30/15');
 assertEqual(planning.setupActivityMinutes(null, A, TIMES), { knifeMin: 0, materialWindingMin: 0 }, 'минуты: нет предыдущей и нет firstCutSetup → 0/0');
-assertEqual(planning.setupActivityMinutes(null, A, TIMES, { firstCutSetup: true }), { knifeMin: 30, materialWindingMin: 0 }, 'минуты: первая резка дня (firstCutSetup) → настройка ножей 30/0');
+// #4296: первая резка ПУСТОГО станка (firstCutSetup) ставит ножи + заправку сырья с нуля.
+assertEqual(planning.setupActivityMinutes(null, A, TIMES, { firstCutSetup: true }), { knifeMin: 30, materialWindingMin: 15 }, 'минуты: первая резка пустого станка (firstCutSetup) → ножи 30 + заправка сырья 15');
 
 // ── setupActivityColumns: по очереди станка ──
 var queue = [cut('A'), cut('C', { materialId: '2' }), cut('D', { materialId: '2', knifeWidths: [100, 300] })];
-// Без заправки станка: первая резка — настройка ножей с нуля (firstCutSetup).
+// #4296: без заправки станка первая резка — настройка ножей + заправка сырья с нуля (firstCutSetup).
 assertEqual(planning.setupActivityColumns(queue, TIMES), {
-    A: { knifeMin: 30, materialWindingMin: 0 },   // ножи с нуля
+    A: { knifeMin: 30, materialWindingMin: 15 },  // ножи + заправка сырья с нуля (#4296)
     C: { knifeMin: 0, materialWindingMin: 15 },   // A→C: смена сырья
     D: { knifeMin: 30, materialWindingMin: 0 }    // C→D: только ножи (сырьё то же '2')
 }, 'колонки: очередь без заправки станка');
