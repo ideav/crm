@@ -3239,6 +3239,26 @@
         return { cuts: logical, deletes: deletes, chainByLogical: chainByLogical };
     }
 
+    // #4292: ПОЛНАЯ цепочка дробления по дням для записи cutId — ГОЛОВА + все ПРОДОЛЖЕНИЯ (это
+    // ОДНА логическая резка). Удаление любого звена обязано снести ВСЮ цепочку: иначе
+    // продолжение остаётся без «Обеспечения»/заказа (обеспечение висело на голове) — «нет связей»,
+    // и попадает в ОТХОДЫ; автогенерация такую сироту НЕ чистит (у неё проходы>0, planCutOperations
+    // сносит лишь setup-only-мусор с 0 проходов). Возвращает id записей (голова первой, как в
+    // chainByLogical), гарантированно включая сам cutId. Standalone-резка → [cutId]. Вход не мутирует.
+    function chainRecordIdsForCut(cuts, cutId) {
+        var id = String(cutId == null ? '' : cutId);
+        if (id === '') return [];
+        var chainByLogical = (mergeContinuationChains(cuts || []).chainByLogical) || {};
+        var headById = {};
+        Object.keys(chainByLogical).forEach(function(head){
+            (chainByLogical[head] || [head]).forEach(function(m){ headById[String(m)] = String(head); });
+        });
+        var head = headById[id];
+        var chain = (head != null && chainByLogical[head]) ? chainByLogical[head].map(String) : [id];
+        if (chain.indexOf(id) < 0) chain.push(id);
+        return chain;
+    }
+
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →
