@@ -3320,7 +3320,8 @@
                 settings: opts.weights, times: opts.times, capacityMin: winMin > 0 ? winMin : Infinity,
                 baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
                 machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
-                distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut
+                distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut,
+                prevSetupBySlitter: opts.prevSetupBySlitter   // #4288: заправка станков (prev_cut_setup) — первая резка очереди наследует её как prev (размещение + релокация)
             };
             slotPlan = computeSlotPlacement(merged.cuts, slotExtend(slotRefineCtx, {
                 dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,

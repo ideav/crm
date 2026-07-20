@@ -149,6 +149,25 @@
         var next = machineSlots[index] || null;
         var prevCut = (prev && prev.kind === 'cut') ? prev : null;
         var nextCut = (next && next.kind === 'cut') ? next : null;
+        // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
+        // ЗАПРАВКУ станка (prev_cut_setup → ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
+        // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и
+        // оценка идеала (qualityIdeal, #4029). Без этого слой размещения считал старт станка «с
+        // нуля» и НЕ поощрял продолжить УЖЕ СТОЯЩУЮ на станке комбинацию: первая резка 22.07 не
+        // подхватывала заправку 21.07 → у неё лишняя смена сырья/ножей, а совпадающая по сырью/
+        // намотке/ножам резка не получала преимущества встать первой (issue #4288). Лидер/втулку
+        // нейтрализуем (= как у slot): отчёт prev_cut_setup их не несёт, и changeoverParts
+        // упаковщика их для carry тоже не считает — мнимую смену лидера не штрафуем. Только когда
+        // carry по станку известна (иначе prev остаётся null → прежнее поведение). Для смежности
+        // заказа/фольги (ниже) синтетический prev НЕ используем — у заправки нет заказа/дня.
+        var beforePrev = prevCut;
+        if (!beforePrev && index === 0 && ctx.prevSetupBySlitter && ctx.slitterId != null){
+            var carrySetup = ctx.prevSetupBySlitter[String(ctx.slitterId)];
+            if (carrySetup){
+                beforePrev = carryOverPrevCut(carrySetup, slot);
+                beforePrev.leader = slot.leader; beforePrev.sleeveId = slot.sleeveId;
+            }
+        }
         var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
         var dayOff = prefixDayOffset(withSlot, index, ctx);
         var placementDayKey = (ctx.baseMidnightMs != null) ? dayKeyFromOffset(ctx.baseMidnightMs, dayOff) : undefined;
@@ -178,7 +197,7 @@
             distanceExceeded: !!(ctx.distanceExceededFor && ctx.distanceExceededFor(ctx.slitterId, dayOff, index))
         };
         var ctxAfter = { settings: ctx.settings };   // slot → next: только стоимость перехода
-        var cost = insertionCost(prevCut, slot, nextCut, ctxBefore, ctxAfter);
+        var cost = insertionCost(beforePrev, slot, nextCut, ctxBefore, ctxAfter);   // #4288: beforePrev = реальный prev либо заправка станка на старте
         var bf = cost.before.byFactor, af = cost.after.byFactor;
         var setupWeight = (bf.knife || 0) + (bf.material || 0) + (af.knife || 0) + (af.material || 0);
         // #4095: суммарный разбор ВЕСА по факторам (штрафным минутам) для трассировки причины выбора —
@@ -696,6 +715,7 @@
                          baseMidnightMs: ctx.baseMidnightMs, perPassByCut: perPass,
                          machineDayOffFor: ctx.machineDayOffFor, feasibleMachine: ctx.feasibleMachine,
                          distanceExceededFor: ctx.distanceExceededFor,
+                         prevSetupBySlitter: ctx.prevSetupBySlitter,   // #4288: заправка станков — первая резка очереди наследует её как prev
                          traceTasks: trace ? trace.tasks : null };
         placeAllSlots(occ, movable, placeCtx);
         if (ctx.relocate !== false) relocatePass(occ, ctx.dayByCut || null, slotExtend(placeCtx, { dueDayByCut: ctx.dueDayByCut }));
