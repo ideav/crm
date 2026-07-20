@@ -1,7 +1,7 @@
 # VecMory — отчёт: MCP-память развёрнута + план теста «с памятью / без»
 
 *Дата: 25.06.2026. Дополняет [`summary_vm.md`](summary_vm.md), [`Plan-draft.md`](Plan-draft.md),
-[`vecmory_deck.md`](vecmory_deck.md). Фиксирует переход от «прототип проверен» к «инструмент
+[`INTEGRAM_PARTNER_DECK_PLAN.md`](../docs/INTEGRAM_PARTNER_DECK_PLAN.md). Фиксирует переход от «прототип проверен» к «инструмент
 работает у агента», и даёт воспроизводимую методику измерить пользу памяти.*
 
 ---
