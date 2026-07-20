@@ -624,6 +624,16 @@
             if (cut.number != null && cut.number !== '') parts.push(String(cut.number));
             if (cut.winding != null && cut.winding !== '') parts.push(String(cut.winding));
             if (cut.status != null && cut.status !== '') parts.push(String(cut.status));
+            // #4298: ширины полос (ножей) резки — чтобы поиск по ширине (напр. «110») находил резку
+            // по её СОБСТВЕННОЙ геометрии, а не только по подписи связанной позиции. Подписи позиций
+            // строятся из обеспечений/this.positions, которые после ручного переноса+пересчёта могут
+            // временно устареть (карточка при этом показывает «110мм» из knifeWidths) → поиск «110»
+            // не находил резки станка. Матч по своей ширине устойчив к этому. Дубли ширин схлопываем.
+            var seenW = {};
+            (cut.knifeWidths || []).forEach(function(w) {
+                var s = String(w == null ? '' : w).trim();
+                if (s !== '' && s !== 'null' && !seenW[s]) { seenW[s] = 1; parts.push(s); }
+            });
         }
         (linkedLabels || []).forEach(function(l) { if (l != null && l !== '') parts.push(String(l)); });
         return parts.join(' ').toLowerCase();
