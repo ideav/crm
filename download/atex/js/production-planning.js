@@ -4964,6 +4964,26 @@
         return { cuts: logical, deletes: deletes, chainByLogical: chainByLogical };
     }
 
+    // #4292: ПОЛНАЯ цепочка дробления по дням для записи cutId — ГОЛОВА + все ПРОДОЛЖЕНИЯ (это
+    // ОДНА логическая резка). Удаление любого звена обязано снести ВСЮ цепочку: иначе
+    // продолжение остаётся без «Обеспечения»/заказа (обеспечение висело на голове) — «нет связей»,
+    // и попадает в ОТХОДЫ; автогенерация такую сироту НЕ чистит (у неё проходы>0, planCutOperations
+    // сносит лишь setup-only-мусор с 0 проходов). Возвращает id записей (голова первой, как в
+    // chainByLogical), гарантированно включая сам cutId. Standalone-резка → [cutId]. Вход не мутирует.
+    function chainRecordIdsForCut(cuts, cutId) {
+        var id = String(cutId == null ? '' : cutId);
+        if (id === '') return [];
+        var chainByLogical = (mergeContinuationChains(cuts || []).chainByLogical) || {};
+        var headById = {};
+        Object.keys(chainByLogical).forEach(function(head){
+            (chainByLogical[head] || [head]).forEach(function(m){ headById[String(m)] = String(head); });
+        });
+        var head = headById[id];
+        var chain = (head != null && chainByLogical[head]) ? chainByLogical[head].map(String) : [id];
+        if (chain.indexOf(id) < 0) chain.push(id);
+        return chain;
+    }
+
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →
@@ -8225,6 +8245,7 @@
         daySplitBadges: daySplitBadges,
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
+        chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -10858,17 +10879,36 @@
     AtexProductionPlanning.prototype.deleteCutTask = function(cut, cardEl) {
         var self = this;
         if (this.busy || !cut) return;
-        var cutId = String(cut.id);
+        // #4292: день-сплит — «задание» = ГОЛОВА + ПРОДОЛЖЕНИЯ (одна логическая резка). Удаляем ВСЮ
+        // цепочку и обеспечения ВСЕХ её звеньев, иначе продолжение остаётся без обеспечения/заказа
+        // («нет связей», в ОТХОДЫ), а автогенерация его не чистит (проходы>0 — planCutOperations сносит
+        // лишь setup-only-мусор). Клик по любой части цепочки сносит её целиком.
+        var chainIds = chainRecordIdsForCut(self.cuts || [], cut.id);
+        if (!chainIds.length) chainIds = [String(cut.id)];
+        var cutsById = {};
+        (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
+        // #3508: зафиксированное (🔒) звено цепочки удалять нельзя — снять фиксацию сначала.
+        if (chainIds.some(function(id) { return cutsById[id] && cutsById[id].fixed; })) {
+            this.notify('В цепочке дробления есть зафиксированное задание — снимите фиксацию, чтобы удалить', 'error');
+            return;
+        }
         var label = cutTaskLabel(cut);
         this.setBusy(true);
-        this.loadCutFulfillments(cutId).then(function(fulfillmentIds) {
+        // Обеспечения ВСЕХ звеньев цепочки (у продолжений их обычно нет, но собираем на всякий случай).
+        Promise.all(chainIds.map(function(id) { return self.loadCutFulfillments(id); })).then(function(lists) {
             self.setBusy(false);
+            var seen = {}, fulfillmentIds = [];
+            lists.forEach(function(l) { (l || []).forEach(function(fid) {
+                var s = String(fid);
+                if (s && s !== 'null' && !seen[s]) { seen[s] = true; fulfillmentIds.push(s); }
+            }); });
+            var contCount = chainIds.length - 1;
             var msg = el('span', { class: 'atex-pp-confirm-msg', text:
-                'Удалить задание «' + label + '»? Будет удалено обеспечений — ' +
-                fulfillmentIds.length + '. Действие необратимо.' });
+                'Удалить задание «' + label + '»' + (contCount > 0 ? ' вместе с продолжениями (' + contCount + ')' : '') +
+                '? Будет удалено обеспечений — ' + fulfillmentIds.length + '. Действие необратимо.' });
             self.confirmAction(msg, cardEl, [
                 { label: 'Удалить', warning: true, onConfirm: function() {
-                    self.runDeleteCutTask(cutId, fulfillmentIds, label);
+                    self.runDeleteCutTask(chainIds, fulfillmentIds, label);
                 } }
             ]);
         }).catch(function(err) {
@@ -10880,20 +10920,25 @@
     // #3486: удаление одной резки. Порядок как у заданий дня (#3475): сперва все
     // «Обеспечение» (снимаем ссылки на «Партии ГП»), затем сама «Производственная
     // резка» — backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход.
-    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutId, fulfillmentIds, label) {
+    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutIds, fulfillmentIds, label) {
         var self = this;
         if (this.busy) return;
         var ids = (fulfillmentIds || []).map(function(x) { return String(x); })
             .filter(function(id) { return id && id !== 'null'; });
-        var total = ids.length + 1;   // обеспечения + сама резка
+        // #4292: cutIds — ГОЛОВА + ПРОДОЛЖЕНИЯ цепочки дробления; терпим и одиночный id (совместимость).
+        var cutList = (Array.isArray(cutIds) ? cutIds : [cutIds]).map(function(x) { return String(x); })
+            .filter(function(id) { return id && id !== 'null'; });
+        var total = ids.length + cutList.length;   // обеспечения + записи цепочки
 
         this.setBusy(true);
         this.showProgress('Удаление задания «' + label + '»…', total);
         var done = 0;
         // #4005: обеспечения резки независимы друг от друга — сносим их пулом до
-        // MAX_PARALLEL_DELETES потоков (как сохранение #3998/#4004), затем БАРЬЕР и сама
-        // резка. Порядок «сперва все обеспечения, потом резка» обязателен (иначе _m_del
-        // резки → 409, см. комментарий выше). Порядок _m_del в базе неважен.
+        // MAX_PARALLEL_DELETES потоков (как сохранение #3998/#4004), затем БАРЬЕР и записи резок.
+        // Порядок «сперва все обеспечения, потом резки» обязателен (иначе _m_del резки → 409, см.
+        // комментарий выше). #4292: записи цепочки сносим ПОСЛЕДОВАТЕЛЬНО в ОБРАТНОМ порядке (хвост →
+        // голова): продолжения ссылаются на голову («ID первой части», #3892), удаление головы раньше
+        // продолжений может дать 409.
         var MAX_PARALLEL_DELETES = 5;
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
@@ -10901,17 +10946,21 @@
             });
         }
         var supplyTasks = ids.map(function(id) { return function() { return del(id); }; });
-        // Фаза 1 — обеспечения (пул), барьер, Фаза 2 — сама резка.
+        // Фаза 1 — обеспечения (пул), барьер, Фаза 2 — записи цепочки (хвост → голова).
         runWithConcurrency(supplyTasks, MAX_PARALLEL_DELETES).then(function() {
-            return del(cutId);
+            return cutList.slice().reverse().reduce(function(p, id) {
+                return p.then(function() { return del(id); });
+            }, Promise.resolve());
         }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress();
             self.setBusy(false);
-            if (String(self.selectedCutId) === String(cutId)) self.selectedCutId = null;
+            if (cutList.indexOf(String(self.selectedCutId)) >= 0) self.selectedCutId = null;
             self.render();
-            self.notify('Задание удалено: обеспечений — ' + ids.length, 'success');
+            var contCount = cutList.length - 1;
+            self.notify('Задание удалено' + (contCount > 0 ? ' (продолжений — ' + contCount + ')' : '') +
+                ': обеспечений — ' + ids.length, 'success');
             // #3840: удаление резки из середины дня оставляло простой на её месте — прочие резки
             // дня сохраняли прежний planStart (РМ «Диаграмма Ганта» рисует сохранённый planStart).
             // Пересобираем время старта дня, СОХРАНЯЯ порядок (preserveOrder, #3619): gapFill
