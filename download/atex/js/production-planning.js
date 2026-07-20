@@ -4984,6 +4984,32 @@
         return chain;
     }
 
+    // #4294: id записей заданий, запланированных РАНЬШЕ базы «С» (в прошлые рабочие дни), которые НЕ
+    // надо пере-планировать — задание уже стоит на своём дне. Планировщик кладёт всё от «С» вперёд
+    // (#3974, «база размещения — С») и день держит лишь у 🔒 (fixedDay); поэтому НЕзафиксированное
+    // задание прошлого дня иначе затягивалось в «С» и садилось в середину дня (issue #4294), а
+    // зафиксированные оставались на месте. Признак «прошлого дня» — день ГОЛОВЫ цепочки < 0 (голова —
+    // самый ранний сегмент; берём по ней, чтобы, исключая цепочку из входа, НЕ осиротить продолжение,
+    // попавшее в окно, — ср. #4292). Цепочку с ЗАФИКСИРОВАННОЙ головой НЕ трогаем: её день движок
+    // и так держит (fixedDay<0), пусть идёт штатным входом. → массив id ВСЕХ записей таких цепочек.
+    // Пустая «Дата план» (никогда не планировалось) → offset null → НЕ исключаем (новое задание — в окно).
+    // Вход не мутирует.
+    function cutsBeforeWindowToKeep(cuts, baseMidnightMs) {
+        var out = [];
+        var chains = (mergeContinuationChains(cuts || []).chainByLogical) || {};
+        var byId = {};
+        (cuts || []).forEach(function(c){ if (c && c.id != null) byId[String(c.id)] = c; });
+        Object.keys(chains).forEach(function(head){
+            var hc = byId[head];
+            if (!hc || hc.fixed) return;                       // фикс-цепочку держит движок сам (fixedDay<0)
+            var hoff = dayOffsetFromBase(hc.planDate, baseMidnightMs);
+            if (hoff != null && hoff < 0) {                    // голова раньше «С» — вся цепочка остаётся как есть
+                (chains[head] || [head]).forEach(function(m){ out.push(String(m)); });
+            }
+        });
+        return out;
+    }
+
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →
@@ -8246,6 +8272,7 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
+        cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -13749,6 +13776,20 @@
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
         var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
+        // #4294: задания ПРОШЛЫХ дней (запланированные раньше «С») НЕ пере-планируем — они уже стоят на
+        // своих днях. Планировщик кладёт всё от «С» вперёд (#3974) и день держит лишь у 🔒 (fixedDay),
+        // поэтому НЕзафиксированное задание прошлого дня иначе затягивалось в «С» (issue #4294). Исключаем
+        // из входа ВСЮ цепочку с незафиксированной головой раньше «С» (движок фикс-цепочку держит сам).
+        // Только общий путь (генерация/«Упорядочить»/удаление/↑↓); ручной перенос 🗓 (moveScope) имеет
+        // свой scope и приколку — его не трогаем.
+        if (!moveScope) {
+            var keepIds = cutsBeforeWindowToKeep(cuts, planBaseMidnightMs);
+            if (keepIds.length) {
+                var keepSet = {};
+                keepIds.forEach(function(id){ keepSet[String(id)] = true; });
+                planInput = planInput.filter(function(c){ return !keepSet[String(c && c.id)]; });
+            }
+        }
         // #4221/#4225: «В пределах одного станка» — пересобираем ТОЛЬКО задействованные переносом станки
         // (исходный + целевой; при переносе в тот же станок — он один). Во вход планировщика берём лишь
         // их задания (прочие станки не трогаются и не заимствуются), а slitterIds ниже сужаем до них же.
