@@ -269,8 +269,12 @@ assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies,
     'cutRunLength #3209: cut_length is available as run-length fallback');
 assertEqual(planning.supplyFootage(issue3209Plan.supplies[0], { '23352': 0 }), 800,
     'supplyFootage #3209: direct report footage wins over empty object fallback');
-assertEqual(planning.cutRunLength({ id: 'c1', length: 0 }, [{ id: 's1', cutId: 'c1', footage: 0 }], { s1: 500 }), 500,
-    'cutRunLength #3209: object footage remains fallback when report row has no footage');
+// #4301: длина прогона — из «Длина, м» ПОЗИЦИИ (positionLengths по positionId), НЕ из метража
+// обеспечения (footage). Метраж (даже большой/искажённый) игнорируется; нет позиции → сохранённая
+// «Длина, м» резки как есть (но не из метража).
+assertEqual(planning.cutRunLength({ id: 'c1', length: 0 },
+    [{ id: 's1', cutId: 'c1', positionId: 'p1', footage: 9999 }], { p1: 500 }), 500,
+    'cutRunLength #4301: длина = «Длина, м» позиции (500), метраж обеспечения (9999) игнорируется');
 
 // ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
 var posRows = [
