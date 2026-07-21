@@ -4228,14 +4228,26 @@
         return stripNum(footageBySupply && supply && footageBySupply[String(supply.id)]);
     }
 
-    function cutRunLength(cut, supplies, footageBySupply){
-        var maxF = stripNum(cut && cut.length);
+    // #4301: длина прогона (намотки) резки = «Длина, м» обеспечиваемой позиции ЗАКАЗА — величина,
+    // ЗАДАННАЯ ЗАКАЗОМ и НЕИЗМЕННАЯ. НЕ выводим её из «Метраж, м» обеспечения (footage): дробление/
+    // склейка заданий искажали метраж (на ateh — 600→1200→2400), а cutRunLength возвращал искажение,
+    // и оно записывалось ОБРАТНО в «Метраж, м» резки (runLenForCutId → _m_set при разбиении) — длина
+    // «пересчитывалась» и удваивалась на каждой пересборке (issue #4301: «нельзя пересчитывать длину
+    // НИКОГДА»). Берём МАКС «Длина, м» покрытых позиций (как layoutRunLength при генерации: параллельный
+    // слиттинг — все полосы за один прогон, самая длинная позиция задаёт длину прогона). positionLengths —
+    // карта { positionId: «Длина, м» } (positionLengthMap(genPositions)). Позиция не резолвится (сток/
+    // сирота #4175 вне positions_list) → сохранённая «Длина, м» резки как есть (восстанавливать неоткуда),
+    // но НИКОГДА из метража обеспечения. Так длина берётся из заказа и не «плывёт» при дроблении/склейке.
+    function cutRunLength(cut, supplies, positionLengths){
+        var posLen = positionLengths || {};
+        var maxP = 0;
         (supplies || []).forEach(function(s) {
-            if (String(s.cutId) !== String(cut && cut.id)) return;
-            var f = supplyFootage(s, footageBySupply);
-            if (f > maxF) maxF = f;
+            if (String(s && s.cutId) !== String(cut && cut.id)) return;
+            var len = Number(posLen[String(s && s.positionId)]) || 0;
+            if (len > maxP) maxP = len;
         });
-        return maxF;
+        if (maxP > 0) return round3(maxP);       // длина позиции заказа — источник истины
+        return stripNum(cut && cut.length);      // нет позиции — сохранённая длина резки (не из метража)
     }
 
     // FIFO-резерв сырья из партий (#3120 группа C). batches — [{id, label, arrivalKey, freeLinearM}]

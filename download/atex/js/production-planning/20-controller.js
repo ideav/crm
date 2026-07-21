@@ -313,6 +313,7 @@
         this.supplies = [];        // все записи «Обеспечения» (для подсчёта привязок)
         // Данные для генерации резок:
         this.genPositions = [];    // [{ id, materialId, width, qty, dueKey }] — все позиции
+        this.positionLengthById = {};   // #4301: { positionId: «Длина, м» } — источник истины длины прогона (cutRunLength)
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
         this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья» («Ширина, мм» — геометрия реза)
@@ -773,6 +774,7 @@
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
+            self.positionLengthById = positionLengthMap(self.genPositions);   // #4301: длина прогона резки берётся из «Длина, м» позиции заказа
             var approvedCnt = self.genPositions.filter(function(p) { return p.approved; }).length;
             console.log('[pp] 📋 loadPositions: загружено позиций для дропдауна:', self.positions.length, ', для генерации:', self.genPositions.length, ', согласованных:', approvedCnt);
         });
@@ -995,7 +997,7 @@
         var materialId = cut.materialId ? String(cut.materialId) : '';
         if (materialId === '') { this.notify('У задания не задано сырьё — резерв невозможен', 'error'); return Promise.resolve(); }
         var widthM = (Number(this.jumboWidthByMaterial[materialId]) || 0) / 1000;
-        var requiredLin = cutRunLength(cut, this.supplies, this.footageBySupply);
+        var requiredLin = cutRunLength(cut, this.supplies, this.positionLengthById);
         // свободный остаток без учёта собственных прежних резервов этой резки (их перезапишем)
         var existing = (this.consumptionByCut && this.consumptionByCut[String(cut.id)]) || [];
         var reservedExcl = {};
@@ -1717,7 +1719,7 @@
         var grp = groupBySlitter(this.cuts).filter(function(g) { return String(g.slitter.id) === String(slitterId); })[0];
         var stationCuts = grp ? grp.cuts : [];
         var runLenByCut = {};
-        stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply); });
+        stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.positionLengthById); });
         var slot = freeSlotForQueue(stationCuts, prospect, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
@@ -2266,7 +2268,7 @@
         var chainByLogical = merged.chainByLogical || {};
         var openLogical = (merged.cuts || []).filter(function(c) { return String(c && c.status || '').trim() !== 'Завершён'; });
         function descOf(c) {
-            var runLength = cutRunLength(c, self.supplies, self.footageBySupply);
+            var runLength = cutRunLength(c, self.supplies, self.positionLengthById);
             var runs = Number(c.plannedRuns) || 0;
             return {
                 id: String(c.id),
@@ -4996,7 +4998,7 @@
         function runLenForCutId(cutId) {
             var head = chainHeadById[String(cutId)] || String(cutId);
             var hc = cutsById[head];
-            return hc ? cutRunLength(hc, self.supplies, self.footageBySupply) : 0;
+            return hc ? cutRunLength(hc, self.supplies, self.positionLengthById) : 0;
         }
         // #3795: «Вид сырья» цепочки = сырьё её ГОЛОВЫ (у всех сегментов одно сырьё). Берём
         // у головы, потому что у реюзнутого продолжения, созданного до фикса, поле пустое.
@@ -5538,7 +5540,7 @@
             (orderIdsByCut[cid] = orderIdsByCut[cid] || {})[oid] = true;
         });
         cuts.forEach(function(c) {
-            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.footageBySupply), windPointsForCut(c.isFoil, windPoints)); // #3606
+            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.positionLengthById), windPointsForCut(c.isFoil, windPoints)); // #3606
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
             var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, honorSupplyDue);   // #4050 / #4195: фолбэк только при ручном переносе
@@ -6419,7 +6421,7 @@
         var windPoints = windingPointsFromTimes(self.opTimes || {});
         var runLenByCut = {};
         activeGroup.cuts.forEach(function(c) {
-            runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.footageBySupply);
+            runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.positionLengthById);
         });
         var schedById = {};
         var dayWindow = self.workingWindow();
@@ -7068,7 +7070,7 @@
             // переходящей (дроблёной) резки обеспечение делится по дням (splitSupplyShares), и
             // raw-метраж сегмента — бессмысленная дробь (напр. 348.496 вместо 450). cutRunLength
             // стартует с cut.length (head) и игнорирует делёные доли → реальная длина прогона.
-            var cutRunLen = cutRunLength(cut, self.supplies, self.footageBySupply);
+            var cutRunLen = cutRunLength(cut, self.supplies, self.positionLengthById);
             linked.forEach(function(s) {
                 // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж.
                 var foot = cutRunLen > 0 ? cutRunLen : supplyFootage(s, self.footageBySupply);
