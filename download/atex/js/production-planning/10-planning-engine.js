@@ -2693,7 +2693,19 @@
                                 if (d != null && d > day && (nextDay == null || d < nextDay)) nextDay = d;
                             });
                         });
-                        if (nextDay == null) break;
+                        if (nextDay == null) {
+                            // #4304: остались зафикс-резки В ОКНЕ (fixedDay ≥ 0), чей день уже ПОЗАДИ — их
+                            // зафиксированный день переполнен (напр. большая зафикс-резка того же дня
+                            // разорвалась и увела день вперёд). НЕ бросаем их (иначе задание пропало бы из
+                            // плана!): снимаем замок дня и размещаем как обычные с текущего дня. Разрыв/перенос
+                            // пометит их «→» — рендер покажет красное предупреждение, что зафикс. задание сдвинуто.
+                            // Зафикс-резку РАНЬШЕ «С» (fixedDay < 0) НЕ трогаем — она остаётся на своём прошлом
+                            // дне как есть (#3974: цикл идёт только вперёд от 0, прошлые дни не перепланируем).
+                            var stranded = rem.filter(function(id){ return state[id].fixedDay != null && state[id].fixedDay >= 0; });
+                            if (!stranded.length) break;
+                            stranded.forEach(function(id){ state[id].fixedDay = null; });   // день переполнен — освобождаем
+                            continue;
+                        }
                         day = nextDay; clock = 0; continue;
                     }
                 }
@@ -2704,31 +2716,52 @@
                     (st.fixedDay != null ? ' [ЗАФИКСИРОВАНА day=' + st.fixedDay + ']' : '') +
                     (st.isCont ? ' [продолжение]' : '') +
                     ' остаток проходов=' + st.remaining + '/проход=' + Math.round(st.perPass));
-                // #3792: фиксированная резка — один сегмент на своём дне, без разбивки; нахлёст за
-                // конец смены допустим (как обычный gapFill-нахлёст). Настройка — переналадка с
-                // предыдущей физической резкой. День не двигаем: переполнение само вытолкнет
-                // следующие свободные на завтра (avail < 0 → ветка-страж ниже).
+                // #3792/#4304: зафиксированная резка держит СВОЙ ДЕНЬ (голова), но, как и обычная,
+                // РАЗРЫВАЕТСЯ по потолку дня (cutEndMin + нахлёст), а не кладётся целиком за смену
+                // (issue #4304: 158 проходов до 20:33). Голова с влезающими проходами остаётся на
+                // зафиксированном дне; остаток — продолжением на следующий день (снимаем fixedDay,
+                // чтобы остаток шёл штатной веткой продолжения). Настройка — переналадка с предыдущей
+                // физической резкой.
                 if (st.fixedDay != null) {
                     insertLunchBefore();
                     var setupF = setupCostFor(prevPhysical, c);
                     var perPassF = st.perPass + leader;
-                    var wsF = day * 1440 + dayStart + clock;
-                    var durF = (st.remaining > 0 && st.perPass > 0 && hasWindow) ? st.remaining * perPassF : 0;
-                    segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
-                        windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
-                        durationMin: round3(durF), isContinuation: false, parentCutId: null });
-                    clock += setupF + durF;
-                    // #3914: ФИКС-резка кладётся ЦЕЛИКОМ, без дробления и без лимита ёмкости — если
-                    // её конец за потолком дня, это осознанный «замок на день» (#3792), а не баг
-                    // упаковки. Ключевой кандидат в причину «520»: считаем конец окна.
-                    if (round3(wsF + setupF + durF) - day * 1440 > dayEnd + (maxOverworkCuts || 0) + 1e-6) {
-                        ppTraceWarn('ФИКС-резка ' + pick + ' выходит за потолок дня: конец ' +
-                            ppClock(wsF + setupF + durF) + ' > ' + ppClock(day * 1440 + dayEnd + (maxOverworkCuts || 0)) +
-                            ' (настр ' + Math.round(setupF) + ' + намотка ' + Math.round(durF) + ' мин; занято дня стало ' + Math.round(clock) + ')');
-                    } else {
-                        ppTrace('  ФИКС-резка ' + pick + ' целиком: настр ' + Math.round(setupF) + ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
+                    var canRunF = st.remaining > 0 && st.perPass > 0 && hasWindow;
+                    // #4304: сколько проходов влезает в день до потолка нахлёста РЕЗКИ (как обычная резка,
+                    // #3821/#3847). availFor уже учёл занятость дня и обед.
+                    var availCutsF = availFor(day, 'cuts');
+                    var fittingF = (canRunF && availCutsF >= setupF) ? Math.floor((availCutsF - setupF) / perPassF) : 0;
+                    if (fittingF < 0) fittingF = 0;
+                    if (!canRunF || fittingF >= st.remaining) {
+                        // #3792: влезает целиком (в пределах нахлёста) ИЛИ вырожденная (0 проходов/без
+                        // окна) — один сегмент на зафиксированном дне, БЕЗ разрыва.
+                        var wsF = day * 1440 + dayStart + clock;
+                        var durF = canRunF ? st.remaining * perPassF : 0;
+                        segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
+                            windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
+                            durationMin: round3(durF), isContinuation: false, parentCutId: null });
+                        clock += setupF + durF;
+                        ppTrace('  ФИКС-резка ' + pick + ' целиком на дне ' + day + ': настр ' + Math.round(setupF) +
+                            ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
+                        prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                        continue;
                     }
-                    prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                    // #4304: НЕ влезает — РАЗРЫВАЕМ зафиксированную резку по потолку дня. Голова с fittingF
+                    // проходами (хотя бы 1, чтобы фикс-день нёс проходы) остаётся на зафиксированном дне;
+                    // остаток — продолжением на следующий день. fixedDay снимаем: остаток идёт штатной
+                    // веткой продолжения (inProgress), продолжение НЕ зафиксировано. Красное предупреждение
+                    // рисует рендер: зафикс-резка с признаком дробления «→» (#4304 renderQueue).
+                    var passesNowF = fittingF > 0 ? fittingF : 1;   // хотя бы 1 проход держим на фикс-дне
+                    var wsF2 = day * 1440 + dayStart + clock;
+                    var durF2 = passesNowF * perPassF;
+                    segments.push({ cutId: pick, dayOffset: day, runs: passesNowF,
+                        windowStartMin: round3(wsF2), startMin: round3(wsF2 + setupF), setupMin: round3(setupF),
+                        durationMin: round3(durF2), isContinuation: false, parentCutId: null });
+                    st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c;
+                    ppTraceWarn('#4304 ЗАФИКС-резка ' + pick + ' РАЗОРВАНА по потолку дня: ' + passesNowF +
+                        ' проходов на дне ' + day + ' (конец ' + ppClock(dayStart + clock + setupF + durF2) + '), остаток ' +
+                        st.remaining + ' проходов → день ' + (day + 1));
+                    day += 1; clock = 0;
                     continue;
                 }
                 // #3792: предыдущая фикс-резка могла переполнить день (нахлёст) — свободные тогда
