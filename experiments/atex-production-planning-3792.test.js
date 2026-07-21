@@ -2,7 +2,8 @@
 //
 // Поведение зафиксированной резки (флаг c.fixed + якорь дня dayAnchorByCut) в splitMachineQueue
 // (путь записи planCutOperations, gapFill):
-//   1) НЕ разбивается по дням — один сегмент на своём дне, нахлёст за конец смены допустим;
+//   1) #4304: РАЗБИВАЕТСЯ по дням по потолку смены (как обычная) — голова на зафиксированном дне,
+//      остаток продолжением на следующий день (раньше клалась целиком за смену — issue #4304);
 //   2) остаётся на своём дне — gapFill (#3739) её не тянет в хвост более раннего дня;
 //   3) переполнение фиксом выталкивает СВОБОДНЫЕ резки на следующий день;
 //   4) на своём дне берётся раньше свободных (перёд дня), внутри дня двигаться можно;
@@ -39,8 +40,8 @@ var split = planning.splitMachineQueue(
     { dayStartMin: 0, dayEndMin: 100, times: TIMES,
       perPassByCut: { F: 10 }, runsByCut: { F: 15 }, dayAnchorByCut: { F: 0 }, gapFill: true });
 assertEqual(split.map(function(s){ return { day: s.dayOffset, runs: s.runs, cont: !!s.isContinuation }; }),
-    [ { day: 0, runs: 15, cont: false } ],
-    '#3792: зафиксированная резка — один сегмент на своём дне (нахлёст 150>100, не разбивается)');
+    [ { day: 0, runs: 10, cont: false }, { day: 1, runs: 5, cont: true } ],
+    '#4304: зафиксированная резка РАЗБИВАЕТСЯ по потолку дня (150>100 → 10 на фикс-дне 0 + 5 продолжением на день 1)');
 
 // контроль: ТА ЖЕ резка без фиксации разбивается по дням (#3821: 10 сегодня + 5 завтра, без нахлёста)
 var splitFree = planning.splitMachineQueue(
@@ -78,10 +79,10 @@ var ovf = planning.splitMachineQueue(
     { dayStartMin: 0, dayEndMin: 100, times: TIMES,
       perPassByCut: { F: 10, A: 10 }, runsByCut: { F: 15, A: 3 }, dayAnchorByCut: { F: 0, A: 0 }, gapFill: true });
 var ovfBy = bySlitterCutId(ovf);
-assertEqual(ovfBy.F.map(function(s){ return { day: s.dayOffset, runs: s.runs }; }), [ { day: 0, runs: 15 } ],
-    '#3792: фикс F — один сегмент день 0 (нахлёст 150>100)');
+assertEqual(ovfBy.F.map(function(s){ return { day: s.dayOffset, runs: s.runs }; }), [ { day: 0, runs: 10 }, { day: 1, runs: 5 } ],
+    '#4304: фикс F разбит по потолку дня — 10 на дне 0, 5 продолжением на дне 1 (не целиком за смену)');
 assertEqual(ovfBy.A.map(function(s){ return s.dayOffset; }), [ 1 ],
-    '#3792: после переполнения дня 0 фиксом свободная A уходит на день 1');
+    '#3792: после заполнения дня 0 фиксом свободная A уходит на день 1');
 
 // ── 4) На своём дне зафиксированная берётся раньше свободных (перёд дня); обе на дне 0 ──
 var sameDay = planning.splitMachineQueue(
