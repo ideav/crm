@@ -171,6 +171,7 @@
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         planMoveSequences: planMoveSequences,   // #3602/#3923
+        planDragReorder: planDragReorder,       // #4306: перестановка задания внутри дня перетаскиванием
         unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
         uncoveredPositions: uncoveredPositions,
@@ -339,6 +340,11 @@
         this._timingByCut = {};     // #3240: контекст тайминга на резку (setup+нормы+старт) для модалки
         this.daySettings = {};      // DAY_START_HOUR/DAY_END_HOUR из таблицы «Настройка»
         this._lastCutPlanningDiagnosticKey = '';
+        // #4306: ожидающий подтверждения предпросмотр «Пересчитать наладку» — { slitterId, ops,
+        // before, after }. Пока не null: очередь показывает статистику до/после + кнопки «Ок» /
+        // «Отменить пересчет». Пересчёт НЕ пишет в БД до «Ок» (по «Отменить» БД не тронута).
+        this._pendingRecalc = null;
+        this._dragCut = null;       // #4306: состояние drag-перетаскивания задания внутри дня
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
@@ -2952,6 +2958,7 @@
 
     AtexProductionPlanning.prototype.reload = function() {
         var self = this;
+        this._pendingRecalc = null;   // #4306: перезагрузка плана делает отложенный предпросмотр пересчёта неактуальным
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
         return this.loadCutStrips().then(function() { return self.loadPlanning(); })
             .then(function() { return self.loadSleeveBatches(); }) // #3340: обновляем партии втулок (FIFO)
@@ -4591,6 +4598,35 @@
         };
     };
 
+    // #4306: числовая сводка «Качество плана» за окно [С;По] — те же величины, что рисует панель
+    // renderQueue (storedSetupTotals + planQualityView + countOverdueCuts), но одним объектом. Нужна
+    // для показа статистики ДО/ПОСЛЕ при предпросмотре «Пересчитать наладку». Считает по ТЕКУЩЕМУ
+    // this.cuts — для «после» вызывающий подменяет this.cuts проекцией (клоны с пересчитанной наладкой).
+    AtexProductionPlanning.prototype.computeQualityStats = function(scopeFromKey, scopeToKey) {
+        var pqView = planQualityView(this.cuts, {
+            settings: this.daySettings,
+            scopeFromKey: scopeFromKey,
+            scopeToKey: scopeToKey,
+            prevSetupBySlitter: this.prevSetupBySlitter
+        });
+        var overdueCount = countOverdueCuts(this.cuts, this.supplies, this.genPositions,
+            { scopeFromKey: scopeFromKey, scopeToKey: scopeToKey, forecastDays: this.daysForecast() });
+        var setupTot = this.storedSetupTotals(scopeFromKey, scopeToKey);
+        var qId = pqView.idealWindow, qW = setupTot.window;
+        return {
+            hasStored: setupTot.hasStored,
+            taskCount: qW.taskCount,
+            changeoverCount: qW.changeoverCount, changeoverMin: qW.changeoverMin,
+            knifeCount: qW.knifeCount, knifeMin: qW.knifeMin,
+            materialCount: qW.materialCount, materialMin: qW.materialMin,
+            idealCount: qId.count, idealMin: qId.minutes,
+            excessCount: qW.changeoverCount - qId.count,
+            excessMin: round3(qW.changeoverMin - qId.minutes),
+            combinations: pqView.combinationsWindow,
+            overdue: overdueCount
+        };
+    };
+
     // #3778: вычислить тайминг-поля резок В ПОРЯДКЕ ПЛАНА и вернуть { reqs, updates } —
     // updates только для резок, чьи хранимые значения ПУСТЫ или разошлись с расчётом (пустое
     // хранимое всегда «изменилось» → force-write, отсюда наполняются «пустые опять» поля).
@@ -5728,6 +5764,145 @@
         return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes });
     };
 
+    // #4306: ПЕРЕСТАНОВКА задания ВНУТРИ дня перетаскиванием мышью (drag-drop). Работает как ↑↓:
+    // переставляет порядок дня и метит станок «грязным» → появляется «Пересчитать наладку». Механика —
+    // как moveCutInDay, но на произвольную позицию: набор сохранённых planStart дня ПЕРЕСТАВЛЯЕТСЯ под
+    // новый порядок (реальные времена сохраняются, лишь меняют владельца), пишутся только изменившиеся.
+    // Зафиксированные (🔒) — «стены»: их позицию/время НЕ трогаем, перенос ЧЕРЕЗ них запрещён (как ↑↓).
+    //   dayCuts — резки дня в порядке показа (по planStart); dragId — перетаскиваемое; targetId — на кого бросили.
+    AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        var arr = (dayCuts || []).slice();
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
+        if (!mainKey) { self.notify('Не найден реквизит даты резки', 'error'); return Promise.resolve(false); }
+        var byId = {}; arr.forEach(function(c) { byId[String(c.id)] = c; });
+        var plan = planDragReorder(arr, dragId, targetId);   // #4306: чистый расчёт перестановки (тест)
+        if (plan.error === 'notime') {
+            self.notify('Не удаётся переставить: у заданий дня нет времени старта — нажмите «Упорядочить»', 'info');
+            return Promise.resolve(false);
+        }
+        if (plan.error === 'fixed') {
+            self.notify('Зафиксированное задание нельзя переставить (оно «стена»)', 'info');
+            return Promise.resolve(false);
+        }
+        if (!plan.assignments.length) return Promise.resolve(false);
+        this.setBusy(true);
+        var chain = Promise.resolve();
+        plan.assignments.forEach(function(w) {
+            chain = chain.then(function() { var f = {}; f[mainKey] = String(w.planStartTs); return self.post('_m_save/' + encodeURIComponent(w.id) + '?JSON', f); });
+        });
+        return chain.then(function() { return self.reload(); }).then(function() {
+            self.setBusy(false);
+            var dc = byId[String(dragId)];
+            var sid = (dc && dc.slitter && dc.slitter.id != null) ? String(dc.slitter.id) : '';
+            (self._manualMoveDirty = self._manualMoveDirty || {})[sid] = true;   // #4189: показать «Пересчитать наладку»
+            self._pendingRecalc = null;   // #4306: новая перестановка отменяет незавершённый предпросмотр
+            self.render();
+            return true;
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка перестановки: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #4306: ПРЕДПРОСМОТР «Пересчитать наладку». Считает новый план (buildSequenceOps — БЕЗ записи в
+    // БД), проецирует наладку/качество «после» на клонах и запоминает _pendingRecalc → очередь показывает
+    // статистику ДО/ПОСЛЕ и кнопки «Ок»/«Отменить пересчет». Запись в БД — только по «Ок»
+    // (applyPendingRecalc → applySplitPlan). По «Отменить пересчет» БД не тронута (ничего не писали).
+    AtexProductionPlanning.prototype.previewRecalcSetup = function(slitterId) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        if (!(this.cuts && this.cuts.length)) return Promise.resolve(false);
+        var qFromStr = String((this.filter && this.filter.date) || '').trim();
+        var qToStr = String((this.filter && this.filter.dateTo) || '').trim();
+        var scopeFromKey = qFromStr === '' ? null : planDateDayKey(qFromStr);
+        var scopeToKey = qToStr === '' ? null : planDateDayKey(qToStr);
+        var before = this.computeQualityStats(scopeFromKey, scopeToKey);   // ДО — по текущему this.cuts
+        // Пересчёт (preserveOrder=true, как ↑↓/кнопка) → ops БЕЗ записи; заодно ставит this.plannedTailSetup.
+        var built = this.buildSequenceOps(this.cuts, PLANNING_STRATEGY_SETUP, true);
+        var changedUpdates = filterChangedUpdates(built.ops, built.cutsById);
+        var ops = { updates: changedUpdates, creates: built.ops.creates || [], deletes: built.ops.deletes || [] };
+        if (!changedUpdates.length && !ops.creates.length && !ops.deletes.length) {
+            this._manualMoveDirty = {};   // пересчитывать нечего — план актуален, убираем кнопку
+            this.notify('Наладка уже актуальна — пересчёт ничего не меняет', 'info');
+            this.render();
+            return Promise.resolve(false);
+        }
+        // ПОСЛЕ — проекция: клоны this.cuts с пересчитанной наладкой (computeCutSetupUpdates мутирует
+        // клоны в ПАМЯТИ, без записи в БД). Подменяем this.cuts на клоны, считаем качество, возвращаем.
+        var after, realCuts = this.cuts;
+        try {
+            var clones = realCuts.map(function(c) {
+                var cl = {}; for (var k in c) if (Object.prototype.hasOwnProperty.call(c, k)) cl[k] = c[k];
+                if (Array.isArray(c.knifeWidths)) cl.knifeWidths = c.knifeWidths.slice();
+                return cl;
+            });
+            this.cuts = clones;
+            this.computeCutSetupUpdates(null);   // пересчёт хранимых колонок наладки на клонах (в памяти)
+            after = this.computeQualityStats(scopeFromKey, scopeToKey);
+        } finally {
+            this.cuts = realCuts;                // всегда возвращаем настоящие резки
+        }
+        this._pendingRecalc = { slitterId: String(slitterId == null ? '' : slitterId), ops: ops, before: before, after: after };
+        this.render();
+        return Promise.resolve(true);
+    };
+
+    // #4306: применить отложенный пересчёт («Ок») — пишет ops в БД (applySplitPlan: writes + reload +
+    // persistCutSetupColumns + render). Снимает «грязь» перестановки и предпросмотр.
+    AtexProductionPlanning.prototype.applyPendingRecalc = function() {
+        if (this.busy) return Promise.resolve(false);
+        var pend = this._pendingRecalc;
+        if (!pend) return Promise.resolve(false);
+        this._pendingRecalc = null;
+        this._manualMoveDirty = {};
+        return this.applySplitPlan(pend.ops);
+    };
+
+    // #4306: отменить отложенный пересчёт («Отменить пересчет») — БД НЕ тронута (ничего не писали).
+    // План остаётся как после перестановки: «грязь» цела → кнопка «Пересчитать наладку» вернётся.
+    AtexProductionPlanning.prototype.cancelPendingRecalc = function() {
+        if (this.busy) return;
+        this._pendingRecalc = null;
+        this.render();
+    };
+
+    // #4306: панель предпросмотра пересчёта — статистика наладки ДО/ПОСЛЕ + кнопки «Ок»/«Отменить пересчет».
+    // Держится в очереди (renderQueue), пока пользователь не нажмёт одну из кнопок (#4306 п.3).
+    AtexProductionPlanning.prototype.renderRecalcPreviewPanel = function(pend) {
+        var self = this;
+        var b = pend.before, a = pend.after;
+        function statLine(label, s, cls) {
+            return el('div', { class: 'atex-pp-recalc-row' + (cls ? ' ' + cls : '') }, [
+                el('span', { class: 'atex-pp-recalc-label', text: label }),
+                el('span', { text: 'переналадки: ' + s.changeoverCount + ' (' + s.changeoverMin + ' мин)' }),
+                el('span', { text: 'ножи: ' + s.knifeCount + ' (' + s.knifeMin + ' мин)', style: 'opacity:.85;' }),
+                el('span', { text: 'смены сырья: ' + s.materialCount + ' (' + s.materialMin + ' мин)', style: 'opacity:.85;' }),
+                el('span', { text: 'избыток: ' + formatQualityDelta(s.excessCount) + ' (' + formatQualityDelta(s.excessMin) + ' мин)' })
+            ]);
+        }
+        var dCnt = a.changeoverCount - b.changeoverCount, dMin = round3(a.changeoverMin - b.changeoverMin);
+        var deltaText = (dCnt === 0 && dMin === 0) ? 'наладка не изменится'
+            : ('изменение наладки: ' + formatQualityDelta(dCnt) + ' переналадок (' + formatQualityDelta(dMin) + ' мин)'
+               + (dMin < 0 ? ' — лучше' : (dMin > 0 ? ' — хуже' : '')));
+        var deltaCls = dMin < 0 ? 'is-better' : (dMin > 0 ? 'is-worse' : '');
+        var panel = el('div', { class: 'atex-pp-recalc-preview' }, [
+            el('div', { class: 'atex-pp-recalc-title', text: '↻ Пересчёт наладки — проверьте изменения и подтвердите' }),
+            statLine('Было:', b, 'is-before'),
+            statLine('Станет:', a, 'is-after'),
+            el('div', { class: 'atex-pp-recalc-delta ' + deltaCls, text: deltaText })
+        ]);
+        var ok = el('button', { class: 'atex-pp-recalc-ok', type: 'button', text: 'Ок — применить' });
+        ok.addEventListener('click', function() { if (self.busy) return; self.applyPendingRecalc(); });
+        var cancel = el('button', { class: 'atex-pp-recalc-cancel', type: 'button', text: 'Отменить пересчет' });
+        cancel.addEventListener('click', function() { if (self.busy) return; self.cancelPendingRecalc(); });
+        panel.appendChild(el('div', { class: 'atex-pp-recalc-btns' }, [ok, cancel]));
+        return panel;
+    };
+
     // ── Рендеринг ──
 
     AtexProductionPlanning.prototype.render = function() {
@@ -6412,16 +6587,21 @@
         // порядок, только время наладки затронутых операций (следующие сдвигаются); станки не
         // переназначаются, пишутся лишь изменившиеся поля → эффект «только на этом станке».
         var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
-        if (self._manualMoveDirty && self._manualMoveDirty[actDirtyId]) {
+        // #4306: ожидает подтверждения предпросмотр пересчёта ЭТОГО станка — статистика ДО/ПОСЛЕ +
+        // «Ок»/«Отменить пересчет» (держится, пока пользователь не нажмёт кнопку). Иначе, если станок
+        // «грязный» после перестановки (↑/↓ или drag) — крупная красная «Пересчитать наладку» (предпросмотр).
+        if (self._pendingRecalc && String(self._pendingRecalc.slitterId) === actDirtyId) {
+            groupEl.appendChild(self.renderRecalcPreviewPanel(self._pendingRecalc));
+        } else if (self._manualMoveDirty && self._manualMoveDirty[actDirtyId]) {
             var recalcBtn = el('button', {
                 class: 'atex-pp-recalc-setup', type: 'button', text: '↻ Пересчитать наладку',
-                title: 'После ручной перестановки: пересчитать время наладки этого станка (порядок не меняется, следующие задания могут сдвинуться)',
+                title: 'После ручной перестановки: пересчитать время наладки этого станка. Покажет статистику ДО/ПОСЛЕ и кнопки «Ок» / «Отменить пересчет» — в БД запишется только по «Ок».',
                 style: 'display:block;width:100%;margin:6px 0 10px;padding:11px 16px;background:#c0392b;color:#fff;'
                      + 'font-weight:700;font-size:15px;border:none;border-radius:6px;cursor:pointer;'
             });
             recalcBtn.addEventListener('click', function() {
                 if (self.busy) return;
-                self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function() { self.render(); });
+                self.previewRecalcSetup(actDirtyId);   // #4306: предпросмотр (не пишет в БД до «Ок»)
             });
             groupEl.appendChild(recalcBtn);
         }
@@ -6717,7 +6897,55 @@
                 self.selectCut(c.id);
             });
 
+            // #4306: drag-drop перестановка ВНУТРИ дня. Карточка — и источник (через ручку ⠿ ниже),
+            // и цель (drop). Валидность (тот же день+станок, не через 🔒) проверяет reorderCutInDay;
+            // здесь лишь гейтим по дню+станку, чтобы не подсвечивать чужие дни/станки.
+            var cardDayKey = String(planDateDayKey(c.planDate));
+            var cardSid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
+            function dragMatchesDay() {
+                var d = self._dragCut;
+                return !!d && String(d.cutId) !== String(c.id) && String(d.dayKey) === cardDayKey && d.slitterId === cardSid;
+            }
+            cardPanel.addEventListener('dragover', function(e) {
+                if (!dragMatchesDay()) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                cardPanel.classList.add('is-drop-target');
+            });
+            cardPanel.addEventListener('dragleave', function() { cardPanel.classList.remove('is-drop-target'); });
+            cardPanel.addEventListener('drop', function(e) {
+                cardPanel.classList.remove('is-drop-target');
+                if (!dragMatchesDay()) return;
+                e.preventDefault();
+                self.reorderCutInDay(sameDayCuts, self._dragCut.cutId, c.id);
+            });
+
             var controls = el('div', { class: 'atex-pp-cut-controls' });
+            // #4306: ручка перетаскивания ⠿ (первый контрол). Зафиксированные (🔒) не перетаскиваются.
+            var dragHandle = el('span', {
+                class: 'atex-pp-drag-handle' + (c.fixed ? ' is-disabled' : ''), text: '⠿',
+                title: c.fixed ? 'Зафиксированное задание нельзя перетаскивать' : 'Перетащить задание в пределах дня'
+            });
+            if (!c.fixed) {
+                dragHandle.setAttribute('draggable', 'true');
+                dragHandle.addEventListener('dragstart', function(e) {
+                    self._dragCut = { cutId: String(c.id), dayKey: cardDayKey, slitterId: cardSid };
+                    if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = 'move';
+                        try { e.dataTransfer.setData('text/plain', String(c.id)); } catch (_e) {}
+                        if (e.dataTransfer.setDragImage) { try { e.dataTransfer.setDragImage(cardPanel, 24, 18); } catch (_e2) {} }   // тащим саму карточку, а не ручку
+                    }
+                    cardPanel.classList.add('is-dragging');
+                });
+                dragHandle.addEventListener('dragend', function() {
+                    self._dragCut = null;
+                    if (self.queueEl) {
+                        var ds = self.queueEl.querySelectorAll('.is-dragging, .is-drop-target');
+                        for (var di = 0; di < ds.length; di++) { ds[di].classList.remove('is-dragging'); ds[di].classList.remove('is-drop-target'); }
+                    }
+                });
+            }
+            controls.appendChild(dragHandle);
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
             // sameDayCuts/dayIdx вычислены выше (для seqText #3508 п.7) — переиспользуем.

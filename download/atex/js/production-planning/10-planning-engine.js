@@ -5383,6 +5383,37 @@
         return { ordered: ordered };
     }
 
+    // #4306: чистый расчёт перестановки задания ВНУТРИ дня перетаскиванием (drag-drop). Порядок дня
+    // задаёт planStart; при drag набор сохранённых времён дня ПЕРЕСТАВЛЯЕТСЯ под новый порядок (реальные
+    // времена сохраняются, лишь меняют владельца) — как обобщённый ↑↓-своп на произвольную позицию.
+    // dragId вынимается и вставляется ПЕРЕД targetId. Зафиксированные (🔒) — «стены»: их индекс меняться
+    // не должен (перенос через фикс запрещён, как в moveCutInDay). → { assignments:[{id,planStartTs}],
+    // error: null|'notime'|'fixed' }. assignments — только реально изменившиеся (id → новое время).
+    // Вход не мутирует. Пустой/вырожденный (drag==target, не найдено) → пустые assignments без ошибки.
+    function planDragReorder(dayCuts, dragId, targetId) {
+        var arr = dayCuts || [];
+        var ids = arr.map(function(c) { return String(c && c.id); });
+        var di = ids.indexOf(String(dragId)), ti = ids.indexOf(String(targetId));
+        if (String(dragId) === String(targetId) || di < 0 || ti < 0) return { assignments: [], error: null };
+        var times = arr.map(function(c) { return Number(c && c.planDate); });
+        if (times.some(function(t) { return !isFinite(t) || t <= 0; })) return { assignments: [], error: 'notime' };
+        var sorted = times.slice().sort(function(x, y) { return x - y; });   // позиция дня → время
+        var byId = {}; arr.forEach(function(c) { byId[String(c && c.id)] = c; });
+        var without = ids.filter(function(id) { return id !== String(dragId); });
+        var tIdx = without.indexOf(String(targetId));
+        var newOrder = without.slice(0, tIdx).concat([String(dragId)]).concat(without.slice(tIdx));
+        for (var i = 0; i < newOrder.length; i++) {
+            var fc = byId[newOrder[i]];
+            if (fc && fc.fixed && ids[i] !== newOrder[i]) return { assignments: [], error: 'fixed' };   // «стена» сдвинулась
+        }
+        var assignments = [];
+        newOrder.forEach(function(id, idx) {
+            var c = byId[id];
+            if (Number(c.planDate) !== sorted[idx]) assignments.push({ id: id, planStartTs: sorted[idx] });
+        });
+        return { assignments: assignments, error: null };
+    }
+
     function cutPlanDayKey(c) {
         // #3249: planDate приходит unix-штампом (DATETIME) — группируем по календарному дню.
         var key = planDateDayKey(c && c.planDate);
