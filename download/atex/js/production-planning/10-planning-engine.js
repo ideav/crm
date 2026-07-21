@@ -3294,6 +3294,41 @@
         return out;
     }
 
+    // #4300: заправка станков ПЕРЕД окном планирования, восстановленная из ИСКЛЮЧЁННЫХ (прошлых дней)
+    // резок (keepIds из cutsBeforeWindowToKeep, #4294). Убирая резки прошлых дней из planInput, мы
+    // теряем контекст: станок к началу окна УЖЕ несёт наладку вчерашней резки ПЛАНА (ножи/сырьё загружены
+    // и остаются на ночь). Без восстановления splitMachineQueue берёт для ПЕРВОЙ резки окна carryPrevSetup
+    // из prev_cut_setup — слепка ПОСЛЕДНЕЙ ФИЗИЧЕСКИ НАЧАТОЙ резки станка (FR_task_start < planBase), а НЕ
+    // вчерашней резки текущего плана — и заряжает ей переналадку от ЭТОЙ старой конфигурации. А
+    // computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка (вчерашняя резка плана → сегодняшняя)
+    // — near-zero переналадкой. Окно упаковщика получается длиннее хранимой наладки → «дыра» после первого
+    // задания дня, РАЗМЕРОМ changeover(prev_cut_setup, перваяРезка) (issue #4300: Станок 1 — 45 мин
+    // ножи+сырьё, Станок 2 — 30 мин ножи). Возвращаем заправку по ПОСЛЕДНЕЙ (макс. planStart) исключённой
+    // резке каждого станка — ту конфигурацию, на которой станок войдёт в окно; ею переопределяем
+    // prevSetupBySlitter, чтобы упаковщик и хранимые колонки сошлись (нет наладки — нет дыры). Пустой
+    // keepIds / нет исключённых резок станка → {} (никого не трогаем). Вход не мутирует.
+    function prevSetupFromExcludedCuts(cuts, keepIds) {
+        var keep = {};
+        (keepIds || []).forEach(function(id){ keep[String(id)] = true; });
+        var lastBySlitter = {};
+        (cuts || []).forEach(function(c){
+            if (!c || !keep[String(c.id)]) return;
+            var sid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
+            if (sid === '') return;
+            var ts = Number(c.planDate) || 0;
+            var cur = lastBySlitter[sid];
+            if (!cur || ts >= cur.ts) lastBySlitter[sid] = { ts: ts, cut: c };   // последняя перед окном (макс. planStart)
+        });
+        var out = {};
+        Object.keys(lastBySlitter).forEach(function(sid){
+            var c = lastBySlitter[sid].cut;
+            out[sid] = { materialId: c.materialId, winding: c.winding,
+                         knifeWidths: (c.knifeWidths || []).slice(),
+                         knifeCount: (c.knifeWidths || []).length };
+        });
+        return out;
+    }
+
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →

@@ -5029,6 +5029,41 @@
         return out;
     }
 
+    // #4300: заправка станков ПЕРЕД окном планирования, восстановленная из ИСКЛЮЧЁННЫХ (прошлых дней)
+    // резок (keepIds из cutsBeforeWindowToKeep, #4294). Убирая резки прошлых дней из planInput, мы
+    // теряем контекст: станок к началу окна УЖЕ несёт наладку вчерашней резки ПЛАНА (ножи/сырьё загружены
+    // и остаются на ночь). Без восстановления splitMachineQueue берёт для ПЕРВОЙ резки окна carryPrevSetup
+    // из prev_cut_setup — слепка ПОСЛЕДНЕЙ ФИЗИЧЕСКИ НАЧАТОЙ резки станка (FR_task_start < planBase), а НЕ
+    // вчерашней резки текущего плана — и заряжает ей переналадку от ЭТОЙ старой конфигурации. А
+    // computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка (вчерашняя резка плана → сегодняшняя)
+    // — near-zero переналадкой. Окно упаковщика получается длиннее хранимой наладки → «дыра» после первого
+    // задания дня, РАЗМЕРОМ changeover(prev_cut_setup, перваяРезка) (issue #4300: Станок 1 — 45 мин
+    // ножи+сырьё, Станок 2 — 30 мин ножи). Возвращаем заправку по ПОСЛЕДНЕЙ (макс. planStart) исключённой
+    // резке каждого станка — ту конфигурацию, на которой станок войдёт в окно; ею переопределяем
+    // prevSetupBySlitter, чтобы упаковщик и хранимые колонки сошлись (нет наладки — нет дыры). Пустой
+    // keepIds / нет исключённых резок станка → {} (никого не трогаем). Вход не мутирует.
+    function prevSetupFromExcludedCuts(cuts, keepIds) {
+        var keep = {};
+        (keepIds || []).forEach(function(id){ keep[String(id)] = true; });
+        var lastBySlitter = {};
+        (cuts || []).forEach(function(c){
+            if (!c || !keep[String(c.id)]) return;
+            var sid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
+            if (sid === '') return;
+            var ts = Number(c.planDate) || 0;
+            var cur = lastBySlitter[sid];
+            if (!cur || ts >= cur.ts) lastBySlitter[sid] = { ts: ts, cut: c };   // последняя перед окном (макс. planStart)
+        });
+        var out = {};
+        Object.keys(lastBySlitter).forEach(function(sid){
+            var c = lastBySlitter[sid].cut;
+            out[sid] = { materialId: c.materialId, winding: c.winding,
+                         knifeWidths: (c.knifeWidths || []).slice(),
+                         knifeCount: (c.knifeWidths || []).length };
+        });
+        return out;
+    }
+
     // #3280: план операций физического разбиения резок по дням. Сливает цепочки-продолжения
     // (mergeContinuationChains), упорядочивает очередь каждого станка (orderCuts) и
     // раскладывает по дням на уровне проходов (splitMachineQueue). →
@@ -8289,6 +8324,7 @@
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
+        prevSetupFromExcludedCuts: prevSetupFromExcludedCuts, // #4300: заправка станка из исключённых прошлых резок (нет дыры после первого задания)
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -13801,11 +13837,22 @@
         // из входа ВСЮ цепочку с незафиксированной головой раньше «С» (движок фикс-цепочку держит сам).
         // Только общий путь (генерация/«Упорядочить»/удаление/↑↓); ручной перенос 🗓 (moveScope) имеет
         // свой scope и приколку — его не трогаем.
+        // #3853/#3876: заправка станков (prev_cut_setup; станок в длинном отпуске обнулён) для первой
+        // резки очереди. #4300: свежая копия — можно переопределять по станкам (planningPrevSetupBySlitter
+        // возвращает новый объект каждый вызов).
+        var prevSetupBySlitter = self.planningPrevSetupBySlitter(planBaseMidnightMs);
         if (!moveScope) {
             var keepIds = cutsBeforeWindowToKeep(cuts, planBaseMidnightMs);
             if (keepIds.length) {
                 var keepSet = {};
                 keepIds.forEach(function(id){ keepSet[String(id)] = true; });
+                // #4300: исключаемые резки прошлых дней несут заправку станка к началу окна. Переопределяем
+                // ею prevSetupBySlitter, иначе первая резка окна зарядит переналадку от СТАРОЙ конфигурации
+                // (prev_cut_setup — последняя физически начатая резка, не вчерашняя резка плана): окно
+                // упаковщика > хранимой наладки → «дыра» после первого задания дня. computeCutSetupUpdates
+                // считает ту же резку near-zero переналадкой от вчерашней — так упаковщик с ней сходится.
+                var carryFromExcluded = prevSetupFromExcludedCuts(planInput, keepIds);
+                Object.keys(carryFromExcluded).forEach(function(sid){ prevSetupBySlitter[sid] = carryFromExcluded[sid]; });
                 planInput = planInput.filter(function(c){ return !keepSet[String(c && c.id)]; });
             }
         }
@@ -13870,7 +13917,7 @@
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
-            prevSetupBySlitter: self.planningPrevSetupBySlitter(planBaseMidnightMs),   // #3853/#3876: заправка станков; станок в отпуске обнулён → первая резка после отпуска считает настройку с нуля
+            prevSetupBySlitter: prevSetupBySlitter,   // #3853/#3876: заправка станков (в отпуске обнулена); #4300: + заправка из исключённых прошлых резок
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
             // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
