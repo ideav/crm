@@ -1,0 +1,78 @@
+/* Рабочее место atex «Выгрузка/Загрузка заказов и заданий» (#4308). */
+.atex-exp {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 16px;
+    font-size: 14px;
+    color: var(--pp-text, #1f2733);
+}
+.atex-exp-title { margin: 0 0 4px; font-size: 20px; font-weight: 700; }
+.atex-exp-note { margin: 0 0 16px; color: var(--pp-muted, #6b7683); }
+
+.atex-exp-card {
+    margin: 0 0 16px;
+    padding: 14px 16px;
+    border: 1px solid var(--pp-border, #d9dee5);
+    border-radius: 10px;
+    background: var(--pp-surface, #f7f9fb);
+}
+.atex-exp-card-title { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
+.atex-exp-check { display: block; margin: 6px 0; cursor: pointer; user-select: none; }
+.atex-exp-check input { vertical-align: middle; }
+.atex-exp-hint { margin: 8px 0 12px; font-size: 12px; color: var(--pp-muted, #6b7683); }
+
+.atex-exp-btn {
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 700;
+    border: 1px solid var(--pp-border, #d9dee5);
+    border-radius: 6px;
+    background: var(--pp-bg, #fff);
+    color: inherit;
+    cursor: pointer;
+    margin: 4px 8px 0 0;
+}
+.atex-exp-btn:hover { filter: brightness(0.97); }
+.atex-exp-btn-primary { background: #1e6fd6; color: #fff; border-color: #1e6fd6; }
+.atex-exp-btn-danger { background: #c0392b; color: #fff; border-color: #c0392b; }
+.atex-exp.is-busy .atex-exp-btn { pointer-events: none; opacity: .5; }
+
+.atex-exp-file { display: block; margin: 4px 0 8px; }
+
+.atex-exp-report {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 2px solid var(--pp-border, #d9dee5);
+    background: var(--pp-bg, #fff);
+}
+.atex-exp-report.is-ok { border-color: #1e874b; }
+.atex-exp-report.is-bad { border-color: #c0392b; }
+.atex-exp-report-title { font-weight: 700; margin-bottom: 8px; }
+.atex-exp-report-line { margin: 3px 0; font-variant-numeric: tabular-nums; }
+.atex-exp-report-warn { margin: 3px 0; color: #b7791f; }
+.atex-exp-report-err { margin: 3px 0; color: #c0392b; font-weight: 600; }
+.atex-exp-report-ok { margin: 8px 0; color: #1e874b; font-weight: 600; }
+
+.atex-exp-status { min-height: 20px; margin-top: 10px; color: var(--pp-muted, #6b7683); font-weight: 600; }
+
+.atex-exp-toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    max-width: 460px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    color: #fff;
+    background: #333;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .25);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .18s, transform .18s;
+    pointer-events: none;
+    z-index: 9999;
+}
+.atex-exp-toast.is-shown { opacity: 1; transform: translateY(0); }
+.atex-exp-toast.is-ok { background: #1e874b; }
+.atex-exp-toast.is-warn { background: #b7791f; }
+.atex-exp-toast.is-error { background: #c0392b; }
