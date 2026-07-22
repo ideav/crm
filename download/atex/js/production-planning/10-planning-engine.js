@@ -132,6 +132,16 @@
     // knifeWidths, knifeCount } по верхней (последней по task_start) задаче станка. rows —
     // строки отчёта (фильтруем по slitterId, если задан). Сравниваем материал/намотку/набор
     // ножей (НЕ партию). Нет строк → null. Вход не мутируется.
+    //
+    // #4315: строка отчёта — это ПОЛОСА (ширина + `batch_count` полос этой ширины), а не один нож.
+    // Раньше количество игнорировалось, и задача с 8 полосами по 110 мм давала заправку в ОДИН нож.
+    // Против сегодняшних 8 таких же ножей это «переставить 7» → лишняя переналадка KNIFE (30 мин),
+    // которой нет в хранимых колонках (они берут полосы из cut_strips, где количество есть). Разница
+    // и была «дырой в полчаса» после первого задания дня (issue #4315, ateh Станок 3 22.07: 08:00–09:06,
+    // следующее с 09:36; ножи вчерашней и сегодняшней резки одинаковы — 110×8, переставлять нечего).
+    // Разворачиваем ширину по количеству — ровно как aggregateStrips разворачивает `strip_qty`
+    // (сверено на боевых данных: batch_count == strip_qty по всем задачам). Нет колонки/значения → 1
+    // полоса (прежнее поведение, отчёт старого формата).
     function prevSetupFromRows(rows, slitterId) {
         var sid = String(slitterId == null ? '' : slitterId);
         var byTask = {};
@@ -144,7 +154,9 @@
             var rec = byTask[tid];
             if (ts > rec.start) rec.start = ts;
             var w = Number(r.width) || 0;
-            if (w > 0) rec.widths.push(w);
+            var n = Math.round(Number(r.batch_count));
+            if (!isFinite(n) || n < 1) n = 1;   // #4315: нет количества → одна полоса
+            if (w > 0) for (var k = 0; k < n; k++) rec.widths.push(w);
             if (rec.material === '' && r.material_id != null && String(r.material_id) !== '') rec.material = String(r.material_id);
             if (rec.winding === '' && r.wind_dir) rec.winding = normWinding(r.wind_dir);
         });
