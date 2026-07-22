@@ -12,7 +12,7 @@
 
 | Тема | Файл | Ключи |
 |---|---|---|
-| Старт: авторизация, модель данных | [00-start.md](00-start.md) | token, X-Authorization, idb_{db}, _xsrf, БД, таблица, реквизит, ссылка, подчинённая |
+| Старт: авторизация, модель данных | [00-start.md](00-start.md) | token, X-Authorization, idb_{db}, _xsrf, БД, таблица, реквизит, ссылка, подчинённая, TIME, предел времени |
 | Схема (DDL) `_d_*` | [schema.md](schema.md) | _d_new, _d_req, _d_ref, _d_alias, _d_save, _d_del, _d_del_req, типы колонок, подчинённая таблица, referenced, метаданные |
 | Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
 | Запросы/отчёты `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, колонка t28/t100/t104, SET-запрос, формула-фильтр |
@@ -43,6 +43,8 @@
 | поле позиции пропало в UI после закрытия заказа | «списочный» отчёт (`positions_list`) отдаёт только активные — дублировать поле в широкий (`cut_planning`) | [queries.md](queries.md) |
 | разные браузеры дают РАЗНЫЙ результат стабильно (таблица грузится пустой) | разные сессии/роли: у одной нет READ-гранта → чтение `&uni_obj` отдаёт пусто без ошибки; фикс `my_die(403)` для API + клиент не глушит | [roles.md](roles.md) |
 | отчёт не виден роли | выдать READ-грант (объект 22 не выдан по умолчанию) | [roles.md](roles.md) |
+| запрос отвечает `504`, «превышен предел времени N c» | предел запроса 30 c по умолчанию — передать `?TIME=<секунды>` (максимум 600) | [00-start.md](00-start.md) |
+| тяжёлый SELECT грузит CPU сервера часами | запрос переживал ушедший PHP — теперь его рубит `max_statement_time` + `KILL QUERY` | [00-start.md](00-start.md) |
 | `InvalidToken` в dir_admin | нет cookie `idb_{db}` | [files.md](files.md) |
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
 | правки в `integram-table.js` пропадают | это сгенерированный бандл — править модули + `build.sh` | [table-component.md](table-component.md) |
