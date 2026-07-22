@@ -1191,6 +1191,13 @@
     // отсортирован по FIFO. Партии со складом «Атех» помечаются foreign (другой
     // склад) — их показываем, но выбрать нельзя. На случай отсутствия отчёта в
     // сборке — тихий фолбэк на прямое чтение таблицы.
+    // #4317: досчёт «Остатка, м» — ЧАСТЬ загрузки, а не отдельный шаг инициализации. У большинства
+    // партий «Остаток, м» в базе пуст (приход заводят в м², метры появляются только после первого
+    // списания расходом): в отчёте `batch_remainder_m` = '' → remainderM = 0 → batchPasses = 0 →
+    // availableBatchesForCut отбрасывает партию → панель «Партии сырья» пишет «Нет партий в работе».
+    // Перезагрузка страницы всё чинила, потому что fillBatchRemainderM звался ТОЛЬКО в start(), а
+    // перечитывание партий после «Готово»/«Готовы все» (finishCut) шло без него — партии «терялись»
+    // до F5 (issue #4317; на боевой ateh это 56 партий из 62). Хвост общий для обеих веток загрузки.
     AtexSlitter.prototype.loadBatches = function() {
         var self = this;
         return this.getJson('report/material_batches?JSON_KV&FR_is_active=%25&LIMIT=0,2000')
@@ -1198,7 +1205,8 @@
                 var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
                 self.batches = core.rowsToActiveBatches(list);
             })
-            .catch(function() { return self.loadBatchesFromTable(); });
+            .catch(function() { return self.loadBatchesFromTable(); })
+            .then(function() { self.fillBatchRemainderM(); });
     };
 
     // Фолбэк #3460: прямое чтение таблицы «Партия сырья», если отчёт недоступен.
@@ -2781,6 +2789,9 @@
 
         return this.loadMetadata()
             .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
+            // #4317: loadBatches досчитывает остаток сам, но здесь он идёт ПАРАЛЛЕЛЬНО с
+            // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем
+            // досчёт, когда справочник ширин уже загружен (fillBatchRemainderM идемпотентен).
             .then(function() { self.fillBatchRemainderM(); self.validateStoredSlitter(); return self.loadShiftEvents(); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
