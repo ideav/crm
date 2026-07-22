@@ -2081,12 +2081,17 @@
     // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
     // carryOverPrevCut); нет заправки (carryPrevCut=null) → настройка ножей с нуля
     // (firstCutSetup). Зеркалит ветку setup в buildSchedule. → { cutId: { knifeMin, materialWindingMin } }.
+    // #4314: resetIds (из setupResetCutIds) — задания, ПЕРЕД которыми станок стоял в длинном отпуске:
+    // ножи сняты, сырьё убрано, поэтому наладка считается С НУЛЯ (firstCutSetup), а не переналадкой от
+    // предыдущей резки. Пустой/не задан → прежнее поведение.
     // Чистая (тест).
-    function setupActivityColumns(orderedCuts, times, carryPrevCut){
+    function setupActivityColumns(orderedCuts, times, carryPrevCut, resetIds){
         var out = {};
+        var reset = resetIds || {};
         (orderedCuts || []).forEach(function(c, i){
-            var prev = i > 0 ? orderedCuts[i - 1] : (carryPrevCut || null);
-            var opts = (i === 0 && !carryPrevCut) ? { firstCutSetup: true } : null;
+            var afterVacation = !!reset[String(c && c.id)];
+            var prev = afterVacation ? null : (i > 0 ? orderedCuts[i - 1] : (carryPrevCut || null));
+            var opts = (afterVacation || (i === 0 && !carryPrevCut)) ? { firstCutSetup: true } : null;
             out[String(c.id)] = setupActivityMinutes(prev, c, times, opts);
         });
         return out;
@@ -4271,6 +4276,16 @@
         var segments = [];
         var day = 0, clock = 0;   // clock — минут занято в текущем дне (от dayStart)
         var prevPhysical = null;                     // предыдущая ФИЗИЧЕСКАЯ резка (для переналадки)
+        // #4314: длинный отпуск станка (> DOWNTIME_KEEP_SETUP_MAX_DAYS дней) СНИМАЕТ заправку: первая
+        // резка после него считает настройку С НУЛЯ, как и хранимые колонки (setupResetCutIds). Иначе
+        // упаковщик зарядил бы ей переналадку от резки ДО отпуска, колонки — полную настройку, и окна
+        // разъехались бы ровно так же, как в #4300/#4312. prevPhysicalDay — день предыдущей размещённой
+        // резки; для ПЕРВОЙ резки очереди роль предшественника играет заправка станка, а описывает она
+        // день carryPrevSetupDay (день последнего задания раньше «С», #4312; по умолчанию 0 — prev_cut_setup
+        // снят на день базы). Пустые longVacationRanges → ветка инертна, поведение прежнее.
+        var longVacationRanges = opts.longVacationRanges || [];
+        var carryPrevSetupDay = isFinite(Number(opts.carryPrevSetupDay)) ? Number(opts.carryPrevSetupDay) : 0;
+        var prevPhysicalDay = null;                  // день prevPhysical (null — ещё ничего не клали)
         // Обед как пауза перед НОВОЙ резкой: если в этот день он ещё не был и время дня
         // (dayStart+clock) дошло до LUNCH_START — вставляем паузу (clock += длительность).
         function insertLunchBefore() {
@@ -4287,7 +4302,27 @@
         // а окно — переналадку от заправки → на первой карточке дня возникал разрыв/перекрытие.
         // carryOverPrevCut нейтрализует партию ИМЕННО первой резки c (как arr[0] в persistence),
         // поэтому батч не считается ложной сменой даже при gapFill-перестановке.
+        // #4314: упаковщик набивает дни ПОДРЯД, включая дни отпуска, — за окна «Отпуска» сегменты
+        // выносит уже applyDowntime (#3764, shiftPlacementsPastDowntime) в самом конце. Поэтому день
+        // ВНУТРИ отпуска — фикция: в базе задание окажется первым днём ПОСЛЕ него, и хранимые колонки
+        // (setupResetCutIds по итоговым planStart) будут считать по нему. Приводим день к этой же шкале,
+        // иначе два задания, упакованные в разные дни отпуска, у упаковщика оказались бы «через отпуск»
+        // (лишний сброс наладки), а в колонках — соседями одного дня → окна разъехались бы.
+        function effDayForSetup(d) {
+            for (var vi = 0; vi < longVacationRanges.length; vi++) {
+                var r = longVacationRanges[vi];
+                if (d >= r.fromDay && d <= r.toDay) return r.toDay + 1;
+            }
+            return d;
+        }
         function setupPartsFor(prev, c) {
+            // #4314: между предшественником и текущим днём стоял длинный отпуск → станок разряжен,
+            // настройка с нуля (то же, что пишут хранимые колонки, setupResetCutIds).
+            if (longVacationRanges.length
+                && setupResetByVacation(effDayForSetup(prev ? prevPhysicalDay : carryPrevSetupDay),
+                                        effDayForSetup(day), longVacationRanges)) {
+                return firstSetupParts(c, times);
+            }
             if (prev) return changeoverParts(prev, c, times);
             if (opts.carryPrevCut) return changeoverParts(opts.carryPrevCut, c, times);   // #3688
             if (opts.carryPrevSetup) return changeoverParts(carryOverPrevCut(opts.carryPrevSetup, c), c, times);   // #3853
@@ -4478,7 +4513,7 @@
                         clock += setupF + durF;
                         ppTrace('  ФИКС-резка ' + pick + ' целиком на дне ' + day + ': настр ' + Math.round(setupF) +
                             ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
-                        prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                        prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
                         continue;
                     }
                     // #4304: НЕ влезает — РАЗРЫВАЕМ зафиксированную резку по потолку дня. Голова с fittingF
@@ -4492,7 +4527,7 @@
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowF,
                         windowStartMin: round3(wsF2), startMin: round3(wsF2 + setupF), setupMin: round3(setupF),
                         durationMin: round3(durF2), isContinuation: false, parentCutId: null });
-                    st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c;
+                    st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('#4304 ЗАФИКС-резка ' + pick + ' РАЗОРВАНА по потолку дня: ' + passesNowF +
                         ' проходов на дне ' + day + ' (конец ' + ppClock(dayStart + clock + setupF + durF2) + '), остаток ' +
                         st.remaining + ' проходов → день ' + (day + 1));
@@ -4511,7 +4546,7 @@
                         windowStartMin: round3(w0), startMin: round3(w0 + s0), setupMin: round3(s0),
                         durationMin: 0, isContinuation: false, parentCutId: null });
                     clock += s0;
-                    prevPhysical = c; st.remaining = 0; st.placedEmpty = true;
+                    prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
                     continue;
                 }
                 // #4068: обычная (нерезервная) резка не должна заходить в хвост, зарезервированный под
@@ -4543,7 +4578,7 @@
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
-                    st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
+                    st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
                     if (st.remaining > 0) { day += 1; clock = 0; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин), остаток ' + st.remaining + ' → день ' + day); }     // остаток проходов — на следующий день
                     else { clock += setupG + durG; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин) целиком, занято дня ' + Math.round(clock) + ' (конец ' + ppClock(dayStart + clock) + ')'); }
                 } else if (clock > 0) {
@@ -4568,7 +4603,7 @@
                             windowStartMin: round3(wsS), startMin: round3(wsS + tailSetupG), setupMin: round3(tailSetupG),
                             durationMin: 0, isContinuation: false, parentCutId: null, setupOnly: true,
                             setupKnifeMin: colsG ? colsG.knifeMin : null, setupMaterialMin: colsG ? colsG.materialWindingMin : null });
-                        clock += tailSetupG; prevPhysical = c;
+                        clock += tailSetupG; prevPhysical = c; prevPhysicalDay = day;
                         st.isCont = true; st.pendingSetup = round3(setupG - tailSetupG);
                         ppTrace('  проход не влез — в хвост дня положена настройка ' + Math.round(tailSetupG) +
                             ' мин (нахлёст ≤ ' + Math.round(maxOverworkTune != null ? maxOverworkTune : 0) + '), остаток настройки ' +
@@ -4587,7 +4622,7 @@
                     segments.push({ cutId: pick, dayOffset: day, runs: 1,
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
                         durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
-                    st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c;
+                    st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('вырожденно: настройка+1 проход (' + Math.round(setupG + perPassEffG) + ' мин) длиннее целого дня — кладём 1 проход с нахлёстом, остаток ' + st.remaining + ' → день ' + (day + 1));
                     day += 1; clock = 0;
                 }
@@ -4620,7 +4655,7 @@
                     durationMin: round3((runs > 0 && perPass > 0) ? runs * perPass : 0),
                     isContinuation: false, parentCutId: null });
                 clock += setup0 + ((runs > 0 && perPass > 0) ? runs * perPass : 0);
-                prevPhysical = c;
+                prevPhysical = c; prevPhysicalDay = day;
                 return;
             }
             // #3401: каждая резка цуга включает свой лидер — добавляем его к стоимости прохода.
@@ -4666,7 +4701,7 @@
                                 isContinuation: false, parentCutId: null, setupOnly: true,
                                 setupKnifeMin: colsT ? colsT.knifeMin : null, setupMaterialMin: colsT ? colsT.materialWindingMin : null });
                             clock += tailSetup;
-                            prevPhysical = c;
+                            prevPhysical = c; prevPhysicalDay = day;
                             isCont = true;                          // проходы дня N+1 — продолжение
                             pendingSetup = round3(setup - tailSetup);   // остаток настройки → на продолжение
                             day += 1; clock = 0; continue;
@@ -4684,7 +4719,7 @@
                     isContinuation: isCont, parentCutId: isCont ? String(cid) : null });
                 clock += setup + segDur;
                 remaining -= passesNow;
-                prevPhysical = c;
+                prevPhysical = c; prevPhysicalDay = day;
                 isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
                 pendingSetup = 0;   // #3635 п.5: остаток настройки применён к этому сегменту — больше не добавляем
             }
@@ -5100,9 +5135,68 @@
                 last = c;
             });
             if (!last) return;
+            // #4314: dayOffset — день, который эта заправка ОПИСЫВАЕТ (нужен правилу сброса наладки
+            // после длинного отпуска: отпуск между этим днём и днём первой резки окна снимает
+            // ножи/сырьё). Для changeoverParts поле инертно — оно читает сырьё/намотку/ножи.
             out[sid] = { materialId: last.materialId, winding: last.winding,
                          knifeWidths: (last.knifeWidths || []).slice(),
-                         knifeCount: (last.knifeWidths || []).length };
+                         knifeCount: (last.knifeWidths || []).length,
+                         dayOffset: dayOffsetFromBase(last.planDate, baseMidnightMs) };
+        });
+        return out;
+    }
+
+    // #4314: ДЛИННЫЕ окна «Отпуска» станка (> DOWNTIME_KEEP_SETUP_MAX_DAYS календарных дней, #3898)
+    // в индексах дней от базы «С» — [{ fromDay, toDay }] включительно, по возрастанию. За такой простой
+    // с валов снимают ножи, а сырьё уходит со станка, поэтому первая резка ПОСЛЕ него считает настройку
+    // С НУЛЯ (а короткий, ≤ порога, наладку сохраняет). downtimes — [{ start, end }] в unix-секундах
+    // (this.downtimesBySlitter[slitterId]); окна без «Окончания» не учитываем (как везде в расписании).
+    function longVacationDayRanges(downtimes, baseMidnightMs) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return [];
+        var out = [];
+        (downtimes || []).forEach(function(d) {
+            var s = Number(d && d.start), e = Number(d && d.end);
+            if (!isFinite(s) || s <= 0 || !isFinite(e) || e <= s) return;
+            if (downtimeSpanDays(s, e) <= DOWNTIME_KEEP_SETUP_MAX_DAYS) return;   // короткий простой заправку держит
+            var fromDay = Math.round((startOfDayMs(s * 1000) - base) / 86400000);
+            var toDay = Math.round((startOfDayMs(e * 1000 - 1) - base) / 86400000);   // последний ПОКРЫТЫЙ день
+            if (!isFinite(fromDay) || !isFinite(toDay)) return;
+            out.push({ fromDay: fromDay, toDay: toDay });
+        });
+        out.sort(function(a, b) { return a.fromDay - b.fromDay; });
+        return out;
+    }
+
+    // #4314: стоял ли станок в ДЛИННОМ отпуске между днём prevDay (день предыдущей резки либо день,
+    // который описывает заправка станка) и днём curDay размещаемой резки. Полуинтервал (prevDay; curDay]:
+    // отпуск, накрывающий сам день предыдущей резки, наладку не снимает (она была ПОСЛЕ него/в этот день),
+    // а накрывающий день текущей — снимает (резка идёт после простоя). Ranges — из longVacationDayRanges.
+    function setupResetByVacation(prevDay, curDay, ranges) {
+        var p = Number(prevDay), c = Number(curDay);
+        if (!isFinite(p) || !isFinite(c) || c <= p) return false;
+        var list = ranges || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].toDay > p && list[i].fromDay <= c) return true;
+        }
+        return false;
+    }
+
+    // #4314: id заданий очереди станка, ПЕРЕД которыми стоял длинный отпуск, — им хранимые колонки
+    // («Наладка ножей»/«Сырье-намотка») пишут настройку С НУЛЯ, а не переналадку от предыдущей резки:
+    // за такой простой станок разряжают. Очередь — в порядке groupBySlitter (день → planStart), тот же,
+    // в котором считает setupActivityColumns. Для ПЕРВОГО задания очереди предшественник — заправка
+    // станка, и её день задаёт carryDayOffset (день последнего задания раньше «С» — prevSetupBeforeWindow,
+    // #4312 — либо 0 для prev_cut_setup: слепок описывает станок на день базы). Пустые ranges → {}.
+    function setupResetCutIds(orderedCuts, ranges, baseMidnightMs, carryDayOffset) {
+        var out = {};
+        if (!(ranges || []).length) return out;
+        var prevDay = isFinite(Number(carryDayOffset)) ? Number(carryDayOffset) : 0;
+        (orderedCuts || []).forEach(function(c) {
+            var day = dayOffsetFromBase(c && c.planDate, baseMidnightMs);
+            if (day == null) return;                          // без «Даты план» день не определить — не трогаем
+            if (setupResetByVacation(prevDay, day, ranges)) out[String(c.id)] = true;
+            prevDay = day;
         });
         return out;
     }
@@ -5260,6 +5354,10 @@
                 weights: opts.weights,            // #4050: веса §8 (DEADLINE/EXACT_DEADLINE_COST_MN)
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
+                // #4314: длинные окна «Отпуска» этого станка (сбрасывают наладку) + день, который
+                // описывает его заправка (последнее задание раньше «С», #4312; иначе день базы).
+                longVacationRanges: (opts.longVacationRangesBySlitter || {})[key],
+                carryPrevSetupDay: ((opts.prevSetupBySlitter || {})[key] || {}).dayOffset,
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 orderAuthoritative: !!slotPlan   // #4085: порядок задан слоем размещения — не переигрывать
@@ -8411,6 +8509,9 @@
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
+        longVacationDayRanges: longVacationDayRanges,   // #4314: длинные окна «Отпуска» (дни от «С») — сбрасывают наладку
+        setupResetByVacation: setupResetByVacation,     // #4314: стоял ли длинный отпуск между двумя днями
+        setupResetCutIds: setupResetCutIds,             // #4314: задания, которым наладка считается с нуля (после отпуска)
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -9084,6 +9185,21 @@
         if (!this.slitterOnVacationDay(slitterId, dayMidnightMs)) return false;
         var span = vacationSpanDaysOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs);
         return span > DOWNTIME_KEEP_SETUP_MAX_DAYS;
+    };
+
+    // #4314: карта slitterId → ДЛИННЫЕ окна «Отпуска» в днях от «С» (longVacationDayRanges) — для
+    // planCutOperations. За таким простоем (> DOWNTIME_KEEP_SETUP_MAX_DAYS дней, #3898) заправка станка
+    // не сохраняется: первая резка ПОСЛЕ него считает настройку с нуля — и в плане (splitMachineQueue),
+    // и в хранимых колонках (computeCutSetupUpdates), иначе окна разъедутся. В отличие от
+    // blockedRangesBySlitter, календарные выходные/праздники сюда НЕ входят: наладку снимает только
+    // отпуск станка (выходные её сохраняют — станок стоит заправленным).
+    AtexProductionPlanning.prototype.longVacationRangesBySlitter = function(baseMidnightMs) {
+        var self = this, out = {};
+        Object.keys(this.downtimesBySlitter || {}).forEach(function(key) {
+            var ranges = longVacationDayRanges(self.downtimesBySlitter[key], baseMidnightMs);
+            if (ranges.length) out[key] = ranges;
+        });
+        return out;
     };
 
     // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
@@ -13003,13 +13119,31 @@
         var win4111 = (typeof self.workingWindow === 'function') ? (self.workingWindow() || {}) : {};
         var cutEndMin4111 = Number(win4111.cutEndMin);
         var overTuneMin4111 = Number(win4111.maxOverworkTuneMin) || 0;
+        // #4314: заправка, которой станок ВХОДИТ в окно, описывает день последнего задания раньше «С»
+        // (prevSetupBeforeWindow, #4312) — от него правило сброса отсчитывает отпуск для первого задания
+        // очереди. Нет таких заданий → день базы (prev_cut_setup — слепок «сейчас»).
+        var carryDayBySlitter = prevSetupBeforeWindow(this.cuts || [], planBaseMidnightMs);
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
             var arr = group.cuts;   // уже упорядочены как очередь станка (день → planStart → ножи, #3923)
             var carrySetup = prevBySlitter[sid];
+            // #4314: обнуление #3876 (станок в длинном отпуске на день базы — заправки нет) описывает
+            // станок НА ДЕНЬ «С». Если первое задание очереди — из ПРОШЛОГО дня, то есть ДО отпуска,
+            // состояние «С» ему не предшественник: полную настройку оно получать не должно (её ставит
+            // resetIds первому заданию ПОСЛЕ отпуска). Берём для него физический слепок prev_cut_setup.
+            var firstDayOff = arr.length ? dayOffsetFromBase(arr[0].planDate, planBaseMidnightMs) : null;
+            if (firstDayOff != null && firstDayOff < 0) carrySetup = (self.prevSetupBySlitter || {})[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
-            var cols = setupActivityColumns(arr, times, carryPrevCut);
+            // #4314: за ДЛИННЫМ отпуском станка (> DOWNTIME_KEEP_SETUP_MAX_DAYS) ножи снимают, а сырьё
+            // убирают — первое задание ПОСЛЕ него считает настройку С НУЛЯ, а не переналадку от резки
+            // ДО отпуска. Тот же расчёт делает упаковщик (splitMachineQueue, longVacationRanges), иначе
+            // окно плана и хранимые колонки разошлись бы на эту настройку (#4300/#4312).
+            var resetIds = setupResetCutIds(arr,
+                longVacationDayRanges((self.downtimesBySlitter || {})[sid], planBaseMidnightMs),
+                planBaseMidnightMs,
+                (carryDayBySlitter[sid] || {}).dayOffset);
+            var cols = setupActivityColumns(arr, times, carryPrevCut, resetIds);
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
             // Нормализуем ТАК ЖЕ, как группировка цепочек #3892 (String(...).trim()) — иначе пробел/
             // формат из rowValue расходится: голова (fp==id) и продолжение сравнивались бы неравными.
@@ -14047,6 +14181,10 @@
             prevSetupBySlitter: prevSetupBySlitter,   // #3853/#3876: заправка станков (в отпуске обнулена); #4300: + заправка из исключённых прошлых резок
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
+            // #4314: длинные отпуска — первая резка после них считает настройку с нуля (typeof-гард, как
+            // у slotPlacementOn выше: в юнит-тестах buildSequenceOps зовут на стаб-self без прототипа).
+            longVacationRangesBySlitter: (self && typeof self.longVacationRangesBySlitter === 'function')
+                ? self.longVacationRangesBySlitter(planBaseMidnightMs) : {},
             // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
             slotPlacement: slotOn,
             // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)

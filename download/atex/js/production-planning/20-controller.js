@@ -79,6 +79,9 @@
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
+        longVacationDayRanges: longVacationDayRanges,   // #4314: длинные окна «Отпуска» (дни от «С») — сбрасывают наладку
+        setupResetByVacation: setupResetByVacation,     // #4314: стоял ли длинный отпуск между двумя днями
+        setupResetCutIds: setupResetCutIds,             // #4314: задания, которым наладка считается с нуля (после отпуска)
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -752,6 +755,21 @@
         if (!this.slitterOnVacationDay(slitterId, dayMidnightMs)) return false;
         var span = vacationSpanDaysOnDay((this.downtimesBySlitter || {})[String(slitterId)], dayMidnightMs);
         return span > DOWNTIME_KEEP_SETUP_MAX_DAYS;
+    };
+
+    // #4314: карта slitterId → ДЛИННЫЕ окна «Отпуска» в днях от «С» (longVacationDayRanges) — для
+    // planCutOperations. За таким простоем (> DOWNTIME_KEEP_SETUP_MAX_DAYS дней, #3898) заправка станка
+    // не сохраняется: первая резка ПОСЛЕ него считает настройку с нуля — и в плане (splitMachineQueue),
+    // и в хранимых колонках (computeCutSetupUpdates), иначе окна разъедутся. В отличие от
+    // blockedRangesBySlitter, календарные выходные/праздники сюда НЕ входят: наладку снимает только
+    // отпуск станка (выходные её сохраняют — станок стоит заправленным).
+    AtexProductionPlanning.prototype.longVacationRangesBySlitter = function(baseMidnightMs) {
+        var self = this, out = {};
+        Object.keys(this.downtimesBySlitter || {}).forEach(function(key) {
+            var ranges = longVacationDayRanges(self.downtimesBySlitter[key], baseMidnightMs);
+            if (ranges.length) out[key] = ranges;
+        });
+        return out;
     };
 
     // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
@@ -4671,13 +4689,31 @@
         var win4111 = (typeof self.workingWindow === 'function') ? (self.workingWindow() || {}) : {};
         var cutEndMin4111 = Number(win4111.cutEndMin);
         var overTuneMin4111 = Number(win4111.maxOverworkTuneMin) || 0;
+        // #4314: заправка, которой станок ВХОДИТ в окно, описывает день последнего задания раньше «С»
+        // (prevSetupBeforeWindow, #4312) — от него правило сброса отсчитывает отпуск для первого задания
+        // очереди. Нет таких заданий → день базы (prev_cut_setup — слепок «сейчас»).
+        var carryDayBySlitter = prevSetupBeforeWindow(this.cuts || [], planBaseMidnightMs);
         var updates = [];
         groupBySlitter(this.cuts || []).forEach(function(group) {
             var sid = group.slitter && group.slitter.id != null ? String(group.slitter.id) : '';
             var arr = group.cuts;   // уже упорядочены как очередь станка (день → planStart → ножи, #3923)
             var carrySetup = prevBySlitter[sid];
+            // #4314: обнуление #3876 (станок в длинном отпуске на день базы — заправки нет) описывает
+            // станок НА ДЕНЬ «С». Если первое задание очереди — из ПРОШЛОГО дня, то есть ДО отпуска,
+            // состояние «С» ему не предшественник: полную настройку оно получать не должно (её ставит
+            // resetIds первому заданию ПОСЛЕ отпуска). Берём для него физический слепок prev_cut_setup.
+            var firstDayOff = arr.length ? dayOffsetFromBase(arr[0].planDate, planBaseMidnightMs) : null;
+            if (firstDayOff != null && firstDayOff < 0) carrySetup = (self.prevSetupBySlitter || {})[sid];
             var carryPrevCut = (carrySetup && arr.length) ? carryOverPrevCut(carrySetup, arr[0]) : null;
-            var cols = setupActivityColumns(arr, times, carryPrevCut);
+            // #4314: за ДЛИННЫМ отпуском станка (> DOWNTIME_KEEP_SETUP_MAX_DAYS) ножи снимают, а сырьё
+            // убирают — первое задание ПОСЛЕ него считает настройку С НУЛЯ, а не переналадку от резки
+            // ДО отпуска. Тот же расчёт делает упаковщик (splitMachineQueue, longVacationRanges), иначе
+            // окно плана и хранимые колонки разошлись бы на эту настройку (#4300/#4312).
+            var resetIds = setupResetCutIds(arr,
+                longVacationDayRanges((self.downtimesBySlitter || {})[sid], planBaseMidnightMs),
+                planBaseMidnightMs,
+                (carryDayBySlitter[sid] || {}).dayOffset);
+            var cols = setupActivityColumns(arr, times, carryPrevCut, resetIds);
             // #4026: корень цепочки разбиения — «ID первой части» (firstPartId), иначе сам id.
             // Нормализуем ТАК ЖЕ, как группировка цепочек #3892 (String(...).trim()) — иначе пробел/
             // формат из rowValue расходится: голова (fp==id) и продолжение сравнивались бы неравными.
@@ -5715,6 +5751,10 @@
             prevSetupBySlitter: prevSetupBySlitter,   // #3853/#3876: заправка станков (в отпуске обнулена); #4300: + заправка из исключённых прошлых резок
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
             blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
+            // #4314: длинные отпуска — первая резка после них считает настройку с нуля (typeof-гард, как
+            // у slotPlacementOn выше: в юнит-тестах buildSequenceOps зовут на стаб-self без прототипа).
+            longVacationRangesBySlitter: (self && typeof self.longVacationRangesBySlitter === 'function')
+                ? self.longVacationRangesBySlitter(planBaseMidnightMs) : {},
             // #4085: модель #3985 — размещение перебором точек вставки (по умолчанию выкл, настройка SLOT_PLACEMENT)
             slotPlacement: slotOn,
             // #4139: внутридневная пересортировка после упаковки (день фиксирован → сроки не трогаем)
