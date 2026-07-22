@@ -55,10 +55,10 @@ assertEqual(core.isDone('Завершён'), true, 'isDone backward-compat: За
 assertEqual(core.isDone('завершена'), true, 'isDone case-insensitive');
 assertEqual(core.isDone('В работе'), false, 'isDone false for В работе');
 
-// ── meterageFromCounters: погонаж = кон. − нач., не ниже нуля ──
-assertEqual(core.meterageFromCounters(1000, 1850), 850, 'meterage = end − start');
-assertEqual(core.meterageFromCounters('1 000', '1 850,5'), 850.5, 'meterage parses formatted input');
-assertEqual(core.meterageFromCounters(2000, 1500), 0, 'meterage never negative (counter does not rewind)');
+// ── meterageFromCounters: #4321 счётчик мотает НАЗАД → погонаж = нач. − кон. ──
+assertEqual(core.meterageFromCounters(2000, 1500), 500, '#4321 meterage = start − end (счётчик убывает)');
+assertEqual(core.meterageFromCounters('1 850,5', '1 000'), 850.5, 'meterage parses formatted input');
+assertEqual(core.meterageFromCounters(1000, 1850), 0, '#4321 обратный ввод (кон. > нач.) → 0');
 assertEqual(core.meterageFromCounters('', ''), 0, 'meterage of empty counters → 0');
 
 // ── #3433: факт. проходы из погонажа и факт. рулоны полосы ──
@@ -201,11 +201,10 @@ assertEqual(core.batchCoverage(rawBatches, ['old', 'new'], cutForCoverage), {
     ]
 }, 'batchCoverage counts whole passes and sums selected batches');
 
-// ── #3459: погонаж вычисляемый = счётчик кон. − счётчик нач. (read-only) ──
-assertEqual(core.meterageFromCounters(1000, 1850), 850, '#3459 meterage = end − start');
+// ── #3459/#4321: погонаж вычисляемый (read-only) = счётчик нач. − счётчик кон. ──
+assertEqual(core.meterageFromCounters(1850, 1000), 850, '#4321 meterage = start − end');
 assertEqual(core.meterageFromCounters(500, 500), 0, '#3459 нулевой погонаж при равных счётчиках');
-assertEqual(core.meterageFromCounters(2000, 1500), 0, '#3459 meterage never negative');
-assertEqual(core.meterageFromCounters('', '1500'), 1500, '#3459 пустой счётчик нач. → кон. − 0 = 1500 (пусто = 0)');
+assertEqual(core.meterageFromCounters('', '1500'), 0, '#4321 пустой счётчик нач. → 0 (пусто = 0, счёт идёт вниз)');
 
 // ── #3459: блокировка последующих резок в «Ожидает» — первая открытая доступна ──
 var blockedCuts = [
