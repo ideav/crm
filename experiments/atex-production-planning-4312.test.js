@@ -58,7 +58,8 @@ function cut(id, dayMs, mat, kw, runs, o) {
     var Y = cut('Y', D21, 'MWR113L', K8, 3);
     var T1 = cut('T1', D22, 'MW308', [95], 3);
     eqo(planning.prevSetupBeforeWindow([Y, T1], BASE).m3,
-        { materialId: 'MWR113L', winding: 'OUT', knifeWidths: K8, knifeCount: 8 },
+        // #4314: dayOffset — день, который заправка описывает (правило сброса наладки после отпуска).
+        { materialId: 'MWR113L', winding: 'OUT', knifeWidths: K8, knifeCount: 8, dayOffset: -1 },
         '#4312: заправка станка = конфигурация вчерашнего задания (MWR113L, ножи 110×8)');
 
     // Несколько прошлых дней — берём ПОСЛЕДНЕЕ по очереди станка (день → planStart).
