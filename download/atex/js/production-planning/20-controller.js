@@ -78,7 +78,7 @@
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
-        prevSetupFromExcludedCuts: prevSetupFromExcludedCuts, // #4300: заправка станка из исключённых прошлых резок (нет дыры после первого задания)
+        prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
         planCutOperations: planCutOperations,
         filterChangedUpdates: filterChangedUpdates,     // #4108: отбор изменившихся апдейтов (planStart/проходы/станок)
         planWeight: planWeight,                         // #3989: вес штрафа из «Настройки» (ATEH)
@@ -5634,17 +5634,20 @@
         // возвращает новый объект каждый вызов).
         var prevSetupBySlitter = self.planningPrevSetupBySlitter(planBaseMidnightMs);
         if (!moveScope) {
+            // #4300/#4312: задания станка ПРОШЛЫХ дней несут его заправку к началу окна. Переопределяем
+            // ею prevSetupBySlitter, иначе первая резка окна зарядит переналадку от СТАРОЙ конфигурации
+            // (prev_cut_setup — последняя физически начатая резка, не вчерашняя резка плана): окно
+            // упаковщика > хранимой наладки → «дыра» после первого задания дня. computeCutSetupUpdates
+            // считает ту же резку near-zero переналадкой от вчерашней — так упаковщик с ней сходится.
+            // #4312: берём по ВСЕЙ очереди станка (cuts, любой статус/замок), а не по резкам, вырезанным
+            // из planInput механизмом #4294: «Завершён» в planInput не доходит, а зафиксированную цепочку
+            // не возвращает cutsBeforeWindowToKeep — в обоих случаях дыра возвращалась (issue #4312).
+            var carryBeforeWindow = prevSetupBeforeWindow(cuts, planBaseMidnightMs);
+            Object.keys(carryBeforeWindow).forEach(function(sid){ prevSetupBySlitter[sid] = carryBeforeWindow[sid]; });
             var keepIds = cutsBeforeWindowToKeep(cuts, planBaseMidnightMs);
             if (keepIds.length) {
                 var keepSet = {};
                 keepIds.forEach(function(id){ keepSet[String(id)] = true; });
-                // #4300: исключаемые резки прошлых дней несут заправку станка к началу окна. Переопределяем
-                // ею prevSetupBySlitter, иначе первая резка окна зарядит переналадку от СТАРОЙ конфигурации
-                // (prev_cut_setup — последняя физически начатая резка, не вчерашняя резка плана): окно
-                // упаковщика > хранимой наладки → «дыра» после первого задания дня. computeCutSetupUpdates
-                // считает ту же резку near-zero переналадкой от вчерашней — так упаковщик с ней сходится.
-                var carryFromExcluded = prevSetupFromExcludedCuts(planInput, keepIds);
-                Object.keys(carryFromExcluded).forEach(function(sid){ prevSetupBySlitter[sid] = carryFromExcluded[sid]; });
                 planInput = planInput.filter(function(c){ return !keepSet[String(c && c.id)]; });
             }
         }

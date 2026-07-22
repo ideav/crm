@@ -3327,37 +3327,47 @@
         return out;
     }
 
-    // #4300: заправка станков ПЕРЕД окном планирования, восстановленная из ИСКЛЮЧЁННЫХ (прошлых дней)
-    // резок (keepIds из cutsBeforeWindowToKeep, #4294). Убирая резки прошлых дней из planInput, мы
-    // теряем контекст: станок к началу окна УЖЕ несёт наладку вчерашней резки ПЛАНА (ножи/сырьё загружены
-    // и остаются на ночь). Без восстановления splitMachineQueue берёт для ПЕРВОЙ резки окна carryPrevSetup
-    // из prev_cut_setup — слепка ПОСЛЕДНЕЙ ФИЗИЧЕСКИ НАЧАТОЙ резки станка (FR_task_start < planBase), а НЕ
-    // вчерашней резки текущего плана — и заряжает ей переналадку от ЭТОЙ старой конфигурации. А
-    // computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка (вчерашняя резка плана → сегодняшняя)
-    // — near-zero переналадкой. Окно упаковщика получается длиннее хранимой наладки → «дыра» после первого
-    // задания дня, РАЗМЕРОМ changeover(prev_cut_setup, перваяРезка) (issue #4300: Станок 1 — 45 мин
-    // ножи+сырьё, Станок 2 — 30 мин ножи). Возвращаем заправку по ПОСЛЕДНЕЙ (макс. planStart) исключённой
-    // резке каждого станка — ту конфигурацию, на которой станок войдёт в окно; ею переопределяем
-    // prevSetupBySlitter, чтобы упаковщик и хранимые колонки сошлись (нет наладки — нет дыры). Пустой
-    // keepIds / нет исключённых резок станка → {} (никого не трогаем). Вход не мутирует.
-    function prevSetupFromExcludedCuts(cuts, keepIds) {
-        var keep = {};
-        (keepIds || []).forEach(function(id){ keep[String(id)] = true; });
-        var lastBySlitter = {};
-        (cuts || []).forEach(function(c){
-            if (!c || !keep[String(c.id)]) return;
-            var sid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
-            if (sid === '') return;
-            var ts = Number(c.planDate) || 0;
-            var cur = lastBySlitter[sid];
-            if (!cur || ts >= cur.ts) lastBySlitter[sid] = { ts: ts, cut: c };   // последняя перед окном (макс. planStart)
-        });
+    // #4300/#4312: заправка станков НА ВХОДЕ в окно планирования — конфигурация ПОСЛЕДНЕГО задания
+    // станка, запланированного РАНЬШЕ базы «С». Станок к началу окна уже несёт наладку вчерашней резки
+    // ПЛАНА (ножи/сырьё загружены и остаются на ночь). Без неё splitMachineQueue берёт для ПЕРВОЙ резки
+    // окна carryPrevSetup из prev_cut_setup — слепка ПОСЛЕДНЕЙ ФИЗИЧЕСКИ НАЧАТОЙ резки станка
+    // (FR_task_start < planBase), а НЕ вчерашней резки текущего плана — и заряжает ей переналадку от
+    // ЭТОЙ старой конфигурации. А computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка
+    // (вчерашняя резка плана → сегодняшняя) near-zero переналадкой. Окно упаковщика получается длиннее
+    // хранимой наладки → «дыра» после первого задания дня, РАЗМЕРОМ changeover(prev_cut_setup,
+    // перваяРезка) (#4300: Станок 1 — 45 мин ножи+сырьё, Станок 2 — 30 мин ножи).
+    //
+    // #4312: источник — ВСЯ очередь станка (groupBySlitter: день → planStart, тот же порядок, в котором
+    // считает колонки computeCutSetupUpdates), а НЕ только резки, исключённые из planInput механизмом
+    // #4294. Прежняя версия (prevSetupFromExcludedCuts: planInput ∩ keepIds) мимо двух живых случаев,
+    // и «дыра в полчаса» возвращалась (issue #4312, Станок 3 22.07: 08:00–09:06, следующее с 09:36):
+    //   • вчерашняя резка «Завершён» — она ЕСТЬ в keepIds (cutsBeforeWindowToKeep смотрит все резки),
+    //     но её нет в planInput (там фильтр по статусу) → поиск заправки не находил ничего;
+    //   • вчерашняя резка в ЗАФИКСИРОВАННОЙ (🔒) цепочке — cutsBeforeWindowToKeep её намеренно не
+    //     возвращает (день такой цепочки движок держит сам) → keepIds пуст, переопределения не было
+    //     вовсе, и первая резка окна получала переналадку от prev_cut_setup.
+    // Статус и замок на заправку станка не влияют: физически на нём остаются ножи и сырьё ПОСЛЕДНЕГО
+    // задания, что бы с этим заданием ни было в учёте. Инвариант — заправка ровно та, от которой
+    // computeCutSetupUpdates считает наладку первой резки окна: упаковщик и хранимые колонки сходятся,
+    // дыры нет. Нет заданий раньше «С» → станка в ответе нет (остаётся prev_cut_setup). Вход не мутирует.
+    function prevSetupBeforeWindow(cuts, baseMidnightMs) {
         var out = {};
-        Object.keys(lastBySlitter).forEach(function(sid){
-            var c = lastBySlitter[sid].cut;
-            out[sid] = { materialId: c.materialId, winding: c.winding,
-                         knifeWidths: (c.knifeWidths || []).slice(),
-                         knifeCount: (c.knifeWidths || []).length };
+        groupBySlitter(cuts || []).forEach(function(group){
+            var sid = (group.slitter && group.slitter.id != null) ? String(group.slitter.id) : '';
+            if (sid === '') return;
+            // Группа отсортирована день → planStart, поэтому ПОСЛЕДНЯЯ подходящая резка и есть та,
+            // с которой станок войдёт в окно (та же, что становится предшественником первой резки
+            // окна в setupActivityColumns).
+            var last = null;
+            (group.cuts || []).forEach(function(c){
+                var off = dayOffsetFromBase(c && c.planDate, baseMidnightMs);
+                if (off == null || off >= 0) return;
+                last = c;
+            });
+            if (!last) return;
+            out[sid] = { materialId: last.materialId, winding: last.winding,
+                         knifeWidths: (last.knifeWidths || []).slice(),
+                         knifeCount: (last.knifeWidths || []).length };
         });
         return out;
     }
