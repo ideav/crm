@@ -1874,6 +1874,35 @@
         return out;
     }
 
+    // #4326: «замороженные» дни («Заморозка») горизонта [0..horizonDays] от базы → блокированные
+    // интервалы в МИНУТАХ от полуночи дня 0 (та же ось, что calendarBlockedRanges #3788/blockedRanges
+    // #3764). Замороженный день блокируется ЦЕЛИКОМ [d*1440,(d+1)*1440] — планировщик не кладёт на
+    // него НОВЫХ заданий (задания самого дня из planInput исключены отдельно, frozenDayCutsToKeep, —
+    // остаются как есть). Смежные замороженные дни сливаются в один интервал. Пустой freezeByDay → [].
+    // baseMidnightMs нечисловой → []. Вход не мутирует. freezeByDay — карта YYYYMMDD → истина.
+    function frozenBlockedRanges(freezeByDay, baseMidnightMs, horizonDays) {
+        var base = Number(baseMidnightMs);
+        if (!isFinite(base)) return [];
+        var bd = new Date(base);
+        if (isNaN(bd.getTime())) return [];
+        var fb = freezeByDay || {};
+        if (!Object.keys(fb).length) return [];
+        var H = Math.max(0, Number(horizonDays) || 0);
+        var offs = [];
+        for (var d = 0; d <= H; d++) {
+            var day = new Date(bd.getFullYear(), bd.getMonth(), bd.getDate() + d, 0, 0, 0, 0);
+            if (fb[dayKeyFromMs(day.getTime())]) offs.push(d);
+        }
+        var out = [];
+        for (var i = 0; i < offs.length; ) {
+            var s = offs[i], e = offs[i];
+            while (i + 1 < offs.length && offs[i + 1] === e + 1) { e = offs[++i]; }
+            out.push([s * 1440, (e + 1) * 1440]);
+            i++;
+        }
+        return out;
+    }
+
     // #3788: слить два набора блокированных интервалов (минуты от базы) в один отсортированный
     // массив (окна простоя станка #3764 ∪ нерабочие дни календаря). Дубли не схлопываем —
     // свип (nextFreeWorkMinute) корректно работает с перекрытиями.
@@ -3368,6 +3397,32 @@
             if (!hc || hc.fixed) return;                       // фикс-цепочку держит движок сам (fixedDay<0)
             var hoff = dayOffsetFromBase(hc.planDate, baseMidnightMs);
             if (hoff != null && hoff < 0) {                    // голова раньше «С» — вся цепочка остаётся как есть
+                (chains[head] || [head]).forEach(function(m){ out.push(String(m)); });
+            }
+        });
+        return out;
+    }
+
+    // #4326: id записей заданий, стоящих на ЗАМОРОЖЕННЫХ днях («Заморозка») — их НЕ пере-планируем ни
+    // на одном пути (генерация/«Упорядочить»/↑↓/удаление/перенос): день неприкосновенен, задания
+    // остаются ровно как сохранены (рисуются scheduleFromStored), а сам день блокируется для новых
+    // размещений (frozenBlockedRanges/dayIsFrozen). Как #4294 — исключаем ЦЕЛУЮ цепочку дробления по
+    // дню её ГОЛОВЫ (голова — самый ранний сегмент; берём по ней, чтобы не осиротить продолжение).
+    // Замок 🔒 у головы значения не имеет: заморожен день — исключаем цепочку в любом случае. Пустая
+    // «Дата план» → planDateDayKey=Infinity → не в карте → не исключаем. freezeByDay — карта YYYYMMDD →
+    // истина. Вход не мутирует.
+    function frozenDayCutsToKeep(cuts, freezeByDay) {
+        var out = [];
+        var fb = freezeByDay || {};
+        if (!Object.keys(fb).length) return out;
+        var chains = (mergeContinuationChains(cuts || []).chainByLogical) || {};
+        var byId = {};
+        (cuts || []).forEach(function(c){ if (c && c.id != null) byId[String(c.id)] = c; });
+        Object.keys(chains).forEach(function(head){
+            var hc = byId[head];
+            if (!hc) return;
+            var key = planDateDayKey(hc.planDate);
+            if (key != null && key !== Infinity && fb[key]) {
                 (chains[head] || [head]).forEach(function(m){ out.push(String(m)); });
             }
         });
