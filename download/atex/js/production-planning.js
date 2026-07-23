@@ -12921,6 +12921,17 @@
                 var batchId = unit.batchId;
                 var slitterId = unit.slitterId;
                 var cutMainValue = unit.cutMainValue;
+                // #4347: НОВУЮ резку НЕ сохраняем на замороженный день. Иначе её главное значение
+                // (Дата план = замороженный день) заставит пин #4326 пометить её c.fixed → она
+                // закрепится на замороженном дне и seal её НЕ заблокирует (seal блокирует только
+                // СВОБОДНЫЕ) → набивка замороженного дня (issue #4347: «удалил всё → генерация →
+                // напихало в замороженный день»). Сдвигаем Дату план на первый НЕзамороженный день;
+                // финальный autoSequenceQueue разложит от неё по срокам. Реально существовавшие
+                // (committed) резки грузятся из БД и сюда, в создание НОВЫХ, не попадают.
+                var _fzGuard = 0;
+                while (self.dayIsFrozen(cutMainValue) && _fzGuard++ < 400) {
+                    cutMainValue = Number(cutMainValue) + 86400;   // +1 сутки (главное значение в секундах)
+                }
                 var cutFields = buildFields(cutReqIds, {
                     status: CUT_STATUSES[0],
                     slitter: slitterId,
