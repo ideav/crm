@@ -1617,10 +1617,15 @@
         return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate, this.selectedSlitterLabel());
     };
 
+    // #4348: событие смены и атрибуты резки (Начато/Закончено) фиксируем ТЕКУЩИМ моментом —
+    // реальными датой и временем, а НЕ выбранным в пульте днём. Под одной открытой сменой
+    // (#4332) оператор выполняет задания будущих дней; «Закончено» должно нести фактическую
+    // дату завершения, а не плановую дату задания (иначе завершение уезжает в будущее и ломает
+    // хронологию событий смены).
     AtexSlitter.prototype.eventDateTime = function() {
         var now = new Date();
         function p(n) { return (n < 10 ? '0' : '') + n; }
-        var day = this.selectedDate || core.todayISO(now);
+        var day = core.todayISO(now);
         return day + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
     };
 
