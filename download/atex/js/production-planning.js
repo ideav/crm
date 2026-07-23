@@ -14105,29 +14105,35 @@
         // своих днях. Планировщик кладёт всё от «С» вперёд (#3974) и день держит лишь у 🔒 (fixedDay),
         // поэтому НЕзафиксированное задание прошлого дня иначе затягивалось в «С» (issue #4294). Исключаем
         // из входа ВСЮ цепочку с незафиксированной головой раньше «С» (движок фикс-цепочку держит сам).
-        // Только общий путь (генерация/«Упорядочить»/удаление/↑↓); ручной перенос 🗓 (moveScope) имеет
-        // свой scope и приколку — его не трогаем.
         // #3853/#3876: заправка станков (prev_cut_setup; станок в длинном отпуске обнулён) для первой
         // резки очереди. #4300: свежая копия — можно переопределять по станкам (planningPrevSetupBySlitter
         // возвращает новый объект каждый вызов).
         var prevSetupBySlitter = self.planningPrevSetupBySlitter(planBaseMidnightMs);
-        if (!moveScope) {
-            // #4300/#4312: задания станка ПРОШЛЫХ дней несут его заправку к началу окна. Переопределяем
-            // ею prevSetupBySlitter, иначе первая резка окна зарядит переналадку от СТАРОЙ конфигурации
-            // (prev_cut_setup — последняя физически начатая резка, не вчерашняя резка плана): окно
-            // упаковщика > хранимой наладки → «дыра» после первого задания дня. computeCutSetupUpdates
-            // считает ту же резку near-zero переналадкой от вчерашней — так упаковщик с ней сходится.
-            // #4312: берём по ВСЕЙ очереди станка (cuts, любой статус/замок), а не по резкам, вырезанным
-            // из planInput механизмом #4294: «Завершён» в planInput не доходит, а зафиксированную цепочку
-            // не возвращает cutsBeforeWindowToKeep — в обоих случаях дыра возвращалась (issue #4312).
-            var carryBeforeWindow = prevSetupBeforeWindow(cuts, planBaseMidnightMs);
-            Object.keys(carryBeforeWindow).forEach(function(sid){ prevSetupBySlitter[sid] = carryBeforeWindow[sid]; });
-            var keepIds = cutsBeforeWindowToKeep(cuts, planBaseMidnightMs);
-            if (keepIds.length) {
-                var keepSet = {};
-                keepIds.forEach(function(id){ keepSet[String(id)] = true; });
-                planInput = planInput.filter(function(c){ return !keepSet[String(c && c.id)]; });
-            }
+        // #4300/#4312: задания станка ПРОШЛЫХ дней несут его заправку к началу окна. Переопределяем
+        // ею prevSetupBySlitter, иначе первая резка окна зарядит переналадку от СТАРОЙ конфигурации
+        // (prev_cut_setup — последняя физически начатая резка, не вчерашняя резка плана): окно
+        // упаковщика > хранимой наладки → «дыра» после первого задания дня. computeCutSetupUpdates
+        // считает ту же резку near-zero переналадкой от вчерашней — так упаковщик с ней сходится.
+        // #4312: берём по ВСЕЙ очереди станка (cuts, любой статус/замок), а не по резкам, вырезанным
+        // из planInput механизмом #4294: «Завершён» в planInput не доходит, а зафиксированную цепочку
+        // не возвращает cutsBeforeWindowToKeep — в обоих случаях дыра возвращалась (issue #4312).
+        // #4330: раньше этот блок стоял под `if (!moveScope)` — ручной перенос 🗓 его ПРОПУСКАЛ. Тогда
+        // на move-пути упаковщик (planStart) нёс заправку от СЫРОГО prev_cut_setup и пере-паковал прошлые
+        // дни от «С», а computeCutSetupUpdates (колонки «Наладка ножей»/«Сырьё-намотка») считает наладку
+        // по ВСЕЙ сохранённой очереди — два прохода расходились на величину переналадки, и после переноса
+        // на Ганте появлялись дыры/нахлёсты 15 (сырьё) / 30 (ножи) / 45 (оба) мин. PR #4316 изменил
+        // величину сырой заправки (prevSetupFromRows × batch_count) → расхождение всплыло. Применяем
+        // carry-override + исключение прошлых дней НА ВСЕХ путях, включая перенос: тогда planStart
+        // упаковщика и хранимые колонки сходятся так же, как при генерации. Перенесённое задание (будущий
+        // день) НЕ исключается — cutsBeforeWindowToKeep пропускает голову ≥ «С» и фикс-голову; приколка и
+        // scope переноса (withinSlitterIds/pinCutIds/weightPositionCutIds — ниже) не затрагиваются.
+        var carryBeforeWindow = prevSetupBeforeWindow(cuts, planBaseMidnightMs);
+        Object.keys(carryBeforeWindow).forEach(function(sid){ prevSetupBySlitter[sid] = carryBeforeWindow[sid]; });
+        var keepIds = cutsBeforeWindowToKeep(cuts, planBaseMidnightMs);
+        if (keepIds.length) {
+            var keepSet = {};
+            keepIds.forEach(function(id){ keepSet[String(id)] = true; });
+            planInput = planInput.filter(function(c){ return !keepSet[String(c && c.id)]; });
         }
         // #4221/#4225: «В пределах одного станка» — пересобираем ТОЛЬКО задействованные переносом станки
         // (исходный + целевой; при переносе в тот же станок — он один). Во вход планировщика берём лишь
