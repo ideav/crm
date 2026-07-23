@@ -508,8 +508,6 @@
 /* #3616: дата рабочего дня — заголовок перед первой карточкой каждого дня расписания
    (после блока уборки предыдущего дня). Нумерация заданий начинается с 1 на каждый день. */
 .atex-pp-day-date {
-    display: flex;
-    align-items: center;
     margin: 14px 0 8px;
     padding: 4px 2px;
     font-size: 13px;
@@ -519,25 +517,6 @@
     font-variant-numeric: tabular-nums;
 }
 .atex-pp-day-date:first-child { margin-top: 2px; }
-/* #4326: «замок дня» справа в шапке дня. Открыт 🔓 — приглушён (не отвлекает); закрыт 🔒 (день
-   заморожен) — яркий, чтобы фиксация была заметна. Клик — заморозить/разморозить. */
-.atex-pp-day-freeze {
-    margin-left: auto;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-    padding: 2px 5px;
-    border-radius: 6px;
-    opacity: .5;
-    filter: grayscale(1);
-    transition: opacity .12s ease, filter .12s ease, background .12s ease;
-}
-.atex-pp-day-freeze:hover { opacity: 1; background: var(--pp-surface); }
-.atex-pp-day-freeze.is-frozen { opacity: 1; filter: none; }
-.atex-pp-day-date.is-dayoff .atex-pp-day-freeze:hover { background: rgba(255, 255, 255, .22); }
-.atex-pp.is-busy .atex-pp-day-freeze { pointer-events: none; opacity: .3; }
 /* #3788: день расписания — выходной/праздник, но задания на него есть → красный фон даты. */
 .atex-pp-day-date.is-dayoff {
     background: var(--pp-warn);
