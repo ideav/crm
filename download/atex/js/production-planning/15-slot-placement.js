@@ -620,13 +620,20 @@
                 var oldCostSid = machineCost(T.sid);          // штраф sid С заданием T (база)
                 byMachine[T.sid].splice(T.pos, 1);            // снять T с текущего места
                 var oldSidNoT = machineCost(T.sid);           // штраф sid БЕЗ T
-                var cands = [];
-                Object.keys(byMachine).forEach(function(tid){
-                    if (!feasible(tid, T.slot)) return;
-                    if (T.slot.fixed && String(tid) !== String(T.sid)) return;   // 🔒 — только свой станок
+                // #4338 перф: ищем ЛУЧШИЙ ход, но пакуем позиции лениво — ПОЗИЦИИ С НАЧАЛА (просроченное
+                // выгоднее раньше ⇒ хорошая вставка находится в первых индексах). Раньше считали ВСЕ дельты
+                // и сортировали (десятки упаковок/итерацию → 22с). Теперь на каждом станке останавливаем
+                // перебор индексов, как только нашли улучшение (delta<0): более поздние индексы для срока
+                // не лучше. Из по-станочных кандидатов берём глобально лучший (устойчиво к балансу).
+                var tids = Object.keys(byMachine);
+                var best = null;
+                for (var mi = 0; mi < tids.length; mi++){
+                    var tid = tids[mi];
+                    if (!feasible(tid, T.slot)) continue;
+                    if (T.slot.fixed && String(tid) !== String(T.sid)) continue;   // 🔒 — только свой станок
                     var same = String(tid) === String(T.sid);
                     var oldCostTid = same ? 0 : machineCost(tid);
-                    var tarr = byMachine[tid];
+                    var tarr = byMachine[tid], mBest = null;
                     for (var idx = 0; idx <= tarr.length; idx++){
                         if (!canInsertAt(tarr, idx)) continue;
                         tarr.splice(idx, 0, tagSlot(T.slot, tid));
@@ -635,19 +642,17 @@
                         var delta = (same ? (newCostTid - oldCostSid)
                                           : (oldSidNoT + newCostTid - oldCostSid - oldCostTid))
                                     + moveWeight(ctx, T.sid, tid);
-                        cands.push({ tid: tid, idx: idx, delta: delta });
+                        if (delta < -EPS && (!mBest || delta < mBest.delta)) mBest = { tid: tid, idx: idx, delta: delta };
+                        if (mBest) break;   // на этом станке лучшая вставка — самая ранняя улучшающая (перф)
                     }
-                });
-                cands.sort(function(a, b){ return a.delta - b.delta; });   // лучший (меньший delta) первым
-                for (var ci = 0; ci < cands.length; ci++){
-                    var cd = cands[ci];
-                    if (!(cd.delta < -EPS)) break;   // улучшения нет — к следующему заданию
-                    byMachine[cd.tid].splice(cd.idx, 0, tagSlot(T.slot, cd.tid));
-                    var h = hashState();
-                    if (seen[h]){ byMachine[cd.tid].splice(cd.idx, 1); continue; }   // виденное — следующий вариант
-                    seen[h] = 1; applied = true; break;
+                    if (mBest && (!best || mBest.delta < best.delta)) best = mBest;
                 }
-                if (!applied) byMachine[T.sid].splice(T.pos, 0, T.slot);   // вернуть T на место
+                if (best && best.delta < -EPS){
+                    byMachine[best.tid].splice(best.idx, 0, tagSlot(T.slot, best.tid));
+                    var h = hashState();
+                    if (seen[h]){ byMachine[best.tid].splice(best.idx, 1); byMachine[T.sid].splice(T.pos, 0, T.slot); }   // виденное — вернуть, к следующему заданию
+                    else { seen[h] = 1; applied = true; }
+                } else byMachine[T.sid].splice(T.pos, 0, T.slot);   // вернуть T на место
             }
             if (!applied) break;
         }
