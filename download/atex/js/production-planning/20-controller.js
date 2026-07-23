@@ -5871,6 +5871,14 @@
                 if (c && !c.fixed && self.dayIsFrozen(c.planDate)) { c.fixed = true; pinnedRestore.push(c); }
             });
         }
+        // #4326-seal: предикат «день заморожен» (по смещению от базы плана) для упаковщика
+        // splitMachineQueue: НОВЫЕ резки в замороженный день НЕ кладём (существующие уже закреплены
+        // выше и остаются на своём дне). Так «заморозка» = «планировщик не запихнёт в день ничего»
+        // (в отличие от прежнего Варианта A, где срочные всё равно вставали). Активен только при
+        // наличии таблицы «Заморозка» и хотя бы одного дня; иначе null → упаковщик работает как прежде.
+        var frozenDayFor = (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length)
+            ? function(dayOffset){ return self.dayIsFrozen(planBaseMidnightMs + Number(dayOffset) * 86400000); }
+            : null;
         var ops;
         try {
         self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам этого плана (см. computeCutSetupUpdates)
@@ -5908,7 +5916,8 @@
             dueKeyByCut: dueKeyByCut,
             orderIdsByCut: orderIdsByCut,   // #4194: заказы заданий для штрафа/бонуса смежности (слой размещения)
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,
-            machineDayOffFor: slotOn ? machineDayOffFor : null
+            machineDayOffFor: slotOn ? machineDayOffFor : null,
+            frozenDayFor: frozenDayFor   // #4326-seal: новые резки в замороженный день не кладём
         });
         } finally {
             pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
