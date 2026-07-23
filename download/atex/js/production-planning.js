@@ -139,8 +139,7 @@
         maxStock: 'Максимальный запас',  // #3391: какие номенклатуры «Партии ГП» целесообразно нарезать впрок
         leader: 'Лидер',                 // #3569: справочник «Лидер» (1132) — резолв метки лидера в id для записи в задание
         downtime: 'Отпуск',              // #3764: подчинённая станку таблица «Отпуск» (122572) — окна простоя станка
-        calendar: 'Календарь',           // #3788: таблица «Календарь» (123162) — праздничные/рабочие дни (исключения)
-        freeze: 'Заморозка'              // #4326: таблица «Заморозка» (633483) — «замок дня»: планирование не трогает эти дни
+        calendar: 'Календарь'            // #3788: таблица «Календарь» (123162) — праздничные/рабочие дни (исключения)
     };
     // #3764: реквизиты подчинённой «Отпуск» (up = Слиттер). Главное значение записи —
     // НАЧАЛО окна простоя (DATETIME, unix-сек); «Окончание» — конец окна (DATETIME);
@@ -156,10 +155,6 @@
     var CALENDAR_REQ = { dayType: 'Тип дня' };
     var DAY_TYPE_HOLIDAY = 'Праздничный день';
     var DAY_TYPE_WORKING = 'Рабочий день';
-    // #4326: «Заморозка» (633483, главное значение — DATE ДД.ММ.ГГГГ, unique). Реквизит
-    // «Примечание» (633484) — причина фиксации дня, показывается title-подсказкой замка. Наличие
-    // записи на день ⇒ день заморожен: планирование не трогает его задания и не кладёт на него новых.
-    var FREEZE_REQ = { notes: 'Примечание' };
     // #3788: горизонт расчёта нерабочих дней расписания (дней вперёд от базы). Покрывает
     // годовой набор праздников; дальше плановой очереди не бывает.
     var CALENDAR_HORIZON_DAYS = 366;
@@ -3614,35 +3609,6 @@
         return out;
     }
 
-    // #4326: «замороженные» дни («Заморозка») горизонта [0..horizonDays] от базы → блокированные
-    // интервалы в МИНУТАХ от полуночи дня 0 (та же ось, что calendarBlockedRanges #3788/blockedRanges
-    // #3764). Замороженный день блокируется ЦЕЛИКОМ [d*1440,(d+1)*1440] — планировщик не кладёт на
-    // него НОВЫХ заданий (задания самого дня из planInput исключены отдельно, frozenDayCutsToKeep, —
-    // остаются как есть). Смежные замороженные дни сливаются в один интервал. Пустой freezeByDay → [].
-    // baseMidnightMs нечисловой → []. Вход не мутирует. freezeByDay — карта YYYYMMDD → истина.
-    function frozenBlockedRanges(freezeByDay, baseMidnightMs, horizonDays) {
-        var base = Number(baseMidnightMs);
-        if (!isFinite(base)) return [];
-        var bd = new Date(base);
-        if (isNaN(bd.getTime())) return [];
-        var fb = freezeByDay || {};
-        if (!Object.keys(fb).length) return [];
-        var H = Math.max(0, Number(horizonDays) || 0);
-        var offs = [];
-        for (var d = 0; d <= H; d++) {
-            var day = new Date(bd.getFullYear(), bd.getMonth(), bd.getDate() + d, 0, 0, 0, 0);
-            if (fb[dayKeyFromMs(day.getTime())]) offs.push(d);
-        }
-        var out = [];
-        for (var i = 0; i < offs.length; ) {
-            var s = offs[i], e = offs[i];
-            while (i + 1 < offs.length && offs[i + 1] === e + 1) { e = offs[++i]; }
-            out.push([s * 1440, (e + 1) * 1440]);
-            i++;
-        }
-        return out;
-    }
-
     // #3788: слить два набора блокированных интервалов (минуты от базы) в один отсортированный
     // массив (окна простоя станка #3764 ∪ нерабочие дни календаря). Дубли не схлопываем —
     // свип (nextFreeWorkMinute) корректно работает с перекрытиями.
@@ -5137,32 +5103,6 @@
             if (!hc || hc.fixed) return;                       // фикс-цепочку держит движок сам (fixedDay<0)
             var hoff = dayOffsetFromBase(hc.planDate, baseMidnightMs);
             if (hoff != null && hoff < 0) {                    // голова раньше «С» — вся цепочка остаётся как есть
-                (chains[head] || [head]).forEach(function(m){ out.push(String(m)); });
-            }
-        });
-        return out;
-    }
-
-    // #4326: id записей заданий, стоящих на ЗАМОРОЖЕННЫХ днях («Заморозка») — их НЕ пере-планируем ни
-    // на одном пути (генерация/«Упорядочить»/↑↓/удаление/перенос): день неприкосновенен, задания
-    // остаются ровно как сохранены (рисуются scheduleFromStored), а сам день блокируется для новых
-    // размещений (frozenBlockedRanges/dayIsFrozen). Как #4294 — исключаем ЦЕЛУЮ цепочку дробления по
-    // дню её ГОЛОВЫ (голова — самый ранний сегмент; берём по ней, чтобы не осиротить продолжение).
-    // Замок 🔒 у головы значения не имеет: заморожен день — исключаем цепочку в любом случае. Пустая
-    // «Дата план» → planDateDayKey=Infinity → не в карте → не исключаем. freezeByDay — карта YYYYMMDD →
-    // истина. Вход не мутирует.
-    function frozenDayCutsToKeep(cuts, freezeByDay) {
-        var out = [];
-        var fb = freezeByDay || {};
-        if (!Object.keys(fb).length) return out;
-        var chains = (mergeContinuationChains(cuts || []).chainByLogical) || {};
-        var byId = {};
-        (cuts || []).forEach(function(c){ if (c && c.id != null) byId[String(c.id)] = c; });
-        Object.keys(chains).forEach(function(head){
-            var hc = byId[head];
-            if (!hc) return;
-            var key = planDateDayKey(hc.planDate);
-            if (key != null && key !== Infinity && fb[key]) {
                 (chains[head] || [head]).forEach(function(m){ out.push(String(m)); });
             }
         });
@@ -8566,8 +8506,6 @@
         dayTypeWorking: dayTypeWorking,                           // #3788
         dayIsWorking: dayIsWorking,                               // #3788
         calendarBlockedRanges: calendarBlockedRanges,             // #3788
-        frozenBlockedRanges: frozenBlockedRanges,                 // #4326: замороженные дни → блокированные интервалы
-        frozenDayCutsToKeep: frozenDayCutsToKeep,                 // #4326: задания замороженных дней — не пере-планировать
         mergeBlockedRanges: mergeBlockedRanges,                   // #3788
         nextFreeWorkMinute: nextFreeWorkMinute,                   // #3764
         shiftPlacementsPastDowntime: shiftPlacementsPastDowntime, // #3764
@@ -8807,13 +8745,10 @@
             finishedBatch: null,
             sleeveTask: null,
             settings: null,
-            downtime: null,       // #3764: подчинённая «Отпуск» (окна простоя станка)
-            calendar: null,       // #3788: «Календарь» (исключения выходных/праздников)
-            freeze: null          // #4326: «Заморозка» (замок дня — планирование не трогает эти дни)
+            downtime: null        // #3764: подчинённая «Отпуск» (окна простоя станка)
         };
         this.downtimesBySlitter = {};  // #3764: карта slitterId → [{ id, start, end, notes }] (start/end — unix-сек)
         this.calendarByDay = {};       // #3788: карта ГГГГММДД → 'Праздничный день'|'Рабочий день' (исключения календаря)
-        this.freezeByDay = {};         // #4326: карта ГГГГММДД → { id, notes } (замороженные дни «Заморозка»)
         this.sleeveBatches = [];   // #3340: партии втулок «в работе» (отчёт sleeve_batches_active) для FIFO
         this.sleeveCutterId = '';  // #3340: id втулкореза TC-20 (резолв по имени)
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
@@ -9000,7 +8935,6 @@
             self.meta.leader = byName(TABLE.leader);        // #3569: справочник «Лидер» (резолв метки → id)
             self.meta.downtime = byName(TABLE.downtime);    // #3764: необязательная — кнопка/пропуск простоя включаются её наличием
             self.meta.calendar = byName(TABLE.calendar);    // #3788: необязательная — пропуск выходных/праздников включается её наличием
-            self.meta.freeze = byName(TABLE.freeze);        // #4326: необязательная — «замок дня» включается её наличием
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -9180,123 +9114,6 @@
         });
     };
 
-    // #4326: «Заморозка» — «замок дня». Таблица 633483 (главное значение — DATE ДД.ММ.ГГГГ, unique):
-    // одна запись на день. Строим карту ГГГГММДД → { id, notes }. Реквизит «Примечание» (633484) —
-    // причина, показывается подсказкой замка. Таблицы нет в метаданных (старое окружение) → пустая
-    // карта, фича выключена (замки не рисуются, планирование прежнее). В ОТЛИЧИЕ от loadCalendar
-    // ошибку чтения НЕ роняем на init (замок — необязательная фича, а не корректность расписания):
-    // недоступная/пустая «Заморозка» просто означает «замороженных дней нет» (как loadDowntimes).
-    AtexProductionPlanning.prototype.loadFreeze = function() {
-        var self = this;
-        this.freezeByDay = {};
-        var meta = this.meta.freeze;
-        if (!meta) return Promise.resolve();
-        var notesIdx = columnIndex(meta, FREEZE_REQ.notes);
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            (rows || []).forEach(function(rec) {
-                var r = rec.r || [];
-                var key = parseDmyKey(r[0]);
-                if (key == null || key === Infinity) return;
-                self.freezeByDay[key] = {
-                    id: String(rec.i),
-                    notes: (notesIdx >= 0 && r[notesIdx] != null) ? String(r[notesIdx]) : ''
-                };
-            });
-            console.log('[pp] 🔒 loadFreeze: замороженных дней:', Object.keys(self.freezeByDay).length);
-        }).catch(function(err) {
-            console.warn('[pp] 🔒 loadFreeze: не удалось прочитать «' + TABLE.freeze + '»:', err && err.message);
-            self.freezeByDay = {};
-        });
-    };
-
-    // #4326: клик по «замку дня». Открыт (frozenInfo == null) → спросить Примечание и заморозить:
-    // создать запись в «Заморозке» (главное значение — дата ДД.ММ.ГГГГ, уникальна; «Примечание» —
-    // причина). Закрыт (frozenInfo) → подтвердить и разморозить: удалить запись. После — перечитать
-    // карту и перерисовать. dayMs — полночь дня в шкале расписания.
-    AtexProductionPlanning.prototype.openFreezeDay = function(dayMs, frozenInfo) {
-        var self = this;
-        var meta = this.meta.freeze;
-        if (!meta) { this.notify('Таблица «' + TABLE.freeze + '» недоступна в этой сборке', 'error'); return; }
-        var dayKey = planDateDayKey(dayMs);
-        var dateStr = formatDayKey(dayKey);   // ДД.ММ.ГГГГ — и для показа, и для главного значения записи
-
-        if (frozenInfo) {
-            // Разморозить — удалить запись «Заморозки» этого дня.
-            var recId = frozenInfo.id;
-            if (!recId) { this.notify('Не найден id записи заморозки дня ' + dateStr, 'error'); return; }
-            var msg = el('span', { class: 'atex-pp-confirm-msg',
-                text: 'Разморозить день ' + dateStr + '? Планирование снова сможет менять его задания.' });
-            this.confirmAction(msg, this.root, [
-                { label: 'Разморозить', onConfirm: function() {
-                    self.setBusy(true);
-                    self.post('_m_del/' + encodeURIComponent(recId) + '?JSON', {}).then(function() {
-                        return self.loadFreeze().then(function() {
-                            self.setBusy(false);
-                            self.notify('День ' + dateStr + ' разморожен', 'info');
-                            self.render();
-                        });
-                    }).catch(function(err) {
-                        self.setBusy(false);
-                        self.notify('Ошибка разморозки дня: ' + (err && err.message || err), 'error');
-                    });
-                } }
-            ]);
-            return;
-        }
-
-        // Заморозить — модалка с Примечанием.
-        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-freeze-dialog' });
-        var overlay = el('div', { class: 'atex-pp-modal atex-pp-freeze-modal is-open' }, [dialog]);
-        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
-        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
-        closeX.addEventListener('click', close);
-        dialog.appendChild(closeX);
-
-        var content = el('div', { class: 'atex-pp-freeze-content' });
-        dialog.appendChild(content);
-        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Заморозить день ' + dateStr }));
-        content.appendChild(el('p', { class: 'atex-pp-hint',
-            text: 'Планирование не будет трогать задания этого дня (для всех станков) и не поставит на него новых.' }));
-        var noteInput = el('input', { type: 'text', class: 'atex-pp-input atex-pp-freeze-note',
-            placeholder: 'Примечание (причина фиксации)' });
-        content.appendChild(el('label', { class: 'atex-pp-move-field' }, [
-            el('span', { class: 'atex-pp-move-label', text: 'Примечание' }), noteInput
-        ]));
-
-        var actions = el('div', { class: 'atex-pp-supply-actions' });
-        var cancel = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
-        cancel.addEventListener('click', close);
-        var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Заморозить' });
-        ok.addEventListener('click', function() {
-            if (self.busy) return;
-            var note = String(noteInput.value || '').trim();
-            var reqNotes = reqIdByName(meta, FREEZE_REQ.notes);
-            var fields = {};
-            if (reqNotes && note) fields['t' + reqNotes] = note;
-            fields = addMainValueField(meta, fields, dateStr);   // главное значение — дата дня (уникальна)
-            close();
-            self.setBusy(true);
-            self.post('_m_new/' + meta.id + '?JSON&up=1', fields).then(function(res) {
-                var id = res && (res.obj || res.id || res.i);
-                if (!id) throw new Error('Сервер не вернул id записи «' + TABLE.freeze + '»');
-                return self.loadFreeze().then(function() {
-                    self.setBusy(false);
-                    self.notify('День ' + dateStr + ' заморожен', 'success');
-                    self.render();
-                });
-            }).catch(function(err) {
-                self.setBusy(false);
-                self.notify('Ошибка заморозки дня: ' + (err && err.message || err), 'error');
-            });
-        });
-        actions.appendChild(cancel);
-        actions.appendChild(ok);
-        content.appendChild(actions);
-        this.root.appendChild(overlay);
-        if (noteInput.focus) noteInput.focus();
-    };
-
     // #3788: нерабочие дни (выходные/праздники) горизонта → блокированные интервалы (минуты от
     // базы). Фича включается наличием таблицы «Календарь»: без неё [] (расписание прежнее, дни
     // не блокируются). baseMidnightMs — база расписания (день фильтра «С»). Глобальны для всех станков.
@@ -9312,31 +9129,12 @@
         return dayIsWorking(ms, this.calendarByDay);
     };
 
-    // #4326: замороженные дни («Заморозка») горизонта → блокированные интервалы (минуты от базы).
-    // Фича включается наличием таблицы «Заморозка»: без неё [] (планирование прежнее). Глобальны для
-    // ВСЕХ станков (день неприкосновенен «для всех станков»). Каждый замороженный день — целиком.
-    AtexProductionPlanning.prototype.frozenBlockedRanges = function(baseMidnightMs) {
-        if (!this.meta || !this.meta.freeze) return [];   // #4326: typeof-гард — стаб-self в юнит-тестах без meta
-        return frozenBlockedRanges(this.freezeByDay, baseMidnightMs, CALENDAR_HORIZON_DAYS);
-    };
-
-    // #4326: заморожен ли день (по мс). Фича выключена (нет «Заморозки») → всегда false. Ключ дня —
-    // YYYYMMDD той же шкалы, что planDateDayKey/parseDmyKey (сравнимо с ключами freezeByDay).
-    AtexProductionPlanning.prototype.dayIsFrozen = function(ms) {
-        if (!this.meta || !this.meta.freeze || !this.freezeByDay) return false;   // #4326: стаб-self без meta (юнит-тесты)
-        var key = planDateDayKey(ms);
-        return !!(key != null && key !== Infinity && this.freezeByDay[key]);
-    };
-
     // #3764+#3788: блокированные интервалы станка = окна «Отпуска» этого станка ∪ нерабочие дни
-    // календаря (глобальные) ∪ замороженные дни (#4326, глобальные). baseMidnightMs — база расписания.
+    // календаря (глобальные). baseMidnightMs — база расписания (день фильтра «С»).
     AtexProductionPlanning.prototype.blockedRangesForSlitter = function(slitterId, baseMidnightMs) {
         return mergeBlockedRanges(
-            mergeBlockedRanges(
-                downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs),
-                this.calendarBlockedRanges(baseMidnightMs)
-            ),
-            this.frozenBlockedRanges(baseMidnightMs)   // #4326: день неприкосновенен — новых заданий не кладём
+            downtimeBlockedRanges((this.downtimesBySlitter || {})[String(slitterId)], baseMidnightMs),
+            this.calendarBlockedRanges(baseMidnightMs)
         );
     };
 
@@ -9359,9 +9157,7 @@
     // «не доходит» до отпуска — станок с отпуском выглядит заканчивающим рано (Станок 1 «4д» вместо
     // «12д»), и хвост за отпуском не стекает на свободные станки.
     AtexProductionPlanning.prototype.balanceDayOff = function(slitterId, dayMidnightMs) {
-        // #4326: замороженный день недоступен для НОВОЙ загрузки (как выходной) — модель баланса и
-        // machineDayOff (для всех станков) обязаны его пропускать, иначе новое задание сядет на него.
-        return !this.dayIsWorking(dayMidnightMs) || this.dayIsFrozen(dayMidnightMs) || this.slitterOnVacationDay(slitterId, dayMidnightMs);
+        return !this.dayIsWorking(dayMidnightMs) || this.slitterOnVacationDay(slitterId, dayMidnightMs);
     };
 
     // #3876: id станков, у которых в день dayMidnightMs отпуск → { slitterId: true }. Для
@@ -9421,18 +9217,15 @@
     // #3764+#3788: карта slitterId → blockedRanges по ВСЕМ станкам (для planCutOperations).
     // Нерабочие дни календаря добавляем КАЖДОМУ станку (глобальны), поэтому строим по полному
     // справочнику станков, а не только по тем, у кого есть отпуск.
-    // #4326: замороженные дни («Заморозка») тоже глобальны — добавляем каждому станку, чтобы
-    // упаковщик (splitMachineQueue) не клал новых заданий на неприкосновенный день.
     AtexProductionPlanning.prototype.blockedRangesBySlitter = function(baseMidnightMs) {
         var self = this, out = {};
-        var globalBlocks = mergeBlockedRanges(
-            this.calendarBlockedRanges(baseMidnightMs), this.frozenBlockedRanges(baseMidnightMs));
+        var calBlocks = this.calendarBlockedRanges(baseMidnightMs);
         var keys = {};
         (this.slitters || []).forEach(function(s) { keys[String(s.id)] = true; });
         Object.keys(this.downtimesBySlitter || {}).forEach(function(k) { keys[k] = true; });
         Object.keys(keys).forEach(function(key) {
             var ranges = mergeBlockedRanges(
-                downtimeBlockedRanges(self.downtimesBySlitter[key], baseMidnightMs), globalBlocks);
+                downtimeBlockedRanges(self.downtimesBySlitter[key], baseMidnightMs), calBlocks);
             if (ranges.length) out[key] = ranges;
         });
         return out;
@@ -10964,7 +10757,7 @@
         }
         var dayOffMemo = {};
         function machineDayOff(sid, off) { var k = sid + ':' + off; if (k in dayOffMemo) return dayOffMemo[k]; var v = self.balanceDayOff(sid, planBaseMidnightMs + off * 86400000); dayOffMemo[k] = v; return v; }
-        function slitterDayBlocked(sid, plan) { var sec = Number(plan && plan.planDate); if (!isFinite(sec) || sec <= 0) return false; var d = new Date(sec * 1000); d.setHours(0, 0, 0, 0); var frz = (typeof self.dayIsFrozen === 'function') && self.dayIsFrozen(d.getTime()); return frz || self.slitterOnVacationDay(sid, d.getTime()); }   // #4326: не переносить задание НА замороженный день
+        function slitterDayBlocked(sid, plan) { var sec = Number(plan && plan.planDate); if (!isFinite(sec) || sec <= 0) return false; var d = new Date(sec * 1000); d.setHours(0, 0, 0, 0); return self.slitterOnVacationDay(sid, d.getTime()); }
 
         var res = computeSlitterReassignment(movable, fixed, {
             slitters: self.slitters, weights: planOptions, dayCapacityMin: dayCapacityMin,
@@ -12695,13 +12488,11 @@
                 nominalWidthByMaterial: self.nominalWidthByMaterial,   // #4006: лимит ширины джамбо станка при переносе
                 machineDayOff: machineDayOff,   // #3881/#3965: дата окончания из реальной укладки по дням
                 // #3876: не переносить задание на станок, у которого в день задания (plan.planDate) отпуск.
-                // #4326: и не переносить НА замороженный день (для любого станка — день неприкосновенен).
                 slitterDayBlocked: function(slitterId, plan){
                     var sec = Number(plan && plan.planDate);
                     if (!isFinite(sec) || sec <= 0) return false;
                     var d = new Date(sec * 1000); d.setHours(0, 0, 0, 0);
-                    var frz = (typeof self.dayIsFrozen === 'function') && self.dayIsFrozen(d.getTime());
-                    return frz || self.slitterOnVacationDay(slitterId, d.getTime());
+                    return self.slitterOnVacationDay(slitterId, d.getTime());
                 },
                 log: function(ev){
                     if (ev.event === 'start') console.log('[pp] ⚖ выравнивание загрузки — старт:', fmt(ev.load));
@@ -14301,11 +14092,7 @@
         function machineDayOffFor(sid){
             return function(dayOffset){
                 var ms = planBaseMidnightMs + Number(dayOffset) * 86400000;
-                // #4326: замороженный день недоступен для НОВОГО размещения (для всех станков) — слой
-                // размещения (15-slot-placement skipOff) пропускает его, как выходной/отпуск. typeof-гард:
-                // в юнит-тестах buildSequenceOps зовут на стаб-self без метода dayIsFrozen.
-                var frozen = (typeof self.dayIsFrozen === 'function') && self.dayIsFrozen(ms);
-                return !self.dayIsWorking(ms) || frozen || self.slitterOnVacationDay(sid, ms);   // выходной/праздник, заморозка или отпуск станка
+                return !self.dayIsWorking(ms) || self.slitterOnVacationDay(sid, ms);   // выходной/праздник или отпуск станка
             };
         }
         // #3974: вход планировщика = всё НЕОБЕСПЕЧЕННОЕ — открытые задания (статус ≠ «Завершён»),
@@ -14314,19 +14101,6 @@
         // (база = «С», splitMachineQueue набивает от неё и переливает за «По»). Обеспеченные
         // («Завершён») и не показанные в очереди — не трогаем (остаются как есть).
         var planInput = (cuts || []).filter(function(c){ return String(c && c.status || '').trim() !== 'Завершён'; });
-        // #4326: ЗАМОРОЖЕННЫЕ дни («Заморозка») неприкосновенны на ЛЮБОМ пути (генерация/«Упорядочить»/
-        // ↑↓/удаление/перенос 🗓): их задания НЕ пере-планируем — исключаем ЦЕЛУЮ цепочку по дню головы
-        // (как #4294 для прошлых дней), задания остаются как сохранены (scheduleFromStored). Сам день
-        // блокируется для новых размещений отдельно (blockedRangesBySlitter/machineDayOffFor/balanceDayOff
-        // через frozenBlockedRanges/dayIsFrozen). Делаем ДО moveScope-ветвей — заморозка сильнее переноса.
-        if (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
-            var frozenIds = frozenDayCutsToKeep(cuts, self.freezeByDay);
-            if (frozenIds.length) {
-                var frozenSet = {};
-                frozenIds.forEach(function(id){ frozenSet[String(id)] = true; });
-                planInput = planInput.filter(function(c){ return !frozenSet[String(c && c.id)]; });
-            }
-        }
         // #4294: задания ПРОШЛЫХ дней (запланированные раньше «С») НЕ пере-планируем — они уже стоят на
         // своих днях. Планировщик кладёт всё от «С» вперёд (#3974) и день держит лишь у 🔒 (fixedDay),
         // поэтому НЕзафиксированное задание прошлого дня иначе затягивалось в «С» (issue #4294). Исключаем
@@ -15749,36 +15523,14 @@
                 var dayMins = Math.round(Number(dayMinutesBySched[cardSchedDay]) || 0);
                 // #3788: день расписания пришёлся на выходной/праздник, но задания на него есть
                 // (вручную или вытеснены) — помечаем дату красным фоном.
-                var dayHeaderMs = planBaseMidnightMs + cardSchedDay * 86400000;
-                var dayOff = !self.dayIsWorking(dayHeaderMs);
-                var dayDateEl = el('div', {
+                var dayOff = !self.dayIsWorking(planBaseMidnightMs + cardSchedDay * 86400000);
+                groupEl.appendChild(el('div', {
                     class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : ''),
                     title: dayOff ? 'Выходной/праздничный день — заданий быть не должно' : ''
                 }, [
                     formatPlanDayHeading(planBaseMidnightMs, cardSchedDay),
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
-                ]);
-                // #4326: «замок дня» справа в шапке дня. Есть таблица «Заморозка» → показываем замок:
-                // открыт 🔓 (день можно менять) / закрыт 🔒 (день заморожен — планирование его не трогает).
-                // title закрытого = Примечание фиксации. Клик — заморозить/разморозить (openFreezeDay).
-                if (self.meta.freeze) {
-                    var frozenInfo = self.freezeByDay[planDateDayKey(dayHeaderMs)] || null;
-                    var lockBtn = el('button', {
-                        class: 'atex-pp-day-freeze' + (frozenInfo ? ' is-frozen' : ''),
-                        type: 'button',
-                        text: frozenInfo ? '🔒' : '🔓',
-                        title: frozenInfo
-                            ? ('День заморожен' + (frozenInfo.notes ? ': ' + frozenInfo.notes : '') + ' — планирование его не трогает. Нажмите, чтобы разморозить.')
-                            : 'Заморозить день — планирование не будет его трогать (для всех станков)'
-                    });
-                    lockBtn.addEventListener('click', function(e) {
-                        if (e && e.stopPropagation) e.stopPropagation();
-                        if (self.busy) return;
-                        self.openFreezeDay(dayHeaderMs, frozenInfo);
-                    });
-                    dayDateEl.appendChild(lockBtn);
-                }
-                groupEl.appendChild(dayDateEl);
+                ]));
                 lastDayDateRendered = cardSchedDay;
             }
 
@@ -16286,7 +16038,6 @@
                     self.loadOperationTimes(), // времена переналадок (веса очереди)
                     self.loadDaySettings(),    // DAY_START_HOUR/DAY_END_HOUR для рабочего окна
                     self.loadCalendar(),       // #3788: праздничные/рабочие дни (пропуск выходных при планировании)
-                    self.loadFreeze(),         // #4326: замороженные дни («замок дня») — планирование их не трогает
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
