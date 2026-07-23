@@ -12,8 +12,22 @@ $dbName = integram_env('INTEGRAM_DB_NAME', 'ideav');
 $dbUser = integram_env('INTEGRAM_DB_USER', 'ideav');
 $dbPassword = integram_env('INTEGRAM_DB_PASSWORD', 'x');
 
-$connection = mysqli_connect($dbHost, $dbUser, $dbPassword, $dbName, $dbPort) or die("Couldn't connect.");
+# Соединение открывается через mysqli_init(), чтобы выставить таймауты ДО коннекта:
+# после connect опции уже не применяются. Read-таймаут держим по потолку TIME_LIMIT_MAX —
+# он страхует от вечного ожидания ответа БД (таймер PHP в это время не тикает), а
+# фактический предел запроса ставит max_statement_time ниже (issue #4322).
+$connection = mysqli_init() or die("Couldn't connect.");
+@mysqli_options($connection, MYSQLI_OPT_CONNECT_TIMEOUT, 10);
+if(defined("MYSQLI_OPT_READ_TIMEOUT"))
+    @mysqli_options($connection, MYSQLI_OPT_READ_TIMEOUT, TIME_LIMIT_MAX + TIME_LIMIT_SQL_SLACK);
+mysqli_real_connect($connection, $dbHost, $dbUser, $dbPassword, $dbName, $dbPort) or die("Couldn't connect.");
 $connection->set_charset("utf8mb4");
+# Реквизиты и номер потока нужны, чтобы добить зависший запрос отдельным соединением
+# (KILL QUERY), когда основное занято или уже разорвано — issue #4322.
+$GLOBALS["DB_CONN"] = array("host" => $dbHost, "user" => $dbUser, "password" => $dbPassword,
+                            "name" => $dbName, "port" => $dbPort);
+$GLOBALS["SQL_THREAD_ID"] = mysqli_thread_id($connection);
+Limit_sql_time(isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : TIME_LIMIT_DEFAULT, $connection);
 
 global $mail_config;
 $mail_config['smtp_username'] = integram_env('INTEGRAM_SMTP_USERNAME', 'a@bi.com'); //$replyto;  // Default reply address

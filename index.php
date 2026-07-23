@@ -3,15 +3,135 @@ error_reporting(E_ALL);
 ini_set('log_errors', 1);
 ini_set('error_log', 'logs/php-error.log');
 
+# <time-limit-4322>
+# Предел времени обработки запроса (issue #4322).
+#
+# Запрос ограничен по времени: по умолчанию 30 секунд, GET-параметр TIME задаёт другое
+# значение в секундах, потолок — 600 секунд (10 минут). Предел ставится сразу в четырёх
+# местах, потому что каждое из них закрывает свой сценарий «работает вечно»:
+#   • PHP           — set_time_limit(): циклы и разбор данных внутри скрипта;
+#   • клиент MySQL  — MYSQLI_OPT_READ_TIMEOUT (include/connection.php): PHP не ждёт ответа
+#                     БД дольше потолка. Собственный таймер PHP в ожидании ответа MySQL не
+#                     тикает, поэтому без этого set_time_limit на mysqli_query не действует;
+#   • сервер MySQL  — SET SESSION max_statement_time (MariaDB) / max_execution_time (MySQL):
+#                     БД сама прерывает затянувшийся SELECT, даже если PHP уже убит и
+#                     клиента у запроса нет;
+#   • KILL QUERY    — при завершении PHP (таймаут, фатальная ошибка, обрыв клиента) запрос,
+#                     оставшийся в работе, добивается отдельным соединением.
+#
+# Серверный предел MySQL/MariaDB останавливает только SELECT, поэтому KILL QUERY нужен и
+# как страховка для остальных запросов.
+
+define("TIME_LIMIT_DEFAULT", 30);   # секунд по умолчанию, когда TIME не передан
+define("TIME_LIMIT_MAX", 600);      # потолок: 10 минут
+define("TIME_LIMIT_SQL_SLACK", 5);  # запас клиентского read-таймаута над серверным пределом
+
+# Ошибки MySQL/MariaDB, означающие «запрос прерван по времени или соединение потеряно»:
+# 1969 ER_STATEMENT_TIMEOUT (MariaDB), 3024 ER_QUERY_TIMEOUT (MySQL),
+# 2006 gone away, 2013 lost connection (сработал MYSQLI_OPT_READ_TIMEOUT).
+function Sql_timeout_errno($errno){
+    return in_array((int)$errno, array(1969, 3024, 2006, 2013), TRUE);
+}
+
+# Запрошенный предел: GET-параметр TIME в секундах, обрезанный потолком TIME_LIMIT_MAX.
+function Time_limit_requested(){
+    if(isset($_GET["TIME"]) && is_numeric($_GET["TIME"]))
+        return max(1, min(TIME_LIMIT_MAX, (int)$_GET["TIME"]));
+    return TIME_LIMIT_DEFAULT;
+}
+
+# Поднять предел до $seconds секунд (не выше TIME_LIMIT_MAX) и вернуть действующий предел.
+# Предел только повышается: повторный вызов с тем же или меньшим значением ничего не делает
+# и НЕ перезапускает таймер PHP — иначе вызов внутри цикла продлевал бы работу бесконечно.
+function Limit_time($seconds){
+    $seconds = min(TIME_LIMIT_MAX, max(1, (int)$seconds));
+    $current = isset($GLOBALS["TIME_LIMIT"]) ? (int)$GLOBALS["TIME_LIMIT"] : 0;
+    if($seconds <= $current)
+        return $current;
+    $GLOBALS["TIME_LIMIT"] = $seconds;
+    @set_time_limit($seconds);
+    Limit_sql_time($seconds);
+    return $seconds;
+}
+
+# Серверный предел на выполнение запроса в текущей сессии БД.
+# MariaDB: max_statement_time (секунды), MySQL 5.7.8+: max_execution_time (миллисекунды).
+function Limit_sql_time($seconds, $connection = NULL){
+    if($connection === NULL)
+        $connection = isset($GLOBALS["connection"]) ? $GLOBALS["connection"] : NULL;
+    if(!($connection instanceof mysqli))
+        return FALSE;
+    $seconds = min(TIME_LIMIT_MAX, max(1, (int)$seconds));
+    $sql = (stripos((string)@mysqli_get_server_info($connection), "mariadb") !== FALSE)
+        ? "SET SESSION max_statement_time=$seconds"
+        : "SET SESSION max_execution_time=".($seconds * 1000);
+    return (bool)@mysqli_query($connection, $sql);
+}
+
+# Отметить запрос как выполняющийся: по этой метке запрос добивается на сервере,
+# если PHP завершится прямо во время него.
+function Sql_running($sql){
+    $GLOBALS["SQL_RUNNING"] = $sql;
+}
+
+function Sql_running_done(){
+    $GLOBALS["SQL_RUNNING"] = "";
+}
+
+# Убить запрос, оставшийся выполняться на сервере БД. Основное соединение занято этим же
+# запросом (или уже разорвано по read-таймауту), поэтому KILL QUERY идёт отдельным
+# соединением по реквизитам из $GLOBALS["DB_CONN"] (заполняет include/connection.php).
+function Kill_sql_query(){
+    if(empty($GLOBALS["SQL_RUNNING"]) || empty($GLOBALS["SQL_THREAD_ID"]) || empty($GLOBALS["DB_CONN"]))
+        return FALSE;
+    $thread = (int)$GLOBALS["SQL_THREAD_ID"];
+    $sql = (string)$GLOBALS["SQL_RUNNING"];
+    Sql_running_done();  # метку снимаем сразу: добиваем запрос один раз
+    $db = $GLOBALS["DB_CONN"];
+    $killer = @mysqli_init();
+    if(!$killer)
+        return FALSE;
+    @mysqli_options($killer, MYSQLI_OPT_CONNECT_TIMEOUT, 5);
+    if(defined("MYSQLI_OPT_READ_TIMEOUT"))
+        @mysqli_options($killer, MYSQLI_OPT_READ_TIMEOUT, 5);
+    $ok = FALSE;
+    if(@mysqli_real_connect($killer, $db["host"], $db["user"], $db["password"], $db["name"], $db["port"])){
+        $ok = (bool)@mysqli_query($killer, "KILL QUERY $thread");
+        @mysqli_close($killer);
+    }
+    Time_limit_log("KILL QUERY $thread ".($ok ? "ok" : "fail").": ".substr($sql, 0, 500));
+    return $ok;
+}
+
+# Запись в лог базы; на ранних стадиях запроса wlog() и имя базы могут быть ещё недоступны.
+function Time_limit_log($text){
+    if(function_exists("wlog") && isset($GLOBALS["z"]) && defined("LOGS_DIR"))
+        wlog("[time limit ".(isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : "?")."c] $text", "log");
+    else
+        error_log("[time limit] $text");
+}
+# </time-limit-4322>
+
+ignore_user_abort(FALSE);
+Limit_time(Time_limit_requested());
+
 register_shutdown_function(function() {
     $error = error_get_last();
+    $timeout = $error && ($error['type'] === E_ERROR)
+                && (strpos($error['message'], 'Maximum execution time') !== FALSE);
+    # PHP завершается — запрос, оставшийся в работе, добиваем на сервере БД: иначе
+    # он продолжает молотить CPU уже без клиента (issue #4322).
+    Kill_sql_query();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if ($timeout && !headers_sent())
+            header('HTTP/1.1 504 Gateway Timeout');
         header('Content-Type: application/json');
         echo json_encode([
-            'error' => 'PHP Fatal error',
+            'error' => $timeout ? 'Time limit exceeded' : 'PHP Fatal error',
             'message' => $error['message'],
             'file' => $error['file'],
-            'line' => $error['line']
+            'line' => $error['line'],
+            'time_limit' => isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : NULL
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
@@ -115,10 +235,12 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
 # Check the DB existence
-$billing = mysqli_query($connection
-			, "SELECT bal.val FROM $z db LEFT JOIN my ON my.t=".DATABASE." AND my.val='$z'
+$billingSql = "SELECT bal.val FROM $z db LEFT JOIN my ON my.t=".DATABASE." AND my.val='$z'
 				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
-				LIMIT 1");
+				LIMIT 1";
+Sql_running($billingSql);  # #4322: запрос можно добить, если PHP завершится прямо на нём
+$billing = mysqli_query($connection, $billingSql);
+Sql_running_done();
 if(!$billing && ($z !== "auth.asp")){
 	# Проверочный запрос упал. mysqli_errno()===1146 (нет таблицы $z) означает, что
 	# запрошенной базы не существует: API-клиенту — структурированная ошибка [{error}] + 404,
@@ -128,6 +250,10 @@ if(!$billing && ($z !== "auth.asp")){
 	# а не отсутствие базы. #4247 (регресс #2479: раньше $errno не присваивался → ветка
 	# login() была мёртвой, а die() печатал пустой $dbName вместо запрошенной базы).
 	$errno = mysqli_errno($connection);
+	# Проверочный запрос упёрся в предел времени (#4322) — база на месте, просто БД не ответила
+	# в отведённое время (например, таблица заблокирована). Отвечаем 504, а не «базы нет».
+	if(Sql_timeout_errno($errno))
+		Die_sql_timeout($billingSql, "DB check");
 	if($errno === 1146){
 		if(isApi())
 			my_die(t9n("[RU]База «{$z}» не найдена[EN]The «{$z}» database was not found"), "404 Not Found");
@@ -795,12 +921,28 @@ function trace($text){
         fclose($file);
 	}
 }
+# Запрос прерван по времени (issue #4322): добиваем его на сервере БД и отвечаем 504.
+function Die_sql_timeout($sql, $err_msg){
+	Sql_running($sql);
+	Kill_sql_query();
+	$limit = isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : TIME_LIMIT_DEFAULT;
+	Time_limit_log("SQL прерван [$err_msg]: ".substr($sql, 0, 500));
+	my_die(t9n("[RU]Запрос прерван: превышен предел времени $limit c."
+			." Больший предел передаётся GET-параметром TIME (секунды, максимум ".TIME_LIMIT_MAX.")."
+			."[EN]The request was aborted: the $limit s time limit is exceeded."
+			." Pass a bigger limit in the TIME GET parameter (seconds, ".TIME_LIMIT_MAX." max)."), "504 Gateway Timeout");
+}
 # Execute SQL and measure the time it needs to be processed
 function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	global $connection, $z;
 	$time_start = microtime(TRUE);
 	trace("Try Exec_sql $sql [$err_msg]");
-	if(!$result = mysqli_query($connection, $sql)){
+	Sql_running($sql);  # #4322: пока запрос в работе, его можно добить при завершении PHP
+	$result = mysqli_query($connection, $sql);
+	Sql_running_done();
+	if(!$result){
+	    if(Sql_timeout_errno(mysqli_errno($connection)))
+	        Die_sql_timeout($sql, $err_msg);
     	if(mysqli_errno($connection)===1146)
     	    login("", "", "dBNotExists", t9n("[RU]База $z не существует[EN]The $z DB does not exist")." [$err_msg]");
     	$msg = "Couldn't execute query [$err_msg] ".mysqli_error($connection)." ($sql; )";
@@ -4832,7 +4974,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				die(t9n("[RU]Объект $id не найден, вероятно, он был удален[EN]Object $id not found (it might be deleted)"));
 					break;
 				case "csv_all":
-				    set_time_limit(300);
+				    Limit_time(300);  # #4322: длинная операция — поднять предел (потолок 600 c)
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die("У вас нет прав на выгрузку базы");
         			$sql = "SELECT a.id, a.val, IF(base.t=base.id,0,1) ref, IF(base.t=base.id,defs.val,base.val) req, count(def_reqs.id) req_req, reqs.id req_id, defs.id req_t, defs.t req_base, a.t base
@@ -4923,7 +5065,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					die();
 					break;
 				case "restore":
-				    set_time_limit(300);
+				    Limit_time(300);  # #4322: длинная операция — поднять предел (потолок 600 c)
 				    $limit = 500000;
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die(t9n("[RU]У вас нет прав на импорт базы[EN]You do not have grants to import the database"));
@@ -4984,7 +5126,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     die("INSERT INTO `$z` (`id`, `t`, `up`, `ord`, `val`) VALUES $output;");
 					break;
 				case "backup":
-				    set_time_limit(300);
+				    Limit_time(300);  # #4322: длинная операция — поднять предел (потолок 600 c)
 				    $limit = 500000;
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die(t9n("[RU]У вас нет прав на выгрузку базы[EN]You do not have grants to export the database"));
@@ -5985,6 +6127,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 		case "&uni_obj_head":
 			if(isset($_POST["import"])||isset($_GET["import"])){
+				Limit_time(300);  # #4322: импорт файла — длинная операция (потолок 600 c)
 				check();
 				constructHeader($id);
 				$max_size = 8388608;
@@ -7845,6 +7988,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     require_once "include/google_sheets_sync.php";
                     $configData = gss_normalize_config($configData, realpath($gssDir));
                     try {
+                        Limit_time(300);  # #4322: синхронизация с Google Sheets — длинная операция
                         $summary = gss_sync($configData);
                         api_dump(json_encode($summary, JSON_UNESCAPED_UNICODE));
                     } catch (Throwable $e) {
@@ -9635,6 +9779,9 @@ function aiChatPostJson($endpoint, $request, $headers, $timeout=60){
     $timeout = (int)$timeout;
     if($timeout <= 0)
         $timeout = 60;
+    # Ответ ИИ ждём до $timeout секунд — под это поднимаем предел времени запроса,
+    # иначе PHP оборвётся раньше, чем придёт ответ (issue #4322).
+    Limit_time($timeout + 10);
     curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
     $raw = curl_exec($ch);
     $errno = curl_errno($ch);
@@ -12263,8 +12410,6 @@ if(Validate_Token())
     			$text = Get_file("main.html");
 #    		wlog("$user@".$_SERVER["REMOTE_ADDR"], "log");
 
-        	if(isset($_REQUEST["TIME"]))
-        		set_time_limit(3600);
 			if(isset($GLOBALS["GRANTS"]))
 				$GLOBALS["GLOBAL_VARS"]["grants"] = base64_encode(json_encode($GLOBALS["GRANTS"], JSON_UNESCAPED_UNICODE));
         	Make_tree($text, "&main");
