@@ -608,11 +608,17 @@
         for (var iter = 0; iter < maxIters; iter++){
             // штраф каждого задания (срок по реальному дню + его входящая переналадка) → худшее первым
             var realNow = {}; Object.keys(byMachine).forEach(function(k){ var r = rday(idsOf(k), k); Object.keys(r).forEach(function(id){ realNow[id] = r[id]; }); });
+            // #4338 перф+фокус: двигаем ТОЛЬКО ПРОСРОЧЕННЫЕ задания (dlPen>0). Их единицы, а переналадку
+            // прочих и так оптимизируют слой размещения + внутридневная пересортировка + склейка островов.
+            // Уникальная ценность greedy — ВЫТЕСНЕНИЕ просроченного (чего старые проходы не умеют); её и
+            // делаем, быстро. Стоимость хода при этом учитывает ВСЕХ вытесняемых (не загоняем их за срок).
             var tasks = [];
             Object.keys(byMachine).forEach(function(sid){ var arr = byMachine[sid], prev = null;
                 for (var i = 0; i < arr.length; i++){ var s = arr[i]; if (!s || s.kind !== 'cut') continue;
-                    var pen = dlPen(String(s.id), realNow) + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times));
-                    tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: pen }); prev = s; } });
+                    var dp = dlPen(String(s.id), realNow);
+                    if (dp > 0) tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: dp + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times)) });
+                    prev = s; } });
+            if (!tasks.length) break;   // просроченных нет — оптимизация переналадки остаётся за прочими проходами
             tasks.sort(function(a, b){ return b.pen - a.pen; });
             var applied = false;
             for (var ti = 0; ti < tasks.length && !applied; ti++){
