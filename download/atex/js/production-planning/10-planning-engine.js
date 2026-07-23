@@ -2718,6 +2718,16 @@
                 var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && (state[id].anchor == null || state[id].anchor <= day); });
                 var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id); });
                 var resFoilToday = rem.filter(function(id){ return state[id].resFoilDay === day && state[id].fixedDay == null; });
+                // #4326-seal: ЗАМОРОЗКА — планировщик НЕ кладёт в этот день ничего НОВОГО. Существующие
+                // резки замороженного дня закреплены (#4326: c.fixed → fixedDay===day) и остаются здесь;
+                // незавершённое продолжение доводим. Свободные и резервную фольгу НЕ берём — они уходят
+                // на следующий день (их наладка настраивается там же). Когда на замороженном дне брать
+                // нечего (нет продолжения/закреплённых) — переходим на следующий день, иначе свободные
+                // всё равно встали бы сюда (баг Варианта A: «срочные вставали в замороженный день»).
+                if (opts.frozenDayFor && opts.frozenDayFor(day)) {
+                    if (!inProgress.length && !fixedToday.length) { day += 1; clock = 0; continue; }
+                    freeDue = []; freeAny = []; resFoilToday = [];
+                }
                 var pick;
                 if (inProgress.length) pick = selectByConfig(inProgress);
                 else if (fixedToday.length) pick = selectByConfig(fixedToday);
@@ -3637,6 +3647,7 @@
                 carryPrevSetupDay: ((opts.prevSetupBySlitter || {})[key] || {}).dayOffset,
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
+                frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
                 orderAuthoritative: !!slotPlan   // #4085: порядок задан слоем размещения — не переигрывать
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
