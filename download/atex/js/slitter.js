@@ -360,6 +360,26 @@
         return { cuts: list, firstOpenCutId: firstOpen ? String(firstOpen.id) : null };
     }
 
+    // #4332 п.4: по завершении всех заданий выбранного дня показываем ОДНО следующее задание
+    // из БУДУЩИХ дней — самое раннее НЕзавершённое задание этого станка со строго более поздним
+    // календарным днём (dateKey > afterDateKey). Порядок — тот же, что в очереди (день→planStart).
+    // Уже НАЧАТОЕ (в работе/наладке) будущее задание тоже вернётся (не завершено) → видно при
+    // обновлении формы. Завершённые/пропущенные (isDone) и без «Дата план» — пропускаем.
+    function nextFutureCut(cuts, opts) {
+        var o = opts || {};
+        var sid = o.slitterId == null ? '' : String(o.slitterId);
+        var after = Number(o.afterDateKey);
+        var best = null;
+        (cuts || []).forEach(function(cut) {
+            if (sid && cutSlitterId(cut) !== sid) return;
+            if (isDone(cut && cut.status)) return;
+            var dk = dateKey(cut && cut.planDate);
+            if (!isFinite(dk) || !(dk > after)) return;   // только строго будущие дни с валидной датой
+            if (!best || compareCutsForQueue(cut, best) < 0) best = cut;
+        });
+        return best;
+    }
+
     // #3609: канонический ключ раскладки ножей резки (полосы «ширина×кол-во», порядок-
     // независимо; пустые 0×0 отбрасываем). Совпадение ключей = одинаковая конфигурация ножей.
     function knifeLayoutKey(strips) {
@@ -480,19 +500,23 @@
     // #3522: смена считается ОТДЕЛЬНО для каждого станка. Если slitterLabel задан —
     // учитываем только события смены этого станка (по метке в «Примечаниях»);
     // без него (старые вызовы/тесты) фильтр по станку не применяется.
+    // #4332 п.2: открытость смены определяется по ПОСЛЕДНЕМУ событию «Начало смены»/
+    // «Конец смены» этого станка НЕЗАВИСИМО от дня (фильтр по выбранному дню снят). Так
+    // оператор под одной открытой сменой может выполнять задания будущих дней (#4332 п.4).
+    // Параметр date оставлен для совместимости сигнатуры, но на выбор смены не влияет.
     function hasOpenShift(events, userId, date, slitterLabel) {
-        var targetDay = dateKey(date || todayISO());
         var sl = String(slitterLabel == null ? '' : slitterLabel).trim();
-        var last = null;
+        var last = null, lastKey = -Infinity, lastIdx = -1;
         (events || []).forEach(function(event, i) {
             if (!eventMatchesUser(event, userId)) return;
-            if (dateKey(event.when) !== targetDay) return;
             if (!isShiftStartType(event.type) && !isShiftEndType(event.type)) return;
             if (sl && shiftEventSlitterLabel(event) !== sl) return;
-            var order = String(event.when || '') + '#' + i;
-            if (!last || order > last.order) last = { event: event, order: order };
+            // #4332: порядок между днями — по хронологии (unix-сек), тай-брейк по индексу.
+            var key = eventWhenSeconds(event.when);
+            if (!isFinite(key)) key = -Infinity;   // невалидное время — не должно вытеснять валидные
+            if (key > lastKey || (key === lastKey && i > lastIdx)) { last = event; lastKey = key; lastIdx = i; }
         });
-        return !!(last && isShiftStartType(last.event.type));
+        return !!(last && isShiftStartType(last.type));
     }
 
     function runLengthForCut(cut) {
@@ -918,6 +942,7 @@
         todayISO: todayISO,
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
+        nextFutureCut: nextFutureCut,   // #4332 п.4: следующее задание будущих дней
         knifeLayoutKey: knifeLayoutKey,
         widthSetKey: widthSetKey,             // #3737
         dayStartTimestamp: dayStartTimestamp, // #3737
@@ -1654,22 +1679,13 @@
         return this.currentQueue().cuts;
     };
 
-    // #3861: все резки смены выполнены — список непуст и нет первой открытой резки
-    // (только при открытой смене). Управляет показом «Уборка завершена» и скрытием
-    // кнопок проходов ✓ Готово / ✓✓ Готовы все.
+    // #3861: все резки выбранного дня выполнены — список непуст и нет первой открытой резки
+    // (только при открытой смене). #4332: скрывает кнопки проходов ✓ Готово / ✓✓ Готовы все и
+    // служит признаком для показа «следующего задания» будущих дней (renderFutureCut).
     AtexSlitter.prototype.allCutsDone = function() {
         if (!this.isShiftOpen()) return false;
         var q = this.currentQueue();
         return q.cuts.length > 0 && !q.firstOpenCutId;
-    };
-
-    // #3861: уже отмечена «Уборка завершена» в текущей смене (по станку, как hasOpenShift).
-    AtexSlitter.prototype.hasCleanupEvent = function() {
-        var sl = this.selectedSlitterLabel();
-        return (this.shiftEvents || []).some(function(ev) {
-            if (ev.type !== EV.cleanup) return false;
-            return !sl || core.shiftEventSlitterLabel(ev) === sl;
-        });
     };
 
     AtexSlitter.prototype.renderToolbar = function() {
@@ -1709,14 +1725,20 @@
         box.appendChild(field('Дата', dateInp));
         box.appendChild(field('Станок', select));
 
-        // #3861: «Уборка завершена» вместо «Закрыть смену». Появляется, когда все
-        // резки смены выполнены; пишет событие смены «Уборка завершена» и НЕ
-        // закрывает смену (панель резок остаётся для просмотра деталей). Показываем
-        // один раз за смену — при наличии отметки кнопку убираем.
-        if (this.allCutsDone() && !this.hasCleanupEvent()) {
-            var cleanBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Уборка завершена' });
-            cleanBtn.addEventListener('click', function() { self.markCleanupDone(); });
-            box.appendChild(cleanBtn);
+        // #4332 п.1/п.3: смена управляется из тулбара и всегда доступна при выбранном станке.
+        // Смена закрыта → «Открыть смену»; открыта → «Закрыть смену» (пишет «Конец смены»).
+        // Список заданий и детали резки видны всегда (в т.ч. при закрытой смене, только просмотр);
+        // управляющие кнопки гейтятся отдельно (renderCutControls/renderPassButtons).
+        if (this.selectedSlitterId) {
+            if (this.isShiftOpen()) {
+                var closeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Закрыть смену' });
+                closeBtn.addEventListener('click', function() { self.closeShift(); });
+                box.appendChild(closeBtn);
+            } else {
+                var openBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-toolbar-open', type: 'button', text: 'Открыть смену' });
+                openBtn.addEventListener('click', function() { self.openShift(); });
+                box.appendChild(openBtn);
+            }
         }
     };
 
@@ -1730,15 +1752,13 @@
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Сначала выберите станок.' }));
             return;
         }
-        if (!this.isShiftOpen()) {
-            this.updateSidebarTitle(null);
-            box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Откройте смену, чтобы выбрать резку.' }));
-            return;
-        }
+        // #4332 п.1: список заданий виден ВСЕГДА — в т.ч. при закрытой смене (только просмотр);
+        // управляющие кнопки гейтятся отдельно (renderCutControls/renderPassButtons).
         var list = this.visibleCuts();
         this.updateSidebarTitle(list.length);
         if (!list.length) {
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Резок пока нет' }));
+            this.renderFutureCut(box);   // #4332 п.4: следующее задание будущих дней
             return;
         }
         var firstOpenId = this.currentQueue().firstOpenCutId;
@@ -1777,6 +1797,45 @@
             item.addEventListener('click', function() { self.openCut(cut.id); });
             box.appendChild(item);
         });
+        this.renderFutureCut(box);   // #4332 п.4: следующее задание будущих дней — после списка дня
+    };
+
+    // #4332 п.4: по завершении всех заданий выбранного дня (нет открытой резки дня) показываем
+    // ОДНО следующее задание из будущих дней — отдельной секцией с датой задания. Оператор может
+    // начать его; по завершении renderCuts перерисует следующее. Только при ОТКРЫТОЙ смене (по
+    // станку, любой день — #4332 п.2). Уже начатое будущее задание попадает сюда (не завершено) —
+    // видно при обновлении формы.
+    AtexSlitter.prototype.renderFutureCut = function(box) {
+        var self = this;
+        if (!box || !this.isShiftOpen()) return;
+        if (this.currentQueue().firstOpenCutId) return;   // ещё есть невыполненное задание текущего дня
+        var future = core.nextFutureCut(this.cuts, {
+            slitterId: this.selectedSlitterId,
+            afterDateKey: core.dateKey(this.selectedDate)
+        });
+        if (!future) return;
+        box.appendChild(el('div', { class: 'atex-sl-future-head', text: 'Следующее задание · ' + core.formatDate(future.planDate) }));
+        var active = String(this.currentCutId) === String(future.id);
+        var batch = this.findBatch(future.batchId);
+        var material = (batch && batch.materialLabel) || future.material || future.batch || '—';
+        var runLen = core.toNumber(future.runLength), runsN = core.toNumber(future.plannedRuns);
+        var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
+        var spec = [material, future.winding || '—', dims].join(' / ');
+        var main = [el('div', { class: 'atex-sl-cut-line1' }, [
+            el('span', { class: 'atex-sl-cut-num', text: '→' }),
+            el('span', { class: 'atex-sl-cut-spec', text: spec })
+        ])];
+        var timeTxt = core.cutQueueTime(future);
+        if (timeTxt) main.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
+        var card = el('button', {
+            class: 'atex-sl-cut-item atex-sl-cut-future' + (active ? ' is-active' : ''),
+            type: 'button'
+        }, [
+            el('div', { class: 'atex-sl-cut-main' }, main),
+            el('span', { class: 'atex-sl-badge ' + badgeClass(future.status), text: future.status })
+        ]);
+        card.addEventListener('click', function() { self.openCut(future.id); });
+        box.appendChild(card);
     };
 
     // #3565 #1: «Задание в производство (N)» — N резок в списке; null → без счётчика.
@@ -1790,6 +1849,9 @@
     AtexSlitter.prototype.isCutLocked = function(cut) {
         if (!cut) return false;
         if (core.normalizeStatus(cut.status) !== 'Ожидает') return false;
+        // #4332 п.4: задание БУДУЩЕГО дня (не из очереди выбранного дня) — не блокируется очередью
+        // дня: оно вынесено отдельной секцией как единственное «следующее», его можно начать.
+        if (core.dateKey(cut.planDate) !== core.dateKey(this.selectedDate)) return false;
         var firstOpenId = this.currentQueue().firstOpenCutId;
         return !(firstOpenId && String(firstOpenId) === String(cut.id));
     };
@@ -1812,13 +1874,12 @@
             return;
         }
 
-        if (!this.isShiftOpen()) {
-            host.appendChild(this.renderShiftGate());
-            return;
-        }
-
+        // #4332 п.1: детали резки видны ВСЕГДА (в т.ч. при закрытой смене — просмотр). Управление
+        // (Наладка/Перерыв/Прекратить/Пропуск, отметки проходов) гейтится по открытости смены
+        // в renderCutControls/renderPassButtons; открыть смену — из тулбара («Открыть смену»).
         if (!this.currentCutId || !this.currentCut) {
-            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Выберите производственную резку слева.' }));
+            host.appendChild(el('div', { class: 'atex-sl-placeholder',
+                text: this.isShiftOpen() ? 'Выберите производственную резку слева.' : 'Откройте смену и выберите резку. Задания можно просматривать и при закрытой смене.' }));
             return;
         }
 
@@ -1830,17 +1891,6 @@
         host.appendChild(this.renderEvents());
     };
 
-    AtexSlitter.prototype.renderShiftGate = function() {
-        var self = this;
-        var section = el('section', { class: 'atex-sl-section atex-sl-shift-gate' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Смена не открыта' }),
-            el('div', { class: 'atex-sl-muted', text: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ') })
-        ]);
-        var btn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Открыть смену' });
-        btn.addEventListener('click', function() { self.openShift(); });
-        section.appendChild(el('div', { class: 'atex-sl-section-actions' }, [btn]));
-        return section;
-    };
 
     AtexSlitter.prototype.renderHead = function() {
         var cut = this.currentCut;
@@ -1904,6 +1954,7 @@
     // не показываем вовсе (раньше показывали деактивированными) — возвращаем пустой слот.
     AtexSlitter.prototype.renderPassButtons = function(cut) {
         var self = this;
+        if (!this.isShiftOpen()) return el('div', { class: 'atex-sl-head-pass' });   // #4332 п.3: отметки проходов — только при открытой смене
         if (this.isCutLocked(cut)) return el('div', { class: 'atex-sl-head-pass' });
         // #3861: когда все резки смены выполнены — кнопки ✓ Готово / ✓✓ Готовы все
         // убираем вовсе (резку можно открыть для просмотра деталей).
@@ -1929,6 +1980,12 @@
     AtexSlitter.prototype.renderCutControls = function(cut) {
         var self = this;
         var actions = el('div', { class: 'atex-sl-section-actions atex-sl-life-actions' });
+        // #4332 п.3: Наладка/Перерыв/Прекратить/Пропуск — только при ОТКРЫТОЙ смене. Смена закрыта →
+        // резку видно (просмотр), но управлять нельзя; открыть смену — из тулбара.
+        if (!this.isShiftOpen()) {
+            actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Смена закрыта — откройте смену, чтобы управлять резкой' }));
+            return actions;
+        }
         if (this.isCutLocked(cut)) {
             actions.appendChild(el('span', { class: 'atex-sl-muted', text: 'Резка ожидает предыдущую в очереди' }));
             return actions;
@@ -2684,26 +2741,26 @@
         });
     };
 
-    // #3861: «Уборка завершена» — событие смены (тип «Уборка завершена», справочник
-    // «Тип события» 176076), отмечается по завершении всех резок. Смену НЕ закрывает
-    // (панель резок остаётся для просмотра деталей). Заменила «Закрыть смену» в этом РМ.
-    AtexSlitter.prototype.markCleanupDone = function() {
+    // #4332 п.3: «Закрыть смену» — пишет событие смены «Конец смены» (EV.shiftEnd) для
+    // выбранного станка и закрывает смену (по последнему событию, hasOpenShift). Заменила
+    // «Уборка завершена» (#3861) в этом РМ. Доступна, пока смена открыта (см. renderToolbar).
+    AtexSlitter.prototype.closeShift = function() {
         var self = this;
         if (this.busy) return;
         if (!this.selectedSlitterId) { this.notify('Выберите станок', 'error'); return; }
         this.setBusy(true);
         this.createEvent({
-            type: EV.cleanup,
+            type: EV.shiftEnd,   // «Конец смены»
             notes: [this.selectedSlitterLabel(), this.selectedDate].filter(Boolean).join(' · ')
         }, null).then(function() {
             return self.loadShiftEvents();
         }).then(function() {
             self.setBusy(false);
-            self.notify('Уборка завершена', 'success');
+            self.notify('Смена закрыта', 'success');
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Не удалось отметить уборку: ' + err.message, 'error');
+            self.notify('Не удалось закрыть смену: ' + err.message, 'error');
         });
     };
 

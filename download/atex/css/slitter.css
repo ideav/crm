@@ -68,10 +68,12 @@
     padding: 16px 16px 0;
     align-items: end;
 }
-.atex-sl-toolbar-close { justify-self: end; }  /* #3557 #1: «Закрыть смену» в тулбаре */
+.atex-sl-toolbar-close,
+.atex-sl-toolbar-open { justify-self: end; }  /* #3557/#4332: «Открыть/Закрыть смену» в тулбаре */
 @media (max-width: 640px) {
     .atex-sl-toolbar { grid-template-columns: 1fr; }
-    .atex-sl-toolbar-close { justify-self: stretch; }
+    .atex-sl-toolbar-close,
+    .atex-sl-toolbar-open { justify-self: stretch; }
 }
 
 .atex-sl-layout {
@@ -127,6 +129,17 @@
 .atex-sl-cut-spec { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-time { font-size: 12px; color: var(--sl-muted); font-variant-numeric: tabular-nums; }
 .atex-sl-empty { padding: 14px; color: var(--sl-muted); }
+/* #4332 п.4: секция «Следующее задание» будущих дней под списком выбранного дня. */
+.atex-sl-future-head {
+    padding: 12px 14px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--sl-accent);
+    border-top: 1px solid var(--sl-border-soft);
+    letter-spacing: .02em;
+}
+.atex-sl-cut-future { box-shadow: inset 4px 0 0 var(--sl-cm-stock); }
+.atex-sl-cut-future .atex-sl-cut-num { color: var(--sl-cm-stock); font-size: 16px; line-height: 1; }
 
 /* Главная область */
 .atex-sl-main {
