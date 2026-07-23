@@ -2571,7 +2571,11 @@
         var runLength = core.runLengthForCut(cut);
         if (!(runLength > 0)) { this.notify('У задания не задан «Метраж, м» — не могу пересчитать проходы', 'error'); return; }
         var total = core.plannedRunsForCut(cut);
-        var done = Math.floor(core.toNumber(cut.meterage) / runLength);
+        // #4351: число уже отмеченных проходов — из событий «Резка» (#3621, тот же источник,
+        // что у заголовка «Резка N из M»), а НЕ из «Погонаж факт»: у не начатой резки погонаж
+        // равен «Счётчик нач.» = остаток партии (пред-заполнение, #4321 счётчик мотает назад),
+        // и floor(остаток / метраж) ложно давал «все проходы уже отмечены».
+        var done = this.donePassCount(cut);
         var target = markAll ? total : Math.min(done + 1, total);
         if (target <= done) { this.notify('Все проходы уже отмечены', 'info'); return; }
 
