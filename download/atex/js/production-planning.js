@@ -8195,7 +8195,7 @@
         dueDayByCut = dueDayByCut || {};
         var byMachine = occupancy.byMachine;
         var feasible = ctx.feasibleMachine || function(){ return true; };
-        var maxRounds = ctx.maxRounds || 3, moves = [];
+        var maxRounds = ctx.maxRounds || 12, moves = [];   // #4338: цепочка вытеснений сходится (netGain монотонно ↓); 12 — потолок-бэкстоп
         function cutIdsOf(key){
             return byMachine[key].filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
         }
@@ -8249,21 +8249,33 @@
                         var trialIds = before.concat([task.id], after);
                         var real = realDayFn(trialIds, tid) || {};
                         var myReal = real[task.id];
-                        if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает реальный день — мимо
-                        var harms = false;   // вставка не должна УГЛУБИТЬ ничью просрочку И не увести чужой фикс на день позже
-                        for (var bi = 0; bi < baseIds.length && !harms; bi++){
+                        if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает СВОЙ реальный день — мимо
+                        // #4338: ВЫТЕСНЕНИЕ несрочного соседа под срочное. Раньше вставка отвергалась, если
+                        // углубляла просрочку ЛЮБОГО соседа (harms) — в плотном графике это блокировало все
+                        // ранние вставки, и срочное уходило «дозакладом» в хвост (день 6 при свободном дне 1).
+                        // По ТЗ §8/§11 DEADLINE(200) доминирует над переналадкой: подвинуть НЕСРОЧНОГО (или
+                        // менее просроченного) соседа под срочное — выгодно. Критерий приёма — СУММАРНОЕ
+                        // опоздание плана строго уменьшается (netGain>0). Т.к. измеритель монотонно убывает,
+                        // зацикливания нет (см. §6 docs/atex_planning_actual_behavior.md). Жёсткое исключение:
+                        // чужой замок 🔒 нельзя увести на более поздний день (это запрет, не вес).
+                        var hardBlock = false, costDays = 0;
+                        for (var bi = 0; bi < baseIds.length; bi++){
                             var oid = baseIds[bi];
-                            var wasOd = (Number(baseReal[oid]) - Number(dueDayByCut[oid]));   wasOd = (dueDayByCut[oid] == null || baseReal[oid] == null || wasOd < 0) ? 0 : wasOd;
-                            var nowOd = (Number(real[oid]) - Number(dueDayByCut[oid]));        nowOd = (dueDayByCut[oid] == null || real[oid] == null || nowOd < 0) ? 0 : nowOd;
-                            if (nowOd > wasOd) harms = true;
+                            var wasOd = (dueDayByCut[oid] == null || baseReal[oid] == null) ? 0 : Math.max(0, Number(baseReal[oid]) - Number(dueDayByCut[oid]));
+                            var nowOd = (dueDayByCut[oid] == null || real[oid] == null) ? 0 : Math.max(0, Number(real[oid]) - Number(dueDayByCut[oid]));
+                            if (nowOd > wasOd) costDays += (nowOd - wasOd);   // насколько углубилась просрочка вытесненных
                             // #4224: не ломаем чужой замок дня — фикс не должен переехать на более поздний день
-                            if (fixedOnTid[oid] && baseReal[oid] != null && real[oid] != null && Number(real[oid]) > Number(baseReal[oid])) harms = true;
+                            if (fixedOnTid[oid] && baseReal[oid] != null && real[oid] != null && Number(real[oid]) > Number(baseReal[oid])) hardBlock = true;
                         }
-                        if (harms) continue;
+                        if (hardBlock) continue;
+                        var dueT = dueDayByCut[task.id];
+                        var savedDays = task.depth - (dueT == null ? 0 : Math.max(0, Number(myReal) - Number(dueT)));   // на сколько дней срочное перестало опаздывать
+                        var netGain = savedDays - costDays;   // >0 ⇒ суммарное опоздание плана уменьшилось
+                        if (netGain <= 0) continue;
                         var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
                         var penalty = (sc ? sc.weight : 0) + moveWeight(ctx, sid, tid);
-                        if (!best || Number(myReal) < best.real || (Number(myReal) === best.real && penalty < best.penalty)){
-                            best = { tid: tid, idx: idx, real: Number(myReal), penalty: penalty };
+                        if (!best || netGain > best.netGain || (netGain === best.netGain && penalty < best.penalty)){
+                            best = { tid: tid, idx: idx, real: Number(myReal), netGain: netGain, penalty: penalty };
                         }
                     }
                 });
