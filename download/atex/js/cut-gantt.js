@@ -398,15 +398,22 @@
         return { key: 'unknown', label: STATUS_LABELS.unknown };
     }
 
+    // #4334: Гант — инструмент ПЛАНИРОВАНИЯ. Бар привязан к плановым таймингам (planDate +
+    // плановая длительность); фактические старт/финиш НЕ двигают и не растягивают бар — они
+    // только красят его (cutStatus) и видны в тултипе. Если оператор начал позже или выполнил
+    // завтрашнее, план не съезжает автоматически: диспетчер переносит задание сам. План
+    // отсутствует (легаси-данные без cut_plan_date) → фолбэк на фактический старт, чтобы
+    // задание не пропало с дорожки.
     function cutTimeRange(cut) {
         var planMs = parseDateTimeMs(cut && cut.planDate);
         var startMs = parseDateTimeMs(cut && cut.startDate);
         var endMs = parseDateTimeMs(cut && cut.endDate);
-        var visualStartMs = startMs != null ? startMs : planMs;
+        var visualStartMs = planMs != null ? planMs : startMs;
         if (visualStartMs == null) return null;
         var deadlineMs = cutDeadlineMs(cut);
-        var visualEndMs = endMs != null ? endMs : (deadlineMs != null ? deadlineMs : visualStartMs + 30 * 60000);
-        if (!(visualEndMs > visualStartMs)) visualEndMs = visualStartMs + 30 * 60000;
+        // Окно (endMs) — грубый фолбэк длительности для легаси-данных без cut_time (см.
+        // cutBarMinutes): срок или +30 мин от планового старта. Фактический финиш сюда не идёт.
+        var visualEndMs = deadlineMs != null && deadlineMs > visualStartMs ? deadlineMs : visualStartMs + 30 * 60000;
         return {
             startMs: visualStartMs, endMs: visualEndMs, planMs: planMs,
             actualStartMs: startMs, actualEndMs: endMs, deadlineMs: deadlineMs
@@ -852,26 +859,23 @@
         return ticks;
     }
 
-    // #3675 п.3: минуты наладки ПЕРЕД резкой (для сегментов бара). Только для запланированных
-    // (без фактического старта) — у начатых/завершённых наладка уже позади, показываем факт.
+    // #3675 п.3: минуты наладки ПЕРЕД резкой (для сегментов бара). #4334: бар всегда плановый,
+    // поэтому наладка показывается по плану независимо от фактического старта/финиша.
     // { knife, material, total } в минутах; отрицательные/пустые входы → 0.
     function cutSetupMin(cut) {
-        var tr = cutTimeRange(cut);
-        if (tr && tr.actualStartMs != null) return { knife: 0, material: 0, total: 0 };
         var knife = Math.max(0, stripNum(cut && cut.setupKnifeMin));
         var material = Math.max(0, stripNum(cut && cut.setupMaterialMin));
         return { knife: knife, material: material, total: round3(knife + material) };
     }
 
-    // #3700: длительность сегмента «резка+лидер» бара, мин. У ЗАПЛАНИРОВАННЫХ резок берём
-    // хранимое «Резка и Лидер» (cut_time) — точную сумму намотки и лидера; нет значения
-    // (легаси/до миграции) → грубое окно cutTimeRange (как раньше). Начатые/завершённые —
-    // всегда фактическое окно (план уже не показываем, как и наладку в cutSetupMin). Чистая — тест.
+    // #3700: длительность сегмента «резка+лидер» бара, мин. Берём хранимое «Резка и Лидер»
+    // (cut_time) — точную плановую сумму намотки и лидера; нет значения (легаси/до миграции) →
+    // грубое окно cutTimeRange. #4334: длительность плановая и у начатых/завершённых — факт.
+    // окно бар не растягивает (факт только красит бар). Чистая — тест.
     function cutBarMinutes(cut) {
+        if (cut && cut.cutTimeMin != null) return Math.max(0, stripNum(cut.cutTimeMin));
         var tr = cutTimeRange(cut);
         var winMin = tr ? (tr.endMs - tr.startMs) / 60000 : 0;
-        if (tr && tr.actualStartMs != null) return winMin;
-        if (cut && cut.cutTimeMin != null) return Math.max(0, stripNum(cut.cutTimeMin));
         // #3705: cut_time не пришёл → намотка (окно cutTimeRange) + расчётный лидер «между резками»
         // (attachLeaderMinutes кладёт cut.leaderMin). Иначе бар короче плана ровно на лидер.
         return round3(winMin + Math.max(0, stripNum(cut && cut.leaderMin)));
