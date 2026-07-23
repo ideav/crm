@@ -3824,6 +3824,21 @@
                 prevResid4203 = resid4203;
             }
         }
+        // #4338: ЕДИНЫЙ жадный проход по СУММАРНОМУ штрафу (ТЗ §8/§11) — поверх занятости слоя. Двигает
+        // худшее по штрафу задание (срок доминирует) в позицию с минимальным суммарным штрафом; хэш-
+        // пропуск виденных расстановок; монотонно ⇒ без зацикливания. Идёт ПОСЛЕ оценочных проходов
+        // (может только уменьшить суммарный штраф). Выключается slotGreedy=false. Пере-упаковываем итог.
+        var greedyMovePath = opts.preserveOrder
+            || (opts.dayLockByCut && Object.keys(opts.dayLockByCut).length)
+            || (opts.machineLockByCut && Object.keys(opts.machineLockByCut).length);   // #4338: ручной перенос/порядок — не переоптимизируем
+        if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && opts.slotGreedy !== false && !greedyMovePath) {
+            greedyRefine(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
+                slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
+            var asgG = assignmentFromOccupancy(slotPlan.occupancy);
+            slotPlan._rescued = true;   // пере-упаковка обязана взять этот порядок
+            slotPlan.slitterByCut = asgG.slitterByCut; slotPlan.orderIdxByCut = asgG.orderIdxByCut;
+            packed = packAll();
+        }
         // #4139: ВНУТРИДНЕВНАЯ ПЕРЕСОРТИРОВКА. Слой размещения вставляет резки по одной и собранный
         // день больше не чинит, поэтому одинаковая конфигурация попадает в день дважды, разорванная
         // чужим сырьём. День уже назначен реальной упаковкой → перестановка ВНУТРИ дня не двигает

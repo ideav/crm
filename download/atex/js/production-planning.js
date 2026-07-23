@@ -5564,6 +5564,21 @@
                 prevResid4203 = resid4203;
             }
         }
+        // #4338: ЕДИНЫЙ жадный проход по СУММАРНОМУ штрафу (ТЗ §8/§11) — поверх занятости слоя. Двигает
+        // худшее по штрафу задание (срок доминирует) в позицию с минимальным суммарным штрафом; хэш-
+        // пропуск виденных расстановок; монотонно ⇒ без зацикливания. Идёт ПОСЛЕ оценочных проходов
+        // (может только уменьшить суммарный штраф). Выключается slotGreedy=false. Пере-упаковываем итог.
+        var greedyMovePath = opts.preserveOrder
+            || (opts.dayLockByCut && Object.keys(opts.dayLockByCut).length)
+            || (opts.machineLockByCut && Object.keys(opts.machineLockByCut).length);   // #4338: ручной перенос/порядок — не переоптимизируем
+        if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && opts.slotGreedy !== false && !greedyMovePath) {
+            greedyRefine(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
+                slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
+            var asgG = assignmentFromOccupancy(slotPlan.occupancy);
+            slotPlan._rescued = true;   // пере-упаковка обязана взять этот порядок
+            slotPlan.slitterByCut = asgG.slitterByCut; slotPlan.orderIdxByCut = asgG.orderIdxByCut;
+            packed = packAll();
+        }
         // #4139: ВНУТРИДНЕВНАЯ ПЕРЕСОРТИРОВКА. Слой размещения вставляет резки по одной и собранный
         // день больше не чинит, поэтому одинаковая конфигурация попадает в день дважды, разорванная
         // чужим сырьём. День уже назначен реальной упаковкой → перестановка ВНУТРИ дня не двигает
@@ -8290,6 +8305,91 @@
             if (!changed) break;
         }
         return { occupancy: occupancy, moves: moves };
+    }
+
+    // #4338: ЕДИНЫЙ жадный проход (ТЗ §8/§11). Берём задание с ХУДШИМ штрафом (DEADLINE=200 доминирует ⇒
+    // просроченное первым) и двигаем в позицию с МИНИМАЛЬНЫМ суммарным штрафом плана: переналадка по
+    // очереди станка (changeoverCost/firstSetupCost) + срок по РЕАЛЬНОМУ дню завершения (realDayFn).
+    // Выталкивание соседа ЗА СРОК невыгодно само — его +DEADLINE входит в суммарный штраф. Хэш
+    // посещённых расстановок: ход в виденное состояние — пропускаем, берём следующий по списку. Стоп —
+    // когда ни одно задание нельзя улучшить. МОНОТОННО (суммарный штраф строго убывает) ⇒ без
+    // зацикливания; + cap итераций как бэкстоп. 🔒 двигаем только в пределах своего станка. realDayFn(ids,
+    // mid) → {id: реальный день завершения}. Заменяет оценочные §12-релокацию + #4118/#4203.
+    function greedyRefine(occupancy, dueDayByCut, realDayFn, ctx){
+        ctx = ctx || {}; dueDayByCut = dueDayByCut || {};
+        var byMachine = occupancy.byMachine;
+        var feasible = ctx.feasibleMachine || function(){ return true; };
+        var times = ctx.times, settings = ctx.settings;
+        var W_DL = planWeight(settings, 'DEADLINE_COST_MN'), W_EX = planWeight(settings, 'EXACT_DEADLINE_COST_MN');
+        var maxIters = Number(ctx.greedyMaxIters) || 300, EPS = 1e-6;
+        function cutsOf(key){ return byMachine[key].filter(function(s){ return s && s.kind === 'cut'; }); }
+        function idsOf(key){ return cutsOf(key).map(function(s){ return String(s.id); }); }
+        // Мемо упаковщика: одна и та же очередь станка пакуется многократно (перебор точек вставки).
+        // Ключ — станок + порядок id; результат (дни завершения) детерминирован ⇒ кэш валиден весь проход.
+        var packMemo = {};
+        function rday(ids, mid){ var k = mid + '#' + ids.join(','); return packMemo[k] || (packMemo[k] = (realDayFn(ids, mid) || {})); }
+        // Штраф срока ПРОПОРЦИОНАЛЕН опозданию (× дней) — иначе плоский +DEADLINE не даёт градиента, и
+        // жадный проход свободно двигает просроченное ещё позже. Минимизируем СУММАРНОЕ опоздание плана.
+        function dlPen(id, rd){ var due = dueDayByCut[id]; if (due == null || rd[id] == null) return 0;
+            var d = Number(rd[id]) - Number(due); return d > 0 ? W_DL * d : (d === 0 ? W_EX : 0); }
+        // Штраф очереди станка = переналадка (посл. переходы + первая настройка) + срок его заданий по
+        // РЕАЛЬНОМУ дню (одна упаковка realDayFn — единый источник дня).
+        function machineCost(key){
+            var arr = byMachine[key], rd = rday(idsOf(key), key), c = 0, prev = null;
+            for (var i = 0; i < arr.length; i++){ var s = arr[i]; if (!s || s.kind !== 'cut') continue;
+                c += prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times);
+                c += dlPen(String(s.id), rd); prev = s; }
+            return c;
+        }
+        function hashState(){ return Object.keys(byMachine).sort().map(function(k){ return k + ':' + idsOf(k).join(','); }).join('|'); }
+        var seen = {}; seen[hashState()] = 1;
+        for (var iter = 0; iter < maxIters; iter++){
+            // штраф каждого задания (срок по реальному дню + его входящая переналадка) → худшее первым
+            var realNow = {}; Object.keys(byMachine).forEach(function(k){ var r = rday(idsOf(k), k); Object.keys(r).forEach(function(id){ realNow[id] = r[id]; }); });
+            var tasks = [];
+            Object.keys(byMachine).forEach(function(sid){ var arr = byMachine[sid], prev = null;
+                for (var i = 0; i < arr.length; i++){ var s = arr[i]; if (!s || s.kind !== 'cut') continue;
+                    var pen = dlPen(String(s.id), realNow) + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times));
+                    tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: pen }); prev = s; } });
+            tasks.sort(function(a, b){ return b.pen - a.pen; });
+            var applied = false;
+            for (var ti = 0; ti < tasks.length && !applied; ti++){
+                var T = tasks[ti];
+                var oldCostSid = machineCost(T.sid);          // штраф sid С заданием T (база)
+                byMachine[T.sid].splice(T.pos, 1);            // снять T с текущего места
+                var oldSidNoT = machineCost(T.sid);           // штраф sid БЕЗ T
+                var cands = [];
+                Object.keys(byMachine).forEach(function(tid){
+                    if (!feasible(tid, T.slot)) return;
+                    if (T.slot.fixed && String(tid) !== String(T.sid)) return;   // 🔒 — только свой станок
+                    var same = String(tid) === String(T.sid);
+                    var oldCostTid = same ? 0 : machineCost(tid);
+                    var tarr = byMachine[tid];
+                    for (var idx = 0; idx <= tarr.length; idx++){
+                        if (!canInsertAt(tarr, idx)) continue;
+                        tarr.splice(idx, 0, tagSlot(T.slot, tid));
+                        var newCostTid = machineCost(tid);
+                        tarr.splice(idx, 1);
+                        var delta = (same ? (newCostTid - oldCostSid)
+                                          : (oldSidNoT + newCostTid - oldCostSid - oldCostTid))
+                                    + moveWeight(ctx, T.sid, tid);
+                        cands.push({ tid: tid, idx: idx, delta: delta });
+                    }
+                });
+                cands.sort(function(a, b){ return a.delta - b.delta; });   // лучший (меньший delta) первым
+                for (var ci = 0; ci < cands.length; ci++){
+                    var cd = cands[ci];
+                    if (!(cd.delta < -EPS)) break;   // улучшения нет — к следующему заданию
+                    byMachine[cd.tid].splice(cd.idx, 0, tagSlot(T.slot, cd.tid));
+                    var h = hashState();
+                    if (seen[h]){ byMachine[cd.tid].splice(cd.idx, 1); continue; }   // виденное — следующий вариант
+                    seen[h] = 1; applied = true; break;
+                }
+                if (!applied) byMachine[T.sid].splice(T.pos, 0, T.slot);   // вернуть T на место
+            }
+            if (!applied) break;
+        }
+        return { occupancy: occupancy };
     }
 
     // Порядок резок по станкам для splitMachineQueue (отпуска отбрасываются — они не резки).
