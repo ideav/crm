@@ -369,18 +369,45 @@
     // Уже НАЧАТОЕ (в работе/наладке) будущее задание тоже вернётся (не завершено) → видно при
     // обновлении формы. Завершённые/пропущенные (isDone) и без «Дата план» — пропускаем.
     function nextFutureCut(cuts, opts) {
+        return futureCutPool(cuts, opts).next;
+    }
+
+    // #4332 п.4 / #4365: задания станка в БУДУЩИХ днях (dateKey > afterDateKey, дата валидна)
+    // → { pool, next }: весь набор в порядке очереди (день → planStart) и ближайшее
+    // НЕзавершённое из него («следующее задание»).
+    function futureCutPool(cuts, opts) {
         var o = opts || {};
         var sid = o.slitterId == null ? '' : String(o.slitterId);
         var after = Number(o.afterDateKey);
-        var best = null;
-        (cuts || []).forEach(function(cut) {
-            if (sid && cutSlitterId(cut) !== sid) return;
-            if (isDone(cut && cut.status)) return;
+        var pool = (cuts || []).filter(function(cut) {
+            if (sid && cutSlitterId(cut) !== sid) return false;
             var dk = dateKey(cut && cut.planDate);
-            if (!isFinite(dk) || !(dk > after)) return;   // только строго будущие дни с валидной датой
-            if (!best || compareCutsForQueue(cut, best) < 0) best = cut;
-        });
-        return best;
+            return isFinite(dk) && dk > after;   // только строго будущие дни с валидной датой
+        }).map(function(cut, i) { return { cut: cut, i: i }; }).sort(function(a, b) {
+            return compareCutsForQueue(a.cut, b.cut) || a.i - b.i;
+        }).map(function(x) { return x.cut; });
+        var next = null;
+        pool.forEach(function(cut) { if (!next && !isDone(cut.status)) next = cut; });
+        return { pool: pool, next: next };
+    }
+
+    // #4365: что показывать в секции «Следующее задание» сайдбара. Выполненные задания
+    // будущих дней НЕ пропадают — оператор видит, что он уже сделал (раньше секция знала
+    // только ближайшее НЕзавершённое, и по завершении задание исчезало вместе с секцией).
+    // Ожидающее следующее по-прежнему предлагается ОДНО (#4332 п.4) и только когда в
+    // выбранном дне не осталось открытых заданий — за это отвечает opts.withNext.
+    // → { cuts: [...], nextId, nextDayKey } в порядке очереди (день → planStart).
+    function futureCutsVisible(cuts, opts) {
+        var o = opts || {};
+        var res = futureCutPool(cuts, o);
+        var withNext = o.withNext !== false;
+        var next = withNext ? res.next : null;
+        var list = res.pool.filter(function(cut) { return isDone(cut.status) || cut === next; });
+        return {
+            cuts: list,
+            nextId: next ? String(next.id) : null,
+            nextDayKey: next ? dateKey(next.planDate) : null
+        };
     }
 
     // #3609: канонический ключ раскладки ножей резки (полосы «ширина×кол-во», порядок-
@@ -964,6 +991,7 @@
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
         nextFutureCut: nextFutureCut,   // #4332 п.4: следующее задание будущих дней
+        futureCutsVisible: futureCutsVisible,   // #4365: секция будущих дней (выполненные не пропадают)
         knifeLayoutKey: knifeLayoutKey,
         widthSetKey: widthSetKey,             // #3737
         dayStartTimestamp: dayStartTimestamp, // #3737
@@ -1740,12 +1768,22 @@
     };
 
     // #4332 п.4: следующее задание БУДУЩИХ дней этого станка (одно, ближайшее незавершённое)
-    // — секция «Следующее задание» под очередью дня (renderFutureCut) и признак того, что
-    // смене есть что делать дальше (allCutsDone).
+    // — признак того, что смене есть что делать дальше (allCutsDone).
     AtexSlitter.prototype.futureCut = function() {
         return core.nextFutureCut(this.cuts, {
             slitterId: this.selectedSlitterId,
             afterDateKey: core.dateKey(this.selectedDate)
+        });
+    };
+
+    // #4365: содержимое секции будущих дней — выполненные задания будущих дней (не пропадают)
+    // плюс ОДНО ближайшее ожидающее. Ожидающее предлагаем только когда в выбранном дне не
+    // осталось открытых заданий (#4332 п.4); выполненные показываем всегда.
+    AtexSlitter.prototype.futureCutsVisible = function() {
+        return core.futureCutsVisible(this.cuts, {
+            slitterId: this.selectedSlitterId,
+            afterDateKey: core.dateKey(this.selectedDate),
+            withNext: !this.currentQueue().firstOpenCutId
         });
     };
 
@@ -1830,7 +1868,7 @@
         this.updateSidebarTitle(list.length);
         if (!list.length) {
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Резок пока нет' }));
-            this.renderFutureCut(box);   // #4332 п.4: следующее задание будущих дней
+            this.renderFutureCuts(box);   // #4332 п.4 / #4365: задания будущих дней
             return;
         }
         var firstOpenId = this.currentQueue().firstOpenCutId;
@@ -1869,42 +1907,59 @@
             item.addEventListener('click', function() { self.openCut(cut.id); });
             box.appendChild(item);
         });
-        this.renderFutureCut(box);   // #4332 п.4: следующее задание будущих дней — после списка дня
+        this.renderFutureCuts(box);   // #4332 п.4 / #4365: задания будущих дней — после списка дня
     };
 
-    // #4332 п.4: по завершении всех заданий выбранного дня (нет открытой резки дня) показываем
-    // ОДНО следующее задание из будущих дней — отдельной секцией с датой задания. Оператор может
-    // начать его; по завершении renderCuts перерисует следующее. Только при ОТКРЫТОЙ смене (по
-    // станку, любой день — #4332 п.2). Уже начатое будущее задание попадает сюда (не завершено) —
-    // видно при обновлении формы.
-    AtexSlitter.prototype.renderFutureCut = function(box) {
+    // #4332 п.4 / #4365: секция будущих дней под очередью выбранного дня. Показываем ВСЕ уже
+    // выполненные задания будущих дней (оператор их сделал — из списка они не пропадают) и ОДНО
+    // ближайшее ожидающее, которое можно начать. Ожидающее предлагаем, только когда в выбранном
+    // дне открытых заданий не осталось (#4332 п.4); выполненные видны всегда, в т.ч. при закрытой
+    // смене (#4332 п.1 — задания видно всегда). Задания сгруппированы по дню, у каждой группы —
+    // заголовок с датой.
+    AtexSlitter.prototype.renderFutureCuts = function(box) {
         var self = this;
-        if (!box || !this.isShiftOpen()) return;
-        if (this.currentQueue().firstOpenCutId) return;   // ещё есть невыполненное задание текущего дня
-        var future = this.futureCut();
-        if (!future) return;
-        box.appendChild(el('div', { class: 'atex-sl-future-head', text: 'Следующее задание · ' + core.formatDate(future.planDate) }));
-        var active = String(this.currentCutId) === String(future.id);
-        var batch = this.findBatch(future.batchId);
-        var material = (batch && batch.materialLabel) || future.material || future.batch || '—';
-        var runLen = core.toNumber(future.runLength), runsN = core.toNumber(future.plannedRuns);
+        if (!box) return;
+        var res = this.futureCutsVisible();
+        if (!res.cuts.length) return;
+        var lastDayKey = null;
+        res.cuts.forEach(function(cut) {
+            var dayKey = core.dateKey(cut.planDate);
+            if (dayKey !== lastDayKey) {
+                lastDayKey = dayKey;
+                var isNextDay = res.nextDayKey != null && dayKey === res.nextDayKey;
+                box.appendChild(el('div', { class: 'atex-sl-future-head',
+                    text: (isNextDay ? 'Следующее задание · ' : 'Задания · ') + core.formatDate(cut.planDate) }));
+            }
+            box.appendChild(self.futureCutCard(cut, res.nextId));
+        });
+    };
+
+    // #4365: карточка задания будущего дня. Маркер «→» у следующего (его можно начать),
+    // «✓» у выполненного. Клик открывает детали, как у заданий дня.
+    AtexSlitter.prototype.futureCutCard = function(cut, nextId) {
+        var self = this;
+        var active = String(this.currentCutId) === String(cut.id);
+        var isNext = nextId != null && String(nextId) === String(cut.id);
+        var batch = this.findBatch(cut.batchId);
+        var material = (batch && batch.materialLabel) || cut.material || cut.batch || '—';
+        var runLen = core.toNumber(cut.runLength), runsN = core.toNumber(cut.plannedRuns);
         var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
-        var spec = [material, future.winding || '—', dims].join(' / ');
+        var spec = [material, cut.winding || '—', dims].join(' / ');
         var main = [el('div', { class: 'atex-sl-cut-line1' }, [
-            el('span', { class: 'atex-sl-cut-num', text: '→' }),
+            el('span', { class: 'atex-sl-cut-num', text: isNext ? '→' : '✓' }),
             el('span', { class: 'atex-sl-cut-spec', text: spec })
         ])];
-        var timeTxt = core.cutQueueTime(future);
+        var timeTxt = core.cutQueueTime(cut);
         if (timeTxt) main.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
         var card = el('button', {
-            class: 'atex-sl-cut-item atex-sl-cut-future' + (active ? ' is-active' : ''),
+            class: 'atex-sl-cut-item atex-sl-cut-future' + (active ? ' is-active' : '') + (isNext ? '' : ' is-past'),
             type: 'button'
         }, [
             el('div', { class: 'atex-sl-cut-main' }, main),
-            el('span', { class: 'atex-sl-badge ' + badgeClass(future.status), text: future.status })
+            el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
         ]);
-        card.addEventListener('click', function() { self.openCut(future.id); });
-        box.appendChild(card);
+        card.addEventListener('click', function() { self.openCut(cut.id); });
+        return card;
     };
 
     // #3565 #1: «Задание в производство (N)» — N резок в списке; null → без счётчика.
