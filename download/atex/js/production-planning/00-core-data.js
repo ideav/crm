@@ -761,6 +761,7 @@
         var dayCuts = (cuts || []).filter(function(c) {
             if (!c) return false;
             if (c.fixed) return false;   // #3508 п.3: зафиксированные при удалении пропускаем
+            if (cutIsStarted(c)) return false;   // #4381: начатые неприкосновенны — «Удалить» день их не сносит
             if (String(c.planDate || '').trim() === '') return false;   // недатированные к диапазону не относим
             return isCutVisible(c, fromStr, toStr);   // #3599: тот же диапазон, что и видимость очереди (отсеивает «Завершён»)
         });
@@ -1690,6 +1691,14 @@
         return isNaN(t) ? null : Math.floor(t / 1000);
     }
 
+    // #4381: задание НАЧАТО — заполнено «Начато» (реквизит 1161, колонка cut_start_date отчёта
+    // cut_planning; ставит его пульт слиттера). Начатые НЕПРИКОСНОВЕННЫ, даже если не
+    // зафиксированы (🔒): их нельзя перетаскивать, двигать по очереди ↑↓, фиксировать, переносить
+    // на другой день и удалять; пересборка очереди тоже держит их на своём дне. Чистая — покрыта тестом.
+    function cutIsStarted(cut) {
+        return planTsSeconds(cut && cut.startDate) != null;
+    }
+
     // #4346: отклонения ФАКТА от плана — вход кнопки «Отклонения N/M». Две группы (ТЗ issue #4346):
     //   overdue («просрочено», N)          — плановый день РАНЬШЕ текущего, а «Закончено» пусто;
     //   early («выполнено досрочно», M)    — плановый день СЕГОДНЯ или позже, а «Закончено» РАНЬШЕ текущего дня.
@@ -1757,6 +1766,12 @@
         var bySlitter = {}, sids = [];
         (g.overdue || []).forEach(function(c) {
             if (!c || c.id == null) return;
+            // #4381: НАЧАТОЕ задание неприкосновенно — «Урегулировать» его не двигает. В группе
+            // «просрочено» «Закончено» пусто по построению, поэтому здесь cutIsStarted = «в работе
+            // прямо сейчас». В списке формы оно остаётся (диспетчер должен его видеть), но переноса
+            // не получает. Досрочных это НЕ касается: они завершены, и перенос в день фактического
+            // выполнения — как раз фиксация факта (#4346), а не вмешательство в работу.
+            if (cutIsStarted(c)) return;
             var sid = cutSlitterKey(c);
             if (!bySlitter[sid]) { bySlitter[sid] = []; sids.push(sid); }
             bySlitter[sid].push(c);
@@ -1768,6 +1783,7 @@
                 if (!c || c.id == null || overdueSet[String(c.id)]) return;
                 if (cutSlitterKey(c) !== sid) return;
                 if (planTsSeconds(c.endDate) != null) return;   // уже выполненное «следующим» не считаем
+                if (cutIsStarted(c)) return;   // #4381: перед начатым не встаём — это сдвинуло бы его
                 var pk = planDateDayKey(c.planDate);
                 if (!isFinite(pk) || !isFinite(today) || pk < today) return;
                 var ts = planTsSeconds(c.planDate);
