@@ -1181,6 +1181,12 @@
                     materialBatch: { id: null, label: '' },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
+                    // #4346: фактические отметки исполнения из cut_planning («Начато»/«Закончено»
+                    // резки — их же читает Гант, cut-gantt.js). Пустое «Закончено» = задание не
+                    // выполнено; на этой паре плана и факта стоит детектор отклонений
+                    // (deviationGroups) кнопки «Отклонения N/M».
+                    startDate: str(row.cut_start_date),
+                    endDate: str(row.cut_end_date),
                     sequence: null,   // #3923: порядок задаёт planStart; поле — in-memory ординал генерации
                     fixed: false,   // #3508: уточняется из object/ в loadPlanning (отчёт флаг не отдаёт)
                     materialId: str(row.cut_material_id),
@@ -1667,6 +1673,121 @@
             if (dueKeys.length && dueColorClass(dueKeys[0], dk, o.forecastDays) === 'is-overdue') n++;
         });
         return n;
+    }
+
+    // #4346: «Дата план» / «Закончено» (unix-штамп в секундах или мс, либо дата-строка) → unix-штамп
+    // в СЕКУНДАХ — единицах главного значения резки (planStart, оно же cut_plan_date). Не распознали
+    // (пусто, «ДД.ММ.ГГГГ» без времени и т.п.) → null. Чистая — покрыта тестом.
+    function planTsSeconds(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (s === '') return null;
+        if (/^\d{9,13}$/.test(s)) {
+            var num = Number(s);
+            if (!isFinite(num)) return null;
+            return Math.floor(num >= 1e12 ? num / 1000 : num);
+        }
+        var t = Date.parse(s);
+        return isNaN(t) ? null : Math.floor(t / 1000);
+    }
+
+    // #4346: отклонения ФАКТА от плана — вход кнопки «Отклонения N/M». Две группы (ТЗ issue #4346):
+    //   overdue («просрочено», N)          — плановый день РАНЬШЕ текущего, а «Закончено» пусто;
+    //   early («выполнено досрочно», M)    — плановый день СЕГОДНЯ или позже, а «Закончено» РАНЬШЕ текущего дня.
+    // Дни сравниваем календарными ключами YYYYMMDD (planDateDayKey — он одинаково берёт и unix-штамп,
+    // и «ГГГГ-ММ-ДД»), поэтому час старта/завершения на попадание в группу не влияет. Задание без
+    // «Даты план» (ещё не запланировано, ключ Infinity) не отклонение — пропускаем; выполненное в свой
+    // день — тоже (обе группы требуют расхождения). Внутри групп — по плановому времени по возрастанию,
+    // чтобы порядок заданий («Порядок заданий остается прежним») и список в форме были детерминированы.
+    // Чистая (DOM не трогает) — покрыта тестом. → { overdue: [cut], early: [cut] }.
+    function deviationGroups(cuts, todayKey) {
+        var today = Number(todayKey);
+        var res = { overdue: [], early: [] };
+        if (!isFinite(today)) return res;
+        (cuts || []).forEach(function(c) {
+            var pk = planDateDayKey(c && c.planDate);
+            if (!isFinite(pk)) return;
+            var ek = planDateDayKey(c && c.endDate);
+            if (!isFinite(ek)) {          // не выполнено
+                if (pk < today) res.overdue.push(c);
+                return;
+            }
+            if (pk >= today && ek < today) res.early.push(c);
+        });
+        function byPlan(a, b) {
+            var av = planTsSeconds(a && a.planDate), bv = planTsSeconds(b && b.planDate);
+            return (av == null ? Infinity : av) - (bv == null ? Infinity : bv);
+        }
+        res.overdue.sort(byPlan);
+        res.early.sort(byPlan);
+        return res;
+    }
+
+    // #4346: id станка задания как ключ группировки («» — задание без станка).
+    function cutSlitterKey(cut) {
+        return String(cut && cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
+    }
+
+    // #4346: «Урегулировать» — что записать в «Дату план» каждому отклонившемуся заданию. Правила ТЗ:
+    //   • выполненные ДОСРОЧНО — в день фактического выполнения: пишем сам момент «Закончено», он же
+    //     ставит задание на правильное место внутри того дня;
+    //   • ПРОСРОЧЕННЫЕ — перед СЛЕДУЮЩИМ заданием своего станка («вместо него»), в какой бы день оно
+    //     ни стояло; взаимный порядок просроченных сохраняется. «Следующее» = самое раннее
+    //     НЕвыполненное задание этого станка, не из группы просроченных (такое всегда стоит сегодня
+    //     или позже: незавершённое задание прошлого дня по определению само просрочено);
+    //   • следующего задания у станка НЕТ → ближайший рабочий незамороженный день (freeDayMsFor).
+    // Пишем ПЛЕЙСХОЛДЕР: важны не сами значения, а ПОРЯДОК — сдвиг всех последующих делает пересборка
+    // очереди (autoSequenceQueue preserveOrder, «общие правила»), как и на пути ручного переноса.
+    // Шаг плейсхолдера — минута назад от «следующего» (смена начинается в 08:00, так что запаса
+    // до полуночи хватает на любое реальное число просроченных заданий станка).
+    // Чистая (DOM/сеть не трогает; календарь приходит колбэком freeDayMsFor) — покрыта тестом.
+    // → [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }]
+    function deviationSettlePlan(cuts, groups, opts) {
+        var o = opts || {};
+        var today = Number(o.todayKey);
+        var shiftStartMin = Number(o.shiftStartMin) || 0;
+        var g = groups || {};
+        var plan = [];
+        (g.early || []).forEach(function(c) {
+            var ts = planTsSeconds(c && c.endDate);
+            if (ts == null || !c || c.id == null) return;
+            plan.push({ id: String(c.id), planStart: ts, reason: 'early' });
+        });
+        var overdueSet = {};
+        (g.overdue || []).forEach(function(c) { if (c && c.id != null) overdueSet[String(c.id)] = true; });
+        var bySlitter = {}, sids = [];
+        (g.overdue || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var sid = cutSlitterKey(c);
+            if (!bySlitter[sid]) { bySlitter[sid] = []; sids.push(sid); }
+            bySlitter[sid].push(c);
+        });
+        sids.forEach(function(sid) {
+            var queue = bySlitter[sid];
+            var anchorTs = null;
+            (cuts || []).forEach(function(c) {
+                if (!c || c.id == null || overdueSet[String(c.id)]) return;
+                if (cutSlitterKey(c) !== sid) return;
+                if (planTsSeconds(c.endDate) != null) return;   // уже выполненное «следующим» не считаем
+                var pk = planDateDayKey(c.planDate);
+                if (!isFinite(pk) || !isFinite(today) || pk < today) return;
+                var ts = planTsSeconds(c.planDate);
+                if (ts == null) return;
+                if (anchorTs == null || ts < anchorTs) anchorTs = ts;
+            });
+            if (anchorTs != null) {
+                queue.forEach(function(c, i) {
+                    plan.push({ id: String(c.id), planStart: anchorTs - (queue.length - i) * 60, reason: 'before-next' });
+                });
+                return;
+            }
+            var dayMs = typeof o.freeDayMsFor === 'function' ? o.freeDayMsFor(sid) : null;
+            if (dayMs == null || !isFinite(Number(dayMs))) return;
+            var base = Math.floor(Number(dayMs) / 1000) + shiftStartMin * 60;
+            queue.forEach(function(c, i) {
+                plan.push({ id: String(c.id), planStart: base + i * 60, reason: 'free-day' });
+            });
+        });
+        return plan;
     }
 
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),

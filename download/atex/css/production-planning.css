@@ -160,6 +160,10 @@
 /* #3475: «Удалить» — жёлтая кнопка-предупреждение (амбер-плашка подтверждения). */
 .atex-pp-btn-warning { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); color: var(--pp-attn-text); }
 .atex-pp-btn-warning:hover { background: var(--pp-attn-border); color: var(--pp-attn-text); }
+/* #4346: «Отклонения N/M» — красная кнопка-сигнал (расхождение факта с планом). Отличается от
+   жёлтой -warning: та про необратимое действие, эта про состояние плана, требующее решения. */
+.atex-pp-btn-danger { background: var(--pp-warn); border-color: var(--pp-warn); color: #fff; }
+.atex-pp-btn-danger:hover { filter: brightness(0.92); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
 .atex-pp-confirm-bar {
     display: flex;
@@ -962,6 +966,18 @@
 .atex-pp-move-pos { display: flex; gap: 16px; flex-wrap: wrap; }
 .atex-pp-move-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .atex-pp-move-fix { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+/* #4346: модалка «Отклонения» — две группы (просрочено / выполнено досрочно) + действия. */
+.atex-pp-dev-dialog { max-width: 620px; }
+.atex-pp-dev-content { display: flex; flex-direction: column; gap: 12px; }
+.atex-pp-dev-group-title { margin: 0 0 6px; font-size: 14px; }
+.atex-pp-dev-overdue .atex-pp-dev-group-title { color: var(--pp-warn); }
+.atex-pp-dev-list {
+    margin: 0;
+    padding: 0 0 0 18px;
+    max-height: min(34vh, 260px);
+    overflow: auto;
+}
+.atex-pp-dev-item { margin: 2px 0; font-size: 13px; }
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;
