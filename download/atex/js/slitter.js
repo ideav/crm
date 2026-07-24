@@ -1395,7 +1395,10 @@
                 batch: batchRef.label,
                 batchId: batchRef.id,
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
-                planDate: val(CUT_REQ.planDate),
+                // #3352 / #4353: «Дата план» — ГЛАВНОЕ значение записи (row[0]), отдельного
+                // реквизита с таким именем в таблице нет. Без фолбэка на row[0] дата открытой
+                // резки всегда пуста, и задание выглядит «не из очереди выбранного дня».
+                planDate: val(CUT_REQ.planDate) || row[0] || '',
                 counterStart: val(CUT_REQ.counterStart),
                 counterEnd: val(CUT_REQ.counterEnd),
                 meterage: val(CUT_REQ.meterage),
@@ -1854,11 +1857,16 @@
     AtexSlitter.prototype.isCutLocked = function(cut) {
         if (!cut) return false;
         if (core.normalizeStatus(cut.status) !== 'Ожидает') return false;
-        // #4332 п.4: задание БУДУЩЕГО дня (не из очереди выбранного дня) — не блокируется очередью
-        // дня: оно вынесено отдельной секцией как единственное «следующее», его можно начать.
-        if (core.dateKey(cut.planDate) !== core.dateKey(this.selectedDate)) return false;
-        var firstOpenId = this.currentQueue().firstOpenCutId;
-        return !(firstOpenId && String(firstOpenId) === String(cut.id));
+        var q = this.currentQueue();
+        var id = String(cut.id);
+        // #4332 п.4: задание БУДУЩЕГО дня очередью выбранного дня не блокируется — оно вынесено
+        // отдельной секцией как единственное «следующее», его можно начать. #4353: принадлежность
+        // очереди дня определяем по её СОСТАВУ (id), а не сравнением «Даты план» с выбранным днём:
+        // у открытой резки дата может быть пустой, и сравнение снимало блокировку с любого
+        // ожидающего задания (кнопки были доступны, пока предыдущее не закрыто).
+        var inQueue = (q.cuts || []).some(function(c) { return String(c.id) === id; });
+        if (!inQueue) return false;
+        return !(q.firstOpenCutId && String(q.firstOpenCutId) === id);
     };
 
     function badgeClass(status) {
