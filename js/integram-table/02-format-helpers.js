@@ -272,10 +272,11 @@
             this.objectTableId = typeId;  // Store table ID for _count=1 queries
 
             // Detect metadata drift: if the cached columns don't match the row
-            // shape, drop them so the block below re-fetches fresh metadata
-            // (issue #2526).
-            if (this.hasRowColumnCountMismatch(dataArray)) {
-                this.invalidateMetadataCache();
+            // shape (issue #2526) or the column order moved on the server
+            // (issue #4364), drop them so the block below re-fetches fresh
+            // metadata.
+            if (this.shouldRebuildColumns(dataArray, append)) {
+                await this.reloadTableMetadata(typeId, this.hasRowColumnCountMismatch(dataArray));
             }
 
             // Fetch metadata if columns are not yet loaded
