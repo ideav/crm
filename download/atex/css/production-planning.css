@@ -98,6 +98,16 @@
 }
 .atex-pp-form-title { margin: 0 0 6px; font-size: 17px; }
 .atex-pp-hint { margin: 0 0 14px; color: var(--pp-muted); font-size: 13px; }
+/* #4357: в диалоге переноса — предупреждение, что переносится ПРОДОЛЖЕНИЕ разорванного по дням
+   задания и оно станет отдельным заданием (связь ←/→ с головой пропадёт). */
+.atex-pp-move-detach-warn {
+    padding: 6px 10px;
+    color: var(--pp-warn, #d64545);
+    background: rgba(214, 69, 69, 0.08);
+    border: 1px solid rgba(214, 69, 69, 0.35);
+    border-radius: 8px;
+    line-height: 1.35;
+}
 
 .atex-pp-field { margin-bottom: 14px; }
 .atex-pp-label {

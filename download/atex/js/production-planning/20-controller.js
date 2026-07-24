@@ -78,6 +78,7 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
+        daySplitDetachCutId: daySplitDetachCutId,       // #4357: перенос сегмента — отвязать от цепочки
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
         longVacationDayRanges: longVacationDayRanges,   // #4314: длинные окна «Отпуска» (дни от «С») — сбрасывают наладку
@@ -2526,6 +2527,16 @@
         content.appendChild(el('p', { class: 'atex-pp-hint',
             text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' +
                 (cut.materialName || (cut.materialId ? '#' + cut.materialId : '—')) }));
+        // #4357: это ПРОДОЛЖЕНИЕ разорванного по дням задания — предупреждаем ДО переноса: перенести
+        // кусок отдельно можно, только сделав его самостоятельным заданием (иначе пересборка вернёт
+        // его к голове — см. daySplitDetachCutId). Голове такого предупреждения не даём: она тянет
+        // за собой всю цепочку.
+        if (daySplitDetachCutId(this.cuts || [], cut.id)) {
+            content.appendChild(el('p', { class: 'atex-pp-hint atex-pp-move-detach-warn',
+                text: '⚠ Это продолжение задания, разорванного по дням. При переносе оно станет '
+                    + 'ОТДЕЛЬНЫМ заданием на свои проходы (своя наладка, связь ←/→ с головой пропадёт). '
+                    + 'Чтобы перенести задание целиком — переносите его первую часть.' }));
+        }
 
         // #3631: произвольный день — обычный календарный input type=date (без ограничений).
         var dayInput = el('input', { type: 'date', class: 'atex-pp-input atex-pp-move-day', value: defISO });
@@ -2629,6 +2640,7 @@
         if (!cutMeta) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
         var slitterReqId = reqIdByName(cutMeta, CUT_REQ.slitter);   // #3669 п.1: ссылка «Слиттер»
+        var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);   // #4357: маркер цепочки дробления
         var mainKey = cutMeta.id != null ? 't' + cutMeta.id : null;
         if (!mainKey) {
             this.notify('Не найден реквизит даты резки', 'error');
@@ -2665,6 +2677,11 @@
             if (String(csid == null ? '' : csid) !== sidStr) return false;
             return planDateDayKey(c.planDate) === targetDayKey;
         });
+        // #4357: переносим СЕГМЕНТ разорванного по дням задания (продолжение) — отвязываем его от
+        // цепочки, иначе перенос стирает пересборка: планировщик схлопывает цепочку в голову и
+        // пере-нарезает сегменты заново (daySplitDetachCutId, движок). Голова → null (её перенос
+        // двигает всю цепочку). Нет реквизита «ID первой части» → отвязать нечем (легаси-база).
+        var detachId = firstPartReqId ? daySplitDetachCutId(this.cuts || [], cut.id) : null;
         var plan = planMoveSequences(cut.id, dayCuts, position);
         // #3923: желаемый порядок дня → плейсхолдер-planStart (целевой день 08:00 + i·минут).
         // Точные значения не важны — важен ПОРЯДОК; autoSequenceQueue(preserveOrder) ниже
@@ -2686,6 +2703,7 @@
             var fields = {};
             if (fixFieldKey) fields[fixFieldKey] = '1';
             if (slitterChanged) fields['t' + slitterReqId] = sidStr;   // #3669 п.1: смена станка
+            if (detachId) fields['t' + firstPartReqId] = String(detachId);   // #4357: сегмент → самостоятельное задание
             if (!Object.keys(fields).length) return;
             return self.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields);
         }).then(function() { self.updateProgress(++done); });
@@ -2720,7 +2738,10 @@
             }
             var posLabel = position === 'end' ? ' (в конец дня)'
                 : (position === 'start' ? ' (в начало дня)' : ' (по весу)');   // #4221
-            self.notify('Задание перенесено на ' + dateLabel + posLabel + slitLabel, 'success');
+            // #4357: сегмент отвязан от разорванного задания — называем это оператору. Работа больше
+            // не непрерывна (два задания, две наладки), значков ←/→ между ними не будет.
+            self.notify('Задание перенесено на ' + dateLabel + posLabel + slitLabel
+                + (detachId ? ' · отвязано от разорванного задания (отдельное задание)' : ''), 'success');
             // #3840: перенос менял «Дату план» только переносимого задания и целевого дня — день-
             // ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте вынутой резки висел простой
             // (РМ «Диаграмма Ганта» рисует сохранённый planStart). Терминальный autoSequenceQueue
