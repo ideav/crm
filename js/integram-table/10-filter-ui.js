@@ -24,6 +24,12 @@
             menu.querySelectorAll('.filter-type-option').forEach(opt => {
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
+                    // Choosing an operator is the first half of setting a filter; the second half
+                    // is typing the value. Hand the caret over so it can be typed right away
+                    // instead of making the user aim at the field with the mouse (issue #4373).
+                    // Called at every exit of this handler — after render() where the cell is
+                    // rebuilt, so the fresh control is the one that gets focused.
+                    const focusValue = () => this.focusFilterControl(columnId);
                     const oldType = this.filters[columnId]?.type;
                     // When no filter is set yet, the cell already shows the DEFAULT input shape
                     // (DATE/DATETIME default to '=', a date picker). Compare against the effective
@@ -55,6 +61,7 @@
                             }
                             // Re-render to switch between text input and dropdown
                             this.render();
+                            focusValue();
                             return;
                         }
                     }
@@ -67,6 +74,7 @@
                         this.filterInputKind(format, effectiveOldType) !== this.filterInputKind(format, symbol)) {
                         this.filters[columnId].value = '';
                         this.render();
+                        focusValue();
                         return;
                     }
 
@@ -101,6 +109,7 @@
                         this.totalRows = null;
                         this.loadData(false);
                     }
+                    focusValue();
                 });
             });
 
@@ -112,6 +121,29 @@
                     }
                 });
             }, 0);
+        }
+
+        /**
+         * Give the keyboard to a column's filter control (issue #4373).
+         * One selector covers every shape the filter cell can take: text input, date picker,
+         * both halves of a range (the `from` field comes first in the DOM) and the REF dropdown
+         * trigger — the two classes never appear in the same cell.
+         * preventScroll keeps the browser from scrolling the input into view, which would reset
+         * the table's horizontal scroll when the column sits outside the viewport (issue #2744).
+         * @param {string} columnId - Column whose filter control should receive focus.
+         */
+        focusFilterControl(columnId) {
+            if (!this.container || columnId == null) return;
+            const control = this.container.querySelector(
+                `.filter-input-with-icon[data-column-id="${ columnId }"], .filter-ref-trigger[data-column-id="${ columnId }"]`);
+            if (!control) return;
+            control.focus({ preventScroll: true });
+            // Caret at the end of what is already typed, so the next keystroke appends.
+            // Only text inputs support selection ranges — date/number ones throw.
+            if (control.type === 'text' && typeof control.setSelectionRange === 'function') {
+                const end = String(control.value || '').length;
+                control.setSelectionRange(end, end);
+            }
         }
 
         reorderColumns(draggedId, targetId) {
