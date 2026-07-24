@@ -128,49 +128,8 @@
         return parts;
     }
 
-    // #3688: текущая заправка станка из отчёта prev_cut_setup → { materialId, winding,
-    // knifeWidths, knifeCount } по верхней (последней по task_start) задаче станка. rows —
-    // строки отчёта (фильтруем по slitterId, если задан). Сравниваем материал/намотку/набор
-    // ножей (НЕ партию). Нет строк → null. Вход не мутируется.
-    //
-    // #4315: строка отчёта — это ПОЛОСА (ширина + `batch_count` полос этой ширины), а не один нож.
-    // Раньше количество игнорировалось, и задача с 8 полосами по 110 мм давала заправку в ОДИН нож.
-    // Против сегодняшних 8 таких же ножей это «переставить 7» → лишняя переналадка KNIFE (30 мин),
-    // которой нет в хранимых колонках (они берут полосы из cut_strips, где количество есть). Разница
-    // и была «дырой в полчаса» после первого задания дня (issue #4315, ateh Станок 3 22.07: 08:00–09:06,
-    // следующее с 09:36; ножи вчерашней и сегодняшней резки одинаковы — 110×8, переставлять нечего).
-    // Разворачиваем ширину по количеству — ровно как aggregateStrips разворачивает `strip_qty`
-    // (сверено на боевых данных: batch_count == strip_qty по всем задачам). Нет колонки/значения → 1
-    // полоса (прежнее поведение, отчёт старого формата).
-    function prevSetupFromRows(rows, slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var byTask = {};
-        (rows || []).forEach(function(r) {
-            if (sid !== '' && String(r.slitter_id) !== sid) return;
-            var tid = String(r.task_id == null ? '' : r.task_id);
-            if (tid === '') return;
-            var ts = Number(r.task_start) || 0;
-            if (!byTask[tid]) byTask[tid] = { start: ts, widths: [], material: '', winding: '' };
-            var rec = byTask[tid];
-            if (ts > rec.start) rec.start = ts;
-            var w = Number(r.width) || 0;
-            var n = Math.round(Number(r.batch_count));
-            if (!isFinite(n) || n < 1) n = 1;   // #4315: нет количества → одна полоса
-            if (w > 0) for (var k = 0; k < n; k++) rec.widths.push(w);
-            if (rec.material === '' && r.material_id != null && String(r.material_id) !== '') rec.material = String(r.material_id);
-            if (rec.winding === '' && r.wind_dir) rec.winding = normWinding(r.wind_dir);
-        });
-        var top = null;
-        Object.keys(byTask).forEach(function(tid) {
-            if (top === null || byTask[tid].start > byTask[top].start) top = tid;
-        });
-        if (top === null) return null;
-        var rec = byTask[top];
-        return { materialId: rec.material, winding: rec.winding, knifeWidths: rec.widths.slice(), knifeCount: rec.widths.length };
-    }
-
     // #3688: синтетическая «предыдущая резка» для расчёта переналадки ПЕРВОЙ резки очереди
-    // станка от его текущей заправки (prevSetup, из prev_cut_setup). Партию нейтрализуем
+    // станка от его заправки на входе в окно (#4300/#4312: из заданий прошлых дней). Партию нейтрализуем
     // (= как у next) — сравниваем лишь материал/намотку/ножи, как задаёт отчёт. Нет данных
     // (null) → пустой станок: материал/намотка/ножи отличны → полный сетап (смена сырья +
     // настройка ножей с нуля). nextCut нужен только для нейтрализации партии.
@@ -200,7 +159,7 @@
     }
 
     // #3669 п.2: первая задача очереди станка требует настройки С НУЛЯ на ПУСТОМ станке (нет
-    // prev_cut_setup — история не подгружена / станок пуст). Прочие задачи считают переналадку с
+    // заправки — станок пуст / нет заданий раньше окна). Прочие задачи считают переналадку с
     // предыдущей (changeoverParts, «та же конфигурация → 0»), а первая резка станка с ИЗВЕСТНОЙ
     // заправкой (#3688/#3853) — от неё (вызывающий передаёт carry как prev). Включается флагом
     // firstCutSetup (см. buildSchedule/splitMachineQueue/setupBreakdown).
@@ -355,7 +314,7 @@
 
     // #3698: активности переналадки на каждую резку упорядоченной очереди ОДНОГО станка
     // (порядок исполнения — по planStart, как в Ганте orderCutsInGroup, #3923). Первая резка —
-    // от текущей заправки станка (carryPrevCut из prev_cut_setup, строится вызывающим через
+    // от текущей заправки станка (carryPrevCut, строится вызывающим через
     // carryOverPrevCut); нет заправки (carryPrevCut=null) → настройка ножей с нуля
     // (firstCutSetup). Зеркалит ветку setup в buildSchedule. → { cutId: { knifeMin, materialWindingMin } }.
     // #4314: resetIds (из setupResetCutIds) — задания, ПЕРЕД которыми станок стоял в длинном отпуске:
@@ -2019,7 +1978,7 @@
             // («лидер между резками») заправляют В КОНЦЕ каждой резки → он добавляется ПОСЛЕ
             // намотки (leaderMin), а не в стартовый сетап. Для первой резки очереди (i===0)
             // переналадка считается от текущей заправки станка (opts.carryPrevCut — из отчёта
-            // prev_cut_setup: тот же материал/намотка/ножи → 0); нет данных → настройка ножей
+            // заправка станка: тот же материал/намотка/ножи → 0); нет данных → настройка ножей
             // с нуля (#3669, firstCutSetup).
             var setup = i > 0
                 ? changeoverCost(cuts[i-1], c, times)
@@ -2558,7 +2517,7 @@
         // упаковщик зарядил бы ей переналадку от резки ДО отпуска, колонки — полную настройку, и окна
         // разъехались бы ровно так же, как в #4300/#4312. prevPhysicalDay — день предыдущей размещённой
         // резки; для ПЕРВОЙ резки очереди роль предшественника играет заправка станка, а описывает она
-        // день carryPrevSetupDay (день последнего задания раньше «С», #4312; по умолчанию 0 — prev_cut_setup
+        // день carryPrevSetupDay (день последнего задания раньше «С», #4312; по умолчанию 0 —
         // снят на день базы). Пустые longVacationRanges → ветка инертна, поведение прежнее.
         var longVacationRanges = opts.longVacationRanges || [];
         var carryPrevSetupDay = isFinite(Number(opts.carryPrevSetupDay)) ? Number(opts.carryPrevSetupDay) : 0;
@@ -2574,7 +2533,7 @@
         // #3739: setup (минуты) и его компоненты для переналадки prev→c с учётом первой
         // резки/заправки станка. cost == changeoverCost(...) — единый источник.
         // #3853: первая резка станка считается переналадкой от РЕАЛЬНОЙ заправки станка
-        // (carryPrevSetup из prev_cut_setup) — ровно как окно резки в setupActivityColumns
+        // (carryPrevSetup) — ровно как окно резки в setupActivityColumns
         // (persistence). Раньше генерация planStart брала здесь «ножи с нуля» (firstCutSetup),
         // а окно — переналадку от заправки → на первой карточке дня возникал разрыв/перекрытие.
         // carryOverPrevCut нейтрализует партию ИМЕННО первой резки c (как arr[0] в persistence),
@@ -3438,27 +3397,25 @@
 
     // #4300/#4312: заправка станков НА ВХОДЕ в окно планирования — конфигурация ПОСЛЕДНЕГО задания
     // станка, запланированного РАНЬШЕ базы «С». Станок к началу окна уже несёт наладку вчерашней резки
-    // ПЛАНА (ножи/сырьё загружены и остаются на ночь). Без неё splitMachineQueue берёт для ПЕРВОЙ резки
-    // окна carryPrevSetup из prev_cut_setup — слепка ПОСЛЕДНЕЙ ФИЗИЧЕСКИ НАЧАТОЙ резки станка
-    // (FR_task_start < planBase), а НЕ вчерашней резки текущего плана — и заряжает ей переналадку от
-    // ЭТОЙ старой конфигурации. А computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка
+    // ПЛАНА (ножи/сырьё загружены и остаются на ночь). Без неё splitMachineQueue зарядил бы ПЕРВОЙ резке
+    // окна настройку с нуля, а computeCutSetupUpdates считает ту же резку по ВСЕЙ группе станка
     // (вчерашняя резка плана → сегодняшняя) near-zero переналадкой. Окно упаковщика получается длиннее
-    // хранимой наладки → «дыра» после первого задания дня, РАЗМЕРОМ changeover(prev_cut_setup,
-    // перваяРезка) (#4300: Станок 1 — 45 мин ножи+сырьё, Станок 2 — 30 мин ножи).
+    // хранимой наладки → «дыра» после первого задания дня (#4300: Станок 1 — 45 мин ножи+сырьё,
+    // Станок 2 — 30 мин ножи).
     //
     // #4312: источник — ВСЯ очередь станка (groupBySlitter: день → planStart, тот же порядок, в котором
     // считает колонки computeCutSetupUpdates), а НЕ только резки, исключённые из planInput механизмом
-    // #4294. Прежняя версия (prevSetupFromExcludedCuts: planInput ∩ keepIds) мимо двух живых случаев,
-    // и «дыра в полчаса» возвращалась (issue #4312, Станок 3 22.07: 08:00–09:06, следующее с 09:36):
+    // #4294. Иначе мимо проходят два живых случая, и «дыра в полчаса» возвращается (issue #4312,
+    // Станок 3 22.07: 08:00–09:06, следующее с 09:36):
     //   • вчерашняя резка «Завершён» — она ЕСТЬ в keepIds (cutsBeforeWindowToKeep смотрит все резки),
-    //     но её нет в planInput (там фильтр по статусу) → поиск заправки не находил ничего;
+    //     но её нет в planInput (там фильтр по статусу);
     //   • вчерашняя резка в ЗАФИКСИРОВАННОЙ (🔒) цепочке — cutsBeforeWindowToKeep её намеренно не
-    //     возвращает (день такой цепочки движок держит сам) → keepIds пуст, переопределения не было
-    //     вовсе, и первая резка окна получала переналадку от prev_cut_setup.
+    //     возвращает (день такой цепочки движок держит сам).
     // Статус и замок на заправку станка не влияют: физически на нём остаются ножи и сырьё ПОСЛЕДНЕГО
     // задания, что бы с этим заданием ни было в учёте. Инвариант — заправка ровно та, от которой
     // computeCutSetupUpdates считает наладку первой резки окна: упаковщик и хранимые колонки сходятся,
-    // дыры нет. Нет заданий раньше «С» → станка в ответе нет (остаётся prev_cut_setup). Вход не мутирует.
+    // дыры нет. #4371: это ЕДИНСТВЕННЫЙ источник заправки — нет заданий раньше «С» → станка в ответе
+    // нет, и первая резка окна считает настройку с нуля. Вход не мутирует.
     function prevSetupBeforeWindow(cuts, baseMidnightMs) {
         var out = {};
         groupBySlitter(cuts || []).forEach(function(group){
@@ -3526,7 +3483,7 @@
     // за такой простой станок разряжают. Очередь — в порядке groupBySlitter (день → planStart), тот же,
     // в котором считает setupActivityColumns. Для ПЕРВОГО задания очереди предшественник — заправка
     // станка, и её день задаёт carryDayOffset (день последнего задания раньше «С» — prevSetupBeforeWindow,
-    // #4312 — либо 0 для prev_cut_setup: слепок описывает станок на день базы). Пустые ranges → {}.
+    // #4312; заправки нет → 0, отсчёт от дня базы). Пустые ranges → {}.
     function setupResetCutIds(orderedCuts, ranges, baseMidnightMs, carryDayOffset) {
         var out = {};
         if (!(ranges || []).length) return out;
@@ -3622,7 +3579,7 @@
                 baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
                 machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
                 distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut,
-                prevSetupBySlitter: opts.prevSetupBySlitter   // #4288: заправка станков (prev_cut_setup) — первая резка очереди наследует её как prev (размещение + релокация)
+                prevSetupBySlitter: opts.prevSetupBySlitter   // #4288: заправка станков — первая резка очереди наследует её как prev (размещение + релокация)
             };
             slotPlan = computeSlotPlacement(merged.cuts, slotExtend(slotRefineCtx, {
                 dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,

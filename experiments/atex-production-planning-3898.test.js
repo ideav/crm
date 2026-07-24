@@ -6,7 +6,13 @@
 //   • downtimeSpanDays       — длина окна отпуска в КАЛЕНДАРНЫХ днях;
 //   • vacationSpanDaysOnDay  — длина отпуска, накрывающего сутки дня базы;
 //   • longVacationOnDay      — длинный ли отпуск (> порога) — только он обнуляет заправку;
-//   • planningPrevSetupBySlitter — короткий отпуск сохраняет заправку, длинный обнуляет.
+//   • planningPrevSetupBySlitter — длинный отпуск обнуляет заправку, короткий не трогает.
+//
+// #4371: собственной заправки у этой карты больше нет (отчёт prev_cut_setup убран) — станки берут
+// её из своих заданий прошлых дней (prevSetupBeforeWindow, #4300/#4312), которыми планировщик
+// накрывает карту следом. Поэтому «заправка сохранена» = станка в карте НЕТ (перекроет carry), а
+// «заправка обнулена» = ПУСТАЯ запись: пустая даёт полную настройку через changeoverParts, а
+// отсутствие записи — firstCutSetup (одни ножи).
 //
 // Run with: node experiments/atex-production-planning-3898.test.js
 
@@ -64,8 +70,6 @@ function sec(ms) { return Math.floor(ms / 1000); }
         var c = new Controller(root);
         c.slitters = [{ id: 'S1' }];
         c.downtimesBySlitter = { S1: downtimes };
-        // prevSetup станка ДО отпуска (унаследованная заправка).
-        c.prevSetupBySlitter = { S1: { materialId: 'A', winding: 'OUT', knifeWidths: [50] } };
         // Рабочее окно — полный день (slitterOnVacationDay требует полного покрытия).
         c.workingWindow = function () { return { startMin: 0, cutEndMin: 1440 }; };
         return c;
@@ -76,16 +80,16 @@ function sec(ms) { return Math.floor(ms / 1000); }
     var cShort = makeCtl(twoDay);
     assert(cShort.slitterOnVacationDay('S1', dayMs(2026, 7, 2)), 'предусловие: 02.07 покрыт отпуском');
     assert(!cShort.longVacationOnDay('S1', dayMs(2026, 7, 2)), 'longVacationOnDay: 2-дневный отпуск — НЕ длинный (порог 2)');
-    assertEqual(cShort.planningPrevSetupBySlitter(dayMs(2026, 7, 2)).S1, { materialId: 'A', winding: 'OUT', knifeWidths: [50] },
-        'короткий отпуск (2 дня) → заправка СОХРАНЕНА (нет полной настройки)');
+    assertEqual(cShort.planningPrevSetupBySlitter(dayMs(2026, 7, 2)).S1, undefined,
+        'короткий отпуск (2 дня) → карта станок не трогает: заправку даст carry из заданий (нет полной настройки)');
 
     var cLong = makeCtl(threeDay);
     assert(cLong.longVacationOnDay('S1', dayMs(2026, 7, 2)), 'longVacationOnDay: 3-дневный отпуск — длинный');
     assertEqual(cLong.planningPrevSetupBySlitter(dayMs(2026, 7, 2)).S1, { materialId: '', winding: '', knifeWidths: [] },
         'длинный отпуск (3 дня) → заправка ОБНУЛЕНА (полная настройка после отпуска, #3876)');
 
-    // Станок НЕ в отпуске в день базы → заправка как была (контроль).
-    assertEqual(cLong.planningPrevSetupBySlitter(dayMs(2026, 7, 10)).S1, { materialId: 'A', winding: 'OUT', knifeWidths: [50] },
+    // Станок НЕ в отпуске в день базы → карта его не трогает (контроль).
+    assertEqual(cLong.planningPrevSetupBySlitter(dayMs(2026, 7, 10)).S1, undefined,
         'день базы вне отпуска → заправка не трогается (контроль)');
 })();
 

@@ -185,33 +185,12 @@ assertEqual([seqNoSetup[0].setupKnifeMin, seqNoSetup[0].setupMaterialMin], [30, 
 assertEqual([seqNoSetup[1].setupKnifeMin, seqNoSetup[1].setupMaterialMin], [0, 15], 'attachSetupMinutes: смена сырья у второй');
 assertEqual([seqNoSetup[2].setupKnifeMin, seqNoSetup[2].setupMaterialMin], [30, 0], 'attachSetupMinutes #3693: первая на станке 20 (нет заправки) → ножи 30');
 
-// #3693: известна заправка станка 10 — тот же материал, ДРУГИЕ ножи → у первой только смена ножей 30.
-var seqSameMat = freshSeq();
-gantt.attachSetupMinutes(seqSameMat, TIMES, { '10': { materialId: '5', winding: 'OUT', knifeWidths: [99], knifeCount: 1 } });
-assertEqual([seqSameMat[0].setupKnifeMin, seqSameMat[0].setupMaterialMin], [30, 0], 'attachSetupMinutes #3693: заправка тем же сырьём, др. ножи → смена ножей 30');
-// Заправка ТОЧНО как первая резка (сырьё+намотка+ножи) → наладки нет (0).
-var seqIdentical = freshSeq();
-gantt.attachSetupMinutes(seqIdentical, TIMES, { '10': { materialId: '5', winding: 'OUT', knifeWidths: [55], knifeCount: 1 } });
-assertEqual([seqIdentical[0].setupKnifeMin, seqIdentical[0].setupMaterialMin], [0, 0], 'attachSetupMinutes #3693: та же заправка → первая без наладки');
-// Заправка другим сырьём, те же ножи → только смена сырья 15.
-var seqDiffMat = freshSeq();
-gantt.attachSetupMinutes(seqDiffMat, TIMES, { '10': { materialId: '999', winding: 'OUT', knifeWidths: [55], knifeCount: 1 } });
-assertEqual([seqDiffMat[0].setupKnifeMin, seqDiffMat[0].setupMaterialMin], [0, 15], 'attachSetupMinutes #3693: заправка др. сырьём, те же ножи → смена сырья 15');
-
-// ── #3693: разбор отчёта prev_cut_setup (порт prevSetupFromRows/carryOverPrevCut/firstSetup) ──
-var SETUP_ROWS = [
-    { task_start: '2000', slitter_id: '10', task_id: 'T2', wind_dir: 'IN', width: '55.00', material_id: '39014' },
-    { task_start: '2000', slitter_id: '10', task_id: 'T2', wind_dir: 'IN', width: '33.00', material_id: '39014' },
-    { task_start: '1000', slitter_id: '10', task_id: 'T1', wind_dir: 'OUT', width: '110.00', material_id: '2158' },
-    { task_start: '3000', slitter_id: '20', task_id: 'T3', wind_dir: 'IN', width: '90.00', material_id: '500' }
-];
-assertEqual(gantt.ganttPrevSetupFromRows(SETUP_ROWS, '10'),
-    { materialId: '39014', winding: 'IN', knifeWidths: [55, 33], knifeCount: 2 }, 'ganttPrevSetupFromRows: верхняя задача станка 10 (T2)');
-assertEqual(gantt.ganttPrevSetupFromRows(SETUP_ROWS, '999'), null, 'ganttPrevSetupFromRows: нет задач станка → null');
-assertEqual(Object.keys(gantt.ganttPrevSetupBySlitter(SETUP_ROWS)).sort(), ['10', '20'], 'ganttPrevSetupBySlitter: карта по станкам');
-assertEqual(gantt.ganttCarryOverPrevCut({ materialId: '39014', winding: 'IN', knifeWidths: [55, 33] }),
-    { materialId: '39014', winding: 'IN', knifeWidths: [55, 33], knifeCount: 2, rollerWidth: 0 }, 'ganttCarryOverPrevCut: из заправки');
-assertEqual(gantt.ganttCarryOverPrevCut(null).knifeCount, 0, 'ganttCarryOverPrevCut: нет заправки → пустой станок');
+// #4371: заправку станка Гант больше не спрашивает (отчёт prev_cut_setup убран) — первая резка
+// дорожки всегда считает настройку ножей с нуля, если у неё нет хранимых колонок наладки #3698.
+var seqFirstFromScratch = freshSeq();
+gantt.attachSetupMinutes(seqFirstFromScratch, TIMES);
+assertEqual([seqFirstFromScratch[0].setupKnifeMin, seqFirstFromScratch[0].setupMaterialMin], [30, 0],
+    'attachSetupMinutes #4371: первая резка дорожки → ножи с нуля 30, смена сырья не бронируется');
 assertEqual(gantt.ganttFirstSetupKnifeMin({ knifeCount: 2 }, TIMES), 30, 'ganttFirstSetupKnifeMin: есть ножи → 30');
 assertEqual(gantt.ganttFirstSetupKnifeMin({ knifeCount: 0, knifeWidths: [] }, TIMES), 0, 'ganttFirstSetupKnifeMin: нет ножей → 0');
 
