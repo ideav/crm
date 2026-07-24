@@ -154,6 +154,14 @@
          * POST _d_ord/{columnId}?JSON with order={1-based position} and _xsrf token.
          */
         async saveColumnOrderToServer(columnId, order) {
+            // _d_ord physically reorders the requisites, so every later response lays the
+            // `r` values out differently while this.columns still describes the old
+            // layout. The row length does not change, so the #2526 drift check cannot see
+            // it and every cell would be read from the neighbouring column. Raise the flag
+            // before the request — it may well be applied even if we never see the answer —
+            // so the next full reload (refresh, filter, sort) rebuilds the columns from
+            // fresh metadata (issue #4364).
+            this.metadataStale = true;
             try {
                 const apiBase = this.getApiBase();
                 const params = new URLSearchParams();

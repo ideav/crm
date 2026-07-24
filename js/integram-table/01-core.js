@@ -48,6 +48,8 @@
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
             this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
+            this.metadataStale = false;  // Cached columns may no longer match the server layout (issue #4364)
+            this._fullReload = false;  // True while a non-append load is running (issue #4364)
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
@@ -269,17 +271,124 @@
         }
 
         /**
+         * Decide whether the cached columns must be rebuilt from fresh metadata
+         * before mapping the just-received rows.
+         *
+         * Two kinds of drift are covered:
+         *  - the column *count* changed (issue #2526) — visible in the rows themselves;
+         *  - the column *order* or type changed (issue #4364) — invisible in the rows,
+         *    because `r` keeps the same length. Dragging a column persists the new
+         *    order to the server (_d_ord), so every subsequent response is laid out
+         *    differently while `this.columns` still describes the old layout, and
+         *    `row[this.columns.indexOf(col)]` reads the neighbouring column's value.
+         *    `metadataStale` is raised by the actions that can cause it.
+         *
+         * The flag is only honoured while a full reload is running: appends keep the
+         * rows already in `this.data`, which still follow the old layout, and the
+         * export helpers reuse the same parsers for throw-away fetches that must not
+         * swap the columns of the table on screen. In both cases the flag stays
+         * pending until the next full reload.
+         *
+         * @param {Array} dataArray - Server response array of {i, u, o, r}.
+         * @param {boolean} append - True when the rows are appended to existing data.
+         * @returns {boolean} True when this.columns has to be rebuilt from metadata.
+         */
+        shouldRebuildColumns(dataArray, append = false) {
+            if (this.metadataStale && this._fullReload && !append) {
+                return true;
+            }
+            return this.hasRowColumnCountMismatch(dataArray);
+        }
+
+        /**
          * Clear cached metadata and columns so the next load fetches fresh
          * data (issue #2526). Mirrors the pattern used after column edits in
          * issue #1400.
          */
         invalidateMetadataCache() {
+            this.metadataStale = false;
             this.metadataCache = {};
             this.metadataFetchPromises = {};
             this.globalMetadata = null;
             this.globalMetadataPromise = null;
             this.clearSharedGlobalMetadata();  // refetch fresh, don't reuse the page-shared copy (issue #4252)
             this.columns = [];
+        }
+
+        /**
+         * Drop the cached columns and return fresh metadata after drift was detected.
+         *
+         * A changed column *count* means the schema itself moved, so the whole cache —
+         * including the page-shared /metadata payload — is dropped (issue #2526).
+         * A changed column *order* touches this table only, so just its entry is
+         * refreshed: a refresh click then costs one small request instead of a full
+         * schema reload, and the globalMetadata-driven features (inline-edit parent
+         * lookup, back-references, column suggestions) keep working (issue #4364).
+         *
+         * @param {string|number} typeId - Table whose metadata is reloaded.
+         * @param {boolean} schemaChanged - True when the column count no longer matches.
+         * @returns {Promise<Object>} Fresh metadata for the table.
+         */
+        async reloadTableMetadata(typeId, schemaChanged) {
+            this.metadataStale = false;
+            if (schemaChanged) {
+                this.invalidateMetadataCache();
+                return this.fetchMetadata(typeId);
+            }
+            this.columns = [];
+            return this.refetchTableMetadata(typeId);
+        }
+
+        /**
+         * Re-fetch the metadata of a single table bypassing every cache, then publish
+         * it back into them so all consumers see the same fresh layout (issue #4364).
+         * @param {string|number} typeId - Table whose metadata is fetched.
+         * @returns {Promise<Object>} Fresh metadata for the table.
+         */
+        async refetchTableMetadata(typeId) {
+            delete this.metadataCache[typeId];
+            delete this.metadataFetchPromises[typeId];
+
+            const response = await fetch(`${ this.getApiBase() }/metadata/${ typeId }`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
+            }
+
+            let data = await response.json();
+            // The API returns a single-element array for some tables (see fetchMetadata)
+            if (Array.isArray(data)) {
+                data = data[0] || {};
+            }
+            const serverError = this.getServerError(data);
+            if (serverError) {
+                throw new Error(serverError);
+            }
+
+            this.metadataCache[typeId] = data;
+            this.replaceGlobalMetadataEntry(typeId, data);
+            return data;
+        }
+
+        /**
+         * Swap one table's entry inside the per-instance and the page-shared global
+         * metadata, leaving every other table untouched (issue #4364, #4252).
+         * Both may reference the same array — replacing twice is harmless.
+         */
+        replaceGlobalMetadataEntry(typeId, metadata) {
+            const replaceIn = list => {
+                if (!Array.isArray(list)) {
+                    return;
+                }
+                const idx = list.findIndex(item => String(item.id) === String(typeId));
+                if (idx !== -1) {
+                    list[idx] = metadata;
+                }
+            };
+            replaceIn(this.globalMetadata);
+            const shared = IntegramTable._sharedGlobalMetadata;
+            if (shared) {
+                replaceIn(shared[this.getApiBase()]);
+            }
         }
 
         init() {
@@ -523,6 +632,14 @@
                 return;
             }
 
+            // A pending metadataStale flag means the server's column layout no longer
+            // matches this.columns (issue #4364). Appending would mix rows laid out the
+            // new way into data laid out the old way, and the columns cannot be swapped
+            // without invalidating the rows already on screen — so reload everything.
+            if (append && this.metadataStale) {
+                append = false;
+            }
+
             // Dedupe concurrent loads. When a load is already running, return its
             // in-flight promise instead of a no-op so callers that `await this.loadData(...)`
             // wait for columns/data to be rebuilt. Returning early used to leave
@@ -546,6 +663,9 @@
         }
 
         async _runLoadData(append = false) {
+            // Marks the window in which a pending metadataStale flag may be acted on
+            // (issue #4364) — see shouldRebuildColumns().
+            this._fullReload = !append;
             this.beginRequest();
 
             try {
@@ -562,6 +682,15 @@
                     if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
+                }
+
+                // The reload went through: whatever the data source was, the columns now
+                // describe the rows we are about to show, so the flag has done its job.
+                // Clearing it here also keeps report-shaped sources — which build their
+                // columns from every response anyway — from getting stuck with a flag no
+                // parser consumes (issue #4364).
+                if (!append) {
+                    this.metadataStale = false;
                 }
 
                 // If server returned null or empty result, treat as empty (issue #1514)
@@ -686,6 +815,7 @@
                 this.hasMore = false;
                 this.handleLoadDataError(error, append);
             } finally {
+                this._fullReload = false;
                 this.isLoading = false;
                 this.endRequest();
                 // Check if table fits on screen and needs more data
@@ -1116,11 +1246,12 @@
 
             // Detect metadata drift: rows whose `r` length differs from the
             // current column count mean another user changed the table schema
-            // while we were viewing it (issue #2526). Refresh metadata and
-            // rebuild the columns from scratch.
-            if (this.hasRowColumnCountMismatch(data)) {
-                this.invalidateMetadataCache();
-                const refreshedMetadata = await this.fetchMetadata(this.options.tableTypeId);
+            // while we were viewing it (issue #2526); a raised `metadataStale`
+            // flag means the column order itself moved (issue #4364). Refresh
+            // metadata and rebuild the columns from scratch.
+            if (this.shouldRebuildColumns(data, append)) {
+                const refreshedMetadata = await this.reloadTableMetadata(
+                    this.options.tableTypeId, this.hasRowColumnCountMismatch(data));
 
                 if (!this.options.title) {
                     const refreshedTitle = this.tableDisplayName(refreshedMetadata);

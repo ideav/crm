@@ -137,8 +137,12 @@
         /**
          * Refresh table data from scratch, clearing existing records (issue #1514).
          * If the server returns empty or null result, the table is cleared.
+         * The columns are rebuilt from fresh metadata too, so a layout changed by
+         * this or another user (reordered, retyped or renamed columns) is picked up
+         * instead of shifting every cell by one column (issue #4364).
          */
         refreshData() {
+            this.metadataStale = true;
             this.data = [];
             this.loadedRecords = 0;
             this.hasMore = true;
