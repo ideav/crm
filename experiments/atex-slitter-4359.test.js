@@ -159,6 +159,56 @@ var ids = feed.eventsForSelectedSlitter().map(function(x) { return x.ev.id; }).s
 assertEqual(ids, ['legacy-cut', 'own'],
     '#4359: в ленте станка — его событие по ссылке и старое событие резки; чужое отсеяно');
 
+// ── смена сквозная по дням: событие записано СЕГОДНЯ, оператор работает ВЧЕРАШНИЙ день ────────
+// Ровно случай из тикета: в тулбаре 23.07.2026, «Открыть смену» пишет событие 24.07 (#4348 —
+// событие фиксируется текущим моментом). Отсечка по выбранному дню в filterShiftEvents
+// выбрасывала его сразу после записи: тост «Смена открыта» есть, а смена закрыта.
+function makePult(events) {
+    var inst = Object.create(Controller.prototype);
+    inst.userId = '1640';
+    inst.selectedSlitterId = '1277';
+    inst.selectedSlitterLabel = function() { return 'Станок 1'; };
+    inst.selectedDate = '2026-07-23';       // оператор работает вчерашний день
+    inst.currentCutId = null;
+    inst.cuts = [];
+    inst.applyEventStatuses = function() {};
+    inst.applyLoadedEvents(events);
+    return inst;
+}
+
+// список событий с боевой базы (issue #4359): все «Начало смены», записаны 24.07
+var live = [
+    { id: '1', when: '2026-07-24 11:54:16', type: 'Начало смены', userId: '1640', notes: 'Станок 1 · 2026-07-23', slitterId: null },
+    { id: '2', when: '2026-07-24 11:54:20', type: 'Начало смены', userId: '1640', notes: 'Станок 1 · 2026-07-23', slitterId: null },
+    { id: '3', when: '2026-07-24 11:54:24', type: 'Начало смены', userId: '1640', notes: 'Станок 2 · 2026-07-23', slitterId: null },
+    { id: '4', when: '2026-07-24 12:27:50', type: 'Начало смены', userId: '1640', notes: 'Станок 1 · 2026-07-23', slitterId: '1277' },
+    { id: '5', when: '2026-07-24 12:29:22', type: 'Начало смены', userId: '1640', notes: 'Станок 1 · 2026-07-23', slitterId: '1277' }
+];
+var pult = makePult(live);
+assertEqual(pult.shiftEvents.length, 5,
+    '#4359: события смены не режутся по выбранному дню (смена сквозная, #4332 п.2)');
+assert(pult.isShiftOpen() === true,
+    '#4359: событие «Начало смены» записано 24.07, в тулбаре 23.07 → смена ОТКРЫТА');
+
+// «Конец смены» этого станка (тоже «не в том» дне) закрывает смену
+var closed = makePult(live.concat([
+    { id: '6', when: '2026-07-24 12:40:00', type: 'Конец смены', userId: '1640', notes: '', slitterId: '1277' }
+]));
+assert(closed.isShiftOpen() === false,
+    '#4359: последнее событие станка — «Конец смены» → закрыта, в каком дне записано неважно');
+
+// чужой оператор по-прежнему отсеивается
+var alienUser = makePult([{ id: '7', when: '2026-07-24 12:00:00', type: 'Начало смены', userId: '999', slitterId: '1277' }]);
+assert(alienUser.isShiftOpen() === false, '#4359: событие другого оператора смену не открывает');
+
+// отметки проходов задания будущего дня тоже не теряются (#4332 п.4 + #4348)
+var passes = makePult([
+    { id: 'p1', when: '2026-07-24 12:31:00', type: 'Резка', userId: '1640', cutId: '625873', slitterId: '1277' },
+    { id: 'p2', when: '2026-07-24 12:35:00', type: 'Резка', userId: '1640', cutId: '625873', slitterId: '1277' }
+]);
+assertEqual(passes.donePassCount({ id: '625873' }), 2,
+    '#4359: отмеченные проходы считаются независимо от выбранного дня (было 0 → «Резка 1 из M» врала)');
+
 // ── пустой отчёт не выдаётся за «событий нет» (симптом тикета: смена «закрыта», кнопок нет) ────
 function makeLoader(reportRows, tableEvents) {
     var inst = Object.create(Controller.prototype);
