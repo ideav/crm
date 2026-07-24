@@ -45,6 +45,9 @@
         cutDueKeys: cutDueKeys,                 // #3769
         cutOrderedWidthKeys: cutOrderedWidthKeys, // #4230: ширины полос, идущих в заказ (остальное — склад/отходы)
         countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
+        planTsSeconds: planTsSeconds,           // #4346: «Дата план»/«Закончено» → unix-секунды
+        deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
+        deviationSettlePlan: deviationSettlePlan, // #4346: «Урегулировать» — новые «Даты план» отклонившихся
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
@@ -2776,6 +2779,184 @@
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка переноса задания: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #4346: отклонения факта от плана по ВСЕЙ загруженной очереди (не по видимому диапазону
+    // [С; По]): просроченные задания лежат в прошлом и в рабочий фильтр диспетчера обычно не
+    // попадают, а знать о них он должен. this.cuts — весь отчёт cut_planning (loadPlanning),
+    // фильтр дат клиентский, так что дополнительного запроса не нужно.
+    AtexProductionPlanning.prototype.deviationState = function() {
+        var groups = deviationGroups(this.cuts || [], planDateDayKey(controllerNowMs(this)));
+        return {
+            groups: groups,
+            n: groups.overdue.length,
+            m: groups.early.length,
+            total: groups.overdue.length + groups.early.length
+        };
+    };
+
+    // #4346: подпись/видимость кнопки «Отклонения N/M» (зовётся из renderQueue). Отклонений нет —
+    // кнопки нет: в норме панель не должна нести красный сигнал.
+    AtexProductionPlanning.prototype.updateDeviationsButton = function() {
+        if (!this.devBtn) return;
+        var st = this.deviationState();
+        this.devBtn.style.display = st.total ? '' : 'none';
+        this.devBtn.textContent = 'Отклонения ' + st.n + '/' + st.m;
+        this.devBtn.title = 'Просрочено — ' + st.n + ' (плановый день прошёл, задание не выполнено); '
+            + 'выполнено досрочно — ' + st.m + ' (задание выполнено раньше планового дня). '
+            + 'Открыть список и урегулировать';
+    };
+
+    // #4346: ближайший день, в который станку можно поставить работу: рабочий по «Календарю»
+    // (#3788), НЕзамороженный (#4326) и без «Отпуска» этого станка (#3876). Отсчёт от сегодня.
+    // Арифметика по компонентам даты (как dayKeyFromOffset) — переживает перевод часов.
+    // Ничего не нашли за горизонт — отдаём сегодня (лучше показать день, чем потерять задание).
+    AtexProductionPlanning.prototype.nearestFreeDayMs = function(slitterId) {
+        var now = new Date(controllerNowMs(this));
+        var sid = String(slitterId == null ? '' : slitterId);
+        for (var i = 0; i < CALENDAR_HORIZON_DAYS; i++) {
+            var ms = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, 0, 0, 0, 0).getTime();
+            if (!this.dayIsWorking(ms)) continue;
+            if (this.dayIsFrozen(ms)) continue;
+            if (sid !== '' && this.slitterOnVacationDay(sid, ms)) continue;
+            return ms;
+        }
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    };
+
+    // #4346: одна группа списка отклонений. Подпись задания — его «номер» (с #3242 это плановые
+    // дата-время старта, formatCutNumber), дальше станок, сырьё и состояние факта.
+    AtexProductionPlanning.prototype.renderDeviationGroup = function(title, list, kind) {
+        var box = el('div', { class: 'atex-pp-dev-group atex-pp-dev-' + kind });
+        box.appendChild(el('h3', { class: 'atex-pp-dev-group-title', text: title + ' — ' + list.length }));
+        if (!list.length) {
+            box.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
+            return box;
+        }
+        var listEl = el('ul', { class: 'atex-pp-dev-list' });
+        list.forEach(function(c) {
+            var parts = [formatCutNumber(c.number) || ('#' + c.id)];
+            var label = c.slitter && c.slitter.label;
+            if (label) parts.push(label);
+            if (c.materialName) parts.push(c.materialName);
+            parts.push(kind === 'early'
+                ? ('выполнено ' + (formatDayKey(planDateDayKey(c.endDate)) || '—'))
+                : 'не выполнено');
+            listEl.appendChild(el('li', { class: 'atex-pp-dev-item', title: 'id ' + c.id, text: parts.join(' · ') }));
+        });
+        box.appendChild(listEl);
+        return box;
+    };
+
+    // #4346: форма «Отклонения» — список в две группы + «Урегулировать» / «Закрыть». Диспетчеру,
+    // которому нужно иначе, форма не мешает: закрыл — и раскидал вручную (перенос 🗓 / ↑↓).
+    AtexProductionPlanning.prototype.openDeviations = function() {
+        var self = this;
+        var st = this.deviationState();
+        if (!st.total) { this.notify('Отклонений нет', 'info'); return; }
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dev-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-dev-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+
+        var content = el('div', { class: 'atex-pp-dev-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Отклонения от плана' }));
+        content.appendChild(this.renderDeviationGroup('Просрочено', st.groups.overdue, 'overdue'));
+        content.appendChild(this.renderDeviationGroup('Выполнено досрочно', st.groups.early, 'early'));
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Урегулировать: выполненные досрочно уйдут в день фактического выполнения; просроченные '
+            + 'встанут перед следующим заданием своего станка (нет следующего — на ближайший рабочий '
+            + 'незамороженный день), всё последующее сдвинется. Порядок заданий сохраняется.' }));
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger', type: 'button', text: 'Урегулировать' });
+        okBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + st.n
+                + ', выполненных досрочно — ' + st.m + '. План после них пересобирается.' });
+            self.confirmAction(msg, actions, [
+                { label: 'Урегулировать', warning: true, inline: true, onConfirm: function() {
+                    close();
+                    self.settleDeviations(st.groups);
+                } }
+            ]);
+        });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', close);
+        actions.appendChild(okBtn);
+        actions.appendChild(closeBtn);
+        content.appendChild(actions);
+
+        this.root.appendChild(overlay);
+    };
+
+    // #4346: «Урегулировать» — одной операцией по обеим группам. Пишем только «Дату план»
+    // (главное значение резки → _m_save с t{tableId}, как moveCutToDay: _m_set её не задаёт,
+    // issue #775), значения даёт чистый deviationSettlePlan. Затем ОДНА пересборка очереди
+    // preserveOrder=true — «сдвинуть последующие по общим правилам», не пересобирая порядок
+    // (ТЗ: «Порядок заданий остается прежним»). Пере-планирования избегают задания прошлых дней
+    // (#4294), поэтому досрочные, уехавшие в свой фактический день, пересборка не тронет.
+    AtexProductionPlanning.prototype.settleDeviations = function(groups) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        var cutMeta = this.meta && this.meta.cut;
+        if (!cutMeta || cutMeta.id == null) {
+            this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error');
+            return Promise.resolve(false);
+        }
+        var mainKey = 't' + cutMeta.id;
+        var win = this.workingWindow();
+        var plan = deviationSettlePlan(this.cuts || [], groups, {
+            todayKey: planDateDayKey(controllerNowMs(this)),
+            shiftStartMin: Number(win && win.startMin) || 0,
+            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
+        });
+        var byId = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        // Пишем только изменившиеся (#3427): повторное «Урегулировать» без новых отклонений — no-op.
+        var writes = plan.filter(function(p) {
+            var c = byId[String(p.id)];
+            return c && planTsSeconds(c.planDate) !== p.planStart;
+        });
+        if (!writes.length) {
+            this.notify('Отклонения уже урегулированы — переносить нечего', 'info');
+            return Promise.resolve(false);
+        }
+
+        this.setBusy(true);
+        this.showProgress('Урегулирование отклонений…', writes.length);
+        var done = 0;
+        var chain = Promise.resolve();
+        writes.forEach(function(p) {
+            chain = chain.then(function() {
+                var fields = {}; fields[mainKey] = String(p.planStart);
+                return self.post('_m_save/' + encodeURIComponent(p.id) + '?JSON', fields)
+                    .then(function() { self.updateProgress(++done); });
+            });
+        });
+        return chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress(); self.setBusy(false); self.render();
+            var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
+            var freeDay = byReason('free-day');
+            self.notify('Урегулировано заданий: ' + writes.length
+                + ' · просроченных — ' + (byReason('before-next') + freeDay)
+                + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
+                + ' · досрочных — ' + byReason('early'), 'success');
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+        }).catch(function(err) {
+            self.hideProgress(); self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка урегулирования отклонений: ' + (err && err.message || err), 'error');
             return false;
         });
     };
@@ -6639,6 +6820,9 @@
         if (this._renderingQueue) { console.warn('[pp] ⚠️ renderQueue: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._renderingQueue = true;
         try {
+        // #4346: «Отклонения N/M» — до любых ранних выходов ниже: счёт идёт по ВСЕЙ очереди,
+        // а не по видимому диапазону, поэтому от состава вкладок он не зависит.
+        this.updateDeviationsButton();
         var t0 = Date.now();
         var box = this.queueEl;
         // #3429: фокус и каретку поля поиска запоминаем ДО очистки DOM. box.innerHTML=''
@@ -7726,6 +7910,14 @@
         downtimeBtn.style.display = 'none';
         downtimeBtn.addEventListener('click', function() { self.openDowntime(); });
         this.downtimeBtn = downtimeBtn;
+        // #4346: «Отклонения N/M» — красная кнопка-сигнал расхождения факта с планом: N просроченных
+        // (плановый день раньше сегодня, «Закончено» пусто), M выполненных досрочно (план сегодня или
+        // позже, «Закончено» раньше сегодня). Подпись и видимость проставляет renderQueue: нет
+        // отклонений — кнопки нет. Последняя в ряду, чтобы не сдвигать привычные кнопки.
+        var devBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger atex-pp-dev-btn', type: 'button', text: 'Отклонения' });
+        devBtn.style.display = 'none';
+        devBtn.addEventListener('click', function() { self.openDeviations(); });
+        this.devBtn = devBtn;
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
@@ -7733,6 +7925,7 @@
         queueActions.appendChild(fixBtn);
         queueActions.appendChild(delBtn);
         queueActions.appendChild(downtimeBtn);
+        queueActions.appendChild(devBtn);   // #4346
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
