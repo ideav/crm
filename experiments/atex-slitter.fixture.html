@@ -135,6 +135,17 @@ window.fetch = function(url, opts) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
+    // #4370: отчёт next_cut_setup (93371) — конфигурация предстоящих резок станка по
+    // расписанию. Нужен для подсказки «бесшовное продолжение смены» (.atex-sl-seamless):
+    // у Слиттера-1 первая резка СЛЕДУЮЩЕГО дня идёт на том же сырье (material_id 5).
+    if (/\/report\/next_cut_setup/.test(u)) {
+        var slId = (u.match(/FR_slitter_id=([^&]+)/) || [])[1] || '';
+        if (String(slId) !== '1') return json([]);
+        return json([
+            { task_id: '306', task_start: planAt('10:00'), width: '250', material_id: '5', batch_ord: '1' },
+            { task_id: '350', task_start: planTomorrowAt('08:00'), width: '250', material_id: '5', batch_ord: '1' }
+        ]);
+    }
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj) {
         var tid = mObj[1];

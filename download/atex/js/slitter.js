@@ -1112,8 +1112,22 @@
         this.events = [];         // события смены выбранной резки
         this.shiftEvents = [];    // #4359: события смены оператора (все дни — смена сквозная, #4332)
         this.selectedBatchIds = [];
+        this.seamlessNotice = null; // #3609: подсказка «бесшовное продолжение» ВЫБРАННОЙ резки
         this.busy = false;
     }
+
+    // #4370: сброс всего, что относится к ВЫБРАННОЙ резке. Вызывается при смене станка и даты:
+    // раньше сбрасывались только currentCut/currentCutId/selectedBatchIds, а подсказка
+    // «бесшовное продолжение» (.atex-sl-seamless) и полосы оставались от прежней резки —
+    // под списком другого станка висело неактуальное предупреждение про ножи и сырьё.
+    AtexSlitter.prototype.clearCutSelection = function() {
+        this.currentCutId = null;
+        this.currentCut = null;
+        this.currentStrips = [];
+        this.events = [];
+        this.selectedBatchIds = [];
+        this.seamlessNotice = null;
+    };
 
     AtexSlitter.prototype.url = function(path) {
         return '/' + encodeURIComponent(this.db) + '/' + path;
@@ -1513,6 +1527,11 @@
     // «оставить конфигурацию» определяется даже когда резка следующего дня не загружена в
     // очередь пульта (тот же случай, что один выбранный день в планировании). Сравниваем по
     // НАБОРУ ШИРИН (widthSetKey: отчёт без «Кол-ва полос») и по сырью.
+    // #4370: точка отсчёта — ТЕКУЩЕЕ (открытое) задание: его станок, его «Дата план» и его
+    // полосы. Под одной сменой оператор выполняет задания будущих дней (#4332 п.4), поэтому
+    // «следующий день» считается от дня ОТКРЫТОГО задания, а не от выбранного в тулбаре дня и
+    // не от последнего задания прошедшего дня: делая задание 24-го, оператор сравнивается с
+    // первым заданием 25-го.
     AtexSlitter.prototype.computeSeamless = function() {
         var self = this;
         this.seamlessNotice = null;
@@ -1535,6 +1554,10 @@
             var sameMaterial = curMatId !== '' && curMatId === String(next.materialId || '');
             if (!sameKnives && !sameMaterial) return;
             self.seamlessNotice = {
+                // #4370: подсказка принадлежит КОНКРЕТНОЙ резке и станку — renderSeamless
+                // рисует её, только пока эта резка открыта (иначе она переживала смену
+                // станка/дня и оставалась неактуальной).
+                cutId: String(cut.id), slitterId: sid,
                 nextCut: { id: next.taskId, label: core.cutTitle(next.taskStart) },
                 sameKnives: sameKnives, sameMaterial: sameMaterial
             };
@@ -1730,6 +1753,10 @@
         box.innerHTML = '';
         var n = this.seamlessNotice;
         if (!n) return;
+        // #4370: подсказка живёт только вместе со «своей» резкой и своим станком.
+        var cut = this.currentCut;
+        if (!cut || String(cut.id) !== String(n.cutId)) return;
+        if (n.slitterId && this.selectedSlitterId && String(n.slitterId) !== String(this.selectedSlitterId)) return;
         var nextLabel = (n.nextCut && (n.nextCut.label || n.nextCut.id)) || '';
         if (n.sameMaterial) {
             box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
@@ -1808,9 +1835,7 @@
         dateInp.value = this.selectedDate || core.todayISO();
         dateInp.addEventListener('change', function() {
             self.selectedDate = dateInp.value || core.todayISO();
-            self.currentCutId = null;
-            self.currentCut = null;
-            self.selectedBatchIds = [];
+            self.clearCutSelection();   // #4370: вместе с резкой уходит и её подсказка о бесшовной смене
             self.loadShiftEvents().then(function() { self.render(); });
         });
 
@@ -1824,9 +1849,7 @@
         select.addEventListener('change', function() {
             self.selectedSlitterId = select.value;
             self.storeSelectedSlitter(); // #3460: запоминаем выбор станка
-            self.currentCutId = null;
-            self.currentCut = null;
-            self.selectedBatchIds = [];
+            self.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
             // #3674: report/slitter_cuts фильтруется по станку → при смене станка
             // перезагружаем резки (раньше грузились один раз, фильтровал visibleCuts).
             self.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
