@@ -443,7 +443,7 @@
     }
 
     // #3737: конфигурация первой резки СЛЕДУЮЩЕГО календарного дня (после curDayKey) для
-    // станка из строк отчёта next_cut_setup (93371). Отчёт идёт по расписанию (task_start ↑),
+    // станка из строк отчёта next_cut_setup (643132). Отчёт идёт по расписанию (task_start ↑),
     // по строке на «Партию ГП»: ширина (width), сырьё (material_id), намотка (wind_dir). Берём
     // задание с наименьшим task_start в дне позже текущего и собираем все его полосы.
     // → { taskId, taskStart, widthKey, materialId } | null. Чистая → покрыта тестом.
@@ -1112,8 +1112,22 @@
         this.events = [];         // события смены выбранной резки
         this.shiftEvents = [];    // #4359: события смены оператора (все дни — смена сквозная, #4332)
         this.selectedBatchIds = [];
+        this.seamlessNotice = null; // #3609: подсказка «бесшовное продолжение» ВЫБРАННОЙ резки
         this.busy = false;
     }
+
+    // #4370: сброс всего, что относится к ВЫБРАННОЙ резке. Вызывается при смене станка и даты:
+    // раньше сбрасывались только currentCut/currentCutId/selectedBatchIds, а подсказка
+    // «бесшовное продолжение» (.atex-sl-seamless) и полосы оставались от прежней резки —
+    // под списком другого станка висело неактуальное предупреждение про ножи и сырьё.
+    AtexSlitter.prototype.clearCutSelection = function() {
+        this.currentCutId = null;
+        this.currentCut = null;
+        this.currentStrips = [];
+        this.events = [];
+        this.selectedBatchIds = [];
+        this.seamlessNotice = null;
+    };
 
     AtexSlitter.prototype.url = function(path) {
         return '/' + encodeURIComponent(this.db) + '/' + path;
@@ -1143,8 +1157,19 @@
     AtexSlitter.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
             return resp.text().then(function(text) {
-                try { return JSON.parse(text); }
+                var data;
+                try { data = JSON.parse(text); }
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
+                // #4371: платформа отдаёт отказ телом [{"error":"…"}] со статусом 4xx. Раньше это
+                // тело возвращалось вызывающему КАК ДАННЫЕ: несуществующий отчёт («Запрос не
+                // найден») выглядел строкой без нужных полей, фича молча выключалась, и никто
+                // месяц не замечал. Роняем, как post() роняет на {error} (см. также #4359).
+                if (!resp.ok) {
+                    var first = Array.isArray(data) ? data[0] : data;
+                    var msg = (first && (first.error || first.err)) || ('HTTP ' + resp.status);
+                    throw new Error(path + ': ' + msg);
+                }
+                return data;
             });
         });
     };
@@ -1508,11 +1533,19 @@
     // на этом станке совпадает по ножам и/или сырью — предупреждаем оператора (не убирать
     // сырьё / не трогать ножи). Результат в this.seamlessNotice, рендерит renderSeamless.
     // #3737: конфигурацию первой резки СЛЕДУЮЩЕГО дня берём из защищённого отчёта
-    // next_cut_setup (93371) по станку, начиная с полуночи текущего дня. Отчёт отдаёт ширины
+    // next_cut_setup (643132) по станку, начиная с полуночи текущего дня. #4371: это ОТДЕЛЬНЫЙ
+    // запрос, не 93371 prev_cut_setup — у них противоположная сортировка task_start (здесь ↑,
+    // «ближайшая после границы»; там ↓, «последняя до границы»), одним запросом оба сценария не
+    // закрыть. Отчёт отдаёт ширины
     // полос и сырьё каждой предстоящей резки в порядке расписания (task_start) — поэтому
     // «оставить конфигурацию» определяется даже когда резка следующего дня не загружена в
     // очередь пульта (тот же случай, что один выбранный день в планировании). Сравниваем по
     // НАБОРУ ШИРИН (widthSetKey: отчёт без «Кол-ва полос») и по сырью.
+    // #4370: точка отсчёта — ТЕКУЩЕЕ (открытое) задание: его станок, его «Дата план» и его
+    // полосы. Под одной сменой оператор выполняет задания будущих дней (#4332 п.4), поэтому
+    // «следующий день» считается от дня ОТКРЫТОГО задания, а не от выбранного в тулбаре дня и
+    // не от последнего задания прошедшего дня: делая задание 24-го, оператор сравнивается с
+    // первым заданием 25-го.
     AtexSlitter.prototype.computeSeamless = function() {
         var self = this;
         this.seamlessNotice = null;
@@ -1535,10 +1568,18 @@
             var sameMaterial = curMatId !== '' && curMatId === String(next.materialId || '');
             if (!sameKnives && !sameMaterial) return;
             self.seamlessNotice = {
+                // #4370: подсказка принадлежит КОНКРЕТНОЙ резке и станку — renderSeamless
+                // рисует её, только пока эта резка открыта (иначе она переживала смену
+                // станка/дня и оставалась неактуальной).
+                cutId: String(cut.id), slitterId: sid,
                 nextCut: { id: next.taskId, label: core.cutTitle(next.taskStart) },
                 sameKnives: sameKnives, sameMaterial: sameMaterial
             };
-        }).catch(function() {});
+        }).catch(function(e) {
+            // #4371: подсказка необязательная — тост тут был бы шумом на каждом открытии резки,
+            // но и молчать нельзя: именно молчание скрыло, что отчёт зовут по несуществующему имени.
+            console.error('atex-slitter: конфигурация следующей смены не прочитана —', e && e.message || e);
+        });
     };
 
     // #3460: вид сырья резки для шапки. У резки нет прямого поля «Вид сырья» —
@@ -1730,14 +1771,18 @@
         box.innerHTML = '';
         var n = this.seamlessNotice;
         if (!n) return;
+        // #4370: подсказка живёт только вместе со «своей» резкой и своим станком.
+        var cut = this.currentCut;
+        if (!cut || String(cut.id) !== String(n.cutId)) return;
+        if (n.slitterId && this.selectedSlitterId && String(n.slitterId) !== String(this.selectedSlitterId)) return;
         var nextLabel = (n.nextCut && (n.nextCut.label || n.nextCut.id)) || '';
         if (n.sameMaterial) {
             box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
-                '⚠ Сырьё совпадает с первой резкой следующего дня (' + nextLabel + ') — не убирайте сырьё, смена продолжится бесшовно.' }));
+                '⚠ Сырьё совпадает с первой резкой следующего дня (' + nextLabel + ') — не убирайте сырьё.' }));
         }
         if (n.sameKnives) {
             box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
-                '⚠ Конфигурация ножей совпадает с первой резкой следующего дня (' + nextLabel + ') — не трогайте ножи, смена продолжится бесшовно.' }));
+                '⚠ Конфигурация ножей совпадает с первой резкой следующего дня (' + nextLabel + ') — не трогайте ножи.' }));
         }
     };
 
@@ -1808,9 +1853,7 @@
         dateInp.value = this.selectedDate || core.todayISO();
         dateInp.addEventListener('change', function() {
             self.selectedDate = dateInp.value || core.todayISO();
-            self.currentCutId = null;
-            self.currentCut = null;
-            self.selectedBatchIds = [];
+            self.clearCutSelection();   // #4370: вместе с резкой уходит и её подсказка о бесшовной смене
             self.loadShiftEvents().then(function() { self.render(); });
         });
 
@@ -1824,9 +1867,7 @@
         select.addEventListener('change', function() {
             self.selectedSlitterId = select.value;
             self.storeSelectedSlitter(); // #3460: запоминаем выбор станка
-            self.currentCutId = null;
-            self.currentCut = null;
-            self.selectedBatchIds = [];
+            self.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
             // #3674: report/slitter_cuts фильтруется по станку → при смене станка
             // перезагружаем резки (раньше грузились один раз, фильтровал visibleCuts).
             self.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
