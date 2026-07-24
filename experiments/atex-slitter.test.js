@@ -540,7 +540,8 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     assertEqual(captured.params['t1050'], 400, '#3861 applyBatchConsumption: Остаток,м² = 800×500/1000 (по ширине)');
     assertEqual('t1160' in captured.params, false, '#3861 applyBatchConsumption: без finishMode «В работе» не трогаем');
     inst.applyBatchConsumption({ batchId: '77' }, 0, true);
-    assertEqual(captured.params['t1160'], '', '#3861 applyBatchConsumption: finishMode → «В работе» у партии снят');
+    // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
+    assertEqual(captured.params['t1160'], '0', '#3861 applyBatchConsumption: finishMode → «В работе» у партии снят');
 })();
 
 // markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
