@@ -140,6 +140,10 @@
 }
 .atex-sl-cut-future { box-shadow: inset 4px 0 0 var(--sl-cm-stock); }
 .atex-sl-cut-future .atex-sl-cut-num { color: var(--sl-cm-stock); font-size: 16px; line-height: 1; }
+/* #4365: уже выполненное задание будущего дня остаётся в списке — приглушённой каймой,
+   чтобы «следующее» (его можно начать) читалось первым. */
+.atex-sl-cut-future.is-past { box-shadow: inset 4px 0 0 var(--sl-border); }
+.atex-sl-cut-future.is-past .atex-sl-cut-num { color: var(--sl-muted); }
 
 /* Главная область */
 .atex-sl-main {
