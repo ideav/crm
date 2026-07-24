@@ -4963,6 +4963,35 @@
         };
     }
 
+    // #4304: красное предупреждение на карточке — задание ПРИШЛОСЬ РАЗОРВАТЬ по дням (не влезло
+    // в смену). Предупреждаем в двух независимых случаях, оба реальные:
+    //   А) ПРОСРОЧЕНО и разорвано — авто-планирование: объём больше смены, часть работы уезжает
+    //      за «Срок изготовления» (ateh: 158 проходов ≈ 506 мин против 470 мин нетто в смене —
+    //      физически не влезает в день до срока, хвост встаёт на следующий день);
+    //   Б) ЗАФИКСИРОВАНО и разорвано — ручной перенос: фиксация подразумевает «в один день», но
+    //      выносить работу за конец смены нельзя, генерация делит задание по потолку дня
+    //      (splitMachineQueue, #4304).
+    // Разрыв бывает не только на 2 дня — объём может не влезть и в 2, и в 3 смены, поэтому
+    // «разорвано» = у сегмента есть ЛЮБОЙ значок смежности (fromPrev «←» и/или toNext «→»):
+    // так помечены и голова, и середина, и хвост цепочки. Просрочка — по КОНКРЕТНОМУ сегменту:
+    // голова может стоять в срок, красным горит лишь тот кусок, что уехал за срок.
+    // → { text, title } для плашки либо null. Чистая (без DOM) → проверяется тестом.
+    function daySplitWarning(o){
+        o = o || {};
+        if (!(o.fromPrev || o.toNext)) return null;          // не разорвано — предупреждать не о чем
+        var overdue = !!o.overdue, fixed = !!o.fixed;
+        if (!overdue && !fixed) return null;                 // штатное дробление большого задания в срок
+        var subj = fixed ? 'Зафиксированное задание' : 'Задание';
+        return {
+            text: '⚠ ' + subj + ' разорвано по дням' + (overdue
+                ? ' и просрочено — не помещается в смену до срока'
+                : ' — не помещается в смену'),
+            title: subj + ' не помещается в смену и разорвано по дням' + (overdue
+                ? ' — часть работы выходит за «Срок изготовления»'
+                : ' — продолжение перенесено на следующие рабочие дни')
+        };
+    }
+
     // #3737: недостающий сосед карточки через ВНЕШНЮЮ границу выбранного диапазона дат.
     // Сегмент-продолжение задания за границей диапазона лежит в дне ВНЕ фильтра — в очередь
     // он не попадает, но присутствует в полном наборе резок (cut_planning грузится целиком).
@@ -8655,6 +8684,7 @@
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
         daySplitBadges: daySplitBadges,
+        daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
@@ -15626,6 +15656,17 @@
             infoChildren.push(el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' }));
             cardPanel.appendChild(el('div', { class: 'atex-pp-cut-info' }, infoChildren));
 
+            // #3769: «Срок изготовления» обеспечиваемых позиций — в скобках в конце строки полос.
+            // Срок один на задание (позиции резки кластеризованы по сроку), поэтому
+            // показываем общий набор сроков и красим строку по самому раннему (срочному):
+            // раньше «Даты план» → красный, дальше план+DAYS_FORECAST → жёлтый, в окне → как есть.
+            // #4051: includeSupplyFallback=true — срок берём и из cut_planning.due_date, когда
+            // позиция выпала из активного positions_list (иначе плашка пропадала у таких заданий).
+            // Считаем ОДИН раз на карточку: тот же признак просрочки нужен ниже предупреждению
+            // о разрыве по дням (см. блок «разорвано по дням»).
+            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);
+            var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
+
             // #3354 п.1: под первой строкой — сводка полос по ширинам. Контейнер
             // .atex-pp-cut-material содержит по одной строке .atex-pp-strip-row на ширину:
             // «{сырьё} {ширина} x {длина} {намотка} — {факт.ширина}мм х {резок} x {полос} = {мотков} шт.».
@@ -15633,14 +15674,6 @@
             if (stripGroups.length) {
                 // #3686: обратный резолв (факт→номинал) сверяет j= с «Номинальной шириной» рулона
                 var jumboWidth = self.nominalWidthByMaterial ? self.nominalWidthByMaterial[String(c.materialId)] : null;
-                // #3769: «Срок изготовления» обеспечиваемых позиций — в скобках в конце строки.
-                // Срок один на задание (позиции резки кластеризованы по сроку), поэтому
-                // показываем общий набор сроков и красим строку по самому раннему (срочному):
-                // раньше «Даты план» → красный, дальше план+DAYS_FORECAST → жёлтый, в окне → как есть.
-                // #4051: includeSupplyFallback=true — срок берём и из cut_planning.due_date, когда
-                // позиция выпала из активного positions_list (иначе плашка пропадала у таких заданий).
-                var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);
-                var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
                 var dueSuffix = '';
                 if (dueKeys.length) {
                     var dueLabels = dueKeys.map(formatDayKey).filter(function(s) { return s; });
@@ -15938,15 +15971,17 @@
             if (spanBadges.length) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-spans' }, spanBadges));
             }
-            // #4304: зафиксированное задание, которое ПРИШЛОСЬ РАЗОРВАТЬ по дням (не влезло в смену) —
-            // красное предупреждение оператору. Фиксация подразумевает «в один день», но выносить
-            // задание за конец смены нельзя (issue #4304: 158 проходов до 20:33) — генерация делит его
-            // по потолку дня (splitMachineQueue, #4304), а карточку помечаем: зафикс-резка с признаком
-            // продолжения «→» = была разорвана. Продолжение (не зафиксировано) предупреждения не несёт.
-            if (c.fixed && spans.toNext) {
+            // #4304: задание разорвано по дням (не влезло в смену) → красная плашка оператору.
+            // Условие и текст — в daySplitWarning (10-planning-engine, покрыто тестом): просрочено
+            // ИЛИ зафиксировано, на любом сегменте цепочки (разрыв бывает и на 3+ дня). Просрочка —
+            // по «Дате план» ЭТОГО сегмента (dueClass выше): голова в срок красной не станет.
+            var splitWarn = daySplitWarning({
+                fromPrev: spans.fromPrev, toNext: spans.toNext,
+                fixed: c.fixed, overdue: dueClass === 'is-overdue'
+            });
+            if (splitWarn) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-fixed-split-warn',
-                    title: 'Зафиксированное задание не помещается в смену и разорвано по дням — продолжение перенесено на следующий рабочий день',
-                    text: '⚠ Зафиксированное задание разорвано по дням — не помещается в смену' }));
+                    title: splitWarn.title, text: splitWarn.text }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
