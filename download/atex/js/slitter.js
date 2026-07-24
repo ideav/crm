@@ -1154,11 +1154,17 @@
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
+    // #4366: ПУСТОЕ значение = «очистить реквизит», и оно обязано доехать до сервера:
+    // `_m_set` с `t{req}=` снимает галку BOOLEAN и стирает DATETIME (проверено на 1078:
+    // «В работе» 1162 BOOLEAN, «Закончено» 16411 DATETIME). Раньше пустые значения
+    // выбрасывались из тела запроса, и ЛЮБАЯ очистка была немой: завершение резки писало
+    // «Закончено», а галка «В работе» оставалась стоять. Не пишем только undefined/null —
+    // это «реквизит не трогаем».
     AtexSlitter.prototype.post = function(path, params) {
         var body = new URLSearchParams();
         body.set('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
         Object.keys(params || {}).forEach(function(k) {
-            if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
+            if (params[k] !== undefined && params[k] !== null) body.set(k, params[k]);
         });
         return fetch(this.url(path), {
             method: 'POST',
@@ -2465,9 +2471,9 @@
     // (Начато/В работе/Закончено) и зафиксировать событие смены. Статус резки
     // после перезагрузки событий выводится из последнего события (applyEventStatuses).
     //   opts.setStarted   — проставить «Начато»=now, если ещё пусто
-    //   opts.setInWork    — true: «В работе»=1; false: «В работе»=''
+    //   opts.setInWork    — true: «В работе»=1; false: «В работе»=0 (#4366: снять галку)
     //   opts.setFinished  — проставить «Закончено»=now
-    //   opts.clearFinished— очистить «Закончено»
+    //   opts.clearFinished— очистить «Закончено» (пустым значением, #4366)
     AtexSlitter.prototype.cutAction = function(eventType, opts) {
         var self = this;
         var cut = this.currentCut;
@@ -2483,7 +2489,8 @@
         var fields = {};
         if (opts.setStarted && startedRid && !cut.startedAt) { cut.startedAt = when; fields['t' + startedRid] = when; }
         if (opts.setInWork === true && inWorkRid) { cut.inWork = '1'; fields['t' + inWorkRid] = '1'; }
-        if (opts.setInWork === false && inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = ''; }
+        // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
+        if (opts.setInWork === false && inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = '0'; }
         if (opts.setFinished && finishedRid) { cut.finishedAt = when; fields['t' + finishedRid] = when; }
         if (opts.clearFinished && finishedRid) { cut.finishedAt = ''; fields['t' + finishedRid] = ''; }
         var write = Object.keys(fields).length ? this.post('_m_set/' + cut.id + '?JSON', fields) : Promise.resolve();
@@ -2550,8 +2557,9 @@
         if (remMReq) bf['t' + remMReq] = newRemM;
         if (remAreaReq) bf['t' + remAreaReq] = newRemArea;
         if (finishMode) {
+            // #4366: «В работе» партии — булев реквизит (1074/16427), снимаем нулём.
             var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
-            if (batchActiveReq) bf['t' + batchActiveReq] = '';
+            if (batchActiveReq) bf['t' + batchActiveReq] = '0';
         }
         if (!Object.keys(bf).length) return Promise.resolve(null);
         return this.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
@@ -2582,7 +2590,8 @@
 
         this.setBusy(true);
 
-        // 1. Погонаж + «Закончено»=now + снять «В работе»
+        // 1. Погонаж + «Закончено»=now + снять галку «В работе» (#4366: нулём, и пустые
+        //    значения теперь доезжают до сервера — см. post)
         var meta = this.meta.cut;
         var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
         var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
@@ -2593,7 +2602,7 @@
         if (meterageRid) fields['t' + meterageRid] = meterage;
         if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры
         if (finishedRid) { cut.finishedAt = this.eventDateTime(); fields['t' + finishedRid] = cut.finishedAt; }
-        if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = ''; }
+        if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = '0'; }
 
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
             cut.meterage = String(meterage);
