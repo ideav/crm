@@ -135,8 +135,12 @@ function fieldsOf(inst, idx) { return (inst.posts[idx || 0] || {}).params || {};
     inst.materialWidths = {};
     inst.applyBatchConsumption(inst.currentCut, 300, true);
     var f = fieldsOf(inst);
-    assert(f.t16427 === '0', '#4366: «В работе» партии сырья снимается нулём');
     assert(f.t8456 === 700, '#4366: остаток партии списан (1000 − 300)');
+    // #4374: партию из оборота выводит только ИСЧЕРПАНИЕ, а не сам факт завершения резки.
+    assert(!('t16427' in f), '#4374: партия с остатком остаётся «В работе»');
+    inst.posts = [];
+    inst.applyBatchConsumption(inst.currentCut, 1000, true);
+    assert(fieldsOf(inst).t16427 === '0', '#4366: исчерпанная партия — «В работе» снимается нулём');
 })();
 
 // ── 6. стирание показаний доезжает до БД (тот же корень) ───────────────────────────────────────

@@ -128,6 +128,27 @@ function field(metaId, row, reqId) {
     return order.indexOf(String(reqId));
 }
 
+// #4374: применить _m_set к записи мок-БД: t{reqId} → колонка r по порядку метаданных.
+function applySet(objId, body) {
+    var tables = [[105, DB.materials], [106, DB.batches], [107, DB.slitters], [110, DB.cuts], [114, DB.events]];
+    tables.forEach(function(pair) {
+        var metaId = pair[0];
+        (pair[1] || []).forEach(function(rec) {
+            if (String(rec.i) !== String(objId)) return;
+            var meta = META.filter(function(m){ return String(m.id) === String(metaId); })[0];
+            var order = [String(meta.id)].concat(meta.reqs.map(function(r){ return String(r.id); }));
+            order.forEach(function(reqId, idx) {
+                if (!body.has('t' + reqId)) return;
+                var v = body.get('t' + reqId);
+                // булев реквизит: '0'/пусто = снято, иначе 'X' (как отдаёт сервер)
+                rec.r[idx] = (reqId === '1054' || reqId === '1119')
+                    ? ((v === '' || v === '0') ? '' : 'X')
+                    : v;
+            });
+        });
+    });
+}
+
 var realFetch = window.fetch;
 window.fetch = function(url, opts) {
     var u = String(url);
@@ -152,7 +173,12 @@ window.fetch = function(url, opts) {
         var fi = u.match(/F_I=(\d+)/);
         var fu = u.match(/F_U=(\d+)/);
         if (tid === '105') return json(DB.materials);
-        if (tid === '106') return json(DB.batches);
+        if (tid === '106') {
+            // #4374: боевой report/material_batches?FR_is_active=%25 отдаёт ТОЛЬКО партии с
+            // проставленной «В работе» (проверено на ateh: 62 строки из 96 записей 1074).
+            var actIdx = field(106, null, 1054);
+            return json(DB.batches.filter(function(b){ return String(b.r[actIdx] || '').trim() !== ''; }));
+        }
         if (tid === '107') return json(DB.slitters);
         if (tid === '110') {
             if (fi) return json(DB.cuts.filter(function(c){ return String(c.i) === fi[1]; }));
@@ -175,7 +201,15 @@ window.fetch = function(url, opts) {
         console.log('[mock] _m_new', u, opts && opts.body);
         return json({ obj: id, i: id });
     }
-    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+    if (/\/_m_set\//.test(u)) {
+        // #4374: правка ПРИМЕНЯЕТСЯ к мок-данным (раньше только логировалась) — иначе стенд
+        // не воспроизводит последствия записи: снятую «В работе» партии, проставленное
+        // «Закончено» у задания.
+        applySet((u.match(/\/_m_set\/(\d+)/) || [])[1], new URLSearchParams((opts && opts.body) || ''));
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    if (/\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
         console.log('[mock]', u, opts && opts.body);
         return json({ ok: 1 });
     }
