@@ -1760,11 +1760,11 @@
         var nextLabel = (n.nextCut && (n.nextCut.label || n.nextCut.id)) || '';
         if (n.sameMaterial) {
             box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
-                '⚠ Сырьё совпадает с первой резкой следующего дня (' + nextLabel + ') — не убирайте сырьё, смена продолжится бесшовно.' }));
+                '⚠ Сырьё совпадает с первой резкой следующего дня (' + nextLabel + ') — не убирайте сырьё.' }));
         }
         if (n.sameKnives) {
             box.appendChild(el('div', { class: 'atex-sl-warn-note', text:
-                '⚠ Конфигурация ножей совпадает с первой резкой следующего дня (' + nextLabel + ') — не трогайте ножи, смена продолжится бесшовно.' }));
+                '⚠ Конфигурация ножей совпадает с первой резкой следующего дня (' + nextLabel + ') — не трогайте ножи.' }));
         }
     };
 
