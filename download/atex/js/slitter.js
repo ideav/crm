@@ -1733,13 +1733,25 @@
         return this.currentQueue().cuts;
     };
 
-    // #3861: все резки выбранного дня выполнены — список непуст и нет первой открытой резки
-    // (только при открытой смене). #4332: скрывает кнопки проходов ✓ Готово / ✓✓ Готовы все и
-    // служит признаком для показа «следующего задания» будущих дней (renderFutureCut).
+    // #4332 п.4: следующее задание БУДУЩИХ дней этого станка (одно, ближайшее незавершённое)
+    // — секция «Следующее задание» под очередью дня (renderFutureCut) и признак того, что
+    // смене есть что делать дальше (allCutsDone).
+    AtexSlitter.prototype.futureCut = function() {
+        return core.nextFutureCut(this.cuts, {
+            slitterId: this.selectedSlitterId,
+            afterDateKey: core.dateKey(this.selectedDate)
+        });
+    };
+
+    // #3861: работа смены окончена — резки выбранного дня выполнены (список непуст, первой
+    // открытой нет) при открытой смене; скрывает кнопки проходов ✓ Готово / ✓✓ Готовы все.
+    // #4362: смена сквозная (#4332 п.2) и продолжается заданием будущего дня (#4332 п.4) —
+    // пока такое задание есть, работа НЕ окончена: его проходы отмечают теми же кнопками.
     AtexSlitter.prototype.allCutsDone = function() {
         if (!this.isShiftOpen()) return false;
         var q = this.currentQueue();
-        return q.cuts.length > 0 && !q.firstOpenCutId;
+        if (!q.cuts.length || q.firstOpenCutId) return false;
+        return !this.futureCut();
     };
 
     AtexSlitter.prototype.renderToolbar = function() {
@@ -1863,10 +1875,7 @@
         var self = this;
         if (!box || !this.isShiftOpen()) return;
         if (this.currentQueue().firstOpenCutId) return;   // ещё есть невыполненное задание текущего дня
-        var future = core.nextFutureCut(this.cuts, {
-            slitterId: this.selectedSlitterId,
-            afterDateKey: core.dateKey(this.selectedDate)
-        });
+        var future = this.futureCut();
         if (!future) return;
         box.appendChild(el('div', { class: 'atex-sl-future-head', text: 'Следующее задание · ' + core.formatDate(future.planDate) }));
         var active = String(this.currentCutId) === String(future.id);
@@ -2015,8 +2024,9 @@
         var self = this;
         if (!this.isShiftOpen()) return el('div', { class: 'atex-sl-head-pass' });   // #4332 п.3: отметки проходов — только при открытой смене
         if (this.isCutLocked(cut)) return el('div', { class: 'atex-sl-head-pass' });
-        // #3861: когда все резки смены выполнены — кнопки ✓ Готово / ✓✓ Готовы все
-        // убираем вовсе (резку можно открыть для просмотра деталей).
+        // #3861: когда работа смены окончена — кнопки ✓ Готово / ✓✓ Готовы все убираем вовсе
+        // (резку можно открыть для просмотра деталей). #4362: задание будущего дня (#4332 п.4)
+        // работу смены продолжает — у него кнопки проходов есть (allCutsDone его учитывает).
         if (this.allCutsDone()) return el('div', { class: 'atex-sl-head-pass' });
         var canMark = !core.isDone(cut.status);
         var one = el('button', { class: 'atex-sl-btn atex-sl-btn-pass', type: 'button', text: '✓ Готово',
