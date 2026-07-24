@@ -2634,7 +2634,13 @@
         var bf = {};
         if (remMReq) bf['t' + remMReq] = newRemM;
         if (remAreaReq) bf['t' + remAreaReq] = newRemArea;
-        if (finishMode) {
+        // #4374: «В работе» у партии сырья означает «партия в обороте»: склад ставит флаг при
+        // оприходовании и снимает, когда партия ИСЧЕРПАНА (warehouse.js, batchExhaustedByProvision).
+        // Завершение резки само по себе партию из оборота не выводит — на рулоне остаются метры,
+        // и он нужен следующим заданиям. Снимаем флаг только когда остаток ушёл в ноль.
+        // (До #4366 снятие вообще не доезжало до сервера, поэтому промах не был виден.)
+        var retire = finishMode && !(newRemM > 0);
+        if (retire) {
             // #4366: «В работе» партии — булев реквизит (1074/16427), снимаем нулём.
             var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
             if (batchActiveReq) bf['t' + batchActiveReq] = '0';
@@ -2643,7 +2649,7 @@
         return this.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
             batch.remainderM = newRemM;
             batch.remainder = newRemArea;
-            if (finishMode && typeof batch.active !== 'undefined') batch.active = '';
+            if (retire && typeof batch.active !== 'undefined') batch.active = '';
         });
     };
 
@@ -2702,11 +2708,17 @@
         }).then(function() {
             self.applyEventStatuses();
             self.setBusy(false);
-            self.notify('Резка завершена. Погонаж: ' + meterage + ' м. Остаток партии: ' + (cut.batchId ? self.findBatch(cut.batchId) : {}).remainderM + ' м', 'success');
+            // #4374: партии может уже не быть в пуле (report material_batches отдаёт только
+            // партии «В работе»). Обращение к null роняло ПОСЛЕДНИЙ шаг: запись в БД прошла,
+            // а форма оставалась со старым статусом и показывала «Ошибка завершения».
+            var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
+            self.notify('Резка завершена. Погонаж: ' + meterage + ' м'
+                + (batch ? '. Остаток партии: ' + core.round3(batch.remainderM || 0) + ' м' : ''), 'success');
             self.advanceToNextCut(); // #3583: переключить на следующее задание
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка завершения: ' + err.message, 'error');
+            self.render();   // #4374: часть записей могла пройти — показываем актуальное состояние
         });
     };
 

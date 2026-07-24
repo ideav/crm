@@ -539,9 +539,14 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     assertEqual(captured.params['t1148'], 800, '#3861 applyBatchConsumption: Остаток,м = 1000−200 (расход)');
     assertEqual(captured.params['t1050'], 400, '#3861 applyBatchConsumption: Остаток,м² = 800×500/1000 (по ширине)');
     assertEqual('t1160' in captured.params, false, '#3861 applyBatchConsumption: без finishMode «В работе» не трогаем');
+    // #4374: завершение резки САМО ПО СЕБЕ партию из оборота не выводит — на рулоне остались метры.
     inst.applyBatchConsumption({ batchId: '77' }, 0, true);
+    assertEqual('t1160' in captured.params, false,
+        '#4374 applyBatchConsumption: finishMode с остатком → «В работе» не трогаем');
     // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
-    assertEqual(captured.params['t1160'], '0', '#3861 applyBatchConsumption: finishMode → «В работе» у партии снят');
+    inst.applyBatchConsumption({ batchId: '77' }, 1000, true);
+    assertEqual(captured.params['t1160'], '0',
+        '#3861/#4374 applyBatchConsumption: партия ИСЧЕРПАНА → «В работе» снят нулём');
 })();
 
 // markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
