@@ -1220,67 +1220,8 @@
         };
     }
 
-    // #3693: текущая заправка станка из отчёта prev_cut_setup → { materialId, winding,
-    // knifeWidths, knifeCount } по верхней (последней по task_start) задаче станка. Порт
-    // prevSetupFromRows планировщика (production-planning.js #3688). rows фильтруются по
-    // slitterId; нет задач → null. Нужна для переналадки ПЕРВОЙ резки станка (см. attachSetupMinutes).
-    function ganttPrevSetupFromRows(rows, slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var byTask = {};
-        (rows || []).forEach(function(r) {
-            if (sid !== '' && String(r.slitter_id) !== sid) return;
-            var tid = String(r.task_id == null ? '' : r.task_id);
-            if (tid === '') return;
-            var ts = Number(r.task_start) || 0;
-            if (!byTask[tid]) byTask[tid] = { start: ts, widths: [], material: '', winding: '' };
-            var rec = byTask[tid];
-            if (ts > rec.start) rec.start = ts;
-            var w = Number(r.width) || 0;
-            if (w > 0) rec.widths.push(w);
-            if (rec.material === '' && r.material_id != null && String(r.material_id) !== '') rec.material = String(r.material_id);
-            if (rec.winding === '' && r.wind_dir) rec.winding = ganttNormWinding(r.wind_dir);
-        });
-        var top = null;
-        Object.keys(byTask).forEach(function(tid) {
-            if (top === null || byTask[tid].start > byTask[top].start) top = tid;
-        });
-        if (top === null) return null;
-        var rec = byTask[top];
-        return { materialId: rec.material, winding: rec.winding, knifeWidths: rec.widths.slice(), knifeCount: rec.widths.length };
-    }
-
-    // #3693: строки отчёта prev_cut_setup → карта { slitterId: заправка }. Чистая — тест.
-    function ganttPrevSetupBySlitter(rows) {
-        var bySlitter = {};
-        (rows || []).forEach(function(r) {
-            var sid = String(r && r.slitter_id == null ? '' : r.slitter_id);
-            if (sid === '') return;
-            (bySlitter[sid] = bySlitter[sid] || []).push(r);
-        });
-        var map = {};
-        Object.keys(bySlitter).forEach(function(sid) {
-            var setup = ganttPrevSetupFromRows(bySlitter[sid], sid);
-            if (setup) map[sid] = setup;
-        });
-        return map;
-    }
-
-    // #3693: синтетическая «предыдущая резка» для первой резки станка от его текущей заправки
-    // (порт carryOverPrevCut #3688). cutChangeoverMinutes сравнивает материал/намотку/ножи —
-    // партию Гант не сравнивает (нет в cut_planning), поэтому её здесь не переносим. Нет заправки
-    // (null) → пустой станок: материал/намотка/ножи отличны → полный сетап.
-    function ganttCarryOverPrevCut(prevSetup) {
-        if (!prevSetup) {
-            return { materialId: ' none', winding: ' none', knifeWidths: [], knifeCount: 0, rollerWidth: 0 };
-        }
-        return { materialId: prevSetup.materialId, winding: prevSetup.winding,
-                 knifeWidths: (prevSetup.knifeWidths || []).slice(),
-                 knifeCount: (prevSetup.knifeWidths || []).length, rollerWidth: 0 };
-    }
-
-    // #3693: настройка ножей ПЕРВОЙ резки станка с нуля, когда заправка неизвестна (нет данных
-    // prev_cut_setup) — порт firstSetupParts/firstSetupCost (#3669 п.2). Только ножи (KNIFE),
-    // если у резки есть ножи; смена сырья при неизвестной заправке не бронируется. → минуты.
+    // #3669 п.2: настройка ножей ПЕРВОЙ резки станка с нуля — предшественника у неё нет.
+    // Только ножи (KNIFE), если у резки есть ножи; смена сырья не бронируется. → минуты.
     function ganttFirstSetupKnifeMin(next, times) {
         var t = times || GANTT_OP_TIMES;
         var knifeTime = Number(t.KNIFE != null ? t.KNIFE : GANTT_OP_TIMES.KNIFE) || 0;
@@ -1314,12 +1255,14 @@
     // #3675 п.3: минуты наладки ПЕРЕД каждой резкой = переналадка с ПРЕДЫДУЩЕЙ резкой того же
     // станка (порядок — по очерёдности/старту, как orderCutsInGroup). Пишет cut.setupKnifeMin /
     // cut.setupMaterialMin. Мутирует cuts. Чистая — покрывается тестами.
-    // #3693: ПЕРВАЯ резка станка тоже получает наладку (как в планировщике, #3688): если известна
-    // текущая заправка станка (prevSetupBySlitter из отчёта prev_cut_setup) — переналадка от неё
-    // (та же конфигурация → 0, другое сырьё/ножи → смена сырья/ножей); заправка неизвестна →
-    // настройка ножей с нуля (firstSetup, #3669 п.2). Раньше первая резка ставила 0.
-    function attachSetupMinutes(cuts, times, prevSetupBySlitter) {
-        var prevMap = prevSetupBySlitter || {};
+    // #3693: ПЕРВАЯ резка станка тоже получает наладку — настройку ножей с нуля (firstSetup,
+    // #3669 п.2). Раньше первая резка ставила 0.
+    // #4371: заправку станка из отчёта prev_cut_setup здесь больше не спрашиваем. Ветка была
+    // недостижима у всех резок с хранимыми колонками наладки #3698 (а это первая резка дорожки
+    // почти всегда — она самая старая во всём cut_planning), то есть отчёт на 5000 строк тянулся
+    // впустую. Вдобавок запрос шёл БЕЗ FR_task_start (#3862 на Гант не портирован), поэтому
+    // «верхней по task_start» оказывалась задача НОВОГО плана из будущего.
+    function attachSetupMinutes(cuts, times) {
         var byMachine = {};
         (cuts || []).forEach(function(cut) {
             if (!cut) return;
@@ -1343,11 +1286,8 @@
                 }
                 var ch;
                 if (!prev) {
-                    // #3693: первая резка станка — от текущей заправки (prev_cut_setup), иначе ножи с нуля.
-                    var setup = prevMap[sid];
-                    ch = setup
-                        ? cutChangeoverMinutes(ganttCarryOverPrevCut(setup), cut, times)
-                        : { knife: ganttFirstSetupKnifeMin(cut, times), material: 0 };
+                    // #4371: предшественника нет — настройка ножей с нуля.
+                    ch = { knife: ganttFirstSetupKnifeMin(cut, times), material: 0 };
                 } else {
                     ch = cutChangeoverMinutes(prev, cut, times);
                 }
@@ -1739,9 +1679,6 @@
         ganttLeaderMin: ganttLeaderMin,           // #3705
         attachLeaderMinutes: attachLeaderMinutes, // #3705
         cutChangeoverMinutes: cutChangeoverMinutes,
-        ganttPrevSetupFromRows: ganttPrevSetupFromRows,
-        ganttPrevSetupBySlitter: ganttPrevSetupBySlitter,
-        ganttCarryOverPrevCut: ganttCarryOverPrevCut,
         ganttFirstSetupKnifeMin: ganttFirstSetupKnifeMin,
         attachStrips: attachStrips,
         attachSetupMinutes: attachSetupMinutes,
@@ -1844,12 +1781,6 @@
     // отчёта → пусто (наладка ножей деградирует до «сужение ролика», смена сырья считается всегда).
     AtexCutGantt.prototype.loadStrips = function() {
         return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,20000').catch(function() { return []; });
-    };
-
-    // #3693: текущая заправка станков из отчёта prev_cut_setup (как у планировщика, #3688) — для
-    // наладки ПЕРВОЙ резки станка. Ошибка/нет доступа → пусто (деградация к настройке ножей с нуля).
-    AtexCutGantt.prototype.loadPrevCutSetup = function() {
-        return this.getJson('report/prev_cut_setup?JSON_KV&LIMIT=0,5000').catch(function() { return []; });
     };
 
     // #3675 п.3: op-времена наладки из таблицы «Время операции, мин» (как у планировщика). Код
@@ -2013,11 +1944,10 @@
             this.loadSlitters(),
             this.loadStrips(),
             this.loadOpTimes(),
-            this.loadPrevCutSetup(),   // #3693: текущая заправка станков для наладки первой резки
             this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
             this.loadCalendar()        // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
         ]).then(function(res) {
-            var lunchCfg = res[5] || {};   // #3846/#3904/#4007: { durationMin, startMin, breaks } из «Настройки»
+            var lunchCfg = res[4] || {};   // #3846/#3904/#4007: { durationMin, startMin, breaks } из «Настройки»
             self.lunchDurationMin = lunchCfg.durationMin || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
             self.lunchStartMin = lunchCfg.startMin;              // #3904: LUNCH_START (мин), NaN = неизвестно
             self.breaks = lunchCfg.breaks || [];                 // #4007 (ТЗ §5): короткие перерывы для Ганта
@@ -2025,9 +1955,7 @@
             // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
             attachStrips(self.cuts, res[2] || []);
             self.opTimes = res[3] || GANTT_OP_TIMES;
-            // #3693: первая резка станка — наладка от его текущей заправки (prev_cut_setup).
-            self.prevSetupBySlitter = ganttPrevSetupBySlitter(res[4] || []);
-            attachSetupMinutes(self.cuts, self.opTimes, self.prevSetupBySlitter);
+            attachSetupMinutes(self.cuts, self.opTimes);
             // #3705: лидер «между резками» — фолбэк для cutBarMinutes, когда нет cut_time в отчёте.
             attachLeaderMinutes(self.cuts, self.opTimes);
             var merged = {};

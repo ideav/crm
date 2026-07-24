@@ -18,23 +18,10 @@ function assertEqual(actual, expected, name) {
     else { console.log('  expected:', JSON.stringify(expected)); console.log('  actual:  ', JSON.stringify(actual)); process.exitCode = 1; }
 }
 
-// ── prevSetupFromRows: верхняя (последняя по task_start) задача станка ──
-var ROWS = [
-    { task_start:'2000', slitter_id:'1', task_id:'T2', wind_dir:'IN',  batch_ord:'1', width:'55.00', material_id:'39014' },
-    { task_start:'2000', slitter_id:'1', task_id:'T2', wind_dir:'IN',  batch_ord:'2', width:'33.00', material_id:'39014' },
-    { task_start:'1000', slitter_id:'1', task_id:'T1', wind_dir:'OUT', batch_ord:'1', width:'110.00', material_id:'2158' },
-    { task_start:'3000', slitter_id:'2', task_id:'T3', wind_dir:'IN',  batch_ord:'1', width:'90.00', material_id:'500' }
-];
-assertEqual(planning.prevSetupFromRows(ROWS, '1'),
-    { materialId:'39014', winding:'IN', knifeWidths:[55,33], knifeCount:2 },
-    'prevSetupFromRows: станок 1 → верхняя задача T2 (полосы 55,33, IN, 39014)');
-assertEqual(planning.prevSetupFromRows(ROWS, '2'),
-    { materialId:'500', winding:'IN', knifeWidths:[90], knifeCount:1 },
-    'prevSetupFromRows: станок 2 → T3');
-assertEqual(planning.prevSetupFromRows(ROWS, '999'), null, 'prevSetupFromRows: нет задач станка → null');
-
 // ── carryOverPrevCut: синтетическая «предыдущая резка» (партия нейтрализована) ──
-var setup1 = planning.prevSetupFromRows(ROWS, '1');
+// #4371: заправка станка приходит из его заданий прошлых дней (prevSetupBeforeWindow),
+// отчёта prev_cut_setup больше нет. Здесь важна только её форма.
+var setup1 = { materialId: '39014', winding: 'IN', knifeWidths: [55, 33], knifeCount: 2 };
 assertEqual(planning.carryOverPrevCut(setup1, { batchId:'b9' }),
     { materialId:'39014', winding:'IN', batchId:'b9', knifeWidths:[55,33], knifeCount:2, rollerWidth:0 },
     'carryOverPrevCut: из заправки (партия = как у next)');
