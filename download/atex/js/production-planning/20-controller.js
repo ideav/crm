@@ -46,6 +46,7 @@
         cutOrderedWidthKeys: cutOrderedWidthKeys, // #4230: ширины полос, идущих в заказ (остальное — склад/отходы)
         countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
         planTsSeconds: planTsSeconds,           // #4346: «Дата план»/«Закончено» → unix-секунды
+        cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
         deviationSettlePlan: deviationSettlePlan, // #4346: «Урегулировать» — новые «Даты план» отклонившихся
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
@@ -2599,6 +2600,9 @@
         var self = this;
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
+        // #4381: начатое задание не переносим. Кнопка «🗓» у него убрана, но метод зовут и иначе
+        // (drag-drop между днями, deep-link) — проверка авторитетная, здесь.
+        if (cutIsStarted(cut)) { this.notify('Начатое задание нельзя перенести', 'info'); return Promise.resolve(false); }
         var cutMeta = this.meta.cut;
         if (!cutMeta) { this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error'); return Promise.resolve(false); }
         var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
@@ -2801,10 +2805,15 @@
             var label = c.slitter && c.slitter.label;
             if (label) parts.push(label);
             if (c.materialName) parts.push(c.materialName);
+            // #4381: начатое задание в списке остаётся (диспетчер должен его видеть), но
+            // «Урегулировать» его не двигает — говорим об этом прямо в строке.
             parts.push(kind === 'early'
                 ? ('выполнено ' + (formatDayKey(planDateDayKey(c.endDate)) || '—'))
-                : 'не выполнено');
-            listEl.appendChild(el('li', { class: 'atex-pp-dev-item', title: 'id ' + c.id, text: parts.join(' · ') }));
+                : (cutIsStarted(c) ? 'начато — не двигаем' : 'не выполнено'));
+            listEl.appendChild(el('li', {
+                class: 'atex-pp-dev-item' + (kind !== 'early' && cutIsStarted(c) ? ' is-started' : ''),
+                title: 'id ' + c.id, text: parts.join(' · ')
+            }));
         });
         box.appendChild(listEl);
         return box;
@@ -2839,8 +2848,11 @@
         var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger', type: 'button', text: 'Урегулировать' });
         okBtn.addEventListener('click', function() {
             if (self.busy) return;
+            // #4381: начатые не двигаем — в подтверждении считаем только то, что реально поедет.
+            var startedN = st.groups.overdue.filter(function(x) { return cutIsStarted(x); }).length;
             var msg = el('span', { class: 'atex-pp-confirm-msg', text:
-                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + st.n
+                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + (st.n - startedN)
+                + (startedN ? ' (ещё ' + startedN + ' начато — остаются на месте)' : '')
                 + ', выполненных досрочно — ' + st.m + '. План после них пересобирается.' });
             self.confirmAction(msg, actions, [
                 { label: 'Урегулировать', warning: true, inline: true, onConfirm: function() {
@@ -3043,6 +3055,13 @@
         // #3508: зафиксированное (🔒) звено цепочки удалять нельзя — снять фиксацию сначала.
         if (chainIds.some(function(id) { return cutsById[id] && cutsById[id].fixed; })) {
             this.notify('В цепочке дробления есть зафиксированное задание — снимите фиксацию, чтобы удалить', 'error');
+            return;
+        }
+        // #4381: начатое звено (заполнено «Начато») удалять нельзя вообще — в отличие от 🔒 снять
+        // тут нечего: работа уже идёт. Кнопка «🗑» у начатого убрана; здесь — авторитетная проверка,
+        // в том числе на случай, когда начато ДРУГОЕ звено цепочки дробления.
+        if (chainIds.some(function(id) { return cutsById[id] && cutIsStarted(cutsById[id]); })) {
+            this.notify('Задание уже начато — удалить нельзя', 'error');
             return;
         }
         var label = cutTaskLabel(cut);
@@ -5193,6 +5212,10 @@
         var a = arr[index], b = arr[target];
         if (!a || !b) return Promise.resolve(false);
         if (a.fixed || b.fixed) { self.notify('Зафиксированное задание нельзя переставить', 'info'); return Promise.resolve(false); }
+        // #4381: начатое задание неприкосновенно — и само не переставляется, и через него не
+        // перепрыгнуть (обмен planStart сдвинул бы начатое). Кнопки ↑↓ у начатого убраны, но
+        // сосед мог бы утащить его свопом — закрываем и этот путь.
+        if (cutIsStarted(a) || cutIsStarted(b)) { self.notify('Начатое задание нельзя переставить', 'info'); return Promise.resolve(false); }
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey) { self.notify('Не найден реквизит даты резки', 'error'); return Promise.resolve(false); }
         var tsA = Number(a.planDate), tsB = Number(b.planDate);
@@ -6043,6 +6066,14 @@
                 if (c && !c.fixed && self.dayIsFrozen(c.planDate)) { c.fixed = true; pinnedRestore.push(c); }
             });
         }
+        // #4381: НАЧАТЫЕ задания (заполнено «Начато») неприкосновенны и для пересборки — иначе
+        // «Упорядочить»/перенос/«Урегулировать» уводили бы с их дня то, что уже идёт на станке.
+        // Приём тот же, что у замороженных дней: временный c.fixed (снимается в общем finally) →
+        // planCutOperations держит их день по dayAnchorByCut. Это ЗАКРЕПЛЕНИЕ (Вариант A #4326),
+        // а не жёсткий блок дня — просрочки оно не создаёт (#4338).
+        planInput.forEach(function(c){
+            if (c && !c.fixed && cutIsStarted(c)) { c.fixed = true; pinnedRestore.push(c); }
+        });
         // #4326-seal: предикат «день заморожен» (по смещению от базы плана) для упаковщика
         // splitMachineQueue: НОВЫЕ резки в замороженный день НЕ кладём (существующие уже закреплены
         // выше и остаются на своём дне). Так «заморозка» = «планировщик не запихнёт в день ничего»
@@ -6153,6 +6184,10 @@
         }
         if (plan.error === 'fixed') {
             self.notify('Зафиксированное задание нельзя переставить (оно «стена»)', 'info');
+            return Promise.resolve(false);
+        }
+        if (plan.error === 'started') {   // #4381
+            self.notify('Начатое задание нельзя переставить (оно «стена»)', 'info');
             return Promise.resolve(false);
         }
         if (!plan.assignments.length) return Promise.resolve(false);
@@ -7296,12 +7331,17 @@
             });
 
             var controls = el('div', { class: 'atex-pp-cut-controls' });
+            // #4381: НАЧАТОЕ задание (заполнено «Начато») неприкосновенно, даже если не
+            // зафиксировано: управляющие контролы у него не показываем ВООБЩЕ (⠿, ↑↓, 🔒, 🗓, 🗑) —
+            // остаются только «Полосы» (просмотр раскладки). Начатое уже идёт на станке: перенос,
+            // перестановка и удаление такого задания рассинхронизируют план с цехом.
+            var cutStarted = cutIsStarted(c);
             // #4306: ручка перетаскивания ⠿ (первый контрол). Зафиксированные (🔒) не перетаскиваются.
             var dragHandle = el('span', {
                 class: 'atex-pp-drag-handle' + (c.fixed ? ' is-disabled' : ''), text: '⠿',
                 title: c.fixed ? 'Зафиксированное задание нельзя перетаскивать' : 'Перетащить задание в пределах дня'
             });
-            if (!c.fixed) {
+            if (!c.fixed && !cutStarted) {
                 dragHandle.setAttribute('draggable', 'true');
                 dragHandle.addEventListener('dragstart', function(e) {
                     self._dragCut = { cutId: String(c.id), dayKey: cardDayKey, slitterId: cardSid };
@@ -7320,7 +7360,7 @@
                     }
                 });
             }
-            controls.appendChild(dragHandle);
+            if (!cutStarted) controls.appendChild(dragHandle);   // #4381
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
             // sameDayCuts/dayIdx вычислены выше (для seqText #3508 п.7) — переиспользуем.
@@ -7392,15 +7432,15 @@
                 if (self.busy || c.fixed) return;
                 self.deleteCutTask(c, cardPanel);
             });
-            controls.appendChild(up);
-            controls.appendChild(down);
+            // #4381: у начатого задания из всего ряда остаются только «Полосы».
+            if (!cutStarted) { controls.appendChild(up); controls.appendChild(down); }
             controls.appendChild(strips);
-            controls.appendChild(fix);
-            controls.appendChild(move);   // #3602: «🗓» перенос на другой день — между «🔒» и «🗑»
+            if (!cutStarted) controls.appendChild(fix);
+            if (!cutStarted) controls.appendChild(move);   // #3602: «🗓» перенос на другой день — между «🔒» и «🗑»
             // #3540: кнопки ◀▶ ручного сдвига планового старта убраны — двигать время вручную
             // не требуется. #3562: пин планового старта тоже убран — автогенерация двигает
             // зафиксированное задание по времени в течение дня и меняет его очередность.
-            controls.appendChild(del);
+            if (!cutStarted) controls.appendChild(del);   // #4381
             cardPanel.appendChild(controls);
 
             // #3616: дата рабочего дня — заголовком перед первой (видимой) карточкой каждого

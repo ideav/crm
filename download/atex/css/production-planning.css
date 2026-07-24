@@ -978,6 +978,8 @@
     overflow: auto;
 }
 .atex-pp-dev-item { margin: 2px 0; font-size: 13px; }
+/* #4381: начатое задание в списке отклонений — приглушённое: «Урегулировать» его не двигает. */
+.atex-pp-dev-item.is-started { color: var(--pp-muted); }
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;
