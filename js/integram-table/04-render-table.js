@@ -9,13 +9,17 @@
             const focusedElement = document.activeElement;
             let focusState = null;
 
-            if (focusedElement && focusedElement.classList.contains('filter-input-with-icon')) {
+            // #4373: the REF dropdown trigger is a filter control too — a re-render (say, the
+            // reload that follows picking an operator) must not drop the caret it just received.
+            const isRefTrigger = focusedElement && focusedElement.classList.contains('filter-ref-trigger');
+            if (focusedElement && (focusedElement.classList.contains('filter-input-with-icon') || isRefTrigger)) {
                 focusState = {
                     columnId: focusedElement.dataset.columnId,
                     // Range cells have two inputs sharing a columnId — remember which one (issue #3542)
                     rangePart: focusedElement.dataset.rangePart || null,
-                    selectionStart: focusedElement.selectionStart,
-                    selectionEnd: focusedElement.selectionEnd
+                    refTrigger: isRefTrigger,
+                    selectionStart: isRefTrigger ? null : focusedElement.selectionStart,
+                    selectionEnd: isRefTrigger ? null : focusedElement.selectionEnd
                 };
             }
 
@@ -258,9 +262,12 @@
             // position when a filter input lives outside the visible scroll viewport
             // (issue #2744).
             if (focusState) {
-                const selector = focusState.rangePart
-                    ? `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`
-                    : `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
+                let selector = `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
+                if (focusState.rangePart) {
+                    selector = `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`;
+                } else if (focusState.refTrigger) {
+                    selector = `.filter-ref-trigger[data-column-id="${focusState.columnId}"]`;
+                }
                 const newInput = this.container.querySelector(selector);
                 if (newInput) {
                     newInput.focus({ preventScroll: true });
