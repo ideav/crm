@@ -81,7 +81,10 @@
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
     var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
-    var EVENT_REQ ={ type: 'Тип события', cut: 'Задание в производство', user: 'Пользователь', value: 'Значение', notes: 'Примечания' }; // #3504: реквизит «Событие смены» переименован вслед за таблицей
+    // #3504: реквизит «Событие смены» переименован вслед за таблицей.
+    // #4359: slitter — ссылка на станок («Слиттер», ref на справочник слиттеров): станок события
+    // хранится ссылкой, а не только текстовой меткой в «Примечаниях».
+    var EVENT_REQ ={ type: 'Тип события', cut: 'Задание в производство', user: 'Пользователь', value: 'Значение', notes: 'Примечания', slitter: 'Слиттер' };
     var BATCH_REQ = {
         kind: 'Вид сырья',
         date: 'Дата прихода',
@@ -491,26 +494,42 @@
 
     // #3522: станок события смены. «Начало/Конец смены» пишут «Примечания» вида
     // «{станок} · {дата}» — станок = первый сегмент до « · ». Пусто, если метки нет.
+    // #4359: это ЗАПАСНОЙ путь — для событий, записанных до появления ссылки «Слиттер».
     function shiftEventSlitterLabel(event) {
         var notes = String(event && event.notes != null ? event.notes : '').trim();
         if (!notes) return '';
         return notes.split('·')[0].trim();
     }
 
-    // #3522: смена считается ОТДЕЛЬНО для каждого станка. Если slitterLabel задан —
-    // учитываем только события смены этого станка (по метке в «Примечаниях»);
-    // без него (старые вызовы/тесты) фильтр по станку не применяется.
+    // #4359: станок события — по ссылке «Слиттер» (реквизит события; в отчёте
+    // slitter_shift_events это поле slitter_id). Сверяем id с id — подпись станка может
+    // измениться в справочнике, ссылка при этом остаётся верной. У событий, записанных до
+    // появления реквизита, ссылки нет — для них остаётся метка в «Примечаниях» (#3522).
+    // Фильтр не задан (ни id, ни подписи) — событие подходит.
+    function shiftEventMatchesSlitter(event, slitterId, slitterLabel) {
+        var wantId = String(slitterId == null ? '' : slitterId).trim();
+        var wantLabel = String(slitterLabel == null ? '' : slitterLabel).trim();
+        if (!wantId && !wantLabel) return true;
+        var haveId = String(event && event.slitterId != null ? event.slitterId : '').trim();
+        if (wantId && haveId) return haveId === wantId;
+        if (!wantLabel) return false;
+        return shiftEventSlitterLabel(event) === wantLabel;
+    }
+
+    // #3522: смена считается ОТДЕЛЬНО для каждого станка. Если станок задан — учитываем
+    // только события смены этого станка; без него фильтр по станку не применяется.
+    // #4359: станок берём из ссылки «Слиттер» события (slitterId), подпись — запасной путь
+    // для старых событий (см. shiftEventMatchesSlitter).
     // #4332 п.2: открытость смены определяется по ПОСЛЕДНЕМУ событию «Начало смены»/
     // «Конец смены» этого станка НЕЗАВИСИМО от дня (фильтр по выбранному дню снят). Так
     // оператор под одной открытой сменой может выполнять задания будущих дней (#4332 п.4).
     // Параметр date оставлен для совместимости сигнатуры, но на выбор смены не влияет.
-    function hasOpenShift(events, userId, date, slitterLabel) {
-        var sl = String(slitterLabel == null ? '' : slitterLabel).trim();
+    function hasOpenShift(events, userId, date, slitterLabel, slitterId) {
         var last = null, lastKey = -Infinity, lastIdx = -1;
         (events || []).forEach(function(event, i) {
             if (!eventMatchesUser(event, userId)) return;
             if (!isShiftStartType(event.type) && !isShiftEndType(event.type)) return;
-            if (sl && shiftEventSlitterLabel(event) !== sl) return;
+            if (!shiftEventMatchesSlitter(event, slitterId, slitterLabel)) return;
             // #4332: порядок между днями — по хронологии (unix-сек), тай-брейк по индексу.
             var key = eventWhenSeconds(event.when);
             if (!isFinite(key)) key = -Infinity;   // невалидное время — не должно вытеснять валидные
@@ -848,6 +867,7 @@
 
     // События смены: report/slitter_shift_events → та же форма, что parseEventRows
     // (новые сверху). cutId — из event_cut_id (ref на задание, 16415).
+    // #4359: slitterId — из slitter_id (ref «Слиттер» события): станок события задан ссылкой.
     function rowsToShiftEvents(rows) {
         return (rows || []).map(function(row) {
             return {
@@ -858,7 +878,8 @@
                 userId: firstField(row, ['event_user_id']) || null,
                 user: firstField(row, ['event_user']),
                 value: firstField(row, ['event_value']),
-                notes: firstField(row, ['event_notes'])
+                notes: firstField(row, ['event_notes']),
+                slitterId: firstField(row, ['slitter_id', 'event_slitter_id']) || null
             };
         }).sort(function(a, b) {
             return String(b.when).localeCompare(String(a.when)); // новые сверху
@@ -950,6 +971,7 @@
         shiftContinuation: shiftContinuation,
         hasOpenShift: hasOpenShift,
         shiftEventSlitterLabel: shiftEventSlitterLabel,
+        shiftEventMatchesSlitter: shiftEventMatchesSlitter,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
         isSetupTask: isSetupTask,   // #3635 п.5
@@ -1526,11 +1548,13 @@
         var userIdx = colIndex(meta, EVENT_REQ.user);
         var valIdx = colIndex(meta, EVENT_REQ.value);
         var notesIdx = colIndex(meta, EVENT_REQ.notes);
+        var slitterIdx = colIndex(meta, EVENT_REQ.slitter);   // #4359: ссылка «Слиттер»
         return (rows || []).map(function(rec) {
             var r = rec.r || [];
             var cutId = cutIdx >= 0 ? parseRef(r[cutIdx]).id : null;
             if (!cutId && rec.u && String(rec.u) !== '1') cutId = String(rec.u);
             var userRef = userIdx >= 0 ? parseRef(r[userIdx]) : { id: null, label: '' };
+            var slitterRef = slitterIdx >= 0 ? parseRef(r[slitterIdx]) : { id: null, label: '' };
             return {
                 id: String(rec.i),
                 when: r[0] || '',
@@ -1539,7 +1563,9 @@
                 userId: userRef.id,
                 user: userRef.label,
                 value: valIdx >= 0 ? (r[valIdx] || '') : '',
-                notes: notesIdx >= 0 ? (r[notesIdx] || '') : ''
+                notes: notesIdx >= 0 ? (r[notesIdx] || '') : '',
+                slitterId: slitterRef.id || null,   // #4359
+                slitter: slitterRef.label || ''
             };
         }).sort(function(a, b) {
             return String(b.when).localeCompare(String(a.when)); // новые сверху
@@ -1561,7 +1587,18 @@
     AtexSlitter.prototype.loadShiftEvents = function() {
         var self = this;
         return this.getJson('report/slitter_shift_events?JSON_KV&LIMIT=0,5000').then(function(rows) {
-            self.applyLoadedEvents(core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []));
+            var list = core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+            if (list.length) { self.applyLoadedEvents(list); return; }
+            // #4359: пустой отчёт — НЕ доказательство, что событий нет: сломанный или
+            // недогранченный report/ отдаёт [] со статусом 200, и пульт молча считает смену
+            // закрытой (кнопки в задании не появляются). Перепроверяем прямым чтением таблицы;
+            // если события там ЕСТЬ — отчёт врёт, и об этом надо орать, а не чинить молча.
+            return self.loadShiftEventsFromTable().then(function() {
+                if (!(self.allEvents || []).length) return;
+                console.error('atex-slitter: report/slitter_shift_events отдал пусто, а в таблице «'
+                    + TABLE.event + '» события есть — отчёт сломан или не выдан роли');
+                self.notify('Отчёт событий смены пуст — события прочитаны напрямую из таблицы', 'error');
+            }).catch(function() { self.applyLoadedEvents([]); });
         }).catch(function() { return self.loadShiftEventsFromTable(); });
     };
 
@@ -1617,7 +1654,10 @@
     AtexSlitter.prototype.isShiftOpen = function() {
         // #3522: смена — на конкретный станок. Без выбранного станка смены нет.
         if (!this.selectedSlitterId) return false;
-        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate, this.selectedSlitterLabel());
+        // #4359: станок смены — по ссылке «Слиттер» события; подпись остаётся запасным путём
+        // для событий, записанных до появления реквизита.
+        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate,
+            this.selectedSlitterLabel(), this.selectedSlitterId);
     };
 
     // #4348: событие смены и атрибуты резки (Начато/Закончено) фиксируем ТЕКУЩИМ моментом —
@@ -2298,16 +2338,18 @@
         }
     };
 
-    // #3557 #2: события смены выбранного станка. Событие резки относится к станку
-    // через её слиттер; событие без резки (Начало/Конец смены) — по метке станка в
-    // «Примечаниях». Возвращает по убыванию времени, с длительностью до следующего
-    // (более позднего) события этого станка.
+    // #3557 #2: события смены выбранного станка. Возвращает по убыванию времени, с
+    // длительностью до следующего (более позднего) события этого станка.
+    // #4359: станок события — из его ссылки «Слиттер». У событий без ссылки (записаны до
+    // появления реквизита) остаются прежние пути: событие резки — через слиттер резки,
+    // событие смены — через метку станка в «Примечаниях».
     AtexSlitter.prototype.eventsForSelectedSlitter = function() {
         var slLabel = this.selectedSlitterLabel();
         var slId = String(this.selectedSlitterId || '');
         var cutSlitter = {};
         (this.cuts || []).forEach(function(c) { cutSlitter[String(c.id)] = String(c.slitterId || ''); });
         var list = (this.shiftEvents || []).filter(function(ev) {
+            if (ev.slitterId) return String(ev.slitterId) === slId;   // #4359
             if (ev.cutId) return cutSlitter[String(ev.cutId)] === slId;
             return core.shiftEventSlitterLabel(ev) === slLabel;
         });
@@ -2725,11 +2767,17 @@
         var userReq = reqIdByName(meta, EVENT_REQ.user);
         var valReq = reqIdByName(meta, EVENT_REQ.value);
         var notesReq = reqIdByName(meta, EVENT_REQ.notes);
+        var slitterReq = reqIdByName(meta, EVENT_REQ.slitter);   // #4359
         if (typeReq && data.type) params['t' + typeReq] = data.type;
         if (cutReq && cutId) params['t' + cutReq] = cutId;
         if (userReq && this.userId) params['t' + userReq] = this.userId;
         if (valReq && data.value !== '' && data.value != null) params['t' + valReq] = core.toNumber(data.value);
         if (notesReq && data.notes) params['t' + notesReq] = data.notes;
+        // #4359: станок пишем ССЫЛКОЙ «Слиттер» — id записи справочника, а не подпись
+        // (ref-поле принимает id, см. docs/kb/crud.md). Пишем у ВСЕХ событий — и смены,
+        // и резки: по ней потом определяется, к какому станку событие относится.
+        var slitterId = data.slitterId || this.selectedSlitterId;
+        if (slitterReq && slitterId) params['t' + slitterReq] = slitterId;
         // #3560: «Событие смены» — корневой объект (up=1). Резку НЕ ставим
         // родителем: роль Оператора не имеет доступа на запись в поддерево
         // объекта-резки, и Integram отвечает «нет доступа к реквизиту объекта…
