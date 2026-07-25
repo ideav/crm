@@ -255,7 +255,8 @@
    ДО .is-active, чтобы у выбранной зафиксированной карточки выделение-акцент перекрывало. */
 .atex-pp-cut.is-fixed { border-color: #9ca3af; background: rgba(107, 114, 128, .06); box-shadow: inset 0 0 0 1px #cbd1d9; }
 .atex-pp-cut.is-fixed:hover { background: rgba(107, 114, 128, .1); }
-.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
+/* #4404 п.1: выбранная карточка заметнее — ореол 8px вместо 2px (значение из задачи). */
+.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 8px rgba(19, 65, 116, .15); }
 /* #3638: задание, открытое по ссылке из диаграммы Ганта — кратковременная подсветка. */
 .atex-pp-cut.is-deeplink { animation: atex-pp-deeplink 2.4s ease-out 1; }
 @keyframes atex-pp-deeplink {

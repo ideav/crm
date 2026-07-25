@@ -15991,7 +15991,10 @@
             // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
             var isSetupTask = !!setupTaskIds[String(c.id)];
             // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : ''), dataset: { cutId: String(c.id) } });
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : ''), dataset: { cutId: String(c.id) },
+                // #4404 п.2: подсказка карточки = список заказов и позиций, тот же текст, что в
+                // панели «Связанные позиции» (cutLinkedTitle → cutLinkedLabels).
+                title: self.cutLinkedTitle(c) });
 
             var materialText = c.materialName || (c.materialId ? ('#' + c.materialId) : '—');
             var sc = schedById[String(c.id)];
@@ -16172,10 +16175,16 @@
             // по этой карточке, ни при клике по другой (закрытие — только её крестиком
             // .atex-pp-strip-close). cutClickSelectsCut пропускает лишь клики внутри
             // самой панели полос (она и так гасит всплытие).
+            // #4404 п.3/п.4: ЛЮБОЕ действие по карточке сначала ВЫБИРАЕТ её задание, иначе панель
+            // «Связанные позиции» показывает позиции прошлого выбора — переносишь одно, а видишь
+            // связи другого. Слушаем в фазе ПЕРЕХВАТА (capture): кнопки 🔒/🗓/🗑 гасят всплытие
+            // (stopPropagation), и обычный bubble-обработчик до карточки не доходил. Capture
+            // срабатывает по пути ВНИЗ, до обработчиков самих кнопок, поэтому выбор случается
+            // всегда — и для нынешних контролов, и для любых будущих.
             cardPanel.addEventListener('click', function(e) {
                 if (!cutClickSelectsCut(e.target)) return;
                 self.selectCut(c.id);
-            });
+            }, true);
 
             // #4306: drag-drop перестановка ВНУТРИ дня. Карточка — и источник (через ручку ⠿ ниже),
             // и цель (drop). Валидность (тот же день+станок, не через 🔒) проверяет reorderCutInDay;
@@ -16608,6 +16617,33 @@
         }
     };
 
+    // #4404 п.2: подписи связанных позиций задания — РОВНО те строки, что показывает панель
+    // «Связанные позиции» (.atex-pp-linked). Один источник на два места: панель и title карточки
+    // очереди, иначе они разъезжаются. Пусто → связей нет.
+    AtexProductionPlanning.prototype.cutLinkedLabels = function(cut) {
+        var self = this;
+        if (!cut) return [];
+        var linked = (this.supplies || []).filter(function(s) { return String(s.cutId) === String(cut.id); });
+        if (!linked.length) return [];
+        var posById = {};
+        (this.positions || []).forEach(function(p) { posById[p.id] = p; });
+        // #3892: метраж — по ВСЕЙ резке (длина прогона одинакова у всех сегментов цепочки, #3781),
+        // а не из делёного «Метраж, м» сегмента.
+        var cutRunLen = cutRunLength(cut, this.supplies, this.positionLengthById);
+        return linked.map(function(s) {
+            var foot = cutRunLen > 0 ? cutRunLen : supplyFootage(s, self.footageBySupply);
+            return formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot,
+                s.orderNo, s.positionWidth, s.positionLength);
+        });
+    };
+
+    // #4404 п.2: тот же список одной строкой — для title карточки очереди.
+    AtexProductionPlanning.prototype.cutLinkedTitle = function(cut) {
+        var labels = this.cutLinkedLabels(cut);
+        if (!labels.length) return 'Связанных позиций нет';
+        return 'Связанные позиции (' + labels.length + '):\n' + labels.join('\n');
+    };
+
     AtexProductionPlanning.prototype.renderLink = function() {
         var self = this;
         var box = this.linkEl;
@@ -16626,18 +16662,10 @@
         if (!linked.length) {
             listWrap.appendChild(el('div', { class: 'atex-pp-empty', text: 'Пока нет связей.' }));
         } else {
-            var posById = {};
-            this.positions.forEach(function(p) { posById[p.id] = p; });
-            // #3892: метраж берём по ВСЕЙ резке (длина прогона = «Метраж, м», одинакова у всех
-            // сегментов цепочки, #3781), а НЕ из «Метраж, м» обеспечения этого сегмента. У
-            // переходящей (дроблёной) резки обеспечение делится по дням (splitSupplyShares), и
-            // raw-метраж сегмента — бессмысленная дробь (напр. 348.496 вместо 450). cutRunLength
-            // стартует с cut.length (head) и игнорирует делёные доли → реальная длина прогона.
-            var cutRunLen = cutRunLength(cut, self.supplies, self.positionLengthById);
-            linked.forEach(function(s) {
-                // #3406 п.1: подпись + «Количество» позиции заказа + рулоны/метраж.
-                var foot = cutRunLen > 0 ? cutRunLen : supplyFootage(s, self.footageBySupply);
-                var label = formatLinkedPositionLabel(posById[s.positionId], s.positionId, s.rolls, foot, s.orderNo, s.positionWidth, s.positionLength);
+            // #4404 п.2: подписи — через общий cutLinkedLabels (тот же источник, что title карточки).
+            var labels = this.cutLinkedLabels(cut);
+            linked.forEach(function(s, i) {
+                var label = labels[i];
                 var children = [el('span', { class: 'atex-pp-linked-label', text: label })];
                 var del = el('button', { class: 'atex-pp-linked-del', type: 'button', text: '×', title: 'Убрать из задания' });
                 del.addEventListener('click', function() { self.deleteSupply(s.id); });
