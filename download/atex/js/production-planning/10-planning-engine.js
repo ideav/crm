@@ -5559,7 +5559,11 @@
         var newOrder = without.slice(0, tIdx).concat([String(dragId)]).concat(without.slice(tIdx));
         for (var i = 0; i < newOrder.length; i++) {
             var fc = byId[newOrder[i]];
-            if (fc && fc.fixed && ids[i] !== newOrder[i]) return { assignments: [], error: 'fixed' };   // «стена» сдвинулась
+            if (!fc || ids[i] === newOrder[i]) continue;
+            if (fc.fixed) return { assignments: [], error: 'fixed' };     // «стена» сдвинулась
+            // #4381: начатое задание — такая же «стена», даже без 🔒: перетаскивание не должно
+            // сдвигать то, что уже идёт на станке (ни само начатое, ни через него).
+            if (cutIsStarted(fc)) return { assignments: [], error: 'started' };
         }
         var assignments = [];
         newOrder.forEach(function(id, idx) {

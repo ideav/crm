@@ -1912,13 +1912,17 @@ class IntegramTable{
             const focusedElement = document.activeElement;
             let focusState = null;
 
-            if (focusedElement && focusedElement.classList.contains('filter-input-with-icon')) {
+            // #4373: the REF dropdown trigger is a filter control too — a re-render (say, the
+            // reload that follows picking an operator) must not drop the caret it just received.
+            const isRefTrigger = focusedElement && focusedElement.classList.contains('filter-ref-trigger');
+            if (focusedElement && (focusedElement.classList.contains('filter-input-with-icon') || isRefTrigger)) {
                 focusState = {
                     columnId: focusedElement.dataset.columnId,
                     // Range cells have two inputs sharing a columnId — remember which one (issue #3542)
                     rangePart: focusedElement.dataset.rangePart || null,
-                    selectionStart: focusedElement.selectionStart,
-                    selectionEnd: focusedElement.selectionEnd
+                    refTrigger: isRefTrigger,
+                    selectionStart: isRefTrigger ? null : focusedElement.selectionStart,
+                    selectionEnd: isRefTrigger ? null : focusedElement.selectionEnd
                 };
             }
 
@@ -2076,7 +2080,7 @@ class IntegramTable{
                                             return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                                         })() : '';
                                         return `
-                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }>
                                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
@@ -2161,9 +2165,12 @@ class IntegramTable{
             // position when a filter input lives outside the visible scroll viewport
             // (issue #2744).
             if (focusState) {
-                const selector = focusState.rangePart
-                    ? `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`
-                    : `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
+                let selector = `.filter-input-with-icon[data-column-id="${focusState.columnId}"]`;
+                if (focusState.rangePart) {
+                    selector = `.filter-range-input[data-column-id="${focusState.columnId}"][data-range-part="${focusState.rangePart}"]`;
+                } else if (focusState.refTrigger) {
+                    selector = `.filter-ref-trigger[data-column-id="${focusState.columnId}"]`;
+                }
                 const newInput = this.container.querySelector(selector);
                 if (newInput) {
                     newInput.focus({ preventScroll: true });
@@ -2705,6 +2712,10 @@ class IntegramTable{
 
             let escapedValue;
             let fullValueForEditing;
+            // Issue #4385: record/reference ID for the cell, mirrored onto the
+            // parent <td> title so it stays readable even when the .edit-icon
+            // (or a link) fully covers the inner .cell-content-wrapper.
+            let cellTitleId = '';
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
@@ -2919,6 +2930,7 @@ class IntegramTable{
                         : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
                     const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
+                    cellTitleId = recordId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
@@ -2931,6 +2943,7 @@ class IntegramTable{
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
+                    cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
@@ -2939,6 +2952,7 @@ class IntegramTable{
             if (isAnyRecordLink && refValueId && !escapedValue.includes('cell-content-wrapper')) {
                 const instanceName = this.options.instanceName;
                 escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a></span></div>`;
+                cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
             }
 
             // Add inline editing data attributes for editable cells (only when not already showing edit icon)
@@ -3042,7 +3056,10 @@ class IntegramTable{
                 rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, withEditIcon);
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }${ rowNumberHtml }</td>`;
+            // Issue #4385: mirror the record/reference ID onto the parent <td> title so the
+            // ID stays discoverable even when the .edit-icon covers the inner wrapper entirely.
+            const cellTitleAttr = cellTitleId ? ` title="${ cellTitleId }"` : '';
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }${ cellTitleAttr }>${ escapedValue }${ rowNumberHtml }</td>`;
         }
 
         /**
@@ -3286,7 +3303,7 @@ class IntegramTable{
                             return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                         })() : '';
                         rows[depth].push(`
-                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
@@ -3351,7 +3368,7 @@ class IntegramTable{
                 })() : '';
 
                 return `
-                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
+                    <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle } class="${ groupingClass }">
                         <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
                         ${ refIconHtml }
                         ${ addButtonHtml }
@@ -6977,6 +6994,8 @@ class IntegramTable{
                 const editIconHtml = hasEditIcon.outerHTML;
                 const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
                 cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
+                // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
+                if (cellRecordId) { cell.setAttribute('title', cellRecordId); }
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
@@ -6996,6 +7015,8 @@ class IntegramTable{
                         : `window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();`;
                     const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
+                    // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
+                    if (editRecordId) { cell.setAttribute('title', editRecordId); }
                 } else {
                     cell.innerHTML = escapedValue;
                 }
@@ -7766,6 +7787,12 @@ class IntegramTable{
             menu.querySelectorAll('.filter-type-option').forEach(opt => {
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
+                    // Choosing an operator is the first half of setting a filter; the second half
+                    // is typing the value. Hand the caret over so it can be typed right away
+                    // instead of making the user aim at the field with the mouse (issue #4373).
+                    // Called at every exit of this handler — after render() where the cell is
+                    // rebuilt, so the fresh control is the one that gets focused.
+                    const focusValue = () => this.focusFilterControl(columnId);
                     const oldType = this.filters[columnId]?.type;
                     // When no filter is set yet, the cell already shows the DEFAULT input shape
                     // (DATE/DATETIME default to '=', a date picker). Compare against the effective
@@ -7797,6 +7824,7 @@ class IntegramTable{
                             }
                             // Re-render to switch between text input and dropdown
                             this.render();
+                            focusValue();
                             return;
                         }
                     }
@@ -7809,6 +7837,7 @@ class IntegramTable{
                         this.filterInputKind(format, effectiveOldType) !== this.filterInputKind(format, symbol)) {
                         this.filters[columnId].value = '';
                         this.render();
+                        focusValue();
                         return;
                     }
 
@@ -7843,6 +7872,7 @@ class IntegramTable{
                         this.totalRows = null;
                         this.loadData(false);
                     }
+                    focusValue();
                 });
             });
 
@@ -7854,6 +7884,29 @@ class IntegramTable{
                     }
                 });
             }, 0);
+        }
+
+        /**
+         * Give the keyboard to a column's filter control (issue #4373).
+         * One selector covers every shape the filter cell can take: text input, date picker,
+         * both halves of a range (the `from` field comes first in the DOM) and the REF dropdown
+         * trigger — the two classes never appear in the same cell.
+         * preventScroll keeps the browser from scrolling the input into view, which would reset
+         * the table's horizontal scroll when the column sits outside the viewport (issue #2744).
+         * @param {string} columnId - Column whose filter control should receive focus.
+         */
+        focusFilterControl(columnId) {
+            if (!this.container || columnId == null) return;
+            const control = this.container.querySelector(
+                `.filter-input-with-icon[data-column-id="${ columnId }"], .filter-ref-trigger[data-column-id="${ columnId }"]`);
+            if (!control) return;
+            control.focus({ preventScroll: true });
+            // Caret at the end of what is already typed, so the next keystroke appends.
+            // Only text inputs support selection ranges — date/number ones throw.
+            if (control.type === 'text' && typeof control.setSelectionRange === 'function') {
+                const end = String(control.value || '').length;
+                control.setSelectionRange(end, end);
+            }
         }
 
         reorderColumns(draggedId, targetId) {

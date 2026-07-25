@@ -371,6 +371,29 @@
         };
     }
 
+    // #4384: диапазон, СТАРТУЮЩИЙ с выбранной в поле «Дата периода» даты, длиной в
+    // текущий режим (день/3 дня/неделя/месяц). В отличие от ganttRange (неделя
+    // выравнивается на понедельник, месяц — на 1-е число), начало здесь = ровно
+    // выбранная дата. Возвращает {fromIso, toIso} для #3713-диапазона [С; По].
+    function modeRangeFromDate(dateIso, mode) {
+        var normalized = normalizeMode(mode);
+        var startMs = parseDateTimeMs(dateIso);
+        if (startMs == null) startMs = Date.now();
+        var startDayMs = startOfLocalDayMs(startMs);
+        var fromIso = localIsoDateFromMs(startDayMs);
+        var toIso;
+        if (normalized === 'month') {
+            // «Месяц» от даты: то же число следующего месяца минус день (окно ≈ месяц).
+            var d = new Date(startDayMs);
+            var nextMonthMs = new Date(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0, 0, 0).getTime();
+            toIso = localIsoDateFromMs(nextMonthMs - GANTT_DAY_MS);
+        } else {
+            var span = normalized === 'week' ? 7 : (normalized === 'three' ? 3 : 1);
+            toIso = shiftIsoDate(fromIso, span - 1);
+        }
+        return { fromIso: fromIso, toIso: toIso };
+    }
+
     function cutDeadlineMs(cut) {
         var planMs = parseDateTimeMs(cut && cut.planDate);
         var duration = stripNum(cut && cut.duration);
@@ -1659,6 +1682,7 @@
         shiftIsoDate: shiftIsoDate,
         ganttRange: ganttRange,
         ganttRangeFromTo: ganttRangeFromTo,   // #3713
+        modeRangeFromDate: modeRangeFromDate, // #4384
         daySpanToMode: daySpanToMode,         // #3713
         shiftAnchor: shiftAnchor,
         cutStatus: cutStatus,
@@ -2032,7 +2056,15 @@
 
         var dateInput = el('input', { class: 'atex-cg-input atex-cg-date', type: 'date', value: st.fromIso || st.anchor || range.startIso, title: 'Дата периода' });
         dateInput.addEventListener('change', function() {
-            if (dateInput.value) { st.anchor = dateInput.value; st.fromIso = ''; st.toIso = ''; self.render(); }   // #3713: дата → выход из диапазона
+            if (!dateInput.value) return;
+            // #4384: выбранная дата — НАЧАЛО диапазона (не якорь календарной недели/
+            // месяца). Строим #3713-диапазон [С; По] со стартом на выбранной дате,
+            // длиной в текущий активный режим (день/3 дня/неделя/месяц).
+            var picked = modeRangeFromDate(dateInput.value, activeMode);
+            st.anchor = picked.fromIso;
+            st.fromIso = picked.fromIso;
+            st.toIso = picked.toIso;
+            self.render();
         });
 
         var slitterSelect = el('select', { class: 'atex-cg-input atex-cg-slitter', title: 'Станок' });
