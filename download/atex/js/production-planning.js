@@ -10844,6 +10844,17 @@
         return chain.then(function() {
             return self.reload();
         }).then(function() {
+            // #4388: неустойчивый дефект — после снятия/постановки фиксации кнопка 🔒
+            // (и серый замок карточки) иногда не меняла состояние до F5. Причина: reload
+            // читает флаг «Зафиксировано» через loadCutSequences (object/{cut}/?JSON_OBJ),
+            // а это чтение сразу после _m_set изредка отдаёт СТАРОЕ значение (реплика/кеш
+            // отчёта отстаёт от записи). Все _m_set в chain уже успешно завершились, значит
+            // источник истины — записанное нами value: применяем его к затронутым резкам
+            // поверх возможно отставшего чтения, чтобы render() нарисовал верную кнопку без
+            // перезагрузки страницы.
+            var wrote = {};
+            ids.forEach(function(id) { wrote[String(id)] = true; });
+            (self.cuts || []).forEach(function(c) { if (wrote[String(c.id)]) c.fixed = value; });
             self.hideProgress(); self.setBusy(false); self.render();
             if (!o.silent) {
                 self.notify(o.successMessage ||
