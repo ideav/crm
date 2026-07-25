@@ -7223,11 +7223,14 @@
                         windPoints: windPoints
                     });
                 }
+                // #4394: в title — id задания (объекта «Задание в производство»), чтобы из
+                // очереди можно было сразу найти запись в CRM. Формат «id N» — как в списке
+                // отклонений (renderDeviationGroup).
                 timeEl = el('div', {
                     class: 'atex-pp-cut-time',
                     role: 'button',
                     tabindex: '0',
-                    title: 'Показать тайминг резки',
+                    title: 'Показать тайминг резки · id ' + c.id,
                     text: scheduleText
                 });
                 timeEl.addEventListener('click', function() {
