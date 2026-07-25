@@ -11438,8 +11438,11 @@
                 : (position === 'start' ? ' (в начало дня)' : ' (по весу)');   // #4221
             // #4357: сегмент отвязан от разорванного задания — называем это оператору. Работа больше
             // не непрерывна (два задания, две наладки), значков ←/→ между ними не будет.
-            self.notify('Задание перенесено на ' + dateLabel + posLabel + slitLabel
-                + (detachId ? ' · отвязано от разорванного задания (отдельное задание)' : ''), 'success');
+            var detachLabel = detachId ? ' · отвязано от разорванного задания (отдельное задание)' : '';
+            // #4390: уведомление даём НЕ здесь (до пересборки), а ПОСЛЕ terminal-autoSequenceQueue —
+            // по ФАКТИЧЕСКОМУ дню задания (точная раскладка splitMachineQueue), а не по обещанному
+            // целевому. Раньше тост «перенесено на 27» печатался до раскладки и лгал, когда упаковщик
+            // клал задание на 28 (день переполнен/заморожен).
             // #3840: перенос менял «Дату план» только переносимого задания и целевого дня — день-
             // ИСТОЧНИК оставался с прежним сохранённым planStart, и на месте вынутой резки висел простой
             // (РМ «Диаграмма Ганта» рисует сохранённый planStart). Терминальный autoSequenceQueue
@@ -11463,13 +11466,47 @@
             // (при смене станка) исходный. Прочие станки не трогаем; задания между станками не кидаем
             // (buildSequenceOps замыкает каждое задание на свой станок при scope >1).
             var moveScope = {};
-            if (position === 'weight') moveScope.weightPositionCutIds = [String(cut.id)];
-            else moveScope.pinCutIds = [String(cut.id)];
+            // #4390: «Зафиксировать» → задание ложится на ВЫБРАННЫЙ день ЖЁСТКО, точным упаковщиком.
+            // Мягкий замок дня «по весу» (weightPositionCutIds → dayLockByCut) держит задание ПОДВИЖНЫМ,
+            // а его целевой день проверяет ЭВРИСТИКОЙ ёмкости слоя размещения (prefixDayOffset/capacityMin),
+            // которая НЕ видит «Заморозку» (#4326) и точную ёмкость дня. Арбитр §12 (splitMachineQueue,
+            // точный) затем переливает подвижное задание за замороженный/переполненный день на следующий —
+            // «перенёс на 27 → оказалось на 28». Зафиксированное (Зафиксировано=1 записано выше) идёт в
+            // раскладке ФИКС-ЯКОРЕМ: его кладёт точный упаковщик на «Дату план» (#3792/#3974) БЕЗ эвристики,
+            // с переполнением дня, и не выкидывает. Поэтому при fix НЕ отдаём задание в мягкий замок.
+            if (position === 'weight') {
+                if (!fix) moveScope.weightPositionCutIds = [String(cut.id)];
+            } else {
+                moveScope.pinCutIds = [String(cut.id)];
+            }
             if (withinSlitter) {
                 moveScope.withinSlitterIds = (curSidStr !== '' && curSidStr !== sidStr)
                     ? [sidStr, curSidStr] : [sidStr];   // целевой + исходный (при смене станка)
             }
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, moveScope);
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, false, moveScope).then(function(res) {
+                // #4390: сверяем ФАКТИЧЕСКИЙ день задания после ТОЧНОЙ раскладки. Совпал с целевым →
+                // обычный успех. Не совпал (день переполнен/заморожен, упаковщик сдвинул — в т.ч.
+                // зафиксированное #4304) → НЕ молчим: сообщаем, что цель не вместила и куда легло.
+                var moved = (self.cuts || []).filter(function(c) { return String(c.id) === String(cut.id); })[0];
+                var actualKey = moved ? planDateDayKey(moved.planDate) : null;
+                if (actualKey != null && actualKey === targetDayKey) {
+                    self.notify('Задание перенесено на ' + dateLabel + posLabel + slitLabel + detachLabel, 'success');
+                } else {
+                    // Полночь фактического дня из «Даты план» (unix-сек/мс) → заголовок дня.
+                    var pdNum = moved ? Number(moved.planDate) : NaN;
+                    var actualMid = null;
+                    if (isFinite(pdNum) && pdNum > 0) {
+                        var pdMs = pdNum >= 1e12 ? pdNum : pdNum * 1000;
+                        var pdDate = new Date(pdMs);
+                        if (!isNaN(pdDate.getTime())) actualMid = new Date(pdDate.getFullYear(), pdDate.getMonth(), pdDate.getDate(), 0, 0, 0, 0).getTime();
+                    }
+                    var actualLabel = actualMid != null ? formatPlanDayHeading(actualMid, 0) : 'другой день';
+                    self.notify('«' + dateLabel + '» не вместил задание (день переполнен или заморожен) — '
+                        + 'оно осталось на ' + actualLabel + slitLabel + detachLabel
+                        + '. Зафиксированное задание не удалено.', 'warning');
+                }
+                return res;
+            });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
