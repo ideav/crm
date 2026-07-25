@@ -358,11 +358,23 @@
     align-items: center;
 }
 .atex-pp-cut-type { font-weight: 600; }
-/* #3354 п.1: «номер по порядку» — ведущий жирный элемент первой строки. */
+/* #3354 п.1: «номер по порядку» — ведущий жирный элемент первой строки.
+   #4394: теперь это ссылка на форму правки задания (edit_obj). Вид не меняем —
+   цвет и подчёркивание как у обычного текста, подчёркивание только по наведению
+   (тот же приём, что у .atex-pp-cut-time). */
 .atex-pp-cut-seq {
     flex: 0 0 auto;
     font-weight: 700;
     white-space: nowrap;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+.atex-pp-cut-seq:hover { text-decoration: underline; }
+.atex-pp-cut-seq:focus-visible {
+    outline: 2px solid var(--pp-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
 }
 /* #3354 п.1: название сырья в первой строке (раньше эту роль играл
    .atex-pp-cut-material, теперь он — контейнер сводки полос под строкой). */

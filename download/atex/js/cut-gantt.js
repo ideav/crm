@@ -1061,7 +1061,12 @@
 
     function cutBarTitle(cut, tr, status) {
         var lines = [];
-        lines.push('Задание ' + (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || ''))));
+        // #4394: id задания в тултипе — «номер» с #3242 это плановые дата-время старта, по
+        // нему запись в CRM не найти. Формат «id N» — как в очереди планирования. Когда номера
+        // нет, подпись и так вырождается в «#id» — второй раз id не пишем.
+        var cutId = cut && cut.id != null ? String(cut.id) : '';
+        var cutNum = formatCutNumber(cut && cut.number);
+        lines.push('Задание ' + (cutNum || ('#' + cutId)) + (cutNum && cutId ? ' · id ' + cutId : ''));
         if (cut && cut.orderNo) lines.push('Заказ: ' + cut.orderNo);
         if (cut && cut.slitter && cut.slitter.label) lines.push('Станок: ' + cut.slitter.label);
         if (cut && cut.materialName) lines.push('Сырьё: ' + cut.materialName);
@@ -1694,6 +1699,7 @@
         downtimeNotesText: downtimeNotesText,       // #4229
         mergeGroupRows: mergeGroupRows,             // #4238
         cutRowLabel: cutRowLabel,
+        cutBarTitle: cutBarTitle,       // #4394
         cutBarTime: cutBarTime,
         cutBarSpanMin: cutBarSpanMin,   // #3770
         cutSetupMin: cutSetupMin,
