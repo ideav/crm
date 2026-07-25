@@ -7418,9 +7418,10 @@
     // #4306: чистый расчёт перестановки задания ВНУТРИ дня перетаскиванием (drag-drop). Порядок дня
     // задаёт planStart; при drag набор сохранённых времён дня ПЕРЕСТАВЛЯЕТСЯ под новый порядок (реальные
     // времена сохраняются, лишь меняют владельца) — как обобщённый ↑↓-своп на произвольную позицию.
-    // dragId вынимается и вставляется ПЕРЕД targetId. Зафиксированные (🔒) — «стены»: их индекс меняться
-    // не должен (перенос через фикс запрещён, как в moveCutInDay). → { assignments:[{id,planStartTs}],
-    // error: null|'notime'|'fixed' }. assignments — только реально изменившиеся (id → новое время).
+    // dragId вынимается и вставляется ПЕРЕД targetId. #4392: зафиксированные (🔒) НЕ «стены» — их можно
+    // переставлять и тащить сквозь них (фиксация держит день, а перестановка меняет planStart в пределах
+    // того же дня). «Стена» осталась только у начатого (#4381). → { assignments:[{id,planStartTs}],
+    // error: null|'notime'|'started' }. assignments — только реально изменившиеся (id → новое время).
     // Вход не мутирует. Пустой/вырожденный (drag==target, не найдено) → пустые assignments без ошибки.
     function planDragReorder(dayCuts, dragId, targetId) {
         var arr = dayCuts || [];
@@ -7437,9 +7438,11 @@
         for (var i = 0; i < newOrder.length; i++) {
             var fc = byId[newOrder[i]];
             if (!fc || ids[i] === newOrder[i]) continue;
-            if (fc.fixed) return { assignments: [], error: 'fixed' };     // «стена» сдвинулась
-            // #4381: начатое задание — такая же «стена», даже без 🔒: перетаскивание не должно
-            // сдвигать то, что уже идёт на станке (ни само начатое, ни через него).
+            // #4392: зафиксированное (🔒) задание БОЛЬШЕ НЕ «стена» — его можно переставлять и через
+            // него можно тащить. Фиксация держит ДЕНЬ, а не позицию в дне; перестановка лишь
+            // переназначает planStart В ПРЕДЕЛАХ ТОГО ЖЕ дня (день/замок сохраняются).
+            // #4381: начатое задание — «стена», даже без 🔒: перетаскивание не должно сдвигать то,
+            // что уже идёт на станке (ни само начатое, ни через него).
             if (cutIsStarted(fc)) return { assignments: [], error: 'started' };
         }
         var assignments = [];
@@ -13990,7 +13993,9 @@
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return Promise.resolve(false);
         var a = arr[index], b = arr[target];
         if (!a || !b) return Promise.resolve(false);
-        if (a.fixed || b.fixed) { self.notify('Зафиксированное задание нельзя переставить', 'info'); return Promise.resolve(false); }
+        // #4392: порядок в очереди (↑↓) МЕНЯЕМ и для зафиксированных заданий — фиксация держит ДЕНЬ,
+        // а не позицию внутри дня. Перестановка = обмен planStart в пределах ТОГО ЖЕ дня (ниже),
+        // день сохраняется, замок не нарушается. Прежний запрет (#3508 п.3) снят.
         // #4381: начатое задание неприкосновенно — и само не переставляется, и через него не
         // перепрыгнуть (обмен planStart сдвинул бы начатое). Кнопки ↑↓ у начатого убраны, но
         // сосед мог бы утащить его свопом — закрываем и этот путь.
@@ -14947,7 +14952,8 @@
     // переставляет порядок дня и метит станок «грязным» → появляется «Пересчитать наладку». Механика —
     // как moveCutInDay, но на произвольную позицию: набор сохранённых planStart дня ПЕРЕСТАВЛЯЕТСЯ под
     // новый порядок (реальные времена сохраняются, лишь меняют владельца), пишутся только изменившиеся.
-    // Зафиксированные (🔒) — «стены»: их позицию/время НЕ трогаем, перенос ЧЕРЕЗ них запрещён (как ↑↓).
+    // #4392: зафиксированные (🔒) — НЕ «стены»: их можно переставлять и тащить сквозь них (день держит
+    // фиксация, перестановка меняет planStart в пределах того же дня). «Стена» осталась у начатого (#4381).
     //   dayCuts — резки дня в порядке показа (по planStart); dragId — перетаскиваемое; targetId — на кого бросили.
     AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId) {
         var self = this;
@@ -14961,10 +14967,7 @@
             self.notify('Не удаётся переставить: у заданий дня нет времени старта — нажмите «Упорядочить»', 'info');
             return Promise.resolve(false);
         }
-        if (plan.error === 'fixed') {
-            self.notify('Зафиксированное задание нельзя переставить (оно «стена»)', 'info');
-            return Promise.resolve(false);
-        }
+        // #4392: ветка error==='fixed' убрана — planDragReorder больше не считает зафиксированные «стеной».
         if (plan.error === 'started') {   // #4381
             self.notify('Начатое задание нельзя переставить (оно «стена»)', 'info');
             return Promise.resolve(false);
@@ -16115,12 +16118,15 @@
             // остаются только «Полосы» (просмотр раскладки). Начатое уже идёт на станке: перенос,
             // перестановка и удаление такого задания рассинхронизируют план с цехом.
             var cutStarted = cutIsStarted(c);
-            // #4306: ручка перетаскивания ⠿ (первый контрол). Зафиксированные (🔒) не перетаскиваются.
+            // #4306: ручка перетаскивания ⠿ (первый контрол).
+            // #4392: зафиксированные (🔒) ТЕПЕРЬ тоже перетаскиваются — фиксация держит ДЕНЬ, а не
+            // позицию в дне (перестановка — обмен planStart внутри того же дня). Недоступна лишь у
+            // начатого задания (#4381: оно уже идёт на станке).
             var dragHandle = el('span', {
-                class: 'atex-pp-drag-handle' + (c.fixed ? ' is-disabled' : ''), text: '⠿',
-                title: c.fixed ? 'Зафиксированное задание нельзя перетаскивать' : 'Перетащить задание в пределах дня'
+                class: 'atex-pp-drag-handle', text: '⠿',
+                title: 'Перетащить задание в пределах дня'
             });
-            if (!c.fixed && !cutStarted) {
+            if (!cutStarted) {
                 dragHandle.setAttribute('draggable', 'true');
                 dragHandle.addEventListener('dragstart', function(e) {
                     self._dragCut = { cutId: String(c.id), dayKey: cardDayKey, slitterId: cardSid };
@@ -16143,15 +16149,16 @@
             var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑', title: 'Выше' });
             var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓', title: 'Ниже' });
             // sameDayCuts/dayIdx вычислены выше (для seqText #3508 п.7) — переиспользуем.
-            // #3508 п.3: зафиксированное задание нельзя двигать по очереди (↑↓ заблокированы).
-            if (dayIdx === 0 || c.fixed) up.disabled = true;
-            if (dayIdx === sameDayCuts.length - 1 || c.fixed) down.disabled = true;
+            // #4392: ↑↓ доступны и для зафиксированных заданий (фиксация держит ДЕНЬ, не позицию в
+            // дне). Блокируем только на границах дня; прежний запрет по c.fixed (#3508 п.3) снят.
+            if (dayIdx === 0) up.disabled = true;
+            if (dayIdx === sameDayCuts.length - 1) down.disabled = true;
             up.addEventListener('click', function() {
-                if (self.busy || c.fixed) return;
+                if (self.busy) return;
                 self.moveCutInDay(sameDayCuts, dayIdx, -1);   // #3923: перестановка = обмен planStart + переупаковка
             });
             down.addEventListener('click', function() {
-                if (self.busy || c.fixed) return;
+                if (self.busy) return;
                 self.moveCutInDay(sameDayCuts, dayIdx, 1);
             });
             // #3706: остаток резки вне допуска → кнопка «Полосы» светло-красная,
