@@ -61,10 +61,15 @@ assert(interleaved.materialCount > grouped.materialCount,
 var Controller = require('../download/atex/js/production-planning.js').Controller;
 function runScenario(cfg) {
     return new Promise(function(resolve) {
-        var calls = { applySplit: 0, persist: 0, reload: 0, notify: '', busyFalse: 0 };
+        var calls = { applySplit: 0, persist: 0, reload: 0, notify: '', busyFalse: 0, wroteBeforeApply: null };
         var self = Object.create(Controller.prototype);
         self.busy = false;
-        self.cuts = [{ id: 'c1', number: '100', slitter: { id: 'M1', label: '' } }];
+        self.cuts = [{ id: 'c1', number: '100', planDate: '100', slitter: { id: 'M1', label: '' } }];
+        // #4402: startPlanPreview проецирует план на очередь и считает статистику «Было/Станет» —
+        // ему нужен минимум состояния контроллера (метаданных нет → колонки наладки не считаем).
+        self.meta = {}; self.daySettings = {}; self.filter = { date: '', dateTo: '' };
+        self.supplies = []; self.genPositions = []; self.slitters = []; self.opTimes = {};
+        self.positionLengthById = {}; self.changeTimes = {};
         self.setBusy = function(v) { if (v === false) calls.busyFalse++; };
         self.buildSequenceOps = function() {
             return { ops: { updates: [{ cutId: 'c1', planStartTs: 123, plannedRuns: 1 }], creates: [], deletes: [] },
@@ -79,6 +84,10 @@ function runScenario(cfg) {
         self.render = function() {};
         self.notify = function(msg) { calls.notify = String(msg); setTimeout(function() { resolve(calls); }, 0); };
         self.runOptimizeQueue();
+        // #4402: «Упорядочить» больше не пишет сразу — сперва показывает план (предпросмотр),
+        // запись идёт по «Применить». Фиксируем, что до применения записей нет, и нажимаем кнопку.
+        calls.wroteBeforeApply = calls.applySplit + calls.persist;
+        if (self._pendingPlan) self.applyPendingPlan();
     });
 }
 var REASSIGN = { changed: true, slitterByRecordId: { c1: 'M2' }, slitterReqId: '99' };
@@ -94,6 +103,7 @@ var NOREASSIGN = { changed: false, slitterByRecordId: {}, slitterReqId: '99' };
 
     // (B) B улучшает (460), A хуже (495) → пишем раскладку БЕЗ смены станка.
     var b = await runScenario({ obj: [480, 460, 495], reassign: REASSIGN });
+    eq(b.wroteBeforeApply, 0, '#4402: до «Применить» в БД ничего не записано');
     eq(b.applySplit, 1, 'B: applySplitPlan вызван один раз');
     eq(b.persist, 0, 'B: смена станка НЕ записана (переназначение отвергнуто)');
     assert(/460/.test(b.notify) && !/сменой станка/.test(b.notify), 'B: уведомление 460 без смены станка (' + b.notify + ')');

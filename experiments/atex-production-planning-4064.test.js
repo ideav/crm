@@ -42,10 +42,14 @@ assert(inst.planLatenessDays([{ id: 'L', number: String(tsOf(2026, 6, 20)), dueK
 // ── 2) runOptimizeQueue: срок старше переналадки (лексикографически) ──
 function runScenario(cfg) {
     return new Promise(function(resolve) {
-        var calls = { applySplit: 0, persist: 0, notify: '' };
+        var calls = { applySplit: 0, persist: 0, notify: '', wroteBeforeApply: null };
         var self = Object.create(Controller.prototype);
         self.busy = false;
-        self.cuts = [{ id: 'c1', number: '100', slitter: { id: 'M1', label: '' } }];
+        self.cuts = [{ id: 'c1', number: '100', planDate: '100', slitter: { id: 'M1', label: '' } }];
+        // #4402: предпросмотр плана проецирует ops на очередь — нужен минимум состояния контроллера.
+        self.meta = {}; self.daySettings = {}; self.filter = { date: '', dateTo: '' };
+        self.supplies = []; self.genPositions = []; self.slitters = []; self.opTimes = {};
+        self.positionLengthById = {}; self.changeTimes = {};
         self.setBusy = function() {};
         self.buildSequenceOps = function() {
             return { ops: { updates: [{ cutId: 'c1', planStartTs: 123, plannedRuns: 1 }], creates: [], deletes: [] },
@@ -61,6 +65,9 @@ function runScenario(cfg) {
         self.render = function() {};
         self.notify = function(m) { calls.notify = String(m); setTimeout(function() { resolve(calls); }, 0); };
         self.runOptimizeQueue();
+        // #4402: план сперва показывается (предпросмотр), в БД идёт по «Применить».
+        calls.wroteBeforeApply = calls.applySplit + calls.persist;
+        if (self._pendingPlan) self.applyPendingPlan();
     });
 }
 var REASSIGN = { changed: true, slitterByRecordId: { c1: 'M2' }, slitterReqId: '99' };
@@ -68,6 +75,7 @@ var REASSIGN = { changed: true, slitterByRecordId: { c1: 'M2' }, slitterReqId: '
 (async function() {
     // Кандидат B: переналадка ВЫШЕ (500>480), но опозданий МЕНЬШЕ (1<2) → ПРИМЕНЯЕМ (срок важнее).
     var s1 = await runScenario({ co: [480, 500], late: [2, 1] });
+    assert(s1.wroteBeforeApply === 0, '#4402: до «Применить» в БД ничего не записано');
     assert(s1.applySplit === 1, 'B: больше переналадки (500>480), но меньше опозданий (1<2) → ПРИМЕНЁН');
     assert(/опоздания 2 → 1/.test(s1.notify), 'B: уведомление показывает опоздания 2 → 1 дн (' + s1.notify + ')');
 

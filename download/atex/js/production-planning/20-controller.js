@@ -26,6 +26,9 @@
         selectCoreStripFillers: selectCoreStripFillers,  // #3872
         coreOnlyStripWidths: coreOnlyStripWidths,        // #3872
         mapCutRecord: mapCutRecord,
+        clonePlanningCut: clonePlanningCut,     // #4402
+        projectPlanOnCuts: projectPlanOnCuts,   // #4402: проекция плана «Упорядочить» на очередь (предпросмотр без записи)
+        isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
         filterCuts: filterCuts,
@@ -359,6 +362,11 @@
         // before, after }. Пока не null: очередь показывает статистику до/после + кнопки «Ок» /
         // «Отменить пересчет». Пересчёт НЕ пишет в БД до «Ок» (по «Отменить» БД не тронута).
         this._dragCut = null;       // #4306: состояние drag-перетаскивания задания внутри дня
+        // #4402: предпросмотр «Упорядочить» — { ops, reassign, before, after, lateBefore, lateAfter,
+        // snapshot, tailSetup, createdIds }. Пока не null: очередь ПОКАЗЫВАЕТ новый план (проекция в
+        // памяти, карточки перерисованы), но в БД он НЕ записан — сверху висит липкая панель со
+        // статистикой и кнопками «Применить» / «Отменить». Отмена и F5 возвращают прежний план.
+        this._pendingPlan = null;
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
@@ -451,6 +459,13 @@
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
     AtexProductionPlanning.prototype.post = function(path, params) {
+        // #4402: пока висит предпросмотр «Упорядочить», очередь на экране — ПРОЕКЦИЯ в памяти
+        // (включая синтетические id продолжений), а в БД прежний план. Любая запись в этот
+        // момент пишется «не от того» состояния, поэтому запись закрыта наглухо: сперва
+        // «Применить» или «Отменить» (applyPendingPlan снимает флаг ДО записи).
+        if (this._pendingPlan) {
+            return Promise.reject(new Error('Показан непринятый пересчёт «Упорядочить» — нажмите «Применить» или «Отменить»'));
+        }
         var body = new URLSearchParams();
         body.set('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
         Object.keys(params || {}).forEach(function(k) {
@@ -2215,6 +2230,7 @@
     AtexProductionPlanning.prototype.optimizeQueue = function(actionsEl) {
         var self = this;
         if (this.busy) return;
+        if (this._pendingPlan) { this.notify('Пересчёт уже показан — нажмите «Применить» или «Отменить»', 'info'); return; }
         if (!(this.cuts && this.cuts.length)) { this.notify('Нет заданий для упорядочивания', 'info'); return; }
         var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
         var oldBar = host && host.querySelector && host.querySelector('.atex-pp-confirm-bar');
@@ -2222,7 +2238,8 @@
         var msg = el('span', { class: 'atex-pp-confirm-msg', text:
             'Пересобрать очередь в оптимальный порядок: группировка по сырью (минимум переналадок), ' +
             'при прочих равных — больше полос раньше. Ручные перестановки заменятся; ' +
-            'зафиксированные задания останутся на своих днях (#3792).' });
+            'зафиксированные задания останутся на своих днях (#3792). ' +
+            'Результат сперва ПОКАЖЕМ на карточках — в базу он запишется только по «Применить» (#4402).' });
         this.confirmAction(msg, host, [
             { label: 'Упорядочить', inline: true, onConfirm: function() { self.runOptimizeQueue(); } }
         ]);
@@ -2335,6 +2352,10 @@
         // для уведомления. combined() собирает объектив для chooseOptimizeCandidate.
         var before, builtB, objB, plan, objA, builtA;
         var coBefore, lateBefore, coB, lateB, coA = Infinity, lateA = Infinity;
+        // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
+        // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
+        // считались бы по хвостам непринятого плана).
+        var tailBefore = this.plannedTailSetup;
         function combined(late, co) { return late * LATE_DAY_WEIGHT + co; }
         try {
             coBefore = self.planChangeoverMin(self.cuts, null);
@@ -2391,33 +2412,147 @@
         }
         var useA = choice.action === 'A';
         var coBest = useA ? coA : coB, lateBest = useA ? lateA : lateB;
+        var built = useA ? builtA : builtB;
+        var changedUpdates = filterChangedUpdates(built.ops, built.cutsById);
+        var ops = { updates: changedUpdates, creates: built.ops.creates || [], deletes: built.ops.deletes || [] };
 
-        var applyPromise;
-        if (useA) {
-            applyPromise = self.persistSlitterReassignment(plan.slitterByRecordId, plan.slitterReqId).then(function() {
-                var changed = filterChangedUpdates(builtA.ops, builtA.cutsById);
-                if (!changed.length && !(builtA.ops.creates || []).length && !(builtA.ops.deletes || []).length) {
-                    return self.reload().then(function() { self.render(); });   // станки записаны, порядок/дни — нет
-                }
-                return self.applySplitPlan({ updates: changed, creates: builtA.ops.creates, deletes: builtA.ops.deletes });
-            });
-        } else {
-            var changedB = filterChangedUpdates(builtB.ops, builtB.cutsById);
-            applyPromise = (!changedB.length && !(builtB.ops.creates || []).length && !(builtB.ops.deletes || []).length)
-                ? Promise.resolve(false)
-                : self.applySplitPlan({ updates: changedB, creates: builtB.ops.creates, deletes: builtB.ops.deletes });
+        // #4402: план НЕ пишем — показываем ПРЕДПРОСМОТР: проекция на очередь в памяти (карточки
+        // перерисованы, видно, что куда уехало) + липкая панель со статистикой и кнопками
+        // «Применить» / «Отменить». Запись — только по «Применить» (applyPendingPlan).
+        self.setBusy(false);
+        self.startPlanPreview({
+            ops: ops,
+            reassign: useA ? { slitterByRecordId: plan.slitterByRecordId, slitterReqId: plan.slitterReqId } : null,
+            tailSetup: tailBefore,
+            slitterChange: useA,
+            coBefore: round3(coBefore), coAfter: round3(coBest),
+            lateBefore: round3(lateBefore), lateAfter: round3(lateBest)
+        });
+    };
+
+    // #4402: сводка качества плана по текущему this.cuts за окно [С;По] — те же числа, что панель
+    // «Качество» под очередью: ФАКТ переналадки из ХРАНИМЫХ колонок (#4156, storedSetupTotals),
+    // идеал из planQualityView, просрочка из countOverdueCuts. Липкая панель показывает её дважды —
+    // до проекции плана («Было») и после («Станет»).
+    AtexProductionPlanning.prototype.computeQualityStats = function(scopeFromKey, scopeToKey) {
+        // #4371: prevSetupBySlitter сюда не передаём — читаем только idealWindow/combinationsWindow,
+        // а они от заправки станков не зависят (ФАКТ идёт из хранимых колонок).
+        var pqView = planQualityView(this.cuts, {
+            settings: this.daySettings,
+            scopeFromKey: scopeFromKey,
+            scopeToKey: scopeToKey
+        });
+        var overdueCount = countOverdueCuts(this.cuts, this.supplies, this.genPositions,
+            { scopeFromKey: scopeFromKey, scopeToKey: scopeToKey, forecastDays: this.daysForecast() });
+        var setupTot = this.storedSetupTotals(scopeFromKey, scopeToKey);
+        var qId = pqView.idealWindow, qW = setupTot.window;
+        return {
+            hasStored: setupTot.hasStored,
+            taskCount: qW.taskCount,
+            changeoverCount: qW.changeoverCount, changeoverMin: qW.changeoverMin,
+            knifeCount: qW.knifeCount, knifeMin: qW.knifeMin,
+            materialCount: qW.materialCount, materialMin: qW.materialMin,
+            idealCount: qId.count, idealMin: qId.minutes,
+            excessCount: qW.changeoverCount - qId.count,
+            excessMin: round3(qW.changeoverMin - qId.minutes),
+            combinations: pqView.combinationsWindow,
+            overdue: overdueCount
+        };
+    };
+
+    // #4402: показать предпросмотр пересчитанного плана. Проецирует ops (+ смену станков) на
+    // КОПИЮ очереди, пересчитывает на ней колонки наладки (в памяти, без записи) и запоминает
+    // _pendingPlan вместе со СНИМКОМ исходных резок — «Отменить» и F5 возвращают прежний план.
+    AtexProductionPlanning.prototype.startPlanPreview = function(payload) {
+        var self = this;
+        var pend = payload || {};
+        var pOps = pend.ops || {};
+        // Показывать нечего — план уже такой (после filterChangedUpdates не осталось ни одного
+        // изменения и станки не меняются). Молчать нельзя: кнопка нажата, ответ нужен.
+        if (!(pOps.updates || []).length && !(pOps.creates || []).length && !(pOps.deletes || []).length && !pend.reassign) {
+            this.notify('Очередь уже в этом порядке — пересчёт ничего не меняет', 'info');
+            return false;
         }
+        var qFromStr = String((this.filter && this.filter.date) || '').trim();
+        var qToStr = String((this.filter && this.filter.dateTo) || '').trim();
+        var scopeFromKey = qFromStr === '' ? null : planDateDayKey(qFromStr);
+        var scopeToKey = qToStr === '' ? null : planDateDayKey(qToStr);
+        var snapshot = this.cuts || [];
+        pend.before = this.computeQualityStats(scopeFromKey, scopeToKey);   // ДО — по текущей очереди
+        var slitterById = {};
+        (this.slitters || []).forEach(function(s) { slitterById[String(s.id)] = s; });
+        var projected = projectPlanOnCuts(snapshot, pend.ops, {
+            slitterById: slitterById,
+            slitterByRecordId: pend.reassign ? pend.reassign.slitterByRecordId : null,
+            // #3916: длительность сегмента — по ЕГО проходам (то же правило, что пишет applySplitPlan).
+            durationForSegment: function(headCut, runs) {
+                var P = Math.max(0, Math.round(Number(runs) || 0));
+                if (!(P > 0)) return 0;
+                return Math.ceil(plannedCutDurationMinutes(
+                    cutRunLength(headCut, self.supplies, self.positionLengthById), P, self.opTimes, !!(headCut && headCut.isFoil)));
+            }
+        });
+        this.cuts = projected.cuts;
+        this.computeCutSetupUpdates(null);   // колонки наладки проекции — в памяти (без записи)
+        pend.after = this.computeQualityStats(scopeFromKey, scopeToKey);
+        pend.snapshot = snapshot;
+        pend.createdIds = projected.createdIds;
+        pend.deletedIds = projected.deletedIds;
+        pend.movedCount = projected.changedIds.length;
+        this._pendingPlan = pend;
+        console.log('[pp] ⚙️ #4402 предпросмотр «Упорядочить»: переставлено ' + pend.movedCount
+            + ', новых сегментов ' + projected.createdIds.length + ', удаляется ' + projected.deletedIds.length
+            + ' (в БД НЕ записано)');
+        this.render();
+        return true;
+    };
 
-        applyPromise.then(function() {
+    // #4402: «Применить» — пишем отложенный план в БД. Пишем ОТ ИСХОДНОГО состояния (возвращаем
+    // снимок): applySplitPlan сравнивает/лечит цепочки по self.cuts, а на экране была проекция с
+    // синтетическими id. Флаг снимаем ДО записи — иначе её заблокирует защита в post() (#4402).
+    AtexProductionPlanning.prototype.applyPendingPlan = function() {
+        var self = this;
+        var pend = this._pendingPlan;
+        if (!pend || this.busy) return Promise.resolve(false);
+        this._pendingPlan = null;
+        this.cuts = pend.snapshot;
+        this.plannedTailSetup = pend.tailSetup || {};
+        this.renderPlanPreviewBar();   // панель уходит сразу по нажатию: дальше идёт запись
+        this.setBusy(true);
+        var ops = pend.ops || { updates: [], creates: [], deletes: [] };
+        var hasOps = !!((ops.updates || []).length || (ops.creates || []).length || (ops.deletes || []).length);
+        var chain = pend.reassign
+            ? this.persistSlitterReassignment(pend.reassign.slitterByRecordId, pend.reassign.slitterReqId)
+            : Promise.resolve(true);
+        return chain.then(function() {
+            if (!hasOps) return self.reload().then(function() { self.render(); });   // станки записаны, порядок/дни — нет
+            return self.applySplitPlan(ops);
+        }).then(function() {
             self.setBusy(false);
-            self.notify('Очередь упорядочена: опоздания ' + round3(lateBefore) + ' → ' + round3(lateBest) + ' дн, '
-                + 'переналадка ' + round3(coBefore) + ' → ' + round3(coBest) + ' мин'
-                + (useA ? ' (со сменой станка)' : ''), 'success');
+            self.notify('Очередь упорядочена: опоздания ' + pend.lateBefore + ' → ' + pend.lateAfter + ' дн, '
+                + 'переналадка ' + pend.coBefore + ' → ' + pend.coAfter + ' мин'
+                + (pend.slitterChange ? ' (со сменой станка)' : ''), 'success');
+            return true;
         }).catch(function(err) {
             self.setBusy(false);
             console.error('[pp] ⚙️ optimizeQueue: ОШИБКА применения', err && err.message, err && err.stack);
             self.notify('Ошибка упорядочивания: ' + (err && err.message ? err.message : err), 'error');
+            return false;
         });
+    };
+
+    // #4402: «Отменить» — возвращаем снимок очереди. В БД ничего не писали, поэтому отмена
+    // (как и F5) просто отдаёт прежний план; проекция с синтетическими сегментами выбрасывается.
+    AtexProductionPlanning.prototype.cancelPendingPlan = function() {
+        if (this.busy) return false;
+        var pend = this._pendingPlan;
+        if (!pend) return false;
+        this._pendingPlan = null;
+        this.cuts = pend.snapshot;
+        this.plannedTailSetup = pend.tailSetup || {};
+        this.render();
+        this.notify('Пересчёт отменён — план остался прежним', 'info');
+        return true;
     };
 
     // #4001/#4047: РАССЧИТАТЬ пере-выбор станка для СУЩЕСТВУЮЩИХ логических резок (как «Сгенерировать»,
@@ -3379,6 +3514,7 @@
 
     AtexProductionPlanning.prototype.reload = function() {
         var self = this;
+        this._pendingPlan = null;     // #4402: очередь придёт из БД — проекция «Упорядочить» и её снимок неактуальны
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
         return this.loadCutStrips().then(function() { return self.loadPlanning(); })
             .then(function() { return self.loadSleeveBatches(); }) // #3340: обновляем партии втулок (FIFO)
@@ -6333,6 +6469,12 @@
     AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId) {
         var self = this;
         if (this.busy) return Promise.resolve(false);
+        // #4402: на экране непринятый план «Упорядочить» (проекция в памяти, синтетические id
+        // сегментов) — тайминг по нему считать и писать нельзя. Сперва «Применить» или «Отменить».
+        if (this._pendingPlan) {
+            this.notify('Сперва примите или отмените показанный пересчёт очереди', 'info');
+            return Promise.resolve(false);
+        }
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
         if (!scopeIds.length) { this.notify('В видимых днях у этого станка нет заданий', 'info'); return Promise.resolve(false); }
@@ -6357,6 +6499,69 @@
             return false;
         });
     };
+
+    // #4402: строки статистики «Было / Станет / изменение наладки» для липкой панели «Упорядочить» —
+    // тот же состав чисел, что показывала форма после пересчёта переналадки. → [node, node, node]
+    function planStatsNodes(before, after) {
+        function statLine(label, s, cls) {
+            return el('div', { class: 'atex-pp-plan-row' + (cls ? ' ' + cls : '') }, [
+                el('span', { class: 'atex-pp-plan-label', text: label }),
+                el('span', { text: 'переналадки: ' + s.changeoverCount + ' (' + s.changeoverMin + ' мин)' }),
+                el('span', { text: 'ножи: ' + s.knifeCount + ' (' + s.knifeMin + ' мин)', style: 'opacity:.85;' }),
+                el('span', { text: 'смены сырья: ' + s.materialCount + ' (' + s.materialMin + ' мин)', style: 'opacity:.85;' }),
+                el('span', { text: 'избыток: ' + formatQualityDelta(s.excessCount) + ' (' + formatQualityDelta(s.excessMin) + ' мин)' })
+            ]);
+        }
+        var dCnt = after.changeoverCount - before.changeoverCount;
+        var dMin = round3(after.changeoverMin - before.changeoverMin);
+        var deltaText = (dCnt === 0 && dMin === 0) ? 'наладка не изменится'
+            : ('изменение наладки: ' + formatQualityDelta(dCnt) + ' переналадок (' + formatQualityDelta(dMin) + ' мин)'
+               + (dMin < 0 ? ' — лучше' : (dMin > 0 ? ' — хуже' : '')));
+        var deltaCls = dMin < 0 ? 'is-better' : (dMin > 0 ? 'is-worse' : '');
+        return [
+            statLine('Было:', before, 'is-before'),
+            statLine('Станет:', after, 'is-after'),
+            el('div', { class: 'atex-pp-plan-delta ' + deltaCls, text: deltaText })
+        ];
+    }
+
+    // #4402: липкая панель непринятого плана «Упорядочить» — во всю ширину рабочего места, поверх
+    // очереди. Живёт в собственном узле (this.planBarEl), поэтому переключение станков/дней её не
+    // сбрасывает: план видно на карточках всех станков, пока не нажаты «Применить» / «Отменить».
+    // Пусто (нет _pendingPlan) → узел очищается и по :empty скрывается.
+    AtexProductionPlanning.prototype.renderPlanPreviewBar = function() {
+        var self = this;
+        var host = this.planBarEl;
+        if (!host) return;
+        host.innerHTML = '';
+        var pend = this._pendingPlan;
+        // Пока висит непринятый план, действия над очередью гасим (класс на корне): любая запись
+        // шла бы «не от того» состояния — сперва «Применить» или «Отменить».
+        if (this.root && this.root.classList) this.root.classList.toggle('is-plan-preview', !!pend);
+        if (!pend) return;
+        var lateWorse = round3(pend.lateAfter) > round3(pend.lateBefore);
+        var lateCls = round3(pend.lateAfter) < round3(pend.lateBefore) ? 'is-better' : (lateWorse ? 'is-worse' : '');
+        var panel = el('div', { class: 'atex-pp-plan-bar' }, [
+            el('div', { class: 'atex-pp-plan-title', text: '↻ Пересчёт очереди — план показан, но НЕ сохранён' })
+        ].concat(planStatsNodes(pend.before, pend.after), [
+            el('div', { class: 'atex-pp-plan-delta ' + lateCls,
+                text: 'опоздания: ' + pend.lateBefore + ' → ' + pend.lateAfter + ' дн'
+                    + (pend.slitterChange ? ' · со сменой станка' : '') }),
+            el('div', { class: 'atex-pp-plan-bar-hint',
+                text: 'Переставлено заданий: ' + (pend.movedCount || 0)
+                    + (pend.createdIds && pend.createdIds.length ? ', новых сегментов: ' + pend.createdIds.length : '')
+                    + (pend.deletedIds && pend.deletedIds.length ? ', удаляется записей: ' + pend.deletedIds.length : '')
+                    + '. Переключайтесь между станками и днями — карточки уже показывают новый план. '
+                    + '«Применить» записывает его в базу, «Отменить» (и обновление страницы) возвращает прежний.' })
+        ]));
+        var ok = el('button', { class: 'atex-pp-plan-apply', type: 'button', text: 'Применить' });
+        ok.addEventListener('click', function() { if (self.busy) return; self.applyPendingPlan(); });
+        var cancel = el('button', { class: 'atex-pp-plan-cancel', type: 'button', text: 'Отменить' });
+        cancel.addEventListener('click', function() { if (self.busy) return; self.cancelPendingPlan(); });
+        panel.appendChild(el('div', { class: 'atex-pp-plan-btns' }, [ok, cancel]));
+        host.appendChild(panel);
+    };
+
     // ── Рендеринг ──
 
     AtexProductionPlanning.prototype.render = function() {
@@ -6373,6 +6578,7 @@
         if (this._rendering) { console.warn('[pp] ⚠️ render: уже выполняется, пропускаю рекурсивный вызов'); return; }
         this._rendering = true;
         try {
+            this.renderPlanPreviewBar();   // #4402: липкая панель непринятого плана «Упорядочить»
             this.renderForm();
             this.renderQueue();
             this.renderLink();
@@ -7243,8 +7449,12 @@
             // #3120 п.4: подсветка резки, которую нечем обеспечить — нет подходящей
             // партии (Фаза 1a) ЛИБО есть потребность (метраж), но «Расход сырья» её не
             // покрывает (Фаза 1b: не удалось зарезервировать полностью).
-            var unreserved = cutMissingBatch(c, self.genBatches);
-            if (!unreserved) {
+            // #4402: сегмент из предпросмотра «Упорядочить» — записи в БД ещё нет, поэтому нет ни
+            // «Обеспечения», ни «Расхода сырья»: подсветку «нечем обеспечить» ему не ставим (сырьё
+            // и обеспечение придут от головы цепочки при «Применить»).
+            var isPreviewNew = !!c.previewNew;
+            var unreserved = isPreviewNew ? false : cutMissingBatch(c, self.genBatches);
+            if (!unreserved && !isPreviewNew) {
                 var needLin = Number(runLenByCut[String(c.id)]) || 0;
                 if (needLin > 0) {
                     var cons = (self.consumptionByCut && self.consumptionByCut[String(c.id)]) || [];
@@ -7258,7 +7468,7 @@
             // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
             var isSetupTask = !!setupTaskIds[String(c.id)];
             // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : ''), dataset: { cutId: String(c.id) },
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : '') + (isPreviewNew ? ' is-preview-new' : ''), dataset: { cutId: String(c.id) },
                 // #4404 п.2: подсказка карточки = список заказов и позиций, тот же текст, что в
                 // панели «Связанные позиции» (cutLinkedTitle → cutLinkedLabels).
                 title: self.cutLinkedTitle(c) });
@@ -7336,17 +7546,29 @@
             // draggable=false: перетаскивание карточки живёт на ручке ⠿ (#4306), нативный
             // drag ссылки только мешал бы. Клик всплывает и выбирает резку, как по любому
             // другому месту карточки (#3354 п.2).
+            // #4402: у сегмента предпросмотра записи в БД ещё нет — ссылке на edit_obj вести некуда,
+            // поэтому номер обычным текстом + пометка, что задание появится по «Применить».
             var infoChildren = [
-                el('a', {
-                    class: 'atex-pp-cut-seq',
-                    href: '/' + encodeURIComponent(self.db) + '/edit_obj/' + encodeURIComponent(c.id),
-                    target: '_blank',
-                    rel: 'noopener',
-                    draggable: 'false',
-                    title: cutNumTitle + ' · Открыть карточку задания (id ' + c.id + ')',
-                    text: '№ ' + seqText
-                })
+                isPreviewNew
+                    ? el('span', {
+                        class: 'atex-pp-cut-seq',
+                        title: cutNumTitle + ' · Новый сегмент: запись появится после «Применить»',
+                        text: '№ ' + seqText
+                    })
+                    : el('a', {
+                        class: 'atex-pp-cut-seq',
+                        href: '/' + encodeURIComponent(self.db) + '/edit_obj/' + encodeURIComponent(c.id),
+                        target: '_blank',
+                        rel: 'noopener',
+                        draggable: 'false',
+                        title: cutNumTitle + ' · Открыть карточку задания (id ' + c.id + ')',
+                        text: '№ ' + seqText
+                    })
             ];
+            if (isPreviewNew) {
+                infoChildren.push(el('span', { class: 'atex-pp-cut-new-badge',
+                    title: 'Новый сегмент разбиения по дням — появится после «Применить»', text: 'новое' }));
+            }
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
             infoChildren.push(el('span', { class: 'atex-pp-cut-winding', text: windingText }));
@@ -8033,6 +8255,10 @@
     AtexProductionPlanning.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
+        // #4402: узел липкой панели непринятого плана «Упорядочить» — ПЕРВЫМ в рабочем месте, во
+        // всю его ширину (position: sticky). Пустой узел скрыт (:empty), наполняет renderPlanPreviewBar.
+        this.planBarEl = el('div', { class: 'atex-pp-plan-bar-host' });
+        this.root.appendChild(this.planBarEl);
         var layout = el('div', { class: 'atex-pp-layout' });
 
         // Форма новой резки живёт в модалке (#3116 п.1), открывается кнопкой «+».

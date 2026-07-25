@@ -626,6 +626,81 @@
 /* #4401: панель предпросмотра пересчёта наладки (#4306, .atex-pp-recalc-*) удалена вместе
    с самим предпросмотром: пересчёт тайминга подтверждения не требует. */
 
+/* #4402: липкая панель непринятого плана «Упорядочить» — во всю ширину рабочего места, над
+   очередью и правой панелью (её z-index 1). Скролл-контейнер — .app-content (см. #3696).
+   Пустой узел (плана нет) не занимает места. */
+.atex-pp-plan-bar-host {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.atex-pp-plan-bar-host:empty { display: none; }
+.atex-pp-plan-bar {
+    margin: 0;
+    padding: 10px 16px;
+    border-bottom: 2px solid var(--pp-attn-border);
+    background: var(--pp-attn-bg);
+    color: var(--pp-attn-text);
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .12);
+}
+.atex-pp-plan-title { font-weight: 700; margin-bottom: 8px; }
+.atex-pp-plan-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 3px 0;
+    font-variant-numeric: tabular-nums;
+}
+.atex-pp-plan-label { font-weight: 700; min-width: 62px; }
+.atex-pp-plan-delta { margin: 6px 0 2px; font-weight: 700; }
+.atex-pp-plan-delta.is-better { color: #1e874b; }
+.atex-pp-plan-delta.is-worse { color: #c0392b; }
+.atex-pp-plan-bar-hint { margin-top: 6px; opacity: .85; line-height: 1.35; }
+.atex-pp-plan-btns { display: flex; gap: 10px; margin-top: 8px; }
+.atex-pp-plan-apply, .atex-pp-plan-cancel {
+    padding: 9px 18px;
+    font: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.atex-pp-plan-apply { background: #1e874b; color: #fff; }
+.atex-pp-plan-cancel { background: var(--pp-bg); color: inherit; border: 1px solid var(--pp-border); }
+.atex-pp-plan-apply:hover { filter: brightness(1.08); }
+.atex-pp-plan-cancel:hover { background: var(--pp-surface); }
+.atex-pp.is-busy .atex-pp-plan-apply, .atex-pp.is-busy .atex-pp-plan-cancel { pointer-events: none; opacity: .5; }
+
+/* Пока план не принят, действия над очередью гасим: любая запись шла бы «не от того»
+   состояния (на экране проекция в памяти). Вкладки станков, даты и поиск остаются живыми —
+   план ради того и показан, чтобы его рассмотреть. */
+.atex-pp.is-plan-preview .atex-pp-panel-actions .atex-pp-btn,
+.atex-pp.is-plan-preview .atex-pp-cut-controls,
+.atex-pp.is-plan-preview .atex-pp-recalc-setup {
+    pointer-events: none;
+    opacity: .45;
+}
+
+/* Новый сегмент разбиения в предпросмотре: записи в БД ещё нет (появится по «Применить»). */
+.atex-pp-cut.is-preview-new {
+    border-style: dashed;
+    border-color: var(--pp-attn-border);
+    background: var(--pp-attn-bg);
+}
+.atex-pp-cut-new-badge {
+    padding: 1px 6px;
+    border: 1px solid var(--pp-attn-border);
+    border-radius: 999px;
+    background: var(--pp-bg);
+    color: var(--pp-attn-text);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 /* Панель полос — под своей карточкой (#3120 п.8). Клик внутри не выбирает
    резку (#3149) — курсор по умолчанию, поля вводят свой. */
 .atex-pp-cut > .atex-pp-strip-panel { margin: 10px 0 2px; cursor: default; }

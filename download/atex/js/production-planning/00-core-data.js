@@ -1367,6 +1367,122 @@
         return '';
     }
 
+    // #4402: копия записи очереди (для предпросмотра плана в памяти). Массивы и вложенные
+    // ссылки (станок/партия) копируем, иначе проекция мутировала бы исходные объекты.
+    function clonePlanningCut(cut) {
+        var cl = {};
+        for (var k in cut) if (Object.prototype.hasOwnProperty.call(cut, k)) cl[k] = cut[k];
+        if (Array.isArray(cut.knifeWidths)) cl.knifeWidths = cut.knifeWidths.slice();
+        if (Array.isArray(cut.leaders)) cl.leaders = cut.leaders.slice();
+        if (Array.isArray(cut.sleeves)) cl.sleeves = cut.sleeves.slice();
+        if (cut.slitter) cl.slitter = { id: cut.slitter.id, label: cut.slitter.label };
+        if (cut.materialBatch) cl.materialBatch = { id: cut.materialBatch.id, label: cut.materialBatch.label };
+        return cl;
+    }
+
+    // #4402: префикс id синтетических записей-продолжений предпросмотра. В БД таких записей
+    // нет — они появятся только по «Применить» (ops.creates), поэтому id заведомо «не своё».
+    var PREVIEW_CUT_ID_PREFIX = 'preview:';
+
+    function isPreviewCutId(id) {
+        return String(id == null ? '' : id).indexOf(PREVIEW_CUT_ID_PREFIX) === 0;
+    }
+
+    // #4402: ПРОЕКЦИЯ плана на очередь — предпросмотр «Упорядочить» без записи в БД. Возвращает
+    // НОВЫЙ массив резок-клонов (исходные не трогаем: по «Отменить» возвращаем их как есть):
+    //   • slitterByRecordId — смена станка (кандидат A «Упорядочить», persistSlitterReassignment);
+    //   • ops.updates — новый planStart и число проходов сегмента;
+    //   • ops.creates — сегменты дробления, записей под которые ещё нет: синтетическая копия
+    //     ГОЛОВЫ с previewNew:true (карточка помечена «новое», ссылок на объект БД у неё нет);
+    //   • ops.deletes — лишние записи цепочки убираем из очереди.
+    // opts: { slitterById, slitterByRecordId, durationForSegment(headCut, runs) → мин }.
+    // Тайминг сегмента пересчитываем ТЕМ ЖЕ правилом, что пишет applySplitPlan (#3916: по
+    // проходам сегмента), иначе предпросмотр показал бы длительность целой резки.
+    // Чистая — покрыта тестом. → { cuts, createdIds, deletedIds, changedIds }
+    function projectPlanOnCuts(cuts, ops, opts) {
+        var o = ops || {};
+        var options = opts || {};
+        var slitterById = options.slitterById || {};
+        var durationFor = typeof options.durationForSegment === 'function' ? options.durationForSegment : null;
+        var out = [], byId = {}, changed = {}, createdIds = [], deletedIds = [];
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var cl = clonePlanningCut(c);
+            out.push(cl);
+            byId[String(cl.id)] = cl;
+        });
+        function setSlitter(cut, sid) {
+            var key = String(sid == null ? '' : sid);
+            if (key === '') return;
+            if (String((cut.slitter && cut.slitter.id) == null ? '' : cut.slitter.id) === key) return;
+            var s = slitterById[key];
+            cut.slitter = { id: key, label: (s && s.label) || ('#' + key) };
+            changed[String(cut.id)] = true;
+        }
+        function setDuration(cut, headCut) {
+            if (!durationFor) return;
+            var d = durationFor(headCut || cut, stripNum(cut.plannedRuns));
+            if (d != null && isFinite(Number(d))) cut.duration = Number(d);
+        }
+        Object.keys(options.slitterByRecordId || {}).forEach(function(rid) {
+            var c = byId[String(rid)];
+            if (c) setSlitter(c, options.slitterByRecordId[rid]);
+        });
+        (o.updates || []).forEach(function(u) {
+            if (!u) return;
+            var c = byId[String(u.cutId)];
+            if (!c) return;
+            var ts = Number(u.planStartTs);
+            if (isFinite(ts) && ts > 0 && String(c.planDate) !== String(ts)) {
+                c.planDate = String(ts);
+                c.number = String(ts);   // #3242: «номер» задания = плановый старт
+                changed[String(c.id)] = true;
+            }
+            if (u.plannedRuns != null && stripNum(c.plannedRuns) !== Number(u.plannedRuns)) {
+                c.plannedRuns = Number(u.plannedRuns) || 0;
+                changed[String(c.id)] = true;
+            }
+            if (u.slitterId != null) setSlitter(c, u.slitterId);
+            setDuration(c, byId[String(c.firstPartId)] || c);
+        });
+        var previewSeq = 0;
+        (o.creates || []).forEach(function(cr) {
+            if (!cr) return;
+            var head = byId[String(cr.parentCutId)];
+            if (!head) return;   // головы нет в очереди — рисовать продолжение не от чего
+            var seg = clonePlanningCut(head);
+            previewSeq += 1;
+            seg.id = PREVIEW_CUT_ID_PREFIX + previewSeq;
+            seg.previewNew = true;          // карточка: «появится после «Применить»»
+            seg.firstPartId = String(cr.parentCutId);
+            seg.planDate = String(cr.planStartTs);
+            seg.number = String(cr.planStartTs);
+            seg.plannedRuns = Number(cr.plannedRuns) || 0;
+            seg.status = ''; seg.startDate = ''; seg.endDate = '';
+            seg.fixed = false;
+            seg.storedKnifeSetupMin = ''; seg.storedMaterialWindingMin = ''; seg.storedCutAndLeaderMin = '';
+            if (cr.slitterId != null) {
+                var sk = String(cr.slitterId);
+                var s = slitterById[sk];
+                seg.slitter = { id: sk, label: (s && s.label) || (head.slitter && String(head.slitter.id) === sk ? head.slitter.label : '#' + sk) };
+            }
+            setDuration(seg, head);
+            out.push(seg);
+            byId[seg.id] = seg;
+            createdIds.push(seg.id);
+        });
+        var deleteSet = {};
+        (o.deletes || []).forEach(function(id) { deleteSet[String(id)] = true; });
+        if (Object.keys(deleteSet).length) {
+            out = out.filter(function(c) {
+                if (!deleteSet[String(c.id)]) return true;
+                deletedIds.push(String(c.id));
+                return false;
+            });
+        }
+        return { cuts: out, createdIds: createdIds, deletedIds: deletedIds, changedIds: Object.keys(changed) };
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
     // для дропдауна привязки и плашек «Связанные позиции». Подпись:
     // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).
