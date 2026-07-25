@@ -32,6 +32,9 @@
         cutSearchHaystack: cutSearchHaystack,
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
+        planDateIso: planDateIso,                             // #4398
+        searchMatchesOutsideRange: searchMatchesOutsideRange, // #4398: совпадения поиска вне диапазона дат
+        expandRangeToInclude: expandRangeToInclude,           // #4398
         dayDeletionTargets: dayDeletionTargets,
         formatPlanDayLabel: formatPlanDayLabel,
         formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
@@ -6735,6 +6738,18 @@
                 label: base + ' · ост. ' + round3(remaining) + ' рул.' };
         }).filter(function(o) { return o.remaining > 0; });
 
+        // #4398: позиция, у которой уже есть «Обеспечение» с заданием или складской партией,
+        // из списка исчезает — и это выглядело так, будто заказа в планировании нет вовсе.
+        // Говорим, сколько согласованных позиций скрыто по этой причине и где искать их задания.
+        var approvedCount = (this.genPositions || []).filter(function(p) { return p.approved; }).length;
+        var coveredCount = approvedCount - unsup.length;
+        if (coveredCount > 0) {
+            form.appendChild(el('p', { class: 'atex-pp-hint',
+                text: 'Позиции, у которых уже есть задание или складская партия, в списке не показываются (скрыто: ' +
+                    coveredCount + '). Их задания ищите поиском по номеру заказа в очереди — если ничего не найдено, ' +
+                    'очередь предложит расширить диапазон дат.' }));
+        }
+
         if (!options.length) {
             form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Нет согласованных необеспеченных позиций.' }));
             this._renderingForm = false;
@@ -6975,6 +6990,41 @@
         function groupMatchCount(g) {
             if (!hasQuery) return g.cuts.length;
             return g.cuts.filter(cutMatchesSearch).length;
+        }
+
+        // #4398: поиск отбирает из ВИДИМОГО диапазона дат, поэтому задание, стоящее раньше «С»
+        // (застрявшее в прошлом, не начатое), поиск по номеру заказа не находил и молчал — заказ
+        // выглядел потерянным (заказ есть, задания нигде нет). Считаем совпадения по всей
+        // загруженной очереди и, если они вне диапазона, показываем плашку с их датами и
+        // кнопкой, расширяющей диапазон до них.
+        // Считаем по набору, уже отсеянному ОСТАЛЬНЫМИ фильтрами (статус), иначе кнопка
+        // обещала бы задание, которое после расширения дат всё равно не покажется.
+        var outside = searchMatchesOutsideRange(filterCuts(this.cuts, this.filter), query,
+            linkedLabelsByCut, this.filter.date, this.filter.dateTo);
+        if (outside.count) {
+            var outsideDays = formatPlanDayRangeLabel(outside.fromIso, outside.toIso);
+            var outsideBtn = el('button', { class: 'atex-pp-outside-btn', type: 'button',
+                text: 'Расширить диапазон', title: 'Показать в очереди даты ' + outsideDays });
+            outsideBtn.addEventListener('click', function() {
+                var next = expandRangeToInclude(self.filter.date, self.filter.dateTo,
+                    outside.fromIso, outside.toIso);
+                self.filter.date = next.date;
+                self.filter.dateTo = next.dateTo;
+                // Найденное задание может стоять на ДРУГОМ станке — переключаем закладку на
+                // станок первого совпадения, иначе расширенный диапазон снова покажет пустоту.
+                var firstSlitterId = (outside.cuts[0] && outside.cuts[0].slitter && outside.cuts[0].slitter.id != null)
+                    ? String(outside.cuts[0].slitter.id) : '';
+                if (firstSlitterId !== '') self.activeSlitter = firstSlitterId;
+                self.selectedCutId = null;   // #3349: панель «Связанные позиции» — от прежней резки
+                self.renderQueue();
+                self.renderLink();
+            });
+            box.appendChild(el('div', { class: 'atex-pp-outside-note' }, [
+                el('span', { class: 'atex-pp-outside-text',
+                    text: 'Вне диапазона дат по запросу найдено заданий: ' + outside.count +
+                        ' (' + outsideDays + ')' }),
+                outsideBtn
+            ]));
         }
 
         // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.

@@ -746,6 +746,60 @@
         return pk >= fromK && pk <= toK;
     }
 
+    // #4398: «Дата план» (unix-штамп из отчёта или дата-строка) → «ГГГГ-ММ-ДД» для значения
+    // фильтра дат <input type=date>. Нераспознанная дата → ''.
+    function planDateIso(planDate) {
+        var key = planDateDayKey(planDate);
+        var dt = dayKeyToDate(key);
+        return dt ? isoDateFromMs(dt.getTime()) : '';
+    }
+
+    // #4398: совпадения быстрого поиска (#3411), СКРЫТЫЕ фильтром дат [dateFrom; dateTo].
+    // Поиск фильтрует уже отобранную диапазоном очередь, поэтому задание, стоящее раньше «С»
+    // (например застрявшее в прошлом), не находилось и ничем себя не выдавало — заказ выглядел
+    // потерянным. Возвращает число таких заданий и границы их дат «ГГГГ-ММ-ДД», чтобы очередь
+    // предложила расширить диапазон. Завершённые и недатированные не считаем: первых в очереди
+    // нет никогда, вторые видны при любом диапазоне. labelsByCut — {cutId: [подписи позиций]},
+    // как в cutMatchesQuery. Чистая — покрыта тестом.
+    // → { count, cuts (по возрастанию «Даты план»), fromIso, toIso }
+    function searchMatchesOutsideRange(cuts, query, labelsByCut, dateFrom, dateTo) {
+        var empty = { count: 0, cuts: [], fromIso: '', toIso: '' };
+        var q = String(query == null ? '' : query).trim();
+        if (q === '') return empty;
+        var labels = labelsByCut || {};
+        var hidden = (cuts || []).filter(function(c) {
+            if (!c) return false;
+            if (String(c.status || '').trim() === 'Завершён') return false;
+            if (String(c.planDate || '').trim() === '') return false;
+            if (isCutVisible(c, dateFrom, dateTo)) return false;
+            return cutMatchesQuery(c, q, labels[String(c.id)]);
+        });
+        if (!hidden.length) return empty;
+        hidden.sort(function(a, b) { return planDateDayKey(a.planDate) - planDateDayKey(b.planDate); });
+        var fromIso = '', toIso = '';
+        hidden.forEach(function(c) {
+            var iso = planDateIso(c.planDate);
+            if (iso === '') return;
+            if (fromIso === '' || iso < fromIso) fromIso = iso;
+            if (toIso === '' || iso > toIso) toIso = iso;
+        });
+        return { count: hidden.length, cuts: hidden, fromIso: fromIso, toIso: toIso };
+    }
+
+    // #4398: расширить фильтр дат [dateFrom; dateTo] так, чтобы найденные вне диапазона
+    // задания попали в очередь. Пустой край — «без границы», его не заполняем (диапазон и так
+    // открыт). Сравнение «ГГГГ-ММ-ДД» лексикографическое: формат один (<input type=date>).
+    // Чистая — покрыта тестом. → { date, dateTo }
+    function expandRangeToInclude(dateFrom, dateTo, fromIso, toIso) {
+        var from = String(dateFrom == null ? '' : dateFrom).trim();
+        var to = String(dateTo == null ? '' : dateTo).trim();
+        var lo = String(fromIso == null ? '' : fromIso).trim();
+        var hi = String(toIso == null ? '' : toIso).trim();
+        if (from !== '' && lo !== '' && lo < from) from = lo;
+        if (to !== '' && hi !== '' && hi > to) to = hi;
+        return { date: from, dateTo: to };
+    }
+
     // #3475/#3622: задания и обеспечения для кнопки «Удалить». Берём резки с непустой
     // плановой датой В ДИАПАЗОНЕ фильтра [dateFrom; dateTo] — тот же набор, что показан в
     // очереди (isCutVisible, #3599). До #3622 отбирали только один день (dateFrom), из-за
@@ -8766,6 +8820,9 @@
         cutSearchHaystack: cutSearchHaystack,
         cutMatchesQuery: cutMatchesQuery,
         isCutVisible: isCutVisible,
+        planDateIso: planDateIso,                             // #4398
+        searchMatchesOutsideRange: searchMatchesOutsideRange, // #4398: совпадения поиска вне диапазона дат
+        expandRangeToInclude: expandRangeToInclude,           // #4398
         dayDeletionTargets: dayDeletionTargets,
         formatPlanDayLabel: formatPlanDayLabel,
         formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
@@ -15469,6 +15526,18 @@
                 label: base + ' · ост. ' + round3(remaining) + ' рул.' };
         }).filter(function(o) { return o.remaining > 0; });
 
+        // #4398: позиция, у которой уже есть «Обеспечение» с заданием или складской партией,
+        // из списка исчезает — и это выглядело так, будто заказа в планировании нет вовсе.
+        // Говорим, сколько согласованных позиций скрыто по этой причине и где искать их задания.
+        var approvedCount = (this.genPositions || []).filter(function(p) { return p.approved; }).length;
+        var coveredCount = approvedCount - unsup.length;
+        if (coveredCount > 0) {
+            form.appendChild(el('p', { class: 'atex-pp-hint',
+                text: 'Позиции, у которых уже есть задание или складская партия, в списке не показываются (скрыто: ' +
+                    coveredCount + '). Их задания ищите поиском по номеру заказа в очереди — если ничего не найдено, ' +
+                    'очередь предложит расширить диапазон дат.' }));
+        }
+
         if (!options.length) {
             form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Нет согласованных необеспеченных позиций.' }));
             this._renderingForm = false;
@@ -15709,6 +15778,41 @@
         function groupMatchCount(g) {
             if (!hasQuery) return g.cuts.length;
             return g.cuts.filter(cutMatchesSearch).length;
+        }
+
+        // #4398: поиск отбирает из ВИДИМОГО диапазона дат, поэтому задание, стоящее раньше «С»
+        // (застрявшее в прошлом, не начатое), поиск по номеру заказа не находил и молчал — заказ
+        // выглядел потерянным (заказ есть, задания нигде нет). Считаем совпадения по всей
+        // загруженной очереди и, если они вне диапазона, показываем плашку с их датами и
+        // кнопкой, расширяющей диапазон до них.
+        // Считаем по набору, уже отсеянному ОСТАЛЬНЫМИ фильтрами (статус), иначе кнопка
+        // обещала бы задание, которое после расширения дат всё равно не покажется.
+        var outside = searchMatchesOutsideRange(filterCuts(this.cuts, this.filter), query,
+            linkedLabelsByCut, this.filter.date, this.filter.dateTo);
+        if (outside.count) {
+            var outsideDays = formatPlanDayRangeLabel(outside.fromIso, outside.toIso);
+            var outsideBtn = el('button', { class: 'atex-pp-outside-btn', type: 'button',
+                text: 'Расширить диапазон', title: 'Показать в очереди даты ' + outsideDays });
+            outsideBtn.addEventListener('click', function() {
+                var next = expandRangeToInclude(self.filter.date, self.filter.dateTo,
+                    outside.fromIso, outside.toIso);
+                self.filter.date = next.date;
+                self.filter.dateTo = next.dateTo;
+                // Найденное задание может стоять на ДРУГОМ станке — переключаем закладку на
+                // станок первого совпадения, иначе расширенный диапазон снова покажет пустоту.
+                var firstSlitterId = (outside.cuts[0] && outside.cuts[0].slitter && outside.cuts[0].slitter.id != null)
+                    ? String(outside.cuts[0].slitter.id) : '';
+                if (firstSlitterId !== '') self.activeSlitter = firstSlitterId;
+                self.selectedCutId = null;   // #3349: панель «Связанные позиции» — от прежней резки
+                self.renderQueue();
+                self.renderLink();
+            });
+            box.appendChild(el('div', { class: 'atex-pp-outside-note' }, [
+                el('span', { class: 'atex-pp-outside-text',
+                    text: 'Вне диапазона дат по запросу найдено заданий: ' + outside.count +
+                        ' (' + outsideDays + ')' }),
+                outsideBtn
+            ]));
         }
 
         // Базовая видимость очереди: не «Завершён», дата плана = выбранной/пустая.

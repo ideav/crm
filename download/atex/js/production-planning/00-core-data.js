@@ -745,6 +745,60 @@
         return pk >= fromK && pk <= toK;
     }
 
+    // #4398: «Дата план» (unix-штамп из отчёта или дата-строка) → «ГГГГ-ММ-ДД» для значения
+    // фильтра дат <input type=date>. Нераспознанная дата → ''.
+    function planDateIso(planDate) {
+        var key = planDateDayKey(planDate);
+        var dt = dayKeyToDate(key);
+        return dt ? isoDateFromMs(dt.getTime()) : '';
+    }
+
+    // #4398: совпадения быстрого поиска (#3411), СКРЫТЫЕ фильтром дат [dateFrom; dateTo].
+    // Поиск фильтрует уже отобранную диапазоном очередь, поэтому задание, стоящее раньше «С»
+    // (например застрявшее в прошлом), не находилось и ничем себя не выдавало — заказ выглядел
+    // потерянным. Возвращает число таких заданий и границы их дат «ГГГГ-ММ-ДД», чтобы очередь
+    // предложила расширить диапазон. Завершённые и недатированные не считаем: первых в очереди
+    // нет никогда, вторые видны при любом диапазоне. labelsByCut — {cutId: [подписи позиций]},
+    // как в cutMatchesQuery. Чистая — покрыта тестом.
+    // → { count, cuts (по возрастанию «Даты план»), fromIso, toIso }
+    function searchMatchesOutsideRange(cuts, query, labelsByCut, dateFrom, dateTo) {
+        var empty = { count: 0, cuts: [], fromIso: '', toIso: '' };
+        var q = String(query == null ? '' : query).trim();
+        if (q === '') return empty;
+        var labels = labelsByCut || {};
+        var hidden = (cuts || []).filter(function(c) {
+            if (!c) return false;
+            if (String(c.status || '').trim() === 'Завершён') return false;
+            if (String(c.planDate || '').trim() === '') return false;
+            if (isCutVisible(c, dateFrom, dateTo)) return false;
+            return cutMatchesQuery(c, q, labels[String(c.id)]);
+        });
+        if (!hidden.length) return empty;
+        hidden.sort(function(a, b) { return planDateDayKey(a.planDate) - planDateDayKey(b.planDate); });
+        var fromIso = '', toIso = '';
+        hidden.forEach(function(c) {
+            var iso = planDateIso(c.planDate);
+            if (iso === '') return;
+            if (fromIso === '' || iso < fromIso) fromIso = iso;
+            if (toIso === '' || iso > toIso) toIso = iso;
+        });
+        return { count: hidden.length, cuts: hidden, fromIso: fromIso, toIso: toIso };
+    }
+
+    // #4398: расширить фильтр дат [dateFrom; dateTo] так, чтобы найденные вне диапазона
+    // задания попали в очередь. Пустой край — «без границы», его не заполняем (диапазон и так
+    // открыт). Сравнение «ГГГГ-ММ-ДД» лексикографическое: формат один (<input type=date>).
+    // Чистая — покрыта тестом. → { date, dateTo }
+    function expandRangeToInclude(dateFrom, dateTo, fromIso, toIso) {
+        var from = String(dateFrom == null ? '' : dateFrom).trim();
+        var to = String(dateTo == null ? '' : dateTo).trim();
+        var lo = String(fromIso == null ? '' : fromIso).trim();
+        var hi = String(toIso == null ? '' : toIso).trim();
+        if (from !== '' && lo !== '' && lo < from) from = lo;
+        if (to !== '' && hi !== '' && hi > to) to = hi;
+        return { date: from, dateTo: to };
+    }
+
     // #3475/#3622: задания и обеспечения для кнопки «Удалить». Берём резки с непустой
     // плановой датой В ДИАПАЗОНЕ фильтра [dateFrom; dateTo] — тот же набор, что показан в
     // очереди (isCutVisible, #3599). До #3622 отбирали только один день (dateFrom), из-за

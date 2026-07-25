@@ -864,6 +864,33 @@
 
 .atex-pp-empty { padding: 14px; color: var(--pp-muted); }
 
+/* #4398: плашка «поиск нашёл задания вне диапазона дат» — между фильтрами и вкладками
+   станков. Информационная (не ошибка): совпадения есть, их просто не показывает фильтр. */
+.atex-pp-outside-note {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--pp-border);
+    border-radius: 8px;
+    background: var(--pp-info-bg);
+    color: var(--pp-info-text);
+    font-size: 13px;
+}
+.atex-pp-outside-btn {
+    padding: 5px 12px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+}
+.atex-pp-outside-btn:hover { background: var(--pp-bg); }
+
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-pp-toast {
     position: fixed;
