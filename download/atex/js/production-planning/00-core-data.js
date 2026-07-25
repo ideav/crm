@@ -663,6 +663,28 @@
     // «Производственной резки» (DATETIME) и приходит unix-штампом (секунды/мс), а фильтр
     // <input type=date> даёт «ГГГГ-ММ-ДД». batchDateKey сводит дату-строку к YYYYMMDD, но
     // unix-штамп (≈1.7e9) к нему несравним — приводим штамп к календарному дню той же шкалы.
+    // #4401: подпись очереди станка — всё, от чего зависит расчёт хранимого тайминга:
+    // порядок (planStart), конфигурация задания (сырьё/намотка/ножи/проходы/длительность),
+    // цепочка дробления и САМИ хранимые колонки. Нужна детектору «↻ Пересчитать наладку»:
+    // полный пересчёт стоит десятки миллисекунд, а очередь перерисовывается на каждый ввод в
+    // поиске — по совпадению подписи отдаём прошлый результат. Меняется что угодно из
+    // перечисленного — подпись другая, считаем заново. Чистая, проверяется тестом.
+    function slitterQueueSignature(cuts, slitterId) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var parts = [];
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var csid = c.slitter && c.slitter.id;
+            if (String(csid == null ? '' : csid) !== sid) return;
+            parts.push([
+                c.id, c.planDate, c.plannedRuns, c.duration, c.materialId, c.winding,
+                (c.knifeWidths || []).join('.'), c.firstPartId,
+                c.storedKnifeSetupMin, c.storedMaterialWindingMin, c.storedCutAndLeaderMin
+            ].join('~'));
+        });
+        return parts.join(';');
+    }
+
     function planDateDayKey(value) {
         var s = String(value == null ? '' : value).trim();
         if (s === '') return Infinity;
