@@ -9107,7 +9107,8 @@
     AtexProductionPlanning.prototype.blankDraft = function() {
         // #4396: insertDate («ГГГГ-ММ-ДД») — день, в который диспетчер вставляет задание. Пусто =
         // как раньше (ближайшее свободное окно, конец очереди станка); указан — ОБЯЗАТЕЛЕН.
-        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', insertDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], prospect: null };
+        // `active` из черновика убран вместе с галкой «В работе» (25.07.2026): значение не пишем.
+        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', insertDate: '', status: CUT_STATUSES[0], notes: '', selectedPositions: [], prospect: null };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -10687,7 +10688,8 @@
                 winding: reqIdByName(cutMeta, CUT_REQ.winding),
                 leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: ссылка «Лидер» (82519)
                 material: reqIdByName(cutMeta, CUT_REQ.material), // #3688: ссылка «Вид сырья» (95358)
-                active: activeReqId(cutMeta),
+                // «В работе» (activeReqId) больше не пишем — галку с формы убрали, значение не
+                // сохраняем вообще: реквизит остаётся дефолтным по схеме.
                 notes: reqIdByName(cutMeta, CUT_REQ.notes)
             };
             var cutMainState = { last: self.lastCutMainValue };
@@ -10702,7 +10704,6 @@
                 winding: normWinding(plan.layout && plan.layout.windDir),
                 leader: self.resolveLeaderId(leaderPos && leaderPos.leader), // #3569: лидер позиции → id
                 material: plan.materialId,   // #3688: «Вид сырья» проспект-резки
-                active: (d.active === false) ? '0' : '1',
                 notes: d.notes
                 // #3923: «Очередность» не пишем — порядок задаёт planStart (главное значение)
             });
@@ -15598,14 +15599,13 @@
         insertInput.addEventListener('change', function() { d.insertDate = String(insertInput.value || '').trim(); self.renderForm(); });
         form.appendChild(field('День вставки (можно не указывать; указан — обязателен)', insertInput));
 
-        // У «Производственной резки» нет колонки «Статус» — есть флаг «В работе» (по умолчанию вкл).
-        var activeInput = el('input', { type: 'checkbox' });
-        activeInput.checked = d.active !== false;
-        activeInput.addEventListener('change', function() { d.active = activeInput.checked; });
-        form.appendChild(el('label', { class: 'atex-pp-checkbox-field' }, [
-            activeInput,
-            el('span', { text: 'В работе' })
-        ]));
+        // Галка «В работе» убрана (решение заказчика 25.07.2026): реквизит «В работе» задания
+        // это флаг АКТИВНОСТИ ЗАПИСИ, а не статус; рабочее место его нигде не читало (ни
+        // mapCutRecord/rowsToPlanning, ни очередь/Гант/генерация), и переключателя на карточке
+        // тоже нет — галка была записью в никуда. Значение больше не пишем ВООБЩЕ: у нового
+        // задания реквизит остаётся дефолтным по схеме. Менять его — в карточке объекта CRM
+        // (edit_obj, ссылка с номера задания в очереди, #4394). Статус очереди — отдельное поле
+        // (cut_status отчёта), к этому флагу отношения не имеет.
 
         var notes = el('textarea', { class: 'atex-pp-input atex-pp-textarea', rows: '2' });
         notes.value = d.notes || '';
