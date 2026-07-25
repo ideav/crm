@@ -1,18 +1,19 @@
 // Tests for ideav/crm#4396 — форма «Новое производственное задание»:
-//   A) ПРЕДПОЧТИТЕЛЬНЫЙ ДЕНЬ (можно оставить пустым) — куда диспетчер хочет вставить задание;
+//   A) ДЕНЬ ВСТАВКИ — можно не указывать, но УКАЗАННЫЙ ОБЯЗАТЕЛЕН: задание встаёт именно в него
+//      (перенос с фиксацией — только фикс-якорь даёт эту гарантию, #4390);
 //   B) свободное окно больше НЕ ставит задание на нерабочий день (выходные/праздники
 //      «Календаря» #3788 и «Отпуск» станка #3764) — раньше форма показывала окно на выходном,
 //      создавала на нём задание, и очередь тут же писала «Выходной/праздничный день —
 //      заданий быть не должно».
 //
 // Покрываем:
-//   1) preferDayIso — разбор значения date-поля;
+//   1) insertDayIso — разбор значения date-поля;
 //   2) freeSlotForQueue с blockedRanges — окно уезжает за нерабочие дни;
 //   3) freeSlotForCut — контроллер эти блокировки действительно передаёт;
 //   4) форму (renderForm на DOM-стабе): поле есть, пишет в draft, превью показывает выбранный
 //      день вместо «Свободного окна», выходной/отпуск гасят «Создать задание»;
 //   5) createCutForPosition — день пуст → как раньше; указан → moveCutToDay(день,'weight',
-//      fix=false, свой станок, withinSlitter); выходной/отпуск → не создаём ничего.
+//      fix=TRUE, свой станок, withinSlitter); выходной/отпуск → не создаём ничего.
 //
 // Run with: node experiments/atex-production-planning-4396.test.js
 
@@ -78,14 +79,14 @@ function assertEqual(actual, expected, name) {
     }
 }
 
-// ── 1) preferDayIso ──────────────────────────────────────────────────────────
-assertEqual(planning.preferDayIso('2026-07-27'), '2026-07-27', 'preferDayIso: полная дата принимается');
-assertEqual(planning.preferDayIso('  2026-07-27  '), '2026-07-27', 'preferDayIso: пробелы обрезаются');
-assertEqual(planning.preferDayIso(''), '', 'preferDayIso: пусто — законное значение (день не указан)');
-assertEqual(planning.preferDayIso(null), '', 'preferDayIso: null → пусто');
-assertEqual(planning.preferDayIso(undefined), '', 'preferDayIso: undefined → пусто');
-assertEqual(planning.preferDayIso('2026-7-7'), '', 'preferDayIso: недописанный ввод не считается днём');
-assertEqual(planning.preferDayIso('завтра'), '', 'preferDayIso: мусор → пусто');
+// ── 1) insertDayIso ──────────────────────────────────────────────────────────
+assertEqual(planning.insertDayIso('2026-07-27'), '2026-07-27', 'insertDayIso: полная дата принимается');
+assertEqual(planning.insertDayIso('  2026-07-27  '), '2026-07-27', 'insertDayIso: пробелы обрезаются');
+assertEqual(planning.insertDayIso(''), '', 'insertDayIso: пусто — законное значение (день не указан)');
+assertEqual(planning.insertDayIso(null), '', 'insertDayIso: null → пусто');
+assertEqual(planning.insertDayIso(undefined), '', 'insertDayIso: undefined → пусто');
+assertEqual(planning.insertDayIso('2026-7-7'), '', 'insertDayIso: недописанный ввод не считается днём');
+assertEqual(planning.insertDayIso('завтра'), '', 'insertDayIso: мусор → пусто');
 
 // ── 2) freeSlotForQueue: окно пропускает нерабочие дни ───────────────────────
 (function () {
@@ -112,8 +113,8 @@ assertEqual(planning.preferDayIso('завтра'), '', 'preferDayIso: мусор
 })();
 
 // ── Общий стенд формы ────────────────────────────────────────────────────────
-var PREFER = '2026-07-27';
-var PREFER_MIDNIGHT = new Date(2026, 6, 27, 0, 0, 0, 0).getTime();
+var INSERT_DAY = '2026-07-27';
+var INSERT_MIDNIGHT = new Date(2026, 6, 27, 0, 0, 0, 0).getTime();
 
 function fakeProspect(positionId, qty) {
     return {
@@ -189,27 +190,31 @@ function previewLines(formEl) {
     c.draft.positionId = 'p1'; c.draft.qty = '5'; c.draft.slitterId = '101';
     var form = renderReady(c);
 
-    var box = fieldByLabel(form, 'Предпочтительный день');
-    assert(!!box, 'поле «Предпочтительный день» есть на форме');
+    var box = fieldByLabel(form, 'День вставки');
+    assert(!!box, 'поле «День вставки» есть на форме');
     var input = box && box.querySelectorAll('.atex-pp-date-input')[0];
     assert(!!input, 'это <input type=date>');
     assertEqual(input && input.getAttribute('type'), 'date', 'тип поля — date');
     assertEqual(input && input.value, '', 'по умолчанию пусто — день указывать не обязательно');
     assert(String(box.textContent).indexOf('можно не указывать') !== -1,
-        'подпись прямо говорит, что поле необязательное');
+        'подпись говорит, что поле необязательное');
+    assert(String(box.textContent).indexOf('указан — обязателен') !== -1,
+        'подпись говорит, что УКАЗАННЫЙ день обязателен');
 
     var linesEmpty = previewLines(form);
     assert(linesEmpty.length > 0 && linesEmpty[0].indexOf('Свободное окно') === 0,
         'без выбранного дня первая строка превью — «Свободное окно…» (как было)');
 
-    input.value = PREFER;
+    input.value = INSERT_DAY;
     input.dispatch('change');
-    assertEqual(c.draft.preferDate, PREFER, 'выбранный день попал в draft.preferDate');
+    assertEqual(c.draft.insertDate, INSERT_DAY, 'выбранный день попал в draft.insertDate');
 
     var form2 = renderReady(c);
     var lines = previewLines(form2);
-    assert(lines.length > 0 && lines[0].indexOf('Предпочтительный день') === 0,
+    assert(lines.length > 0 && lines[0].indexOf('День вставки') === 0,
         'с выбранным днём превью говорит про него, а не про свободное окно');
+    assert(lines[0].indexOf('зафиксировано') !== -1,
+        'превью честно предупреждает, что задание будет зафиксировано на этом дне');
     assert(lines[0].indexOf('27.07.2026') !== -1, 'в превью — выбранная дата');
     var btn = form2.querySelectorAll('.atex-pp-btn-primary')[0];
     assertEqual(btn && btn.disabled, false, '«Создать задание» доступно на рабочий день');
@@ -218,8 +223,8 @@ function previewLines(formEl) {
 (function () {
     // Выходной/праздник как предпочтительный день: предупреждаем и не даём создать.
     var c = makeController();
-    c.dayIsWorking = function(ms) { return ms !== PREFER_MIDNIGHT; };
-    c.draft.positionId = 'p1'; c.draft.qty = '5'; c.draft.slitterId = '101'; c.draft.preferDate = PREFER;
+    c.dayIsWorking = function(ms) { return ms !== INSERT_MIDNIGHT; };
+    c.draft.positionId = 'p1'; c.draft.qty = '5'; c.draft.slitterId = '101'; c.draft.insertDate = INSERT_DAY;
     var form = renderReady(c);
     assert(previewLines(form).filter(function(t) { return t.indexOf('Выходной/праздничный') !== -1; }).length === 1,
         'превью предупреждает про выходной/праздничный день');
@@ -230,8 +235,8 @@ function previewLines(formEl) {
 (function () {
     // Отпуск станка на выбранный день.
     var c = makeController();
-    c.slitterOnVacationDay = function(sid, ms) { return String(sid) === '101' && ms === PREFER_MIDNIGHT; };
-    c.draft.positionId = 'p1'; c.draft.qty = '5'; c.draft.slitterId = '101'; c.draft.preferDate = PREFER;
+    c.slitterOnVacationDay = function(sid, ms) { return String(sid) === '101' && ms === INSERT_MIDNIGHT; };
+    c.draft.positionId = 'p1'; c.draft.qty = '5'; c.draft.slitterId = '101'; c.draft.insertDate = INSERT_DAY;
     var form = renderReady(c);
     assert(previewLines(form).filter(function(t) { return t.indexOf('в отпуске') !== -1; }).length === 1,
         'превью предупреждает об отпуске станка в выбранный день');
@@ -280,18 +285,18 @@ function flush() {
         assert(noDay._posts.length > 0, 'день не указан → задание всё равно создано');
 
         var withDay = makeCreateController();
-        withDay.draft.preferDate = PREFER;
+        withDay.draft.insertDate = INSERT_DAY;
         withDay.createCutForPosition();
         return flush().then(function() {
             assertEqual(withDay._moves.length, 1, 'день указан → зовём moveCutToDay ровно один раз');
             assertEqual(withDay._moves[0], {
-                cutId: 'NEW1', dateStr: PREFER, position: 'weight', fix: false,
+                cutId: 'NEW1', dateStr: INSERT_DAY, position: 'weight', fix: true,
                 slitterId: '101', withinSlitter: true
-            }, 'перенос: выбранный день, «по весу», БЕЗ фиксации (день предпочтительный), свой станок');
+            }, 'перенос: выбранный день, «по весу» внутри дня, С ФИКСАЦИЕЙ (день обязателен), свой станок');
 
             var onVac = makeCreateController();
-            onVac.draft.preferDate = PREFER;
-            onVac.slitterOnVacationDay = function(sid, ms) { return String(sid) === '101' && ms === PREFER_MIDNIGHT; };
+            onVac.draft.insertDate = INSERT_DAY;
+            onVac.slitterOnVacationDay = function(sid, ms) { return String(sid) === '101' && ms === INSERT_MIDNIGHT; };
             onVac.createCutForPosition();
             return flush().then(function() {
                 assertEqual(onVac._posts.length, 0, 'отпуск станка в выбранный день → задание не создаём вовсе');
@@ -300,11 +305,11 @@ function flush() {
                     'отпуск → внятная ошибка диспетчеру');
 
                 var onOff = makeCreateController();
-                onOff.draft.preferDate = PREFER;
-                onOff.dayIsWorking = function(ms) { return ms !== PREFER_MIDNIGHT; };
+                onOff.draft.insertDate = INSERT_DAY;
+                onOff.dayIsWorking = function(ms) { return ms !== INSERT_MIDNIGHT; };
                 onOff.createCutForPosition();
                 return flush().then(function() {
-                    assertEqual(onOff._posts.length, 0, 'выходной как предпочтительный день → задание не создаём');
+                    assertEqual(onOff._posts.length, 0, 'выходной как день вставки → задание не создаём');
                     assert(onOff._notes.filter(function(n) { return n.kind === 'error' && n.msg.indexOf('выходной') !== -1; }).length === 1,
                         'выходной → внятная ошибка диспетчеру');
 

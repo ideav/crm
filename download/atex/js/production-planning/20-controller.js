@@ -52,7 +52,7 @@
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
-        preferDayIso: preferDayIso,   // #4396
+        insertDayIso: insertDayIso,   // #4396
         buildFields: buildFields,
         runWithConcurrency: runWithConcurrency,   // #3998: пул сохранений с лимитом потоков
         maxNumericCutNumber: maxNumericCutNumber,
@@ -359,9 +359,9 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        // #4396: preferDate — предпочтительный день, в который диспетчер хочет вставить задание
-        // («ГГГГ-ММ-ДД»); пусто = как раньше, ближайшее свободное окно в конце очереди станка.
-        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', preferDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], prospect: null };
+        // #4396: insertDate («ГГГГ-ММ-ДД») — день, в который диспетчер вставляет задание. Пусто =
+        // как раньше (ближайшее свободное окно, конец очереди станка); указан — ОБЯЗАТЕЛЕН.
+        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', insertDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], prospect: null };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -1897,16 +1897,16 @@
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supplyMeta = this.meta.supply;
         if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц задания/Партии ГП/Обеспечения', 'error'); return; }
-        // #4396: предпочтительный день (можно не указывать). Проверяем отпуск станка ДО создания:
-        // moveCutToDay такой перенос отклоняет, и без проверки мы бы создали задание, которое
-        // молча осталось стоять не там, где просили.
-        var preferDate = preferDayIso(d.preferDate);
-        var preferMidnight = preferDate ? planBaseMidnightFrom(preferDate, controllerNowMs(self)) : null;
-        if (preferDate && !self.dayIsWorking(preferMidnight)) {
+        // #4396: день вставки (можно не указывать; указан — обязателен). Нерабочий день отсекаем ДО
+        // создания: moveCutToDay такой перенос отклоняет, и без проверки мы бы создали задание,
+        // которое молча осталось стоять не там, где просили — а день обязательный.
+        var insertDate = insertDayIso(d.insertDate);
+        var insertMidnight = insertDate ? planBaseMidnightFrom(insertDate, controllerNowMs(self)) : null;
+        if (insertDate && !self.dayIsWorking(insertMidnight)) {
             self.notify('Выбран выходной/праздничный день — заданий в него быть не должно. Задание не создано', 'error');
             return;
         }
-        if (preferDate && self.slitterOnVacationDay(d.slitterId, preferMidnight)) {
+        if (insertDate && self.slitterOnVacationDay(d.slitterId, insertMidnight)) {
             var pvSlit = (self.slitters || []).filter(function(s) { return String(s.id) === String(d.slitterId); })[0];
             self.notify('Станок ' + ((pvSlit && pvSlit.label) || ('#' + d.slitterId)) + ' в отпуске в выбранный день — задание не создано', 'error');
             return;
@@ -2023,14 +2023,18 @@
                     self.notify('Производственное задание #' + cutId + ' создано, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
                     self.render();
                     // #4396: день не указан — оставляем как было (ближайшее свободное окно, конец
-                    // очереди станка). Указан — переносим тем же путём, что и ручное «🗓»: положение
-                    // «по весу», БЕЗ фиксации (день предпочтительный, а не жёсткий), в пределах
-                    // своего станка. moveCutToDay сам перечитает данные, пересоберёт затронутые дни
-                    // и скажет тостом, куда задание легло на самом деле (в т.ч. если день не вместил).
-                    if (!preferDate) return;
+                    // очереди станка). УКАЗАН — он ОБЯЗАТЕЛЬНЫЙ: переносим тем же путём, что и ручное
+                    // «🗓», с фиксацией (fix=true). Фиксация здесь не «на всякий случай», а механизм:
+                    // зафиксированное задание точный упаковщик кладёт на «Дату план» ФИКС-ЯКОРЕМ, без
+                    // эвристики ёмкости, и не выкидывает с дня (#4390). Мягкий замок «по весу» (fix=false)
+                    // такой гарантии НЕ даёт — задание переливается на следующий день. Позиция ВНУТРИ
+                    // дня остаётся «по весу»: обязателен день, а не место в очереди.
+                    // moveCutToDay сам перечитает данные, пересоберёт затронутые дни и скажет тостом,
+                    // куда задание легло.
+                    if (!insertDate) return;
                     var created = (self.cuts || []).filter(function(c) { return String(c.id) === String(cutId); })[0];
-                    if (!created) { self.notify('Задание создано, но не найдено в очереди — перенос на предпочтительный день пропущен', 'warning'); return; }
-                    return self.moveCutToDay(created, preferDate, 'weight', false, slitterId, true);
+                    if (!created) { self.notify('Задание создано, но не найдено в очереди — постановка на выбранный день пропущена', 'warning'); return; }
+                    return self.moveCutToDay(created, insertDate, 'weight', true, slitterId, true);
                 });
             });
         }).catch(function(err) {
@@ -6838,15 +6842,15 @@
             form.appendChild(field('Станок', slitterSelect));
         }
 
-        // #4396: предпочтительный день. Пусто (по умолчанию) — как раньше: задание встаёт в
-        // ближайшее свободное окно, то есть в конец очереди станка. Заполнено — после создания
-        // задание переносится на этот день «по весу» (moveCutToDay), тем же путём, что и ручной
-        // перенос «🗓». Замок дня МЯГКИЙ (fix=false): день предпочтительный, а не жёсткий — если
-        // он не вмещает, упаковщик положит на ближайший следующий и скажет об этом тостом.
-        var preferInput = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date',
-            value: d.preferDate || '', title: 'День, в который предпочтительно вставить задание' });
-        preferInput.addEventListener('change', function() { d.preferDate = String(preferInput.value || '').trim(); self.renderForm(); });
-        form.appendChild(field('Предпочтительный день (можно не указывать)', preferInput));
+        // #4396: день вставки задания. Пусто (по умолчанию) — как раньше: задание встаёт в
+        // ближайшее свободное окно, то есть в конец очереди станка. УКАЗАН — он ОБЯЗАТЕЛЬНЫЙ:
+        // после создания задание переносится на этот день (moveCutToDay), тем же путём, что и
+        // ручное «🗓», и ФИКСИРУЕТСЯ — только фикс-якорь гарантирует именно этот день (#4390).
+        // Место ВНУТРИ дня по-прежнему выбирается по весу.
+        var insertInput = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date',
+            value: d.insertDate || '', title: 'День, в который встанет задание; указан — обязателен' });
+        insertInput.addEventListener('change', function() { d.insertDate = String(insertInput.value || '').trim(); self.renderForm(); });
+        form.appendChild(field('День вставки (можно не указывать; указан — обязателен)', insertInput));
 
         // У «Производственной резки» нет колонки «Статус» — есть флаг «В работе» (по умолчанию вкл).
         var activeInput = el('input', { type: 'checkbox' });
@@ -6871,28 +6875,28 @@
         var chosenSlot = (prospectReady && d.slitterId && !chosenBlocked) ? this.freeSlotForCut(d.slitterId, d.prospect.scheduleCut) : null;
         var canCreate = prospectReady && !!d.slitterId && !chosenBlocked;
 
-        // #4396: предпочтительный день выбран — вместо «Свободного окна» (оно про конец очереди)
-        // говорим, куда задание поедет, и заранее предупреждаем об отпуске станка в этот день
+        // #4396: день вставки выбран — вместо «Свободного окна» (оно про конец очереди) говорим,
+        // куда задание встанет, и заранее предупреждаем об отпуске станка в этот день
         // (moveCutToDay такой перенос отклоняет — пусть диспетчер увидит это ДО создания).
-        var preferMidnightMs = preferDayIso(d.preferDate) ? planBaseMidnightFrom(d.preferDate, controllerNowMs(this)) : null;
-        var preferVacation = !!(preferMidnightMs != null && d.slitterId && this.slitterOnVacationDay(d.slitterId, preferMidnightMs));
+        var insertMidnightMs = insertDayIso(d.insertDate) ? planBaseMidnightFrom(d.insertDate, controllerNowMs(this)) : null;
+        var insertVacation = !!(insertMidnightMs != null && d.slitterId && this.slitterOnVacationDay(d.slitterId, insertMidnightMs));
         // #4396: выходной/праздник «Календаря» (#3788) — в такой день заданий быть не должно
         // (очередь так и пишет). Нет таблицы «Календарь» → dayIsWorking всегда true, поведение прежнее.
-        var preferDayOff = !!(preferMidnightMs != null && !this.dayIsWorking(preferMidnightMs));
+        var insertDayOff = !!(insertMidnightMs != null && !this.dayIsWorking(insertMidnightMs));
 
         var previewBox = el('div', { class: 'atex-pp-cut-preview' });
         if (canCreate) {
             var pl = d.prospect;
             var lines = [
-                preferMidnightMs != null
-                    ? ('Предпочтительный день: ' + formatPlanDayHeading(preferMidnightMs, 0) + ' — задание встанет в него по весу')
+                insertMidnightMs != null
+                    ? ('День вставки: ' + formatPlanDayHeading(insertMidnightMs, 0) + ' — задание встанет именно в него (будет зафиксировано)')
                     : ('Свободное окно: ' + formatFreeSlot(chosenSlot)),
                 'Проходов: ' + round3(pl.plannedRuns) + ' · полос/проход (ширина ' + round3(pl.posWidth) + ' мм): ' + round3(pl.stripsPerPass),
                 'Произведём этой ширины: ' + round3(pl.producedPosRolls) + ' рул. · обеспечим: ' + round3(pl.supplyRolls) + ' · склад: ' + round3(pl.stockRolls),
                 'Длительность резки: ~' + round3(pl.duration) + ' мин'
             ];
-            if (preferDayOff) lines.push('⚠️ Выходной/праздничный день — заданий быть не должно. Выберите рабочий день.');
-            if (preferVacation) lines.push('⚠️ Станок в отпуске в этот день — выберите другой день или станок.');
+            if (insertDayOff) lines.push('⚠️ Выходной/праздничный день — заданий быть не должно. Выберите рабочий день.');
+            if (insertVacation) lines.push('⚠️ Станок в отпуске в этот день — выберите другой день или станок.');
             if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько заданий — создаётся первое.');
             lines.forEach(function(txt) { previewBox.appendChild(el('div', { class: 'atex-pp-cut-preview-line', text: txt })); });
         } else {
@@ -6903,7 +6907,7 @@
 
         var actions = el('div', { class: 'atex-pp-actions' });
         var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать задание' });
-        createBtn.disabled = !canCreate || preferVacation || preferDayOff;   // #4396: нерабочий день выбран — создавать нечего
+        createBtn.disabled = !canCreate || insertVacation || insertDayOff;   // #4396: нерабочий день выбран — создавать нечего
         createBtn.addEventListener('click', function() { self.createCutForPosition(); });
         actions.appendChild(createBtn);
         form.appendChild(actions);
