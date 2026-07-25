@@ -3094,7 +3094,9 @@
     // создания (резка станет последней в своём дне). Вход не мутирует.
     //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
     //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
-    //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin }.
+    //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin,
+    //            blockedRanges:[[s,e],…] (#4396: нерабочие дни календаря #3788 + «Отпуск» #3764 —
+    //            окно обязано их пропускать, иначе задание встаёт на выходной) }.
     // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day } | null.
     function freeSlotForQueue(stationCuts, prospect, opts){
         opts = opts || {};
@@ -3112,7 +3114,8 @@
             shiftEndMin: opts.shiftEndMin,
             lunchStartMin: opts.lunchStartMin,
             lunchDurationMin: opts.lunchDurationMin,
-            firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+            firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+            blockedRanges: opts.blockedRanges    // #4396: выходные/праздники + «Отпуск» станка
         });
         var sc = sched.length ? sched[sched.length - 1] : null;
         if (!sc) return null;

@@ -900,6 +900,14 @@
         return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
     }
 
+    // #4396: «предпочтительный день» формы нового задания. Валиден только полный «ГГГГ-ММ-ДД»
+    // (то же, что принимает moveCutToDay); пусто/мусор/полузаполненный ввод date-поля → ''.
+    // Пустая строка — законное значение поля: день не указан, задание встаёт как раньше.
+    function preferDayIso(v) {
+        var s = String(v == null ? '' : v).trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+    }
+
     // #3764: unix-секунды → значение `<input type="datetime-local">` («ГГГГ-ММ-ДДTЧЧ:ММ»,
     // локальное время — как и отображение DATETIME через new Date(sec*1000)). Пусто/мусор → ''.
     function unixToDatetimeLocal(sec) {
@@ -4971,7 +4979,9 @@
     // создания (резка станет последней в своём дне). Вход не мутирует.
     //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
     //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
-    //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin }.
+    //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin,
+    //            blockedRanges:[[s,e],…] (#4396: нерабочие дни календаря #3788 + «Отпуск» #3764 —
+    //            окно обязано их пропускать, иначе задание встаёт на выходной) }.
     // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day } | null.
     function freeSlotForQueue(stationCuts, prospect, opts){
         opts = opts || {};
@@ -4989,7 +4999,8 @@
             shiftEndMin: opts.shiftEndMin,
             lunchStartMin: opts.lunchStartMin,
             lunchDurationMin: opts.lunchDurationMin,
-            firstCutSetup: opts.firstCutSetup   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+            firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
+            blockedRanges: opts.blockedRanges    // #4396: выходные/праздники + «Отпуск» станка
         });
         var sc = sched.length ? sched[sched.length - 1] : null;
         if (!sc) return null;
@@ -8786,6 +8797,7 @@
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
+        preferDayIso: preferDayIso,   // #4396
         buildFields: buildFields,
         runWithConcurrency: runWithConcurrency,   // #3998: пул сохранений с лимитом потоков
         maxNumericCutNumber: maxNumericCutNumber,
@@ -9092,7 +9104,9 @@
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], prospect: null };
+        // #4396: preferDate — предпочтительный день, в который диспетчер хочет вставить задание
+        // («ГГГГ-ММ-ДД»); пусто = как раньше, ближайшее свободное окно в конце очереди станка.
+        return { positionId: '', qty: '', footage: '', slitterId: '', materialBatchId: '', plannedRuns: '1', planDate: '', preferDate: '', status: CUT_STATUSES[0], active: true, notes: '', selectedPositions: [], prospect: null };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -10577,16 +10591,22 @@
         var stationCuts = grp ? grp.cuts : [];
         var runLenByCut = {};
         stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.positionLengthById); });
+        // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
+        // без даты — сегодня. Как в генерации (#3311), ре-планировании (#3312), очереди (#3316).
+        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var slot = freeSlotForQueue(stationCuts, prospect, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
             lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
-            firstCutSetup: true   // #3669 п.2: очередь учитывает настройку ножей первой задачи
+            firstCutSetup: true,   // #3669 п.2: очередь учитывает настройку ножей первой задачи
+            // #4396: свободное окно ОБЯЗАНО пропускать нерабочие дни — выходные/праздники
+            // «Календаря» (#3788) и «Отпуск» станка (#3764). Без них форма показывала окно на
+            // выходном и createCutForPosition писала этот planStart: задание вставало в день, про
+            // который очередь тут же говорила «Выходной/праздничный день — заданий быть не должно».
+            // Те же blockedRanges, что у очереди и генерации (blockedRangesForSlitter).
+            blockedRanges: this.blockedRangesForSlitter(slitterId, planBaseMidnightMs)
         });
         if (!slot) return null;
-        // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
-        // без даты — сегодня. Как в генерации (#3311), ре-планировании (#3312), очереди (#3316).
-        var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         slot.startTs = scheduleStartTimestamp(planBaseMidnightMs, slot.windowStartMin);
         slot.planBaseMidnightMs = planBaseMidnightMs;
         return slot;
@@ -10622,6 +10642,20 @@
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supplyMeta = this.meta.supply;
         if (!cutMeta || !fbMeta || !supplyMeta) { this.notify('Нет метаданных таблиц задания/Партии ГП/Обеспечения', 'error'); return; }
+        // #4396: предпочтительный день (можно не указывать). Проверяем отпуск станка ДО создания:
+        // moveCutToDay такой перенос отклоняет, и без проверки мы бы создали задание, которое
+        // молча осталось стоять не там, где просили.
+        var preferDate = preferDayIso(d.preferDate);
+        var preferMidnight = preferDate ? planBaseMidnightFrom(preferDate, controllerNowMs(self)) : null;
+        if (preferDate && !self.dayIsWorking(preferMidnight)) {
+            self.notify('Выбран выходной/праздничный день — заданий в него быть не должно. Задание не создано', 'error');
+            return;
+        }
+        if (preferDate && self.slitterOnVacationDay(d.slitterId, preferMidnight)) {
+            var pvSlit = (self.slitters || []).filter(function(s) { return String(s.id) === String(d.slitterId); })[0];
+            self.notify('Станок ' + ((pvSlit && pvSlit.label) || ('#' + d.slitterId)) + ' в отпуске в выбранный день — задание не создано', 'error');
+            return;
+        }
         var key = String(d.positionId) + '|' + (Math.floor(Number(d.qty) || 0));
         var ensure = (d.prospect && !d.prospect.error && d.prospect.forKey === key)
             ? Promise.resolve(d.prospect)
@@ -10726,12 +10760,22 @@
                 return self.reload().then(function() {
                     return self.persistCutSetupColumns();   // #3698: активности переналадки новой резки
                 }).then(function() {
+                    var slitterId = String(d.slitterId || '');   // до сброса черновика
                     self.setBusy(false);
                     self.draft = self.blankDraft();
                     self.selectedCutId = String(cutId);
                     self.closeForm();
                     self.notify('Производственное задание #' + cutId + ' создано, позиция обеспечена (' + plan.qty + ' рул.)', 'success');
                     self.render();
+                    // #4396: день не указан — оставляем как было (ближайшее свободное окно, конец
+                    // очереди станка). Указан — переносим тем же путём, что и ручное «🗓»: положение
+                    // «по весу», БЕЗ фиксации (день предпочтительный, а не жёсткий), в пределах
+                    // своего станка. moveCutToDay сам перечитает данные, пересоберёт затронутые дни
+                    // и скажет тостом, куда задание легло на самом деле (в т.ч. если день не вместил).
+                    if (!preferDate) return;
+                    var created = (self.cuts || []).filter(function(c) { return String(c.id) === String(cutId); })[0];
+                    if (!created) { self.notify('Задание создано, но не найдено в очереди — перенос на предпочтительный день пропущен', 'warning'); return; }
+                    return self.moveCutToDay(created, preferDate, 'weight', false, slitterId, true);
                 });
             });
         }).catch(function(err) {
@@ -15539,6 +15583,16 @@
             form.appendChild(field('Станок', slitterSelect));
         }
 
+        // #4396: предпочтительный день. Пусто (по умолчанию) — как раньше: задание встаёт в
+        // ближайшее свободное окно, то есть в конец очереди станка. Заполнено — после создания
+        // задание переносится на этот день «по весу» (moveCutToDay), тем же путём, что и ручной
+        // перенос «🗓». Замок дня МЯГКИЙ (fix=false): день предпочтительный, а не жёсткий — если
+        // он не вмещает, упаковщик положит на ближайший следующий и скажет об этом тостом.
+        var preferInput = el('input', { class: 'atex-pp-input atex-pp-date-input', type: 'date',
+            value: d.preferDate || '', title: 'День, в который предпочтительно вставить задание' });
+        preferInput.addEventListener('change', function() { d.preferDate = String(preferInput.value || '').trim(); self.renderForm(); });
+        form.appendChild(field('Предпочтительный день (можно не указывать)', preferInput));
+
         // У «Производственной резки» нет колонки «Статус» — есть флаг «В работе» (по умолчанию вкл).
         var activeInput = el('input', { type: 'checkbox' });
         activeInput.checked = d.active !== false;
@@ -15562,15 +15616,28 @@
         var chosenSlot = (prospectReady && d.slitterId && !chosenBlocked) ? this.freeSlotForCut(d.slitterId, d.prospect.scheduleCut) : null;
         var canCreate = prospectReady && !!d.slitterId && !chosenBlocked;
 
+        // #4396: предпочтительный день выбран — вместо «Свободного окна» (оно про конец очереди)
+        // говорим, куда задание поедет, и заранее предупреждаем об отпуске станка в этот день
+        // (moveCutToDay такой перенос отклоняет — пусть диспетчер увидит это ДО создания).
+        var preferMidnightMs = preferDayIso(d.preferDate) ? planBaseMidnightFrom(d.preferDate, controllerNowMs(this)) : null;
+        var preferVacation = !!(preferMidnightMs != null && d.slitterId && this.slitterOnVacationDay(d.slitterId, preferMidnightMs));
+        // #4396: выходной/праздник «Календаря» (#3788) — в такой день заданий быть не должно
+        // (очередь так и пишет). Нет таблицы «Календарь» → dayIsWorking всегда true, поведение прежнее.
+        var preferDayOff = !!(preferMidnightMs != null && !this.dayIsWorking(preferMidnightMs));
+
         var previewBox = el('div', { class: 'atex-pp-cut-preview' });
         if (canCreate) {
             var pl = d.prospect;
             var lines = [
-                'Свободное окно: ' + formatFreeSlot(chosenSlot),
+                preferMidnightMs != null
+                    ? ('Предпочтительный день: ' + formatPlanDayHeading(preferMidnightMs, 0) + ' — задание встанет в него по весу')
+                    : ('Свободное окно: ' + formatFreeSlot(chosenSlot)),
                 'Проходов: ' + round3(pl.plannedRuns) + ' · полос/проход (ширина ' + round3(pl.posWidth) + ' мм): ' + round3(pl.stripsPerPass),
                 'Произведём этой ширины: ' + round3(pl.producedPosRolls) + ' рул. · обеспечим: ' + round3(pl.supplyRolls) + ' · склад: ' + round3(pl.stockRolls),
                 'Длительность резки: ~' + round3(pl.duration) + ' мин'
             ];
+            if (preferDayOff) lines.push('⚠️ Выходной/праздничный день — заданий быть не должно. Выберите рабочий день.');
+            if (preferVacation) lines.push('⚠️ Станок в отпуске в этот день — выберите другой день или станок.');
             if (pl.multiLayout) lines.push('⚠️ Кол-ва хватает на несколько заданий — создаётся первое.');
             lines.forEach(function(txt) { previewBox.appendChild(el('div', { class: 'atex-pp-cut-preview-line', text: txt })); });
         } else {
@@ -15581,7 +15648,7 @@
 
         var actions = el('div', { class: 'atex-pp-actions' });
         var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать задание' });
-        createBtn.disabled = !canCreate;
+        createBtn.disabled = !canCreate || preferVacation || preferDayOff;   // #4396: нерабочий день выбран — создавать нечего
         createBtn.addEventListener('click', function() { self.createCutForPosition(); });
         actions.appendChild(createBtn);
         form.appendChild(actions);

@@ -899,6 +899,14 @@
         return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
     }
 
+    // #4396: «предпочтительный день» формы нового задания. Валиден только полный «ГГГГ-ММ-ДД»
+    // (то же, что принимает moveCutToDay); пусто/мусор/полузаполненный ввод date-поля → ''.
+    // Пустая строка — законное значение поля: день не указан, задание встаёт как раньше.
+    function preferDayIso(v) {
+        var s = String(v == null ? '' : v).trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+    }
+
     // #3764: unix-секунды → значение `<input type="datetime-local">` («ГГГГ-ММ-ДДTЧЧ:ММ»,
     // локальное время — как и отображение DATETIME через new Date(sec*1000)). Пусто/мусор → ''.
     function unixToDatetimeLocal(sec) {
