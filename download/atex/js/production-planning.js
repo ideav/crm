@@ -5330,10 +5330,70 @@
         return out;
     }
 
+    // #4416: ближайшее свободное окно станка ПО СОХРАНЁННОМУ ПЛАНУ — минута, с которой новое
+    // задание встанет в хвост очереди, не наехав на уже запланированное и не оставив дыры.
+    // Раньше окно считал live-пересчёт всей очереди (freeSlotForQueue → buildSchedule): он
+    // паковал ВСЕ задания станка заново от дня 0, поэтому «конец очереди» приходился не туда, где
+    // очередь реально кончается по сохранённым planStart. Растянутый по дням план (обычное дело:
+    // сроки, фиксация, разрывы) сжимался в первые дни, и созданное вручную задание вставало
+    // ВНУТРИ уже занятого дня — с дырой или нахлёстом (issue #4416: «вижу предложение пересчитать,
+    // хотя тайминги выглядят правильно»). Считаем от того, что записано (#3846/#4144).
+    //   items — окна заданий станка [{ windowStartMin, occMin }] (scheduleFromStored + колонки);
+    //   opts — { occMin (занятость нового задания = наладка + «Резка и Лидер»), dayStartMin,
+    //            dayEndMin (потолок резки, cutEndMin), lunchStartMin, lunchDurationMin,
+    //            blocked:[[s,e],…] (#3764 «Отпуск» + нерабочие дни), minStartMin (не раньше базы) }.
+    // Правила дня — как у упаковщика: обед вставляется один раз (splitMachineQueue.insertLunchBefore),
+    // не влезающее до потолка уезжает на следующий рабочий день (nextFreeWorkMinute), окна простоя
+    // обходятся. → минута начала окна (целая) | null. Чистая — покрыта тестом.
+    function freeSlotFromStoredQueue(items, opts){
+        opts = opts || {};
+        var list = (items || []).filter(function(it){ return it && isFinite(Number(it.windowStartMin)); });
+        var occ = Math.max(0, Math.round(Number(opts.occMin) || 0));
+        var dayStart = Number(opts.dayStartMin) || 0;
+        var dayEnd = Number(opts.dayEndMin);
+        if (!isFinite(dayEnd) || dayEnd <= dayStart) dayEnd = 1440;
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        var lunchStart = Number(opts.lunchStartMin);
+        var hasLunch = lunchDur > 0 && isFinite(lunchStart);
+        var blocked = opts.blocked || [];
+        // Курсор = конец СОХРАНЁННОЙ очереди станка (но не раньше начала окна планирования).
+        var cursor = isFinite(Number(opts.minStartMin)) ? Number(opts.minStartMin) : dayStart;
+        list.forEach(function(it){
+            var end = Number(it.windowStartMin) + Math.max(0, Number(it.occMin) || 0);
+            if (end > cursor) cursor = end;
+        });
+        // Обед этого дня уже стоит в сохранённых стартах? (тем же правилом, что #4408 разбирает день)
+        function dayHasLunch(day){
+            if (!hasLunch) return true;
+            var dayItems = list.filter(function(it){ return Math.floor(Number(it.windowStartMin) / 1440) === day; })
+                .sort(function(a, b){ return a.windowStartMin - b.windowStartMin; });
+            if (!dayItems.length) return false;
+            return dayLayoutGaps(dayItems, { dayStartMin: dayStart, lunchStartMin: lunchStart,
+                lunchDurationMin: lunchDur, blocked: blocked })
+                .some(function(g){ return g.kind === 'lunch'; });
+        }
+        var guard = 0;
+        while (guard++ < 400) {
+            var day = Math.floor(cursor / 1440);
+            var base = day * 1440;
+            if (cursor - base < dayStart) cursor = base + dayStart;
+            var lunchPending = hasLunch && !dayHasLunch(day);
+            if (lunchPending && (cursor - base) >= lunchStart) { cursor = round3(cursor + lunchDur); lunchPending = false; }
+            // Потолок дня резервирует обед, если он в этом дне ещё впереди (как effCapacity упаковщика).
+            var fitEnd = dayEnd - (lunchPending ? lunchDur : 0);
+            var placed = nextFreeWorkMinute(cursor, occ, blocked, dayStart, dayEnd, fitEnd, true);
+            if (Math.floor(placed / 1440) === day) return Math.ceil(round3(placed));
+            cursor = placed;   // уехали на другой день — там свои обед и потолок
+        }
+        return Math.ceil(round3(cursor));
+    }
+
     // Ближайшее свободное окно станка для НОВОЙ резки. Повторяет расписание очереди
     // (buildSchedule по порядку), добавляя проспект-резку в КОНЕЦ очереди станка, и
     // возвращает окно последнего сегмента — то же время, что покажет очередь после
     // создания (резка станет последней в своём дне). Вход не мутирует.
+    // #4416: для РАЗМЕЩЕНИЯ больше не используется (окно считает freeSlotFromStoredQueue по
+    // сохранённому плану) — остаётся источником канонических наладки/намотки нового задания.
     //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
     //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
     //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin,
@@ -9363,6 +9423,7 @@
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
         freeSlotForQueue: freeSlotForQueue,
+        freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
         formatClockHHMM: formatClockHHMM,
@@ -10964,35 +11025,76 @@
         });
     };
 
-    // Ближайшее свободное окно станка для проспект-резки (повтор расписания очереди).
+    // Ближайшее свободное окно станка для проспект-резки — ПО СОХРАНЁННОМУ ПЛАНУ (#4416).
+    // Окно = хвост очереди станка в том виде, в каком её рисует страница и Гант (#3846:
+    // planStart + «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»), а НЕ live-пересчёт всей
+    // очереди (прежний freeSlotForQueue → buildSchedule паковал станок заново от дня 0 и в
+    // растянутом по дням плане отдавал окно ВНУТРИ уже занятого дня — созданное вручную задание
+    // вставало с дырой/нахлёстом, и очередь тут же просила «Пересчитать наладку», issue #4416).
+    // Наладку и намотку самого нового задания по-прежнему считают канонические формулы
+    // (buildSchedule на паре «последнее задание станка + проспект»), только теперь они кладутся
+    // на сохранённую сетку. Округляем как хранимые колонки: наладка — round, «Резка и Лидер» —
+    // ceil(намотка) + лидер (#3635 п.4/#3700), иначе окно снова разъедется с очередью.
     // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day, startTs, planBaseMidnightMs } | null.
     AtexProductionPlanning.prototype.freeSlotForCut = function(slitterId, prospect) {
         var self = this;
+        if (!prospect) return null;
         var windPoints = windingPointsFromTimes(this.opTimes || {});
         var dayWindow = this.workingWindow();
         var grp = groupBySlitter(this.cuts).filter(function(g) { return String(g.slitter.id) === String(slitterId); })[0];
         var stationCuts = grp ? grp.cuts : [];
         var runLenByCut = {};
         stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.positionLengthById); });
+        runLenByCut[String(prospect.id)] = Number(prospect.runLength) || 0;
         // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
         // без даты — сегодня. Как в генерации (#3311), ре-планировании (#3312), очереди (#3316).
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var slot = freeSlotForQueue(stationCuts, prospect, {
+        // #4396: свободное окно ОБЯЗАНО пропускать нерабочие дни — выходные/праздники «Календаря»
+        // (#3788) и «Отпуск» станка (#3764). Иначе форма показывала окно на выходном и
+        // createCutForPosition писала этот planStart: задание вставало в день, про который очередь
+        // тут же говорила «Выходной/праздничный день — заданий быть не должно».
+        var blocked = this.blockedRangesForSlitter(slitterId, planBaseMidnightMs);
+        // Сохранённые окна очереди станка и её ФИЗИЧЕСКИ последнее задание (по концу окна) —
+        // от него считается переналадка нового.
+        var stored = scheduleFromStored(stationCuts, planBaseMidnightMs);
+        var cutById = {};
+        stationCuts.forEach(function(c) { cutById[String(c.id)] = c; });
+        var items = [], lastCut = null, lastEnd = -Infinity;
+        stored.forEach(function(sc) {
+            var ws = stripNum(sc.startMin) - stripNum(sc.setupMin);
+            var occ = stripNum(sc.setupMin) + stripNum(sc.durationMin);
+            items.push({ windowStartMin: ws, occMin: occ });
+            if (ws + occ > lastEnd) { lastEnd = ws + occ; lastCut = cutById[String(sc.cutId)] || null; }
+        });
+        // Наладка/намотка нового задания — теми же формулами, что у расписания: переналадка от
+        // последнего задания станка (пустая очередь → настройка ножей с нуля, #3669 п.2).
+        var pair = lastCut ? [lastCut, prospect] : [prospect];
+        var pairSched = buildSchedule(pair, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
-            firstCutSetup: true,   // #3669 п.2: очередь учитывает настройку ножей первой задачи
-            // #4396: свободное окно ОБЯЗАНО пропускать нерабочие дни — выходные/праздники
-            // «Календаря» (#3788) и «Отпуск» станка (#3764). Без них форма показывала окно на
-            // выходном и createCutForPosition писала этот planStart: задание вставало в день, про
-            // который очередь тут же говорила «Выходной/праздничный день — заданий быть не должно».
-            // Те же blockedRanges, что у очереди и генерации (blockedRangesForSlitter).
-            blockedRanges: this.blockedRangesForSlitter(slitterId, planBaseMidnightMs)
+            firstCutSetup: true
         });
-        if (!slot) return null;
-        slot.startTs = scheduleStartTimestamp(planBaseMidnightMs, slot.windowStartMin);
-        slot.planBaseMidnightMs = planBaseMidnightMs;
-        return slot;
+        var sc = pairSched.length ? pairSched[pairSched.length - 1] : null;
+        if (!sc) return null;
+        var setupMin = Math.round(stripNum(sc.setupMin));
+        var durationMin = Math.ceil(round3(stripNum(sc.durationMin))) + Math.round(stripNum(sc.leaderMin));
+        var windowStartMin = freeSlotFromStoredQueue(items, {
+            occMin: setupMin + durationMin,
+            dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
+            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
+            blocked: blocked, minStartMin: dayWindow.startMin
+        });
+        if (windowStartMin == null) return null;
+        return {
+            windowStartMin: windowStartMin,
+            startMin: round3(windowStartMin + setupMin),
+            finishMin: round3(windowStartMin + setupMin + durationMin),
+            durationMin: durationMin,
+            setupMin: setupMin,
+            day: Math.floor(windowStartMin / 1440),
+            startTs: scheduleStartTimestamp(planBaseMidnightMs, windowStartMin),
+            planBaseMidnightMs: planBaseMidnightMs
+        };
     };
 
     // Гарантирует актуальный draft.prospect под текущие позицию+кол-во (асинхронно),
@@ -15913,14 +16015,16 @@
             // Нерабочий день / отпуск на весь день: раскладывать негде — оставляем как есть.
             var covered = blocked.some(function(b) { return b[0] <= day * 1440 && b[1] >= (day + 1) * 1440; });
             if (covered) return;
-            // Задание с НУЛЕВОЙ занятостью (колонок тайминга нет в таблице; осиротевший setup-сегмент
-            // Σ=0, #3924/#3943) — «стена» неизвестной длины: раскладывать день по ней нельзя, иначе
-            // всё съедет на начало смены. День пропускаем и ГОВОРИМ об этом (ТЗ §14/#4059).
-            var noOcc = items.filter(function(it) { return !(it.occMin > 0); });
-            if (noOcc.length) {
+            // #4416: занятость НИ У ОДНОГО задания дня (колонок тайминга нет в таблице) — мерить
+            // нечем, день не трогаем и ГОВОРИМ об этом (ТЗ §14/#4059). Прежде (#4408) день
+            // пропускался, если нулевая занятость была хоть у одного задания, — а осиротевший
+            // setup-сегмент Σ=0 (#3924/#3943) в дне обычное дело, и из-за него «Пересчитать
+            // наладку» молча ничего не делала. Такое задание — нулевой длины: встаёт на курсор и
+            // соседей не двигает.
+            if (!items.some(function(it) { return it.occMin > 0; })) {
                 if (typeof console !== 'undefined' && console.warn) {
-                    console.warn('[pp] #4408: старты дня не пересобраны — у задания нет минут занятости',
-                        { slitterId: sid, dayOffset: day, cutIds: noOcc.map(function(it) { return it.cutId; }) });
+                    console.warn('[pp] #4416: старты дня не пересобраны — ни у одного задания нет минут занятости',
+                        { slitterId: sid, dayOffset: day, cutIds: items.map(function(it) { return it.cutId; }) });
                 }
                 return;
             }
@@ -15997,7 +16101,21 @@
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
         var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
         if (!stale.length && !startOps.length) {
-            this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
+            // #4416: кнопку показывает тот же детектор — если он насчитал расхождения, а писать
+            // нечего, это ПРОТИВОРЕЧИЕ, а не «всё хорошо»: кнопка висит, нажатие не даёт эффекта
+            // («окно пересчёта ничего не пересчитывает»). Кричим, а не отвечаем «уже актуальна».
+            var shown = this.recalcMismatchIds(sid);
+            if (shown.length) {
+                if (typeof console !== 'undefined' && console.error) {
+                    console.error('[pp] ❌ #4416: детектор показал расхождения, а пересчитывать нечего', {
+                        slitterId: sid, mismatchIds: shown, scopeCount: scopeIds.length
+                    });
+                }
+                this.notify('Пересчитывать нечего, хотя расхождений насчитано ' + shown.length
+                    + ' — это ошибка расчёта, сообщите разработчику (детали в консоли)', 'error');
+            } else {
+                this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
+            }
             this.render();
             return Promise.resolve(false);
         }

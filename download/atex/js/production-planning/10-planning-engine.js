@@ -3235,10 +3235,70 @@
         return out;
     }
 
+    // #4416: ближайшее свободное окно станка ПО СОХРАНЁННОМУ ПЛАНУ — минута, с которой новое
+    // задание встанет в хвост очереди, не наехав на уже запланированное и не оставив дыры.
+    // Раньше окно считал live-пересчёт всей очереди (freeSlotForQueue → buildSchedule): он
+    // паковал ВСЕ задания станка заново от дня 0, поэтому «конец очереди» приходился не туда, где
+    // очередь реально кончается по сохранённым planStart. Растянутый по дням план (обычное дело:
+    // сроки, фиксация, разрывы) сжимался в первые дни, и созданное вручную задание вставало
+    // ВНУТРИ уже занятого дня — с дырой или нахлёстом (issue #4416: «вижу предложение пересчитать,
+    // хотя тайминги выглядят правильно»). Считаем от того, что записано (#3846/#4144).
+    //   items — окна заданий станка [{ windowStartMin, occMin }] (scheduleFromStored + колонки);
+    //   opts — { occMin (занятость нового задания = наладка + «Резка и Лидер»), dayStartMin,
+    //            dayEndMin (потолок резки, cutEndMin), lunchStartMin, lunchDurationMin,
+    //            blocked:[[s,e],…] (#3764 «Отпуск» + нерабочие дни), minStartMin (не раньше базы) }.
+    // Правила дня — как у упаковщика: обед вставляется один раз (splitMachineQueue.insertLunchBefore),
+    // не влезающее до потолка уезжает на следующий рабочий день (nextFreeWorkMinute), окна простоя
+    // обходятся. → минута начала окна (целая) | null. Чистая — покрыта тестом.
+    function freeSlotFromStoredQueue(items, opts){
+        opts = opts || {};
+        var list = (items || []).filter(function(it){ return it && isFinite(Number(it.windowStartMin)); });
+        var occ = Math.max(0, Math.round(Number(opts.occMin) || 0));
+        var dayStart = Number(opts.dayStartMin) || 0;
+        var dayEnd = Number(opts.dayEndMin);
+        if (!isFinite(dayEnd) || dayEnd <= dayStart) dayEnd = 1440;
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        var lunchStart = Number(opts.lunchStartMin);
+        var hasLunch = lunchDur > 0 && isFinite(lunchStart);
+        var blocked = opts.blocked || [];
+        // Курсор = конец СОХРАНЁННОЙ очереди станка (но не раньше начала окна планирования).
+        var cursor = isFinite(Number(opts.minStartMin)) ? Number(opts.minStartMin) : dayStart;
+        list.forEach(function(it){
+            var end = Number(it.windowStartMin) + Math.max(0, Number(it.occMin) || 0);
+            if (end > cursor) cursor = end;
+        });
+        // Обед этого дня уже стоит в сохранённых стартах? (тем же правилом, что #4408 разбирает день)
+        function dayHasLunch(day){
+            if (!hasLunch) return true;
+            var dayItems = list.filter(function(it){ return Math.floor(Number(it.windowStartMin) / 1440) === day; })
+                .sort(function(a, b){ return a.windowStartMin - b.windowStartMin; });
+            if (!dayItems.length) return false;
+            return dayLayoutGaps(dayItems, { dayStartMin: dayStart, lunchStartMin: lunchStart,
+                lunchDurationMin: lunchDur, blocked: blocked })
+                .some(function(g){ return g.kind === 'lunch'; });
+        }
+        var guard = 0;
+        while (guard++ < 400) {
+            var day = Math.floor(cursor / 1440);
+            var base = day * 1440;
+            if (cursor - base < dayStart) cursor = base + dayStart;
+            var lunchPending = hasLunch && !dayHasLunch(day);
+            if (lunchPending && (cursor - base) >= lunchStart) { cursor = round3(cursor + lunchDur); lunchPending = false; }
+            // Потолок дня резервирует обед, если он в этом дне ещё впереди (как effCapacity упаковщика).
+            var fitEnd = dayEnd - (lunchPending ? lunchDur : 0);
+            var placed = nextFreeWorkMinute(cursor, occ, blocked, dayStart, dayEnd, fitEnd, true);
+            if (Math.floor(placed / 1440) === day) return Math.ceil(round3(placed));
+            cursor = placed;   // уехали на другой день — там свои обед и потолок
+        }
+        return Math.ceil(round3(cursor));
+    }
+
     // Ближайшее свободное окно станка для НОВОЙ резки. Повторяет расписание очереди
     // (buildSchedule по порядку), добавляя проспект-резку в КОНЕЦ очереди станка, и
     // возвращает окно последнего сегмента — то же время, что покажет очередь после
     // создания (резка станет последней в своём дне). Вход не мутирует.
+    // #4416: для РАЗМЕЩЕНИЯ больше не используется (окно считает freeSlotFromStoredQueue по
+    // сохранённому плану) — остаётся источником канонических наладки/намотки нового задания.
     //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
     //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
     //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin,
