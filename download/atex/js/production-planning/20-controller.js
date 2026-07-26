@@ -144,6 +144,7 @@
         formatLinkedPositionLabel: formatLinkedPositionLabel,
         stripSupplyRolls: stripSupplyRolls,
         cutPositionFit: cutPositionFit,                 // #4426: годится ли позиция для добавления в задание
+        planCutPositionFill: planCutPositionFill,       // #4426: добор остальных свободных полос позициями
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
         groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
@@ -4041,13 +4042,64 @@
                 content.appendChild(el('p', { class: 'atex-pp-hint',
                     text: 'Полоса перестанет быть складской: её «Партия ГП» получит спрос и «ID заказа» позиции. ' +
                         'Раскладка задания и его длительность не меняются — полоса уже есть в задании.' }));
+
+                // #4426: ОСТАЛЬНЫЕ свободные полосы задания тоже пытаются обеспечиться — как при
+                // генерации, где втулочная полоса 110 мм привязывается к уже заказанной позиции
+                // 110 мм (#3872). Позиции ЗАКАЗОВ задания отмечены заранее, из чужих заказов —
+                // предложены, но не отмечены (диспетчер решает, тянуть ли чужой заказ в это задание).
+                var rest = free.filter(function(s) { return String(s.id) !== String(c.fit.strip.id); });
+                var others = candidates.filter(function(x) { return String(x.id) !== String(c.id); });
+                var coveredOrders = {};
+                coveredOrders[String(c.position && c.position.orderId)] = true;
+                Object.keys(linkedPosIds).forEach(function(pid) {
+                    var lp = (self.genPositions || []).filter(function(p) { return String(p.id) === String(pid); })[0];
+                    if (lp && lp.orderId != null && String(lp.orderId) !== '') coveredOrders[String(lp.orderId)] = true;
+                });
+                var candById = {};
+                candidates.forEach(function(x) { candById[String(x.id)] = x; });
+                var fill = planCutPositionFill(cut, rest, others, coveredOrders);
+                var picked = fill.map(function(f) { return !!f.sameOrder; });
+                if (fill.length) {
+                    content.appendChild(el('div', { class: 'atex-pp-supply-reject-title',
+                        text: 'Заодно обеспечим свободные полосы задания (' + fill.length + '):' }));
+                    var fillBox = el('div', { class: 'atex-pp-supply-fill' });
+                    fill.forEach(function(f, i) {
+                        var fc = candById[String(f.positionId)];
+                        var strip = rest.filter(function(s) { return String(s.id) === String(f.stripId); })[0] || {};
+                        var box = el('input', { type: 'checkbox' });
+                        if (picked[i]) box.checked = true;
+                        box.addEventListener('change', function() { picked[i] = !!box.checked; });
+                        var row = el('label', { class: 'atex-pp-supply-fill-row' }, [
+                            box,
+                            el('span', { class: 'atex-pp-supply-item-label',
+                                text: (fc && fc.label) || ('позиция #' + f.positionId) }),
+                            el('span', { class: 'atex-pp-supply-item-meta',
+                                text: 'полоса ' + round3(stripNum(strip.width)) + ' мм · ' + round3(f.rolls) + ' рул.' +
+                                    (f.sameOrder ? '' : ' · другой заказ') })
+                        ]);
+                        fillBox.appendChild(row);
+                    });
+                    content.appendChild(fillBox);
+                } else if (rest.length) {
+                    content.appendChild(el('p', { class: 'atex-pp-hint',
+                        text: 'Прочие свободные полосы задания (' + rest.length + ') обеспечить нечем: подходящих позиций нет.' }));
+                }
+
                 var actions = el('div', { class: 'atex-pp-supply-actions' });
                 var back = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Назад' });
                 back.addEventListener('click', renderList);
                 var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Добавить позицию' });
                 ok.addEventListener('click', function() {
                     close();
-                    self.createStripSupply(c.fit.strip, c, round3(c.fit.rolls));
+                    var items = [{ strip: c.fit.strip, candidate: c, rolls: round3(c.fit.rolls) }];
+                    fill.forEach(function(f, i) {
+                        if (!picked[i]) return;
+                        var fc = candById[String(f.positionId)];
+                        var strip = rest.filter(function(s) { return String(s.id) === String(f.stripId); })[0];
+                        if (!fc || !strip) return;
+                        items.push({ strip: strip, candidate: fc, rolls: round3(f.rolls) });
+                    });
+                    self.createStripSupplies(items);
                 });
                 actions.appendChild(back);
                 actions.appendChild(ok);
@@ -4069,39 +4121,70 @@
     // (Партии ГП). После записи перечитывает план и переоткрывает редактор полос, чтобы
     // «Назначение» полосы обновилось (Склад → Заказ).
     AtexProductionPlanning.prototype.createStripSupply = function(strip, candidate, rolls) {
+        return this.createStripSupplies([{ strip: strip, candidate: candidate, rolls: rolls }]);
+    };
+
+    // #4426: то же для НЕСКОЛЬКИХ пар «полоса → позиция» за раз — добавляемая позиция плюс
+    // добор остальных свободных полос (planCutPositionFill). Пишем последовательно: каждое
+    // «Обеспечение» + пометка его «Партии ГП» заказной; план перечитываем ОДИН раз в конце.
+    // items — [{ strip, candidate, rolls }]. Любой невалидный элемент — ошибка ДО записи
+    // (пишем всё или ничего не начинаем), сбой в середине — перечитываем план, чтобы экран
+    // не врал о том, что успело записаться.
+    AtexProductionPlanning.prototype.createStripSupplies = function(items) {
         var self = this;
         if (this.busy) return Promise.resolve();
         var meta = this.meta.supply;
         if (!meta) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return Promise.resolve(); }
-        if (!strip || strip.id == null) { this.notify('Полоса не сохранена (нет «Партии ГП»)', 'error'); return Promise.resolve(); }
-        if (!candidate || !candidate.id) { this.notify('Не выбрана позиция заказа', 'error'); return Promise.resolve(); }
-        if (!(stripNum(rolls) > 0)) { this.notify('Нечего обеспечивать (0 рулонов)', 'error'); return Promise.resolve(); }
-        var pos = candidate.position || {};
-        var fields = buildSupplyFieldsForFinishedBatch(meta, {
-            finishedBatchId: strip.id,
-            rolls: rolls,
-            footage: stripNum(pos.length) > 0 ? pos.length : '',
-            active: '1',
-            status: SUPPLY_STATUSES[0]
-        });
+        var list = items || [];
+        if (!list.length) { this.notify('Нечего обеспечивать: не выбрана позиция', 'error'); return Promise.resolve(); }
+        for (var i = 0; i < list.length; i++) {
+            var it = list[i] || {};
+            if (!it.strip || it.strip.id == null) { this.notify('Полоса не сохранена (нет «Партии ГП»)', 'error'); return Promise.resolve(); }
+            if (!it.candidate || !it.candidate.id) { this.notify('Не выбрана позиция заказа', 'error'); return Promise.resolve(); }
+            if (!(stripNum(it.rolls) > 0)) { this.notify('Нечего обеспечивать (0 рулонов)', 'error'); return Promise.resolve(); }
+        }
         this.setBusy(true);
-        return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(candidate.id), fields).then(function(res) {
-            var id = res && (res.obj || res.id || res.i);
-            if (!id) throw new Error('Сервер не вернул id обеспечения');
-            // #4426: полоса перестала быть складской — «Партия ГП» получает СПРОС и «ID заказа»
-            // (те же поля, что пишет генерация, #3433, и слияние заданий, #4424). Без этого
-            // партия остаётся «в запас»: склад считает её свободной, хотя она уже в заказе.
-            return self.markFinishedBatchOrdered(strip.id, rolls, pos.orderId);
-        }).then(function() {
+        var done = [];
+        var chain = list.reduce(function(acc, it) {
+            return acc.then(function() {
+                var pos = it.candidate.position || {};
+                var fields = buildSupplyFieldsForFinishedBatch(meta, {
+                    finishedBatchId: it.strip.id,
+                    rolls: it.rolls,
+                    footage: stripNum(pos.length) > 0 ? pos.length : '',
+                    active: '1',
+                    status: SUPPLY_STATUSES[0]
+                });
+                return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(it.candidate.id), fields)
+                    .then(function(res) {
+                        var id = res && (res.obj || res.id || res.i);
+                        if (!id) throw new Error('Сервер не вернул id обеспечения');
+                        // #4426: полоса перестала быть складской — «Партия ГП» получает СПРОС и
+                        // «ID заказа» (те же поля, что пишет генерация, #3433, и слияние заданий,
+                        // #4424). Без этого партия остаётся «в запас»: склад считает её свободной,
+                        // хотя она уже в заказе.
+                        return self.markFinishedBatchOrdered(it.strip.id, it.rolls, pos.orderId);
+                    }).then(function() {
+                        done.push(round3(stripNum(it.strip.width)) + ' мм · ' + round3(it.rolls) + ' рул.');
+                    });
+            });
+        }, Promise.resolve());
+        return chain.then(function() {
             return self.loadPlanning();
         }).then(function() {
             self.setBusy(false);
-            self.notify('Обеспечение создано: позиция привязана к полосе (' + round3(rolls) + ' рул.)', 'success');
+            self.notify(list.length === 1
+                ? ('Обеспечение создано: позиция привязана к полосе (' + round3(list[0].rolls) + ' рул.)')
+                : ('Обеспечено позиций: ' + list.length + ' — полосы ' + done.join('; ')), 'success');
             self.render();
             self.reopenStripsIfOpen();
         }).catch(function(err) {
+            console.error('[pp] ❌ #4426 обеспечение прервано (записано ' + done.length + ' из ' + list.length + '):',
+                err && err.message, err && err.stack);
             self.setBusy(false);
-            self.notify('Ошибка создания обеспечения: ' + err.message, 'error');
+            var tail = done.length ? (' Записано до сбоя: ' + done.length + ' из ' + list.length + '.') : '';
+            self.notify('Ошибка создания обеспечения: ' + (err && err.message || err) + tail, 'error');
+            return self.loadPlanning().then(function() { self.render(); self.reopenStripsIfOpen(); }).catch(function() {});
         });
     };
 

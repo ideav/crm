@@ -1087,6 +1087,18 @@
 .atex-pp-supply-confirm-label { color: var(--pp-muted); }
 .atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
 .atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* #4426: «Заодно обеспечим» — добор остальных свободных полос задания позициями (#3872). */
+.atex-pp-supply-fill { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 180px; overflow-y: auto; }
+.atex-pp-supply-fill-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--pp-border-soft);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.atex-pp-supply-fill-row input { flex: 0 0 auto; }
 /* #4426: «Не подходят» — позиции того же сырья, которые в это задание не лечь: рядом с
    каждой причина (нет свободной полосы, не согласована, другой метраж…). */
 .atex-pp-supply-reject-title { margin-top: 14px; font-size: 13px; color: var(--pp-muted); }

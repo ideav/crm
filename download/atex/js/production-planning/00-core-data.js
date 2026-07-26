@@ -1751,6 +1751,48 @@
         return { ok: true, reason: '', strip: strip, rolls: rolls };
     }
 
+    // #4426: добавляя позицию в задание, пытаемся обеспечить и ОСТАЛЬНЫЕ его свободные полосы —
+    // ровно как генерация, где втулочная полоса 110 мм привязывается к уже заказанной позиции
+    // 110 мм (#3872), а не остаётся синтетической. Раскладываем кандидатов по свободным полосам:
+    // одна полоса — одна позиция, одна позиция — одна полоса (как «Партия ГП» ширины у резки).
+    // Приоритет кандидата на полосу: позиция ЗАКАЗОВ задания (coveredOrders — правило #3872
+    // «филлер из покрытого заказа») → более ранний срок (dueKey) → подпись (стабильность).
+    //   cut/freeStrips — как у cutPositionFit; candidates — [{ id, position, remaining, label }].
+    // → [{ positionId, stripId, rolls, sameOrder }]. Чистая (тест).
+    function planCutPositionFill(cut, freeStrips, candidates, coveredOrders) {
+        var orders = coveredOrders || {};
+        var claimed = {};
+        var out = [];
+        // Широкие полосы разбираем первыми: узкую позицию проще пристроить следующей.
+        var strips = (freeStrips || []).slice().sort(function(a, b) {
+            return stripNum(b && b.width) - stripNum(a && a.width);
+        });
+        strips.forEach(function(strip) {
+            if (!strip || strip.id == null) return;
+            var best = null;
+            (candidates || []).forEach(function(c) {
+                if (!c || c.id == null || claimed[String(c.id)]) return;
+                var fit = cutPositionFit(c.position, cut, [strip], c.remaining);
+                if (!fit.ok) return;
+                var due = Number(c.position && c.position.dueKey);
+                var cand = {
+                    positionId: String(c.id), stripId: String(strip.id), rolls: fit.rolls,
+                    sameOrder: !!orders[String(c.position && c.position.orderId)],
+                    due: isFinite(due) ? due : Infinity,
+                    label: String(c.label == null ? c.id : c.label)
+                };
+                if (!best) { best = cand; return; }
+                if (cand.sameOrder !== best.sameOrder) { if (cand.sameOrder) best = cand; return; }
+                if (cand.due !== best.due) { if (cand.due < best.due) best = cand; return; }
+                if (cand.label < best.label) best = cand;
+            });
+            if (!best) return;
+            claimed[best.positionId] = true;
+            out.push({ positionId: best.positionId, stripId: best.stripId, rolls: best.rolls, sameOrder: best.sameOrder });
+        });
+        return out;
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveId, sleeveReady, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty, position_length/wind_length → числа; пустые значения → 0/'' но объект всегда

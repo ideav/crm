@@ -306,9 +306,113 @@ function tailChecks() {
     });
 }
 
+// ── 6) Добор остальных свободных полос: чистая planCutPositionFill ──────────
+// Случай из обсуждения: к ширинам 55 мм автоматом добавлена втулочная полоса 110 мм (#3812),
+// а позиция 110 мм того же заказа осталась непривязанной. Добавляя позицию, разбираем и её.
+var CORE_FREE = [{ id: 'b110', width: 110, rolls: 6 }, { id: 'b152', width: 152, rolls: 15 }];
+function cand(id, over) {
+    var p = pos(over);
+    p.id = id;
+    return { id: id, position: p, remaining: p.qty, label: p.orderId + ' · ' + p.width + 'мм' };
+}
+(function () {
+    var own = cand('p110', { width: 110, orderWidth: 110, orderId: '4385', qty: 20, dueKey: 20260730 });
+    var alien = cand('pX110', { width: 110, orderWidth: 110, orderId: '4999', qty: 20, dueKey: 20260728 });
+    var covered = { '4385': true };
+
+    var fill = planning.planCutPositionFill(CUT, CORE_FREE, [own, alien], covered);
+    assertEqual(fill.map(function (f) { return [f.positionId, f.stripId, f.rolls, f.sameOrder]; }),
+        [['p110', 'b110', 6, true]],
+        '#4426: втулочная полоса 110 мм достаётся позиции 110 мм ТОГО ЖЕ заказа (правило #3872), 152 мм обеспечить нечем');
+
+    // Своего заказа нет — предлагаем чужой, но помечаем sameOrder=false (галка снята в UI).
+    assertEqual(planning.planCutPositionFill(CUT, CORE_FREE, [alien], covered),
+        [{ positionId: 'pX110', stripId: 'b110', rolls: 6, sameOrder: false }],
+        'позиция чужого заказа предлагается, но помечена как чужая');
+
+    // Две позиции своего заказа на одну полосу — берём более срочную (dueKey).
+    var late = cand('pLate', { width: 110, orderWidth: 110, orderId: '4385', qty: 20, dueKey: 20260805 });
+    var early = cand('pEarly', { width: 110, orderWidth: 110, orderId: '4385', qty: 20, dueKey: 20260727 });
+    assertEqual(planning.planCutPositionFill(CUT, [CORE_FREE[0]], [late, early], covered)[0].positionId, 'pEarly',
+        'на одну полосу претендуют двое — берём более срочную по сроку');
+
+    // Одна позиция не уходит на две полосы: две свободные полосы 110 мм, кандидат один.
+    var two = [{ id: 'b110a', width: 110, rolls: 6 }, { id: 'b110b', width: 110, rolls: 6 }];
+    assertEqual(planning.planCutPositionFill(CUT, two, [own], covered).length, 1,
+        'одна позиция — одна полоса (вторая остаётся свободной)');
+})();
+
+// ── 7) Модалка: «Заодно обеспечим» и запись пачкой ──────────────────────────
+function fillChecks() {
+    // Задание: 55 мм в заказ 4385 (уже обеспечено) + свободные 152 мм и втулочная 110 мм.
+    var strips = [
+        { id: 'b55', width: '55', strips: '10', rolls: '30', planned: '30', orderId: '4385' },
+        { id: 'b152', width: '152', strips: '5', rolls: '', planned: '15', orderId: '' },
+        { id: 'b110', width: '110', strips: '2', rolls: '', planned: '6', orderId: '' }
+    ];
+    var supplies = [{ id: 's55', cutId: '5', finishedBatchId: 'b55', positionId: 'p55', rolls: 30 }];
+    var p55 = pos({ id: 'p55', width: 55, orderWidth: 55, orderId: '4385', qty: 30 });
+    var p152 = pos({ id: 'p152', orderId: '4385' });
+    var p110 = pos({ id: 'p110', width: 110, orderWidth: 110, orderId: '4385', qty: 20 });
+    var c = makeController(strips, supplies, [p55, p152, p110]);
+    c.openCutPositionPicker(CUT);
+    return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+        var modal = c.root.childNodes[0];
+        var items = byClass(modal, 'atex-pp-supply-item');
+        assertEqual(items.length, 2, 'в списке две подходящие позиции: 152 мм и втулочная 110 мм');
+        // Добавляем 152 мм — 110 мм должна подтянуться сама.
+        var item152 = items.filter(function (n) { return /152/.test(n.textContent); })[0];
+        item152.listeners.click[0]();
+        var fillRows = byClass(modal, 'atex-pp-supply-fill-row');
+        assertEqual(fillRows.length, 1, '#4426: на подтверждении предложена вторая позиция — под свободную полосу 110 мм');
+        assert(/p110|110мм/.test(fillRows[0].textContent) && /полоса 110 мм · 6 рул\./.test(fillRows[0].textContent),
+            'видно, на какую полосу и сколько рулонов');
+        var box = walk(fillRows[0]).filter(function (n) { return n.tagName === 'INPUT'; })[0];
+        assertEqual(box.checked, true, 'позиция ТОГО ЖЕ заказа отмечена заранее (как при генерации)');
+
+        byClass(modal, 'atex-pp-btn-primary')[0].listeners.click[0]();
+        return new Promise(function (resolve) { setTimeout(resolve, 0); });
+    }).then(function () {
+        var sup = c.posts.filter(function (p) { return p.path.indexOf('_m_new/' + SUP_TABLE) === 0; });
+        assertEqual(sup.length, 2, 'записаны ДВА «Обеспечения» — выбранная позиция и добор');
+        assert(/up=p152/.test(sup[0].path) && sup[0].fields['t' + REQ.supBatch] === 'b152', 'первое — выбранная позиция на полосу 152 мм');
+        assert(/up=p110/.test(sup[1].path) && sup[1].fields['t' + REQ.supBatch] === 'b110', 'второе — добор 110 мм на втулочную полосу');
+        assertEqual(c.posts.filter(function (p) { return /^_m_set\/(b152|b110)/.test(p.path); }).length, 2,
+            'обе «Партии ГП» помечены заказными');
+        assertEqual(c.loaded, 1, 'план перечитан ОДИН раз на всю пачку');
+        assert(c.notes.some(function (n) { return n.kind === 'success' && /Обеспечено позиций: 2/.test(n.msg); }),
+            'тост говорит, сколько позиций обеспечено');
+    }).then(function () {
+        // Чужой заказ: галка снята — пишем только выбранную позицию.
+        var strips2 = [
+            { id: 'b152', width: '152', strips: '5', rolls: '', planned: '15', orderId: '' },
+            { id: 'b110', width: '110', strips: '2', rolls: '', planned: '6', orderId: '' }
+        ];
+        var c2 = makeController(strips2, [], [pos({ id: 'p152', orderId: '4385' }),
+            pos({ id: 'pX110', width: 110, orderWidth: 110, orderId: '4999', qty: 20 })]);
+        c2.openCutPositionPicker(CUT);
+        return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+            var modal = c2.root.childNodes[0];
+            byClass(modal, 'atex-pp-supply-item').filter(function (n) { return /152/.test(n.textContent); })[0].listeners.click[0]();
+            var row = byClass(modal, 'atex-pp-supply-fill-row')[0];
+            assert(!!row && /другой заказ/.test(row.textContent), 'позиция чужого заказа предложена с пометкой «другой заказ»');
+            var box = walk(row).filter(function (n) { return n.tagName === 'INPUT'; })[0];
+            assert(!box.checked, 'и НЕ отмечена — чужой заказ в задание тянет только диспетчер');
+            byClass(modal, 'atex-pp-btn-primary')[0].listeners.click[0]();
+            return new Promise(function (resolve) { setTimeout(resolve, 0); });
+        }).then(function () {
+            var sup = c2.posts.filter(function (p) { return p.path.indexOf('_m_new/' + SUP_TABLE) === 0; });
+            assertEqual(sup.length, 1, 'снятая галка — обеспечение чужой позиции не создаётся');
+        });
+    });
+}
+
 function done() {
-    tailChecks().then(function () {
+    tailChecks().then(fillChecks).then(function () {
         console.log('\n' + passed + '/' + total + ' passed');
         if (passed !== total) process.exitCode = 1;
+    }).catch(function (e) {
+        console.log('FAIL — необработанная ошибка: ' + (e && e.stack || e));
+        process.exitCode = 1;
     });
 }
