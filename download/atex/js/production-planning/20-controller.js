@@ -8899,6 +8899,10 @@
         var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
         var mismatchIds = actDirtyId ? self.recalcMismatchIds(actDirtyId) : [];
         if (mismatchIds.length) {
+            // #4430: вид и ЛИПКОСТЬ кнопки — в CSS (.atex-pp-recalc-setup): она приклеена к верху
+            // экрана, иначе в длинной очереди уезжала вверх и расхождение чинить было нечем.
+            // Inline-стиля здесь нет намеренно: он перебил бы правило .is-plan-preview, которое
+            // снимает липкость под липкой плашкой непринятого плана (#4402).
             var recalcBtn = el('button', {
                 class: 'atex-pp-recalc-setup', type: 'button',
                 text: '↻ Пересчитать наладку (заданий: ' + mismatchIds.length + ')',
@@ -8906,9 +8910,7 @@
                      + ' другие, а наладка осталась прежней. Пересчёт приведёт «Наладку ножей»,'
                      + ' «Сырьё/намотку» и «Резку и Лидер» в соответствие и пересоберёт ВРЕМЯ СТАРТА'
                      + ' встык внутри дня (без дыр и нахлёстов). Порядок заданий и их дни НЕ меняются;'
-                     + ' затрагиваются только этот станок и видимые дни.',
-                style: 'display:block;width:100%;margin:6px 0 10px;padding:11px 16px;background:#c0392b;color:#fff;'
-                     + 'font-weight:700;font-size:15px;border:none;border-radius:6px;cursor:pointer;'
+                     + ' затрагиваются только этот станок и видимые дни.'
             });
             recalcBtn.addEventListener('click', function() {
                 if (self.busy) return;
