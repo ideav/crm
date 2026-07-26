@@ -68,6 +68,7 @@
         scheduleStartTimestamp: scheduleStartTimestamp,
         planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
+        downtimeConflictCuts: downtimeConflictCuts,               // #4413: задания, стоящие в окне «Отпуска»
         slitterDownOnDay: slitterDownOnDay,                       // #3876
         downtimeSpanDays: downtimeSpanDays,                       // #3898
         vacationSpanDaysOnDay: vacationSpanDaysOnDay,             // #3898
@@ -2266,10 +2267,42 @@
     // (ТЗ §14) старший критерий. Объектив кандидата = дни_опоздания × LATE_DAY_WEIGHT + переналадка(мин),
     // поэтому chooseOptimizeCandidate сперва минимизирует опоздания, затем переналадку (лексикографически).
     var LATE_DAY_WEIGHT = 1e9;
+    // #4413: задание, стоящее в окне «Отпуска» своего станка, — не «дорого», а НЕВОЗМОЖНО: станок
+    // в это время не работает. Такое нарушение старше срока, поэтому его вес выше LATE_DAY_WEIGHT:
+    // план, который снимает нарушение, применяется даже при тех же опозданиях и той же переналадке
+    // (issue #4413: «Отпуск» добавили перед «Упорядочить» — задание осталось внутри него).
+    var DOWNTIME_CONFLICT_WEIGHT = 1e15;
 
-    // #4047/#4064: выбор кандидата «Упорядочить». before/objB/objA — КОМБИНИРОВАННЫЙ объектив
-    // (дни_опоздания × LATE_DAY_WEIGHT + переналадка), objA = Infinity если переназначения нет.
-    // Применяем ЛУЧШИЙ (строго меньший объектив = меньше опозданий, при равных — меньше переналадки);
+    // #4413: планируемая занятость станка заданием (мин) — «Наладка ножей» + «Сырьё/намотка» +
+    // «Резка и Лидер», как её показывает очередь (#3846) и пересобирает #4408. Хранимых колонок нет
+    // → «Длительность, минут». runsOverride (проходы кандидата) масштабирует намоточную часть: план
+    // мог разорвать задание по дням, и голова занимает станок меньше исходного. → минуты (≥ 0).
+    function cutOccupancyMinutes(cut, runsOverride) {
+        if (!cut) return 0;
+        var setup = Math.round(stripNum(cut.storedKnifeSetupMin)) + Math.round(stripNum(cut.storedMaterialWindingMin));
+        var work = Math.round(stripNum(cut.storedCutAndLeaderMin));
+        if (!(work > 0)) work = Math.round(stripNum(cut.duration));
+        var runsNow = stripNum(cut.plannedRuns);
+        var runsNew = (runsOverride == null) ? runsNow : Math.max(0, Number(runsOverride) || 0);
+        if (runsNow > 0 && runsNew !== runsNow) work = Math.round(work * (runsNew / runsNow));
+        return Math.max(0, setup + work);
+    }
+
+    // #4413: проходы, которые кандидат назначает заданиям (updates планировщика) → { cutId: runs }.
+    // Нужны, чтобы мерить занятость ГОЛОВЫ разорванного задания по её проходам, а не по исходным.
+    function plannedRunsMapFromOps(ops) {
+        var m = {};
+        ((ops && ops.updates) || []).forEach(function(u) {
+            if (u && u.plannedRuns != null) m[String(u.cutId)] = Number(u.plannedRuns);
+        });
+        return m;
+    }
+
+    // #4047/#4064/#4413: выбор кандидата «Упорядочить». before/objB/objA — КОМБИНИРОВАННЫЙ объектив
+    // (заданий_в_«Отпуске» × DOWNTIME_CONFLICT_WEIGHT + дни_опоздания × LATE_DAY_WEIGHT + переналадка),
+    // objA = Infinity если переназначения нет.
+    // Применяем ЛУЧШИЙ (строго меньший объектив = меньше невыполнимого, затем меньше опозданий, при
+    // равных — меньше переналадки);
     // при равенстве кандидатов берём B (без смены станка). Лучший НЕ строго меньше текущего → 'none'
     // (план не трогаем). Так «Упорядочить» НЕ увеличивает ни опоздания, ни (при равных опозданиях)
     // переналадку, но РАДИ сокращения опозданий переналадку увеличить может (срок важнее, #4064).
@@ -2305,11 +2338,17 @@
             var n = Number(v);
             return isFinite(n) ? String(round3(n)) : '—';
         }
-        // Вердикт кандидата против текущего плана — ЛЕКСИКОГРАФИЧЕСКИ (срок §14 старше переналадки,
-        // см. LATE_DAY_WEIGHT): сперва дни опоздания, при равных — минуты переналадки.
-        function verdict(late, co, s) {
+        // Вердикт кандидата против текущего плана — ЛЕКСИКОГРАФИЧЕСКИ (#4413 «Отпуск» старше срока,
+        // срок §14 старше переналадки, см. DOWNTIME_CONFLICT_WEIGHT/LATE_DAY_WEIGHT): сперва задания
+        // в окне «Отпуска», затем дни опоздания, при равных — минуты переналадки.
+        function verdict(late, co, s, downtime) {
             var dLate = round3(Number(late) - Number(s.lateBefore));
             var dCo = round3(Number(co) - Number(s.coBefore));
+            var dtNow = Number(downtime), dtWas = Number(s.downtimeBefore);
+            if (isFinite(dtNow) && isFinite(dtWas) && dtNow !== dtWas) {
+                return (dtNow < dtWas ? 'ЛУЧШЕ' : 'ХУЖЕ') + ': в окне «Отпуска» ' + dtWas + ' → ' + dtNow
+                    + ' заданий (станок в это время не работает — старше срока)';
+            }
             if (dLate < 0) return 'ЛУЧШЕ: опозданий ' + num(dLate) + ' дн';
             if (dLate > 0) return 'ХУЖЕ: опозданий +' + num(dLate) + ' дн (срок старше переналадки)';
             if (dCo < 0) return 'ЛУЧШЕ: опоздания те же, переналадка ' + num(dCo) + ' мин';
@@ -2323,13 +2362,18 @@
         } else {
             out.push('СТАРТ: заданий ' + (s.cutCount || 0) + ' (зафиксировано ' + (s.fixedCount || 0) + '), станков '
                 + (s.slitterCount || 0) + ', окно ' + (s.windowLabel || 'весь горизонт'));
-            out.push('  текущий план: опозданий ' + num(s.lateBefore) + ' дн, переналадка ' + num(s.coBefore) + ' мин');
+            out.push('  текущий план: опозданий ' + num(s.lateBefore) + ' дн, переналадка ' + num(s.coBefore) + ' мин'
+                // #4413: строку про «Отпуск» показываем, только если нарушения есть.
+                + (s.downtimeBefore ? ', в окне «Отпуска» станка заданий ' + s.downtimeBefore
+                    + ((s.downtimeIds || []).length ? ' (' + s.downtimeIds.join(', ') + ')' : '') : ''));
         }
         (t.candidates || []).forEach(function(c) {
             var head = 'КАНДИДАТ ' + c.key + ' (' + c.title + ')';
             if (c.skipped) { out.push(head + ': не считался — ' + c.skipped); return; }
             out.push(head + (c.reassignCount != null ? ', переназначений станка ' + c.reassignCount : '')
-                + ': опозданий ' + num(c.late) + ' дн, переналадка ' + num(c.changeover) + ' мин → ' + verdict(c.late, c.changeover, s));
+                + ': опозданий ' + num(c.late) + ' дн, переналадка ' + num(c.changeover) + ' мин'
+                + ((c.downtime || s.downtimeBefore) ? ', в «Отпуске» ' + (c.downtime || 0) : '')
+                + ' → ' + verdict(c.late, c.changeover, s, c.downtime));
         });
         var ch = t.choice || {};
         out.push(ch.action === 'none' || !ch.action
@@ -2416,6 +2460,38 @@
         return planQuality(slots, { settings: self.daySettings }).all.changeoverMin;
     };
 
+    // #4413: задания плана, СТОЯЩИЕ в окне «Отпуска» своего станка (или в нерабочем дне) — станок
+    // тогда не работает, план невыполним. Считаем на той же оси, что и планировщик
+    // (blockedRangesBySlitter, #3764): старт — override из ops кандидата, иначе хранимый planStart;
+    // занятость — хранимые колонки тайминга, масштабированные проходами кандидата (разрыв по дням
+    // укорачивает голову). Старший критерий «Упорядочить», выше срока: DOWNTIME_CONFLICT_WEIGHT.
+    // → массив id заданий-нарушителей.
+    AtexProductionPlanning.prototype.planDowntimeConflicts = function(cutsArray, planStartByCutId, plannedRunsByCutId) {
+        var ov = planStartByCutId || null;
+        var runsOv = plannedRunsByCutId || null;
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        if (!isFinite(base)) return [];
+        // Без метаданных окна простоя не читаются (стаб-self в юнит-тестах, как typeof-гарды выше):
+        // простоев не знаем — нарушений не показываем.
+        if (!this.meta || typeof this.blockedRangesBySlitter !== 'function') return [];
+        var blocked = this.blockedRangesBySlitter(base);
+        if (!blocked || !Object.keys(blocked).length) return [];
+        var items = (cutsArray || []).map(function(c) {
+            var o = ov ? ov[String(c.id)] : null;
+            var ts = (o != null) ? Number(o)
+                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
+            if (!(ts > 0)) return null;
+            var runsNew = runsOv ? runsOv[String(c.id)] : null;
+            return {
+                id: c.id,
+                slitterId: c.slitter && c.slitter.id,
+                windowStartMin: Math.round((ts * 1000 - base) / 60000),
+                occMin: cutOccupancyMinutes(c, runsNew)
+            };
+        }).filter(Boolean);
+        return downtimeConflictCuts(items, blocked);
+    };
+
     // #4064: суммарные дни опоздания плана — Σ по резкам max(0, день размещения − срок). День
     // размещения берём как в planChangeoverMin (override planStart из ops кандидата, иначе хранимый
     // planStart/planDate резки), срок — dueKey (YYYYMMDD). Старший критерий «Упорядочить» (срок —
@@ -2458,6 +2534,8 @@
         // для уведомления. combined() собирает объектив для chooseOptimizeCandidate.
         var before, builtB, objB, plan, objA, builtA;
         var coBefore, lateBefore, coB, lateB, coA = Infinity, lateA = Infinity;
+        // #4413: задания, стоящие в окне «Отпуска» станка, — старший критерий (см. DOWNTIME_CONFLICT_WEIGHT).
+        var dtBefore = [], dtB = [], dtA = [];
         // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
         // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
         // считались бы по хвостам непринятого плана).
@@ -2467,17 +2545,21 @@
         // предпросмотр) — иначе «ничего не происходит» остаётся без объяснения (issue #4409).
         var trace = { start: null, candidates: [], choice: null, moves: [], movesTotal: 0,
             creates: [], createsTotal: 0, deletes: [], deletesTotal: 0, result: null, stop: null };
-        function combined(late, co) { return late * LATE_DAY_WEIGHT + co; }
+        // #4413: объектив лексикографический — сперва задания в окне «Отпуска» (невыполнимо),
+        // затем опоздания (срок §14), затем переналадка.
+        function combined(dt, late, co) { return dt * DOWNTIME_CONFLICT_WEIGHT + late * LATE_DAY_WEIGHT + co; }
         try {
             coBefore = self.planChangeoverMin(self.cuts, null);
             lateBefore = self.planLatenessDays(self.cuts, null);
-            before = combined(lateBefore, coBefore);
+            dtBefore = self.planDowntimeConflicts(self.cuts, null, null);
+            before = combined(dtBefore.length, lateBefore, coBefore);
             trace.start = {
                 cutCount: (self.cuts || []).length,
                 fixedCount: (self.cuts || []).filter(function(c) { return c && c.fixed; }).length,
                 slitterCount: (self.slitters || []).length,
                 windowLabel: self.optimizeWindowLabel(),
-                lateBefore: round3(lateBefore), coBefore: round3(coBefore)
+                lateBefore: round3(lateBefore), coBefore: round3(coBefore),
+                downtimeBefore: dtBefore.length, downtimeIds: dtBefore.slice(0, 10)
             };
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
@@ -2485,9 +2567,10 @@
             var mapB = planStartMapFromOps(builtB.ops);
             coB = self.planChangeoverMin(self.cuts, mapB);
             lateB = self.planLatenessDays(self.cuts, mapB);
-            objB = combined(lateB, coB);
+            dtB = self.planDowntimeConflicts(self.cuts, mapB, plannedRunsMapFromOps(builtB.ops));
+            objB = combined(dtB.length, lateB, coB);
             trace.candidates.push({ key: 'B', title: 'порядок/дни на текущих станках',
-                late: round3(lateB), changeover: round3(coB) });
+                late: round3(lateB), changeover: round3(coB), downtime: dtB.length });
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
@@ -2507,10 +2590,13 @@
                 var mapA = planStartMapFromOps(builtA.ops);
                 coA = self.planChangeoverMin(self.cuts, mapA);
                 lateA = self.planLatenessDays(self.cuts, mapA);
-                objA = combined(lateA, coA);
+                // #4413: конфликты с «Отпуском» меряем ПОКА станки подменены — иначе задание
+                // проверялось бы против простоев не того станка.
+                dtA = self.planDowntimeConflicts(self.cuts, mapA, plannedRunsMapFromOps(builtA.ops));
+                objA = combined(dtA.length, lateA, coA);
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
                     reassignCount: Object.keys(plan.slitterByRecordId || {}).length,
-                    late: round3(lateA), changeover: round3(coA) });
+                    late: round3(lateA), changeover: round3(coA), downtime: dtA.length });
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             } else {
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
@@ -2525,11 +2611,22 @@
             return;
         }
 
-        // Выбор кандидата: сперва меньше опозданий (срок §14), затем меньше переналадки; иначе не трогаем.
+        // Выбор кандидата: сперва меньше заданий в «Отпуске» (#4413 — невыполнимо), затем меньше
+        // опозданий (срок §14), затем меньше переналадки; иначе не трогаем.
         var choice = chooseOptimizeCandidate(before, objB, objA, plan.changed);
         if (choice.action === 'none') {
             self.setBusy(false);
             trace.choice = { action: 'none' };
+            // #4413: задания стоят в окне «Отпуска», и переставить их не вышло — это старше просрочки
+            // и молчать об этом нельзя (иначе «ничего не происходит» без объяснения).
+            if (dtBefore.length) {
+                trace.stop = { code: 'none-downtime', text: 'план НЕ изменён — в окне «Отпуска» станка осталось заданий: '
+                    + dtBefore.length + ' (' + dtBefore.slice(0, 10).join(', ') + '); переставить их не удалось' };
+                emitOptimizeTrace(trace);
+                self.notify('Отпуск станка не обойти: в его окне стоят задания — ' + dtBefore.length
+                    + '. Переставить не удалось (нет свободного места). Освободите день или сдвиньте задания вручную (🗓)', 'warning');
+                return;
+            }
             // #4211: при НАЛИЧИИ просрочки НЕ рапортовать «очередь оптимальна» — переставить в срок не
             // удалось (нет свободного места раньше). «Оптимальна» — только когда опозданий реально нет.
             if (round3(lateBefore) > 0) {
@@ -2546,6 +2643,7 @@
         }
         var useA = choice.action === 'A';
         var coBest = useA ? coA : coB, lateBest = useA ? lateA : lateB;
+        var dtBest = useA ? dtA : dtB;   // #4413: сколько заданий остаётся в окне «Отпуска»
         var built = useA ? builtA : builtB;
         var changedUpdates = filterChangedUpdates(built.ops, built.cutsById);
         var ops = { updates: changedUpdates, creates: built.ops.creates || [], deletes: built.ops.deletes || [] };
@@ -2563,6 +2661,7 @@
             slitterChange: useA,
             coBefore: round3(coBefore), coAfter: round3(coBest),
             lateBefore: round3(lateBefore), lateAfter: round3(lateBest),
+            downtimeBefore: dtBefore.length, downtimeAfter: dtBest.length,   // #4413
             trace: trace
         });
     };
@@ -2742,6 +2841,9 @@
                 + ' дн, переналадка ' + pend.coBefore + ' → ' + pend.coAfter + ' мин)');
             self.notify('Очередь упорядочена: опоздания ' + pend.lateBefore + ' → ' + pend.lateAfter + ' дн, '
                 + 'переналадка ' + pend.coBefore + ' → ' + pend.coAfter + ' мин'
+                // #4413: ради чего переставили, если сроки и переналадка не изменились.
+                + ((Number(pend.downtimeBefore) || Number(pend.downtimeAfter))
+                    ? ', в окне «Отпуска» ' + (Number(pend.downtimeBefore) || 0) + ' → ' + (Number(pend.downtimeAfter) || 0) + ' заданий' : '')
                 + (pend.slitterChange ? ' (со сменой станка)' : ''), 'success');
             return true;
         }).catch(function(err) {
@@ -6906,9 +7008,16 @@
         if (!pend) return;
         var lateWorse = round3(pend.lateAfter) > round3(pend.lateBefore);
         var lateCls = round3(pend.lateAfter) < round3(pend.lateBefore) ? 'is-better' : (lateWorse ? 'is-worse' : '');
+        // #4413: задания в окне «Отпуска» станка — строку показываем, только если они были или
+        // остаются: в обычном плане её нет, а тут она объясняет, ради чего переставили.
+        var dtBefore4413 = Number(pend.downtimeBefore) || 0, dtAfter4413 = Number(pend.downtimeAfter) || 0;
+        var dtNodes = (dtBefore4413 || dtAfter4413) ? [el('div', {
+            class: 'atex-pp-plan-delta ' + (dtAfter4413 < dtBefore4413 ? 'is-better' : (dtAfter4413 > dtBefore4413 ? 'is-worse' : '')),
+            text: 'в окне «Отпуска» станка: ' + dtBefore4413 + ' → ' + dtAfter4413 + ' заданий'
+        })] : [];
         var panel = el('div', { class: 'atex-pp-plan-bar' }, [
             el('div', { class: 'atex-pp-plan-title', text: '↻ Пересчёт очереди — план показан, но НЕ сохранён' })
-        ].concat(planStatsNodes(pend.before, pend.after), [
+        ].concat(planStatsNodes(pend.before, pend.after), dtNodes, [
             el('div', { class: 'atex-pp-plan-delta ' + lateCls,
                 text: 'опоздания: ' + pend.lateBefore + ' → ' + pend.lateAfter + ' дн'
                     + (pend.slitterChange ? ' · со сменой станка' : '') }),

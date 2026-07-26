@@ -1702,6 +1702,36 @@
         return out;
     }
 
+    // #4413: задания, СТОЯЩИЕ в окне «Отпуска» своего станка (или в нерабочем дне) — станок в это
+    // время не работает, выполнить их нельзя. Это НЕ «дорого», а НЕВОЗМОЖНО: такое нарушение старше
+    // и срока, и переналадки, поэтому «Упорядочить» обязано применить план, который его снимает,
+    // даже когда опоздания и переналадка не изменились (issue #4413: «Отпуск» добавили перед
+    // запуском, задание осталось стоять внутри него, а кнопка ответила «просрочка не устранена»).
+    // items — [{ id, slitterId, windowStartMin, occMin }] (минуты от полуночи дня 0, та же ось, что
+    // blockedRangesBySlitter #3764); occMin — занятость станка заданием (наладка + резка), 0 — считаем
+    // точкой старта. blockedBySlitter — { slitterId: [[s, e], …] }.
+    // → массив id заданий-нарушителей В ПОРЯДКЕ items. Чистая — покрыта тестом.
+    function downtimeConflictCuts(items, blockedBySlitter) {
+        var map = blockedBySlitter || {};
+        var out = [];
+        (items || []).forEach(function(it) {
+            if (!it) return;
+            var ranges = map[String(it.slitterId == null ? '' : it.slitterId)];
+            if (!ranges || !ranges.length) return;
+            var ws = Number(it.windowStartMin);
+            if (!isFinite(ws)) return;
+            var occ = Math.max(0, Number(it.occMin) || 0);
+            for (var i = 0; i < ranges.length; i++) {
+                var bS = Number(ranges[i][0]), bE = Number(ranges[i][1]);
+                if (!(bE > bS)) continue;
+                // Окно задания [ws, ws+occ] пересекает простой (нулевую занятость меряем точкой старта).
+                var hit = occ > 0 ? (ws < bE && ws + occ > bS) : (ws >= bS && ws < bE);
+                if (hit) { out.push(String(it.id)); return; }
+            }
+        });
+        return out;
+    }
+
     // #3876: на отпуске ли станок ВЕСЬ рабочий день. downtimes — окна простоя [{ start, end }]
     // в unix-секундах (start — начало «Отпуска», end — «Окончание»), как
     // this.downtimesBySlitter[slitterId]. dayMidnightMs — полночь дня (локально). workStartMin/
