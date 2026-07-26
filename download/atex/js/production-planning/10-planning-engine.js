@@ -1352,15 +1352,19 @@
         // (намотка + лидер), а не только намотку. Норма намотки остаётся отдельной строкой.
         var t = opTimes || {};
         var leaderUnit = Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
-        var perPassFull = round3(oneRun + leaderUnit);
-        var total = round3(perPassFull * runs);
+        // #4421: намотка и лидер — РАЗНЫМИ строками (как в модалке): смешанный «тайминг прохода»
+        // читался как норма, хотя нормой не был. Итог тот же — намотка по норме + лидер.
+        var windTotal = round3(oneRun * runs);
+        var leaderTotal = round3(leaderUnit * runs);
+        var total = round3(windTotal + leaderTotal);
         if (!(total > 0)) return '';
         return [
             'Метраж прохода: ' + formatTimingNumber(length) + ' м',
             'Плановых проходов: ' + formatTimingNumber(runs),
             formatWindingNorms(relevantWindingNorms(length, points)),
-            'Намотка и лидер: ' + formatTimingNumber(perPassFull) + ' мин',
-            'Итого резка: ' + formatTimingNumber(perPassFull) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(total) + ' мин'
+            'Намотка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(windTotal) + ' мин',
+            'Лидер: ' + formatTimingNumber(leaderUnit) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(leaderTotal) + ' мин',
+            'Итого резка: ' + formatTimingNumber(windTotal) + ' + ' + formatTimingNumber(leaderTotal) + ' = ' + formatTimingNumber(total) + ' мин'
         ].filter(function(x){ return x; }).join('\n');
     }
 
@@ -1410,16 +1414,39 @@
         }
         lines.push({ text: 'Метраж прохода: ' + formatTimingNumber(length) + ' м' });
         lines.push({ text: 'Плановых проходов: ' + formatTimingNumber(runs) });
-        // #4006: лидер (BETWEEN_CUTS) заправляется после каждого прохода — показываем полное время
-        // прохода «Намотка и лидер» и включаем лидер в «Итого резка» (а не отдельной строкой ниже).
-        // Норма намотки — отдельной строкой выше. Лидер на проход = leaderMin/runs (leaderMin = база×runs).
+        // #4006: лидер (BETWEEN_CUTS) заправляется после каждой резки цуга и входит в «Итого резка».
+        // #4421: НО показываем его ОТДЕЛЬНОЙ строкой, а не размазанным по проходам. Прежняя одна
+        // строка «Намотка и лидер» = намотка + leaderMin/runs давала ДРОБЬ вида «3.211 мин» и
+        // «Итого 3.211 * 57 = 183.027» при окне 183: у СОХРАНЁННОГО расписания (#3862) leaderMin —
+        // это ОСТАТОК окна после намотки по норме, а в остатке сидит округление «Длительности»
+        // ВВЕРХ до целой минуты (#3916: 68.4 → 69). Лидер (2×57=114) при этом ровный — дробь была
+        // чужая. Теперь разложено честно: намотка по норме → сколько её в плане → лидер → итог.
         var leaderMin = round3(Number(ctx.leaderMin) || 0);
-        var perPassFull = round3(oneRun + (runs > 0 ? leaderMin / runs : 0));
-        var totalFull = round3(perPassFull * runs);   // #4006: «X * N = Y» самосогласовано (Y от округлённого X)
+        var leaderInWindow4421 = ctx.leaderInWindow === true;
+        var leaderUnit = round3(Number(ctx.leaderUnit) || 0);
+        var leaderRuns = stripNum(ctx.leaderRuns);
+        // Лидер по НОРМЕ (база × резок цуга). У сохранённого расписания берём его, а не остаток окна.
+        var leaderNorm = (leaderUnit > 0 && leaderRuns > 0) ? round3(leaderUnit * leaderRuns) : leaderMin;
+        var leaderShown = leaderInWindow4421 ? leaderNorm : leaderMin;
+        // Намотка: по норме и «сколько её в плане» (хранимая «Длительность», #3916 — целые минуты).
+        var windNorm = round3(oneRun * runs);
+        var plannedWind = round3(Number(ctx.plannedWindMin) || 0);
+        var windShown = (leaderInWindow4421 && plannedWind > 0) ? plannedWind : windNorm;
+        var totalFull = round3(windShown + leaderShown);
         if (!setupOnly) {
             var normLine = formatWindingNorms(ctx.norms);
             if (normLine) lines.push({ text: normLine });
-            lines.push({ text: 'Намотка и лидер: ' + formatTimingNumber(perPassFull) + ' мин' });
+            lines.push({ text: 'Намотка: ' + formatTimingNumber(oneRun) + ' * ' + formatTimingNumber(runs)
+                + ' = ' + formatTimingNumber(windNorm) + ' мин'
+                + (windShown !== windNorm ? (' → в плане ' + formatTimingNumber(windShown)
+                    + ' мин (округление до целой минуты)') : '') });
+            // Норму лидера показываем ТОЛЬКО если она сходится с показанной суммой: в ctx без
+            // leaderUnit/leaderRuns её нет, а у live-расписания сумма берётся из sc.leaderMin и
+            // может отличаться от базы×резок — «2 * 23 = 47» было бы враньём в арифметике.
+            var leaderCalc = (leaderUnit > 0 && leaderRuns > 0 && round3(leaderUnit * leaderRuns) === leaderShown)
+                ? (formatTimingNumber(leaderUnit) + ' * ' + formatTimingNumber(leaderRuns) + ' = ') : '';
+            lines.push({ text: 'Лидер: ' + leaderCalc + formatTimingNumber(leaderShown)
+                + ' мин (заправка после каждой резки цуга)' });
         }
         lines.push({ text: '' });
         lines.push({ text: 'Тайминг окна:' });
@@ -1442,8 +1469,18 @@
             lines.push({ text: '↪ Это последняя резка смены. Намотка (резка) — продолжение в следующем рабочем дне.' });
             return lines;
         }
+        // #4421: итог = намотка + лидер (обе строки выше), поэтому он СХОДИТСЯ с окном карточки.
+        // Если сохранённое окно всё же шире/уже суммы (правили колонки руками, старый расчёт) —
+        // расхождение печатаем, а не прячем: иначе «Итого» и «готово» опять разъедутся молча.
+        var windowMin4421 = (ctx.startMin != null && ctx.finishMin != null
+            && isFinite(Number(ctx.startMin)) && isFinite(Number(ctx.finishMin)))
+            ? round3(Number(ctx.finishMin) - Number(ctx.startMin)) : null;
+        var mismatch4421 = (leaderInWindow4421 && windowMin4421 != null && windowMin4421 !== totalFull)
+            ? (' · сохранённое окно ' + formatTimingNumber(windowMin4421) + ' мин, расхождение '
+               + formatTimingNumber(round3(windowMin4421 - totalFull)) + ' мин') : '';
         lines.push({
-            text: cutPrefix + 'Итого резка: ' + formatTimingNumber(perPassFull) + ' * ' + formatTimingNumber(runs) + ' = ' + formatTimingNumber(totalFull) + ' мин',
+            text: cutPrefix + 'Итого резка: ' + formatTimingNumber(windShown) + ' + ' + formatTimingNumber(leaderShown)
+                + ' = ' + formatTimingNumber(totalFull) + ' мин' + mismatch4421,
             bold: true
         });
         // #4006: лидер (BETWEEN_CUTS) включён в «Итого резка» — отдельной строкой не показываем.
@@ -1512,6 +1549,13 @@
             runs: runs,
             oneRun: round3(oneRun),
             total: round3(total),
+            // #4421: составляющие лидера и намотки — чтобы модалка разложила окно честно (норма
+            // лидера отдельно, округление «Длительности» отдельно), а не смешивала их в дробный
+            // «тайминг прохода». plannedWindMin — намотка, которую ДЕРЖИТ план (хранимая
+            // «Длительность, минут», #3916 — целые минуты).
+            leaderUnit: round3(leaderUnit),
+            leaderRuns: cutLeaderRuns(cut),
+            plannedWindMin: stripNum(cut && cut.duration),
             // #3862: при сохранённом расписании setup берём из хранимых колонок (sum = sc.setupMin),
             // иначе — live-разбивка (buildSchedule). Так модалка не расходится с карточкой/Гантом.
             setupParts: leaderInWindow ? storedSetupBreakdown(cut, prevCut, times, opts) : setupBreakdown(prevCut, cut, times, opts),
