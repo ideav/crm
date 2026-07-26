@@ -1711,6 +1711,47 @@
         return round3(base < cap ? base : cap);
     }
 
+    // #4426: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание. Задание уже
+    // режет свой набор полос; позиция ложится на СВОБОДНУЮ (ещё не обеспеченную) «Партию ГП»
+    // той же ширины — её рулоны до сих пор шли на склад/в отходы, а теперь идут в заказ.
+    // Номенклатура обязана совпасть с заданием (сырьё + метраж рулона + намотка): иначе
+    // задание физически произведёт не то, что заказано.
+    //   position — запись genPositions (width — ФАКТИЧЕСКАЯ ширина реза, #3372);
+    //   cut      — { materialId, winding, length } задания;
+    //   freeStrips — свободные полосы задания [{ id, width, rolls }] (rolls = полос × проходов);
+    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition).
+    // → { ok, reason, strip, rolls }. reason — человеческая причина отказа (её показываем
+    // в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт, почему её нет).
+    // Чистая (тест).
+    function cutPositionFit(position, cut, freeStrips, remaining) {
+        var p = position || {};
+        var c = cut || {};
+        function no(reason) { return { ok: false, reason: reason, strip: null, rolls: 0 }; }
+        if (!(stripNum(remaining) > 0)) return no('уже обеспечена полностью');
+        if (!p.approved) return no('позиция не согласована');
+        var cutMat = String(c.materialId == null ? '' : c.materialId).trim();
+        var posMat = String(p.materialId == null ? '' : p.materialId).trim();
+        if (cutMat === '') return no('у задания не определено сырьё');
+        if (posMat === '') return no('у позиции не указано сырьё');
+        if (posMat !== cutMat) return no('другое сырьё');
+        var cutLen = windLengthValue(c.length), posLen = windLengthValue(p.length);
+        if (cutLen > 0 && posLen > 0 && cutLen !== posLen) {
+            return no('другой метраж рулона (задание ' + cutLen + ' м, позиция ' + posLen + ' м)');
+        }
+        var cutWind = normWinding(c.winding), posWind = normWinding(p.windDir);
+        if (cutWind && posWind && cutWind !== posWind) return no('другая намотка (' + cutWind + ' ≠ ' + posWind + ')');
+        // Ширину полосы сверяем через stripNum: из БД она приходит строкой и может быть с
+        // запятой («152,00») — Number() дал бы NaN и «нет свободной полосы» на ровном месте.
+        var widthKey = stripWidthKey(stripNum(p.width));
+        var strip = (freeStrips || []).filter(function(s) {
+            return stripWidthKey(stripNum(s && s.width)) === widthKey;
+        })[0] || null;
+        if (!strip) return no('нет свободной полосы ' + round3(stripNum(p.width)) + ' мм');
+        var rolls = stripSupplyRolls(strip.rolls, remaining);
+        if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
+        return { ok: true, reason: '', strip: strip, rolls: rolls };
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveId, sleeveReady, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty, position_length/wind_length → числа; пустые значения → 0/'' но объект всегда
@@ -9585,6 +9626,7 @@
         remainingRollsForPosition: remainingRollsForPosition,
         formatLinkedPositionLabel: formatLinkedPositionLabel,
         stripSupplyRolls: stripSupplyRolls,
+        cutPositionFit: cutPositionFit,                 // #4426: годится ли позиция для добавления в задание
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
         groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
@@ -13306,6 +13348,206 @@
         renderList();
     };
 
+    // #4426: свободные полосы задания — те «Партии ГП», на которые ещё НЕ ссылается ни одно
+    // «Обеспечение» (их рулоны идут на склад/в отходы). strips — из loadStripsForCut
+    // ({ id, width, qty = полос за проход }); passes — проходов задания. → [{ id, width, rolls }].
+    AtexProductionPlanning.prototype.freeStripsOfCut = function(strips, passes) {
+        var ordered = {};
+        (this.supplies || []).forEach(function(s) {
+            var b = s && s.finishedBatchId;
+            if (b != null && String(b) !== '') ordered[String(b)] = true;
+        });
+        var runs = stripNum(passes) > 0 ? stripNum(passes) : 1;
+        return (strips || []).filter(function(s) { return s && s.id != null && !ordered[String(s.id)]; })
+            .map(function(s) {
+                return { id: String(s.id), width: s.width, rolls: round3((stripNum(s.qty) || 0) * runs) };
+            });
+    };
+
+    // #4426: «+ позиция» на панели «Связанные позиции» — добавить в СУЩЕСТВУЮЩЕЕ задание
+    // ещё одну позицию заказа. Раньше это было возможно только «изнутри» редактора полос
+    // (значок 🔗 у необеспеченной полосы, #3320): с панели связей задание выглядело
+    // неизменяемым — позиции только отвязывались. Состав задания читаем из БД (свежие
+    // «Партии ГП»), годность позиции считает cutPositionFit: сырьё + метраж + намотка
+    // задания и СВОБОДНАЯ полоса его ширины. Непроходные позиции той же номенклатуры
+    // показываем с причиной — иначе непонятно, почему нужной позиции нет в списке.
+    AtexProductionPlanning.prototype.openCutPositionPicker = function(cut) {
+        var self = this;
+        if (!cut) { this.notify('Не выбрано задание', 'error'); return; }
+        if (!this.meta.supply) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return; }
+        if (!this.meta.finishedBatch) { this.notify('Не найдены метаданные таблицы «' + TABLE.finishedBatch + '»', 'error'); return; }
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-supply-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-supply-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+        var content = el('div', { class: 'atex-pp-supply-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Добавить позицию в задание' }));
+        content.appendChild(el('p', { class: 'atex-pp-hint', text: 'Читаю состав задания…' }));
+        this.root.appendChild(overlay);
+
+        var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
+        var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
+        var search = '';
+
+        function confirmRow(label, value) {
+            return el('div', { class: 'atex-pp-supply-confirm-row' }, [
+                el('span', { class: 'atex-pp-supply-confirm-label', text: label }),
+                el('span', { class: 'atex-pp-supply-confirm-value', text: String(value) })
+            ]);
+        }
+
+        this.loadStripsForCut(cut.id).then(function(strips) {
+            if (!overlay.parentNode) return;   // модалку успели закрыть
+            var free = self.freeStripsOfCut(strips, passes);
+            var posLabelById = {};
+            (self.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+            var linkedPosIds = {};
+            (self.supplies || []).forEach(function(s) {
+                if (String(s.cutId) === String(cut.id) && s.positionId != null) linkedPosIds[String(s.positionId)] = true;
+            });
+            // Кандидаты: позиции ТОЙ ЖЕ номенклатуры (сырьё) — прочие в список не попадают
+            // вовсе, их только считаем (иначе список — весь портфель заказов).
+            var otherNomenclature = 0;
+            var candidates = [];
+            (self.genPositions || []).forEach(function(p) {
+                var remaining = remainingRollsForPosition(p, self.supplies);
+                var fit = cutPositionFit(p, cut, free, remaining);
+                var sameMaterial = String(p.materialId == null ? '' : p.materialId).trim() ===
+                    String(cut.materialId == null ? '' : cut.materialId).trim();
+                if (!sameMaterial) { otherNomenclature++; return; }
+                candidates.push({
+                    id: String(p.id), position: p, remaining: remaining, fit: fit,
+                    linked: !!linkedPosIds[String(p.id)],
+                    label: posLabelById[String(p.id)] ||
+                        ('Сырьё#' + (p.materialId || '?') + ' · ' + ((p.orderWidth != null ? p.orderWidth : p.width) || '?') + ' мм')
+                });
+            });
+            candidates.sort(function(a, b) { return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
+
+            function matchesSearch(c) {
+                if (search === '') return true;
+                return (c.label + ' ' + round3(stripNum(c.position.width)) + ' ' + c.id).toLowerCase().indexOf(search) >= 0;
+            }
+
+            // Список перерисовывается по мере ввода в поиск — ТОЛЬКО он: поле поиска живёт
+            // между перерисовками, иначе на каждом нажатии терялись фокус и каретка (#3429).
+            function renderItems(listBox) {
+                listBox.innerHTML = '';
+                var shown = candidates.filter(matchesSearch);
+                var fits = shown.filter(function(c) { return c.fit.ok; });
+                var unfits = shown.filter(function(c) { return !c.fit.ok; });
+
+                var list = el('div', { class: 'atex-pp-supply-list' });
+                fits.forEach(function(c) {
+                    var item = el('button', { class: 'atex-pp-supply-item', type: 'button' }, [
+                        el('span', { class: 'atex-pp-supply-item-label',
+                            text: c.label + (c.linked ? ' · уже в задании' : '') }),
+                        el('span', { class: 'atex-pp-supply-item-meta',
+                            text: 'ост. ' + round3(c.remaining) + ' рул. → полоса ' +
+                                round3(stripNum(c.fit.strip.width)) + ' мм · ' + round3(c.fit.rolls) + ' рул.' })
+                    ]);
+                    item.addEventListener('click', function() { renderConfirm(c); });
+                    list.appendChild(item);
+                });
+                if (!fits.length) {
+                    list.appendChild(el('div', { class: 'atex-pp-hint',
+                        text: shown.length
+                            ? 'Подходящих позиций нет: у задания нет свободной полосы нужной ширины либо остаток позиций уже обеспечен.'
+                            : 'Под поиск ничего не подошло.' }));
+                }
+                listBox.appendChild(list);
+
+                if (unfits.length) {
+                    listBox.appendChild(el('div', { class: 'atex-pp-supply-reject-title',
+                        text: 'Не подходят (' + unfits.length + '):' }));
+                    var rejects = el('div', { class: 'atex-pp-supply-rejects' });
+                    unfits.forEach(function(c) {
+                        rejects.appendChild(el('div', { class: 'atex-pp-supply-reject' }, [
+                            el('span', { class: 'atex-pp-supply-item-label', text: c.label }),
+                            el('span', { class: 'atex-pp-supply-item-meta', text: c.fit.reason })
+                        ]));
+                    });
+                    listBox.appendChild(rejects);
+                }
+            }
+
+            function renderList() {
+                content.innerHTML = '';
+                content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Добавить позицию в задание' }));
+                content.appendChild(el('p', { class: 'atex-pp-hint',
+                    text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + matLabel + ' · ' +
+                        round3(stripNum(cut.length)) + ' м · ' + (normWinding(cut.winding) || '—') +
+                        '. Позиция ложится на свободную полосу задания той же ширины (свободных полос: ' +
+                        free.length + ' из ' + (strips || []).length + ') и обеспечивается через «Обеспечение».' }));
+
+                if (!candidates.length) {
+                    content.appendChild(el('p', { class: 'atex-pp-hint',
+                        text: 'Позиций этого сырья в планировании нет' +
+                            (otherNomenclature > 0 ? ' (другого сырья: ' + otherNomenclature + ' — их в это задание добавить нельзя).' : '.') }));
+                    return;
+                }
+
+                var listBox = el('div', { class: 'atex-pp-supply-listbox' });
+                var searchInput = el('input', { class: 'atex-pp-input', type: 'search',
+                    placeholder: 'Поиск: номер заказа или ширина', value: search });
+                searchInput.addEventListener('input', function() {
+                    search = String(searchInput.value || '').trim().toLowerCase();
+                    renderItems(listBox);
+                });
+                content.appendChild(searchInput);
+                content.appendChild(listBox);
+                renderItems(listBox);
+
+                if (otherNomenclature > 0) {
+                    content.appendChild(el('p', { class: 'atex-pp-hint',
+                        text: 'Позиции другого сырья (' + otherNomenclature + ') не показаны: задание режет ' +
+                            matLabel + ' — другое сырьё оно физически не произведёт.' }));
+                }
+            }
+
+            function renderConfirm(c) {
+                content.innerHTML = '';
+                content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Добавить позицию в задание?' }));
+                var capped = round3(c.fit.rolls) < round3(c.fit.strip.rolls);
+                content.appendChild(el('div', { class: 'atex-pp-supply-confirm' }, [
+                    confirmRow('Задание', '№ ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + matLabel),
+                    confirmRow('Позиция', c.label),
+                    confirmRow('Полоса задания', round3(stripNum(c.fit.strip.width)) + ' мм · ' + round3(c.fit.strip.rolls) + ' рул.'),
+                    confirmRow('Необеспеченный остаток', round3(c.remaining) + ' рул.'),
+                    confirmRow('Будет обеспечено', round3(c.fit.rolls) + ' рул.' + (capped ? ' (ограничено 110% остатка)' : ''))
+                ]));
+                content.appendChild(el('p', { class: 'atex-pp-hint',
+                    text: 'Полоса перестанет быть складской: её «Партия ГП» получит спрос и «ID заказа» позиции. ' +
+                        'Раскладка задания и его длительность не меняются — полоса уже есть в задании.' }));
+                var actions = el('div', { class: 'atex-pp-supply-actions' });
+                var back = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Назад' });
+                back.addEventListener('click', renderList);
+                var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Добавить позицию' });
+                ok.addEventListener('click', function() {
+                    close();
+                    self.createStripSupply(c.fit.strip, c, round3(c.fit.rolls));
+                });
+                actions.appendChild(back);
+                actions.appendChild(ok);
+                content.appendChild(actions);
+            }
+
+            renderList();
+        }).catch(function(err) {
+            console.error('[pp] ❌ #4426 не прочитан состав задания ' + cut.id + ':', err && err.message, err && err.stack);
+            if (!overlay.parentNode) return;
+            content.innerHTML = '';
+            content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Добавить позицию в задание' }));
+            content.appendChild(el('div', { class: 'atex-pp-empty',
+                text: 'Ошибка чтения полос задания: ' + (err && err.message || err) }));
+        });
+    };
+
     // #3320: создать запись «Обеспечения», привязав позицию заказа к складской полосе
     // (Партии ГП). После записи перечитывает план и переоткрывает редактор полос, чтобы
     // «Назначение» полосы обновилось (Склад → Заказ).
@@ -13329,6 +13571,11 @@
         return this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(candidate.id), fields).then(function(res) {
             var id = res && (res.obj || res.id || res.i);
             if (!id) throw new Error('Сервер не вернул id обеспечения');
+            // #4426: полоса перестала быть складской — «Партия ГП» получает СПРОС и «ID заказа»
+            // (те же поля, что пишет генерация, #3433, и слияние заданий, #4424). Без этого
+            // партия остаётся «в запас»: склад считает её свободной, хотя она уже в заказе.
+            return self.markFinishedBatchOrdered(strip.id, rolls, pos.orderId);
+        }).then(function() {
             return self.loadPlanning();
         }).then(function() {
             self.setBusy(false);
@@ -13339,6 +13586,57 @@
             self.setBusy(false);
             self.notify('Ошибка создания обеспечения: ' + err.message, 'error');
         });
+    };
+
+    // #4426: пометить «Партию ГП» заказной: «Кол-во рулонов» (СПРОС) += рулоны обеспечения,
+    // «ID заказа» — заказ покрытой позиции (список через запятую, как batchOrderId/#4424).
+    // Текущее значение читаем из БД (F_I), чтобы не затереть уже накопленный спрос других
+    // обеспечений этой партии. Нет реквизитов в метаданных / отказ записи — НЕ рушим уже
+    // созданное обеспечение, но и не молчим: пишем в консоль и предупреждаем тостом.
+    AtexProductionPlanning.prototype.markFinishedBatchOrdered = function(batchId, rolls, orderId) {
+        var self = this;
+        var fbMeta = this.meta.finishedBatch;
+        if (!fbMeta || batchId == null || String(batchId) === '') return Promise.resolve(false);
+        var rollsReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var orderReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.orderId);
+        var rollsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var orderIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.orderId);
+        if (!rollsReq && !orderReq) {
+            console.error('[pp] ❌ #4426: в метаданных «' + TABLE.finishedBatch + '» нет «' +
+                FINISHED_BATCH_REQ.rolls + '»/«' + FINISHED_BATCH_REQ.orderId + '» — партия останется складской');
+            self.notify('Обеспечение создано, но «Партию ГП» не пометить заказной: нет реквизитов «' +
+                FINISHED_BATCH_REQ.rolls + '»/«' + FINISHED_BATCH_REQ.orderId + '»', 'warning');
+            return Promise.resolve(false);
+        }
+        var stripsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.strips);
+        return this.getJson('object/' + fbMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(batchId) + '&LIMIT=0,1')
+            .then(function(rows) {
+                var r = (rows && rows[0] && rows[0].r) || [];
+                var curRolls = (rollsIdx >= 0 && r[rollsIdx] != null) ? stripNum(r[rollsIdx]) : 0;
+                var curOrder = (orderIdx >= 0 && r[orderIdx] != null) ? String(r[orderIdx]).trim() : '';
+                // #3431: у СТАРЫХ партий «Кол-во полос» пусто, и число полос лежит в «Кол-во
+                // рулонов» (редактор полос читает его фолбэком). Такой записи спрос не
+                // прибавляем — иначе у полосы «уедет» количество; ставим только «ID заказа».
+                var legacyRollsAreStrips = stripsIdx >= 0 &&
+                    String(r[stripsIdx] == null ? '' : r[stripsIdx]).trim() === '';
+                var f = {};
+                if (rollsReq && !legacyRollsAreStrips) f['t' + rollsReq] = String(round3(curRolls + stripNum(rolls)));
+                if (legacyRollsAreStrips) {
+                    console.warn('[pp] ⚠️ #4426: «Партия ГП» ' + batchId + ' без «' + FINISHED_BATCH_REQ.strips +
+                        '» (старая запись) — спрос не трогаем, пишем только «' + FINISHED_BATCH_REQ.orderId + '»');
+                }
+                var orders = curOrder === '' ? [] : curOrder.split(',').map(function(x) { return x.trim(); }).filter(Boolean);
+                var add = String(orderId == null ? '' : orderId).trim();
+                if (orderReq && add !== '' && orders.indexOf(add) < 0) orders.push(add);
+                if (orderReq && orders.length) f['t' + orderReq] = orders.join(',');
+                if (!Object.keys(f).length) return false;
+                return self.post('_m_set/' + encodeURIComponent(batchId) + '?JSON', f).then(function() { return true; });
+            }).catch(function(err) {
+                console.error('[pp] ❌ #4426: «Партия ГП» ' + batchId + ' не помечена заказной:', err && err.message, err && err.stack);
+                self.notify('Обеспечение создано, но «Партию ГП» не удалось пометить заказной: ' +
+                    (err && err.message || err) + ' — поправьте спрос/«ID заказа» в карточке партии', 'warning');
+                return false;
+            });
     };
 
     AtexProductionPlanning.prototype.reload = function() {
@@ -18462,10 +18760,21 @@
             return;
         }
 
-        // Связанные позиции резки (только список; добавление/резерв — вне этой панели).
+        // Связанные позиции задания: список + добавление позиции (#4426).
         var linked = this.supplies.filter(function(s) { return String(s.cutId) === String(cut.id); });
         var listWrap = el('div', { class: 'atex-pp-linked' });
-        listWrap.appendChild(el('h3', { class: 'atex-pp-linked-title', text: 'Связанные позиции (' + linked.length + ')' }));
+        // #4426: «+ позиция» — добавить в это задание ещё одну позицию заказа (ложится на
+        // свободную полосу той же ширины). Задание с одной позицией больше не «запечатано».
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-linked-add', type: 'button',
+            text: '+ позиция', title: 'Добавить в задание позицию заказа (на свободную полосу той же ширины)' });
+        addBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            self.openCutPositionPicker(cut);
+        });
+        listWrap.appendChild(el('div', { class: 'atex-pp-linked-head' }, [
+            el('h3', { class: 'atex-pp-linked-title', text: 'Связанные позиции (' + linked.length + ')' }),
+            addBtn
+        ]));
         if (!linked.length) {
             listWrap.appendChild(el('div', { class: 'atex-pp-empty', text: 'Пока нет связей.' }));
         } else {

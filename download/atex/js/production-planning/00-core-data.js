@@ -1710,6 +1710,47 @@
         return round3(base < cap ? base : cap);
     }
 
+    // #4426: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание. Задание уже
+    // режет свой набор полос; позиция ложится на СВОБОДНУЮ (ещё не обеспеченную) «Партию ГП»
+    // той же ширины — её рулоны до сих пор шли на склад/в отходы, а теперь идут в заказ.
+    // Номенклатура обязана совпасть с заданием (сырьё + метраж рулона + намотка): иначе
+    // задание физически произведёт не то, что заказано.
+    //   position — запись genPositions (width — ФАКТИЧЕСКАЯ ширина реза, #3372);
+    //   cut      — { materialId, winding, length } задания;
+    //   freeStrips — свободные полосы задания [{ id, width, rolls }] (rolls = полос × проходов);
+    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition).
+    // → { ok, reason, strip, rolls }. reason — человеческая причина отказа (её показываем
+    // в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт, почему её нет).
+    // Чистая (тест).
+    function cutPositionFit(position, cut, freeStrips, remaining) {
+        var p = position || {};
+        var c = cut || {};
+        function no(reason) { return { ok: false, reason: reason, strip: null, rolls: 0 }; }
+        if (!(stripNum(remaining) > 0)) return no('уже обеспечена полностью');
+        if (!p.approved) return no('позиция не согласована');
+        var cutMat = String(c.materialId == null ? '' : c.materialId).trim();
+        var posMat = String(p.materialId == null ? '' : p.materialId).trim();
+        if (cutMat === '') return no('у задания не определено сырьё');
+        if (posMat === '') return no('у позиции не указано сырьё');
+        if (posMat !== cutMat) return no('другое сырьё');
+        var cutLen = windLengthValue(c.length), posLen = windLengthValue(p.length);
+        if (cutLen > 0 && posLen > 0 && cutLen !== posLen) {
+            return no('другой метраж рулона (задание ' + cutLen + ' м, позиция ' + posLen + ' м)');
+        }
+        var cutWind = normWinding(c.winding), posWind = normWinding(p.windDir);
+        if (cutWind && posWind && cutWind !== posWind) return no('другая намотка (' + cutWind + ' ≠ ' + posWind + ')');
+        // Ширину полосы сверяем через stripNum: из БД она приходит строкой и может быть с
+        // запятой («152,00») — Number() дал бы NaN и «нет свободной полосы» на ровном месте.
+        var widthKey = stripWidthKey(stripNum(p.width));
+        var strip = (freeStrips || []).filter(function(s) {
+            return stripWidthKey(stripNum(s && s.width)) === widthKey;
+        })[0] || null;
+        if (!strip) return no('нет свободной полосы ' + round3(stripNum(p.width)) + ' мм');
+        var rolls = stripSupplyRolls(strip.rolls, remaining);
+        if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
+        return { ok: true, reason: '', strip: strip, rolls: rolls };
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, length, sleeveId, sleeveReady, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty, position_length/wind_length → числа; пустые значения → 0/'' но объект всегда

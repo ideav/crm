@@ -900,7 +900,10 @@
 
 /* Привязка обеспечения */
 .atex-pp-linked { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
-.atex-pp-linked-title { margin: 0 0 8px; font-size: 14px; }
+/* #4426: заголовок панели и кнопка «+ позиция» — в одну строку, кнопка справа. */
+.atex-pp-linked-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.atex-pp-linked-title { margin: 0; font-size: 14px; }
+.atex-pp-linked-add { flex: 0 0 auto; font-size: 12px; padding: 4px 10px; }
 .atex-pp-linked-item {
     display: flex;
     align-items: center;
@@ -1084,6 +1087,21 @@
 .atex-pp-supply-confirm-label { color: var(--pp-muted); }
 .atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
 .atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* #4426: «Не подходят» — позиции того же сырья, которые в это задание не лечь: рядом с
+   каждой причина (нет свободной полосы, не согласована, другой метраж…). */
+.atex-pp-supply-reject-title { margin-top: 14px; font-size: 13px; color: var(--pp-muted); }
+.atex-pp-supply-rejects { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 180px; overflow-y: auto; }
+.atex-pp-supply-reject {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 10px;
+    border: 1px dashed var(--pp-border-soft);
+    border-radius: 6px;
+    color: var(--pp-muted);
+    font-size: 12px;
+}
 
 /* #3602: модалка переноса задания на другой день — день, положение, фиксация. */
 .atex-pp-move-dialog { max-width: 460px; }
