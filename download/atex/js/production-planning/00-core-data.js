@@ -1500,6 +1500,126 @@
         return { cuts: out, createdIds: createdIds, deletedIds: deletedIds, changedIds: Object.keys(changed) };
     }
 
+    // #4409/#4417: unix-секунды планового старта → «ДД.ММ ЧЧ:ММ». Общий формат для трассы
+    // «Упорядочить» и списка изменений («Детали»). Пусто/мусор → «—».
+    function formatPlanStamp(ts) {
+        var n = Number(ts);
+        if (!isFinite(n) || n <= 0) return '—';
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return '—';
+        function p2(x) { return (x < 10 ? '0' : '') + x; }
+        return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+
+    // #4417: РАЗБОР непринятого плана «Упорядочить» — что именно поменялось у каждого задания.
+    // Сравнивает СНИМОК очереди с ПРОЕКЦИЕЙ (projectPlanOnCuts) и подмешивает изменения колонок
+    // наладки (`computeCutSetupUpdates().updates`, они несут прежние значения was*). Источник и для
+    // модалки «Детали», и для пометки карточек в очереди (их ищут, листая станки и дни).
+    // Чистая — покрыта тестом. timingUpdates: [{cutId, knife, material, cutTime, wasKnife, wasMaterial, wasCutTime}].
+    // opts: { slitterById }.
+    // → { rows: [row], byId: {cutId: row}, movedCount, createdCount, deletedCount }
+    //   row = { kind:'moved'|'new'|'deleted', cutId, label, whenFrom, whenTo, startTs,
+    //           slitterFrom, slitterTo, startChanged, slitterChanged, timingChanged,
+    //           timing: [{ key, label, from, to }], parentCutId }
+    function planChangeRows(snapshot, projected, timingUpdates, opts) {
+        var options = opts || {};
+        var slitterById = options.slitterById || {};
+        function slitterLabel(sid) {
+            var k = String(sid == null ? '' : sid);
+            if (k === '') return '—';
+            var s = slitterById[k];
+            return (s && (s.label || s.name)) || ('#' + k);
+        }
+        function cutLabel(c) {
+            var mat = (c && c.materialName) || (c && c.materialId ? ('#' + c.materialId) : '') || '—';
+            var w = String((c && c.winding) == null ? '' : c.winding).trim();
+            return w ? (mat + ' ' + w) : mat;
+        }
+        function startTs(c) { return Number((c && (c.number || c.planDate)) || 0) || 0; }
+        function sidOf(c) { return String((c && c.slitter && c.slitter.id) == null ? '' : c.slitter.id); }
+        // Прежнее значение колонки: пусто/не число → null («не было»), иначе целые минуты.
+        function prevMin(v) {
+            if (v == null || String(v).trim() === '') return null;
+            var n = Number(String(v).replace(',', '.'));
+            return isFinite(n) ? Math.round(n) : null;
+        }
+        var TIMING_COLS = [
+            { key: 'knife', label: 'наладка ножей', to: 'knife', was: 'wasKnife' },
+            { key: 'material', label: 'сырьё/намотка', to: 'material', was: 'wasMaterial' },
+            { key: 'cutTime', label: 'резка и лидер', to: 'cutTime', was: 'wasCutTime' }
+        ];
+        var timingByCut = {};
+        (timingUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var diffs = [];
+            TIMING_COLS.forEach(function(col) {
+                var to = Math.round(Number(u[col.to]) || 0);
+                var from = prevMin(u[col.was]);
+                if (from === to) return;
+                // Пусто → 0 (#3778 force-write заполняет колонку нулём) — в плане не меняется ничего,
+                // а как «изменение» это метило бы карточки шумом. Пусто → N ≠ 0 показываем честно.
+                if (from == null && to === 0) return;
+                diffs.push({ key: col.key, label: col.label, from: from, to: to });
+            });
+            if (diffs.length) timingByCut[String(u.cutId)] = diffs;
+        });
+        var snapById = {};
+        (snapshot || []).forEach(function(c) { if (c) snapById[String(c.id)] = c; });
+        var seenIds = {};
+        var moved = [], created = [], deleted = [];
+        (projected || []).forEach(function(c) {
+            if (!c) return;
+            var id = String(c.id);
+            seenIds[id] = true;
+            var was = snapById[id];
+            if (!was) {
+                // Синтетический сегмент дробления (записи в БД ещё нет — появится по «Применить»).
+                created.push({ kind: 'new', cutId: id, label: cutLabel(c),
+                    whenFrom: '—', whenTo: formatPlanStamp(startTs(c)), startTs: startTs(c),
+                    slitterFrom: '—', slitterTo: slitterLabel(sidOf(c)),
+                    startChanged: true, slitterChanged: false, timingChanged: false, timing: [],
+                    parentCutId: String(c.firstPartId == null ? '' : c.firstPartId), runs: Number(c.plannedRuns) || 0 });
+                return;
+            }
+            var startChanged = startTs(c) !== startTs(was);
+            var slitterChanged = sidOf(c) !== sidOf(was);
+            var timing = timingByCut[id] || [];
+            if (!startChanged && !slitterChanged && !timing.length) return;   // задание не тронуто
+            moved.push({ kind: 'moved', cutId: id, label: cutLabel(c),
+                whenFrom: formatPlanStamp(startTs(was)), whenTo: formatPlanStamp(startTs(c)), startTs: startTs(c),
+                slitterFrom: slitterLabel(sidOf(was)), slitterTo: slitterLabel(sidOf(c)),
+                startChanged: startChanged, slitterChanged: slitterChanged,
+                timingChanged: !!timing.length, timing: timing, parentCutId: '' });
+        });
+        (snapshot || []).forEach(function(c) {
+            if (!c || seenIds[String(c.id)]) return;
+            deleted.push({ kind: 'deleted', cutId: String(c.id), label: cutLabel(c),
+                whenFrom: formatPlanStamp(startTs(c)), whenTo: '—', startTs: startTs(c),
+                slitterFrom: slitterLabel(sidOf(c)), slitterTo: '—',
+                startChanged: false, slitterChanged: false, timingChanged: false, timing: [], parentCutId: '' });
+        });
+        function byTime(a, b) { return a.startTs - b.startTs; }
+        moved.sort(byTime); created.sort(byTime); deleted.sort(byTime);
+        var rows = moved.concat(created, deleted);
+        var byId = {};
+        rows.forEach(function(r) { byId[r.cutId] = r; });
+        return { rows: rows, byId: byId,
+            movedCount: moved.length, createdCount: created.length, deletedCount: deleted.length };
+    }
+
+    // #4417: короткая подпись изменения для бейджа карточки («старт · станок · тайминг») и
+    // строки в «Деталях». Чистая.
+    function planChangeSummary(row) {
+        if (!row) return '';
+        if (row.kind === 'new') return 'новое';
+        if (row.kind === 'deleted') return 'удаляется';
+        var parts = [];
+        if (row.startChanged) parts.push('старт');
+        if (row.slitterChanged) parts.push('станок');
+        if (row.timingChanged) parts.push('тайминг');
+        return parts.join(' · ');
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
     // для дропдауна привязки и плашек «Связанные позиции». Подпись:
     // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).

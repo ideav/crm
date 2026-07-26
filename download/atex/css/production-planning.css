@@ -664,7 +664,7 @@
 .atex-pp-plan-delta.is-worse { color: #c0392b; }
 .atex-pp-plan-bar-hint { margin-top: 6px; opacity: .85; line-height: 1.35; }
 .atex-pp-plan-btns { display: flex; gap: 10px; margin-top: 8px; }
-.atex-pp-plan-apply, .atex-pp-plan-cancel {
+.atex-pp-plan-apply, .atex-pp-plan-cancel, .atex-pp-plan-details-btn {
     padding: 9px 18px;
     font: inherit;
     font-weight: 700;
@@ -675,9 +675,14 @@
 }
 .atex-pp-plan-apply { background: #1e874b; color: #fff; }
 .atex-pp-plan-cancel { background: var(--pp-bg); color: inherit; border: 1px solid var(--pp-border); }
+/* #4417: «Детали» стоит МЕЖДУ решениями и ничего не пишет — вид второстепенной кнопки. */
+.atex-pp-plan-details-btn { background: var(--pp-bg); color: inherit; border: 1px solid var(--pp-attn-border); }
 .atex-pp-plan-apply:hover { filter: brightness(1.08); }
-.atex-pp-plan-cancel:hover { background: var(--pp-surface); }
-.atex-pp.is-busy .atex-pp-plan-apply, .atex-pp.is-busy .atex-pp-plan-cancel { pointer-events: none; opacity: .5; }
+.atex-pp-plan-cancel:hover, .atex-pp-plan-details-btn:hover { background: var(--pp-surface); }
+.atex-pp.is-busy .atex-pp-plan-apply,
+.atex-pp.is-busy .atex-pp-plan-cancel,
+.atex-pp.is-busy .atex-pp-plan-details-btn { pointer-events: none; opacity: .5; }
+
 
 /* Пока план не принят, действия над очередью гасим: любая запись шла бы «не от того»
    состояния (на экране проекция в памяти). Вкладки станков, даты и поиск остаются живыми —
@@ -695,7 +700,7 @@
     border-color: var(--pp-attn-border);
     background: var(--pp-attn-bg);
 }
-.atex-pp-cut-new-badge {
+.atex-pp-cut-new-badge, .atex-pp-cut-chg-badge {
     padding: 1px 6px;
     border: 1px solid var(--pp-attn-border);
     border-radius: 999px;
@@ -704,6 +709,20 @@
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
+}
+
+/* #4417: задание, которое непринятый план ТРОНУЛ (старт, станок или тайминг) — заметная кайма
+   слева, чтобы такие карточки находились при листании станков и дней. Отличается от «нового»
+   сегмента (пунктир + сплошная жёлтая заливка): здесь запись в БД есть, меняются её значения. */
+.atex-pp-cut.is-preview-changed {
+    border-color: var(--pp-attn-border);
+    background: rgba(234, 179, 8, .08);
+    box-shadow: inset 4px 0 0 0 var(--pp-attn-border);
+}
+/* Выбранная карточка (#4404) остаётся заметной: её ореол не теряем, метку изменения оставляем. */
+.atex-pp-cut.is-preview-changed.is-active {
+    border-color: var(--pp-accent);
+    box-shadow: 0 0 0 8px rgba(19, 65, 116, .15), inset 4px 0 0 0 var(--pp-attn-border);
 }
 
 /* Панель полос — под своей карточкой (#3120 п.8). Клик внутри не выбирает
@@ -1071,6 +1090,33 @@
 .atex-pp-dev-item { margin: 2px 0; font-size: 13px; }
 /* #4381: начатое задание в списке отклонений — приглушённое: «Урегулировать» его не двигает. */
 .atex-pp-dev-item.is-started { color: var(--pp-muted); }
+
+/* #4417: модалка «Детали» — список всех изменённых заданий непринятого плана. Ширина объявлена
+   ПОСЛЕ .atex-pp-modal-dialog (там max-width 460px) — как у .atex-pp-dev-dialog выше. */
+.atex-pp-plan-details-dialog { max-width: 920px; }
+.atex-pp-plan-details-content { display: flex; flex-direction: column; gap: 4px; }
+.atex-pp-plan-details-group { margin-top: 12px; }
+.atex-pp-plan-details-title { margin: 0 0 4px; font-size: 14px; }
+.atex-pp-plan-details-list { margin: 0; padding: 0; list-style: none; max-height: min(46vh, 420px); overflow: auto; }
+.atex-pp-plan-details-item {
+    display: grid;
+    grid-template-columns: 92px minmax(110px, 1fr) 190px minmax(200px, 2fr);
+    gap: 12px;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--pp-border-soft);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+.atex-pp-plan-details-item.is-deleted { opacity: .75; }
+.atex-pp-plan-details-item.is-deleted .atex-pp-plan-details-label { text-decoration: line-through; }
+.atex-pp-plan-details-label { font-weight: 600; }
+.atex-pp-plan-details-when { white-space: nowrap; }
+.atex-pp-plan-details-what { opacity: .85; }
+@media (max-width: 860px) {
+    .atex-pp-plan-details-item { grid-template-columns: 1fr; gap: 2px; }
+    .atex-pp-plan-details-when { white-space: normal; }
+}
 .atex-pp-timing-dialog { max-width: 640px; }
 .atex-pp-timing-body {
     margin: 14px 0 0;

@@ -28,6 +28,9 @@
         mapCutRecord: mapCutRecord,
         clonePlanningCut: clonePlanningCut,     // #4402
         projectPlanOnCuts: projectPlanOnCuts,   // #4402: проекция плана «Упорядочить» на очередь (предпросмотр без записи)
+        planChangeRows: planChangeRows,         // #4417: что поменялось у каждого задания (модалка «Детали» + пометка карточек)
+        planChangeSummary: planChangeSummary,   // #4417: короткая подпись изменения («старт · станок · тайминг»)
+        formatPlanStamp: formatPlanStamp,       // #4409/#4417: unix-секунды → «ДД.ММ ЧЧ:ММ»
         isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -116,6 +119,8 @@
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
         chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку
         formatOptimizeTrace: formatOptimizeTrace,           // #4409: структурный trace «Упорядочить» → строки лога
+        planChangeTitle: planChangeTitle,                   // #4417: «было → стало» одного задания (подсказка карточки)
+        planChangeRest: planChangeRest,                     // #4417: то же без старта — колонка «Деталей»
         optTraceOn: optTraceOn,                             // #4409: трассировка «Упорядочить» включена?
         formatQualityDelta: formatQualityDelta,          // #3989 Фаза 3: подпись избытка
         splitSupplyShares: splitSupplyShares,
@@ -2676,16 +2681,6 @@
         return (from || '…') + ' – ' + (to || '…');
     };
 
-    // #4409: unix-секунды планового старта → «ДД.ММ ЧЧ:ММ» для строк ПЕРЕМЕЩЕНИЙ.
-    function optTraceWhen(ts) {
-        var n = Number(ts);
-        if (!isFinite(n) || n <= 0) return '—';
-        var d = new Date(n * 1000);
-        if (isNaN(d.getTime())) return '—';
-        function p2(x) { return (x < 10 ? '0' : '') + x; }
-        return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
-    }
-
     // #4409: раздел ПЕРЕМЕЩЕНИЯ трассы — что куда уехало относительно ТЕКУЩЕЙ очереди (self.cuts
     // ещё не подменена проекцией). Поимённо печатаем первые OPT_TRACE_MOVES_LIMIT, остаток
     // не замалчиваем (formatOptimizeTrace допишет «…и ещё N»).
@@ -2705,8 +2700,8 @@
             if (!c) return;
             var fromSid = c.slitter ? c.slitter.id : '';
             var toSid = u.slitterId != null ? u.slitterId : (reassign[String(u.cutId)] != null ? reassign[String(u.cutId)] : fromSid);
-            var whenFrom = optTraceWhen(c.number || c.planDate);
-            var whenTo = optTraceWhen(u.planStartTs);
+            var whenFrom = formatPlanStamp(c.number || c.planDate);
+            var whenTo = formatPlanStamp(u.planStartTs);
             // Апдейт-«родитель разбиения» может не двигаться сам (filterChangedUpdates держит его
             // ради долей Обеспечения) — такой в перемещения не пишем, он виден в НОВЫХ СЕГМЕНТАХ.
             if (whenFrom === whenTo && String(fromSid) === String(toSid)) return;
@@ -2716,7 +2711,7 @@
         trace.movesTotal = moves.length;
         trace.moves = moves.slice(0, OPT_TRACE_MOVES_LIMIT);
         var creates = ((ops && ops.creates) || []).map(function(cr) {
-            return { parentCutId: String(cr.parentCutId), when: optTraceWhen(cr.planStartTs), runs: cr.plannedRuns };
+            return { parentCutId: String(cr.parentCutId), when: formatPlanStamp(cr.planStartTs), runs: cr.plannedRuns };
         });
         trace.createsTotal = creates.length;
         trace.creates = creates.slice(0, OPT_TRACE_MOVES_LIMIT);
@@ -2793,12 +2788,22 @@
             }
         });
         this.cuts = projected.cuts;
-        this.computeCutSetupUpdates(null);   // колонки наладки проекции — в памяти (без записи)
+        // Колонки наладки проекции — в памяти (без записи). updates несут прежние значения (was*),
+        // из них #4417 берёт изменения ТАЙМИНГА: их не видно по planStart, но применение их запишет.
+        var setupRes = this.computeCutSetupUpdates(null);
         pend.after = this.computeQualityStats(scopeFromKey, scopeToKey);
         pend.snapshot = snapshot;
         pend.createdIds = projected.createdIds;
         pend.deletedIds = projected.deletedIds;
         pend.movedCount = projected.changedIds.length;
+        // #4417: разбор «что у кого поменялось» — для модалки «Детали» и пометки карточек в очереди.
+        // Считаем ПОСЛЕ пересчёта колонок наладки: тайминг проекции к этому моменту уже в памяти.
+        var changes = planChangeRows(snapshot, projected.cuts, setupRes.updates, { slitterById: slitterById });
+        pend.changes = changes;
+        projected.cuts.forEach(function(c) {
+            var row = changes.byId[String(c.id)];
+            if (row && row.kind === 'moved') c.previewChanged = row;   // карточку помечаем «изменено»
+        });
         this._pendingPlan = pend;
         console.log('[pp] ⚙️ #4402 предпросмотр «Упорядочить»: переставлено ' + pend.movedCount
             + ', новых сегментов ' + projected.createdIds.length + ', удаляется ' + projected.deletedIds.length
@@ -6995,6 +7000,114 @@
         ];
     }
 
+    // #4417: подробное «было → стало» одного задания — подсказка карточки и строка в «Деталях».
+    // Чистая (покрыта тестом): на вход — строка planChangeRows.
+    function planChangeTitle(row) {
+        if (!row) return '';
+        var parts = [];
+        if (row.kind === 'new') {
+            parts.push('Новый сегмент разбиения — появится после «Применить»');
+            if (row.parentCutId) parts.push('от задания ' + row.parentCutId);
+            parts.push('старт ' + row.whenTo);
+            if (row.runs) parts.push('проходов ' + row.runs);
+            return parts.join(' · ');
+        }
+        if (row.kind === 'deleted') return 'Запись удаляется по «Применить» · старт был ' + row.whenFrom;
+        if (row.startChanged) parts.push('старт ' + row.whenFrom + ' → ' + row.whenTo);
+        if (row.slitterChanged) parts.push('станок ' + row.slitterFrom + ' → ' + row.slitterTo);
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        return parts.length ? ('Изменится: ' + parts.join(' · ')) : '';
+    }
+
+    // #4417: то же «было → стало», но БЕЗ времени старта — для списка «Деталей», где старт стоит
+    // отдельной колонкой (иначе одно и то же читалось бы дважды). Чистая.
+    function planChangeRest(row) {
+        if (!row) return '';
+        if (row.kind === 'new') {
+            return 'сегмент разбиения от задания ' + (row.parentCutId || '—')
+                + (row.runs ? ' · проходов ' + row.runs : '');
+        }
+        if (row.kind === 'deleted') return 'запись удаляется по «Применить»';
+        var parts = [];
+        if (row.slitterChanged) parts.push('станок ' + row.slitterFrom + ' → ' + row.slitterTo);
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        return parts.join(' · ') || 'только время старта';
+    }
+
+    // #4417: «Детали» — модалка со ВСЕМИ изменёнными заданиями непринятого плана. Панель даёт
+    // только сводку («переставлено N»), а разбор нужен списком: что куда уехало, у чего сменился
+    // станок, у чего только тайминг, что появится и что удалится.
+    AtexProductionPlanning.prototype.openPlanDetails = function() {
+        var self = this;
+        var pend = this._pendingPlan;
+        if (!pend) { this.notify('Непринятого плана нет — показывать нечего', 'info'); return; }
+        var changes = pend.changes || { rows: [], movedCount: 0, createdCount: 0, deletedCount: 0 };
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-plan-details-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-plan-details-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+
+        var content = el('div', { class: 'atex-pp-plan-details-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Изменения непринятого плана' }));
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Переставлено заданий: ' + changes.movedCount
+            + ' · новых сегментов: ' + changes.createdCount
+            + ' · удаляется записей: ' + changes.deletedCount
+            + '. В базу ничего не записано — план ждёт «Применить» или «Отменить». '
+            + 'Те же задания помечены в очереди каймой и бейджем.' }));
+        content.appendChild(this.renderPlanDetailsGroup('Переставлено', changes.rows, 'moved'));
+        content.appendChild(this.renderPlanDetailsGroup('Новые сегменты (появятся по «Применить»)', changes.rows, 'new'));
+        content.appendChild(this.renderPlanDetailsGroup('Удаляются по «Применить»', changes.rows, 'deleted'));
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', close);
+        actions.appendChild(closeBtn);
+        content.appendChild(actions);
+
+        this.root.appendChild(overlay);
+        this.planDetailsEl = overlay;   // для теста/повторного открытия
+    };
+
+    // #4417: одна группа списка «Деталей». Пустая группа не рисуется вовсе — лишний заголовок
+    // «Удаляются: 0» только мешает читать.
+    AtexProductionPlanning.prototype.renderPlanDetailsGroup = function(title, rows, kind) {
+        var self = this;
+        var items = (rows || []).filter(function(r) { return r.kind === kind; });
+        var box = el('div', { class: 'atex-pp-plan-details-group is-' + kind });
+        if (!items.length) return box;
+        box.appendChild(el('h3', { class: 'atex-pp-plan-details-title', text: title + ': ' + items.length }));
+        var listEl = el('ul', { class: 'atex-pp-plan-details-list' });
+        items.forEach(function(r) {
+            var idNode = (kind === 'new')
+                ? el('span', { class: 'atex-pp-plan-details-id', title: 'Записи в БД ещё нет', text: '—' })
+                : el('a', { class: 'atex-pp-plan-details-id',
+                    href: '/' + encodeURIComponent(self.db) + '/edit_obj/' + encodeURIComponent(r.cutId),
+                    target: '_blank', rel: 'noopener',
+                    title: 'Открыть карточку задания (id ' + r.cutId + ')', text: 'id ' + r.cutId });
+            listEl.appendChild(el('li', { class: 'atex-pp-plan-details-item is-' + kind }, [
+                idNode,
+                el('span', { class: 'atex-pp-plan-details-label', text: r.label }),
+                el('span', { class: 'atex-pp-plan-details-when',
+                    text: (kind === 'new') ? ('старт ' + r.whenTo)
+                        : (kind === 'deleted') ? ('был ' + r.whenFrom)
+                        : (r.startChanged ? (r.whenFrom + ' → ' + r.whenTo) : (r.whenTo + ' — старт тот же')) }),
+                el('span', { class: 'atex-pp-plan-details-what', text: planChangeRest(r) })
+            ]));
+        });
+        box.appendChild(listEl);
+        return box;
+    };
+
     // #4402: липкая панель непринятого плана «Упорядочить» — во всю ширину рабочего места, поверх
     // очереди. Живёт в собственном узле (this.planBarEl), поэтому переключение станков/дней её не
     // сбрасывает: план видно на карточках всех станков, пока не нажаты «Применить» / «Отменить».
@@ -7028,14 +7141,21 @@
                 text: 'Переставлено заданий: ' + (pend.movedCount || 0)
                     + (pend.createdIds && pend.createdIds.length ? ', новых сегментов: ' + pend.createdIds.length : '')
                     + (pend.deletedIds && pend.deletedIds.length ? ', удаляется записей: ' + pend.deletedIds.length : '')
-                    + '. Переключайтесь между станками и днями — карточки уже показывают новый план. '
+                    + '. Переключайтесь между станками и днями — карточки уже показывают новый план; '
+                    + 'тронутые задания помечены каймой и бейджем, весь список — по кнопке «Детали». '
                     + '«Применить» записывает его в базу, «Отменить» (и обновление страницы) возвращает прежний.' })
         ]));
         var ok = el('button', { class: 'atex-pp-plan-apply', type: 'button', text: 'Применить' });
         ok.addEventListener('click', function() { if (self.busy) return; self.applyPendingPlan(); });
+        // #4417: «Детали» — между «Применить» и «Отменить»: список всех изменённых заданий.
+        // Ничего не пишет и не решает, поэтому стоит рядом с решением, а не в панели действий.
+        var chg4417 = pend.changes || { rows: [] };
+        var details = el('button', { class: 'atex-pp-plan-details-btn', type: 'button', text: 'Детали',
+            title: 'Показать все изменённые задания (' + (chg4417.rows || []).length + ')' });
+        details.addEventListener('click', function() { self.openPlanDetails(); });
         var cancel = el('button', { class: 'atex-pp-plan-cancel', type: 'button', text: 'Отменить' });
         cancel.addEventListener('click', function() { if (self.busy) return; self.cancelPendingPlan(); });
-        panel.appendChild(el('div', { class: 'atex-pp-plan-btns' }, [ok, cancel]));
+        panel.appendChild(el('div', { class: 'atex-pp-plan-btns' }, [ok, details, cancel]));
         host.appendChild(panel);
     };
 
@@ -7947,7 +8067,10 @@
             // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
             var isSetupTask = !!setupTaskIds[String(c.id)];
             // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : '') + (isPreviewNew ? ' is-preview-new' : ''), dataset: { cutId: String(c.id) },
+            // #4417: задание, которое непринятый план ТРОНУЛ (время старта, станок или тайминг) —
+            // заметная кайма, чтобы такие карточки находились при листании станков и дней.
+            var previewChange = c.previewChanged || null;
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : '') + (isPreviewNew ? ' is-preview-new' : '') + (previewChange ? ' is-preview-changed' : ''), dataset: { cutId: String(c.id) },
                 // #4404 п.2: подсказка карточки = список заказов и позиций, тот же текст, что в
                 // панели «Связанные позиции» (cutLinkedTitle → cutLinkedLabels).
                 title: self.cutLinkedTitle(c) });
@@ -8047,6 +8170,12 @@
             if (isPreviewNew) {
                 infoChildren.push(el('span', { class: 'atex-pp-cut-new-badge',
                     title: 'Новый сегмент разбиения по дням — появится после «Применить»', text: 'новое' }));
+            }
+            // #4417: чем именно задание отличается от сохранённого плана — коротко на бейдже,
+            // подробно (было → стало) в подсказке и в модалке «Детали» липкой панели.
+            if (previewChange) {
+                infoChildren.push(el('span', { class: 'atex-pp-cut-chg-badge',
+                    title: planChangeTitle(previewChange), text: planChangeSummary(previewChange) }));
             }
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
