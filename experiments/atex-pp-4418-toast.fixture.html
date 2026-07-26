@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- Стенд для ideav/crm#4418: как выглядит тост с кнопкой закрытия. Подключает боевой
+     download/atex/css/production-planning.css.
+     Открыть: file://<repo>/experiments/atex-pp-4418-toast.fixture.html
+     Важные (error/warning) в жизни НЕ исчезают сами — закрываются кнопкой «×». -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>#4418 — тост с кнопкой закрытия</title>
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 24px; background: #fff; }
+    /* На стенде показываем тосты сразу и в потоке страницы (в РМ они fixed справа снизу). */
+    .atex-pp-toast { position: static; opacity: 1; transform: none; margin: 0 0 12px; }
+</style>
+</head>
+<body class="atex-pp atex-brand">
+    <h2 style="font-size:15px;">Предупреждение (не исчезает само)</h2>
+    <div class="atex-pp-toast atex-pp-toast-warning is-sticky is-visible">
+        <span class="atex-pp-toast-text">Задание разорвано по дням: на «Пн, 27.07.2026» встало проходов — 1, остальные (1) остались на «Вт, 28.07.2026». Целиком день не вместил (переполнен, заморожен или мешает «Отпуск»).</span>
+        <button class="atex-pp-toast-close" type="button" title="Закрыть сообщение">×</button>
+    </div>
+
+    <h2 style="font-size:15px;">Ошибка (не исчезает сама)</h2>
+    <div class="atex-pp-toast atex-pp-toast-error is-sticky is-visible">
+        <span class="atex-pp-toast-text">Пересчитывать нечего, хотя расхождений насчитано 5 — это ошибка расчёта, сообщите разработчику (детали в консоли)</span>
+        <button class="atex-pp-toast-close" type="button" title="Закрыть сообщение">×</button>
+    </div>
+
+    <h2 style="font-size:15px;">Успех (уходит сам через 3.5 с, кнопка тоже есть)</h2>
+    <div class="atex-pp-toast atex-pp-toast-success is-visible">
+        <span class="atex-pp-toast-text">Задание перенесено на «Пн, 27.07.2026» · по весу · Станок 2</span>
+        <button class="atex-pp-toast-close" type="button" title="Закрыть сообщение">×</button>
+    </div>
+</body>
+</html>

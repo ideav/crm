@@ -4586,7 +4586,23 @@
                 var lo = Math.max(ws, s), hi = Math.min(we, e);
                 if (hi > lo) sum += hi - lo;
             }
-            return (sum < capacity) ? sum : 0;   // полный блок окна — не наш случай (см. выше)
+            return (sum < capacity) ? sum : 0;   // полный блок окна — день пропускаем целиком (dayFullyBlocked)
+        }
+        // #4418: день ЦЕЛИКОМ закрыт для станка — рабочее окно [dayStart; dayEnd] полностью накрыто
+        // окнами простоя (выходной/праздник «Календаря» #3788 или «Отпуск» #3764 на всю смену).
+        // Такой день упаковщик ПРОПУСКАЕТ, а не раскладывает в него «логически» с последующим
+        // сдвигом applyDowntime: иначе его ось дней расходится с календарём, а зафиксированные
+        // задания (fixedDay — КАЛЕНДАРНЫЙ день) оказываются «позади» уже разложенного и правило
+        // #3951 выталкивает их на день позже (issue #4418).
+        function dayFullyBlocked(d) {
+            if (!hasWindow || !blockedRangesLocal.length) return false;
+            var ws = d * 1440 + dayStart, we = d * 1440 + dayEnd;
+            for (var bi = 0; bi < blockedRangesLocal.length; bi++) {
+                var r = blockedRangesLocal[bi];
+                var s = r.start != null ? r.start : r[0], e = r.end != null ? r.end : r[1];
+                if (s <= ws && e >= we) return true;
+            }
+            return false;
         }
         // До вставки обеда доступную ёмкость дня уменьшаем на длительность обеда (резерв):
         // если обед не получится поставить паузой между резками, день закончится раньше.
@@ -4785,6 +4801,15 @@
             while (guard++ < guardMax) {
                 var rem = pending();
                 if (!rem.length) break;
+                // #4418: день ЦЕЛИКОМ закрыт для станка (выходной/праздник «Календаря» #3788 или
+                // «Отпуск» #3764 на всё рабочее окно) — пропускаем его СРАЗУ. Иначе упаковщик клал
+                // сюда «логически», а сдвиг за простой (applyDowntime) переносил сегменты на первый
+                // рабочий день ПОСЛЕ — и ось дней упаковщика расходилась с календарём: остаток
+                // разорванной фикс-резки уезжал на «логический» день 1 → календарный 27.07, а
+                // зафиксированная НА 27.07 резка (fixedDay = календарный день 3) вставала «после»
+                // него и правилом #3951 выталкивалась на 28.07 (issue #4418: «перенёс на 27 —
+                // оказалось на 28», хотя день занят на 180 из 450 минут).
+                if (dayFullyBlocked(day)) { day += 1; clock = 0; continue; }
                 // #4068: резервная фольга дня уже поставлена (в rem её нет), но резерв дня был — день
                 // закрыт для нефольги (она не встаёт ПОСЛЕ фольги), переходим на следующий день.
                 if (reserveForDay(day) > 0 && clock > 0 && !rem.some(function(id){ return state[id].resFoilDay === day; })) {
@@ -12375,9 +12400,30 @@
                         if (!isNaN(pdDate.getTime())) actualMid = new Date(pdDate.getFullYear(), pdDate.getMonth(), pdDate.getDate(), 0, 0, 0, 0).getTime();
                     }
                     var actualLabel = actualMid != null ? formatPlanDayHeading(actualMid, 0) : 'другой день';
-                    self.notify('«' + dateLabel + '» не вместил задание (день переполнен или заморожен) — '
-                        + 'оно осталось на ' + actualLabel + slitLabel + detachLabel
-                        + '. Зафиксированное задание не удалено.', 'warning');
+                    // #4418: говорим ПРАВДУ о результате. Задание могло разорваться по дням: часть
+                    // проходов легла на выбранный день, часть осталась — тогда «не вместил» вводит в
+                    // заблуждение (на экране видно и то, и другое). Считаем по ЦЕПОЧКЕ задания.
+                    var chainIds = chainRecordIdsForCut(self.cuts || [], cut.id) || [String(cut.id)];
+                    var byId4418 = {};
+                    (self.cuts || []).forEach(function(c) { byId4418[String(c.id)] = c; });
+                    var runsOnTarget = 0, runsElsewhere = 0;
+                    chainIds.forEach(function(id) {
+                        var c = byId4418[String(id)];
+                        if (!c) return;
+                        var runs = stripNum(c.plannedRuns);
+                        if (planDateDayKey(c.planDate) === targetDayKey) runsOnTarget += runs;
+                        else runsElsewhere += runs;
+                    });
+                    if (runsOnTarget > 0) {
+                        self.notify('Задание разорвано по дням: на ' + dateLabel + ' встало проходов — '
+                            + round3(runsOnTarget) + ', остальные (' + round3(runsElsewhere) + ') остались на '
+                            + actualLabel + slitLabel + detachLabel
+                            + '. Целиком день не вместил (переполнен, заморожен или мешает «Отпуск»).', 'warning');
+                    } else {
+                        self.notify('«' + dateLabel + '» не вместил задание (день переполнен, заморожен или '
+                            + 'занят «Отпуском») — оно осталось на ' + actualLabel + slitLabel + detachLabel
+                            + '. Зафиксированное задание не удалено.', 'warning');
+                    }
                 }
                 return res;
             });
@@ -17769,13 +17815,30 @@
             window.mainAppController.showErrorModal(message);
             return;
         }
-        var toast = el('div', { class: 'atex-pp-toast atex-pp-toast-' + (kind || 'info'), text: message });
-        (this.toastHost || document.body).appendChild(toast);
-        setTimeout(function() { toast.classList.add('is-visible'); }, 10);
-        setTimeout(function() {
+        // #4418: важное сообщение (ошибка/предупреждение) НЕ исчезает само — оператор не успевает
+        // его прочитать («не успеваю прочитать красное сообщение — оно исчезает»). Такой тост живёт,
+        // пока его не закроют кнопкой «×». Обычные (info/success) по-прежнему уходят сами через 3.5 с,
+        // но кнопка закрытия есть у всех — длинный текст можно убрать сразу.
+        var sticky = (kind === 'error' || kind === 'warning');
+        var toast = el('div', { class: 'atex-pp-toast atex-pp-toast-' + (kind || 'info') + (sticky ? ' is-sticky' : '') });
+        toast.appendChild(el('span', { class: 'atex-pp-toast-text', text: message }));
+        var closed = false;
+        function dismiss() {
+            if (closed) return;
+            closed = true;
             toast.classList.remove('is-visible');
             setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
-        }, 3500);
+        }
+        var closeBtn = el('button', { class: 'atex-pp-toast-close', type: 'button', text: '×',
+            title: 'Закрыть сообщение' });
+        closeBtn.addEventListener('click', function(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            dismiss();
+        });
+        toast.appendChild(closeBtn);
+        (this.toastHost || document.body).appendChild(toast);
+        setTimeout(function() { toast.classList.add('is-visible'); }, 10);
+        if (!sticky) setTimeout(dismiss, 3500);
     };
 
     // Окно прогресса длительной генерации резок (#3148). Модальный оверлей с

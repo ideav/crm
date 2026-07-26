@@ -3273,9 +3273,30 @@
                         if (!isNaN(pdDate.getTime())) actualMid = new Date(pdDate.getFullYear(), pdDate.getMonth(), pdDate.getDate(), 0, 0, 0, 0).getTime();
                     }
                     var actualLabel = actualMid != null ? formatPlanDayHeading(actualMid, 0) : 'другой день';
-                    self.notify('«' + dateLabel + '» не вместил задание (день переполнен или заморожен) — '
-                        + 'оно осталось на ' + actualLabel + slitLabel + detachLabel
-                        + '. Зафиксированное задание не удалено.', 'warning');
+                    // #4418: говорим ПРАВДУ о результате. Задание могло разорваться по дням: часть
+                    // проходов легла на выбранный день, часть осталась — тогда «не вместил» вводит в
+                    // заблуждение (на экране видно и то, и другое). Считаем по ЦЕПОЧКЕ задания.
+                    var chainIds = chainRecordIdsForCut(self.cuts || [], cut.id) || [String(cut.id)];
+                    var byId4418 = {};
+                    (self.cuts || []).forEach(function(c) { byId4418[String(c.id)] = c; });
+                    var runsOnTarget = 0, runsElsewhere = 0;
+                    chainIds.forEach(function(id) {
+                        var c = byId4418[String(id)];
+                        if (!c) return;
+                        var runs = stripNum(c.plannedRuns);
+                        if (planDateDayKey(c.planDate) === targetDayKey) runsOnTarget += runs;
+                        else runsElsewhere += runs;
+                    });
+                    if (runsOnTarget > 0) {
+                        self.notify('Задание разорвано по дням: на ' + dateLabel + ' встало проходов — '
+                            + round3(runsOnTarget) + ', остальные (' + round3(runsElsewhere) + ') остались на '
+                            + actualLabel + slitLabel + detachLabel
+                            + '. Целиком день не вместил (переполнен, заморожен или мешает «Отпуск»).', 'warning');
+                    } else {
+                        self.notify('«' + dateLabel + '» не вместил задание (день переполнен, заморожен или '
+                            + 'занят «Отпуском») — оно осталось на ' + actualLabel + slitLabel + detachLabel
+                            + '. Зафиксированное задание не удалено.', 'warning');
+                    }
                 }
                 return res;
             });
@@ -8667,13 +8688,30 @@
             window.mainAppController.showErrorModal(message);
             return;
         }
-        var toast = el('div', { class: 'atex-pp-toast atex-pp-toast-' + (kind || 'info'), text: message });
-        (this.toastHost || document.body).appendChild(toast);
-        setTimeout(function() { toast.classList.add('is-visible'); }, 10);
-        setTimeout(function() {
+        // #4418: важное сообщение (ошибка/предупреждение) НЕ исчезает само — оператор не успевает
+        // его прочитать («не успеваю прочитать красное сообщение — оно исчезает»). Такой тост живёт,
+        // пока его не закроют кнопкой «×». Обычные (info/success) по-прежнему уходят сами через 3.5 с,
+        // но кнопка закрытия есть у всех — длинный текст можно убрать сразу.
+        var sticky = (kind === 'error' || kind === 'warning');
+        var toast = el('div', { class: 'atex-pp-toast atex-pp-toast-' + (kind || 'info') + (sticky ? ' is-sticky' : '') });
+        toast.appendChild(el('span', { class: 'atex-pp-toast-text', text: message }));
+        var closed = false;
+        function dismiss() {
+            if (closed) return;
+            closed = true;
             toast.classList.remove('is-visible');
             setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
-        }, 3500);
+        }
+        var closeBtn = el('button', { class: 'atex-pp-toast-close', type: 'button', text: '×',
+            title: 'Закрыть сообщение' });
+        closeBtn.addEventListener('click', function(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            dismiss();
+        });
+        toast.appendChild(closeBtn);
+        (this.toastHost || document.body).appendChild(toast);
+        setTimeout(function() { toast.classList.add('is-visible'); }, 10);
+        if (!sticky) setTimeout(dismiss, 3500);
     };
 
     // Окно прогресса длительной генерации резок (#3148). Модальный оверлей с

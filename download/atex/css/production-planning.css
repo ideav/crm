@@ -954,6 +954,25 @@
     transition: opacity .25s, transform .25s;
 }
 .atex-pp-toast.is-visible { opacity: 1; transform: translateY(0); }
+/* #4418: текст и кнопка «×» в одной строке; длинное сообщение переносится, кнопка не съезжает.
+   Важные тосты (ошибка/предупреждение, .is-sticky) не исчезают сами — их закрывают кнопкой,
+   поэтому она обязана быть заметной и попадать по себе пальцем. */
+.atex-pp-toast { display: flex; align-items: flex-start; gap: 10px; }
+.atex-pp-toast-text { flex: 1 1 auto; white-space: pre-line; }
+.atex-pp-toast-close {
+    flex: 0 0 auto;
+    border: none;
+    background: rgba(255, 255, 255, .18);
+    color: #fff;
+    font: inherit;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.atex-pp-toast-close:hover { background: rgba(255, 255, 255, .32); }
+.atex-pp-toast.is-sticky { max-width: 460px; }
 .atex-pp-toast-success { background: #15803d; }
 .atex-pp-toast-error { background: #b91c1c; }
 .atex-pp-toast-info { background: #334155; }
