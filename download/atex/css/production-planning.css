@@ -150,9 +150,14 @@
 .atex-pp-btn-warning { background: var(--pp-attn-bg); border-color: var(--pp-attn-border); color: var(--pp-attn-text); }
 .atex-pp-btn-warning:hover { background: var(--pp-attn-border); color: var(--pp-attn-text); }
 /* #4346: «Отклонения N/M» — красная кнопка-сигнал (расхождение факта с планом). Отличается от
-   жёлтой -warning: та про необратимое действие, эта про состояние плана, требующее решения. */
+   жёлтой -warning: та про необратимое действие, эта про состояние плана, требующее решения.
+   #4412: цветной модификатор ОБЯЗАН переопределить фон и в :hover. Базовое
+   `.atex-pp-btn:hover { background: var(--pp-surface) }` имеет ту же силу (класс + псевдокласс),
+   что и `.atex-pp-btn-danger`, и бьёт его фон: под курсором кнопка становилась почти белой, а
+   текст остаётся белым (color: #fff) — подпись исчезала, кнопка выглядела отключённой (issue
+   #4412). Одного `filter` мало — он красит то, что осталось после подмены фона. */
 .atex-pp-btn-danger { background: var(--pp-warn); border-color: var(--pp-warn); color: #fff; }
-.atex-pp-btn-danger:hover { filter: brightness(0.92); }
+.atex-pp-btn-danger:hover { background: var(--pp-warn); border-color: var(--pp-warn); color: #fff; filter: brightness(0.92); }
 .atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
 .atex-pp-confirm-bar {
     display: flex;
