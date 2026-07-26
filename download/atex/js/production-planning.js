@@ -1501,6 +1501,126 @@
         return { cuts: out, createdIds: createdIds, deletedIds: deletedIds, changedIds: Object.keys(changed) };
     }
 
+    // #4409/#4417: unix-секунды планового старта → «ДД.ММ ЧЧ:ММ». Общий формат для трассы
+    // «Упорядочить» и списка изменений («Детали»). Пусто/мусор → «—».
+    function formatPlanStamp(ts) {
+        var n = Number(ts);
+        if (!isFinite(n) || n <= 0) return '—';
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return '—';
+        function p2(x) { return (x < 10 ? '0' : '') + x; }
+        return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+
+    // #4417: РАЗБОР непринятого плана «Упорядочить» — что именно поменялось у каждого задания.
+    // Сравнивает СНИМОК очереди с ПРОЕКЦИЕЙ (projectPlanOnCuts) и подмешивает изменения колонок
+    // наладки (`computeCutSetupUpdates().updates`, они несут прежние значения was*). Источник и для
+    // модалки «Детали», и для пометки карточек в очереди (их ищут, листая станки и дни).
+    // Чистая — покрыта тестом. timingUpdates: [{cutId, knife, material, cutTime, wasKnife, wasMaterial, wasCutTime}].
+    // opts: { slitterById }.
+    // → { rows: [row], byId: {cutId: row}, movedCount, createdCount, deletedCount }
+    //   row = { kind:'moved'|'new'|'deleted', cutId, label, whenFrom, whenTo, startTs,
+    //           slitterFrom, slitterTo, startChanged, slitterChanged, timingChanged,
+    //           timing: [{ key, label, from, to }], parentCutId }
+    function planChangeRows(snapshot, projected, timingUpdates, opts) {
+        var options = opts || {};
+        var slitterById = options.slitterById || {};
+        function slitterLabel(sid) {
+            var k = String(sid == null ? '' : sid);
+            if (k === '') return '—';
+            var s = slitterById[k];
+            return (s && (s.label || s.name)) || ('#' + k);
+        }
+        function cutLabel(c) {
+            var mat = (c && c.materialName) || (c && c.materialId ? ('#' + c.materialId) : '') || '—';
+            var w = String((c && c.winding) == null ? '' : c.winding).trim();
+            return w ? (mat + ' ' + w) : mat;
+        }
+        function startTs(c) { return Number((c && (c.number || c.planDate)) || 0) || 0; }
+        function sidOf(c) { return String((c && c.slitter && c.slitter.id) == null ? '' : c.slitter.id); }
+        // Прежнее значение колонки: пусто/не число → null («не было»), иначе целые минуты.
+        function prevMin(v) {
+            if (v == null || String(v).trim() === '') return null;
+            var n = Number(String(v).replace(',', '.'));
+            return isFinite(n) ? Math.round(n) : null;
+        }
+        var TIMING_COLS = [
+            { key: 'knife', label: 'наладка ножей', to: 'knife', was: 'wasKnife' },
+            { key: 'material', label: 'сырьё/намотка', to: 'material', was: 'wasMaterial' },
+            { key: 'cutTime', label: 'резка и лидер', to: 'cutTime', was: 'wasCutTime' }
+        ];
+        var timingByCut = {};
+        (timingUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var diffs = [];
+            TIMING_COLS.forEach(function(col) {
+                var to = Math.round(Number(u[col.to]) || 0);
+                var from = prevMin(u[col.was]);
+                if (from === to) return;
+                // Пусто → 0 (#3778 force-write заполняет колонку нулём) — в плане не меняется ничего,
+                // а как «изменение» это метило бы карточки шумом. Пусто → N ≠ 0 показываем честно.
+                if (from == null && to === 0) return;
+                diffs.push({ key: col.key, label: col.label, from: from, to: to });
+            });
+            if (diffs.length) timingByCut[String(u.cutId)] = diffs;
+        });
+        var snapById = {};
+        (snapshot || []).forEach(function(c) { if (c) snapById[String(c.id)] = c; });
+        var seenIds = {};
+        var moved = [], created = [], deleted = [];
+        (projected || []).forEach(function(c) {
+            if (!c) return;
+            var id = String(c.id);
+            seenIds[id] = true;
+            var was = snapById[id];
+            if (!was) {
+                // Синтетический сегмент дробления (записи в БД ещё нет — появится по «Применить»).
+                created.push({ kind: 'new', cutId: id, label: cutLabel(c),
+                    whenFrom: '—', whenTo: formatPlanStamp(startTs(c)), startTs: startTs(c),
+                    slitterFrom: '—', slitterTo: slitterLabel(sidOf(c)),
+                    startChanged: true, slitterChanged: false, timingChanged: false, timing: [],
+                    parentCutId: String(c.firstPartId == null ? '' : c.firstPartId), runs: Number(c.plannedRuns) || 0 });
+                return;
+            }
+            var startChanged = startTs(c) !== startTs(was);
+            var slitterChanged = sidOf(c) !== sidOf(was);
+            var timing = timingByCut[id] || [];
+            if (!startChanged && !slitterChanged && !timing.length) return;   // задание не тронуто
+            moved.push({ kind: 'moved', cutId: id, label: cutLabel(c),
+                whenFrom: formatPlanStamp(startTs(was)), whenTo: formatPlanStamp(startTs(c)), startTs: startTs(c),
+                slitterFrom: slitterLabel(sidOf(was)), slitterTo: slitterLabel(sidOf(c)),
+                startChanged: startChanged, slitterChanged: slitterChanged,
+                timingChanged: !!timing.length, timing: timing, parentCutId: '' });
+        });
+        (snapshot || []).forEach(function(c) {
+            if (!c || seenIds[String(c.id)]) return;
+            deleted.push({ kind: 'deleted', cutId: String(c.id), label: cutLabel(c),
+                whenFrom: formatPlanStamp(startTs(c)), whenTo: '—', startTs: startTs(c),
+                slitterFrom: slitterLabel(sidOf(c)), slitterTo: '—',
+                startChanged: false, slitterChanged: false, timingChanged: false, timing: [], parentCutId: '' });
+        });
+        function byTime(a, b) { return a.startTs - b.startTs; }
+        moved.sort(byTime); created.sort(byTime); deleted.sort(byTime);
+        var rows = moved.concat(created, deleted);
+        var byId = {};
+        rows.forEach(function(r) { byId[r.cutId] = r; });
+        return { rows: rows, byId: byId,
+            movedCount: moved.length, createdCount: created.length, deletedCount: deleted.length };
+    }
+
+    // #4417: короткая подпись изменения для бейджа карточки («старт · станок · тайминг») и
+    // строки в «Деталях». Чистая.
+    function planChangeSummary(row) {
+        if (!row) return '';
+        if (row.kind === 'new') return 'новое';
+        if (row.kind === 'deleted') return 'удаляется';
+        var parts = [];
+        if (row.startChanged) parts.push('старт');
+        if (row.slitterChanged) parts.push('станок');
+        if (row.timingChanged) parts.push('тайминг');
+        return parts.join(' · ');
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
     // для дропдауна привязки и плашек «Связанные позиции». Подпись:
     // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).
@@ -5355,10 +5475,70 @@
         return out;
     }
 
+    // #4416: ближайшее свободное окно станка ПО СОХРАНЁННОМУ ПЛАНУ — минута, с которой новое
+    // задание встанет в хвост очереди, не наехав на уже запланированное и не оставив дыры.
+    // Раньше окно считал live-пересчёт всей очереди (freeSlotForQueue → buildSchedule): он
+    // паковал ВСЕ задания станка заново от дня 0, поэтому «конец очереди» приходился не туда, где
+    // очередь реально кончается по сохранённым planStart. Растянутый по дням план (обычное дело:
+    // сроки, фиксация, разрывы) сжимался в первые дни, и созданное вручную задание вставало
+    // ВНУТРИ уже занятого дня — с дырой или нахлёстом (issue #4416: «вижу предложение пересчитать,
+    // хотя тайминги выглядят правильно»). Считаем от того, что записано (#3846/#4144).
+    //   items — окна заданий станка [{ windowStartMin, occMin }] (scheduleFromStored + колонки);
+    //   opts — { occMin (занятость нового задания = наладка + «Резка и Лидер»), dayStartMin,
+    //            dayEndMin (потолок резки, cutEndMin), lunchStartMin, lunchDurationMin,
+    //            blocked:[[s,e],…] (#3764 «Отпуск» + нерабочие дни), minStartMin (не раньше базы) }.
+    // Правила дня — как у упаковщика: обед вставляется один раз (splitMachineQueue.insertLunchBefore),
+    // не влезающее до потолка уезжает на следующий рабочий день (nextFreeWorkMinute), окна простоя
+    // обходятся. → минута начала окна (целая) | null. Чистая — покрыта тестом.
+    function freeSlotFromStoredQueue(items, opts){
+        opts = opts || {};
+        var list = (items || []).filter(function(it){ return it && isFinite(Number(it.windowStartMin)); });
+        var occ = Math.max(0, Math.round(Number(opts.occMin) || 0));
+        var dayStart = Number(opts.dayStartMin) || 0;
+        var dayEnd = Number(opts.dayEndMin);
+        if (!isFinite(dayEnd) || dayEnd <= dayStart) dayEnd = 1440;
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        var lunchStart = Number(opts.lunchStartMin);
+        var hasLunch = lunchDur > 0 && isFinite(lunchStart);
+        var blocked = opts.blocked || [];
+        // Курсор = конец СОХРАНЁННОЙ очереди станка (но не раньше начала окна планирования).
+        var cursor = isFinite(Number(opts.minStartMin)) ? Number(opts.minStartMin) : dayStart;
+        list.forEach(function(it){
+            var end = Number(it.windowStartMin) + Math.max(0, Number(it.occMin) || 0);
+            if (end > cursor) cursor = end;
+        });
+        // Обед этого дня уже стоит в сохранённых стартах? (тем же правилом, что #4408 разбирает день)
+        function dayHasLunch(day){
+            if (!hasLunch) return true;
+            var dayItems = list.filter(function(it){ return Math.floor(Number(it.windowStartMin) / 1440) === day; })
+                .sort(function(a, b){ return a.windowStartMin - b.windowStartMin; });
+            if (!dayItems.length) return false;
+            return dayLayoutGaps(dayItems, { dayStartMin: dayStart, lunchStartMin: lunchStart,
+                lunchDurationMin: lunchDur, blocked: blocked })
+                .some(function(g){ return g.kind === 'lunch'; });
+        }
+        var guard = 0;
+        while (guard++ < 400) {
+            var day = Math.floor(cursor / 1440);
+            var base = day * 1440;
+            if (cursor - base < dayStart) cursor = base + dayStart;
+            var lunchPending = hasLunch && !dayHasLunch(day);
+            if (lunchPending && (cursor - base) >= lunchStart) { cursor = round3(cursor + lunchDur); lunchPending = false; }
+            // Потолок дня резервирует обед, если он в этом дне ещё впереди (как effCapacity упаковщика).
+            var fitEnd = dayEnd - (lunchPending ? lunchDur : 0);
+            var placed = nextFreeWorkMinute(cursor, occ, blocked, dayStart, dayEnd, fitEnd, true);
+            if (Math.floor(placed / 1440) === day) return Math.ceil(round3(placed));
+            cursor = placed;   // уехали на другой день — там свои обед и потолок
+        }
+        return Math.ceil(round3(cursor));
+    }
+
     // Ближайшее свободное окно станка для НОВОЙ резки. Повторяет расписание очереди
     // (buildSchedule по порядку), добавляя проспект-резку в КОНЕЦ очереди станка, и
     // возвращает окно последнего сегмента — то же время, что покажет очередь после
     // создания (резка станет последней в своём дне). Вход не мутирует.
+    // #4416: для РАЗМЕЩЕНИЯ больше не используется (окно считает freeSlotFromStoredQueue по
+    // сохранённому плану) — остаётся источником канонических наладки/намотки нового задания.
     //   stationCuts — резки станка в порядке очереди (как из groupBySlitter);
     //   prospect — { id, plannedRuns, materialId, winding, knifeWidths, runLength };
     //   opts — { windPoints, times, runLengthByCut:{cutId:м}, shiftStartMin, shiftEndMin,
@@ -9155,6 +9335,9 @@
         mapCutRecord: mapCutRecord,
         clonePlanningCut: clonePlanningCut,     // #4402
         projectPlanOnCuts: projectPlanOnCuts,   // #4402: проекция плана «Упорядочить» на очередь (предпросмотр без записи)
+        planChangeRows: planChangeRows,         // #4417: что поменялось у каждого задания (модалка «Детали» + пометка карточек)
+        planChangeSummary: planChangeSummary,   // #4417: короткая подпись изменения («старт · станок · тайминг»)
+        formatPlanStamp: formatPlanStamp,       // #4409/#4417: unix-секунды → «ДД.ММ ЧЧ:ММ»
         isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -9243,6 +9426,8 @@
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
         chooseOptimizeCandidate: chooseOptimizeCandidate,   // #4047: гарантия «Упорядочить» не увеличивает переналадку
         formatOptimizeTrace: formatOptimizeTrace,           // #4409: структурный trace «Упорядочить» → строки лога
+        planChangeTitle: planChangeTitle,                   // #4417: «было → стало» одного задания (подсказка карточки)
+        planChangeRest: planChangeRest,                     // #4417: то же без старта — колонка «Деталей»
         optTraceOn: optTraceOn,                             // #4409: трассировка «Упорядочить» включена?
         formatQualityDelta: formatQualityDelta,          // #3989 Фаза 3: подпись избытка
         splitSupplyShares: splitSupplyShares,
@@ -9388,6 +9573,7 @@
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
         freeSlotForQueue: freeSlotForQueue,
+        freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
         formatClockHHMM: formatClockHHMM,
@@ -10989,35 +11175,76 @@
         });
     };
 
-    // Ближайшее свободное окно станка для проспект-резки (повтор расписания очереди).
+    // Ближайшее свободное окно станка для проспект-резки — ПО СОХРАНЁННОМУ ПЛАНУ (#4416).
+    // Окно = хвост очереди станка в том виде, в каком её рисует страница и Гант (#3846:
+    // planStart + «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»), а НЕ live-пересчёт всей
+    // очереди (прежний freeSlotForQueue → buildSchedule паковал станок заново от дня 0 и в
+    // растянутом по дням плане отдавал окно ВНУТРИ уже занятого дня — созданное вручную задание
+    // вставало с дырой/нахлёстом, и очередь тут же просила «Пересчитать наладку», issue #4416).
+    // Наладку и намотку самого нового задания по-прежнему считают канонические формулы
+    // (buildSchedule на паре «последнее задание станка + проспект»), только теперь они кладутся
+    // на сохранённую сетку. Округляем как хранимые колонки: наладка — round, «Резка и Лидер» —
+    // ceil(намотка) + лидер (#3635 п.4/#3700), иначе окно снова разъедется с очередью.
     // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day, startTs, planBaseMidnightMs } | null.
     AtexProductionPlanning.prototype.freeSlotForCut = function(slitterId, prospect) {
         var self = this;
+        if (!prospect) return null;
         var windPoints = windingPointsFromTimes(this.opTimes || {});
         var dayWindow = this.workingWindow();
         var grp = groupBySlitter(this.cuts).filter(function(g) { return String(g.slitter.id) === String(slitterId); })[0];
         var stationCuts = grp ? grp.cuts : [];
         var runLenByCut = {};
         stationCuts.forEach(function(c) { runLenByCut[String(c.id)] = cutRunLength(c, self.supplies, self.positionLengthById); });
+        runLenByCut[String(prospect.id)] = Number(prospect.runLength) || 0;
         // День 0 = дата планирования из фильтра (.atex-pp-input), даже если в прошлом;
         // без даты — сегодня. Как в генерации (#3311), ре-планировании (#3312), очереди (#3316).
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var slot = freeSlotForQueue(stationCuts, prospect, {
+        // #4396: свободное окно ОБЯЗАНО пропускать нерабочие дни — выходные/праздники «Календаря»
+        // (#3788) и «Отпуск» станка (#3764). Иначе форма показывала окно на выходном и
+        // createCutForPosition писала этот planStart: задание вставало в день, про который очередь
+        // тут же говорила «Выходной/праздничный день — заданий быть не должно».
+        var blocked = this.blockedRangesForSlitter(slitterId, planBaseMidnightMs);
+        // Сохранённые окна очереди станка и её ФИЗИЧЕСКИ последнее задание (по концу окна) —
+        // от него считается переналадка нового.
+        var stored = scheduleFromStored(stationCuts, planBaseMidnightMs);
+        var cutById = {};
+        stationCuts.forEach(function(c) { cutById[String(c.id)] = c; });
+        var items = [], lastCut = null, lastEnd = -Infinity;
+        stored.forEach(function(sc) {
+            var ws = stripNum(sc.startMin) - stripNum(sc.setupMin);
+            var occ = stripNum(sc.setupMin) + stripNum(sc.durationMin);
+            items.push({ windowStartMin: ws, occMin: occ });
+            if (ws + occ > lastEnd) { lastEnd = ws + occ; lastCut = cutById[String(sc.cutId)] || null; }
+        });
+        // Наладка/намотка нового задания — теми же формулами, что у расписания: переналадка от
+        // последнего задания станка (пустая очередь → настройка ножей с нуля, #3669 п.2).
+        var pair = lastCut ? [lastCut, prospect] : [prospect];
+        var pairSched = buildSchedule(pair, {
             windPoints: windPoints, times: this.changeTimes, runLengthByCut: runLenByCut,
             shiftStartMin: dayWindow.startMin, shiftEndMin: dayWindow.cutEndMin,
-            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
-            firstCutSetup: true,   // #3669 п.2: очередь учитывает настройку ножей первой задачи
-            // #4396: свободное окно ОБЯЗАНО пропускать нерабочие дни — выходные/праздники
-            // «Календаря» (#3788) и «Отпуск» станка (#3764). Без них форма показывала окно на
-            // выходном и createCutForPosition писала этот planStart: задание вставало в день, про
-            // который очередь тут же говорила «Выходной/праздничный день — заданий быть не должно».
-            // Те же blockedRanges, что у очереди и генерации (blockedRangesForSlitter).
-            blockedRanges: this.blockedRangesForSlitter(slitterId, planBaseMidnightMs)
+            firstCutSetup: true
         });
-        if (!slot) return null;
-        slot.startTs = scheduleStartTimestamp(planBaseMidnightMs, slot.windowStartMin);
-        slot.planBaseMidnightMs = planBaseMidnightMs;
-        return slot;
+        var sc = pairSched.length ? pairSched[pairSched.length - 1] : null;
+        if (!sc) return null;
+        var setupMin = Math.round(stripNum(sc.setupMin));
+        var durationMin = Math.ceil(round3(stripNum(sc.durationMin))) + Math.round(stripNum(sc.leaderMin));
+        var windowStartMin = freeSlotFromStoredQueue(items, {
+            occMin: setupMin + durationMin,
+            dayStartMin: dayWindow.startMin, dayEndMin: dayWindow.cutEndMin,
+            lunchStartMin: dayWindow.lunchStartMin, lunchDurationMin: dayWindow.lunchDurationMin,
+            blocked: blocked, minStartMin: dayWindow.startMin
+        });
+        if (windowStartMin == null) return null;
+        return {
+            windowStartMin: windowStartMin,
+            startMin: round3(windowStartMin + setupMin),
+            finishMin: round3(windowStartMin + setupMin + durationMin),
+            durationMin: durationMin,
+            setupMin: setupMin,
+            day: Math.floor(windowStartMin / 1440),
+            startTs: scheduleStartTimestamp(planBaseMidnightMs, windowStartMin),
+            planBaseMidnightMs: planBaseMidnightMs
+        };
     };
 
     // Гарантирует актуальный draft.prospect под текущие позицию+кол-во (асинхронно),
@@ -11803,16 +12030,6 @@
         return (from || '…') + ' – ' + (to || '…');
     };
 
-    // #4409: unix-секунды планового старта → «ДД.ММ ЧЧ:ММ» для строк ПЕРЕМЕЩЕНИЙ.
-    function optTraceWhen(ts) {
-        var n = Number(ts);
-        if (!isFinite(n) || n <= 0) return '—';
-        var d = new Date(n * 1000);
-        if (isNaN(d.getTime())) return '—';
-        function p2(x) { return (x < 10 ? '0' : '') + x; }
-        return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
-    }
-
     // #4409: раздел ПЕРЕМЕЩЕНИЯ трассы — что куда уехало относительно ТЕКУЩЕЙ очереди (self.cuts
     // ещё не подменена проекцией). Поимённо печатаем первые OPT_TRACE_MOVES_LIMIT, остаток
     // не замалчиваем (formatOptimizeTrace допишет «…и ещё N»).
@@ -11832,8 +12049,8 @@
             if (!c) return;
             var fromSid = c.slitter ? c.slitter.id : '';
             var toSid = u.slitterId != null ? u.slitterId : (reassign[String(u.cutId)] != null ? reassign[String(u.cutId)] : fromSid);
-            var whenFrom = optTraceWhen(c.number || c.planDate);
-            var whenTo = optTraceWhen(u.planStartTs);
+            var whenFrom = formatPlanStamp(c.number || c.planDate);
+            var whenTo = formatPlanStamp(u.planStartTs);
             // Апдейт-«родитель разбиения» может не двигаться сам (filterChangedUpdates держит его
             // ради долей Обеспечения) — такой в перемещения не пишем, он виден в НОВЫХ СЕГМЕНТАХ.
             if (whenFrom === whenTo && String(fromSid) === String(toSid)) return;
@@ -11843,7 +12060,7 @@
         trace.movesTotal = moves.length;
         trace.moves = moves.slice(0, OPT_TRACE_MOVES_LIMIT);
         var creates = ((ops && ops.creates) || []).map(function(cr) {
-            return { parentCutId: String(cr.parentCutId), when: optTraceWhen(cr.planStartTs), runs: cr.plannedRuns };
+            return { parentCutId: String(cr.parentCutId), when: formatPlanStamp(cr.planStartTs), runs: cr.plannedRuns };
         });
         trace.createsTotal = creates.length;
         trace.creates = creates.slice(0, OPT_TRACE_MOVES_LIMIT);
@@ -11920,12 +12137,22 @@
             }
         });
         this.cuts = projected.cuts;
-        this.computeCutSetupUpdates(null);   // колонки наладки проекции — в памяти (без записи)
+        // Колонки наладки проекции — в памяти (без записи). updates несут прежние значения (was*),
+        // из них #4417 берёт изменения ТАЙМИНГА: их не видно по planStart, но применение их запишет.
+        var setupRes = this.computeCutSetupUpdates(null);
         pend.after = this.computeQualityStats(scopeFromKey, scopeToKey);
         pend.snapshot = snapshot;
         pend.createdIds = projected.createdIds;
         pend.deletedIds = projected.deletedIds;
         pend.movedCount = projected.changedIds.length;
+        // #4417: разбор «что у кого поменялось» — для модалки «Детали» и пометки карточек в очереди.
+        // Считаем ПОСЛЕ пересчёта колонок наладки: тайминг проекции к этому моменту уже в памяти.
+        var changes = planChangeRows(snapshot, projected.cuts, setupRes.updates, { slitterById: slitterById });
+        pend.changes = changes;
+        projected.cuts.forEach(function(c) {
+            var row = changes.byId[String(c.id)];
+            if (row && row.kind === 'moved') c.previewChanged = row;   // карточку помечаем «изменено»
+        });
         this._pendingPlan = pend;
         console.log('[pp] ⚙️ #4402 предпросмотр «Упорядочить»: переставлено ' + pend.movedCount
             + ', новых сегментов ' + projected.createdIds.length + ', удаляется ' + projected.deletedIds.length
@@ -15959,14 +16186,16 @@
             // Нерабочий день / отпуск на весь день: раскладывать негде — оставляем как есть.
             var covered = blocked.some(function(b) { return b[0] <= day * 1440 && b[1] >= (day + 1) * 1440; });
             if (covered) return;
-            // Задание с НУЛЕВОЙ занятостью (колонок тайминга нет в таблице; осиротевший setup-сегмент
-            // Σ=0, #3924/#3943) — «стена» неизвестной длины: раскладывать день по ней нельзя, иначе
-            // всё съедет на начало смены. День пропускаем и ГОВОРИМ об этом (ТЗ §14/#4059).
-            var noOcc = items.filter(function(it) { return !(it.occMin > 0); });
-            if (noOcc.length) {
+            // #4416: занятость НИ У ОДНОГО задания дня (колонок тайминга нет в таблице) — мерить
+            // нечем, день не трогаем и ГОВОРИМ об этом (ТЗ §14/#4059). Прежде (#4408) день
+            // пропускался, если нулевая занятость была хоть у одного задания, — а осиротевший
+            // setup-сегмент Σ=0 (#3924/#3943) в дне обычное дело, и из-за него «Пересчитать
+            // наладку» молча ничего не делала. Такое задание — нулевой длины: встаёт на курсор и
+            // соседей не двигает.
+            if (!items.some(function(it) { return it.occMin > 0; })) {
                 if (typeof console !== 'undefined' && console.warn) {
-                    console.warn('[pp] #4408: старты дня не пересобраны — у задания нет минут занятости',
-                        { slitterId: sid, dayOffset: day, cutIds: noOcc.map(function(it) { return it.cutId; }) });
+                    console.warn('[pp] #4416: старты дня не пересобраны — ни у одного задания нет минут занятости',
+                        { slitterId: sid, dayOffset: day, cutIds: items.map(function(it) { return it.cutId; }) });
                 }
                 return;
             }
@@ -16043,7 +16272,21 @@
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
         var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
         if (!stale.length && !startOps.length) {
-            this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
+            // #4416: кнопку показывает тот же детектор — если он насчитал расхождения, а писать
+            // нечего, это ПРОТИВОРЕЧИЕ, а не «всё хорошо»: кнопка висит, нажатие не даёт эффекта
+            // («окно пересчёта ничего не пересчитывает»). Кричим, а не отвечаем «уже актуальна».
+            var shown = this.recalcMismatchIds(sid);
+            if (shown.length) {
+                if (typeof console !== 'undefined' && console.error) {
+                    console.error('[pp] ❌ #4416: детектор показал расхождения, а пересчитывать нечего', {
+                        slitterId: sid, mismatchIds: shown, scopeCount: scopeIds.length
+                    });
+                }
+                this.notify('Пересчитывать нечего, хотя расхождений насчитано ' + shown.length
+                    + ' — это ошибка расчёта, сообщите разработчику (детали в консоли)', 'error');
+            } else {
+                this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
+            }
             this.render();
             return Promise.resolve(false);
         }
@@ -16143,6 +16386,114 @@
         ];
     }
 
+    // #4417: подробное «было → стало» одного задания — подсказка карточки и строка в «Деталях».
+    // Чистая (покрыта тестом): на вход — строка planChangeRows.
+    function planChangeTitle(row) {
+        if (!row) return '';
+        var parts = [];
+        if (row.kind === 'new') {
+            parts.push('Новый сегмент разбиения — появится после «Применить»');
+            if (row.parentCutId) parts.push('от задания ' + row.parentCutId);
+            parts.push('старт ' + row.whenTo);
+            if (row.runs) parts.push('проходов ' + row.runs);
+            return parts.join(' · ');
+        }
+        if (row.kind === 'deleted') return 'Запись удаляется по «Применить» · старт был ' + row.whenFrom;
+        if (row.startChanged) parts.push('старт ' + row.whenFrom + ' → ' + row.whenTo);
+        if (row.slitterChanged) parts.push('станок ' + row.slitterFrom + ' → ' + row.slitterTo);
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        return parts.length ? ('Изменится: ' + parts.join(' · ')) : '';
+    }
+
+    // #4417: то же «было → стало», но БЕЗ времени старта — для списка «Деталей», где старт стоит
+    // отдельной колонкой (иначе одно и то же читалось бы дважды). Чистая.
+    function planChangeRest(row) {
+        if (!row) return '';
+        if (row.kind === 'new') {
+            return 'сегмент разбиения от задания ' + (row.parentCutId || '—')
+                + (row.runs ? ' · проходов ' + row.runs : '');
+        }
+        if (row.kind === 'deleted') return 'запись удаляется по «Применить»';
+        var parts = [];
+        if (row.slitterChanged) parts.push('станок ' + row.slitterFrom + ' → ' + row.slitterTo);
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        return parts.join(' · ') || 'только время старта';
+    }
+
+    // #4417: «Детали» — модалка со ВСЕМИ изменёнными заданиями непринятого плана. Панель даёт
+    // только сводку («переставлено N»), а разбор нужен списком: что куда уехало, у чего сменился
+    // станок, у чего только тайминг, что появится и что удалится.
+    AtexProductionPlanning.prototype.openPlanDetails = function() {
+        var self = this;
+        var pend = this._pendingPlan;
+        if (!pend) { this.notify('Непринятого плана нет — показывать нечего', 'info'); return; }
+        var changes = pend.changes || { rows: [], movedCount: 0, createdCount: 0, deletedCount: 0 };
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-plan-details-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-plan-details-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+
+        var content = el('div', { class: 'atex-pp-plan-details-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Изменения непринятого плана' }));
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Переставлено заданий: ' + changes.movedCount
+            + ' · новых сегментов: ' + changes.createdCount
+            + ' · удаляется записей: ' + changes.deletedCount
+            + '. В базу ничего не записано — план ждёт «Применить» или «Отменить». '
+            + 'Те же задания помечены в очереди каймой и бейджем.' }));
+        content.appendChild(this.renderPlanDetailsGroup('Переставлено', changes.rows, 'moved'));
+        content.appendChild(this.renderPlanDetailsGroup('Новые сегменты (появятся по «Применить»)', changes.rows, 'new'));
+        content.appendChild(this.renderPlanDetailsGroup('Удаляются по «Применить»', changes.rows, 'deleted'));
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', close);
+        actions.appendChild(closeBtn);
+        content.appendChild(actions);
+
+        this.root.appendChild(overlay);
+        this.planDetailsEl = overlay;   // для теста/повторного открытия
+    };
+
+    // #4417: одна группа списка «Деталей». Пустая группа не рисуется вовсе — лишний заголовок
+    // «Удаляются: 0» только мешает читать.
+    AtexProductionPlanning.prototype.renderPlanDetailsGroup = function(title, rows, kind) {
+        var self = this;
+        var items = (rows || []).filter(function(r) { return r.kind === kind; });
+        var box = el('div', { class: 'atex-pp-plan-details-group is-' + kind });
+        if (!items.length) return box;
+        box.appendChild(el('h3', { class: 'atex-pp-plan-details-title', text: title + ': ' + items.length }));
+        var listEl = el('ul', { class: 'atex-pp-plan-details-list' });
+        items.forEach(function(r) {
+            var idNode = (kind === 'new')
+                ? el('span', { class: 'atex-pp-plan-details-id', title: 'Записи в БД ещё нет', text: '—' })
+                : el('a', { class: 'atex-pp-plan-details-id',
+                    href: '/' + encodeURIComponent(self.db) + '/edit_obj/' + encodeURIComponent(r.cutId),
+                    target: '_blank', rel: 'noopener',
+                    title: 'Открыть карточку задания (id ' + r.cutId + ')', text: 'id ' + r.cutId });
+            listEl.appendChild(el('li', { class: 'atex-pp-plan-details-item is-' + kind }, [
+                idNode,
+                el('span', { class: 'atex-pp-plan-details-label', text: r.label }),
+                el('span', { class: 'atex-pp-plan-details-when',
+                    text: (kind === 'new') ? ('старт ' + r.whenTo)
+                        : (kind === 'deleted') ? ('был ' + r.whenFrom)
+                        : (r.startChanged ? (r.whenFrom + ' → ' + r.whenTo) : (r.whenTo + ' — старт тот же')) }),
+                el('span', { class: 'atex-pp-plan-details-what', text: planChangeRest(r) })
+            ]));
+        });
+        box.appendChild(listEl);
+        return box;
+    };
+
     // #4402: липкая панель непринятого плана «Упорядочить» — во всю ширину рабочего места, поверх
     // очереди. Живёт в собственном узле (this.planBarEl), поэтому переключение станков/дней её не
     // сбрасывает: план видно на карточках всех станков, пока не нажаты «Применить» / «Отменить».
@@ -16176,14 +16527,21 @@
                 text: 'Переставлено заданий: ' + (pend.movedCount || 0)
                     + (pend.createdIds && pend.createdIds.length ? ', новых сегментов: ' + pend.createdIds.length : '')
                     + (pend.deletedIds && pend.deletedIds.length ? ', удаляется записей: ' + pend.deletedIds.length : '')
-                    + '. Переключайтесь между станками и днями — карточки уже показывают новый план. '
+                    + '. Переключайтесь между станками и днями — карточки уже показывают новый план; '
+                    + 'тронутые задания помечены каймой и бейджем, весь список — по кнопке «Детали». '
                     + '«Применить» записывает его в базу, «Отменить» (и обновление страницы) возвращает прежний.' })
         ]));
         var ok = el('button', { class: 'atex-pp-plan-apply', type: 'button', text: 'Применить' });
         ok.addEventListener('click', function() { if (self.busy) return; self.applyPendingPlan(); });
+        // #4417: «Детали» — между «Применить» и «Отменить»: список всех изменённых заданий.
+        // Ничего не пишет и не решает, поэтому стоит рядом с решением, а не в панели действий.
+        var chg4417 = pend.changes || { rows: [] };
+        var details = el('button', { class: 'atex-pp-plan-details-btn', type: 'button', text: 'Детали',
+            title: 'Показать все изменённые задания (' + (chg4417.rows || []).length + ')' });
+        details.addEventListener('click', function() { self.openPlanDetails(); });
         var cancel = el('button', { class: 'atex-pp-plan-cancel', type: 'button', text: 'Отменить' });
         cancel.addEventListener('click', function() { if (self.busy) return; self.cancelPendingPlan(); });
-        panel.appendChild(el('div', { class: 'atex-pp-plan-btns' }, [ok, cancel]));
+        panel.appendChild(el('div', { class: 'atex-pp-plan-btns' }, [ok, details, cancel]));
         host.appendChild(panel);
     };
 
@@ -17095,7 +17453,10 @@
             // без проходов, показывает «Настройка ножей и сырья», а не ошибку длительности.
             var isSetupTask = !!setupTaskIds[String(c.id)];
             // #3508 п.5: зафиксированное задание — класс is-fixed (серая кайма, видно, что менять нельзя).
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : '') + (isPreviewNew ? ' is-preview-new' : ''), dataset: { cutId: String(c.id) },
+            // #4417: задание, которое непринятый план ТРОНУЛ (время старта, станок или тайминг) —
+            // заметная кайма, чтобы такие карточки находились при листании станков и дней.
+            var previewChange = c.previewChanged || null;
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : '') + (c.fixed ? ' is-fixed' : '') + (isSetupTask ? ' is-setup' : '') + (isPreviewNew ? ' is-preview-new' : '') + (previewChange ? ' is-preview-changed' : ''), dataset: { cutId: String(c.id) },
                 // #4404 п.2: подсказка карточки = список заказов и позиций, тот же текст, что в
                 // панели «Связанные позиции» (cutLinkedTitle → cutLinkedLabels).
                 title: self.cutLinkedTitle(c) });
@@ -17195,6 +17556,12 @@
             if (isPreviewNew) {
                 infoChildren.push(el('span', { class: 'atex-pp-cut-new-badge',
                     title: 'Новый сегмент разбиения по дням — появится после «Применить»', text: 'новое' }));
+            }
+            // #4417: чем именно задание отличается от сохранённого плана — коротко на бейдже,
+            // подробно (было → стало) в подсказке и в модалке «Детали» липкой панели.
+            if (previewChange) {
+                infoChildren.push(el('span', { class: 'atex-pp-cut-chg-badge',
+                    title: planChangeTitle(previewChange), text: planChangeSummary(previewChange) }));
             }
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));

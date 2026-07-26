@@ -291,7 +291,9 @@ var FILTER = { slitter: '', status: '', date: '2026-07-27', dateTo: '2026-07-27'
     assert(!!btn, 'кнопка «Пересчитать наладку» показана по расхождению стартов');
 })();
 
-// ── E2) Задание без минут занятости — день не трогаем (нечем мерить «стену») ──
+// ── E2) Мерить нечем (колонок тайминга нет) — день не трогаем ────────────────
+// #4416: правило сужено — день пропускается, только если занятости нет НИ У ОДНОГО задания;
+// одиночный сегмент Σ=0 пересборку больше не отменяет (см. atex-4416-free-slot-stored.test.js).
 (function () {
     var cuts = [cutOf('n1', '101', at(8, 0)), cutOf('n2', '101', at(11, 0))];
     var c = makeController(cuts, FILTER);
@@ -301,8 +303,8 @@ var FILTER = { slitter: '', status: '', date: '2026-07-27', dateTo: '2026-07-27'
     console.warn = function() { warns.push(Array.prototype.slice.call(arguments).join(' ')); };
     var ops = c.recalcStartUpdates('101');
     console.warn = origWarn;
-    assertEqual(ops, [], 'день с заданием нулевой занятости не пересобираем');
-    assert(warns.filter(function(w) { return w.indexOf('#4408') !== -1; }).length === 1,
+    assertEqual(ops, [], 'день, в котором нечего мерить, не пересобираем');
+    assert(warns.filter(function(w) { return w.indexOf('#4416') !== -1; }).length === 1,
         'и не молчим об этом — пишем в консоль');
 })();
 
