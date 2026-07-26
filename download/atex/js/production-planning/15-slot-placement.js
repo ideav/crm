@@ -508,6 +508,15 @@
                 if (pos < 0) continue;
                 var slot = arr[pos];
                 arr.splice(pos, 1);   // снять с текущего места — оцениваем ЧИСТЫЕ станки-приёмники
+                // #4424: у ПРОСРОЧЕННОГО 🔒 замок дня в пробной упаковке НЕ действует. Иначе спасти его
+                // нельзя в принципе: как ни переставляй в очереди, упаковщик возвращает ему тот же
+                // зафиксированный день (dayAnchorByCut), проверка «стало раньше» не проходит — и #4224
+                // («рескьюем даже зафиксированное») оставался мёртвой буквой. Замок дня, оставивший
+                // задание за сроком, недействителен; станок 🔒 держит по-прежнему (условие ниже).
+                // Снимать замок вправе только у НАСТОЯЩЕЙ фиксации (ctx.rescueUnpinIds — из контроллера:
+                // временные пины переноса/заморозки/начатого туда не попадают, #4424).
+                var mayUnpin = slot.fixed && (!ctx.rescueUnpinIds || ctx.rescueUnpinIds[task.id]);
+                var unpinSelf = mayUnpin ? (function(){ var u = {}; u[task.id] = 1; return u; })() : null;
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
@@ -516,7 +525,7 @@
                     if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
-                    var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var baseReal = realDayFn(baseIds, tid, unpinSelf) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
                     var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
@@ -524,7 +533,7 @@
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
-                        var real = realDayFn(trialIds, tid) || {};
+                        var real = realDayFn(trialIds, tid, unpinSelf) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает СВОЙ реальный день — мимо
                         // #4338: ВЫТЕСНЕНИЕ несрочного соседа под срочное. Раньше вставка отвергалась, если
@@ -558,7 +567,10 @@
                 });
                 if (best){
                     byMachine[best.tid].splice(best.idx, 0, tagSlot(slot, best.tid));
-                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real });
+                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real, unpinned: !!slot.fixed });
+                    // #4424: замок дня снят НАВСЕГДА в этом прогоне — иначе финальная упаковка вернула бы
+                    // задание на прежний (просроченный) день, и рескью выглядел бы «перенос без эффекта».
+                    if (mayUnpin && typeof ctx.onUnpinFixed === 'function') ctx.onUnpinFixed(task.id);
                     changed = true;
                 } else {
                     arr.splice(pos, 0, slot);   // некуда лучше — вернуть на место

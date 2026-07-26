@@ -6030,6 +6030,26 @@
             var id = String(c && c.id);
             if (c && c.fixed && anchorIn[id] != null) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
         });
+        // #4424: 🔒, оставивший задание ЗА СРОКОМ, — недействителен: пользователь приколол задание,
+        // ожидая его В СРОК (это и написано в #4224). Пока замок дня действовал в КАЖДОЙ пробной
+        // упаковке рескью, спасти такое задание было НЕЛЬЗЯ: как его ни переставляй в очереди,
+        // realPackFn возвращал ему тот же зафиксированный день, проверка «стало раньше» не проходила,
+        // и просроченный фикс навсегда оставался в своём дне (реальный ateh: три 🔒-задания стояли на
+        // 29.07 при свободном на 267 мин 27.07 и ПУСТОМ 28.07, а отчёт врал «честный дефицит ёмкости»).
+        // Здесь копятся id, у которых рескью снял замок дня; их анкер не действует ни в пробной, ни в
+        // финальной упаковке (иначе задание отскочило бы назад). Станок 🔒 по-прежнему держит:
+        // relocateOverdueReal переставляет зафиксированное только внутри своего станка.
+        var rescuedUnpin = {};
+        function anchorsWithout(extraUnpin){
+            if (!Object.keys(rescuedUnpin).length && !(extraUnpin && Object.keys(extraUnpin).length)) return effAnchorByCut;
+            var out = {};
+            Object.keys(effAnchorByCut).forEach(function(id){
+                if (rescuedUnpin[id]) return;
+                if (extraUnpin && extraUnpin[id]) return;
+                out[id] = effAnchorByCut[id];
+            });
+            return out;
+        }
         var perPass = opts.perPassByCut || {};
         // #3974: фильтр входа по «Дате план» ∈ [С;По] (#3660 inScopeUpTo / #3918 спил-день)
         // ОТМЕНЁН. Вход планировщика = всё необеспеченное (открытые задания, отобраны вызывающим:
@@ -6129,7 +6149,9 @@
         // #4118: упаковка УЖЕ упорядоченной очереди станка splitMachineQueue (без пере-сортировки).
         // Выделено из planMachineSegs, чтобы доп. проход по РЕАЛЬНЫМ дням (relocateOverdueReal) мог
         // паковать пробные порядки на любом станке теми же параметрами (обед/отпуск/нахлёст/заправка).
-        function packOrderedMachine(ordered, key){
+        // #4424: unpin — id, чей замок дня в ЭТОЙ упаковке не действует (пробная упаковка рескью
+        // просроченного 🔒; снятые рескью замки живут в rescuedUnpin и действуют дальше везде).
+        function packOrderedMachine(ordered, key, unpin){
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -6140,7 +6162,7 @@
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: effAnchorByCut,   // #3974: якорь дня ТОЛЬКО за 🔒 (фикс держит свой день); свободные — от «С»
+                dayAnchorByCut: anchorsWithout(unpin),   // #3974: якорь дня ТОЛЬКО за 🔒; #4424: минус снятые рескью
                 weights: opts.weights,            // #4050: веса §8 (DEADLINE/EXACT_DEADLINE_COST_MN)
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
@@ -6246,10 +6268,11 @@
         merged.cuts.forEach(function(c){ if (c && c.id != null) cutById[String(c.id)] = c; });
         // #4118: реальный день ЗАВЕРШЕНИЯ каждого задания при заданном порядке очереди станка (реальная
         // упаковка splitMachineQueue с параметрами станка). realDayFn(orderIds, machineId) → {id: day}.
-        function realPackFn(orderIds, machineId){
+        // #4424: unpin — пробная упаковка БЕЗ замка дня этих заданий (рескью просроченного 🔒).
+        function realPackFn(orderIds, machineId, unpin){
             var objs = (orderIds || []).map(function(id){ return cutById[String(id)]; }).filter(Boolean);
             // #4200: календарный день; #4209/#4290: по сегментам НАМОТКИ, ПОСЛЕДНИЙ день (setup-only хвост срок не держит).
-            return windingDaysFromSegs(packOrderedMachine(objs, String(machineId)));
+            return windingDaysFromSegs(packOrderedMachine(objs, String(machineId), unpin));
         }
         var packed = packAll();
         // #4095 / ТЗ §12: срок держат РЕАЛЬНЫЕ дни splitMachineQueue, а НЕ ёмкость-оценка размещения.
@@ -6321,7 +6344,11 @@
                 // Итерация 0 на пути размещения — богатая занятость слоя (#4085); дальше — пере-сев из packed.
                 var occ4118 = (oR4203 === 0 && slotPlan && slotPlan.occupancy) ? slotPlan.occupancy : occupancyFromCurrentOrder();
                 var rel2 = relocateOverdueReal(occ4118, opts.dueDayByCut, realPackFn,
-                    slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
+                    slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor,
+                        // #4424: рескью снял замок дня у просроченного 🔒 — держим это до конца прогона,
+                        // иначе финальная упаковка вернёт задание на прежний просроченный день.
+                        rescueUnpinIds: opts.rescueUnpinIds,
+                        onUnpinFixed: function(id){ rescuedUnpin[String(id)] = 1; } }));
                 if (rel2.moves.length) {
                     overduePass.moves += rel2.moves.length;
                     rel2.moves.forEach(function(m){ overduePass.moveLog.push(m); });
@@ -9027,6 +9054,15 @@
                 if (pos < 0) continue;
                 var slot = arr[pos];
                 arr.splice(pos, 1);   // снять с текущего места — оцениваем ЧИСТЫЕ станки-приёмники
+                // #4424: у ПРОСРОЧЕННОГО 🔒 замок дня в пробной упаковке НЕ действует. Иначе спасти его
+                // нельзя в принципе: как ни переставляй в очереди, упаковщик возвращает ему тот же
+                // зафиксированный день (dayAnchorByCut), проверка «стало раньше» не проходит — и #4224
+                // («рескьюем даже зафиксированное») оставался мёртвой буквой. Замок дня, оставивший
+                // задание за сроком, недействителен; станок 🔒 держит по-прежнему (условие ниже).
+                // Снимать замок вправе только у НАСТОЯЩЕЙ фиксации (ctx.rescueUnpinIds — из контроллера:
+                // временные пины переноса/заморозки/начатого туда не попадают, #4424).
+                var mayUnpin = slot.fixed && (!ctx.rescueUnpinIds || ctx.rescueUnpinIds[task.id]);
+                var unpinSelf = mayUnpin ? (function(){ var u = {}; u[task.id] = 1; return u; })() : null;
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
@@ -9035,7 +9071,7 @@
                     if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
-                    var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var baseReal = realDayFn(baseIds, tid, unpinSelf) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
                     var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
@@ -9043,7 +9079,7 @@
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
-                        var real = realDayFn(trialIds, tid) || {};
+                        var real = realDayFn(trialIds, tid, unpinSelf) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает СВОЙ реальный день — мимо
                         // #4338: ВЫТЕСНЕНИЕ несрочного соседа под срочное. Раньше вставка отвергалась, если
@@ -9077,7 +9113,10 @@
                 });
                 if (best){
                     byMachine[best.tid].splice(best.idx, 0, tagSlot(slot, best.tid));
-                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real });
+                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real, unpinned: !!slot.fixed });
+                    // #4424: замок дня снят НАВСЕГДА в этом прогоне — иначе финальная упаковка вернула бы
+                    // задание на прежний (просроченный) день, и рескью выглядел бы «перенос без эффекта».
+                    if (mayUnpin && typeof ctx.onUnpinFixed === 'function') ctx.onUnpinFixed(task.id);
                     changed = true;
                 } else {
                     arr.splice(pos, 0, slot);   // некуда лучше — вернуть на место
@@ -15987,6 +16026,18 @@
         // c.fixed (как 🔒 «замок дня») — planCutOperations держит его день (effAnchorByCut от «Даты
         // план»), остальное раскладывает по срокам вокруг. Замок снимаем в finally (c.fixed мутируем на
         // общих объектах self.cuts только на время планирования). Без moveScope — прежнее поведение.
+        // #4424: рескью просроченных вправе снять ЗАМОК ДНЯ только у НАСТОЯЩЕЙ фиксации «Зафиксировано»
+        // (пользователь приколол задание, ожидая его В СРОК — см. #4224). Временные пины ниже —
+        // перенос 🗓 (#4074), замороженный день (#4326), начатое задание (#4381) — не фиксация
+        // пользователя: перенос только что сделан руками, замороженный день не трогает никакая
+        // автоматика, а начатое задание физически идёт на станке. Их id сюда НЕ попадают.
+        // Задание, чей день ЗАМОРОЖЕН, тоже не отдаём рескью, даже если оно 🔒: заморозка старше.
+        var rescueUnpinIds = {};
+        planInput.forEach(function(c){
+            if (!c || !c.fixed) return;
+            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return;
+            rescueUnpinIds[String(c.id)] = true;
+        });
         var pinnedRestore = [];
         if (moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length) {
             var pinSet = {};
@@ -16044,6 +16095,7 @@
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
+            rescueUnpinIds: rescueUnpinIds,   // #4424: у кого рескью вправе снять замок дня (настоящая 🔒, день не заморожен)
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: prevSetupBySlitter,   // #3876: станок в отпуске обнулён; #4300/#4312: заправка из заданий прошлых дней
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
