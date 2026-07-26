@@ -188,22 +188,18 @@ var SUPPLIES = [{ id: 's1', cutId: '5', finishedBatchId: 'b110', positionId: 'p1
         'свободна полоса, на которую не ссылается «Обеспечение»; рулоны = полос × проходов');
 })();
 
-// ── 3) Панель «Связанные позиции»: кнопка «+ позиция» ───────────────────────
+// ── 3) Панель «Связанные позиции»: добавление переехало в плашку задания (#4428) ──
 (function () {
     var c = makeController(STRIPS, SUPPLIES, [pos()]);
     c.renderLink();
-    var add = byClass(c.linkEl, 'atex-pp-linked-add');
-    assertEqual(add.length, 1, '#4426: на панели «Связанные позиции» есть кнопка «+ позиция»');
-    assertEqual(add[0].textContent, '+ позиция', 'подпись кнопки');
-    var opened = [];
-    c.openCutPositionPicker = function (cut) { opened.push(cut.id); };
-    add[0].listeners.click[0]();
-    assertEqual(opened, ['5'], 'клик открывает выбор позиции ДЛЯ ВЫБРАННОГО задания');
+    assertEqual(byClass(c.linkEl, 'atex-pp-linked-add').length, 0,
+        '#4428: кнопка «+ позиция» живёт в плашке задания (рядом с «+ полоса»), а не на панели связей');
+    assert(texts(c.linkEl, 'atex-pp-linked-hint').join(' ').indexOf('+ позиция') >= 0,
+        'на панели связей осталась подсказка, где добавляют позицию');
 
-    // Задание без связей — кнопка всё равно есть (иначе пустое задание не наполнить).
-    var c2 = makeController(STRIPS, [], [pos()]);
-    c2.renderLink();
-    assertEqual(byClass(c2.linkEl, 'atex-pp-linked-add').length, 1, 'кнопка есть и у задания без связей');
+    // Панель связей по-прежнему умеет отвязывать (её вторая функция не пострадала).
+    var del = byClass(c.linkEl, 'atex-pp-linked-del');
+    assertEqual(del.length, 1, 'связь по-прежнему отвязывается крестиком');
 })();
 
 // ── 4) Модалка выбора: подходящие, причины отказа, чужое сырьё ──────────────
@@ -327,7 +323,7 @@ function cand(id, over) {
 
     // Своего заказа нет — предлагаем чужой, но помечаем sameOrder=false (галка снята в UI).
     assertEqual(planning.planCutPositionFill(CUT, CORE_FREE, [alien], covered),
-        [{ positionId: 'pX110', stripId: 'b110', rolls: 6, sameOrder: false }],
+        [{ positionId: 'pX110', stripId: 'b110', mode: 'strip', width: 110, stripCount: 0, rolls: 6, sameOrder: false }],
         'позиция чужого заказа предлагается, но помечена как чужая');
 
     // Две позиции своего заказа на одну полосу — берём более срочную (dueKey).

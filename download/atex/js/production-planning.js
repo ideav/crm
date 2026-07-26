@@ -1700,6 +1700,14 @@
         return label;
     }
 
+    // #4428: допуск сравнения ширин в мм — ширины приходят из БД строками («152,00»),
+    // и остаток джамбо считается вычитанием, поэтому «ровно влезает» может выйти
+    // 151.9999999. Полмикрона на ширине реза роли не играют.
+    var WIDTH_FIT_EPS_MM = 0.001;
+    // #4428: потолок ручного ввода «Проходов». Реальные задания доходят до полутора сотен
+    // проходов (#4304: 158), поэтому ограничение чисто от опечатки вроде «3000».
+    var MAX_MANUAL_PASSES = 999;
+
     // #3320: кол-во рулонов обеспечения для привязки полосы к позиции заказа.
     // База — рулоны полосы (Кол-во полос × проходов), но не больше 110% от
     // необеспеченного остатка позиции. Отрицательные/нулевые входы → 0.
@@ -1711,22 +1719,29 @@
         return round3(base < cap ? base : cap);
     }
 
-    // #4426: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание. Задание уже
-    // режет свой набор полос; позиция ложится на СВОБОДНУЮ (ещё не обеспеченную) «Партию ГП»
-    // той же ширины — её рулоны до сих пор шли на склад/в отходы, а теперь идут в заказ.
+    // #4426/#4428: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание.
     // Номенклатура обязана совпасть с заданием (сырьё + метраж рулона + намотка): иначе
-    // задание физически произведёт не то, что заказано.
+    // задание физически произведёт не то, что заказано. Дальше два пути:
+    //   • есть СВОБОДНАЯ (ещё не обеспеченная) «Партия ГП» той же ширины → позиция ложится
+    //     на неё (mode 'strip'): её рулоны шли на склад/в отходы, теперь идут в заказ,
+    //     раскрой и длительность задания не меняются;
+    //   • свободной полосы нет, но в ОСТАТОК ДЖАМБО влезает полоса нужной ширины (#4428) →
+    //     режем НОВУЮ полосу (mode 'new'): позиция, которую удалили из задания или которую
+    //     дозаказали позже, возвращается в задание, а не остаётся без резки.
     //   position — запись genPositions (width — ФАКТИЧЕСКАЯ ширина реза, #3372);
     //   cut      — { materialId, winding, length } задания;
     //   freeStrips — свободные полосы задания [{ id, width, rolls }] (rolls = полос × проходов);
-    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition).
-    // → { ok, reason, strip, rolls }. reason — человеческая причина отказа (её показываем
-    // в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт, почему её нет).
-    // Чистая (тест).
-    function cutPositionFit(position, cut, freeStrips, remaining) {
+    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition);
+    //   opts       — { jumboFreeMm, passes } (#4428): свободная ширина джамбо и проходы задания.
+    //                Без opts новая полоса не предлагается (поведение #4426).
+    // → { ok, reason, mode, strip, stripCount, width, rolls }. reason — человеческая причина
+    // отказа (её показываем в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт,
+    // почему её нет). Чистая (тест).
+    function cutPositionFit(position, cut, freeStrips, remaining, opts) {
         var p = position || {};
         var c = cut || {};
-        function no(reason) { return { ok: false, reason: reason, strip: null, rolls: 0 }; }
+        var o = opts || {};
+        function no(reason) { return { ok: false, reason: reason, mode: '', strip: null, stripCount: 0, width: 0, rolls: 0 }; }
         if (!(stripNum(remaining) > 0)) return no('уже обеспечена полностью');
         if (!p.approved) return no('позиция не согласована');
         var cutMat = String(c.materialId == null ? '' : c.materialId).trim();
@@ -1742,14 +1757,45 @@
         if (cutWind && posWind && cutWind !== posWind) return no('другая намотка (' + cutWind + ' ≠ ' + posWind + ')');
         // Ширину полосы сверяем через stripNum: из БД она приходит строкой и может быть с
         // запятой («152,00») — Number() дал бы NaN и «нет свободной полосы» на ровном месте.
-        var widthKey = stripWidthKey(stripNum(p.width));
+        var width = stripNum(p.width);
+        var widthKey = stripWidthKey(width);
         var strip = (freeStrips || []).filter(function(s) {
             return stripWidthKey(stripNum(s && s.width)) === widthKey;
         })[0] || null;
-        if (!strip) return no('нет свободной полосы ' + round3(stripNum(p.width)) + ' мм');
-        var rolls = stripSupplyRolls(strip.rolls, remaining);
-        if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
-        return { ok: true, reason: '', strip: strip, rolls: rolls };
+        if (strip) {
+            var rolls = stripSupplyRolls(strip.rolls, remaining);
+            if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
+            return { ok: true, reason: '', mode: 'strip', strip: strip, stripCount: 0,
+                width: stripNum(strip.width), rolls: rolls };
+        }
+        // #4428: свободной полосы нет — пробуем отрезать новую из остатка джамбо.
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (!(freeMm > 0)) return no('нет свободной полосы ' + round3(width) + ' мм');
+        if (!(width > 0)) return no('у позиции не указана ширина');
+        if (freeMm + WIDTH_FIT_EPS_MM < width) {
+            return no('нет свободной полосы ' + round3(width) + ' мм, в остаток джамбо (' +
+                round3(freeMm) + ' мм) новая не влезает');
+        }
+        var runs = stripNum(o.passes) > 0 ? stripNum(o.passes) : 1;
+        var count = newStripCount(width, freeMm, remaining, runs);
+        var newRolls = stripSupplyRolls(count * runs, remaining);
+        if (!(newRolls > 0)) return no('новая полоса ' + round3(width) + ' мм не даёт рулонов');
+        return { ok: true, reason: '', mode: 'new', strip: null, stripCount: count,
+            width: round3(width), rolls: newRolls };
+    }
+
+    // #4428: сколько полос ширины width резать под позицию, если свободной полосы нет.
+    // Не больше, чем влезает в остаток джамбо, и не больше, чем нужно позиции
+    // (ceil(остаток рулонов / проходов)); минимум — одна. Чистая (тест).
+    function newStripCount(width, jumboFreeMm, remaining, passes) {
+        var w = stripNum(width), free = stripNum(jumboFreeMm);
+        if (!(w > 0) || !(free + WIDTH_FIT_EPS_MM >= w)) return 0;
+        var byWidth = Math.floor((free + WIDTH_FIT_EPS_MM) / w);
+        var runs = stripNum(passes) > 0 ? stripNum(passes) : 1;
+        var rem = stripNum(remaining);
+        var byNeed = rem > 0 ? Math.ceil(rem / runs) : 1;
+        var count = Math.min(byWidth, byNeed);
+        return count > 0 ? count : 1;
     }
 
     // #4426: добавляя позицию в задание, пытаемся обеспечить и ОСТАЛЬНЫЕ его свободные полосы —
@@ -1758,10 +1804,20 @@
     // одна полоса — одна позиция, одна позиция — одна полоса (как «Партия ГП» ширины у резки).
     // Приоритет кандидата на полосу: позиция ЗАКАЗОВ задания (coveredOrders — правило #3872
     // «филлер из покрытого заказа») → более ранний срок (dueKey) → подпись (стабильность).
-    //   cut/freeStrips — как у cutPositionFit; candidates — [{ id, position, remaining, label }].
-    // → [{ positionId, stripId, rolls, sameOrder }]. Чистая (тест).
-    function planCutPositionFill(cut, freeStrips, candidates, coveredOrders) {
+    //
+    // #4428: после свободных полос разбирается ОСТАТОК ДЖАМБО — под позиции ЗАКАЗОВ задания
+    // режутся НОВЫЕ полосы (ТЗ: «в первую очередь в задание включается то, что объединено одним
+    // заказом»). Поэтому вторая позиция заказа подтягивается, даже если полосы её ширины в
+    // задании нет. Чужие заказы остаток джамбо не занимают: геометрию задания меняет только
+    // свой заказ, чужой предлагается лишь на уже существующие свободные полосы.
+    //   cut/freeStrips — как у cutPositionFit; candidates — [{ id, position, remaining, label }];
+    //   opts — { jumboFreeMm, passes } (без него новые полосы не режутся — поведение #4426).
+    // → [{ positionId, stripId, mode, width, stripCount, rolls, sameOrder }]; mode 'strip' —
+    // лечь на существующую полосу stripId, 'new' — отрезать stripCount новых полос width.
+    // Чистая (тест).
+    function planCutPositionFill(cut, freeStrips, candidates, coveredOrders, opts) {
         var orders = coveredOrders || {};
+        var o = opts || {};
         var claimed = {};
         var out = [];
         // Широкие полосы разбираем первыми: узкую позицию проще пристроить следующей.
@@ -1789,7 +1845,138 @@
             });
             if (!best) return;
             claimed[best.positionId] = true;
-            out.push({ positionId: best.positionId, stripId: best.stripId, rolls: best.rolls, sameOrder: best.sameOrder });
+            out.push({ positionId: best.positionId, stripId: best.stripId, mode: 'strip', width: stripNum(strip.width),
+                stripCount: 0, rolls: best.rolls, sameOrder: best.sameOrder });
+        });
+
+        // #4428: остаток джамбо — под позиции своих заказов, по одной, пока хватает ширины.
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (freeMm > 0) {
+            (candidates || []).filter(function(c) {
+                return c && c.id != null && !claimed[String(c.id)] &&
+                    !!orders[String(c.position && c.position.orderId)];
+            }).sort(function(a, b) {
+                var da = Number(a.position && a.position.dueKey), db = Number(b.position && b.position.dueKey);
+                if (!isFinite(da)) da = Infinity;
+                if (!isFinite(db)) db = Infinity;
+                if (da !== db) return da - db;
+                var la = String(a.label == null ? a.id : a.label), lb = String(b.label == null ? b.id : b.label);
+                return la < lb ? -1 : la > lb ? 1 : 0;
+            }).forEach(function(c) {
+                var fit = cutPositionFit(c.position, cut, [], c.remaining, { jumboFreeMm: freeMm, passes: o.passes });
+                if (!fit.ok || fit.mode !== 'new') return;
+                claimed[String(c.id)] = true;
+                freeMm = round3(freeMm - fit.stripCount * fit.width);
+                out.push({ positionId: String(c.id), stripId: null, mode: 'new', width: fit.width,
+                    stripCount: fit.stripCount, rolls: fit.rolls, sameOrder: true });
+            });
+        }
+        return out;
+    }
+
+    // #4428: сколько ширины джамбо ОСТАВИТЬ под остальные позиции того же заказа. Жадный
+    // добор первой позиции (newStripCount берёт всё, что влезло) съел бы остаток, и вторая
+    // позиция заказа опять осталась бы за бортом — ровно то, на что жалуется ТЗ («добавил
+    // одну — должна подтянуться и другая»). Резервируем каждой сестре по ОДНОЙ полосе её
+    // ширины (минимум, с которого она вообще попадёт в задание), в порядке срока.
+    //   candidates — уже БЕЗ выбранной позиции; остальные аргументы — как у cutPositionFit.
+    // → мм. Чистая (тест).
+    function siblingStripReserveMm(cut, freeStrips, candidates, coveredOrders, opts) {
+        var orders = coveredOrders || {};
+        var o = opts || {};
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (!(freeMm > 0)) return 0;
+        var reserve = 0;
+        (candidates || []).filter(function(c) {
+            return c && c.id != null && !!orders[String(c.position && c.position.orderId)];
+        }).sort(function(a, b) {
+            var da = Number(a.position && a.position.dueKey), db = Number(b.position && b.position.dueKey);
+            if (!isFinite(da)) da = Infinity;
+            if (!isFinite(db)) db = Infinity;
+            if (da !== db) return da - db;
+            var la = String(a.label == null ? a.id : a.label), lb = String(b.label == null ? b.id : b.label);
+            return la < lb ? -1 : la > lb ? 1 : 0;
+        }).forEach(function(c) {
+            var fit = cutPositionFit(c.position, cut, freeStrips, c.remaining,
+                { jumboFreeMm: round3(freeMm - reserve), passes: o.passes });
+            if (!fit.ok || fit.mode !== 'new') return;   // ляжет на готовую полосу — ширины не просит
+            reserve = round3(reserve + fit.width);
+        });
+        return reserve;
+    }
+
+    // #4428: что переписать в задании, когда диспетчер поменял ЧИСЛО ПРОХОДОВ. Проходы —
+    // единственная величина, которой резка «подгоняется под заказ» (полосы ограничены шириной
+    // джамбо), поэтому менять их надо вместе со всем, что от них считается:
+    //   • «Кол-во план» каждой «Партии ГП» = «Кол-во полос» × проходов (#3431/#3433);
+    //   • рулоны «Обеспечений» этого задания — сколько заказу реально достанется с полосы при
+    //     новых проходах (не больше 110% непокрытого остатка позиции, правило #3320). Иначе
+    //     добавленные проходы ушли бы на склад, а позиция осталась бы недообеспеченной;
+    //   • «Кол-во рулонов» (СПРОС) партии = сумма рулонов её обеспечений.
+    //   cutId — задание; batches — его «Партии ГП» [{ id, width, strips, rolls, planned }];
+    //   supplies — ВСЕ обеспечения плана [{ id, cutId, finishedBatchId, positionId, rolls }];
+    //   needByPosition — { positionId: заказано рулонов }; newRuns — новые проходы.
+    // → { runs, batches: [{ id, width, planned, wasPlanned, rolls?, wasRolls? }],
+    //     supplies: [{ id, positionId, rolls, was }], keptSupplyIds, legacyBatchIds }.
+    // keptSupplyIds — обеспечения, которые НЕ трогаем (позиции нет в плане или её остаток уже
+    // покрыт другими заданиями): молча обнулять живую связь нельзя. legacyBatchIds — старые
+    // партии с пустым «Кол-во полос» (#3431: в «Кол-во рулонов» лежит число полос) — их не
+    // пересчитываем. Чистая (тест), записей не делает.
+    function planPassesUpdates(cutId, batches, supplies, needByPosition, newRuns) {
+        var runs = stripNum(newRuns) > 0 ? Math.round(stripNum(newRuns)) : 0;
+        var out = { runs: runs, batches: [], supplies: [], keptSupplyIds: [], legacyBatchIds: [] };
+        if (!(runs > 0)) return out;
+        var cid = String(cutId == null ? '' : cutId);
+        var need = needByPosition || {};
+        var batchById = {};
+        (batches || []).forEach(function(b) { if (b && b.id != null) batchById[String(b.id)] = b; });
+        // Рулоны, обеспеченные позициям ДРУГИМИ заданиями, — они из потребности уже вычтены.
+        var elsewhere = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || String(s.cutId) === cid || s.positionId == null) return;
+            var k = String(s.positionId);
+            elsewhere[k] = round3((elsewhere[k] || 0) + stripNum(s.rolls));
+        });
+        var leftOnBatch = {}, takenByPos = {}, demandByBatch = {};
+        (supplies || []).filter(function(s) { return s && String(s.cutId) === cid; }).forEach(function(s) {
+            var b = batchById[String(s.finishedBatchId)];
+            if (!b) { out.keptSupplyIds.push(String(s.id)); return; }   // партия не этого задания — не наше дело
+            var bk = String(b.id);
+            var was = stripNum(s.rolls);
+            if (!(stripNum(b.strips) > 0)) {   // #3431: старая партия — производство считать нечем
+                demandByBatch[bk] = round3((demandByBatch[bk] || 0) + was);
+                out.keptSupplyIds.push(String(s.id));
+                return;
+            }
+            if (leftOnBatch[bk] == null) leftOnBatch[bk] = round3(stripNum(b.strips) * runs);
+            var pk = String(s.positionId == null ? '' : s.positionId);
+            var qty = stripNum(need[pk]);
+            var free = round3(qty - (elsewhere[pk] || 0) - (takenByPos[pk] || 0));
+            var rolls = qty > 0 ? stripSupplyRolls(leftOnBatch[bk], free) : 0;
+            if (!(rolls > 0)) {   // потребность неизвестна или уже покрыта — связь оставляем как есть
+                leftOnBatch[bk] = round3(leftOnBatch[bk] - was);
+                demandByBatch[bk] = round3((demandByBatch[bk] || 0) + was);
+                out.keptSupplyIds.push(String(s.id));
+                return;
+            }
+            leftOnBatch[bk] = round3(leftOnBatch[bk] - rolls);
+            takenByPos[pk] = round3((takenByPos[pk] || 0) + rolls);
+            demandByBatch[bk] = round3((demandByBatch[bk] || 0) + rolls);
+            if (rolls !== was) out.supplies.push({ id: String(s.id), positionId: pk, rolls: rolls, was: was });
+        });
+        (batches || []).forEach(function(b) {
+            if (!b || b.id == null) return;
+            var bk = String(b.id);
+            if (!(stripNum(b.strips) > 0)) { out.legacyBatchIds.push(bk); return; }
+            var entry = { id: bk, width: stripNum(b.width),
+                planned: round3(stripNum(b.strips) * runs), wasPlanned: stripNum(b.planned) };
+            var changed = entry.planned !== entry.wasPlanned;
+            if (demandByBatch[bk] != null) {
+                entry.rolls = demandByBatch[bk];
+                entry.wasRolls = stripNum(b.rolls);
+                if (entry.rolls !== entry.wasRolls) changed = true;
+            }
+            if (changed) out.batches.push(entry);
         });
         return out;
     }
@@ -9668,8 +9855,11 @@
         remainingRollsForPosition: remainingRollsForPosition,
         formatLinkedPositionLabel: formatLinkedPositionLabel,
         stripSupplyRolls: stripSupplyRolls,
-        cutPositionFit: cutPositionFit,                 // #4426: годится ли позиция для добавления в задание
-        planCutPositionFill: planCutPositionFill,       // #4426: добор остальных свободных полос позициями
+        cutPositionFit: cutPositionFit,                 // #4426/#4428: годится ли позиция для добавления в задание
+        planCutPositionFill: planCutPositionFill,       // #4426/#4428: добор полос задания позициями своих заказов
+        newStripCount: newStripCount,                   // #4428: сколько новых полос режем в остаток джамбо
+        siblingStripReserveMm: siblingStripReserveMm,   // #4428: ширина, отложенная под другие позиции заказа
+        planPassesUpdates: planPassesUpdates,           // #4428: пересчёт партий/обеспечений под новые проходы
         rowsToGenPositions: rowsToGenPositions,
         preferredWidthsKey: preferredWidthsKey,
         groupPositionsByPlanningProfile: groupPositionsByPlanningProfile,
@@ -13407,14 +13597,15 @@
             });
     };
 
-    // #4426: «+ позиция» на панели «Связанные позиции» — добавить в СУЩЕСТВУЮЩЕЕ задание
-    // ещё одну позицию заказа. Раньше это было возможно только «изнутри» редактора полос
-    // (значок 🔗 у необеспеченной полосы, #3320): с панели связей задание выглядело
-    // неизменяемым — позиции только отвязывались. Состав задания читаем из БД (свежие
-    // «Партии ГП»), годность позиции считает cutPositionFit: сырьё + метраж + намотка
-    // задания и СВОБОДНАЯ полоса его ширины. Непроходные позиции той же номенклатуры
-    // показываем с причиной — иначе непонятно, почему нужной позиции нет в списке.
-    AtexProductionPlanning.prototype.openCutPositionPicker = function(cut) {
+    // #4426/#4428: «+ позиция» в плашке задания (рядом с «+ полоса») — добавить в СУЩЕСТВУЮЩЕЕ
+    // задание ещё одну позицию заказа. Состав задания читаем из БД (свежие «Партии ГП»), годность
+    // позиции считает cutPositionFit: сырьё + метраж + намотка задания и либо СВОБОДНАЯ полоса
+    // её ширины, либо (#4428) НОВАЯ полоса, если она влезает в остаток джамбо. Непроходные
+    // позиции той же номенклатуры показываем с причиной — иначе непонятно, почему нужной
+    // позиции нет в списке.
+    //   ctx (из панели полос) — { jumbo, strips, passes }; без него джамбо берём из
+    //   jumboWidthByMaterial, а состав — только из БД.
+    AtexProductionPlanning.prototype.openCutPositionPicker = function(cut, ctx) {
         var self = this;
         if (!cut) { this.notify('Не выбрано задание', 'error'); return; }
         if (!this.meta.supply) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return; }
@@ -13433,7 +13624,10 @@
         content.appendChild(el('p', { class: 'atex-pp-hint', text: 'Читаю состав задания…' }));
         this.root.appendChild(overlay);
 
-        var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
+        var passes = stripNum((ctx && ctx.passes) || cut.plannedRuns) > 0
+            ? stripNum((ctx && ctx.passes) || cut.plannedRuns) : 1;
+        var jumbo = stripNum(ctx && ctx.jumbo) > 0 ? stripNum(ctx.jumbo)
+            : (Number((this.jumboWidthByMaterial || {})[String(cut.materialId)]) || 0);
         var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
         var search = '';
 
@@ -13444,9 +13638,23 @@
             ]);
         }
 
+        // #4428: куда ляжет позиция — на готовую свободную полосу или новой полосой (полосами).
+        function fitPlacementLabel(fit) {
+            if (!fit) return '—';
+            if (fit.mode === 'new') return 'новая полоса ' + round3(fit.width) + ' мм × ' + round3(fit.stripCount);
+            return 'полоса ' + round3(stripNum(fit.strip && fit.strip.width)) + ' мм';
+        }
+
         this.loadStripsForCut(cut.id).then(function(strips) {
             if (!overlay.parentNode) return;   // модалку успели закрыть
             var free = self.freeStripsOfCut(strips, passes);
+            // #4428: свободная ширина джамбо = джамбо − занято сохранёнными полосами. Ширина
+            // джамбо неизвестна (нет вида сырья) → новых полос не предлагаем: резать вслепую
+            // нельзя, но и молчать не будем — скажем в подписи.
+            var usedMm = planning.stripsUsedWidth(strips || []);
+            var jumboFreeMm = jumbo > 0 ? round3(jumbo - usedMm) : 0;
+            if (jumboFreeMm < 0) jumboFreeMm = 0;
+            var fitOpts = { jumboFreeMm: jumboFreeMm, passes: passes };
             var posLabelById = {};
             (self.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
             var linkedPosIds = {};
@@ -13459,7 +13667,7 @@
             var candidates = [];
             (self.genPositions || []).forEach(function(p) {
                 var remaining = remainingRollsForPosition(p, self.supplies);
-                var fit = cutPositionFit(p, cut, free, remaining);
+                var fit = cutPositionFit(p, cut, free, remaining, fitOpts);
                 var sameMaterial = String(p.materialId == null ? '' : p.materialId).trim() ===
                     String(cut.materialId == null ? '' : cut.materialId).trim();
                 if (!sameMaterial) { otherNomenclature++; return; }
@@ -13491,8 +13699,8 @@
                         el('span', { class: 'atex-pp-supply-item-label',
                             text: c.label + (c.linked ? ' · уже в задании' : '') }),
                         el('span', { class: 'atex-pp-supply-item-meta',
-                            text: 'ост. ' + round3(c.remaining) + ' рул. → полоса ' +
-                                round3(stripNum(c.fit.strip.width)) + ' мм · ' + round3(c.fit.rolls) + ' рул.' })
+                            text: 'ост. ' + round3(c.remaining) + ' рул. → ' + fitPlacementLabel(c.fit) +
+                                ' · ' + round3(c.fit.rolls) + ' рул.' })
                     ]);
                     item.addEventListener('click', function() { renderConfirm(c); });
                     list.appendChild(item);
@@ -13500,7 +13708,7 @@
                 if (!fits.length) {
                     list.appendChild(el('div', { class: 'atex-pp-hint',
                         text: shown.length
-                            ? 'Подходящих позиций нет: у задания нет свободной полосы нужной ширины либо остаток позиций уже обеспечен.'
+                            ? 'Подходящих позиций нет: свободной полосы нужной ширины у задания нет, в остаток джамбо новая не влезает либо остаток позиций уже обеспечен.'
                             : 'Под поиск ничего не подошло.' }));
                 }
                 listBox.appendChild(list);
@@ -13526,7 +13734,9 @@
                     text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + matLabel + ' · ' +
                         round3(stripNum(cut.length)) + ' м · ' + (normWinding(cut.winding) || '—') +
                         '. Позиция ложится на свободную полосу задания той же ширины (свободных полос: ' +
-                        free.length + ' из ' + (strips || []).length + ') и обеспечивается через «Обеспечение».' }));
+                        free.length + ' из ' + (strips || []).length + '), а если такой нет — режется новой полосой ' +
+                        'в остаток джамбо (' + (jumbo > 0 ? round3(jumboFreeMm) + ' мм из ' + round3(jumbo) : 'ширина джамбо не задана — новых полос не предлагаем') +
+                        '). Связь пишется «Обеспечением».' }));
 
                 if (!candidates.length) {
                     content.appendChild(el('p', { class: 'atex-pp-hint',
@@ -13553,44 +13763,97 @@
                 }
             }
 
-            function renderConfirm(c) {
+            // #4428: countOverride — сколько НОВЫХ полос режем (диспетчер правит вручную:
+            // менеджер считает заказ «чтобы всё влезло ровненько», и наше предложение — лишь
+            // отправная точка). Для позиции на готовой полосе поле не показываем: геометрия
+            // задания там не меняется.
+            function renderConfirm(c, countOverride) {
                 content.innerHTML = '';
                 content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Добавить позицию в задание?' }));
-                var capped = round3(c.fit.rolls) < round3(c.fit.strip.rolls);
-                content.appendChild(el('div', { class: 'atex-pp-supply-confirm' }, [
-                    confirmRow('Задание', '№ ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + matLabel),
-                    confirmRow('Позиция', c.label),
-                    confirmRow('Полоса задания', round3(stripNum(c.fit.strip.width)) + ' мм · ' + round3(c.fit.strip.rolls) + ' рул.'),
-                    confirmRow('Необеспеченный остаток', round3(c.remaining) + ' рул.'),
-                    confirmRow('Будет обеспечено', round3(c.fit.rolls) + ' рул.' + (capped ? ' (ограничено 110% остатка)' : ''))
-                ]));
-                content.appendChild(el('p', { class: 'atex-pp-hint',
-                    text: 'Полоса перестанет быть складской: её «Партия ГП» получит спрос и «ID заказа» позиции. ' +
-                        'Раскладка задания и его длительность не меняются — полоса уже есть в задании.' }));
-
-                // #4426: ОСТАЛЬНЫЕ свободные полосы задания тоже пытаются обеспечиться — как при
-                // генерации, где втулочная полоса 110 мм привязывается к уже заказанной позиции
-                // 110 мм (#3872). Позиции ЗАКАЗОВ задания отмечены заранее, из чужих заказов —
-                // предложены, но не отмечены (диспетчер решает, тянуть ли чужой заказ в это задание).
-                var rest = free.filter(function(s) { return String(s.id) !== String(c.fit.strip.id); });
-                var others = candidates.filter(function(x) { return String(x.id) !== String(c.id); });
+                var isNew = c.fit.mode === 'new';
+                var width = isNew ? stripNum(c.fit.width) : stripNum(c.fit.strip.width);
+                var maxNew = isNew && width > 0 ? Math.floor(round3(jumboFreeMm) / width) : 0;
+                // Заказы задания: заказ выбранной позиции + заказы уже связанных позиций.
                 var coveredOrders = {};
                 coveredOrders[String(c.position && c.position.orderId)] = true;
                 Object.keys(linkedPosIds).forEach(function(pid) {
                     var lp = (self.genPositions || []).filter(function(p) { return String(p.id) === String(pid); })[0];
                     if (lp && lp.orderId != null && String(lp.orderId) !== '') coveredOrders[String(lp.orderId)] = true;
                 });
+                var others = candidates.filter(function(x) { return String(x.id) !== String(c.id); });
+                // #4428: под ОСТАЛЬНЫЕ позиции этого заказа откладываем по полосе каждой —
+                // иначе жадный добор первой позиции съедает джамбо, и вторая позиция заказа
+                // снова не попадает в задание (ТЗ: заказ идёт в задание целиком).
+                var reserveMm = isNew ? siblingStripReserveMm(cut, free, others, coveredOrders,
+                    { jumboFreeMm: jumboFreeMm, passes: passes }) : 0;
+                var byReserve = isNew && width > 0 ? Math.floor(round3(jumboFreeMm - reserveMm) / width) : 0;
+                var count = isNew ? Math.max(1, Math.min(maxNew, stripNum(countOverride) > 0
+                    ? Math.round(stripNum(countOverride))
+                    : Math.min(round3(c.fit.stripCount), byReserve > 0 ? byReserve : 1))) : 0;
+                var produced = isNew ? round3(count * passes) : round3(c.fit.strip.rolls);
+                var rolls = isNew ? stripSupplyRolls(produced, c.remaining) : round3(c.fit.rolls);
+                var capped = round3(rolls) < round3(produced);
+                var confirmBox = el('div', { class: 'atex-pp-supply-confirm' }, [
+                    confirmRow('Задание', '№ ' + (formatCutNumber(cut.number) || cut.id) + ' · ' + matLabel),
+                    confirmRow('Позиция', c.label)
+                ]);
+                if (isNew) {
+                    // Число новых полос — редактируемое; больше, чем влезает в остаток джамбо, не даём.
+                    var countInput = el('input', { class: 'atex-pp-input atex-pp-supply-count', type: 'number',
+                        min: '1', step: '1', max: String(maxNew) });
+                    countInput.value = String(count);
+                    countInput.addEventListener('change', function() {
+                        var v = Math.round(stripNum(countInput.value));
+                        if (!(v > 0)) v = 1;
+                        if (v > maxNew) {
+                            v = maxNew;
+                            self.notify('В остаток джамбо (' + round3(jumboFreeMm) + ' мм) влезает не больше ' +
+                                maxNew + ' полос по ' + round3(width) + ' мм', 'warning');
+                        }
+                        renderConfirm(c, v);
+                    });
+                    confirmBox.appendChild(el('div', { class: 'atex-pp-supply-confirm-row' }, [
+                        el('span', { class: 'atex-pp-supply-confirm-label', text: 'Новых полос ' + round3(width) + ' мм' }),
+                        countInput
+                    ]));
+                    confirmBox.appendChild(confirmRow('Остаток джамбо',
+                        round3(jumboFreeMm) + ' мм → ' + round3(jumboFreeMm - count * width) + ' мм' +
+                        (reserveMm > 0 ? ' (под другие позиции заказа отложено ' + round3(reserveMm) + ' мм)' : '')));
+                    confirmBox.appendChild(confirmRow('Произведёт', produced + ' рул. (' + count + ' × ' + passes + ' проходов)'));
+                } else {
+                    confirmBox.appendChild(confirmRow('Полоса задания',
+                        round3(width) + ' мм · ' + round3(c.fit.strip.rolls) + ' рул.'));
+                }
+                confirmBox.appendChild(confirmRow('Необеспеченный остаток', round3(c.remaining) + ' рул.'));
+                confirmBox.appendChild(confirmRow('Будет обеспечено',
+                    round3(rolls) + ' рул.' + (capped ? ' (ограничено 110% остатка)' : '')));
+                content.appendChild(confirmBox);
+                content.appendChild(el('p', { class: 'atex-pp-hint',
+                    text: isNew
+                        ? ('Полоса режется заново: раскрой задания меняется (ножей станет больше), длительность — нет ' +
+                           '(её задают проходы). Не хватает рулонов заказу — увеличьте «Проходов» в плашке задания.')
+                        : ('Полоса перестанет быть складской: её «Партия ГП» получит спрос и «ID заказа» позиции. ' +
+                           'Раскладка задания и его длительность не меняются — полоса уже есть в задании.') }));
+
+                // #4426/#4428: ОСТАЛЬНЫЕ позиции ЗАКАЗОВ задания подтягиваются вместе с выбранной
+                // (ТЗ: в задание в первую очередь идёт то, что объединено одним заказом) — на
+                // свободные полосы задания, а что не легло — новой полосой в оставшийся джамбо.
+                // Позиции своих заказов отмечены заранее, из чужих заказов — предложены со снятой
+                // галкой и только на СВОБОДНЫЕ полосы (чужой заказ геометрию задания не меняет).
+                var chosenStripId = isNew ? null : String(c.fit.strip.id);
+                var rest = free.filter(function(s) { return chosenStripId == null || String(s.id) !== chosenStripId; });
                 var candById = {};
                 candidates.forEach(function(x) { candById[String(x.id)] = x; });
-                var fill = planCutPositionFill(cut, rest, others, coveredOrders);
+                var restJumbo = round3(jumboFreeMm - (isNew ? count * width : 0));
+                var fill = planCutPositionFill(cut, rest, others, coveredOrders,
+                    { jumboFreeMm: restJumbo > 0 ? restJumbo : 0, passes: passes });
                 var picked = fill.map(function(f) { return !!f.sameOrder; });
                 if (fill.length) {
                     content.appendChild(el('div', { class: 'atex-pp-supply-reject-title',
-                        text: 'Заодно обеспечим свободные полосы задания (' + fill.length + '):' }));
+                        text: 'Заодно обеспечим позиции этого задания (' + fill.length + '):' }));
                     var fillBox = el('div', { class: 'atex-pp-supply-fill' });
                     fill.forEach(function(f, i) {
                         var fc = candById[String(f.positionId)];
-                        var strip = rest.filter(function(s) { return String(s.id) === String(f.stripId); })[0] || {};
                         var box = el('input', { type: 'checkbox' });
                         if (picked[i]) box.checked = true;
                         box.addEventListener('change', function() { picked[i] = !!box.checked; });
@@ -13599,8 +13862,10 @@
                             el('span', { class: 'atex-pp-supply-item-label',
                                 text: (fc && fc.label) || ('позиция #' + f.positionId) }),
                             el('span', { class: 'atex-pp-supply-item-meta',
-                                text: 'полоса ' + round3(stripNum(strip.width)) + ' мм · ' + round3(f.rolls) + ' рул.' +
-                                    (f.sameOrder ? '' : ' · другой заказ') })
+                                text: (f.mode === 'new'
+                                        ? ('новая полоса ' + round3(f.width) + ' мм × ' + round3(f.stripCount))
+                                        : ('полоса ' + round3(f.width) + ' мм')) +
+                                    ' · ' + round3(f.rolls) + ' рул.' + (f.sameOrder ? '' : ' · другой заказ') })
                         ]);
                         fillBox.appendChild(row);
                     });
@@ -13616,15 +13881,21 @@
                 var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Добавить позицию' });
                 ok.addEventListener('click', function() {
                     close();
-                    var items = [{ strip: c.fit.strip, candidate: c, rolls: round3(c.fit.rolls) }];
+                    var items = [{
+                        strip: isNew ? { id: null, width: round3(width), qty: count } : c.fit.strip,
+                        candidate: c, rolls: round3(rolls)
+                    }];
                     fill.forEach(function(f, i) {
                         if (!picked[i]) return;
                         var fc = candById[String(f.positionId)];
-                        var strip = rest.filter(function(s) { return String(s.id) === String(f.stripId); })[0];
-                        if (!fc || !strip) return;
+                        if (!fc) return;
+                        var strip = f.mode === 'new'
+                            ? { id: null, width: round3(f.width), qty: round3(f.stripCount) }
+                            : rest.filter(function(s) { return String(s.id) === String(f.stripId); })[0];
+                        if (!strip) return;
                         items.push({ strip: strip, candidate: fc, rolls: round3(f.rolls) });
                     });
-                    self.createStripSupplies(items);
+                    self.createStripSupplies(items, { cutId: cut.id, passes: passes });
                 });
                 actions.appendChild(back);
                 actions.appendChild(ok);
@@ -13650,21 +13921,32 @@
     };
 
     // #4426: то же для НЕСКОЛЬКИХ пар «полоса → позиция» за раз — добавляемая позиция плюс
-    // добор остальных свободных полос (planCutPositionFill). Пишем последовательно: каждое
+    // добор остальных полос задания (planCutPositionFill). Пишем последовательно: каждое
     // «Обеспечение» + пометка его «Партии ГП» заказной; план перечитываем ОДИН раз в конце.
-    // items — [{ strip, candidate, rolls }]. Любой невалидный элемент — ошибка ДО записи
-    // (пишем всё или ничего не начинаем), сбой в середине — перечитываем план, чтобы экран
-    // не врал о том, что успело записаться.
-    AtexProductionPlanning.prototype.createStripSupplies = function(items) {
+    // items — [{ strip, candidate, rolls }]. #4428: полоса БЕЗ id — новая: сперва создаём
+    // «Партию ГП» задания (opts.cutId/opts.passes), потом вешаем на неё обеспечение.
+    // Любой невалидный элемент — ошибка ДО записи (пишем всё или ничего не начинаем),
+    // сбой в середине — перечитываем план, чтобы экран не врал о том, что успело записаться.
+    AtexProductionPlanning.prototype.createStripSupplies = function(items, opts) {
         var self = this;
         if (this.busy) return Promise.resolve();
         var meta = this.meta.supply;
+        var fbMeta = this.meta.finishedBatch;
+        var o = opts || {};
         if (!meta) { this.notify('Нет метаданных таблицы «Обеспечение»', 'error'); return Promise.resolve(); }
         var list = items || [];
         if (!list.length) { this.notify('Нечего обеспечивать: не выбрана позиция', 'error'); return Promise.resolve(); }
+        var needsNewStrip = list.some(function(it) { return it && it.strip && it.strip.id == null; });
+        if (needsNewStrip && (!fbMeta || o.cutId == null)) {
+            this.notify('Не создать новую полосу: нет метаданных «' + TABLE.finishedBatch + '» или задания', 'error');
+            return Promise.resolve();
+        }
         for (var i = 0; i < list.length; i++) {
             var it = list[i] || {};
-            if (!it.strip || it.strip.id == null) { this.notify('Полоса не сохранена (нет «Партии ГП»)', 'error'); return Promise.resolve(); }
+            if (!it.strip) { this.notify('Полоса не выбрана (нет «Партии ГП»)', 'error'); return Promise.resolve(); }
+            if (it.strip.id == null && !(stripNum(it.strip.width) > 0 && stripNum(it.strip.qty) > 0)) {
+                this.notify('Новая полоса без ширины/количества — не создаём', 'error'); return Promise.resolve();
+            }
             if (!it.candidate || !it.candidate.id) { this.notify('Не выбрана позиция заказа', 'error'); return Promise.resolve(); }
             if (!(stripNum(it.rolls) > 0)) { this.notify('Нечего обеспечивать (0 рулонов)', 'error'); return Promise.resolve(); }
         }
@@ -13672,6 +13954,22 @@
         var done = [];
         var chain = list.reduce(function(acc, it) {
             return acc.then(function() {
+                // #4428: новой полосы в БД ещё нет — создаём «Партию ГП» задания («Кол-во план» =
+                // полосы × проходов, как persistStrip/#3431), спрос и «ID заказа» проставит
+                // markFinishedBatchOrdered после записи обеспечения.
+                if (it.strip.id != null) return null;
+                var batchFields = buildFinishedBatchFields(fbMeta, {
+                    width: it.strip.width, strips: it.strip.qty,
+                    planned: finishedBatchRolls(it.strip.qty, o.passes), active: '1'
+                });
+                return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(o.cutId), batchFields)
+                    .then(function(res) {
+                        var bid = res && (res.obj || res.id || res.i);
+                        if (!bid) throw new Error('Сервер не вернул id новой «' + TABLE.finishedBatch + '»');
+                        it.strip.id = String(bid);
+                        it.strip._created = true;
+                    });
+            }).then(function() {
                 var pos = it.candidate.position || {};
                 var fields = buildSupplyFieldsForFinishedBatch(meta, {
                     finishedBatchId: it.strip.id,
@@ -13690,7 +13988,8 @@
                         // хотя она уже в заказе.
                         return self.markFinishedBatchOrdered(it.strip.id, it.rolls, pos.orderId);
                     }).then(function() {
-                        done.push(round3(stripNum(it.strip.width)) + ' мм · ' + round3(it.rolls) + ' рул.');
+                        done.push(round3(stripNum(it.strip.width)) + ' мм · ' + round3(it.rolls) + ' рул.' +
+                            (it.strip._created ? ' (новая)' : ''));
                     });
             });
         }, Promise.resolve());
@@ -13762,6 +14061,236 @@
                     (err && err.message || err) + ' — поправьте спрос/«ID заказа» в карточке партии', 'warning');
                 return false;
             });
+    };
+
+    // #4428: «Партии ГП» задания С ЧИСЛАМИ план/спроса (loadStripsForCut отдаёт только
+    // ширину и полосы). → [{ id, width, strips, rolls, planned }] в порядке БД.
+    AtexProductionPlanning.prototype.loadBatchesForCut = function(cutId) {
+        var fbMeta = this.meta.finishedBatch;
+        if (!fbMeta) return Promise.resolve([]);
+        var widthIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.width);
+        var stripsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.strips);
+        var rollsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var plannedIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.planned);
+        return this.getJson('object/' + fbMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500')
+            .then(function(rows) {
+                return (rows || []).map(function(rec) {
+                    var r = rec.r || [];
+                    return {
+                        id: String(rec.i),
+                        width: widthIdx >= 0 ? stripNum(r[widthIdx]) : 0,
+                        strips: stripsIdx >= 0 ? stripNum(r[stripsIdx]) : 0,
+                        rolls: rollsIdx >= 0 ? stripNum(r[rollsIdx]) : 0,
+                        planned: plannedIdx >= 0 ? stripNum(r[plannedIdx]) : 0
+                    };
+                });
+            });
+    };
+
+    // #4428: диспетчер поменял «Проходов» в плашке задания. Проходы — единственный рычаг
+    // подгонки резки под заказ (полосы упираются в ширину джамбо), но менять их молча нельзя:
+    // они задают длительность задания, план «Партий ГП» и то, сколько рулонов достанется
+    // позициям. Поэтому сперва СЧИТАЕМ и ПОКАЗЫВАЕМ, что изменится, и только по «Применить»
+    // пишем (applyCutPasses). revert — вернуть поле к прежнему значению (отказ/ошибка).
+    AtexProductionPlanning.prototype.changeCutPasses = function(cut, rawValue, revert) {
+        var self = this;
+        function back() { if (typeof revert === 'function') revert(); }
+        if (!cut) { back(); return Promise.resolve(false); }
+        if (this.busy) { this.notify('Идёт другая операция — подождите', 'info'); back(); return Promise.resolve(false); }
+        var cutMeta = this.meta.cut;
+        if (!cutMeta) { this.notify('Нет метаданных таблицы заданий', 'error'); back(); return Promise.resolve(false); }
+        var runsReq = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);
+        if (!runsReq) {
+            console.error('[pp] ❌ #4428: в метаданных задания нет реквизита «' + CUT_PLANNED_RUNS_NAMES[0] + '»');
+            this.notify('Не изменить проходы: в таблице заданий нет реквизита «' + CUT_PLANNED_RUNS_NAMES[0] + '»', 'error');
+            back(); return Promise.resolve(false);
+        }
+        var was = stripNum(cut.plannedRuns);
+        var runs = Math.round(stripNum(rawValue));
+        if (!(runs > 0)) { this.notify('Проходов должно быть больше нуля', 'error'); back(); return Promise.resolve(false); }
+        if (runs > MAX_MANUAL_PASSES) {
+            this.notify('Проходов не больше ' + MAX_MANUAL_PASSES + ' — столько джамбо в одно задание не ставят', 'error');
+            back(); return Promise.resolve(false);
+        }
+        if (runs === was) { back(); return Promise.resolve(false); }
+        if (cutIsStarted(cut)) { this.notify('Задание начато — число проходов не меняем', 'info'); back(); return Promise.resolve(false); }
+        if (cut.fixed) { this.notify('Задание зафиксировано (🔒) — снимите фиксацию, чтобы менять проходы', 'info'); back(); return Promise.resolve(false); }
+        if (typeof this.dayIsFrozen === 'function' && this.dayIsFrozen(cut.planDate)) {
+            this.notify('День задания заморожен — проходы не меняем', 'info'); back(); return Promise.resolve(false);
+        }
+        // #3635 п.5/#4209: хвост настройки (0 проходов) резки не несёт — проходы задаёт голова цепочки.
+        if (!(was > 0)) {
+            this.notify('Это хвост настройки (0 проходов) — проходы задаются в головном сегменте задания', 'info');
+            back(); return Promise.resolve(false);
+        }
+
+        return this.loadBatchesForCut(cut.id).then(function(batches) {
+            var needByPosition = {};
+            (self.genPositions || []).forEach(function(p) {
+                if (p && p.id != null) needByPosition[String(p.id)] = stripNum(p.qty);
+            });
+            var plan = planPassesUpdates(cut.id, batches, self.supplies, needByPosition, runs);
+            var runLength = cutRunLength(cut, self.supplies, self.positionLengthById);
+            var durWas = Math.ceil(plannedCutDurationMinutes(runLength, was, self.opTimes, !!cut.isFoil));
+            var durNow = Math.ceil(plannedCutDurationMinutes(runLength, runs, self.opTimes, !!cut.isFoil));
+            self.openCutPassesConfirm(cut, was, runs, durWas, durNow, plan, back);
+            return true;
+        }).catch(function(err) {
+            console.error('[pp] ❌ #4428 не прочитаны «Партии ГП» задания ' + cut.id + ':', err && err.message, err && err.stack);
+            self.notify('Не прочитать состав задания: ' + (err && err.message || err), 'error');
+            back();
+            return false;
+        });
+    };
+
+    // #4428: показать, что даст смена проходов, и записать по подтверждению. Отдельным окном,
+    // потому что менять придётся не только задание: план каждой «Партии ГП» и рулоны
+    // «Обеспечений» (иначе добавленные проходы уедут на склад, а позиция останется
+    // недообеспеченной). Отказ/крестик — поле возвращается к прежнему значению.
+    AtexProductionPlanning.prototype.openCutPassesConfirm = function(cut, was, runs, durWas, durNow, plan, revert) {
+        var self = this;
+        var reverted = false;
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-supply-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-supply-modal is-open' }, [dialog]);
+        function close(cancel) {
+            if (cancel && !reverted) { reverted = true; if (typeof revert === 'function') revert(); }
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(true); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', function() { close(true); });
+        dialog.appendChild(closeX);
+        var content = el('div', { class: 'atex-pp-supply-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Изменить число проходов?' }));
+
+        function row(label, value) {
+            return el('div', { class: 'atex-pp-supply-confirm-row' }, [
+                el('span', { class: 'atex-pp-supply-confirm-label', text: label }),
+                el('span', { class: 'atex-pp-supply-confirm-value', text: String(value) })
+            ]);
+        }
+        var box = el('div', { class: 'atex-pp-supply-confirm' }, [
+            row('Задание', '№ ' + (formatCutNumber(cut.number) || cut.id)),
+            row('Проходов', was + ' → ' + runs),
+            row('Длительность, мин', (durWas > 0 ? durWas : '—') + ' → ' + (durNow > 0 ? durNow : '—'))
+        ]);
+        (plan.batches || []).forEach(function(b) {
+            var txt = 'план ' + round3(b.wasPlanned) + ' → ' + round3(b.planned) + ' рул.';
+            if (b.rolls != null && b.rolls !== b.wasRolls) txt += ', спрос ' + round3(b.wasRolls) + ' → ' + round3(b.rolls) + ' рул.';
+            box.appendChild(row('Полоса ' + round3(b.width) + ' мм', txt));
+        });
+        var posLabelById = {};
+        (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+        (plan.supplies || []).forEach(function(s) {
+            box.appendChild(row('Обеспечение ' + (posLabelById[String(s.positionId)] || ('позиции #' + s.positionId)),
+                round3(s.was) + ' → ' + round3(s.rolls) + ' рул.'));
+        });
+        content.appendChild(box);
+        content.appendChild(el('p', { class: 'atex-pp-hint',
+            text: 'День и порядок заданий не меняются. Длительность задания изменится, поэтому день станка ' +
+                'разъедется — пересоберите его кнопкой «↻ Пересчитать наладку», а если проходы больше не влезают ' +
+                'в смену, задание разобьёт по дням ближайшее «Упорядочить».' }));
+        if ((plan.keptSupplyIds || []).length) {
+            content.appendChild(el('p', { class: 'atex-pp-hint',
+                text: 'Обеспечений не тронем: ' + plan.keptSupplyIds.length +
+                    ' — их позиций нет в планировании или их остаток покрыт другими заданиями.' }));
+        }
+        if ((plan.legacyBatchIds || []).length) {
+            content.appendChild(el('p', { class: 'atex-pp-hint',
+                text: 'Старых «Партий ГП» без «' + FINISHED_BATCH_REQ.strips + '»: ' + plan.legacyBatchIds.length +
+                    ' — их план не пересчитываем (в «' + FINISHED_BATCH_REQ.rolls + '» у них лежит число полос).' }));
+        }
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var cancel = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        cancel.addEventListener('click', function() { close(true); });
+        var ok = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Применить' });
+        ok.addEventListener('click', function() {
+            reverted = true;   // применяем — возвращать поле не надо
+            close(false);
+            self.applyCutPasses(cut, runs, plan, durNow);
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(ok);
+        content.appendChild(actions);
+        this.root.appendChild(overlay);
+    };
+
+    // #4428: записать новое число проходов задания: «Кол-во резок план» + пересчитанные
+    // «Длительность, минут»/«Тайминг» (как при слиянии заданий, #4424) → «Кол-во план»/спрос
+    // «Партий ГП» → рулоны «Обеспечений» → хранимые колонки наладки этого задания
+    // (persistCutSetupColumns, чтобы карточка и Гант показывали новое время). Сбой в середине
+    // не прячем: перечитываем план, чтобы экран не врал о записанном.
+    AtexProductionPlanning.prototype.applyCutPasses = function(cut, runs, plan, durNow) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        this._ppOp = 'applyCutPasses';   // #4177: контекст трассы записей
+        var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
+        var runsReq = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);
+        var durReq = reqIdByName(cutMeta, CUT_REQ.duration);
+        var timingReq = reqIdByName(cutMeta, CUT_REQ.timing);
+        var fbPlannedReq = fbMeta ? reqIdByName(fbMeta, FINISHED_BATCH_REQ.planned) : null;
+        var fbRollsReq = fbMeta ? reqIdByName(fbMeta, FINISHED_BATCH_REQ.rolls) : null;
+        var supRollsReq = supMeta ? reqIdByName(supMeta, SUPPLY_REQ.rolls) : null;
+        var runLength = cutRunLength(cut, this.supplies, this.positionLengthById);
+        var fields = {};
+        fields['t' + runsReq] = String(runs);
+        if (durReq) fields['t' + durReq] = durNow > 0 ? String(durNow) : '';
+        if (timingReq) fields['t' + timingReq] = cutTimingDetails(runLength, runs, this.opTimes, !!cut.isFoil);
+        var slitterId = (cut.slitter && cut.slitter.id) || '';
+        var written = { batches: 0, supplies: 0 };
+        this.setBusy(true);
+        return this.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields).then(function() {
+            return (plan.batches || []).reduce(function(chain, b) {
+                return chain.then(function() {
+                    var f = {};
+                    if (fbPlannedReq) f['t' + fbPlannedReq] = String(round3(b.planned));
+                    if (fbRollsReq && b.rolls != null) f['t' + fbRollsReq] = String(round3(b.rolls));
+                    if (!Object.keys(f).length) return;
+                    return self.post('_m_set/' + encodeURIComponent(b.id) + '?JSON', f)
+                        .then(function() { written.batches += 1; });
+                });
+            }, Promise.resolve());
+        }).then(function() {
+            if (!supRollsReq && (plan.supplies || []).length) {
+                console.error('[pp] ❌ #4428: в метаданных «Обеспечения» нет «' + SUPPLY_REQ.rolls + '» — рулоны не пересчитать');
+                self.notify('Проходы записаны, но рулоны «Обеспечений» не обновить: нет реквизита «' +
+                    SUPPLY_REQ.rolls + '»', 'warning');
+                return;
+            }
+            return (plan.supplies || []).reduce(function(chain, s) {
+                return chain.then(function() {
+                    var f = {};
+                    f['t' + supRollsReq] = String(round3(s.rolls));
+                    return self.post('_m_set/' + encodeURIComponent(s.id) + '?JSON', f)
+                        .then(function() { written.supplies += 1; });
+                });
+            }, Promise.resolve());
+        }).then(function() {
+            return self.reload();
+        }).then(function() {
+            // Хранимые «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» этого задания — от проходов;
+            // без них карточка и Гант показывали бы прежнее время (#3862).
+            return self.persistCutSetupColumns([String(cut.id)]);
+        }).then(function() {
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            self.reopenStripsIfOpen();
+            self.notify('Проходов: ' + runs + ' (партий обновлено ' + written.batches +
+                ', обеспечений ' + written.supplies + '). Время дня разъехалось — нажмите «↻ Пересчитать наладку»', 'success');
+            if (slitterId) self.warnOverfilledDays(slitterId);   // день мог перестать вмещать задание
+            return true;
+        }).catch(function(err) {
+            console.error('[pp] ❌ #4428 смена проходов задания ' + cut.id + ' прервана (партий ' +
+                written.batches + ', обеспечений ' + written.supplies + '):', err && err.message, err && err.stack);
+            self.setBusy(false);
+            self.notify('Ошибка смены проходов: ' + (err && err.message || err) +
+                ' Записано до сбоя: партий ' + written.batches + ', обеспечений ' + written.supplies + '.', 'error');
+            return self.reload().then(function() { self.render(); self.reopenStripsIfOpen(); }).catch(function() {});
+        });
     };
 
     AtexProductionPlanning.prototype.reload = function() {
@@ -13877,23 +14406,42 @@
         var prefWidths = [];   // загруженные ходовые ширины (#3128, фильтруются по остатку)
         panel.innerHTML = '';
 
-        // Заголовок: сырьё + ширина джамбо, справа — иконка закрытия (#3127).
+        // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
+        // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
+        var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
+
+        // Заголовок: сырьё + ширина джамбо, проходы, справа — иконка закрытия (#3127).
         var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
         var closeIcon = el('button', { class: 'atex-pp-strip-close', type: 'button', title: 'Закрыть', text: '×' });
         closeIcon.addEventListener('click', function() {
             self.stripEditCutId = null;
             if (panel.parentNode) panel.parentNode.removeChild(panel);
         });
+        // #4428: «Проходов» — редактируемое «Кол-во резок план». Полосы ограничены шириной
+        // джамбо, поэтому под заказ резка настраивается ИМЕННО проходами; раньше их можно было
+        // задать только при генерации. Начатое задание не трогаем (#4381), зафиксированное
+        // глушит lockStripPanel (#3508 п.3).
+        var passesInput = el('input', { class: 'atex-pp-input atex-pp-strip-passes', type: 'number',
+            min: '1', step: '1', title: 'Проходов (Кол-во резок план): полосы × проходов = рулоны задания' });
+        passesInput.value = String(passes);
+        if (cutIsStarted(cut)) {
+            passesInput.disabled = true;
+            passesInput.title = 'Задание начато — число проходов не меняем';
+        }
+        passesInput.addEventListener('change', function() {
+            self.changeCutPasses(cut, passesInput.value, function() { passesInput.value = String(passes); });
+        });
         panel.appendChild(el('div', { class: 'atex-pp-strip-header' }, [
             el('span', { class: 'atex-pp-strip-header-text', text: 'Сырьё: ' + matLabel + ', Джамбо: ' + (jumbo || '—') + ' мм' }),
+            el('label', { class: 'atex-pp-strip-passes-box' }, [
+                el('span', { class: 'atex-pp-strip-passes-label', text: 'Проходов' }),
+                passesInput
+            ]),
             closeIcon
         ]));
 
         // Таблица полос.
         var table = el('div', { class: 'atex-pp-strip-table' });
-        // #3253: редактируем «Кол-во полос» (за проход); «Рулонов» (полос × проходов) —
-        // справочно, read-only. Геометрия (Занято/Остаток/Ножи) считается по полосам.
-        var passes = stripNum(cut.plannedRuns) > 0 ? stripNum(cut.plannedRuns) : 1;
         // #3280: «Назначение» полосы — Заказ (на эту Партию ГП есть ссылка из Обеспечения)
         // или Склад (ссылки нет). Набор id Партий ГП, на которые ссылается Обеспечение.
         var orderedBatchIds = {};
@@ -14077,14 +14625,23 @@
             });
         }
 
-        // Кнопка «+ полоса».
+        // Кнопки «+ полоса» и «+ позиция» (#4428).
         var addBtn = el('button', { class: 'atex-pp-btn atex-pp-strip-add', type: 'button', text: '+ полоса' });
         addBtn.addEventListener('click', function() {
             strips.push({ id: null, width: '', qty: '' });   // #3242: запись «Партии ГП»
             renderRows();
             recalc();
         });
-        panel.appendChild(addBtn);
+        // #4428: «+ позиция» переехала сюда с панели «Связанные позиции» (#4426) и теперь умеет
+        // ДОБАВЛЯТЬ ПОЛОСУ: позицию, которую удалили из задания или дозаказали позже, кладём на
+        // свободную полосу её ширины, а если такой нет — режем новую в остаток джамбо.
+        var addPosBtn = el('button', { class: 'atex-pp-btn atex-pp-strip-add-pos', type: 'button',
+            text: '+ позиция', title: 'Добавить позицию заказа: на свободную полосу её ширины или новой полосой в остаток джамбо' });
+        addPosBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            self.openCutPositionPicker(cut, { jumbo: jumbo, strips: strips, passes: passes });
+        });
+        panel.appendChild(el('div', { class: 'atex-pp-strip-add-row' }, [addBtn, addPosBtn]));
 
         // Панель ходовых ширин (#3128: 3 ряда со скроллом — в CSS; скрываем те,
         // что шире текущего остатка джамбо).
@@ -18885,20 +19442,14 @@
             return;
         }
 
-        // Связанные позиции задания: список + добавление позиции (#4426).
+        // Связанные позиции задания: список + отвязка. #4428: «+ позиция» (#4426) отсюда убрана —
+        // она живёт в плашке задания рядом с «+ полоса» (openStrips), потому что добавление
+        // позиции теперь МЕНЯЕТ СОСТАВ ПОЛОС (новая полоса в остаток джамбо), а не только связи.
         var linked = this.supplies.filter(function(s) { return String(s.cutId) === String(cut.id); });
         var listWrap = el('div', { class: 'atex-pp-linked' });
-        // #4426: «+ позиция» — добавить в это задание ещё одну позицию заказа (ложится на
-        // свободную полосу той же ширины). Задание с одной позицией больше не «запечатано».
-        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-linked-add', type: 'button',
-            text: '+ позиция', title: 'Добавить в задание позицию заказа (на свободную полосу той же ширины)' });
-        addBtn.addEventListener('click', function() {
-            if (self.busy) return;
-            self.openCutPositionPicker(cut);
-        });
         listWrap.appendChild(el('div', { class: 'atex-pp-linked-head' }, [
             el('h3', { class: 'atex-pp-linked-title', text: 'Связанные позиции (' + linked.length + ')' }),
-            addBtn
+            el('span', { class: 'atex-pp-linked-hint', text: 'добавить — «+ позиция» в «Полосах»' })
         ]));
         if (!linked.length) {
             listWrap.appendChild(el('div', { class: 'atex-pp-empty', text: 'Пока нет связей.' }));

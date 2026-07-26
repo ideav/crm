@@ -826,6 +826,10 @@
 .atex-pp-strip-loading { color: var(--pp-muted); padding: 6px 0; }
 .atex-pp-strip-header { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
 .atex-pp-strip-header-text { flex: 1; min-width: 0; }
+/* #4428: «Проходов» — редактируемое «Кол-во резок план» в шапке плашки задания. */
+.atex-pp-strip-passes-box { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.atex-pp-strip-passes-label { font-size: 12px; color: var(--pp-muted); }
+.atex-pp-strip-passes { width: 72px; text-align: center; }
 /* Иконка закрытия панели полос справа вверху (#3127). */
 .atex-pp-strip-close {
     flex: 0 0 auto;
@@ -867,7 +871,10 @@
 .atex-pp-strip-del { padding: 6px 0; text-align: center; }
 /* #3318: полоса «в заказ» — кнопка удаления неактивна (но кликабельна для tooltip-подсказки). */
 .atex-pp-strip-del.is-disabled { opacity: .4; cursor: not-allowed; }
-.atex-pp-strip-add { margin-bottom: 12px; }
+/* #4428: «+ полоса» и «+ позиция» — в одну строку под таблицей полос. */
+.atex-pp-strip-add-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.atex-pp-strip-add,
+.atex-pp-strip-add-pos { flex: 0 0 auto; }
 
 .atex-pp-strip-summary {
     display: flex;
@@ -900,10 +907,10 @@
 
 /* Привязка обеспечения */
 .atex-pp-linked { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
-/* #4426: заголовок панели и кнопка «+ позиция» — в одну строку, кнопка справа. */
+/* #4426/#4428: заголовок панели и подсказка, где добавляют позицию, — в одну строку. */
 .atex-pp-linked-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .atex-pp-linked-title { margin: 0; font-size: 14px; }
-.atex-pp-linked-add { flex: 0 0 auto; font-size: 12px; padding: 4px 10px; }
+.atex-pp-linked-hint { flex: 0 0 auto; font-size: 11px; color: var(--pp-muted); text-align: right; }
 .atex-pp-linked-item {
     display: flex;
     align-items: center;
@@ -1086,6 +1093,8 @@
 .atex-pp-supply-confirm-row { display: flex; justify-content: space-between; gap: 12px; }
 .atex-pp-supply-confirm-label { color: var(--pp-muted); }
 .atex-pp-supply-confirm-value { font-weight: 600; text-align: right; }
+/* #4428: сколько новых полос режем под позицию — правится прямо в подтверждении. */
+.atex-pp-supply-count { width: 88px; text-align: center; }
 .atex-pp-supply-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 /* #4426: «Заодно обеспечим» — добор остальных свободных полос задания позициями (#3872). */
 .atex-pp-supply-fill { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 180px; overflow-y: auto; }

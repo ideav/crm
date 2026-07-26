@@ -1699,6 +1699,14 @@
         return label;
     }
 
+    // #4428: допуск сравнения ширин в мм — ширины приходят из БД строками («152,00»),
+    // и остаток джамбо считается вычитанием, поэтому «ровно влезает» может выйти
+    // 151.9999999. Полмикрона на ширине реза роли не играют.
+    var WIDTH_FIT_EPS_MM = 0.001;
+    // #4428: потолок ручного ввода «Проходов». Реальные задания доходят до полутора сотен
+    // проходов (#4304: 158), поэтому ограничение чисто от опечатки вроде «3000».
+    var MAX_MANUAL_PASSES = 999;
+
     // #3320: кол-во рулонов обеспечения для привязки полосы к позиции заказа.
     // База — рулоны полосы (Кол-во полос × проходов), но не больше 110% от
     // необеспеченного остатка позиции. Отрицательные/нулевые входы → 0.
@@ -1710,22 +1718,29 @@
         return round3(base < cap ? base : cap);
     }
 
-    // #4426: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание. Задание уже
-    // режет свой набор полос; позиция ложится на СВОБОДНУЮ (ещё не обеспеченную) «Партию ГП»
-    // той же ширины — её рулоны до сих пор шли на склад/в отходы, а теперь идут в заказ.
+    // #4426/#4428: годится ли позиция заказа для добавления в СУЩЕСТВУЮЩЕЕ задание.
     // Номенклатура обязана совпасть с заданием (сырьё + метраж рулона + намотка): иначе
-    // задание физически произведёт не то, что заказано.
+    // задание физически произведёт не то, что заказано. Дальше два пути:
+    //   • есть СВОБОДНАЯ (ещё не обеспеченная) «Партия ГП» той же ширины → позиция ложится
+    //     на неё (mode 'strip'): её рулоны шли на склад/в отходы, теперь идут в заказ,
+    //     раскрой и длительность задания не меняются;
+    //   • свободной полосы нет, но в ОСТАТОК ДЖАМБО влезает полоса нужной ширины (#4428) →
+    //     режем НОВУЮ полосу (mode 'new'): позиция, которую удалили из задания или которую
+    //     дозаказали позже, возвращается в задание, а не остаётся без резки.
     //   position — запись genPositions (width — ФАКТИЧЕСКАЯ ширина реза, #3372);
     //   cut      — { materialId, winding, length } задания;
     //   freeStrips — свободные полосы задания [{ id, width, rolls }] (rolls = полос × проходов);
-    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition).
-    // → { ok, reason, strip, rolls }. reason — человеческая причина отказа (её показываем
-    // в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт, почему её нет).
-    // Чистая (тест).
-    function cutPositionFit(position, cut, freeStrips, remaining) {
+    //   remaining  — необеспеченный остаток позиции в рулонах (remainingRollsForPosition);
+    //   opts       — { jumboFreeMm, passes } (#4428): свободная ширина джамбо и проходы задания.
+    //                Без opts новая полоса не предлагается (поведение #4426).
+    // → { ok, reason, mode, strip, stripCount, width, rolls }. reason — человеческая причина
+    // отказа (её показываем в списке: молча прятать позицию нельзя, иначе диспетчер не поймёт,
+    // почему её нет). Чистая (тест).
+    function cutPositionFit(position, cut, freeStrips, remaining, opts) {
         var p = position || {};
         var c = cut || {};
-        function no(reason) { return { ok: false, reason: reason, strip: null, rolls: 0 }; }
+        var o = opts || {};
+        function no(reason) { return { ok: false, reason: reason, mode: '', strip: null, stripCount: 0, width: 0, rolls: 0 }; }
         if (!(stripNum(remaining) > 0)) return no('уже обеспечена полностью');
         if (!p.approved) return no('позиция не согласована');
         var cutMat = String(c.materialId == null ? '' : c.materialId).trim();
@@ -1741,14 +1756,45 @@
         if (cutWind && posWind && cutWind !== posWind) return no('другая намотка (' + cutWind + ' ≠ ' + posWind + ')');
         // Ширину полосы сверяем через stripNum: из БД она приходит строкой и может быть с
         // запятой («152,00») — Number() дал бы NaN и «нет свободной полосы» на ровном месте.
-        var widthKey = stripWidthKey(stripNum(p.width));
+        var width = stripNum(p.width);
+        var widthKey = stripWidthKey(width);
         var strip = (freeStrips || []).filter(function(s) {
             return stripWidthKey(stripNum(s && s.width)) === widthKey;
         })[0] || null;
-        if (!strip) return no('нет свободной полосы ' + round3(stripNum(p.width)) + ' мм');
-        var rolls = stripSupplyRolls(strip.rolls, remaining);
-        if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
-        return { ok: true, reason: '', strip: strip, rolls: rolls };
+        if (strip) {
+            var rolls = stripSupplyRolls(strip.rolls, remaining);
+            if (!(rolls > 0)) return no('полоса ' + round3(stripNum(strip.width)) + ' мм не даёт рулонов');
+            return { ok: true, reason: '', mode: 'strip', strip: strip, stripCount: 0,
+                width: stripNum(strip.width), rolls: rolls };
+        }
+        // #4428: свободной полосы нет — пробуем отрезать новую из остатка джамбо.
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (!(freeMm > 0)) return no('нет свободной полосы ' + round3(width) + ' мм');
+        if (!(width > 0)) return no('у позиции не указана ширина');
+        if (freeMm + WIDTH_FIT_EPS_MM < width) {
+            return no('нет свободной полосы ' + round3(width) + ' мм, в остаток джамбо (' +
+                round3(freeMm) + ' мм) новая не влезает');
+        }
+        var runs = stripNum(o.passes) > 0 ? stripNum(o.passes) : 1;
+        var count = newStripCount(width, freeMm, remaining, runs);
+        var newRolls = stripSupplyRolls(count * runs, remaining);
+        if (!(newRolls > 0)) return no('новая полоса ' + round3(width) + ' мм не даёт рулонов');
+        return { ok: true, reason: '', mode: 'new', strip: null, stripCount: count,
+            width: round3(width), rolls: newRolls };
+    }
+
+    // #4428: сколько полос ширины width резать под позицию, если свободной полосы нет.
+    // Не больше, чем влезает в остаток джамбо, и не больше, чем нужно позиции
+    // (ceil(остаток рулонов / проходов)); минимум — одна. Чистая (тест).
+    function newStripCount(width, jumboFreeMm, remaining, passes) {
+        var w = stripNum(width), free = stripNum(jumboFreeMm);
+        if (!(w > 0) || !(free + WIDTH_FIT_EPS_MM >= w)) return 0;
+        var byWidth = Math.floor((free + WIDTH_FIT_EPS_MM) / w);
+        var runs = stripNum(passes) > 0 ? stripNum(passes) : 1;
+        var rem = stripNum(remaining);
+        var byNeed = rem > 0 ? Math.ceil(rem / runs) : 1;
+        var count = Math.min(byWidth, byNeed);
+        return count > 0 ? count : 1;
     }
 
     // #4426: добавляя позицию в задание, пытаемся обеспечить и ОСТАЛЬНЫЕ его свободные полосы —
@@ -1757,10 +1803,20 @@
     // одна полоса — одна позиция, одна позиция — одна полоса (как «Партия ГП» ширины у резки).
     // Приоритет кандидата на полосу: позиция ЗАКАЗОВ задания (coveredOrders — правило #3872
     // «филлер из покрытого заказа») → более ранний срок (dueKey) → подпись (стабильность).
-    //   cut/freeStrips — как у cutPositionFit; candidates — [{ id, position, remaining, label }].
-    // → [{ positionId, stripId, rolls, sameOrder }]. Чистая (тест).
-    function planCutPositionFill(cut, freeStrips, candidates, coveredOrders) {
+    //
+    // #4428: после свободных полос разбирается ОСТАТОК ДЖАМБО — под позиции ЗАКАЗОВ задания
+    // режутся НОВЫЕ полосы (ТЗ: «в первую очередь в задание включается то, что объединено одним
+    // заказом»). Поэтому вторая позиция заказа подтягивается, даже если полосы её ширины в
+    // задании нет. Чужие заказы остаток джамбо не занимают: геометрию задания меняет только
+    // свой заказ, чужой предлагается лишь на уже существующие свободные полосы.
+    //   cut/freeStrips — как у cutPositionFit; candidates — [{ id, position, remaining, label }];
+    //   opts — { jumboFreeMm, passes } (без него новые полосы не режутся — поведение #4426).
+    // → [{ positionId, stripId, mode, width, stripCount, rolls, sameOrder }]; mode 'strip' —
+    // лечь на существующую полосу stripId, 'new' — отрезать stripCount новых полос width.
+    // Чистая (тест).
+    function planCutPositionFill(cut, freeStrips, candidates, coveredOrders, opts) {
         var orders = coveredOrders || {};
+        var o = opts || {};
         var claimed = {};
         var out = [];
         // Широкие полосы разбираем первыми: узкую позицию проще пристроить следующей.
@@ -1788,7 +1844,138 @@
             });
             if (!best) return;
             claimed[best.positionId] = true;
-            out.push({ positionId: best.positionId, stripId: best.stripId, rolls: best.rolls, sameOrder: best.sameOrder });
+            out.push({ positionId: best.positionId, stripId: best.stripId, mode: 'strip', width: stripNum(strip.width),
+                stripCount: 0, rolls: best.rolls, sameOrder: best.sameOrder });
+        });
+
+        // #4428: остаток джамбо — под позиции своих заказов, по одной, пока хватает ширины.
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (freeMm > 0) {
+            (candidates || []).filter(function(c) {
+                return c && c.id != null && !claimed[String(c.id)] &&
+                    !!orders[String(c.position && c.position.orderId)];
+            }).sort(function(a, b) {
+                var da = Number(a.position && a.position.dueKey), db = Number(b.position && b.position.dueKey);
+                if (!isFinite(da)) da = Infinity;
+                if (!isFinite(db)) db = Infinity;
+                if (da !== db) return da - db;
+                var la = String(a.label == null ? a.id : a.label), lb = String(b.label == null ? b.id : b.label);
+                return la < lb ? -1 : la > lb ? 1 : 0;
+            }).forEach(function(c) {
+                var fit = cutPositionFit(c.position, cut, [], c.remaining, { jumboFreeMm: freeMm, passes: o.passes });
+                if (!fit.ok || fit.mode !== 'new') return;
+                claimed[String(c.id)] = true;
+                freeMm = round3(freeMm - fit.stripCount * fit.width);
+                out.push({ positionId: String(c.id), stripId: null, mode: 'new', width: fit.width,
+                    stripCount: fit.stripCount, rolls: fit.rolls, sameOrder: true });
+            });
+        }
+        return out;
+    }
+
+    // #4428: сколько ширины джамбо ОСТАВИТЬ под остальные позиции того же заказа. Жадный
+    // добор первой позиции (newStripCount берёт всё, что влезло) съел бы остаток, и вторая
+    // позиция заказа опять осталась бы за бортом — ровно то, на что жалуется ТЗ («добавил
+    // одну — должна подтянуться и другая»). Резервируем каждой сестре по ОДНОЙ полосе её
+    // ширины (минимум, с которого она вообще попадёт в задание), в порядке срока.
+    //   candidates — уже БЕЗ выбранной позиции; остальные аргументы — как у cutPositionFit.
+    // → мм. Чистая (тест).
+    function siblingStripReserveMm(cut, freeStrips, candidates, coveredOrders, opts) {
+        var orders = coveredOrders || {};
+        var o = opts || {};
+        var freeMm = stripNum(o.jumboFreeMm);
+        if (!(freeMm > 0)) return 0;
+        var reserve = 0;
+        (candidates || []).filter(function(c) {
+            return c && c.id != null && !!orders[String(c.position && c.position.orderId)];
+        }).sort(function(a, b) {
+            var da = Number(a.position && a.position.dueKey), db = Number(b.position && b.position.dueKey);
+            if (!isFinite(da)) da = Infinity;
+            if (!isFinite(db)) db = Infinity;
+            if (da !== db) return da - db;
+            var la = String(a.label == null ? a.id : a.label), lb = String(b.label == null ? b.id : b.label);
+            return la < lb ? -1 : la > lb ? 1 : 0;
+        }).forEach(function(c) {
+            var fit = cutPositionFit(c.position, cut, freeStrips, c.remaining,
+                { jumboFreeMm: round3(freeMm - reserve), passes: o.passes });
+            if (!fit.ok || fit.mode !== 'new') return;   // ляжет на готовую полосу — ширины не просит
+            reserve = round3(reserve + fit.width);
+        });
+        return reserve;
+    }
+
+    // #4428: что переписать в задании, когда диспетчер поменял ЧИСЛО ПРОХОДОВ. Проходы —
+    // единственная величина, которой резка «подгоняется под заказ» (полосы ограничены шириной
+    // джамбо), поэтому менять их надо вместе со всем, что от них считается:
+    //   • «Кол-во план» каждой «Партии ГП» = «Кол-во полос» × проходов (#3431/#3433);
+    //   • рулоны «Обеспечений» этого задания — сколько заказу реально достанется с полосы при
+    //     новых проходах (не больше 110% непокрытого остатка позиции, правило #3320). Иначе
+    //     добавленные проходы ушли бы на склад, а позиция осталась бы недообеспеченной;
+    //   • «Кол-во рулонов» (СПРОС) партии = сумма рулонов её обеспечений.
+    //   cutId — задание; batches — его «Партии ГП» [{ id, width, strips, rolls, planned }];
+    //   supplies — ВСЕ обеспечения плана [{ id, cutId, finishedBatchId, positionId, rolls }];
+    //   needByPosition — { positionId: заказано рулонов }; newRuns — новые проходы.
+    // → { runs, batches: [{ id, width, planned, wasPlanned, rolls?, wasRolls? }],
+    //     supplies: [{ id, positionId, rolls, was }], keptSupplyIds, legacyBatchIds }.
+    // keptSupplyIds — обеспечения, которые НЕ трогаем (позиции нет в плане или её остаток уже
+    // покрыт другими заданиями): молча обнулять живую связь нельзя. legacyBatchIds — старые
+    // партии с пустым «Кол-во полос» (#3431: в «Кол-во рулонов» лежит число полос) — их не
+    // пересчитываем. Чистая (тест), записей не делает.
+    function planPassesUpdates(cutId, batches, supplies, needByPosition, newRuns) {
+        var runs = stripNum(newRuns) > 0 ? Math.round(stripNum(newRuns)) : 0;
+        var out = { runs: runs, batches: [], supplies: [], keptSupplyIds: [], legacyBatchIds: [] };
+        if (!(runs > 0)) return out;
+        var cid = String(cutId == null ? '' : cutId);
+        var need = needByPosition || {};
+        var batchById = {};
+        (batches || []).forEach(function(b) { if (b && b.id != null) batchById[String(b.id)] = b; });
+        // Рулоны, обеспеченные позициям ДРУГИМИ заданиями, — они из потребности уже вычтены.
+        var elsewhere = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || String(s.cutId) === cid || s.positionId == null) return;
+            var k = String(s.positionId);
+            elsewhere[k] = round3((elsewhere[k] || 0) + stripNum(s.rolls));
+        });
+        var leftOnBatch = {}, takenByPos = {}, demandByBatch = {};
+        (supplies || []).filter(function(s) { return s && String(s.cutId) === cid; }).forEach(function(s) {
+            var b = batchById[String(s.finishedBatchId)];
+            if (!b) { out.keptSupplyIds.push(String(s.id)); return; }   // партия не этого задания — не наше дело
+            var bk = String(b.id);
+            var was = stripNum(s.rolls);
+            if (!(stripNum(b.strips) > 0)) {   // #3431: старая партия — производство считать нечем
+                demandByBatch[bk] = round3((demandByBatch[bk] || 0) + was);
+                out.keptSupplyIds.push(String(s.id));
+                return;
+            }
+            if (leftOnBatch[bk] == null) leftOnBatch[bk] = round3(stripNum(b.strips) * runs);
+            var pk = String(s.positionId == null ? '' : s.positionId);
+            var qty = stripNum(need[pk]);
+            var free = round3(qty - (elsewhere[pk] || 0) - (takenByPos[pk] || 0));
+            var rolls = qty > 0 ? stripSupplyRolls(leftOnBatch[bk], free) : 0;
+            if (!(rolls > 0)) {   // потребность неизвестна или уже покрыта — связь оставляем как есть
+                leftOnBatch[bk] = round3(leftOnBatch[bk] - was);
+                demandByBatch[bk] = round3((demandByBatch[bk] || 0) + was);
+                out.keptSupplyIds.push(String(s.id));
+                return;
+            }
+            leftOnBatch[bk] = round3(leftOnBatch[bk] - rolls);
+            takenByPos[pk] = round3((takenByPos[pk] || 0) + rolls);
+            demandByBatch[bk] = round3((demandByBatch[bk] || 0) + rolls);
+            if (rolls !== was) out.supplies.push({ id: String(s.id), positionId: pk, rolls: rolls, was: was });
+        });
+        (batches || []).forEach(function(b) {
+            if (!b || b.id == null) return;
+            var bk = String(b.id);
+            if (!(stripNum(b.strips) > 0)) { out.legacyBatchIds.push(bk); return; }
+            var entry = { id: bk, width: stripNum(b.width),
+                planned: round3(stripNum(b.strips) * runs), wasPlanned: stripNum(b.planned) };
+            var changed = entry.planned !== entry.wasPlanned;
+            if (demandByBatch[bk] != null) {
+                entry.rolls = demandByBatch[bk];
+                entry.wasRolls = stripNum(b.rolls);
+                if (entry.rolls !== entry.wasRolls) changed = true;
+            }
+            if (changed) out.batches.push(entry);
         });
         return out;
     }
