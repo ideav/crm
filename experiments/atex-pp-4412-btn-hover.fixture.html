@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!-- Стенд для ideav/crm#4412: как выглядят кнопки панели «Очередь заданий по станкам» в покое и
+     ПОД КУРСОРОМ. Подключает боевой download/atex/css/production-planning.css — правку видно тут же.
+     Открыть: file://<repo>/experiments/atex-pp-4412-btn-hover.fixture.html
+     Строка ".is-hover" повторяет :hover классом — чтобы состояние было видно на скриншоте сразу. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>#4412 — кнопки панели: покой и наведение</title>
+<link rel="stylesheet" href="../download/atex/css/production-planning.css">
+<style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 24px; background: #fff; }
+    h2 { font-size: 15px; margin: 20px 0 8px; }
+    /* Повтор :hover классом — статичный снимок состояния наведения. */
+    .atex-pp-btn.is-hover { background: var(--pp-surface); }
+    .atex-pp-btn-primary.is-hover { background: var(--pp-accent-d); }
+    .atex-pp-btn-warning.is-hover { background: var(--pp-attn-border); color: var(--pp-attn-text); }
+    .atex-pp-btn-danger.is-hover { background: var(--pp-warn); border-color: var(--pp-warn); color: #fff; filter: brightness(0.92); }
+</style>
+</head>
+<body class="atex-pp atex-brand">
+    <h2>Покой</h2>
+    <div class="atex-pp-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="atex-pp-btn atex-pp-btn-primary" type="button">Сгенерировать</button>
+        <button class="atex-pp-btn" type="button">Упорядочить</button>
+        <button class="atex-pp-btn atex-pp-btn-warning" type="button">Удалить</button>
+        <button class="atex-pp-btn atex-pp-btn-danger" type="button">Отклонения 29/1</button>
+    </div>
+
+    <h2>Под курсором (:hover, воспроизведён классом)</h2>
+    <div class="atex-pp-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="atex-pp-btn atex-pp-btn-primary is-hover" type="button">Сгенерировать</button>
+        <button class="atex-pp-btn is-hover" type="button">Упорядочить</button>
+        <button class="atex-pp-btn atex-pp-btn-warning is-hover" type="button">Удалить</button>
+        <button class="atex-pp-btn atex-pp-btn-danger is-hover" type="button">Отклонения 29/1</button>
+    </div>
+
+    <h2>Живой :hover — наведите мышь</h2>
+    <div class="atex-pp-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="atex-pp-btn atex-pp-btn-danger" type="button" title="Просрочено — 29; выполнено досрочно — 1. Открыть список и урегулировать">Отклонения 29/1</button>
+    </div>
+</body>
+</html>
