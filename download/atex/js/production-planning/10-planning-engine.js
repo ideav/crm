@@ -3043,6 +3043,123 @@
         return segs;
     }
 
+    // #4408: РАЗБОР РАСКЛАДКИ ОДНОГО ДНЯ станка по ХРАНИМЫМ колонкам — что стоит между заданиями.
+    // items — задания дня В ПОРЯДКЕ ОЧЕРЕДИ: [{ cutId, windowStartMin, occMin, started }], где
+    // windowStartMin — начало окна (мин от полуночи дня 0, ось расписания), occMin — ЦЕЛАЯ занятость
+    // станка «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер», started — «Начато» заполнено
+    // (#4381: такое задание уже идёт на станке, его старт неприкосновенен).
+    // opts: { dayStartMin, lunchStartMin, lunchDurationMin, blocked }.
+    // → [{ cutId, gapMin, kind }] по каждому заданию: сколько минут пустует ПЕРЕД ним и чем этот
+    // зазор объясняется: 'ok' (встык), 'lunch' (обед), 'downtime' («Отпуск»/нерабочий день, #3764),
+    // 'started' (перед начатым заданием — двигать его нельзя), 'hole' (НИЧЕМ — дыра),
+    // 'overlap' (задания наезжают друг на друга). Отсчёт первого зазора — от начала смены.
+    // Допуск ±1 мин — снап начал окон к целым минутам (#4061). Чистая — покрыта тестом.
+    function dayLayoutGaps(items, opts) {
+        opts = opts || {};
+        var list = (items || []).filter(Boolean);
+        if (!list.length) return [];
+        var dayFrom = Math.floor(stripNum(list[0].windowStartMin) / 1440) * 1440;
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        var lunchAbs = (isFinite(Number(opts.lunchStartMin)) && lunchDur > 0)
+            ? dayFrom + Number(opts.lunchStartMin) : null;
+        var blocked = opts.blocked || [];
+        var TOL = 1;
+        var prevEnd = dayFrom + (Number(opts.dayStartMin) || 0);
+        var lunchSeen = false;
+        return list.map(function(it) {
+            var ws = stripNum(it.windowStartMin);
+            var gapFrom = prevEnd;                       // конец предыдущего окна (начало зазора)
+            var gap = round3(ws - gapFrom);
+            prevEnd = round3(ws + stripNum(it.occMin));
+            var kind;
+            if (gap < -TOL) kind = 'overlap';
+            else if (gap <= TOL) kind = 'ok';
+            else if (it.started) kind = 'started';       // #4381: начатое стоит там, где стоит
+            else if (!lunchSeen && lunchAbs != null && Math.abs(gap - lunchDur) <= TOL && ws >= lunchAbs - TOL) {
+                lunchSeen = true; kind = 'lunch';        // #3342: обед зашит зазором в planStart
+            } else {
+                var byBlock = false;
+                for (var i = 0; i < blocked.length; i++) {
+                    if (blocked[i][0] < ws && blocked[i][1] > gapFrom) { byBlock = true; break; }
+                }
+                kind = byBlock ? 'downtime' : 'hole';    // #3764: простой станка объясняет зазор
+            }
+            return { cutId: String(it.cutId), gapMin: gap, kind: kind };
+        });
+    }
+
+    // #4408: раскладка дня ЦЕЛА — задания идут встык, а зазоры между ними объяснимы (обед, простой,
+    // начатое задание). Дыра или наезд = день надо пересобрать. Чистая — покрыта тестом.
+    function dayLayoutIsSound(items, opts) {
+        return dayLayoutGaps(items, opts).every(function(g) {
+            return g.kind !== 'hole' && g.kind !== 'overlap';
+        });
+    }
+
+    // #4408: ЧЕСТНАЯ пере-сборка СТАРТОВ ОДНОГО ДНЯ станка по хранимым колонкам. Ручная
+    // перестановка (↑↓ #4189, drag #4306) меняет ПОРЯДОК, не трогая длительности, а «Пересчитать
+    // наладку» (#4401) переписывает колонки, не трогая старты, — в итоге день ехал внахлёст: №1
+    // 08:00–11:20, а №2 стартовал в 08:51 (issue #4408). Раскладываем день ЗАНОВО: первое задание —
+    // с начала смены, каждое следующее — встык к предыдущему (старт = старт предыдущего + его ЦЕЛАЯ
+    // занятость, правило #4061), обед вставляем ОДИН раз за день ровно как упаковщик
+    // (splitMachineQueue.insertLunchBefore: курсор дошёл до LUNCH_START и это не первое задание дня),
+    // окна «Отпуска» (#3764) обходим.
+    //   • ЗА ПРЕДЕЛЫ ДНЯ НИЧЕГО НЕ ВЫНОСИМ (#4408): переполненный день остаётся переполненным — он
+    //     виден как есть (#4099), а задание НЕ уезжает на следующий день. Старт, который не влезает
+    //     в сутки, оставляем хранимым (двигать некуда).
+    //   • Начатое задание (#4381) — якорь: его старт не меняем, курсор продолжается от него.
+    // items/opts — как в dayLayoutGaps. → { cutId: windowStartMin } (только ЦЕЛЫЕ минуты).
+    // Чистая, идемпотентная (повторный прогон даёт то же) — покрыта тестом.
+    function repackDayWindowStarts(items, opts) {
+        opts = opts || {};
+        var list = (items || []).filter(Boolean);
+        var out = {};
+        if (!list.length) return out;
+        var dayFrom = Math.floor(stripNum(list[0].windowStartMin) / 1440) * 1440;
+        var dayTo = dayFrom + 1440;
+        var lunchDur = Number(opts.lunchDurationMin) || 0;
+        var lunchAbs = (isFinite(Number(opts.lunchStartMin)) && lunchDur > 0)
+            ? dayFrom + Number(opts.lunchStartMin) : null;
+        var blocked = opts.blocked || [];
+        // Ближайшая минута ≥ from, где окно длиной len не попадает в простой (#3764). Выйти за
+        // сутки не даём (#4408) — вернём null, задание останется на хранимом старте.
+        function freeFrom(from, len) {
+            var m = from, guard = 0;
+            while (guard++ < blocked.length + 8) {
+                var bumped = false;
+                for (var i = 0; i < blocked.length; i++) {
+                    var bS = blocked[i][0], bE = blocked[i][1];
+                    if (((bS <= m && m < bE) || (m < bS && bS < m + len)) && bE > m) { m = bE; bumped = true; break; }
+                }
+                if (!bumped) break;
+            }
+            return m >= dayTo ? null : Math.ceil(round3(m));
+        }
+        var cur = dayFrom + (Number(opts.dayStartMin) || 0);
+        var lunchDone = false, placedAny = false;
+        list.forEach(function(it) {
+            var occ = Math.round(stripNum(it.occMin));
+            var ws = stripNum(it.windowStartMin);
+            if (it.started) {   // #4381: якорь — стоит там, где стоит
+                out[String(it.cutId)] = ws;
+                cur = Math.max(cur, ws + occ);
+                placedAny = true;
+                if (lunchAbs != null && ws >= lunchAbs) lunchDone = true;   // обед уже позади
+                return;
+            }
+            if (lunchAbs != null && !lunchDone && placedAny && cur >= lunchAbs) {
+                cur = round3(cur + lunchDur);
+                lunchDone = true;
+            }
+            var placed = freeFrom(cur, occ);
+            if (placed == null) { out[String(it.cutId)] = ws; return; }   // не влезает в сутки — не трогаем
+            out[String(it.cutId)] = placed;
+            cur = placed + occ;
+            placedAny = true;
+        });
+        return out;
+    }
+
     // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
     // главное значение «Производственной резки»). Группируем по станку, упорядочиваем
     // очередь (orderCuts), строим расписание (buildSchedule) и берём начало окна

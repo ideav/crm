@@ -118,6 +118,28 @@ function flush() {
 
 var D1 = tsAt(2026, 7, 27, 8, 0), D1b = tsAt(2026, 7, 27, 12, 0), D2 = tsAt(2026, 7, 30, 8, 0);
 
+// #4408: «расхождений нет» = не только колонки тайминга совпали с расчётом, но и старты идут
+// ВСТЫК (иначе кнопка законно останется — день едет с дырой/нахлёстом). Приводим к этому оба:
+// пишем в stored* расчёт и раскладываем planStart дня подряд от первого задания.
+function syncTimingAndStarts(ctrl, cuts) {
+    (ctrl.computeCutSetupUpdates(null, { dryRun: true }).updates || []).forEach(function(u) {
+        var cut = cuts.filter(function(x) { return String(x.id) === String(u.cutId); })[0];
+        if (!cut) return;
+        cut.storedKnifeSetupMin = String(u.knife);
+        cut.storedMaterialWindingMin = String(u.material);
+        cut.storedCutAndLeaderMin = String(u.cutTime);
+    });
+    var byDay = {};
+    cuts.forEach(function(cut) {
+        var day = new Date(Number(cut.planDate) * 1000).toDateString();
+        var occ = Number(cut.storedKnifeSetupMin) + Number(cut.storedMaterialWindingMin) + Number(cut.storedCutAndLeaderMin);
+        var ts = byDay[day] != null ? byDay[day] : Number(cut.planDate);
+        cut.planDate = String(ts); cut.number = String(ts);
+        byDay[day] = ts + occ * 60;
+    });
+    ctrl._setupMismatchCache = null;
+}
+
 // ── A) recalcScopeCutIds: свой станок, видимые дни ───────────────────────────
 (function () {
     var cuts = [
@@ -135,33 +157,27 @@ var D1 = tsAt(2026, 7, 27, 8, 0), D1b = tsAt(2026, 7, 27, 12, 0), D2 = tsAt(2026
         'пустой фильтр дат не ограничивает — весь станок');
 })();
 
-// ── B) setupMismatchIds: детектор расхождения, без побочных эффектов ─────────
+// ── B) recalcMismatchIds: детектор расхождения, без побочных эффектов ─────────
 (function () {
     var cuts = [cutOf('a1', '101', D1), cutOf('a2', '101', D1b)];
     var c = makeController(cuts, { slitter: '', status: '', date: '2026-07-27', dateTo: '2026-07-27', query: '' });
 
-    var ids = c.setupMismatchIds('101');
+    var ids = c.recalcMismatchIds('101');
     assert(ids.length > 0, 'пустой хранимый тайминг = расхождение (кнопка нужна)');
 
     // Ключевое: детектор НЕ имеет права «пометить как записанное» — иначе кнопка исчезнет,
     // ничего не сохранив. Второй прогон обязан дать тот же результат.
-    assertEqual(c.setupMismatchIds('101'), ids, 'повторный прогон детектора даёт то же — состояние не тронуто');
+    assertEqual(c.recalcMismatchIds('101'), ids, 'повторный прогон детектора даёт то же — состояние не тронуто');
     assertEqual([cuts[0].storedKnifeSetupMin, cuts[0].storedCutAndLeaderMin], ['', ''],
         'детектор не переписал stored* у резки (dryRun)');
 
     // Приводим хранимое в соответствие расчёту → расхождения исчезают.
-    var want = c.computeCutSetupUpdates(null, { dryRun: true }).updates;
-    want.forEach(function(u) {
-        var cut = cuts.filter(function(x) { return String(x.id) === String(u.cutId); })[0];
-        cut.storedKnifeSetupMin = String(u.knife);
-        cut.storedMaterialWindingMin = String(u.material);
-        cut.storedCutAndLeaderMin = String(u.cutTime);
-    });
-    assertEqual(c.setupMismatchIds('101'), [], 'тайминг совпал с расчётом → расхождений нет, кнопки не будет');
+    syncTimingAndStarts(c, cuts);
+    assertEqual(c.recalcMismatchIds('101'), [], 'тайминг совпал с расчётом → расхождений нет, кнопки не будет');
 
     // Сдвинули хранимое у одного задания — расхождение снова только у него.
     cuts[1].storedCutAndLeaderMin = '999';
-    assertEqual(c.setupMismatchIds('101'), ['a2'], 'расхождение видно ровно у того задания, где оно есть');
+    assertEqual(c.recalcMismatchIds('101'), ['a2'], 'расхождение видно ровно у того задания, где оно есть');
 })();
 
 // ── C) Кнопка в очереди: показ по факту расхождения ──────────────────────────
@@ -180,13 +196,7 @@ function recalcBtnOf(queueEl) {
         'панели предпросмотра ДО/ПОСЛЕ больше нет');
 
     // Хранимое = расчёт → кнопки нет.
-    var want = c.computeCutSetupUpdates(null, { dryRun: true }).updates;
-    want.forEach(function(u) {
-        var cut = cuts.filter(function(x) { return String(x.id) === String(u.cutId); })[0];
-        cut.storedKnifeSetupMin = String(u.knife);
-        cut.storedMaterialWindingMin = String(u.material);
-        cut.storedCutAndLeaderMin = String(u.cutTime);
-    });
+    syncTimingAndStarts(c, cuts);
     c.renderQueue();
     assertEqual(recalcBtnOf(c.queueEl), null, 'расхождений нет → кнопки нет');
 })();
@@ -221,26 +231,28 @@ function recalcBtnOf(queueEl) {
     var calls = 0, orig = c.computeCutSetupUpdates;
     c.computeCutSetupUpdates = function(ids, opts) { calls++; return orig.call(this, ids, opts); };
 
-    var first = c.setupMismatchIds('101');
+    var first = c.recalcMismatchIds('101');
     assertEqual(calls, 1, 'первый вызов считает');
-    c.setupMismatchIds('101'); c.setupMismatchIds('101');
+    c.recalcMismatchIds('101'); c.recalcMismatchIds('101');
     assertEqual(calls, 1, 'повторные вызовы берут кэш — очередь не пересчитывается на каждый рендер');
 
     cuts[1].storedCutAndLeaderMin = '777';       // данные изменились
-    assertEqual(c.setupMismatchIds('101').length >= 0, true, 'после правки данных вызов проходит');
+    assertEqual(c.recalcMismatchIds('101').length >= 0, true, 'после правки данных вызов проходит');
     assertEqual(calls, 2, 'изменились данные — кэш сброшен, пересчитали');
 
     c.filter.dateTo = '2026-07-30';              // изменилось окно фильтра
-    c.setupMismatchIds('101');
+    c.recalcMismatchIds('101');
     assertEqual(calls, 3, 'смена видимых дней тоже сбрасывает кэш');
 
     c._planDataVersion = (c._planDataVersion || 0) + 1;   // как после reload()
-    c.setupMismatchIds('101');
+    c.recalcMismatchIds('101');
     assertEqual(calls, 4, 'перезагрузка данных (версия) сбрасывает кэш');
     void first;
 })();
 
-// ── D) recalcSetupTiming: только тайминг, только свой станок и видимые дни ───
+// ── D) recalcSetupTiming: тайминг + время старта, только свой станок и видимые дни ───
+// #4408: старт задания пересчёт ТЕПЕРЬ пишет (день едет внахлёст, если этого не делать) — но
+// ТОЛЬКО главное значение (planStart) и ТОЛЬКО внутри своего дня; перепланирования по-прежнему нет.
 (function run() {
     var cuts = [
         cutOf('a1', '101', D1), cutOf('a2', '101', D1b),
@@ -253,20 +265,25 @@ function recalcBtnOf(queueEl) {
         var paths = c._posts.map(function(p) { return p.path; });
         assert(paths.length > 0, 'пересчёт что-то записал');
 
-        // Порядок не трогаем: planStart (главное значение) пишется через _m_save, его быть не должно.
-        assertEqual(paths.filter(function(p) { return p.indexOf('_m_save') === 0; }).length, 0,
-            'НИ ОДНОГО _m_save — planStart не переписан, задания не переставлены');
         assertEqual(paths.filter(function(p) { return p.indexOf('_m_new') === 0 || p.indexOf('_m_del') === 0; }).length, 0,
             'заданий не создаём и не удаляем');
-        assert(paths.every(function(p) { return p.indexOf('_m_set/') === 0; }),
-            'все записи — _m_set (только хранимые колонки тайминга)');
+        assert(paths.every(function(p) { return p.indexOf('_m_set/') === 0 || p.indexOf('_m_save/') === 0; }),
+            'пишем только колонки тайминга (_m_set) и время старта (_m_save)');
 
-        var touched = paths.map(function(p) { return p.replace(/^_m_set\//, '').replace(/\?.*$/, ''); }).sort();
+        var touched = paths.map(function(p) { return p.replace(/^_m_(set|save)\//, '').replace(/\?.*$/, ''); })
+            .filter(function(id, i, arr) { return arr.indexOf(id) === i; }).sort();
         assertEqual(touched, ['a1', 'a2'],
             'затронуты только задания своего станка в видимых днях (a3 вне окна, b1 чужой станок — нетронуты)');
 
+        // #4408: в записи старта — только главное значение, и день задания тот же.
+        c._posts.filter(function(p) { return p.path.indexOf('_m_save/') === 0; }).forEach(function(p) {
+            assertEqual(Object.keys(p.fields), ['t' + CUT_TABLE], 'старт пишется главным значением, и только им');
+            assertEqual(new Date(Number(p.fields['t' + CUT_TABLE]) * 1000).toDateString(),
+                new Date(D1 * 1000).toDateString(), 'день задания при пересчёте старта не меняется');
+        });
+
         // Пишутся ровно три колонки тайминга.
-        var keys = Object.keys(c._posts[0].fields).sort();
+        var keys = Object.keys(c._posts.filter(function(p) { return p.path.indexOf('_m_set/') === 0; })[0].fields).sort();
         assertEqual(keys, ['t' + KNIFE_REQ, 't' + MAT_REQ, 't' + TIME_REQ].sort(),
             'в payload только «Наладка ножей» / «Сырье-намотка» / «Резка и Лидер»');
 

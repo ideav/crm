@@ -251,6 +251,9 @@
         intraDayBreaks: intraDayBreaks,                   // #3989 Фаза 2: обед + два перерыва (ТЗ §5)
         buildSchedule: buildSchedule,
         snapWindowStartsWholeMinutes: snapWindowStartsWholeMinutes,   // #4061: снап planStart к целым минутам (= сумма колонок)
+        dayLayoutGaps: dayLayoutGaps,                     // #4408: зазоры дня и чем они объяснены
+        dayLayoutIsSound: dayLayoutIsSound,               // #4408: день без дыр и нахлёстов
+        repackDayWindowStarts: repackDayWindowStarts,     // #4408: честная пересборка стартов ВНУТРИ дня
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
@@ -5374,9 +5377,10 @@
         var res = this.computeCutSetupUpdates(onlyIds || null);
         var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
-        // «Время старта» (planStart) пишет splitMachineQueue/applySplitPlan — единственный
-        // источник правды по дню/нахлёсту настройки (#3805, #3635 п.5). Здесь — только тайминг
-        // (Наладка ножей / Сырьё-намотка / Резка и Лидер), planStart не трогаем.
+        // «Время старта» (planStart) на пути ПЛАНИРОВАНИЯ пишет splitMachineQueue/applySplitPlan —
+        // он один решает день и нахлёст настройки (#3805, #3635 п.5). Здесь — только тайминг
+        // (Наладка ножей / Сырьё-намотка / Резка и Лидер), planStart не трогаем. Пересборку стартов
+        // ВНУТРИ дня по этим колонкам делает recalcSetupTiming (#4408) отдельным шагом.
         // #4023: разные резки независимы (каждая — свой _m_set/<cutId>?JSON), а порядок в базе
         // неважен (#4000). Раньше это был последовательный chain.then — «последний набор запросов»
         // после «Создать»/«Упорядочить» шёл лесенкой в 1 поток (окно висело на 100%). Гоняем пулом
@@ -6432,12 +6436,96 @@
         }).map(function(c) { return String(c.id); });
     };
 
-    // #4401: РАСХОЖДЕНИЯ тайминга у станка в видимых днях. Человек мог подвигать задания и уйти,
-    // не пересчитав наладку: конфигурация соседей (сырьё/ножи) уже другая, а хранимые «Наладка
-    // ножей»/«Сырье/намотка»/«Резка и Лидер» остались от прежнего порядка — лишние или недостающие
-    // минуты. Считаем dryRun-ом (состояние не трогаем) и возвращаем id заданий, у которых
-    // расчёт по ТЕКУЩЕМУ порядку разошёлся с хранимым. Пусто → пересчитывать нечего, кнопки нет.
-    AtexProductionPlanning.prototype.setupMismatchIds = function(slitterId) {
+    // #4408: ЧЕСТНЫЕ СТАРТЫ заданий станка в видимых днях — что надо переписать в planStart.
+    // Хранимый тайминг («Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер») говорит, сколько минут
+    // станок занят заданием; хранимый planStart — когда оно начинается. После ручной перестановки
+    // (↑↓ #4189, drag #4306) и пересчёта наладки (#4401) второе перестаёт следовать из первого: день
+    // едет внахлёст (issue #4408: №1 08:00–11:20, №2 стартует в 08:51) или с дырами.
+    // Пересобираем КАЖДЫЙ день заново (repackDayWindowStarts): встык от начала смены, обед — как у
+    // упаковщика, «Отпуск» обходим, ДЕНЬ ЗАДАНИЯ НЕ МЕНЯЕТСЯ (за пределы дня не выносим — #4408),
+    // порядок заданий не меняется (он и есть вход). Занятость берём по НОВЫМ колонкам (расчёт
+    // dryRun поверх хранимого) — иначе старты пересобрались бы под старую наладку.
+    // ЦЕЛЫЙ день трогаем, только если его раскладка развалилась (dayLayoutIsSound): свежий план
+    // упаковщика мы не «поправляем» — его зазоры (обед/простой) законны.
+    // opts.updates — уже посчитанные dryRun-обновления колонок (вызывающий считает их и для своих
+    // нужд; передаём, чтобы не гонять расчёт всей очереди станка дважды на каждый рендер).
+    // → [{ cutId, ts, wasTs, dayOffset }] (ts — unix-секунды нового planStart). Записи не делает.
+    AtexProductionPlanning.prototype.recalcStartUpdates = function(slitterId, opts) {
+        if (!this.meta || !this.meta.cut) return [];
+        if (!(this.cuts && this.cuts.length)) return [];
+        var sid = String(slitterId == null ? '' : slitterId);
+        var scopeIds = this.recalcScopeCutIds(sid);
+        if (!scopeIds.length) return [];
+        var inScope = {};
+        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
+        // Новые колонки тайминга (то, что запишет persistCutSetupColumns) — dryRun, состояние не трогаем.
+        var wantById = {};
+        var precomputed = opts && opts.updates;
+        (precomputed || this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || []).forEach(function(u) {
+            wantById[String(u.cutId)] = u;
+        });
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var win = this.workingWindow() || {};
+        var blocked = this.blockedRangesForSlitter(sid, base);   // #3764: «Отпуск» + нерабочие дни
+        var group = groupBySlitter(this.cuts || []).filter(function(g) {
+            return String(g.slitter && g.slitter.id != null ? g.slitter.id : '') === sid;
+        })[0];
+        var byDay = {}, dayOrder = [];
+        ((group && group.cuts) || []).forEach(function(c) {
+            if (!c || !inScope[String(c.id)]) return;
+            var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего пересобирать
+            var ws = Math.round((tsSec * 1000 - base) / 60000);
+            var u = wantById[String(c.id)];
+            var occ = u ? (Number(u.knife) + Number(u.material) + Number(u.cutTime))
+                        : (Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
+                           + Math.round(stripNum(c.storedCutAndLeaderMin)));
+            var day = Math.floor(ws / 1440);
+            if (!byDay[day]) { byDay[day] = []; dayOrder.push(day); }
+            byDay[day].push({ cutId: String(c.id), windowStartMin: ws, occMin: occ,
+                started: cutIsStarted(c), wasTs: tsSec });
+        });
+        var packOpts = {
+            dayStartMin: Number(win.startMin) || 0,
+            lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin,
+            blocked: blocked
+        };
+        var out = [];
+        dayOrder.forEach(function(day) {
+            var items = byDay[day];
+            // Нерабочий день / отпуск на весь день: раскладывать негде — оставляем как есть.
+            var covered = blocked.some(function(b) { return b[0] <= day * 1440 && b[1] >= (day + 1) * 1440; });
+            if (covered) return;
+            // Задание с НУЛЕВОЙ занятостью (колонок тайминга нет в таблице; осиротевший setup-сегмент
+            // Σ=0, #3924/#3943) — «стена» неизвестной длины: раскладывать день по ней нельзя, иначе
+            // всё съедет на начало смены. День пропускаем и ГОВОРИМ об этом (ТЗ §14/#4059).
+            var noOcc = items.filter(function(it) { return !(it.occMin > 0); });
+            if (noOcc.length) {
+                if (typeof console !== 'undefined' && console.warn) {
+                    console.warn('[pp] #4408: старты дня не пересобраны — у задания нет минут занятости',
+                        { slitterId: sid, dayOffset: day, cutIds: noOcc.map(function(it) { return it.cutId; }) });
+                }
+                return;
+            }
+            if (dayLayoutIsSound(items, packOpts)) return;   // день цел — не трогаем
+            var starts = repackDayWindowStarts(items, packOpts);
+            items.forEach(function(it) {
+                var ws = starts[it.cutId];
+                if (ws == null || ws === it.windowStartMin) return;
+                out.push({ cutId: it.cutId, ts: scheduleStartTimestamp(base, ws), wasTs: it.wasTs, dayOffset: day });
+            });
+        });
+        return out;
+    };
+
+    // #4401: РАСХОЖДЕНИЯ у станка в видимых днях — то, что исправит кнопка «↻ Пересчитать наладку».
+    // Человек мог подвигать задания и уйти, не пересчитав наладку: конфигурация соседей (сырьё/ножи)
+    // уже другая, а хранимые «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» остались от прежнего
+    // порядка — лишние или недостающие минуты. Считаем dryRun-ом (состояние не трогаем).
+    // #4408: сюда же — задания, у которых разошёлся СТАРТ (recalcStartUpdates): после перестановки
+    // конфигурация соседей может совпасть (колонки те же), а день всё равно поедет внахлёст.
+    // Пусто → пересчитывать нечего, кнопки нет.
+    AtexProductionPlanning.prototype.recalcMismatchIds = function(slitterId) {
         if (!this.meta || !this.meta.cut) return [];
         if (!(this.cuts && this.cuts.length)) return [];
         var sid = String(slitterId == null ? '' : slitterId);
@@ -6453,19 +6541,30 @@
         var cache = this._setupMismatchCache;
         if (cache && cache.key === key) return cache.ids;
         var res = this.computeCutSetupUpdates(scopeIds, { dryRun: true });
-        var ids = (res.updates || []).map(function(u) { return String(u.cutId); });
+        var seen = {}, ids = [];
+        (res.updates || []).forEach(function(u) {
+            var id = String(u.cutId);
+            if (!seen[id]) { seen[id] = true; ids.push(id); }
+        });
+        this.recalcStartUpdates(sid, { updates: res.updates || [] }).forEach(function(u) {   // #4408: разъехавшиеся старты
+            if (!seen[u.cutId]) { seen[u.cutId] = true; ids.push(u.cutId); }
+        });
         this._setupMismatchCache = { key: key, ids: ids };
         return ids;
     };
 
-    // #4401: «↻ Пересчитать наладку» — ПЕРЕСЧЁТ ТАЙМИНГА И ТОЛЬКО ЕГО.
-    // Порядок заданий НЕ меняется: планировщик (buildSequenceOps/applySplitPlan) здесь не
-    // участвует вовсе, planStart не пишется, заданий не создаём и не удаляем, другие станки и дни
-    // вне фильтра не трогаем. Пишем ровно три хранимые колонки — «Наладка ножей, мин»,
-    // «Сырье/намотка, мин», «Резка и Лидер» — тем же путём, что и обычное сохранение тайминга
-    // (persistCutSetupColumns → _m_set пулом), но по набору recalcScopeCutIds.
+    // #4401/#4408: «↻ Пересчитать наладку» — ТАЙМИНГ И ВРЕМЯ СТАРТА, БЕЗ ПЕРЕПЛАНИРОВАНИЯ.
+    // Планировщик (buildSequenceOps/applySplitPlan) здесь не участвует вовсе: заданий не создаём и
+    // не удаляем, ПОРЯДОК не меняем, ДЕНЬ каждого задания сохраняем, другие станки и дни вне фильтра
+    // не трогаем. Пишем:
+    //   • три хранимые колонки — «Наладка ножей, мин», «Сырье/намотка, мин», «Резка и Лидер» — тем
+    //     же путём, что обычное сохранение тайминга (persistCutSetupColumns → _m_set пулом), по
+    //     набору recalcScopeCutIds;
+    //   • #4408: planStart тех заданий, у которых он разъехался с этими минутами — день пересобран
+    //     ВСТЫК (recalcStartUpdates → repackDayWindowStarts), задание остаётся в СВОЁМ дне даже если
+    //     день переполнен (за пределы дня не выносим; переполнение показываем предупреждением).
     // Подтверждения нет намеренно: подтверждать нечего — пересчёт приводит хранимое в соответствие
-    // с тем, что и так нарисовано в очереди.
+    // с тем, что и так задано порядком заданий.
     AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId) {
         var self = this;
         if (this.busy) return Promise.resolve(false);
@@ -6479,18 +6578,32 @@
         var scopeIds = this.recalcScopeCutIds(sid);
         if (!scopeIds.length) { this.notify('В видимых днях у этого станка нет заданий', 'info'); return Promise.resolve(false); }
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
-        if (!stale.length) {
+        var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
+        if (!stale.length && !startOps.length) {
             this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
             this.render();
             return Promise.resolve(false);
         }
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
+        if (!mainKey) startOps = [];   // некуда писать planStart — тайминг пишем всё равно
         this.setBusy(true);
         this.showProgress('Пересчёт наладки…', 1);
         return this.persistCutSetupColumns(scopeIds).then(function() {
+            // #4408: planStart — ТОЛЬКО _m_save с главным значением t{tableId} (_m_set первую
+            // колонку не задаёт, GUIDE issue #775). Разные задания независимы — пулом, как колонки.
+            return runWithConcurrency(startOps.map(function(u) {
+                return function() {
+                    var f = {}; f[mainKey] = String(u.ts);
+                    return self.post('_m_save/' + encodeURIComponent(u.cutId) + '?JSON', f);
+                };
+            }), 5);
+        }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
-            self.notify('Пересчитан тайминг: заданий — ' + stale.length + ' (порядок не менялся)', 'success');
+            self.notify('Пересчитано: наладка — ' + stale.length + ' заданий, время старта — '
+                + startOps.length + ' (порядок и дни не менялись)', 'success');
+            self.warnOverfilledDays(sid);   // #4408: день не вместил — говорим об этом, а не прячем
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -6498,6 +6611,48 @@
             self.notify('Ошибка пересчёта наладки: ' + (err && err.message || err), 'error');
             return false;
         });
+    };
+
+    // #4408: дни станка (в видимых днях), где работа уходит ЗА конец смены. Пересборка стартов
+    // задания за пределы дня не выносит — значит переполнение остаётся видимым, и молчать о нём
+    // нельзя (ТЗ §14/#4059): показываем предупреждение с днём и минутами перебора.
+    // → массив [{ dayOffset, endMin, overMin }] (он же уходит в тост).
+    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterId) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var scopeIds = this.recalcScopeCutIds(sid);
+        if (!scopeIds.length) return [];
+        var inScope = {};
+        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var win = this.workingWindow() || {};
+        var cutEnd = Number(win.cutEndMin);
+        if (!isFinite(cutEnd) || !isFinite(base)) return [];
+        var over = Number(win.maxOverworkCutsMin) || 0;
+        var endByDay = {};
+        (this.cuts || []).forEach(function(c) {
+            if (!c || !inScope[String(c.id)]) return;
+            var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0) return;
+            var ws = Math.round((tsSec * 1000 - base) / 60000);
+            var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
+                    + Math.round(stripNum(c.storedCutAndLeaderMin));
+            var day = Math.floor(ws / 1440);
+            var end = ws + occ - day * 1440;
+            if (!(endByDay[day] > end)) endByDay[day] = end;
+        });
+        var days = Object.keys(endByDay).map(Number).sort(function(a, b) { return a - b; })
+            .filter(function(d) { return endByDay[d] > cutEnd + over + 1; })
+            .map(function(d) { return { dayOffset: d, endMin: endByDay[d], overMin: Math.round(endByDay[d] - cutEnd) }; });
+        if (days.length) {
+            this.notify('Не помещается в смену: ' + days.map(function(d) {
+                return formatPlanDayHeading(base, d.dayOffset) + ' до ' + formatClock(d.endMin)
+                    + ' (+' + d.overMin + ' мин)';
+            }).join('; ') + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».', 'warning');
+            if (typeof console !== 'undefined' && console.warn) {
+                console.warn('[pp] #4408: день переполнен после пересборки стартов', { slitterId: sid, days: days });
+            }
+        }
+        return days;
     };
 
     // #4402: строки статистики «Было / Станет / изменение наладки» для липкой панели «Упорядочить» —
@@ -7318,17 +7473,19 @@
         // «в этой сессии двигали задания» (#4189 _manualMoveDirty). Человек мог подвигать задания и
         // уйти, не пересчитав тайминг: после перезагрузки страницы флаг терялся, а расхождение
         // оставалось — и кнопки не было. Теперь на каждой отрисовке очереди сверяем ХРАНИМЫЙ тайминг
-        // этого станка в видимых днях с расчётом по ТЕКУЩЕМУ порядку (setupMismatchIds, dryRun) и
+        // этого станка в видимых днях с расчётом по ТЕКУЩЕМУ порядку (recalcMismatchIds, dryRun) и
         // показываем кнопку, только если что-то разошлось. Ничего не разошлось — кнопки нет.
+        // #4408: расхождением считается и разъехавшееся ВРЕМЯ СТАРТА (день едет внахлёст/с дырами).
         var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
-        var mismatchIds = actDirtyId ? self.setupMismatchIds(actDirtyId) : [];
+        var mismatchIds = actDirtyId ? self.recalcMismatchIds(actDirtyId) : [];
         if (mismatchIds.length) {
             var recalcBtn = el('button', {
                 class: 'atex-pp-recalc-setup', type: 'button',
                 text: '↻ Пересчитать наладку (заданий: ' + mismatchIds.length + ')',
                 title: 'Хранимый тайминг разошёлся с текущим порядком заданий: сырьё/ножи у соседей'
                      + ' другие, а наладка осталась прежней. Пересчёт приведёт «Наладку ножей»,'
-                     + ' «Сырьё/намотку» и «Резку и Лидер» в соответствие. Порядок заданий НЕ меняется;'
+                     + ' «Сырьё/намотку» и «Резку и Лидер» в соответствие и пересоберёт ВРЕМЯ СТАРТА'
+                     + ' встык внутри дня (без дыр и нахлёстов). Порядок заданий и их дни НЕ меняются;'
                      + ' затрагиваются только этот станок и видимые дни.',
                 style: 'display:block;width:100%;margin:6px 0 10px;padding:11px 16px;background:#c0392b;color:#fff;'
                      + 'font-weight:700;font-size:15px;border:none;border-radius:6px;cursor:pointer;'
