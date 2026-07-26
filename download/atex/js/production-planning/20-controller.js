@@ -89,6 +89,7 @@
         formatDowntimeBound: formatDowntimeBound,                 // #3787
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
+        mergeableOrderGroups: mergeableOrderGroups,   // #4424: задания одного заказа+конфигурации → объединить по первому
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
         boundaryDaySibling: boundaryDaySibling,   // #3737
@@ -5841,6 +5842,168 @@
             });
     };
 
+    // #4424: ОБЪЕДИНЕНИЕ заданий одного заказа и одной конфигурации В ОДНО — «по первому по порядку».
+    // Оператор видит «3 задания одного заказа» там, где работа одна: у каждого своя наладка, они не
+    // сливаются и разъезжаются по дням. Голова — ПЕРВОЕ ПО ПОРЯДКУ (минимальная «Дата план»,
+    // mergeableOrderGroups); остальные записи в неё вливаются и удаляются.
+    // Данные не теряем — это главное:
+    //   • «Партия ГП» поглощаемого задания той же ШИРИНЫ вливается в партию головы: «Обеспечения»
+    //     перевешиваются на партию головы (реквизит «Партия ГП»), рулоны/план суммируются, «ID заказа»
+    //     объединяется; сама партия-донор удаляется;
+    //   • партия ширины, которой у головы нет, ПЕРЕЕЗЖАЕТ под голову целиком (`_m_move&up=`);
+    //   • «Кол-во план» партий головы пересчитывается: полос × новые проходы;
+    //   • голова получает сумму проходов и пересчитанные «Длительность, минут» / «Тайминг».
+    // Не объединяем: начатые (#4381), задания замороженных дней (#4326), завершённые, складские
+    // (без заказа) и уже единую цепочку дробления (общий «ID первой части»).
+    // → Promise<число слитых записей>; 0 — сливать нечего (идемпотентно).
+    AtexProductionPlanning.prototype.mergeSameOrderTasks = function() {
+        var self = this;
+        this._ppOp = 'mergeSameOrderTasks';   // #4177: контекст трассы записей
+        var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
+        if (!cutMeta || !fbMeta || !supMeta) return Promise.resolve(0);
+        // Кого объединять нельзя (см. выше).
+        var skipIds = {};
+        var baseMs4424 = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        (this.cuts || []).forEach(function(c) {
+            if (!c) return;
+            if (cutIsStarted(c)) { skipIds[String(c.id)] = 1; return; }                       // #4381
+            if (planTsSeconds(c.endDate) != null) { skipIds[String(c.id)] = 1; return; }      // завершённое
+            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) { skipIds[String(c.id)] = 1; return; }   // #4326
+            // Прошлые дни (раньше «С») не переписываем — их раскладку планировщик тоже не трогает (#4294).
+            var off = dayOffsetFromBase(c.planDate, baseMs4424);
+            if (off != null && off < 0) skipIds[String(c.id)] = 1;
+        });
+        var groups = mergeableOrderGroups(this.cuts || [], { skipIds: skipIds });
+        if (!groups.length) return Promise.resolve(0);
+        var cutById = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutById[String(c.id)] = c; });
+        var supByCut = {};
+        (this.supplies || []).forEach(function(s) {
+            if (s && s.cutId != null) (supByCut[String(s.cutId)] = supByCut[String(s.cutId)] || []).push(s);
+        });
+        var runsReqId = reqIdByAnyName(cutMeta, CUT_PLANNED_RUNS_NAMES);
+        var durReqId = reqIdByName(cutMeta, CUT_REQ.duration);
+        var timingReqId = reqIdByName(cutMeta, CUT_REQ.timing);
+        var fbWidthIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.width);
+        var fbStripsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.strips);
+        var fbRollsIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var fbPlannedIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.planned);
+        var fbOrderIdx = columnIndex(fbMeta, FINISHED_BATCH_REQ.orderId);
+        var fbRollsReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.rolls);
+        var fbPlannedReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.planned);
+        var fbOrderReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.orderId);
+        var supBatchReq = reqIdByName(supMeta, SUPPLY_REQ.finishedBatch);
+        if (!runsReqId || !supBatchReq) {
+            console.error('[pp] ❌ #4424: объединение заданий невозможно — нет реквизита «' +
+                (!runsReqId ? CUT_PLANNED_RUNS_NAMES[0] : SUPPLY_REQ.finishedBatch) + '» в метаданных');
+            return Promise.resolve(0);
+        }
+        function batchesOf(cutId) {
+            return self.getJson('object/' + fbMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500')
+                .then(function(rows) {
+                    return (rows || []).map(function(rec) {
+                        var r = rec.r || [];
+                        return { id: String(rec.i),
+                            width: fbWidthIdx >= 0 ? stripNum(r[fbWidthIdx]) : 0,
+                            strips: fbStripsIdx >= 0 ? stripNum(r[fbStripsIdx]) : 0,
+                            rolls: fbRollsIdx >= 0 ? stripNum(r[fbRollsIdx]) : 0,
+                            planned: fbPlannedIdx >= 0 ? stripNum(r[fbPlannedIdx]) : 0,
+                            orderId: (fbOrderIdx >= 0 && r[fbOrderIdx] != null) ? String(r[fbOrderIdx]).trim() : '' };
+                    });
+                });
+        }
+        function mergeOrderIds(a, b) {
+            var seen = {}, out = [];
+            (String(a || '') + ',' + String(b || '')).split(',').forEach(function(x) {
+                var v = x.trim();
+                if (v === '' || seen[v]) return;
+                seen[v] = 1; out.push(v);
+            });
+            return out.join(',');
+        }
+        var mergedCount = 0, report = [];
+        var chain = groups.reduce(function(acc, g) {
+            return acc.then(function() {
+                var head = cutById[g.headId];
+                if (!head) return;
+                var donors = g.memberIds.slice(1).map(function(id) { return cutById[id]; }).filter(Boolean);
+                if (!donors.length) return;
+                return batchesOf(g.headId).then(function(headBatches) {
+                    var byWidth = {};
+                    headBatches.forEach(function(b) { byWidth[stripWidthKey(b.width)] = b; });
+                    // Каждого донора обрабатываем последовательно: партии → обеспечения → удаление записи.
+                    return donors.reduce(function(dChain, donor) {
+                        return dChain.then(function() {
+                            return batchesOf(donor.id).then(function(donorBatches) {
+                                var supplies = supByCut[String(donor.id)] || [];
+                                return donorBatches.reduce(function(bChain, db) {
+                                    return bChain.then(function() {
+                                        var target = byWidth[stripWidthKey(db.width)];
+                                        if (!target) {
+                                            // Ширины у головы нет — переносим партию под голову как есть.
+                                            return self.post('_m_move/' + encodeURIComponent(db.id) + '?JSON&up=' + encodeURIComponent(g.headId), {})
+                                                .then(function() { byWidth[stripWidthKey(db.width)] = db; });
+                                        }
+                                        // Обеспечения донорской партии — на партию головы.
+                                        var moveSup = supplies.filter(function(s) { return String(s.finishedBatchId) === String(db.id); })
+                                            .reduce(function(sChain, s) {
+                                                return sChain.then(function() {
+                                                    var f = {}; f['t' + supBatchReq] = String(target.id);
+                                                    return self.post('_m_set/' + encodeURIComponent(s.id) + '?JSON', f);
+                                                });
+                                            }, Promise.resolve());
+                                        return moveSup.then(function() {
+                                            target.rolls = round3(target.rolls + db.rolls);
+                                            target.orderId = mergeOrderIds(target.orderId, db.orderId);
+                                            return self.post('_m_del/' + encodeURIComponent(db.id) + '?JSON', {});
+                                        });
+                                    });
+                                }, Promise.resolve());
+                            }).then(function() {
+                                return self.post('_m_del/' + encodeURIComponent(donor.id) + '?JSON', {});
+                            }).then(function() { mergedCount += 1; });
+                        });
+                    }, Promise.resolve()).then(function() {
+                        // Голова: сумма проходов + пересчитанные тайминг-поля и «Кол-во план» партий.
+                        var runLength = cutRunLength(head, self.supplies, self.positionLengthById);
+                        var fields = {};
+                        fields['t' + runsReqId] = String(g.runs);
+                        if (durReqId) {
+                            var dur = plannedCutDurationMinutes(runLength, g.runs, self.opTimes, !!head.isFoil);
+                            fields['t' + durReqId] = dur > 0 ? String(Math.ceil(dur)) : '';
+                        }
+                        if (timingReqId) fields['t' + timingReqId] = cutTimingDetails(runLength, g.runs, self.opTimes, !!head.isFoil);
+                        return self.post('_m_set/' + encodeURIComponent(g.headId) + '?JSON', fields).then(function() {
+                            return Object.keys(byWidth).reduce(function(uChain, w) {
+                                var b = byWidth[w];
+                                return uChain.then(function() {
+                                    var f = {};
+                                    if (fbPlannedReq) f['t' + fbPlannedReq] = String(round3(b.strips * g.runs));
+                                    if (fbRollsReq) f['t' + fbRollsReq] = String(round3(b.rolls));
+                                    if (fbOrderReq && b.orderId) f['t' + fbOrderReq] = String(b.orderId);
+                                    if (!Object.keys(f).length) return;
+                                    return self.post('_m_set/' + encodeURIComponent(b.id) + '?JSON', f);
+                                });
+                            }, Promise.resolve());
+                        });
+                    }).then(function() {
+                        report.push('заказ ' + g.orderId + ': ' + g.memberIds.length + ' → 1 (задание ' + g.headId + ', проходов ' + g.runs + ')');
+                    });
+                });
+            });
+        }, Promise.resolve());
+        return chain.then(function() {
+            if (!mergedCount) return 0;
+            console.log('[pp] 🔗 #4424 объединено заданий: ' + mergedCount + ' — ' + report.join('; '));
+            self.notify('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')', 'success');
+            return self.reload().then(function() { return mergedCount; });
+        }).catch(function(err) {
+            console.error('[pp] ❌ #4424 объединение заданий прервано:', err && err.message, err && err.stack);
+            self.notify('Не удалось объединить задания одного заказа: ' + (err && err.message || err), 'error');
+            return self.reload().then(function() { return mergedCount; });
+        });
+    };
+
     // #4175: ВОССТАНОВЛЕНИЕ пропавшей связи «задание ↔ заказ» после дробления по дням.
     // Симптом (#4163→#4175, «пустой срок / нет связей»): задание ВЫПУСКАЕТ заказ — его «Партия ГП»
     // несёт «ID заказа» и проходы дают ровно спрос позиции, — но НИ ОДНОГО «Обеспечения» на его
@@ -6737,6 +6900,19 @@
     AtexProductionPlanning.prototype.autoSequenceQueue = function(strategy, preserveOrder, moveScope) {
         var self = this;
         this._ppOp = 'autoSequenceQueue';   // #4177: контекст трассы записей (async)
+        if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
+        // #4424: ПЕРЕД раскладкой сливаем задания одного заказа и одной конфигурации в ОДНО «по
+        // первому по порядку» (mergeSameOrderTasks): иначе одна работа живёт тремя записями, каждая
+        // со своей наладкой, и разъезжается по дням. Слияние идёт в БД и перечитывает очередь, дальше
+        // планируем уже объединённое. Нечего сливать → 0 и ни одной записи (идемпотентно).
+        return self.mergeSameOrderTasks().then(function() {
+            return self.autoSequenceQueueAfterMerge(strategy, preserveOrder, moveScope);
+        });
+    };
+
+    // #4424: раскладка как раньше — вызывается после объединения дублей заказа.
+    AtexProductionPlanning.prototype.autoSequenceQueueAfterMerge = function(strategy, preserveOrder, moveScope) {
+        var self = this;
         if (!(self.cuts && self.cuts.length)) return Promise.resolve(false);
         var built = self.buildSequenceOps(self.cuts, strategy, preserveOrder, moveScope);   // #4074: moveScope.pinCutIds — закрепить перенесённое задание при пересборке по срокам
         var ops = built.ops;

@@ -3447,6 +3447,58 @@
         return String((a && a.orderId) || '') === String((b && b.orderId) || '');
     }
 
+    // #4424: ГРУППЫ ЗАДАНИЙ ПОД ОБЪЕДИНЕНИЕ — одно и то же дело, разложенное по нескольким
+    // записям: один станок, один ЗАКАЗ и одна конфигурация (continuationSignature: станок|сырьё|
+    // намотка|ножи). Такие задания оператор видит как «3 задания одного заказа», хотя это одна
+    // работа: у каждого своя наладка, и они не сливаются (issue #4424). Голова группы — ПЕРВОЕ ПО
+    // ПОРЯДКУ (минимальная «Дата план»; при равенстве — меньший id, чтобы результат был устойчив).
+    //   cuts — задания (обычно очередь одного станка или весь план);
+    //   opts.skipIds — id, которые объединять НЕЛЬЗЯ (начатые #4381, замороженный день #4326,
+    //                  завершённые): такая запись не попадает ни в голову, ни в поглощаемые.
+    // Записи БЕЗ заказа (складские) не объединяем — ключа нет. Записи одной цепочки дробления
+    // (общий «ID первой части») уже суть одно задание — их не трогаем.
+    // → [{ headId, memberIds:[…], orderId, runs }] (только группы из ≥2 записей). Чистая — покрыта тестом.
+    function mergeableOrderGroups(cuts, opts){
+        opts = opts || {};
+        var skip = opts.skipIds || {};
+        var groups = {}, order = [];
+        (cuts || []).forEach(function(c){
+            if (!c || c.id == null) return;
+            if (skip[String(c.id)]) return;
+            var oid = String(c.orderId == null ? '' : c.orderId).trim();
+            if (oid === '') return;                                   // склад — без заказа не объединяем
+            var key = continuationSignature(c) + '|' + oid;
+            if (!groups[key]) { groups[key] = []; order.push(key); }
+            groups[key].push(c);
+        });
+        var out = [];
+        order.forEach(function(key){
+            var arr = groups[key];
+            if (arr.length < 2) return;
+            // Уже одна цепочка дробления (все с общим «ID первой части») — это и так одно задание.
+            var roots = {};
+            arr.forEach(function(c){
+                var fp = (c.firstPartId != null && String(c.firstPartId).trim() !== '') ? String(c.firstPartId).trim() : String(c.id);
+                roots[fp] = 1;
+            });
+            if (Object.keys(roots).length < 2) return;
+            var sorted = arr.slice().sort(function(a, b){
+                var pa = planTsSeconds(a.planDate), pb = planTsSeconds(b.planDate);
+                if (pa == null) pa = Infinity;
+                if (pb == null) pb = Infinity;
+                if (pa !== pb) return pa - pb;
+                return String(a.id).localeCompare(String(b.id), 'ru');
+            });
+            out.push({
+                headId: String(sorted[0].id),
+                memberIds: sorted.map(function(c){ return String(c.id); }),
+                orderId: String(sorted[0].orderId),
+                runs: sorted.reduce(function(s, c){ return s + (Number(c.plannedRuns) || 0); }, 0)
+            });
+        });
+        return out;
+    }
+
     // #3613: какие значки смежности дня показать на карточке очереди. Карточка —
     // первая в своём рабочем дне, если сосед слева (prev) попал в другой день; последняя —
     // если сосед справа (next) в другом дне. Значок ставим только когда соседний сегмент
