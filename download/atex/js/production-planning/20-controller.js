@@ -1,4 +1,9 @@
     var planning = {
+        // Реестр жёстких правил ТЗ §15 и страж записи (05-invariants.js) — наружу для тестов:
+        // experiments/atex-pp-invariants.test.js проверяет их таблицей «входы × правила».
+        invariants: PP_INVARIANTS,
+        checkPlanInvariants: checkPlanInvariants,
+        guardPlanOps: guardPlanOps,
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
         ganttBaseFromLocation: ganttBaseFromLocation,   // #3713
@@ -857,10 +862,14 @@
         return dayIsWorking(ms, this.calendarByDay);
     };
 
-    // #4326 (Вариант A): заморожен ли день (по мс). Фича выключена (нет «Заморозки») → всегда false.
-    // Ключ дня — YYYYMMDD той же шкалы, что planDateDayKey/parseDmyKey (сравнимо с freezeByDay). День
-    // НЕ блокируется наглухо (это создавало просрочку, #4338): заморозка лишь ПИНит существующие
-    // задания дня (buildSequenceOps), срочные задания по-прежнему могут туда встать.
+    // #4326: заморожен ли день (по мс). Фича выключена (нет «Заморозки») → всегда false.
+    // Ключ дня — YYYYMMDD той же шкалы, что planDateDayKey/parseDmyKey (сравнимо с freezeByDay).
+    // СЕМАНТИКА (решение заказчика 27.07.2026, ТЗ §15): для АВТОМАТИКИ замороженный день закрыт
+    // полностью — существующие задания пришпилены, новые не ставятся, в том числе срочные; если
+    // из-за этого задание не успевает в срок, оно уезжает дальше и помечается просроченным.
+    // Прежняя формулировка «срочные всё равно могут встать» (попытка лечить просрочку из #4338)
+    // отменена: она и породила #4347/#4434/#4436. Правило исполняемое — PP_INVARIANTS.FROZEN_DAY
+    // в 05-invariants.js; ручное действие оператора им не ограничено.
     AtexProductionPlanning.prototype.dayIsFrozen = function(ms) {
         if (!this.meta || !this.meta.freeze || !this.freezeByDay) return false;   // #4326: стаб-self без meta (юнит-тесты)
         var key = planDateDayKey(ms);
@@ -7698,26 +7707,33 @@
         // замороженных дней в базу не идут. Признак замороженности берём по ХРАНИМОЙ «Дате план»
         // (где задание стои́т сейчас) и по дню, куда план предлагает его положить, — ни туда, ни
         // оттуда двигать нельзя. Хранимый тайминг тех же заданий не переписывает computeCutSetupUpdates.
-        if (ops && self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
-            var frozenNow = {};
+        // Проверка идёт через РЕЕСТР (05-invariants.js, PP_INVARIANTS), а не условиями по месту:
+        // то же правило обязано действовать на всех путях записи, и оно должно быть одно.
+        if (ops) {
+            var frozenNow = {}, fixedNow = {}, dayKeyNow = {};
+            var freezeOn = !!(self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length);
             (cuts || []).forEach(function(c){
-                if (c && c.id != null && self.dayIsFrozen(c.planDate)) frozenNow[String(c.id)] = true;
+                if (!c || c.id == null) return;
+                var key = String(c.id);
+                if (freezeOn && self.dayIsFrozen(c.planDate)) frozenNow[key] = true;
+                if (c.fixed) fixedNow[key] = true;
+                dayKeyNow[key] = planDateDayKey(c.planDate);
             });
-            var frozenTs = function(ts){ return self.dayIsFrozen(String(ts)); };
-            var skipped = 0;
-            ops.updates = (ops.updates || []).filter(function(u){
-                if (frozenNow[String(u.cutId)] || frozenTs(u.planStartTs)) { skipped++; return false; }
-                return true;
-            });
-            ops.deletes = (ops.deletes || []).filter(function(id){
-                if (frozenNow[String(id)]) { skipped++; return false; }
-                return true;
-            });
-            ops.creates = (ops.creates || []).filter(function(cr){
-                if (frozenNow[String(cr && cr.parentCutId)] || frozenTs(cr && cr.planStartTs)) { skipped++; return false; }
-                return true;
-            });
-            if (skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', skipped);
+            var guard = guardPlanOps(ops, {
+                isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
+                isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
+                isFixedCut: function(id){ return !!fixedNow[String(id)]; },
+                dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
+                dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; }
+            }, 'auto');
+            if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
+            // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
+            // сработали бы. По этому журналу и решается, включать ли им запрет.
+            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
+            if (watched.length) {
+                console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
+                    watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
+            }
         }
 
         var cutsById = {};
