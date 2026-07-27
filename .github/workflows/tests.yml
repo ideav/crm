@@ -1,0 +1,21 @@
+name: tests
+
+# Регрессионная сеть репозитория. Зависимостей нет — только Node, поэтому шаг install не нужен.
+# Красное = мержить нельзя. Известный долг вынесен в experiments/quarantine.txt и в гейт не входит.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Прогон гейта
+        run: bash scripts/run-tests.sh

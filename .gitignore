@@ -6,8 +6,16 @@
 /.env.local
 /docker/certs/
 
-# Local research artifacts for issue #2895
-experiments/
+# Local research artifacts for issue #2895 — но НЕ регрессионная сеть: тесты, фикстуры и
+# карантин обязаны попадать в коммит без `git add -f`, иначе новый тест молча не доедет до PR.
+experiments/*
+!experiments/*.test.js
+!experiments/test-*.js
+!experiments/*-test.js
+!experiments/*_test.js
+!experiments/*.fixture.html
+!experiments/quarantine.txt
+!experiments/README.md
 
 # Playwright MCP scratch output (screenshots/snapshots/console logs)
 .playwright-mcp/
