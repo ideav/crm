@@ -998,7 +998,10 @@
 }
 .atex-pp-outside-btn:hover { background: var(--pp-bg); }
 
-/* Тосты-уведомления (без alert/confirm/prompt) */
+/* Тосты-уведомления (без alert/confirm/prompt).
+   #4442: несколько сообщений живут СТОПКОЙ — каждое следующее чуть выше предыдущего и поверх него
+   (у нижних видна кромка), поэтому `bottom`/`z-index` каждому тосту проставляет notify() инлайном
+   по toastStackLayout(). Значения ниже — база для одиночного сообщения. */
 .atex-pp-toast {
     position: fixed;
     right: 20px;

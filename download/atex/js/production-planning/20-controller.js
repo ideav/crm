@@ -54,6 +54,7 @@
         cutDueKeys: cutDueKeys,                 // #3769
         cutOrderedWidthKeys: cutOrderedWidthKeys, // #4230: ширины полос, идущих в заказ (остальное — склад/отходы)
         supplyHostCutId: supplyHostCutId,        // #4434 п.4: связи продолжения читаются по ГОЛОВЕ цепочки
+        toastStackLayout: toastStackLayout,      // #4442: стопка тостов — новое чуть выше старого
         countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
         planTsSeconds: planTsSeconds,           // #4346: «Дата план»/«Закончено» → unix-секунды
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
@@ -9931,10 +9932,26 @@
         var sticky = (kind === 'error' || kind === 'warning');
         var toast = el('div', { class: 'atex-pp-toast atex-pp-toast-' + (kind || 'info') + (sticky ? ' is-sticky' : '') });
         toast.appendChild(el('span', { class: 'atex-pp-toast-text', text: message }));
+        // #4442: СТОПКА сообщений. Висящие тосты (ошибка/предупреждение живут до «×», #4418) ложились
+        // ТОЧНО друг на друга — видно только последнее, а сколько их под ним, не понять. Держим живые
+        // тосты списком и раскладываем каскадом: каждое следующее чуть выше предыдущего и поверх него,
+        // у нижних видна кромка. Пересчитываем и при добавлении, и при закрытии — иначе в стопке
+        // остаются дыры.
+        var stack = this._toastStack = this._toastStack || [];
+        function restack() {
+            var layout = toastStackLayout(stack.length);
+            stack.forEach(function(t, i) {
+                t.style.bottom = layout[i].bottom + 'px';
+                t.style.zIndex = String(layout[i].zIndex);
+            });
+        }
         var closed = false;
         function dismiss() {
             if (closed) return;
             closed = true;
+            var at = stack.indexOf(toast);
+            if (at >= 0) stack.splice(at, 1);
+            restack();
             toast.classList.remove('is-visible');
             setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
         }
@@ -9946,6 +9963,8 @@
         });
         toast.appendChild(closeBtn);
         (this.toastHost || document.body).appendChild(toast);
+        stack.push(toast);
+        restack();
         setTimeout(function() { toast.classList.add('is-visible'); }, 10);
         if (!sticky) setTimeout(dismiss, 3500);
     };
