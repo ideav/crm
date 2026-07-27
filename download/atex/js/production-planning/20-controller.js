@@ -2887,6 +2887,23 @@
         // Колонки наладки проекции — в памяти (без записи). updates несут прежние значения (was*),
         // из них #4417 берёт изменения ТАЙМИНГА: их не видно по planStart, но применение их запишет.
         var setupRes = this.computeCutSetupUpdates(null);
+        // #4446: ГЛОБАЛЬНЫЙ кандидат выигрывает по всему горизонту, но внутри ОТДЕЛЬНОГО дня может
+        // оставить заведомо худший порядок — оператор сравнивает свой ручной план с предложенным по
+        // одному дню и видит, что предложенный хуже («левый план — предлагаемый — хуже правого — его
+        // я делал вручную»). Полируем ВЫБРАННЫЙ кандидат тем же локальным проходом, что и кандидат C
+        // (#4440): состав дня, его номер и станок не меняются, меняется только порядок внутри дня,
+        // поэтому ни сроки, ни загрузка дней не страдают, а переналадка может только уменьшиться.
+        var polished = this.intraDayImprovementOps();
+        if (polished.updates.length) {
+            this.applyPreviewStarts(polished.updates.map(function(u) {
+                return { cutId: String(u.cutId), ts: Number(u.planStartTs) };
+            }), pend.ops);
+            setupRes = this.computeCutSetupUpdates(null);   // порядок в дне сменился — колонки наладки другие
+            try {
+                console.log('[pp] ⚙️ #4446: порядок ВНУТРИ дней подчищен поверх выбранного кандидата — '
+                    + 'заданий ' + polished.updates.length + ', переналадка −' + round3(polished.gainMin) + ' мин');
+            } catch (e) {}
+        }
         // #4444: ПОКАЗЫВАЕМ РОВНО ТО, ЧТО ЗАПИШЕТСЯ. «Дату план» считает упаковщик, а колонки
         // наладки — computeCutSetupUpdates; расхождение этих двух расчётов рисуется на карточках
         // дырами и наложениями («если одно задание заканчивается в 14:38, я ожидаю увидеть другое,
@@ -7833,36 +7850,46 @@
     // Синтетические сегменты дробления (id `preview:N`) записи не имеют — им правим соответствующую
     // строку ops.creates (порядок в projectPlanOnCuts тот же). Замороженные дни не трогаются
     // (recalcScopeCutIds их отсекает, #4436). → число сведённых заданий.
-    AtexProductionPlanning.prototype.reconcilePreviewStarts = function(ops) {
-        var self = this;
-        if (!(this.cuts && this.cuts.length)) return 0;
+    // #4444/#4446: применить новые старты И к проекции предпросмотра, И к ops (то, что запишет
+    // «Применить»): показанное и записываемое обязаны совпадать. Синтетическому сегменту дробления
+    // (id `preview:N`) записи нет — ему правим соответствующую строку ops.creates (projectPlanOnCuts
+    // нумерует их по порядку). starts: [{ cutId, ts }]. → число применённых.
+    AtexProductionPlanning.prototype.applyPreviewStarts = function(starts, ops) {
         var byId = {};
-        this.cuts.forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
         var updateByCut = {};
         ((ops && ops.updates) || []).forEach(function(u) { if (u) updateByCut[String(u.cutId)] = u; });
         var creates = (ops && ops.creates) || [];
-        var fixed = 0;
+        var n = 0;
+        (starts || []).forEach(function(st) {
+            var c = byId[String(st.cutId)];
+            if (!c) return;
+            c.planDate = String(st.ts);
+            c.number = String(st.ts);
+            n++;
+            if (isPreviewCutId(st.cutId)) {
+                var idx = Number(String(st.cutId).slice(String(st.cutId).indexOf(':') + 1));
+                if (creates[idx - 1]) creates[idx - 1].planStartTs = st.ts;
+                return;
+            }
+            if (updateByCut[String(st.cutId)]) updateByCut[String(st.cutId)].planStartTs = st.ts;
+            else if (ops && ops.updates) {
+                ops.updates.push({ cutId: String(st.cutId), planStartTs: st.ts, plannedRuns: c.plannedRuns });
+            }
+        });
+        return n;
+    };
+
+    AtexProductionPlanning.prototype.reconcilePreviewStarts = function(ops) {
+        var self = this;
+        if (!(this.cuts && this.cuts.length)) return 0;
+        var starts = [];
         (this.slitters || []).forEach(function(s) {
             var sid = String(s && s.id == null ? '' : s.id);
             if (sid === '') return;
-            self.recalcStartUpdates(sid).forEach(function(u) {
-                var c = byId[String(u.cutId)];
-                if (!c) return;
-                c.planDate = String(u.ts);
-                c.number = String(u.ts);
-                fixed++;
-                if (isPreviewCutId(u.cutId)) {
-                    // `preview:N` → N-я строка ops.creates (projectPlanOnCuts нумерует их по порядку).
-                    var n = Number(String(u.cutId).slice(String(u.cutId).indexOf(':') + 1));
-                    if (creates[n - 1]) creates[n - 1].planStartTs = u.ts;
-                    return;
-                }
-                if (updateByCut[String(u.cutId)]) updateByCut[String(u.cutId)].planStartTs = u.ts;
-                else if (ops && ops.updates) {
-                    ops.updates.push({ cutId: String(u.cutId), planStartTs: u.ts, plannedRuns: c.plannedRuns });
-                }
-            });
+            self.recalcStartUpdates(sid).forEach(function(u) { starts.push({ cutId: String(u.cutId), ts: u.ts }); });
         });
+        var fixed = this.applyPreviewStarts(starts, ops);
         if (fixed) {
             try {
                 console.warn('[pp] ⚠️ #4444: план упаковщика разошёлся с хранимой наладкой — предпросмотр '
