@@ -46,15 +46,15 @@ function assert(cond, name) { assertEqual(!!cond, true, name); }
     var sumM = cols['A'].materialWindingMin + cols['B'].materialWindingMin + cols['C'].materialWindingMin;
     assertEqual([sumK, sumM, sumK + sumM], [60, 30, 90], '#4296 канон Σ (= отчёт): ножи 60, смены сырья 30 (вкл. заправку первой), переналадка 90');
 
-    // Старая панель (planQuality по весам): первое задание = ножи + сырьё; рост полос = KNIVES_INCREASE 50.
+    // Старая панель (planQuality по весам): первое задание = ножи + сырьё; рост полос = 30 + доплата 50.
     var slots = [{ ms: 1000, c: A }, { ms: 2000, c: B }, { ms: 3000, c: C }].map(function (x) {
         var c = x.c;
         return { id: c.id, slitterId: c.slitterId, dayKey: 20260701, planStartMs: x.ms,
                  knifeWidths: c.knifeWidths, knifeCount: c.knifeCount, materialId: c.materialId, winding: c.winding };
     });
     var pq = planning.planQuality(slots, { settings: {}, prevSetupBySlitter: {} });
-    assertEqual([pq.all.knifeMin, pq.all.materialMin, pq.all.changeoverMin], [80, 30, 110],
-        '#4156 старая панель РАЗДУВАЛА: ножи 80 (30+50-инкремент), сырьё 30 (15+15 у первого), переналадка 110 ≠ 75');
+    assertEqual([pq.all.knifeMin, pq.all.materialMin, pq.all.changeoverMin], [110, 30, 140],
+        '#4156 старая панель РАЗДУВАЛА: ножи 110 (30 + 30 + доплата 50 за рост), сырьё 30 (15+15 у первого), переналадка 140 ≠ 75');
 })();
 
 // ── 2) storedSetupTotals — панель суммирует ХРАНИМЫЕ колонки (как строки отчёта), с окном [С;По] ──

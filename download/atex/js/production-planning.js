@@ -2245,6 +2245,24 @@
         return keys.sort(function(a, b) { return a - b; });
     }
 
+    // #4434 п.4: по КАКОЙ записи читать «Обеспечение» этой резки. Цепочка дробления по дням — ОДНО
+    // логическое задание, и все «Обеспечения» висят на ГОЛОВЕ; продолжение («ID первой части»
+    // заполнен) своих записей не имеет. Читая связи по id самого продолжения, карточка писала
+    // «нет связей», теряла «(срок: …)» и красила ВСЕ полосы «(ОТХОДЫ)» — задание выглядело новым и
+    // оторванным от заказа (issue #4434 п.4: «Какое НОВОЕ задание и почему оно оторвано от заказа?»).
+    // Свои связи у записи есть — они авторитетны (продолжение могли отвязать, #4357); нет —
+    // читаем по голове. Чистая — покрыта тестом. → id записи-носителя связей.
+    function supplyHostCutId(cut, supplies) {
+        var id = String(cut && cut.id == null ? '' : cut.id);
+        var head = String(cut && cut.firstPartId == null ? '' : cut.firstPartId).trim();
+        if (head === '' || head === id) return id;
+        for (var i = 0; i < (supplies || []).length; i++) {
+            var s = supplies[i];
+            if (s && String(s.cutId) === id) return id;   // у продолжения есть свои связи — по ним и читаем
+        }
+        return head;
+    }
+
     // #4230: ключи ширин полос резки, идущих В ЗАКАЗ. Полоса резки идёт «в заказ», если её
     // ширина совпадает с шириной обеспечиваемой позиции заказа (supply.positionId → позиция →
     // width). Всё остальное этой резки (лишние полосы добора джамбо, #3391) идёт на склад или в
@@ -4412,7 +4430,11 @@
     // сам влезающий в рабочее окно дня, переносится на начало СЛЕДУЮЩЕГО рабочего дня (а не
     // оставляется с нахлёстом за смену). Не задан → прежнее поведение (проверяли только старт).
     // dayEnd по-прежнему граница, ПОСЛЕ которой новый сегмент не начинают.
-    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit, skipCeiling) {
+    // #4434 п.1: keepDay — сегмент ОБЯЗАН остаться в своём дне (зафиксированное 🔒 задание). Тогда ни
+    // потолок нахлёста, ни граница «после dayEnd новый сегмент не начинают» его с дня не выталкивают:
+    // замок дня абсолютен, перегруз дня допустим. Блоки простоя (нерабочий день/«Отпуск») по-прежнему
+    // обходятся — там разместить физически нечего.
+    function nextFreeWorkMinute(from, len, blocked, dayStart, dayEnd, fitEnd, movedInit, skipCeiling, keepDay) {
         var m = Number(from);
         var L = Number(len) || 0;
         var hasFit = (fitEnd != null && isFinite(Number(fitEnd)));
@@ -4430,7 +4452,7 @@
             var day = Math.floor(m / 1440);
             var within = m - day * 1440;
             if (within < dayStart) { m = day * 1440 + dayStart; continue; }
-            if (within >= dayEnd) { m = (day + 1) * 1440 + dayStart; moved = true; continue; }
+            if (within >= dayEnd && !keepDay) { m = (day + 1) * 1440 + dayStart; moved = true; continue; }
             // #3907: сегмент должен влезть в рабочее окно дня ЦЕЛИКОМ. Конец за fitEnd, а сам
             // сегмент в день влезает (L ≤ dayCap) → на начало следующего дня. Только для сдвинутого
             // простоем сегмента (#3934). Сегмент длиннее целого окна разбить нельзя — кладём как есть.
@@ -4439,7 +4461,7 @@
             // уезжал за конец смены — а перед выходными за все выходные, оседая ОДИНОКОЙ наладкой на
             // понедельник и вытесняя #3951 весь дневной объём на вторник: день «недогружен, только наладка»).
             // Блоки простоя (ниже) хвост по-прежнему обходит; выталкивание касается лишь проходов (#3907).
-            if (moved && !skipCeiling && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
+            if (moved && !skipCeiling && !keepDay && hasFit && (within + L > endLimit) && (L <= dayCap)) { m = (day + 1) * 1440 + dayStart; continue; }
             var bumped = false;
             for (var i = 0; i < (blocked || []).length; i++) {
                 var bS = blocked[i][0], bE = blocked[i][1];
@@ -4486,7 +4508,8 @@
             // необязателен; нет — прежнее поведение.
             var skipCeiling = acc.overhangTail ? !!acc.overhangTail(it) : false;
             // #3907: fitEnd — не оставлять сегмент с нахлёстом за смену (см. nextFreeWorkMinute).
-            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved, skipCeiling);
+            var keepDay = acc.keepDay ? !!acc.keepDay(it) : false;   // #4434 п.1: 🔒 остаётся в своём дне
+            var placed = nextFreeWorkMinute(ws, len, blocked, dayStart, dayEnd, fitEnd, cursorMoved, skipCeiling, keepDay);
             var delta = placed - origWs;
             if (delta !== 0) acc.shift(it, delta);
             cursor = placed + len;
@@ -4986,7 +5009,11 @@
                 windowStart: function(s) { return s.windowStartMin; },
                 length: function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
                 shift: function(s, delta) { s.windowStartMin = round3(s.windowStartMin + delta); s.startMin = round3(s.startMin + delta); },
-                overhangTail: function(s) { return !!s.setupOnly; }   // #4021: setup-only хвост дня — намеренный нахлёст (#3635 п.5), не выталкивать потолком
+                // #4021: setup-only хвост дня — намеренный нахлёст (#3635 п.5), не выталкивать потолком.
+                // #4434 п.1: сегмент зафиксированного (🔒) задания — тоже: его день абсолютен, перегруз дня
+                // допустим, а перенос на следующий день — нет.
+                overhangTail: function(s) { return !!s.setupOnly || !!s.fixedDayLock; },
+                keepDay: function(s) { return !!s.fixedDayLock; }   // #4434 п.1: сегмент 🔒 не покидает свой день
             }, fitEnd);
             if (traceDown) {
                 segs.forEach(function(s, i) {
@@ -5173,6 +5200,28 @@
             function pending() {
                 return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
             }
+            // #4434 п.1: ЗАМОК ДНЯ АБСОЛЮТЕН. Указатель дня не имеет права уйти вперёд, пока на
+            // текущем дне остались НЕразмещённые зафиксированные (🔒) резки: уйдя, он оставляет их
+            // «позади», и они попадают в ветку stranded, которая раньше снимала им замок и клала на
+            // текущий день — 🔒 молча переезжало (issue #4434 п.1). Ждём: 🔒 этого дня разместим
+            // здесь же, пусть и с перегрузом дня.
+            function fixedPendingOn(d) {
+                for (var fi = 0; fi < poolOrder.length; fi++) {
+                    var fst = state[poolOrder[fi]];
+                    if (fst.fixedDay !== d) continue;
+                    if (fst.remaining > 0 || (fst.perPass <= 0 && !fst.placedEmpty)) return true;
+                }
+                return false;
+            }
+            // #4434 п.1: перейти на следующий день. Возвращает false и НЕ двигает день, если на нём
+            // ещё стоят 🔒 (их размещаем на их дне). Единая точка ухода с дня для всех веток разрыва.
+            // Отказ помечает день в forceFixedDay: следующий выбор берёт 🔒 этого дня ВПЕРЁД продолжений
+            // и свободных — иначе тот же кандидат выбирался бы снова и цикл не сходился бы.
+            var forceFixedDay = {};
+            function leaveDay() {
+                if (fixedPendingOn(day)) { forceFixedDay[day] = true; return false; }
+                day += 1; clock = 0; return true;
+            }
             // #3974: среди кандидатов — приоритет (по возрастанию ключа): нефольга раньше фольги
             // (#3717 — фольга в конец дня), затем минимальная переналадка от prevPhysical
             // (непрерывность конфигурации, «начинать с той конфигурации, на которой закончили»),
@@ -5247,7 +5296,7 @@
                 // #4068: резервная фольга дня уже поставлена (в rem её нет), но резерв дня был — день
                 // закрыт для нефольги (она не встаёт ПОСЛЕ фольги), переходим на следующий день.
                 if (reserveForDay(day) > 0 && clock > 0 && !rem.some(function(id){ return state[id].resFoilDay === day; })) {
-                    day += 1; clock = 0; continue;
+                    if (leaveDay()) continue;   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 }
                 // Незавершённая резка (продолжение, ножи на станке) — доводим её первой.
                 var inProgress = rem.filter(function(id){ return state[id].isCont && state[id].remaining > 0; });
@@ -5272,8 +5321,14 @@
                     freeDue = []; freeAny = []; resFoilToday = [];
                 }
                 var pick;
-                if (inProgress.length) pick = selectByConfig(inProgress);
-                else if (fixedToday.length) pick = selectByConfig(fixedToday);
+                // #4434 п.1: день ИСЧЕРПАН (занято больше ёмкости) — с него можно уйти только тогда,
+                // когда на нём не осталось 🔒: замок дня абсолютен. Поэтому на исчерпанном дне 🔒 берём
+                // ПЕРЕД продолжением: продолжение всё равно уедет на следующий день (там его ветка это
+                // и сделает), а зафиксированное обязано лечь здесь — иначе указатель дня уйдёт вперёд и
+                // 🔒 «отстанет» (прежний путь: ветка stranded снимала замок и задание переезжало).
+                var dayExhausted = clock > 0 && (effCapacity(day) - clock) <= 0;
+                if (fixedToday.length && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedToday);
+                else if (inProgress.length) pick = selectByConfig(inProgress);
                 else {
                     // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
                     // (isFoil-last key), поэтому фольга уходит в конец дня (#3717) сама.
@@ -5294,16 +5349,28 @@
                             });
                         });
                         if (nextDay == null) {
-                            // #4304: остались зафикс-резки В ОКНЕ (fixedDay ≥ 0), чей день уже ПОЗАДИ — их
-                            // зафиксированный день переполнен (напр. большая зафикс-резка того же дня
-                            // разорвалась и увела день вперёд). НЕ бросаем их (иначе задание пропало бы из
-                            // плана!): снимаем замок дня и размещаем как обычные с текущего дня. Разрыв/перенос
-                            // пометит их «→» — рендер покажет красное предупреждение, что зафикс. задание сдвинуто.
-                            // Зафикс-резку РАНЬШЕ «С» (fixedDay < 0) НЕ трогаем — она остаётся на своём прошлом
-                            // дне как есть (#3974: цикл идёт только вперёд от 0, прошлые дни не перепланируем).
+                            // #4434 п.1: сюда доходят зафикс-резки (fixedDay ≥ 0), чей день уже ПОЗАДИ.
+                            // Обычное переполнение дня сюда больше не приводит — leaveDay() не отпускает
+                            // указатель с дня, пока на нём есть 🔒. Остаётся единственная физическая
+                            // причина: день 🔒 ЦЕЛИКОМ нерабочий (выходной/праздник «Календаря» #3788 или
+                            // «Отпуск» станка #3764 на всё окно) — разместить на нём нечего. Бросить
+                            // задание нельзя (пропадёт из плана), поэтому кладём с текущего дня и КРИЧИМ
+                            // (ТЗ §14, [[crm-no-silent-fallback]]) — оператор обязан узнать, что замок дня
+                            // не соблюдён, а не обнаружить это глазами. Зафикс-резку РАНЬШЕ «С» (fixedDay < 0)
+                            // НЕ трогаем — она остаётся на своём прошлом дне (#3974).
                             var stranded = rem.filter(function(id){ return state[id].fixedDay != null && state[id].fixedDay >= 0; });
                             if (!stranded.length) break;
-                            stranded.forEach(function(id){ state[id].fixedDay = null; });   // день переполнен — освобождаем
+                            stranded.forEach(function(id){
+                                var lostDay = state[id].fixedDay;
+                                state[id].fixedDay = null;   // разместить на своём дне физически нельзя
+                                ppTraceWarn('#4434 ⛔ ЗАМОК ДНЯ НЕ СОБЛЮДЁН: зафикс-резка ' + id + ' (день ' + lostDay +
+                                    ') — этот день нерабочий для станка; кладём с дня ' + day);
+                                if (typeof console !== 'undefined' && console.error) {
+                                    console.error('[pp] ⛔ #4434: зафиксированное задание ' + id + ' не удержало свой день ' +
+                                        lostDay + ' — день нерабочий (выходной/праздник/«Отпуск» станка). Размещено с дня ' + day + '.');
+                                }
+                                if (typeof opts.onFixedDayLost === 'function') opts.onFixedDayLost(String(id), lostDay, day);
+                            });
                             continue;
                         }
                         day = nextDay; clock = 0; continue;
@@ -5332,15 +5399,29 @@
                     var availCutsF = availFor(day, 'cuts');
                     var fittingF = (canRunF && availCutsF >= setupF) ? Math.floor((availCutsF - setupF) / perPassF) : 0;
                     if (fittingF < 0) fittingF = 0;
-                    if (!canRunF || fittingF >= st.remaining) {
+                    // #4434 п.1: 🔒 НИКОГДА не меняет свой день. Если резка влезла бы в ПУСТОЙ день, а
+                    // не влезает лишь потому, что день УЖЕ занят другой работой, — кладём её ЦЕЛИКОМ на
+                    // её день с ПЕРЕГРУЗОМ (и кричим), а не разрываем: разрыв тут был бы следствием
+                    // чужой загрузки, а не размера самой резки. Разрыв #4304 остаётся ровно для своего
+                    // случая — резка длиннее целой смены (в пустой день тоже не влезает).
+                    var emptyAvailF = availCutsF + dayWholeOccupied(day);   // ёмкость дня БЕЗ его занятости
+                    var fitsEmptyF = canRunF && emptyAvailF >= setupF
+                        && Math.floor((emptyAvailF - setupF) / perPassF) >= st.remaining;
+                    if (!canRunF || fittingF >= st.remaining || fitsEmptyF) {
                         // #3792: влезает целиком (в пределах нахлёста) ИЛИ вырожденная (0 проходов/без
                         // окна) — один сегмент на зафиксированном дне, БЕЗ разрыва.
                         var wsF = day * 1440 + dayStart + clock;
                         var durF = canRunF ? st.remaining * perPassF : 0;
                         segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
                             windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
-                            durationMin: round3(durF), isContinuation: false, parentCutId: null });
+                            durationMin: round3(durF), isContinuation: false, parentCutId: null,
+                            fixedDayLock: true });   // #4434 п.1: сегмент 🔒 — потолок нахлёста его с дня не выталкивает
                         clock += setupF + durF;
+                        if (canRunF && fittingF < st.remaining) {
+                            ppTraceWarn('#4434 ФИКС-резка ' + pick + ' оставлена на своём дне ' + day +
+                                ' С ПЕРЕГРУЗОМ (день занят другой работой): конец ' + ppClock(dayStart + clock) +
+                                '. Замок дня абсолютен — не переносим и не разрываем.');
+                        }
                         ppTrace('  ФИКС-резка ' + pick + ' целиком на дне ' + day + ': настр ' + Math.round(setupF) +
                             ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
                         prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
@@ -5356,17 +5437,21 @@
                     var durF2 = passesNowF * perPassF;
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowF,
                         windowStartMin: round3(wsF2), startMin: round3(wsF2 + setupF), setupMin: round3(setupF),
-                        durationMin: round3(durF2), isContinuation: false, parentCutId: null });
+                        durationMin: round3(durF2), isContinuation: false, parentCutId: null,
+                        fixedDayLock: true });   // #4434 п.1: голова 🔒 остаётся на зафиксированном дне
                     st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('#4304 ЗАФИКС-резка ' + pick + ' РАЗОРВАНА по потолку дня: ' + passesNowF +
                         ' проходов на дне ' + day + ' (конец ' + ppClock(dayStart + clock + setupF + durF2) + '), остаток ' +
                         st.remaining + ' проходов → день ' + (day + 1));
-                    day += 1; clock = 0;
+                    // #4434 п.1: голова осталась на зафиксированном дне; уйти с дня можно, только если
+                    // на нём не осталось ДРУГИХ 🔒 (иначе они «отстанут» от указателя и переедут).
+                    clock += setupF + durF2;
+                    leaveDay();
                     continue;
                 }
                 // #3792: предыдущая фикс-резка могла переполнить день (нахлёст) — свободные тогда
                 // начинают со следующего дня, без хвостовой настройки на уже переполненном дне.
-                if (clock > 0 && (effCapacity(day) - clock) < 0) { day += 1; clock = 0; continue; }
+                if (clock > 0 && (effCapacity(day) - clock) < 0) { if (leaveDay()) continue; }   // #4434 п.1: 🔒 этого дня — сначала
                 insertLunchBefore();
                 // Резка без проходов/окна — один сегментик (как базовая ветка).
                 if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) {
@@ -5409,7 +5494,9 @@
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
-                    if (st.remaining > 0) { day += 1; clock = 0; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин), остаток ' + st.remaining + ' → день ' + day); }     // остаток проходов — на следующий день
+                    // #4434 п.1: остаток — на следующий день, НО уйти с текущего можно, только если на
+                    // нём не осталось 🔒 (иначе зафиксированное «отстаёт» от указателя дня и переезжает).
+                    if (st.remaining > 0) { clock += setupG + durG; leaveDay(); ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин), остаток ' + st.remaining + ' → день ' + day); }     // остаток проходов — на следующий день
                     else { clock += setupG + durG; ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин) целиком, занято дня ' + Math.round(clock) + ' (конец ' + ppClock(dayStart + clock) + ')'); }
                 } else if (clock > 0) {
                     // #3760/#3805/#3821: в хвост дня не влезает ни один проход. ЕСТЬ настройка — кладём в
@@ -5442,7 +5529,7 @@
                         ppTrace('  проход не влез, настройка (' + Math.round(setupG) + ') не влезает в хвост дня в пределах нахлёста (' +
                             Math.round(tailAvailG) + ') → резка целиком на день ' + (day + 1));
                     }
-                    day += 1; clock = 0;
+                    leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 } else {
                     // Вырожденно: даже ПУСТОЙ день не вмещает настройку + один проход (настройка или
                     // одиночный проход длиннее целого окна). Разбить одиночный проход нельзя — кладём
@@ -5454,7 +5541,8 @@
                         durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
                     st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('вырожденно: настройка+1 проход (' + Math.round(setupG + perPassEffG) + ' мин) длиннее целого дня — кладём 1 проход с нахлёстом, остаток ' + st.remaining + ' → день ' + (day + 1));
-                    day += 1; clock = 0;
+                    clock += setupG + durO;
+                    leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 }
             }
             // #3914: итог генерации (gapFill) по дням — какие дни превысили бюджет.
@@ -6162,6 +6250,51 @@
         return chain;
     }
 
+    // #4434 п.2: задания, ИСКЛЮЧЁННЫЕ из входа планировщика, продолжают физически занимать станок.
+    // Главный случай — цепочки прошлых дней (#4294): голова стоит 27.07 (раньше «С»), а её
+    // продолжение / наладочный хвост (#3635 п.5) — уже 28.07 в 08:00, ВНУТРИ окна. Планировщик такую
+    // цепочку в глаза не видит и набивает тот же день с 08:00 → два задания стартуют в одну минуту
+    // (issue #4434 п.2: «Почему 2 задания в 1 день в 8 утра?»). Сюда же «Завершён» с плановым днём в
+    // окне — станок в это время был занят.
+    //
+    // Отдаём их станку как БЛОКИРОВАННЫЕ интервалы (та же ось и формат, что «Отпуск» #3764,
+    // [[s,e]] в минутах от полуночи дня 0): ёмкость дня уменьшается (#3978), а новые сегменты
+    // обходят занятое время (shiftPlacementsPastDowntime).
+    //
+    // Занятость = хранимый тайминг задания («Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»),
+    // фолбэк — «Длительность, минут». Нечем измерить — НЕ занижаем день молча: пропускаем и кричим
+    // ([[crm-no-silent-fallback]]). Резервируем только то, что попадает в окно (день ≥ 0).
+    // Чистая (вход не мутирует) — покрыта тестом. → { slitterId: [[startMin, endMin], …] }.
+    function excludedCutBlockedRanges(cuts, excludedIds, baseMidnightMs) {
+        var out = {};
+        if (!excludedIds || !excludedIds.length || !isFinite(Number(baseMidnightMs))) return out;
+        var want = {};
+        excludedIds.forEach(function(id){ want[String(id)] = true; });
+        (cuts || []).forEach(function(c){
+            if (!c || c.id == null || !want[String(c.id)]) return;
+            var sid = (c.slitter && c.slitter.id != null) ? String(c.slitter.id) : '';
+            if (sid === '') return;
+            var tsSec = Number(c.planDate != null && String(c.planDate) !== '' ? c.planDate : c.number);
+            if (!isFinite(tsSec) || tsSec <= 0) return;                       // никогда не планировалось — места не занимает
+            var startMin = Math.round((tsSec * 1000 - Number(baseMidnightMs)) / 60000);
+            if (startMin < 0) return;                                          // сегмент раньше «С» — вне окна раскладки
+            var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
+                    + Math.round(stripNum(c.storedCutAndLeaderMin));
+            if (!(occ > 0)) occ = Math.round(stripNum(c.duration));            // фолбэк: «Длительность, минут»
+            if (!(occ > 0)) {
+                if (typeof console !== 'undefined' && console.warn) {
+                    console.warn('[pp] ⚠️ #4434: задание ' + c.id + ' стоит в окне (' + startMin +
+                        ' мин от базы), но НЕ участвует в раскладке и его занятость измерить нечем ' +
+                        '(тайминг и «Длительность» пусты) — время станка под него НЕ зарезервировано.');
+                }
+                return;
+            }
+            (out[sid] = out[sid] || []).push([startMin, startMin + occ]);
+        });
+        Object.keys(out).forEach(function(sid){ out[sid].sort(function(a, b){ return a[0] - b[0]; }); });
+        return out;
+    }
+
     // #4357: надо ли ОТВЯЗАТЬ запись от цепочки дробления при ручном переносе 🗓.
     // Для планировщика цепочка «голова + продолжения по дням» — ОДНО логическое задание:
     // mergeContinuationChains схлопывает её в копию ГОЛОВЫ (её станок, её день) с суммой проходов, а
@@ -6352,26 +6485,11 @@
             var id = String(c && c.id);
             if (c && c.fixed && anchorIn[id] != null) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
         });
-        // #4424: 🔒, оставивший задание ЗА СРОКОМ, — недействителен: пользователь приколол задание,
-        // ожидая его В СРОК (это и написано в #4224). Пока замок дня действовал в КАЖДОЙ пробной
-        // упаковке рескью, спасти такое задание было НЕЛЬЗЯ: как его ни переставляй в очереди,
-        // realPackFn возвращал ему тот же зафиксированный день, проверка «стало раньше» не проходила,
-        // и просроченный фикс навсегда оставался в своём дне (реальный ateh: три 🔒-задания стояли на
-        // 29.07 при свободном на 267 мин 27.07 и ПУСТОМ 28.07, а отчёт врал «честный дефицит ёмкости»).
-        // Здесь копятся id, у которых рескью снял замок дня; их анкер не действует ни в пробной, ни в
-        // финальной упаковке (иначе задание отскочило бы назад). Станок 🔒 по-прежнему держит:
-        // relocateOverdueReal переставляет зафиксированное только внутри своего станка.
-        var rescuedUnpin = {};
-        function anchorsWithout(extraUnpin){
-            if (!Object.keys(rescuedUnpin).length && !(extraUnpin && Object.keys(extraUnpin).length)) return effAnchorByCut;
-            var out = {};
-            Object.keys(effAnchorByCut).forEach(function(id){
-                if (rescuedUnpin[id]) return;
-                if (extraUnpin && extraUnpin[id]) return;
-                out[id] = effAnchorByCut[id];
-            });
-            return out;
-        }
+        // #4434 п.1: ЗАМОК ДНЯ АБСОЛЮТЕН. Прежний механизм «рескью снимает замок дня у просроченного
+        // 🔒» (#4224/#4424) убран целиком: задание, приколотое оператором к дню, не переезжает НИ ПО
+        // КАКОЙ причине — ни ради срока, ни из-за переполнения дня. Просрочка 🔒 не прячется: её
+        // показывает панель «просрочено: N» (#4161) и безусловный лог #4200. Анкер «Даты план»
+        // действует и в пробной, и в финальной упаковке одинаково.
         var perPass = opts.perPassByCut || {};
         // #3974: фильтр входа по «Дате план» ∈ [С;По] (#3660 inScopeUpTo / #3918 спил-день)
         // ОТМЕНЁН. Вход планировщика = всё необеспеченное (открытые задания, отобраны вызывающим:
@@ -6471,9 +6589,7 @@
         // #4118: упаковка УЖЕ упорядоченной очереди станка splitMachineQueue (без пере-сортировки).
         // Выделено из planMachineSegs, чтобы доп. проход по РЕАЛЬНЫМ дням (relocateOverdueReal) мог
         // паковать пробные порядки на любом станке теми же параметрами (обед/отпуск/нахлёст/заправка).
-        // #4424: unpin — id, чей замок дня в ЭТОЙ упаковке не действует (пробная упаковка рескью
-        // просроченного 🔒; снятые рескью замки живут в rescuedUnpin и действуют дальше везде).
-        function packOrderedMachine(ordered, key, unpin){
+        function packOrderedMachine(ordered, key){
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -6484,7 +6600,8 @@
                 leader: opts.leader, times: opts.times,
                 perPassByCut: perPass, runsByCut: runsByCut,
                 lunchStartMin: opts.lunchStartMin, lunchDurationMin: opts.lunchDurationMin,
-                dayAnchorByCut: anchorsWithout(unpin),   // #3974: якорь дня ТОЛЬКО за 🔒; #4424: минус снятые рескью
+                dayAnchorByCut: effAnchorByCut,   // #3974: якорь дня ТОЛЬКО за 🔒; #4434: замок абсолютен — не снимаем никогда
+                onFixedDayLost: opts.onFixedDayLost,   // #4434: 🔒 не удержало свой день (день нерабочий) — кричим наверх
                 weights: opts.weights,            // #4050: веса §8 (DEADLINE/EXACT_DEADLINE_COST_MN)
                 firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
                 carryPrevSetup: (opts.prevSetupBySlitter || {})[key],   // #3853: реальная заправка станка для первой резки (как окно в setupActivityColumns)
@@ -6590,11 +6707,10 @@
         merged.cuts.forEach(function(c){ if (c && c.id != null) cutById[String(c.id)] = c; });
         // #4118: реальный день ЗАВЕРШЕНИЯ каждого задания при заданном порядке очереди станка (реальная
         // упаковка splitMachineQueue с параметрами станка). realDayFn(orderIds, machineId) → {id: day}.
-        // #4424: unpin — пробная упаковка БЕЗ замка дня этих заданий (рескью просроченного 🔒).
-        function realPackFn(orderIds, machineId, unpin){
+        function realPackFn(orderIds, machineId){
             var objs = (orderIds || []).map(function(id){ return cutById[String(id)]; }).filter(Boolean);
             // #4200: календарный день; #4209/#4290: по сегментам НАМОТКИ, ПОСЛЕДНИЙ день (setup-only хвост срок не держит).
-            return windingDaysFromSegs(packOrderedMachine(objs, String(machineId), unpin));
+            return windingDaysFromSegs(packOrderedMachine(objs, String(machineId)));
         }
         var packed = packAll();
         // #4095 / ТЗ §12: срок держат РЕАЛЬНЫЕ дни splitMachineQueue, а НЕ ёмкость-оценка размещения.
@@ -6666,11 +6782,7 @@
                 // Итерация 0 на пути размещения — богатая занятость слоя (#4085); дальше — пере-сев из packed.
                 var occ4118 = (oR4203 === 0 && slotPlan && slotPlan.occupancy) ? slotPlan.occupancy : occupancyFromCurrentOrder();
                 var rel2 = relocateOverdueReal(occ4118, opts.dueDayByCut, realPackFn,
-                    slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor,
-                        // #4424: рескью снял замок дня у просроченного 🔒 — держим это до конца прогона,
-                        // иначе финальная упаковка вернёт задание на прежний просроченный день.
-                        rescueUnpinIds: opts.rescueUnpinIds,
-                        onUnpinFixed: function(id){ rescuedUnpin[String(id)] = 1; } }));
+                    slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
                 if (rel2.moves.length) {
                     overduePass.moves += rel2.moves.length;
                     rel2.moves.forEach(function(m){ overduePass.moveLog.push(m); });
@@ -6729,7 +6841,9 @@
                 if (!ordered.length) return;
                 var prevSetup = (opts.prevSetupBySlitter || {})[key];
                 var entry = prevSetup ? carryOverPrevCut(prevSetup, ordered[0]) : null;
-                var better = resequenceWithinDays(ordered, dayByCut, spanning, entry, reseqTimes);
+                // #4434 п.5: веса «Настройки» (KNIVES_INCREASE_COST_MN и пр.) — В цель пересортировки.
+                // Без них она считала направленный штраф по дефолтам кода, игнорируя таблицу.
+                var better = resequenceWithinDays(ordered, dayByCut, spanning, entry, reseqTimes, opts.weights);
                 if (!better) return;
                 var trialSegs = packOrderedMachine(better, key);
                 var trialDays = {};
@@ -7433,18 +7547,26 @@
     // (#3600) — и это верно для реальной «Наладка ножей, мин» в задании. Но при УПОРЯДОЧИВАНИИ
     // доставить ножи (полос стало БОЛЬШЕ) дороже, чем снять (ТЗ §8 п.1: KNIVES_INCREASE=50 >
     // KNIVES_CHANGE=30). Добавляем к физической стоимости направленный штраф за РОСТ числа полос
-    // = planWeight(INCREASE) − planWeight(CHANGE) (веса #3991, ТЗ §14). Так убывание полос
+    // = planWeight(INCREASE) — ДОПОЛНИТЕЛЬНАЯ доплата сверх базовой смены ножей, а не замена её цены
+    // (веса #3991, ТЗ §14; #4434 п.5). Так убывание полос
     // становится СТРОГО дешевле возрастания, а не только тай-брейком (#3130): жадная цепочка сама
     // ставит наборы по убыванию, и это не сбивается разницей по сырью/партии. Физтайминг
     // (changeoverParts/setupBreakdown) не трогаем — реальные минуты наладки прежние.
-    function sequencingCost(prev, next, weights){
+    // #4434 п.5: settings — объект «Настройки» (веса ТЗ §14). Раньше здесь стояло planWeight(null, …),
+    // то есть направленный штраф ВСЕГДА брался из дефолтов кода (50−30=20), а значение
+    // KNIVES_INCREASE_COST_MN из таблицы «Настройка» не применялось НИКОГДА — «система штрафов не
+    // работает» ровно в том месте, которое отвечает за порядок ножей по убыванию. Теперь вес читается
+    // из настроек. Фолбэк на `weights` не случаен: orderCuts/greedySequence передают сюда planOptions,
+    // где веса «Настройки» лежат ПЛОСКО (makePlanningOptions), — там источник и без явного аргумента.
+    function sequencingCost(prev, next, weights, settings){
         var base = changeoverCost(prev, next, weights);
+        var wsrc = settings || weights;
         // #3871: во время выравнивания загрузки считаем только быстрый memoized changeoverCost —
         // направленный штраф (не memoized: knifeChangeNeeded/stripBandCount на каждую пробу переноса)
         // раздувал O(n³) проход rebalanceSlitterLoad. Для баланса важны дни/минуты, а не направление
         // ножей; финальный порядок всё равно соберёт orderCuts (balanceFastChangeover=false).
         if (!balanceFastChangeover && knifeChangeNeeded(prev, next) && stripBandCount(next) > stripBandCount(prev)) {
-            base += planWeight(null, 'KNIVES_INCREASE_COST_MN') - planWeight(null, 'KNIVES_CHANGE_COST_MN');
+            base += planWeight(wsrc, 'KNIVES_INCREASE_COST_MN');
         }
         // #4151: крошечный тай-брейк — смена РУЛОНА (материал/партия) чуть дороже смены намотки, чтобы
         // при равной реальной переналадке резки одного рулона держались вместе (не рвались чужим
@@ -7454,13 +7576,13 @@
         return round3(base);
     }
     // Жадная цепочка от заданного старта: далее argmin sequencingCost, tie-break startKey.
-    function greedyFromStart(start, rest, weights){
+    function greedyFromStart(start, rest, weights, settings){
         var pool = (rest || []).slice();
         var result = [start];
         while (pool.length){
             var cur = result[result.length - 1], bestI = 0, bestCost = Infinity, bestKey = null;
             for (var i = 0; i < pool.length; i++){
-                var c = sequencingCost(cur, pool[i], weights), k = startKey(pool[i]);
+                var c = sequencingCost(cur, pool[i], weights, settings), k = startKey(pool[i]);
                 if (c < bestCost || (c === bestCost && cmpKey(k, bestKey) < 0)){ bestCost = c; bestI = i; bestKey = k; }
             }
             result.push(pool.splice(bestI, 1)[0]);
@@ -7597,16 +7719,18 @@
     }
     // Σ стоимости цепочки, считая переход от prev (заправка станка / хвост прошлого дня).
     // costFn — sequencingCost (цель порядка, #3996) либо changeoverCost (реальные минуты наладки).
-    function runChainCost(seq, prev, times, costFn){
+    function runChainCost(seq, prev, times, costFn, settings){
         var total = 0, cur = prev;
         for (var i = 0; i < seq.length; i++){
-            if (cur) total += costFn(cur, seq[i], times);
+            if (cur) total += costFn(cur, seq[i], times, settings);   // #4434 п.5: веса «Настройки» — до sequencingCost
             cur = seq[i];
         }
         return round3(total);
     }
-    // Держим перебор в разумных рамках: на реальных планах РАЗНЫХ конфигураций в дне ≤ 13.
-    // Дней шире — не переставляем (возвращаем null), порядок слоя размещения остаётся как есть.
+    // Держим ТОЧНЫЙ перебор (Held-Karp) в разумных рамках: на реальных планах РАЗНЫХ конфигураций в
+    // дне ≤ 13. День шире — точного перебора не делаем, но день БОЛЬШЕ НЕ ОТМЕНЯЕТ пересортировку
+    // остальных (#4434 п.5): для него берём жадную цепочку по sequencingCost (она и даёт ножи по
+    // убыванию) и оставляем выбор между «как есть» и «жадно» общей ДП по цепочке дней.
     var RESEQ_MAX_NODES = 12;
 
     // Схлопнуть резки в ГРУППЫ по подписи, сохраняя исходный относительный порядок внутри группы.
@@ -7624,7 +7748,9 @@
     //   • фольга — после всей нефольги (#3717);
     //   • резка, переползающая на следующий день (день-сплит), обязана быть последней — иначе
     //     разрыв «настройка в хвосте дня N, резка с N+1» (#3635 п.5) уедет на другую резку.
-    function dayGroups(run, spanningIds){
+    // #4434 п.5: maxNodes — потолок числа групп для ТОЧНОГО перебора; null снимает потолок
+    // (день пойдёт по жадному кандидату, а не отменит пересортировку всей очереди станка).
+    function dayGroups(run, spanningIds, maxNodes){
         var pinned = null, body = run.slice();
         var lastCut = body[body.length - 1];
         if (spanningIds && spanningIds[String(lastCut.id)]) pinned = lastCut;
@@ -7642,21 +7768,74 @@
             var g = groups[pinnedIdx];
             g.splice(g.indexOf(pinned), 1); g.push(pinned);
         }
-        if (groups.length > RESEQ_MAX_NODES) return null;
+        if (maxNodes != null && groups.length > maxNodes) return null;
 
         var idx = groups.map(function(_, i){ return i; });
         var plain = idx.filter(function(i){ return !isFoil[i]; });
         var foils = idx.filter(function(i){ return isFoil[i]; });
         var starts = plain.length ? plain : foils;
         var ends = pinnedIdx >= 0 ? [pinnedIdx] : (foils.length ? foils : idx);
-        return { groups: groups, isFoil: isFoil, starts: starts, ends: ends };
+        return { groups: groups, isFoil: isFoil, starts: starts, ends: ends, pinnedIdx: pinnedIdx };
+    }
+
+    // #4434 п.5: КАНДИДАТНАЯ таблица дня, который шире точного перебора (> RESEQ_MAX_NODES групп).
+    // Раньше такой день возвращал null и ОТМЕНЯЛ пересортировку ВСЕЙ очереди станка — из-за одного
+    // широкого дня остальные дни оставались как есть, и «ножи по убыванию» не появлялись нигде.
+    // Теперь для него считаем два порядка: «как есть» и ЖАДНУЮ цепочку по sequencingCost (именно она
+    // и выстраивает число полос по убыванию), а выбор между ними отдаём общей ДП по цепочке дней.
+    // Ограничения соблюдены: вся нефольга раньше любой фольги (#3717), закреплённая переползающая
+    // резка — последняя (#3635 п.5). → { cost:{s:{e:c}}, path:{s:{e:[gIdx…]}}, rep, starts, ends }.
+    function dayCandidateTable(day, times, settings){
+        var groups = day.groups, rep = groups.map(function(g){ return g[0]; });
+        var pinnedIdx = day.pinnedIdx == null ? -1 : day.pinnedIdx;
+        var idx = groups.map(function(_, i){ return i; });
+        // Жадную цепочку начинаем с САМОЙ «широкой» группы (максимум полос): направленный штраф
+        // (KNIVES_INCREASE > KNIVES_CHANGE) делает дальнейшее убывание дешевле возрастания, и цепочка
+        // сама выстраивает ножи по убыванию (#3130/#3996). Старт «как в текущем порядке» этого не даёт:
+        // начав с малого числа полос, вырасти всё равно придётся.
+        function chainOf(pool){
+            if (pool.length < 2) return pool.slice();
+            var head = 0;
+            for (var hi = 1; hi < pool.length; hi++){
+                if (stripBandCount(rep[pool[hi]]) > stripBandCount(rep[pool[head]])) head = hi;
+            }
+            var rest = pool.slice(0, head).concat(pool.slice(head + 1)), out = [pool[head]];
+            while (rest.length){
+                var cur = rep[out[out.length - 1]], bestI = 0, bestC = Infinity;
+                for (var i = 0; i < rest.length; i++){
+                    var c = sequencingCost(cur, rep[rest[i]], times, settings);
+                    // При РАВНОЙ цене берём группу с БОЛЬШИМ числом полос — иначе жадность выбирает
+                    // первую попавшуюся (все «убывания» стоят одинаково) и ряд ножей скачет.
+                    if (c < bestC || (c === bestC && stripBandCount(rep[rest[i]]) > stripBandCount(rep[rest[bestI]]))){ bestC = c; bestI = i; }
+                }
+                out.push(rest.splice(bestI, 1)[0]);
+            }
+            return out;
+        }
+        var free = idx.filter(function(i){ return i !== pinnedIdx; });
+        var greedy = chainOf(free.filter(function(i){ return !day.isFoil[i]; }))
+            .concat(chainOf(free.filter(function(i){ return day.isFoil[i]; })));
+        if (pinnedIdx >= 0) greedy.push(pinnedIdx);
+        var orders = [idx.slice()];
+        if (greedy.length === idx.length && greedy.join(',') !== idx.join(',')) orders.push(greedy);
+        var cost = {}, path = {}, starts = {}, ends = {};
+        orders.forEach(function(order){
+            var total = 0;
+            for (var i = 1; i < order.length; i++) total += sequencingCost(rep[order[i - 1]], rep[order[i]], times, settings);
+            var s0 = order[0], e0 = order[order.length - 1];
+            if (!cost[s0]) { cost[s0] = {}; path[s0] = {}; }
+            if (cost[s0][e0] == null || total < cost[s0][e0]){ cost[s0][e0] = round3(total); path[s0][e0] = order; }
+            starts[s0] = 1; ends[e0] = 1;
+        });
+        return { cost: cost, path: path, rep: rep,
+                 starts: Object.keys(starts).map(Number), ends: Object.keys(ends).map(Number) };
     }
 
     // Точные минимумы гамильтоновых путей по группам дня (Held-Karp по подмножествам) для КАЖДОЙ
     // пары (начало, конец) из допустимых. Ограничение «вся нефольга раньше любой фольги» вшито в
     // переход. Стоимость — sequencingCost между представителями групп (внутри группы переходы
     // бесплатны: подпись одна). → { cost: {s:{e:c}}, path: {s:{e:[gIdx…]}} }.
-    function dayPathTable(day, times){
+    function dayPathTable(day, times, settings){
         var groups = day.groups, n = groups.length;
         var rep = groups.map(function(g){ return g[0]; });
         var foilMask = 0, i;
@@ -7679,7 +7858,7 @@
                         // фольга уже началась → дальше только фольга (#3717)
                         if ((mask & foilMask) && !day.isFoil[nx]) continue;
                         var nm = mask | (1 << nx);
-                        var c = cur + sequencingCost(rep[last], rep[nx], times);
+                        var c = cur + sequencingCost(rep[last], rep[nx], times, settings);
                         if (c < dp[nm][nx]){ dp[nm][nx] = c; par[nm][nx] = last; }
                     }
                 }
@@ -7706,19 +7885,19 @@
     // (changeoverCost) не выросли — снятие двух «ростов полос» (−20 каждый) окупает лишнюю смену
     // ножей (+30) по цели, но оператор в цеху заплатит эти 30 минут.
     // prev — заправка станка (#3853). → новый порядок | null (не улучшилось / не наш случай).
-    function resequenceWithinDays(ordered, dayByCut, spanningIds, prev, times){
+    function resequenceWithinDays(ordered, dayByCut, spanningIds, prev, times, settings){
         // #4151: тай-брейк группировки рулона активен ТОЛЬКО здесь — sequencingCost добавляет
         // крошечный штраф за перемонтаж рулона, а двойная приёмка (newReal ≤ oldReal ниже) не даёт
         // разменять его на реальные минуты. greedySequence/orderCuts (флаг выключен) не трогаем.
         var prevTiebreak = sequencingRollTiebreak;
         sequencingRollTiebreak = true;
         try {
-            return resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times);
+            return resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times, settings);
         } finally {
             sequencingRollTiebreak = prevTiebreak;
         }
     }
-    function resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times){
+    function resequenceWithinDaysCore(ordered, dayByCut, spanningIds, prev, times, settings){
         if (!ordered || ordered.length < 2) return null;
         var runs = [], curDay = null, i;
         for (i = 0; i < ordered.length; i++){
@@ -7732,9 +7911,20 @@
         }
         var days = [], tables = [];
         for (i = 0; i < runs.length; i++){
-            var dg = dayGroups(runs[i], spanningIds);
-            if (!dg) return null;
-            days.push(dg); tables.push(dayPathTable(dg, times));
+            var dg = dayGroups(runs[i], spanningIds, RESEQ_MAX_NODES);
+            if (dg){
+                days.push(dg); tables.push(dayPathTable(dg, times, settings));
+                continue;
+            }
+            // #4434 п.5: день шире точного перебора — НЕ отменяем пересортировку всей очереди станка
+            // (раньше один такой день оставлял без «ножей по убыванию» все остальные): берём для него
+            // кандидатов «как есть» / жадная цепочка. Не раскладывается вовсе (фольга не может стать
+            // последней при закреплённом хвосте) — только тогда сдаёмся.
+            var loose = dayGroups(runs[i], spanningIds, null);
+            if (!loose) return null;
+            var ct = dayCandidateTable(loose, times, settings);
+            loose.starts = ct.starts; loose.ends = ct.ends;
+            days.push(loose); tables.push(ct);
         }
         // DP по цепочке дней: state[e] = {cost, s, prevEnd}
         var state = null;
@@ -7746,12 +7936,12 @@
                     var inner = tbl.cost[s][e];
                     if (inner == null) return;
                     if (state === null){
-                        var base = prev ? sequencingCost(prev, tbl.rep[s], times) : 0;
+                        var base = prev ? sequencingCost(prev, tbl.rep[s], times, settings) : 0;
                         if (next[e] == null || base + inner < next[e].cost) next[e] = { cost: base + inner, s: s, prevEnd: null };
                     } else {
                         Object.keys(state).forEach(function(pe){
                             var prevRep = tables[i - 1].rep[Number(pe)];
-                            var c = state[pe].cost + sequencingCost(prevRep, tbl.rep[s], times) + inner;
+                            var c = state[pe].cost + sequencingCost(prevRep, tbl.rep[s], times, settings) + inner;
                             if (next[e] == null || c < next[e].cost) next[e] = { cost: c, s: s, prevEnd: Number(pe) };
                         });
                     }
@@ -7776,8 +7966,8 @@
             order.forEach(function(gIdx){ days[i].groups[gIdx].forEach(function(c){ out.push(c); }); });
         }
         if (out.length !== ordered.length) return null;
-        var newSeq = runChainCost(out, prev, times, sequencingCost);
-        var oldSeq = runChainCost(ordered, prev, times, sequencingCost);
+        var newSeq = runChainCost(out, prev, times, sequencingCost, settings);
+        var oldSeq = runChainCost(ordered, prev, times, sequencingCost, settings);
         var newReal = runChainCost(out, prev, times, changeoverCost);
         var oldReal = runChainCost(ordered, prev, times, changeoverCost);
         // #4224: «фольга ВСЕГДА в конец дня» (#3717) — ЖЁСТКОЕ правило, не оптимизация. Если СТАРЫЙ
@@ -8558,6 +8748,8 @@
 
     // Веса штрафов и лимиты из «Настройки» (ATEH). Значения по умолчанию — из ТЗ §14.
     var PLAN_WEIGHT_DEFAULTS = {
+        // KNIVES_INCREASE_COST_MN — ДОПЛАТА сверх KNIVES_CHANGE_COST_MN, когда полос стало больше
+        // (#4434 п.5): доставить ножи = 30 + 50 = 80, снять = 30.
         KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
         LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
         CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3, SLOT_SPLIT_COST_MN: 2, MAX_DISTANCE_COST_MN: 25,
@@ -8629,9 +8821,11 @@
         var byFactor = {}, weight = 0, quality = 0;
         if (prev && next && !ctx.freeAfterCarry){
             if (knifeChangeNeeded(prev, next)){
-                // полос стало больше → дороже (KNIVES_INCREASE), иначе KNIVES_CHANGE (ТЗ §8 п.1).
+                // Смена ножей стоит KNIVES_CHANGE; если полос стало БОЛЬШЕ — СВЕРХ этого начисляется
+                // KNIVES_INCREASE (ТЗ §8 п.1). Штраф за рост ДОПОЛНИТЕЛЬНЫЙ, а не замена базовой цены:
+                // доставить ножи = снять + доплата (по умолчанию 30 + 50 = 80).
                 var inc = stripBandCount(next) > stripBandCount(prev);
-                var kw = planWeight(s, inc ? 'KNIVES_INCREASE_COST_MN' : 'KNIVES_CHANGE_COST_MN');
+                var kw = planWeight(s, 'KNIVES_CHANGE_COST_MN') + (inc ? planWeight(s, 'KNIVES_INCREASE_COST_MN') : 0);
                 weight += kw; byFactor.knife = kw;
                 var q = stripPrefixQuality(prev, next); quality += q; byFactor.knifeQuality = q;
             }
@@ -8717,7 +8911,8 @@
                         var prevForCur = (i === 0) ? carryOverPrevCut(carrySetup, cur) : prev;
                         if (knifeChangeNeeded(prevForCur, cur) && win){
                             knifeCount++;
-                            knifeMin += (stripBandCount(cur) > stripBandCount(prevForCur) ? kInc : kChange);
+                            // рост числа полос — доплата KNIVES_INCREASE СВЕРХ базовой смены ножей
+                            knifeMin += kChange + (stripBandCount(cur) > stripBandCount(prevForCur) ? kInc : 0);
                         }
                         if (materialChangeNeeded(prevForCur, cur) && win){ matCount++; matMin += matW; }
                     }
@@ -9363,6 +9558,7 @@
             Object.keys(byMachine).forEach(function(sid){
                 byMachine[sid].forEach(function(s){
                     if (!s || s.kind !== 'cut') return;
+                    if (s.fixed) return;   // #4434 п.1: 🔒 не двигаем НИКОГДА — даже ради спасения от просрочки
                     var od = overdueDays(String(s.id), realBy[sid]);
                     if (od > 0) overdue.push({ id: String(s.id), sid: sid, curReal: Number(realBy[sid][String(s.id)]), depth: od });
                 });
@@ -9376,24 +9572,16 @@
                 if (pos < 0) continue;
                 var slot = arr[pos];
                 arr.splice(pos, 1);   // снять с текущего места — оцениваем ЧИСТЫЕ станки-приёмники
-                // #4424: у ПРОСРОЧЕННОГО 🔒 замок дня в пробной упаковке НЕ действует. Иначе спасти его
-                // нельзя в принципе: как ни переставляй в очереди, упаковщик возвращает ему тот же
-                // зафиксированный день (dayAnchorByCut), проверка «стало раньше» не проходит — и #4224
-                // («рескьюем даже зафиксированное») оставался мёртвой буквой. Замок дня, оставивший
-                // задание за сроком, недействителен; станок 🔒 держит по-прежнему (условие ниже).
-                // Снимать замок вправе только у НАСТОЯЩЕЙ фиксации (ctx.rescueUnpinIds — из контроллера:
-                // временные пины переноса/заморозки/начатого туда не попадают, #4424).
-                var mayUnpin = slot.fixed && (!ctx.rescueUnpinIds || ctx.rescueUnpinIds[task.id]);
-                var unpinSelf = mayUnpin ? (function(){ var u = {}; u[task.id] = 1; return u; })() : null;
+                // #4434 п.1: рескью 🔒 УБРАН (был #4224/#4424). Замок дня абсолютен: задание, которое
+                // оператор приколол к дню, не переезжает НИ ПО КАКОЙ причине, включая просрочку —
+                // просрочку 🔒 показывает панель «просрочено» и лог #4200, решение за оператором.
+                // Сюда 🔒 больше не попадает (отфильтровано при сборе overdue выше).
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
-                    // #4224: зафиксированное (🔒) задание рескьюим ТОЛЬКО в пределах СВОЕГО станка —
-                    // станок выбрал пользователь; чиним лишь день (в срок), не перекидывая на другой станок.
-                    if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
-                    var baseReal = realDayFn(baseIds, tid, unpinSelf) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
                     var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
@@ -9401,7 +9589,7 @@
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
-                        var real = realDayFn(trialIds, tid, unpinSelf) || {};
+                        var real = realDayFn(trialIds, tid) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает СВОЙ реальный день — мимо
                         // #4338: ВЫТЕСНЕНИЕ несрочного соседа под срочное. Раньше вставка отвергалась, если
@@ -9435,10 +9623,7 @@
                 });
                 if (best){
                     byMachine[best.tid].splice(best.idx, 0, tagSlot(slot, best.tid));
-                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real, unpinned: !!slot.fixed });
-                    // #4424: замок дня снят НАВСЕГДА в этом прогоне — иначе финальная упаковка вернула бы
-                    // задание на прежний (просроченный) день, и рескью выглядел бы «перенос без эффекта».
-                    if (mayUnpin && typeof ctx.onUnpinFixed === 'function') ctx.onUnpinFixed(task.id);
+                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real });
                     changed = true;
                 } else {
                     arr.splice(pos, 0, slot);   // некуда лучше — вернуть на место
@@ -9496,7 +9681,9 @@
             Object.keys(byMachine).forEach(function(sid){ var arr = byMachine[sid], prev = null;
                 for (var i = 0; i < arr.length; i++){ var s = arr[i]; if (!s || s.kind !== 'cut') continue;
                     var dp = dlPen(String(s.id), realNow);
-                    if (dp > 0) tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: dp + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times)) });
+                    // #4434 п.1: 🔒 не двигаем даже в пределах своего станка — позиция в очереди задаёт
+                    // ДЕНЬ, значит любой такой ход = переезд зафиксированного задания на другой день.
+                    if (dp > 0 && !s.fixed) tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: dp + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times)) });
                     prev = s; } });
             if (!tasks.length) break;   // просроченных нет — оптимизация переналадки остаётся за прочими проходами
             tasks.sort(function(a, b){ return b.pen - a.pen; });
@@ -9516,7 +9703,6 @@
                 for (var mi = 0; mi < tids.length; mi++){
                     var tid = tids[mi];
                     if (!feasible(tid, T.slot)) continue;
-                    if (T.slot.fixed && String(tid) !== String(T.sid)) continue;   // 🔒 — только свой станок
                     var same = String(tid) === String(T.sid);
                     var oldCostTid = same ? 0 : machineCost(tid);
                     var tarr = byMachine[tid], mBest = null;
@@ -9765,6 +9951,7 @@
         dueColorClass: dueColorClass,           // #3769
         cutDueKeys: cutDueKeys,                 // #3769
         cutOrderedWidthKeys: cutOrderedWidthKeys, // #4230: ширины полос, идущих в заказ (остальное — склад/отходы)
+        supplyHostCutId: supplyHostCutId,        // #4434 п.4: связи продолжения читаются по ГОЛОВЕ цепочки
         countOverdueCuts: countOverdueCuts,     // #4161: число просроченных заданий (панель качества)
         planTsSeconds: planTsSeconds,           // #4346: «Дата план»/«Закончено» → unix-секунды
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
@@ -9809,6 +9996,7 @@
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         daySplitDetachCutId: daySplitDetachCutId,       // #4357: перенос сегмента — отвязать от цепочки
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
+        excludedCutBlockedRanges: excludedCutBlockedRanges, // #4434 п.2: время станка под исключённые из раскладки задания
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
         longVacationDayRanges: longVacationDayRanges,   // #4314: длинные окна «Отпуска» (дни от «С») — сбрасывают наладку
         setupResetByVacation: setupResetByVacation,     // #4314: стоял ли длинный отпуск между двумя днями
@@ -16246,14 +16434,17 @@
             .then(function() { return self.reload(); })
             .then(function() {
                 self.setBusy(false);
-                // #4189: ↑/↓ — ПРОСТО обмен местами двух соседних заданий (обмен planStart выше), БЕЗ
-                // пере-упаковки дня. autoSequenceQueue (persistCutSetupColumns + пере-раскрой по новому
-                // planStart, #3840) больше НЕ вызываем автоматом. Наладка соседей теперь неактуальна →
-                // метим СТАНОК «грязным»: renderQueue покажет крупную красную «Пересчитать наладку»
-                // (пересчёт по кнопке, не автоматом).
+                // #4434 п.3: ↑/↓ — обмен местами двух соседних заданий (обмен planStart выше). Наладка
+                // соседей после этого неактуальна, и раньше это чинила крупная красная кнопка
+                // «↻ Пересчитать наладку» (#4189/#4401 — пересчёт по кнопке). Кнопка после РУЧНОГО
+                // перемещения убрана: пересчитываем СРАЗУ и сами (тайминг + время старта встык внутри
+                // дня, порядок и дни не трогаем). Кнопка остаётся для расхождений, возникших не сейчас
+                // (напр. правка данных задания) — её показывает тот же детектор по факту расхождения.
                 var moveSid = (a.slitter && a.slitter.id != null) ? String(a.slitter.id) : '';
-                self.render();   // обмен planStart + кнопка «Пересчитать наладку» видны сразу
-                return true;
+                self.render();   // обмен planStart виден сразу, дальше — авто-пересчёт
+                // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
+                if (typeof self.recalcSetupTiming !== 'function') return true;
+                return self.recalcSetupTiming(moveSid, { auto: true }).then(function() { return true; });
             })
             .catch(function(err) {
                 self.setBusy(false);
@@ -17221,18 +17412,11 @@
         // c.fixed (как 🔒 «замок дня») — planCutOperations держит его день (effAnchorByCut от «Даты
         // план»), остальное раскладывает по срокам вокруг. Замок снимаем в finally (c.fixed мутируем на
         // общих объектах self.cuts только на время планирования). Без moveScope — прежнее поведение.
-        // #4424: рескью просроченных вправе снять ЗАМОК ДНЯ только у НАСТОЯЩЕЙ фиксации «Зафиксировано»
-        // (пользователь приколол задание, ожидая его В СРОК — см. #4224). Временные пины ниже —
-        // перенос 🗓 (#4074), замороженный день (#4326), начатое задание (#4381) — не фиксация
-        // пользователя: перенос только что сделан руками, замороженный день не трогает никакая
-        // автоматика, а начатое задание физически идёт на станке. Их id сюда НЕ попадают.
-        // Задание, чей день ЗАМОРОЖЕН, тоже не отдаём рескью, даже если оно 🔒: заморозка старше.
-        var rescueUnpinIds = {};
-        planInput.forEach(function(c){
-            if (!c || !c.fixed) return;
-            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return;
-            rescueUnpinIds[String(c.id)] = true;
-        });
+        // #4434 п.1: замок дня АБСОЛЮТЕН — «Упорядочить»/«Сгенерировать»/баланс/рескью не переносят
+        // зафиксированное (🔒) задание на другой день НИ ПО КАКОЙ причине. Прежний список
+        // rescueUnpinIds (#4424: «рескью просроченного 🔒 снимает замок дня») убран вместе с самим
+        // рескью 🔒 — просрочку приколотого задания показываем (панель «просрочено», лог #4200),
+        // а решение оставляем оператору.
         var pinnedRestore = [];
         if (moveScope && moveScope.pinCutIds && moveScope.pinCutIds.length) {
             var pinSet = {};
@@ -17269,6 +17453,24 @@
         var frozenDayFor = (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length)
             ? function(dayOffset){ return self.dayIsFrozen(planBaseMidnightMs + Number(dayOffset) * 86400000); }
             : null;
+        var fixedDayLost = [];   // #4434 п.1: 🔒, которым не удалось удержать свой день (день нерабочий)
+        // #4434 п.2: задание, которое ВИДНО в очереди, но НЕ попало во вход планировщика (цепочка
+        // прошлых дней #4294, чужой станок при переносе «в пределах станка»), стои́т своим сегментом
+        // внутри окна и физически занимает станок. Без резерва упаковщик набивал тот же день с 08:00
+        // поверх него — «2 задания в 1 день в 8 утра». Отдаём занятое время станку как простой.
+        // «Завершён» сюда НЕ берём: такие задания очередь не показывает (renderQueue), значит и
+        // наложения на экране не бывает, а молча срезать ими ёмкость дня — потеря без видимой причины.
+        var inPlanIds = {};
+        planInput.forEach(function(c){ if (c && c.id != null) inPlanIds[String(c.id)] = true; });
+        var excludedIds = (cuts || []).filter(function(c){
+            return c && c.id != null && !inPlanIds[String(c.id)]
+                && String(c.status || '').trim() !== 'Завершён';
+        }).map(function(c){ return String(c.id); });
+        var blockedBySlitter = self.blockedRangesBySlitter(planBaseMidnightMs);   // #3764: окна «Отпуска» по станкам
+        var occupiedByExcluded = excludedCutBlockedRanges(cuts, excludedIds, planBaseMidnightMs);
+        Object.keys(occupiedByExcluded).forEach(function(sid){
+            blockedBySlitter[sid] = mergeBlockedRanges(blockedBySlitter[sid] || [], occupiedByExcluded[sid]);
+        });
         var ops;
         try {
         self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам этого плана (см. computeCutSetupUpdates)
@@ -17290,11 +17492,15 @@
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
-            rescueUnpinIds: rescueUnpinIds,   // #4424: у кого рескью вправе снять замок дня (настоящая 🔒, день не заморожен)
+            // #4434 п.1: 🔒 не удержало свой день (день нерабочий — выходной/праздник/«Отпуск») —
+            // единственный оставшийся случай сдвига зафиксированного. Не молчим: собираем и говорим.
+            onFixedDayLost: function(cutId, fixedDay, placedDay) {
+                fixedDayLost.push({ cutId: String(cutId), fixedDay: fixedDay, placedDay: placedDay });
+            },
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: prevSetupBySlitter,   // #3876: станок в отпуске обнулён; #4300/#4312: заправка из заданий прошлых дней
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
-            blockedRangesBySlitter: self.blockedRangesBySlitter(planBaseMidnightMs),   // #3764: окна «Отпуска» по станкам
+            blockedRangesBySlitter: blockedBySlitter,   // #3764: окна «Отпуска» + #4434 п.2: время исключённых из раскладки заданий
             // #4314: длинные отпуска — первая резка после них считает настройку с нуля (typeof-гард, как
             // у slotPlacementOn выше: в юнит-тестах buildSequenceOps зовут на стаб-self без прототипа).
             longVacationRangesBySlitter: (self && typeof self.longVacationRangesBySlitter === 'function')
@@ -17313,6 +17519,8 @@
         } finally {
             pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
         }
+        // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
+        if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
 
         var cutsById = {};
         cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
@@ -17350,6 +17558,13 @@
                     + '. Честный дефицит ёмкости: без вытеснения соседей не размещается.');
             } catch (e) {}
         }
+        // #4434 п.1: зафиксированное задание не удержало свой день — единственный допустимый случай
+        // (день нерабочий: выходной/праздник/«Отпуск» станка). Не молчим: тост + консоль (уже в движке).
+        if (ops && ops.fixedDayLost && ops.fixedDayLost.length) {
+            self.notify('Зафиксированных заданий сдвинуто: ' + ops.fixedDayLost.length
+                + ' — их день нерабочий (выходной/праздник или «Отпуск» станка). Замок дня в такой день'
+                + ' удержать нельзя, детали в консоли.', 'warning');
+        }
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
             // #4175: переставлять/дробить нечего (план оптимален), НО заказное задание-сирота (#4163→#4175)
@@ -17365,7 +17580,7 @@
     };
 
     // #4306: ПЕРЕСТАНОВКА задания ВНУТРИ дня перетаскиванием мышью (drag-drop). Работает как ↑↓:
-    // переставляет порядок дня и метит станок «грязным» → появляется «Пересчитать наладку». Механика —
+    // переставляет порядок дня и СРАЗУ пересчитывает наладку (#4434 п.3, без кнопки). Механика —
     // как moveCutInDay, но на произвольную позицию: набор сохранённых planStart дня ПЕРЕСТАВЛЯЕТСЯ под
     // новый порядок (реальные времена сохраняются, лишь меняют владельца), пишутся только изменившиеся.
     // #4392: зафиксированные (🔒) — НЕ «стены»: их можно переставлять и тащить сквозь них (день держит
@@ -17399,7 +17614,10 @@
             var dc = byId[String(dragId)];
             var sid = (dc && dc.slitter && dc.slitter.id != null) ? String(dc.slitter.id) : '';
             self.render();
-            return true;
+            // #4434 п.3: после ручного перетаскивания наладку пересчитываем СРАЗУ, а не показываем
+            // кнопку «↻ Пересчитать наладку» (см. moveCutInDay).
+            if (typeof self.recalcSetupTiming !== 'function') return true;   // стаб-self в юнит-тестах
+            return self.recalcSetupTiming(sid, { auto: true }).then(function() { return true; });
         }).catch(function(err) {
             self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -17561,8 +17779,12 @@
     //     день переполнен (за пределы дня не выносим; переполнение показываем предупреждением).
     // Подтверждения нет намеренно: подтверждать нечего — пересчёт приводит хранимое в соответствие
     // с тем, что и так задано порядком заданий.
-    AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId) {
+    // #4434 п.3: opts.auto — АВТОМАТИЧЕСКИЙ пересчёт сразу после ручного перемещения (↑↓/drag).
+    // Отличается только разговорчивостью: «пересчитывать нечего» молчит (после перестановки это
+    // норма — соседи совпали по конфигурации), а успешный пересчёт говорит коротко.
+    AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId, opts) {
         var self = this;
+        var auto = !!(opts && opts.auto);
         if (this.busy) return Promise.resolve(false);
         // #4402: на экране непринятый план «Упорядочить» (проекция в памяти, синтетические id
         // сегментов) — тайминг по нему считать и писать нельзя. Сперва «Применить» или «Отменить».
@@ -17572,7 +17794,10 @@
         }
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
-        if (!scopeIds.length) { this.notify('В видимых днях у этого станка нет заданий', 'info'); return Promise.resolve(false); }
+        if (!scopeIds.length) {
+            if (!auto) this.notify('В видимых днях у этого станка нет заданий', 'info');
+            return Promise.resolve(false);
+        }
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
         var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
         if (!stale.length && !startOps.length) {
@@ -17588,7 +17813,7 @@
                 }
                 this.notify('Пересчитывать нечего, хотя расхождений насчитано ' + shown.length
                     + ' — это ошибка расчёта, сообщите разработчику (детали в консоли)', 'error');
-            } else {
+            } else if (!auto) {
                 this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
             }
             this.render();
@@ -17611,8 +17836,11 @@
             return self.reload();
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
-            self.notify('Пересчитано: наладка — ' + stale.length + ' заданий, время старта — '
-                + startOps.length + ' (порядок и дни не менялись)', 'success');
+            self.notify(auto
+                ? ('Перестановка учтена: пересчитана наладка (' + stale.length + ') и время старта ('
+                    + startOps.length + ') — порядок и дни не менялись')
+                : ('Пересчитано: наладка — ' + stale.length + ' заданий, время старта — '
+                    + startOps.length + ' (порядок и дни не менялись)'), 'success');
             self.warnOverfilledDays(sid);   // #4408: день не вместил — говорим об этом, а не прячем
             return true;
         }).catch(function(err) {
@@ -18601,7 +18829,10 @@
         }
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
 
-        // #4401: кнопка «↻ Пересчитать наладку» показывается ПО ФАКТУ РАСХОЖДЕНИЯ, а не по флагу
+        // #4434 п.3: после РУЧНОГО перемещения (↑↓/drag) кнопки не будет — перестановка пересчитывает
+        // наладку сама (moveCutInDay/reorderCutInDay → recalcSetupTiming({auto:true})). Кнопка остаётся
+        // страховкой для расхождений, возникших НЕ сейчас: правка данных задания, импорт, чужая сессия.
+        // #4401: показывается ПО ФАКТУ РАСХОЖДЕНИЯ, а не по флагу
         // «в этой сессии двигали задания» (#4189 _manualMoveDirty). Человек мог подвигать задания и
         // уйти, не пересчитав тайминг: после перезагрузки страницы флаг терялся, а расхождение
         // оставалось — и кнопки не было. Теперь на каждой отрисовке очереди сверяем ХРАНИМЫЙ тайминг
@@ -18730,7 +18961,11 @@
             // перестановки ↑/↓ остаются корректными — прячем лишь несовпавшие карточки.
             if (hasQuery && !cutMatchesSearch(c)) return;
             var active = String(self.selectedCutId) === String(c.id);
-            var supplies = self.supplyCount(c.id);
+            // #4434 п.4: связи/срок/назначение полос ПРОДОЛЖЕНИЯ день-сплита живут на ГОЛОВЕ цепочки —
+            // читаем по ней, иначе карточка пишет «нет связей», теряет срок и красит все полосы «(ОТХОДЫ)».
+            var linkHostId = supplyHostCutId(c, self.supplies);
+            var linkCut = (linkHostId === String(c.id)) ? c : { id: linkHostId };
+            var supplies = self.supplyCount(linkHostId);
 
             // Карточка-панель (#3120 п.1): div-панель вместо кнопки. Внутри —
             // информация и контролы (↑/↓/Полосы). Клик по всей панели = выбор резки
@@ -18914,7 +19149,7 @@
             // позиция выпала из активного positions_list (иначе плашка пропадала у таких заданий).
             // Считаем ОДИН раз на карточку: тот же признак просрочки нужен ниже предупреждению
             // о разрыве по дням (см. блок «разорвано по дням»).
-            var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, true);
+            var dueKeys = cutDueKeys(linkCut, self.supplies, self.genPositions, true);   // #4434 п.4: срок — по голове цепочки
             var dueClass = dueKeys.length ? dueColorClass(dueKeys[0], planDateDayKey(c.planDate), self.daysForecast()) : '';
 
             // #3354 п.1: под первой строкой — сводка полос по ширинам. Контейнер
@@ -18934,7 +19169,7 @@
                 // красная и вместо срока — «Склад» (номенклатура есть в «Максимальном запасе»,
                 // table/67113) или «Отходы» (нарезать впрок нельзя). Классификация по ширине —
                 // у карточки нет id полос (в отличие от редактора полос по orderedBatchIds).
-                var orderedWidthKeys = cutOrderedWidthKeys(c, self.supplies, self.genPositions);
+                var orderedWidthKeys = cutOrderedWidthKeys(linkCut, self.supplies, self.genPositions);   // #4434 п.4: «в заказ» — по голове цепочки
                 var matRows = stripGroups.map(function(g) {
                     // #3408: полосы хранят ФАКТИЧЕСКУЮ ширину (#3372: p.width = факт.),
                     // поэтому g.width — это факт.ширина. В сводку выводим сначала номинал
@@ -19412,7 +19647,9 @@
     AtexProductionPlanning.prototype.cutLinkedLabels = function(cut) {
         var self = this;
         if (!cut) return [];
-        var linked = (this.supplies || []).filter(function(s) { return String(s.cutId) === String(cut.id); });
+        // #4434 п.4: у продолжения день-сплита своих «Обеспечений» нет — читаем по голове цепочки.
+        var linkHostId = supplyHostCutId(cut, this.supplies);
+        var linked = (this.supplies || []).filter(function(s) { return String(s.cutId) === linkHostId; });
         if (!linked.length) return [];
         var posById = {};
         (this.positions || []).forEach(function(p) { posById[p.id] = p; });

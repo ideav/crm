@@ -28,9 +28,9 @@ var prevQ = slot({ kw: [110, 60, 40], kc: 18, mat: 'X' });
 var nextQ = slot({ kw: [110, 60, 30], kc: 21, mat: 'X' });   // полос больше (18→21) → KNIVES_INCREASE
 var q = tc(prevQ, nextQ, { settings: {} });
 assert(q.byFactor.knifeQuality === 1.5, '#4085 §8.3: «качество» ножей 110/60/(40→30) = 3/2 = 1.5 (совпали 2 из 3 с начала)');
-assert(q.byFactor.knife === 50, '#4085 §8.1: полос стало больше (18→21) → KNIVES_INCREASE_COST_MN = 50');
+assert(q.byFactor.knife === 80, '#4085 §8.1: полос больше (18→21) → KNIVES_CHANGE 30 + доплата KNIVES_INCREASE 50 = 80');
 assert(q.byFactor.material == null, '#4085: сырьё то же (X) → без штрафа смены сырья');
-assert(q.weight === 50, '#4085: суммарный вес перехода = 50 (только ножи)');
+assert(q.weight === 80, '#4085: суммарный вес перехода = 80 (только ножи, с доплатой за рост)');
 
 // ── Ножи: полос стало МЕНЬШЕ → KNIVES_CHANGE (30) ───────────────────────────────────────────────
 var dec = tc(slot({ kw: [110, 60, 30], kc: 21 }), slot({ kw: [110, 60, 40], kc: 18 }), { settings: {} });

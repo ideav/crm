@@ -495,6 +495,7 @@
             Object.keys(byMachine).forEach(function(sid){
                 byMachine[sid].forEach(function(s){
                     if (!s || s.kind !== 'cut') return;
+                    if (s.fixed) return;   // #4434 п.1: 🔒 не двигаем НИКОГДА — даже ради спасения от просрочки
                     var od = overdueDays(String(s.id), realBy[sid]);
                     if (od > 0) overdue.push({ id: String(s.id), sid: sid, curReal: Number(realBy[sid][String(s.id)]), depth: od });
                 });
@@ -508,24 +509,16 @@
                 if (pos < 0) continue;
                 var slot = arr[pos];
                 arr.splice(pos, 1);   // снять с текущего места — оцениваем ЧИСТЫЕ станки-приёмники
-                // #4424: у ПРОСРОЧЕННОГО 🔒 замок дня в пробной упаковке НЕ действует. Иначе спасти его
-                // нельзя в принципе: как ни переставляй в очереди, упаковщик возвращает ему тот же
-                // зафиксированный день (dayAnchorByCut), проверка «стало раньше» не проходит — и #4224
-                // («рескьюем даже зафиксированное») оставался мёртвой буквой. Замок дня, оставивший
-                // задание за сроком, недействителен; станок 🔒 держит по-прежнему (условие ниже).
-                // Снимать замок вправе только у НАСТОЯЩЕЙ фиксации (ctx.rescueUnpinIds — из контроллера:
-                // временные пины переноса/заморозки/начатого туда не попадают, #4424).
-                var mayUnpin = slot.fixed && (!ctx.rescueUnpinIds || ctx.rescueUnpinIds[task.id]);
-                var unpinSelf = mayUnpin ? (function(){ var u = {}; u[task.id] = 1; return u; })() : null;
+                // #4434 п.1: рескью 🔒 УБРАН (был #4224/#4424). Замок дня абсолютен: задание, которое
+                // оператор приколол к дню, не переезжает НИ ПО КАКОЙ причине, включая просрочку —
+                // просрочку 🔒 показывает панель «просрочено» и лог #4200, решение за оператором.
+                // Сюда 🔒 больше не попадает (отфильтровано при сборе overdue выше).
                 var best = null;      // { tid, idx, real, penalty }
                 Object.keys(byMachine).forEach(function(tid){
                     if (!feasible(tid, slot)) return;
-                    // #4224: зафиксированное (🔒) задание рескьюим ТОЛЬКО в пределах СВОЕГО станка —
-                    // станок выбрал пользователь; чиним лишь день (в срок), не перекидывая на другой станок.
-                    if (slot.fixed && String(tid) !== String(sid)) return;
                     var tarr = byMachine[tid];
                     var baseIds = cutIdsOf(tid);
-                    var baseReal = realDayFn(baseIds, tid, unpinSelf) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
+                    var baseReal = realDayFn(baseIds, tid) || {};   // дни приёмника БЕЗ задания (для проверки «не навредили»)
                     var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
@@ -533,7 +526,7 @@
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
-                        var real = realDayFn(trialIds, tid, unpinSelf) || {};
+                        var real = realDayFn(trialIds, tid) || {};
                         var myReal = real[task.id];
                         if (myReal == null || Number(myReal) >= task.curReal) continue;   // не улучшает СВОЙ реальный день — мимо
                         // #4338: ВЫТЕСНЕНИЕ несрочного соседа под срочное. Раньше вставка отвергалась, если
@@ -567,10 +560,7 @@
                 });
                 if (best){
                     byMachine[best.tid].splice(best.idx, 0, tagSlot(slot, best.tid));
-                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real, unpinned: !!slot.fixed });
-                    // #4424: замок дня снят НАВСЕГДА в этом прогоне — иначе финальная упаковка вернула бы
-                    // задание на прежний (просроченный) день, и рескью выглядел бы «перенос без эффекта».
-                    if (mayUnpin && typeof ctx.onUnpinFixed === 'function') ctx.onUnpinFixed(task.id);
+                    moves.push({ id: task.id, from: sid, to: best.tid, real: best.real });
                     changed = true;
                 } else {
                     arr.splice(pos, 0, slot);   // некуда лучше — вернуть на место
@@ -628,7 +618,9 @@
             Object.keys(byMachine).forEach(function(sid){ var arr = byMachine[sid], prev = null;
                 for (var i = 0; i < arr.length; i++){ var s = arr[i]; if (!s || s.kind !== 'cut') continue;
                     var dp = dlPen(String(s.id), realNow);
-                    if (dp > 0) tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: dp + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times)) });
+                    // #4434 п.1: 🔒 не двигаем даже в пределах своего станка — позиция в очереди задаёт
+                    // ДЕНЬ, значит любой такой ход = переезд зафиксированного задания на другой день.
+                    if (dp > 0 && !s.fixed) tasks.push({ id: String(s.id), sid: sid, pos: i, slot: s, pen: dp + (prev ? changeoverCost(prev, s, times) : firstSetupCost(s, times)) });
                     prev = s; } });
             if (!tasks.length) break;   // просроченных нет — оптимизация переналадки остаётся за прочими проходами
             tasks.sort(function(a, b){ return b.pen - a.pen; });
@@ -648,7 +640,6 @@
                 for (var mi = 0; mi < tids.length; mi++){
                     var tid = tids[mi];
                     if (!feasible(tid, T.slot)) continue;
-                    if (T.slot.fixed && String(tid) !== String(T.sid)) continue;   // 🔒 — только свой станок
                     var same = String(tid) === String(T.sid);
                     var oldCostTid = same ? 0 : machineCost(tid);
                     var tarr = byMachine[tid], mBest = null;

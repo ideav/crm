@@ -64,7 +64,7 @@ var less = planning.transitionCost(cut({ bands: { 110: 1, 60: 1, 40: 1 } }), cut
 eq(less.byFactor.knife, 30, 'полос стало меньше → KNIVES_CHANGE 30');
 // Больше полос → KNIVES_INCREASE (50).
 var more = planning.transitionCost(cut({ bands: { 110: 1, 60: 1 } }), cut({ bands: { 110: 1, 60: 1, 40: 1 } }), { settings: SETTINGS });
-eq(more.byFactor.knife, 50, 'полос стало больше → KNIVES_INCREASE 50');
+eq(more.byFactor.knife, 80, 'полос стало больше → KNIVES_CHANGE 30 + доплата KNIVES_INCREASE 50 = 80 (#4434 п.5)');
 // Смена сырья + намотки.
 var mat = planning.transitionCost(cut({ materialId: 'A', bands: { 100: 2 } }), cut({ materialId: 'B', bands: { 100: 2 } }), { settings: SETTINGS });
 eq(mat.byFactor.material, 15, 'смена сырья → MATERIAL_CHANGE 15');
@@ -110,7 +110,7 @@ var slots = [
     cut({ id: 1, slitterId: 'C1', dayKey: 20260703, planStartMs: 3, bands: { 100: 1 }, materialId: 'A' }),
     // день 03: смена сырья A→B (15), ножи те же ({100})
     cut({ id: 2, slitterId: 'C1', dayKey: 20260703, planStartMs: 4, bands: { 100: 1 }, materialId: 'B' }),
-    // день 05 (за «По»): полос стало больше {100}→{100,60} = KNIVES_INCREASE 50, сырьё B→B нет
+    // день 05 (за «По»): полос стало больше {100}→{100,60} = 30 + доплата 50 = 80, сырьё B→B нет
     cut({ id: 3, slitterId: 'C1', dayKey: 20260705, planStartMs: 5, bands: { 100: 1, 60: 1 }, materialId: 'B' })
 ];
 var pq = planning.planQuality(slots, {
@@ -122,7 +122,7 @@ eq(pq.window.changeoverCount, 1, 'окно [С;По]: 1 переналадка (
 eq(pq.window.changeoverMin, 15, 'окно [С;По]: 15 мин');
 // Всё [03;∞): + смена ножей слота 3 (50) → 2 переналадки, 65 мин.
 eq(pq.all.changeoverCount, 2, 'всё: 2 переналадки');
-eq(pq.all.changeoverMin, 65, 'всё: 15 + 50 (KNIVES_INCREASE) = 65 мин');
+eq(pq.all.changeoverMin, 95, 'всё: 15 + (30 + доплата 50 за рост полос) = 95 мин');
 // СЫРОЕ разнообразие: разные наборы ножей = {100},{100,60} → 2; разные сырья = A,B → 2.
 // #4029: идеал (count/minutes) КРЕДИТУЕТ заправку C1=A/{100} — она закрывает набор {100} и сырьё A,
 // нужно наладок: 1 набор ({100,60}) + 1 сырьё (B) = 2, мин = 1*30 + 1*15 = 45 (было 4/90 без кредита).

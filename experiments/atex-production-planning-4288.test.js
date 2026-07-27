@@ -58,8 +58,8 @@ var BASE = new Date(2026, 6, 22, 0, 0, 0, 0).getTime();   // 22.07.2026 полн
     assert(d.weight === 15 && d.byFactor.material === 15,
         '#4288: первая резка НЕ совпала с заправкой (MW411/IN) → MATERIAL_CHANGE 15 (было 0)');
     var w = P.scorePosition([], 0, sWide, ctxCarry);
-    assert(w.byFactor.knife === 50 && w.byFactor.material == null,
-        '#4288: то же сырьё, больше полос (1→3) → KNIVES_INCREASE 50, сырьё не тронуто');
+    assert(w.byFactor.knife === 80 && w.byFactor.material == null,
+        '#4288: то же сырьё, больше полос (1→3) → 30 + доплата KNIVES_INCREASE 50 = 80, сырьё не тронуто');
 
     // Заправка учитывается ТОЛЬКО у первой резки (index 0): при вставке ПОСЛЕ реальной резки
     // виртуальный prev не подставляется (prev — настоящая резка).
