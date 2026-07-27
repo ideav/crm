@@ -6344,36 +6344,6 @@
         return out;
     }
 
-    // #4436: id ВСЕХ записей заданий, стоящих в ЗАМОРОЖЕННЫХ днях. «Заморозка» (#4326) означает
-    // «планирование этот день НЕ ТРОГАЕТ» — буквально: ни «Дату план» (время внутри дня), ни
-    // хранимый тайминг. Прежний Вариант A держал такие задания ВО ВХОДЕ планировщика, лишь пришпилив
-    // их к дню (`c.fixed`), и упаковщик заново раскладывал день встык: время заданий менялось, записи
-    // уходили в базу — «зачем залез в замороженный день что-то менять?» (issue #4436). Теперь
-    // замороженный день исключается из входа целиком, а занятое им время отдаётся станку простоем
-    // (`excludedCutBlockedRanges`), чтобы соседние дни считались по честной ёмкости и ничто не
-    // встало поверх (issue #4436: «да ещё поставил 2 задания на 8 утра»).
-    //
-    // Исключаем ЦЕЛУЮ цепочку дробления, если хоть одно её звено стои́т в замороженном дне: для
-    // планировщика цепочка — ОДНО логическое задание (mergeContinuationChains), пере-планировать её
-    // «частично» нельзя — он всё равно пере-нарезал бы сегменты и сдвинул замороженное звено.
-    // isFrozenDay(planDate) — предикат контроллера (`dayIsFrozen`). Вход не мутирует. → массив id.
-    function frozenDayCutIds(cuts, isFrozenDay) {
-        if (typeof isFrozenDay !== 'function') return [];
-        var chains = (mergeContinuationChains(cuts || []).chainByLogical) || {};
-        var byId = {};
-        (cuts || []).forEach(function(c){ if (c && c.id != null) byId[String(c.id)] = c; });
-        var out = [];
-        Object.keys(chains).forEach(function(head){
-            var members = chains[head] || [head];
-            var frozen = members.some(function(m){
-                var c = byId[String(m)];
-                return !!c && isFrozenDay(c.planDate);
-            });
-            if (frozen) members.forEach(function(m){ out.push(String(m)); });
-        });
-        return out;
-    }
-
     // #4300/#4312: заправка станков НА ВХОДЕ в окно планирования — конфигурация ПОСЛЕДНЕГО задания
     // станка, запланированного РАНЬШЕ базы «С». Станок к началу окна уже несёт наладку вчерашней резки
     // ПЛАНА (ножи/сырьё загружены и остаются на ночь). Без неё splitMachineQueue зарядил бы ПЕРВОЙ резке
@@ -10026,7 +9996,6 @@
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
         daySplitDetachCutId: daySplitDetachCutId,       // #4357: перенос сегмента — отвязать от цепочки
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
-        frozenDayCutIds: frozenDayCutIds,        // #4436: задания замороженных дней — планировщик их не трогает
         excludedCutBlockedRanges: excludedCutBlockedRanges, // #4434 п.2: время станка под исключённые из раскладки задания
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
         longVacationDayRanges: longVacationDayRanges,   // #4314: длинные окна «Отпуска» (дни от «С») — сбрасывают наладку
@@ -17235,6 +17204,8 @@
         }).then(function() {
             return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
         }).then(function() {
+            return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
+        }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render(); return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -17460,22 +17431,20 @@
                 if (c && !c.fixed && pinSet[String(c.id)]) { c.fixed = true; pinnedRestore.push(c); }   // временный замок перенесённого
             });
         }
-        // #4436: ЗАМОРОЖЕННЫЙ ДЕНЬ ПЛАНИРОВЩИК НЕ ТРОГАЕТ ВООБЩЕ. Прежний Вариант A (#4326) держал его
-        // задания во входе, лишь пришпиливая к дню (`c.fixed`), — и упаковщик каждый раз раскладывал
-        // день заново встык: «Дата план» заданий менялась и уходила в базу («зачем залез в замороженный
-        // день что-то менять?», issue #4436). Исключаем такие задания из входа ЦЕЛИКОМ (всю цепочку
-        // дробления, если хоть одно звено в замороженном дне), а занятое ими время отдаём станку
-        // простоем — блок ниже (excludedCutBlockedRanges) строится по ВСЕМУ, чего нет в planInput,
-        // поэтому день считается по честной ёмкости и ничто не встаёт поверх замороженных заданий.
-        // Хранимый тайминг им тоже не переписываем — computeCutSetupUpdates пропускает замороженные дни.
-        // Пустая «Дата план» → dayIsFrozen=false (новое задание в замороженный день не попадает).
+        // #4326 (Вариант A) + #4436: задания ЗАМОРОЖЕННЫХ дней ОСТАЮТСЯ во входе планировщика,
+        // пришпиленные к своему дню (временный c.fixed → planCutOperations держит день по
+        // dayAnchorByCut). Это принципиально: упаковщик обязан ВИДЕТЬ их конфигурацию, иначе первая
+        // резка следующего планируемого дня считает переналадку не от того предшественника — и в плане
+        // появляется фантомная «дыра в полчаса», которой нет в хранимых колонках (issue #4438,
+        // та же природа, что #4300/#4312/#4315/#4371). ЗАПИСЬ по ним отсекается ниже (#4436:
+        // ops.updates/creates/deletes фильтруются по замороженным дням), а хранимый тайминг не трогает
+        // computeCutSetupUpdates. Итог: планировщик замороженный день СЧИТАЕТ, но НЕ МЕНЯЕТ.
+        // Работает на всех путях (генерация/«Упорядочить»/↑↓/удаление/перенос).
+        // Пустая «Дата план» → dayIsFrozen=false.
         if (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
-            var frozenIds = frozenDayCutIds(planInput, function(planDate){ return self.dayIsFrozen(planDate); });
-            if (frozenIds.length) {
-                var frozenSet = {};
-                frozenIds.forEach(function(id){ frozenSet[String(id)] = true; });
-                planInput = planInput.filter(function(c){ return !frozenSet[String(c && c.id)]; });
-            }
+            planInput.forEach(function(c){
+                if (c && !c.fixed && self.dayIsFrozen(c.planDate)) { c.fixed = true; pinnedRestore.push(c); }
+            });
         }
         // #4381: НАЧАТЫЕ задания (заполнено «Начато») неприкосновенны и для пересборки — иначе
         // «Упорядочить»/перенос/«Урегулировать» уводили бы с их дня то, что уже идёт на станке.
@@ -17561,6 +17530,33 @@
         }
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
+        // #4436: ЗАПИСЬ в замороженный день отсекаем. Планировщик его СЧИТАЕТ (иначе у первой резки
+        // следующего дня неверный предшественник и в плане появляется фантомная «дыра в полчаса»,
+        // #4438), но НЕ МЕНЯЕТ: обновления «Даты план», удаления и новые сегменты по заданиям
+        // замороженных дней в базу не идут. Признак замороженности берём по ХРАНИМОЙ «Дате план»
+        // (где задание стои́т сейчас) и по дню, куда план предлагает его положить, — ни туда, ни
+        // оттуда двигать нельзя. Хранимый тайминг тех же заданий не переписывает computeCutSetupUpdates.
+        if (ops && self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
+            var frozenNow = {};
+            (cuts || []).forEach(function(c){
+                if (c && c.id != null && self.dayIsFrozen(c.planDate)) frozenNow[String(c.id)] = true;
+            });
+            var frozenTs = function(ts){ return self.dayIsFrozen(String(ts)); };
+            var skipped = 0;
+            ops.updates = (ops.updates || []).filter(function(u){
+                if (frozenNow[String(u.cutId)] || frozenTs(u.planStartTs)) { skipped++; return false; }
+                return true;
+            });
+            ops.deletes = (ops.deletes || []).filter(function(id){
+                if (frozenNow[String(id)]) { skipped++; return false; }
+                return true;
+            });
+            ops.creates = (ops.creates || []).filter(function(cr){
+                if (frozenNow[String(cr && cr.parentCutId)] || frozenTs(cr && cr.planStartTs)) { skipped++; return false; }
+                return true;
+            });
+            if (skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', skipped);
+        }
 
         var cutsById = {};
         cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
@@ -17664,6 +17660,56 @@
             self.notify('Ошибка перестановки: ' + (err && err.message || err), 'error');
             return false;
         });
+    };
+
+    // #4438: СВЕРКА ПЛАНА С ХРАНИМЫМ — сразу после того, как план записан. «Сгенерировать»/«Упорядочить»
+    // пишут «Дату план» (упаковщик) и три колонки тайминга (computeCutSetupUpdates) РАЗНЫМИ расчётами.
+    // Обычно они сходятся, но любое расхождение вылезает на экран как ДЫРА (или нахлёст) между
+    // карточками — и человек видит красную «↻ Пересчитать наладку» сразу после генерации: «почему
+    // после Сгенерировать сразу требуется Пересчитать наладку?» (issue #4438: дыра в полчаса между
+    // первым и вторым заданием).
+    //
+    // Поэтому по итогам записи плана прогоняем ту же сверку, что делает кнопка: пересобираем старты
+    // ВСТЫК внутри дня по хранимым колонкам (recalcStartUpdates — день и порядок не меняются, за
+    // пределы дня ничего не выносится) и дописываем расхождения. Замороженные дни сюда не попадают
+    // (recalcScopeCutIds их отсекает, #4436).
+    //
+    // Молчать нельзя: расхождение — признак того, что упаковщик и колонки посчитали переналадку
+    // по-разному, и это надо чинить в корне. Пишем в консоль ЧТО именно разъехалось (задание, было →
+    // стало, сколько минут), чтобы причина была видна в логе, а не только в глазах оператора.
+    // → Promise<число исправленных заданий>.
+    AtexProductionPlanning.prototype.reconcilePlanStarts = function() {
+        var self = this;
+        var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
+        if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
+        var fixes = [];
+        (this.slitters || []).forEach(function(s) {
+            var sid = String(s && s.id == null ? '' : s.id);
+            if (sid === '') return;
+            var ups = self.recalcStartUpdates(sid);
+            ups.forEach(function(u) { fixes.push({ slitterId: sid, up: u }); });
+        });
+        if (!fixes.length) return Promise.resolve(0);
+        function clockOf(tsSec) {
+            var d = new Date(Number(tsSec) * 1000);
+            return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2)
+                + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        }
+        try {
+            console.warn('[pp] ⚠️ #4438: план разошёлся с хранимой наладкой — свожу встык сразу после записи. '
+                + 'Заданий: ' + fixes.length + '. ' + fixes.map(function(f) {
+                    return 'резка ' + f.up.cutId + ' ' + clockOf(f.up.wasTs) + '→' + clockOf(f.up.ts)
+                        + ' (' + Math.round((Number(f.up.ts) - Number(f.up.wasTs)) / 60) + ' мин)';
+                }).join('; '));
+        } catch (e) {}
+        return runWithConcurrency(fixes.map(function(f) {
+            return function() {
+                var fields = {}; fields[mainKey] = String(f.up.ts);
+                return self.post('_m_save/' + encodeURIComponent(f.up.cutId) + '?JSON', fields);
+            };
+        }), 5).then(function() {
+            return self.reload();
+        }).then(function() { return fixes.length; });
     };
 
     // #4401: набор заданий, которые кнопка «↻ Пересчитать наладку» вправе трогать — ТОЛЬКО этот
