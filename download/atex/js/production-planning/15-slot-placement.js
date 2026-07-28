@@ -154,19 +154,34 @@
     // Ничью решает betterCand (качество/день/индекс) — и задание садится в середину цепочки, в том
     // числе на стыке дней (issue #4454). Разрыв обязан стоить дороже явно.
     //
-    // Начисляем ТОЛЬКО между двумя РЕАЛЬНЫМИ соседями: «последовательность» — это два стоящих рядом
-    // задания, которым переналадка друг относительно друга не нужна. Синтетический prev (заправка
-    // станка, #4288) сюда не годится — у него нейтрализованы партия/лидер, сравнение было бы
-    // выдуманным. Веса из «Настройки» 269; 0 выключает штраф.
-    function breakSequencePenalty(prevCut, slot, nextCut, settings){
-        if (!prevCut || !nextCut || !slot) return { knives: 0, material: 0 };
+    // СТЫК ДНЕЙ. «Предыдущим» бывает не только соседний слот. Когда предыдущий день вне входа
+    // планировщика (прошлое / вне окна [С;По]), его хвост приходит ЗАПРАВКОЙ СТАНКА
+    // (`prevSetupBySlitter`, #4288) — и позиция 0 очереди станка оказывается точкой ВНУТРИ
+    // последовательности «заправка → первая резка дня». Разрыв там ровно такой же: рулон снимут и
+    // поставят обратно. Без этой ветки начало дня остаётся самой дешёвой щелью для чужого задания
+    // (в замере: вес 30 против 45 и 110 у остальных позиций) — «вклинилось в начало дня» (#4454).
+    // У заправки нет ни партии, ни лидера, поэтому сырьё с ней сравниваем по ВИДУ и НАМОТКЕ —
+    // так же, как их нейтрализует `carryOverPrevCut`; сравнивать партию было бы выдумкой.
+    function sameMaterialWinding(a, b){
+        if (!a || !b) return false;
+        return String(a.materialId) === String(b.materialId) && normWinding(a.winding) === normWinding(b.winding);
+    }
+    // prevSetup — сырая заправка станка ({materialId, winding, knifeWidths}) вместо соседа-слота.
+    function breakSequencePenalty(prevCut, slot, nextCut, settings, prevSetup){
+        if (!slot || !nextCut) return { knives: 0, material: 0 };
+        var before = prevCut || prevSetup;
+        if (!before) return { knives: 0, material: 0 };
+        var carry = !prevCut;   // сравниваем с заправкой, а не с реальным соседом
         var out = { knives: 0, material: 0 };
-        // Ножи: prev и next — одна комбинация, а слот её меняет.
-        if (!knifeChangeNeeded(prevCut, nextCut) && knifeChangeNeeded(prevCut, slot)){
+        // Ножи: before и next — одна комбинация, а слот её меняет.
+        if (!knifeChangeNeeded(before, nextCut) && knifeChangeNeeded(before, slot)){
             out.knives = planWeight(settings, 'BREAK_KNIVES_COST_MN') || 0;
         }
-        // Сырьё/намотка/партия: prev и next режут один рулон, а слот встаёт между ними чужим.
-        if (!materialChangeNeeded(prevCut, nextCut) && materialChangeNeeded(prevCut, slot)){
+        // Сырьё/намотка(/партия у реальных соседей): before и next режут один рулон, а слот
+        // встаёт между ними чужим.
+        var matSame = carry ? sameMaterialWinding(before, nextCut) : !materialChangeNeeded(before, nextCut);
+        var matBreaks = carry ? !sameMaterialWinding(before, slot) : materialChangeNeeded(before, slot);
+        if (matSame && matBreaks){
             out.material = planWeight(settings, 'BREAK_MATERIAL_COST_MN') || 0;
         }
         return out;
@@ -243,7 +258,12 @@
         // («некуда пристроить» → самый свободный станок) сравнивает ЧИСТУЮ переналадку с
         // KNIVES_CHANGE+MATERIAL_CHANGE; подмешав туда штраф разрыва, мы бы гнали задания на пустой
         // станок вместо того, чтобы просто выбрать другую точку вставки на этом же.
-        var brk = breakSequencePenalty(prevCut, slot, nextCut, ctx.settings);
+        // #4454: на позиции 0 «предыдущим» выступает ЗАПРАВКА станка (#4288) — стык дней, когда
+        // предыдущий день вне входа планировщика. Берём её СЫРОЙ (не нейтрализованный beforePrev):
+        // beforePrev подогнан под slot (партия/лидер = slot), сравнивать с ним nextCut нельзя.
+        var carrySetupRaw = (!prevCut && index === 0 && ctx.prevSetupBySlitter && ctx.slitterId != null)
+            ? ctx.prevSetupBySlitter[String(ctx.slitterId)] : null;
+        var brk = breakSequencePenalty(prevCut, slot, nextCut, ctx.settings, carrySetupRaw);
         if (brk.knives) byFactor.breakKnives = round3((byFactor.breakKnives || 0) + brk.knives);
         if (brk.material) byFactor.breakMaterial = round3((byFactor.breakMaterial || 0) + brk.material);
         return { weight: round3(cost.weight + orderPenalty + brk.knives + brk.material),

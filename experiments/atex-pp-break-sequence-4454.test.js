@@ -152,4 +152,63 @@ function weightAt(arr, index, s) {
         '(выбран индекс ' + best.index + ', вес ' + best.weight + ')');
 })();
 
+// ── 8. СТЫК ДНЕЙ: предыдущий день пришёл ЗАПРАВКОЙ станка, а не слотом ───────────────────────
+// Это и есть «в частности на стыке дней» из тикета. Когда предыдущий день вне входа планировщика
+// (прошлое / вне окна [С;По]), его хвост приходит не соседним слотом, а ЗАПРАВКОЙ станка
+// (prevSetupBySlitter, #4288) — и позиция 0 оказывается точкой ВНУТРИ последовательности
+// «заправка → первая резка дня». Разрыв там такой же настоящий: рулон снимут и поставят обратно.
+// У заправки нет партии, поэтому сырьё сравниваем по виду и намотке (как carryOverPrevCut).
+var CARRY = { materialId: 'MW411', winding: 'IN', knifeWidths: K15 };
+var carryCtx = { settings: SETTINGS, times: TIMES, capacityMin: 450, slitterId: '1',
+                 prevSetupBySlitter: { '1': CARRY } };
+function withWork(s, work) { s.workMin = work; return s; }
+
+(function() {
+    // Станок заправлен под MW411/K15, первая резка дня — MW411/K15: продолжение той же комбинации.
+    var head = withWork(slot('head', 'MW411', '900', K15), 200);
+    var tail = withWork(slot('tail', 'MR194', '903', K18), 150);
+    var arr = [head, tail];
+
+    // Чужое сырьё на тех же ножах — рвётся последовательность СЫРЬЯ.
+    var otherMat = withWork(slot('Y', 'MW308', '901', K15), 100);
+    var sc = planning.scorePosition(arr, 0, otherMat, carryCtx);
+    assert(sc.byFactor.breakMaterial === SETTINGS.BREAK_MATERIAL_COST_MN,
+        'СТЫК ДНЕЙ: вклинивание между заправкой станка и первой резкой дня — разрыв по сырью',
+        '(' + JSON.stringify(sc.byFactor) + ')');
+
+    // Чужие ножи на том же сырье — рвётся последовательность НОЖЕЙ.
+    var otherKn = withWork(slot('Z', 'MW411', '900', K18), 100);
+    var sc2 = planning.scorePosition(arr, 0, otherKn, carryCtx);
+    assert(sc2.byFactor.breakKnives === SETTINGS.BREAK_KNIVES_COST_MN,
+        'СТЫК ДНЕЙ: то же, по ножам', '(' + JSON.stringify(sc2.byFactor) + ')');
+
+    // И главное: начало дня перестаёт быть самым дешёвым местом для чужака.
+    var occ = planning.seedOccupancy(arr, [], ['1']);
+    var best = planning.placeSlot(occ, otherMat, carryCtx);
+    assert(best.index !== 0, 'СТЫК ДНЕЙ: чужое задание не садится в начало дня',
+        '(индекс ' + best.index + ', порядок ' + occ.byMachine['1'].map(function(s) { return s.id; }).join(' → ') + ')');
+})();
+
+(function() {
+    // КОНТРОЛЬ: задание, ПРОДОЛЖАЮЩЕЕ заправку, встать первым имеет полное право — не разрыв.
+    var head = withWork(slot('head', 'MW411', '900', K15), 200);
+    var arr = [head];
+    var same = withWork(slot('S', 'MW411', '900', K15), 100);
+    var sc = planning.scorePosition(arr, 0, same, carryCtx);
+    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
+        'КОНТРОЛЬ: продолжение заправки в начале дня — не разрыв', '(' + JSON.stringify(sc.byFactor) + ')');
+})();
+
+(function() {
+    // КОНТРОЛЬ: станок заправлен ПОД ДРУГОЕ, чем первая резка дня — последовательности нет,
+    // рвать нечего (шов уже оплачен), штрафа быть не должно.
+    var head = withWork(slot('head', 'MR194', '903', K18), 200);
+    var arr = [head];
+    var X2 = withWork(slot('X', 'MW308', '901', [29, 29, 29]), 100);
+    var sc = planning.scorePosition(arr, 0, X2, carryCtx);
+    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
+        'КОНТРОЛЬ: заправка и первая резка дня разные — это шов, а не последовательность',
+        '(' + JSON.stringify(sc.byFactor) + ')');
+})();
+
 console.log('\n' + passed + '/' + total + ' passed');
