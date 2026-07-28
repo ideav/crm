@@ -15734,9 +15734,9 @@
         });
         content.appendChild(box);
         content.appendChild(el('p', { class: 'atex-pp-hint',
-            text: 'День и порядок заданий не меняются. Длительность задания изменится, поэтому день станка ' +
-                'разъедется — пересоберите его кнопкой «↻ Пересчитать наладку», а если проходы больше не влезают ' +
-                'в смену, задание разобьёт по дням ближайшее «Упорядочить».' }));
+            text: 'Порядок заданий не меняется. Длительность задания изменится, поэтому день станка ' +
+                'разъедется — пересоберите его кнопкой «↻ Пересчитать наладку»: она же разобьёт задание ' +
+                'по дням, если проходы больше не влезают в смену.' }));
         if ((plan.keptSupplyIds || []).length) {
             content.appendChild(el('p', { class: 'atex-pp-hint',
                 text: 'Обеспечений не тронем: ' + plan.keptSupplyIds.length +
@@ -19576,6 +19576,13 @@
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
         var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
         if (!stale.length && !startOps.length) {
+            // #4473: в колонках и стартах пересчитывать нечего — но день мог остаться ДЛИННЕЕ смены
+            // (перестановка соседей одинаковой конфигурации расхождений не даёт, а минуты дня растут
+            // от смены переналадки). Потолок дня старше ответа «пересчитывать нечего»: выравниваем.
+            if (this.overfilledDaysOf(sid).length) {
+                this.render();
+                return this.levelDayLoad(sid);
+            }
             // #4416: кнопку показывает тот же детектор — если он насчитал расхождения, а писать
             // нечего, это ПРОТИВОРЕЧИЕ, а не «всё хорошо»: кнопка висит, нажатие не даёт эффекта
             // («окно пересчёта ничего не пересчитывает»). Кричим, а не отвечаем «уже актуальна».
@@ -19613,11 +19620,12 @@
             self.hideProgress(); self.setBusy(false); self.render();
             self.notify(auto
                 ? ('Перестановка учтена: пересчитана наладка (' + stale.length + ') и время старта ('
-                    + startOps.length + ') — порядок и дни не менялись')
+                    + startOps.length + ') — порядок не менялся')
                 : ('Пересчитано: наладка — ' + stale.length + ' заданий, время старта — '
-                    + startOps.length + ' (порядок и дни не менялись)'), 'success');
-            self.warnOverfilledDays(sid);   // #4408: день не вместил — говорим об этом, а не прячем
-            return true;
+                    + startOps.length + ' (порядок не менялся)'), 'success');
+            // #4473: день длиннее смены — ВЫРАВНИВАЕМ (разрыв по потолку + продолжение назавтра),
+            // а не предупреждаем «перенесите лишнее вручную» (#4408).
+            return self.levelDayLoad(sid).then(function() { return true; });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -19626,11 +19634,12 @@
         });
     };
 
-    // #4408: дни станка (в видимых днях), где работа уходит ЗА конец смены. Пересборка стартов
-    // задания за пределы дня не выносит — значит переполнение остаётся видимым, и молчать о нём
-    // нельзя (ТЗ §14/#4059): показываем предупреждение с днём и минутами перебора.
-    // → массив [{ dayOffset, endMin, overMin }] (он же уходит в тост).
-    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterId) {
+    // #4408/#4473: дни станка (в видимых днях), где работа уходит ЗА конец смены — ЧИСТЫЙ детектор,
+    // без тостов и записей. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня
+    // против потолка резки (cutEndMin + нахлёст резки). Это та же арифметика, что стои́т в бейдже
+    // «(N мин)», только выраженная в конце дня — обед и «Отпуск» уже сидят в хранимых стартах.
+    // → массив [{ dayOffset, endMin, overMin }].
+    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
         if (!scopeIds.length) return [];
@@ -19653,19 +19662,71 @@
             var end = ws + occ - day * 1440;
             if (!(endByDay[day] > end)) endByDay[day] = end;
         });
-        var days = Object.keys(endByDay).map(Number).sort(function(a, b) { return a - b; })
+        return Object.keys(endByDay).map(Number).sort(function(a, b) { return a - b; })
             .filter(function(d) { return endByDay[d] > cutEnd + over + 1; })
             .map(function(d) { return { dayOffset: d, endMin: endByDay[d], overMin: Math.round(endByDay[d] - cutEnd) }; });
-        if (days.length) {
-            this.notify('Не помещается в смену: ' + days.map(function(d) {
-                return formatPlanDayHeading(base, d.dayOffset) + ' до ' + formatClock(d.endMin)
-                    + ' (+' + d.overMin + ' мин)';
-            }).join('; ') + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».', 'warning');
-            if (typeof console !== 'undefined' && console.warn) {
-                console.warn('[pp] #4408: день переполнен после пересборки стартов', { slitterId: sid, days: days });
-            }
+    };
+
+    // #4408: переполнение дня, которое автоматика убрать не смогла (замороженный день #4436,
+    // единственный проход длиннее смены), — молчать нельзя (ТЗ §14/#4059): показываем день и
+    // минуты перебора. → массив [{ dayOffset, endMin, overMin }] (он же уходит в тост).
+    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterId) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var days = this.overfilledDaysOf(sid);
+        if (!days.length) return days;
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        this.notify('Не помещается в смену: ' + days.map(function(d) {
+            return formatPlanDayHeading(base, d.dayOffset) + ' до ' + formatClock(d.endMin)
+                + ' (+' + d.overMin + ' мин)';
+        }).join('; ') + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».', 'warning');
+        if (typeof console !== 'undefined' && console.warn) {
+            console.warn('[pp] #4408: день не помещается в смену', { slitterId: sid, days: days });
         }
         return days;
+    };
+
+    // #4473: ВЫРАВНИВАНИЕ ЗАГРУЗКИ ДНЯ ПОСЛЕ РУЧНОГО ПЕРЕМЕЩЕНИЯ. Станко-день не длиннее смены с
+    // нахлёстом — жёсткое правило ТЗ §15 (`DAY_CAPACITY`, #4467), и путь ручной перестановки (↑↓
+    // #4189, drag #4306, кнопка «↻ Пересчитать наладку» #4401) обязан его соблюсти так же, как
+    // «Сгенерировать» и «Упорядочить». Прежде этот путь только пересобирал старты ВНУТРИ дня
+    // (#4408) и ПРЕДУПРЕЖДАЛ: день оставался на 484 мин при потолке 460 (issue #4473).
+    //
+    // ЧТО ДЕЛАЕМ. Отдаём ПОРЯДОК ОПЕРАТОРА упаковщику (`preserveOrder`) по ОДНОМУ станку
+    // (`withinSlitterIds`): он рвёт задание в конце дня по потолку (голова остаётся, остаток —
+    // продолжением на следующий день, #3280/#4304) и склеивает продолжения обратно, когда место
+    // появилось (#4469). Порядок заданий не меняется, замок дня 🔒 и «Заморозка» соблюдаются
+    // шлюзом записи (`guardPlanOps`), запись идёт обычным `applySplitPlan`.
+    //
+    // ПОЧЕМУ ЧЕРЕЗ ДВИЖОК, А НЕ «ОТРЕЗАТЬ ЛИШНЕЕ» ЗДЕСЬ. Остаток дня меряется тем же гейтом, которым
+    // паковали (окно, обед, «Отпуск», нахлёст резки/настройки, атомарность прохода) — снаружи эту
+    // мерку не воспроизвести (#4469). Контроллер лишь РЕШАЕТ, что день переполнен, и зовёт упаковщик.
+    //
+    // Слияния заданий одного заказа (#4424, `mergeSameOrderTasks`) здесь НЕ делаем: ручное
+    // перемещение не повод перекраивать записи оператора — только физика смены.
+    // → Promise<boolean> (true, если план пересобран).
+    AtexProductionPlanning.prototype.levelDayLoad = function(slitterId) {
+        var self = this;
+        var sid = String(slitterId == null ? '' : slitterId);
+        var over = this.overfilledDaysOf(sid);
+        if (!over.length) return Promise.resolve(false);
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var label = over.map(function(d) {
+            return formatPlanDayHeading(base, d.dayOffset) + ' (+' + d.overMin + ' мин)';
+        }).join('; ');
+        if (typeof console !== 'undefined' && console.log) {
+            console.log('[pp] ⚖️ #4473: день длиннее смены — выравниваю упаковщиком (порядок сохраняю)',
+                { slitterId: sid, days: over });
+        }
+        // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
+        if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
+        return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, { withinSlitterIds: [sid] })
+            .then(function(changed) {
+                var left = self.overfilledDaysOf(sid);
+                if (left.length) { self.warnOverfilledDays(sid); return !!changed; }
+                self.notify('День выровнен по смене: ' + label
+                    + ' — лишнее разбито по потолку и уехало на следующий день, порядок сохранён', 'success');
+                return !!changed;
+            });
     };
 
     // #4402: строки статистики «Было / Станет / изменение наладки» для липкой панели «Упорядочить» —
