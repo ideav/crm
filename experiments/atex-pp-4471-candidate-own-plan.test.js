@@ -241,10 +241,13 @@ var VACATION = { '101': [{ id: 'v1', start: tsAt(0, VAC_FROM), end: tsAt(0, VAC_
     self.startPlanPreview = function (payload) { preview = payload; return true; };
     self.runOptimizeQueue();
     assert(!preview, '#4471: план, ломающий 🔒-монолит (ТЗ §15), НЕ применяется даже без просрочки');
-    var warn = notes.filter(function (n) { return n.kind === 'warning' && /жёсткое правило/.test(n.msg); });
-    assert(warn.length === 1, 'оператору названа причина отказа — нарушено жёсткое правило');
-    assert(warn.length === 1 && /зафиксированные задания/.test(warn[0].msg), 'и какое именно',
+    // #4475: текст отказа — на языке оператора (без имён правил и отсылок в консоль), но причина
+    // в нём названа: что отклонено и что именно нарушено.
+    var warn = notes.filter(function (n) { return n.kind === 'warning' && /отклон/i.test(n.msg); });
+    assert(warn.length === 1, 'оператору названа причина отказа — план отклонён, а не «кнопка не работает»');
+    assert(warn.length === 1 && /зафиксированн/.test(warn[0].msg), 'и какое именно правило нарушено',
         '(' + (warn[0] && warn[0].msg) + ')');
+    assert(warn.length === 1 && !/консол/i.test(warn[0].msg), 'без отсылки «детали в консоли» (#4475)');
     assert(notes.filter(function (n) { return /оптимальна/.test(n.msg); }).length === 0,
         '«очередь оптимальна» при отклонённом кандидате не рапортуем');
 })();

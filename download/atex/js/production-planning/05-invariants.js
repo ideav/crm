@@ -20,9 +20,13 @@
     // на выход — массив нарушений. Никаких побочных эффектов, поэтому их можно звать и до записи
     // (как страж), и в тестах (как утверждение).
 
-    // Нарушение: какое правило, по какому заданию, человекочитаемо.
-    function ppViolation(rule, cutId, msg) {
-        return { rule: rule, cutId: cutId == null ? null : String(cutId), msg: msg };
+    // Нарушение: какое правило, по какому заданию, человекочитаемо (msg — для ЖУРНАЛА).
+    // extra — СТРУКТУРА нарушения (станок, день, минуты, второе задание): по ней интерфейс
+    // собирает сообщение оператору, не разбирая текст (#4475). Правило отдаёт данные, а не фразу.
+    function ppViolation(rule, cutId, msg, extra) {
+        var v = { rule: rule, cutId: cutId == null ? null : String(cutId), msg: msg };
+        if (extra) Object.keys(extra).forEach(function(k) { if (extra[k] !== undefined) v[k] = extra[k]; });
+        return v;
     }
 
     // Контекст проверки (ctx):
@@ -180,17 +184,22 @@
                             if (!b || b.key !== key) continue;
                             if (b.i < a.i) {
                                 out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
-                                    'зафиксированные задания дня переставлены местами: ' + fixedWas[i].id + ' ↔ ' + fixedWas[i + 1].id));
+                                    'зафиксированные задания дня переставлены местами: ' + fixedWas[i].id + ' ↔ ' + fixedWas[i + 1].id,
+                                    { slitterId: key.split('|')[0], dayKey: Number(key.split('|')[1]),
+                                      kind: 'swap', otherCutId: String(fixedWas[i].id) }));
                                 continue;
                             }
                             // Стояли ПОДРЯД в хранимом плане → обязаны остаться соседями.
                             var wasIdxA = wasByDay[key].indexOf(fixedWas[i]);
                             var wasIdxB = wasByDay[key].indexOf(fixedWas[i + 1]);
                             if (wasIdxB === wasIdxA + 1 && b.i !== a.i + 1) {
-                                var between = nowByDay[key].slice(a.i + 1, b.i).map(function(r) { return r.id; }).join(', ');
+                                var betweenIds = nowByDay[key].slice(a.i + 1, b.i).map(function(r) { return String(r.id); });
+                                var between = betweenIds.join(', ');
                                 out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
                                     'между зафиксированными ' + fixedWas[i].id + ' и ' + fixedWas[i + 1].id
-                                    + ' вклинилось: ' + (between || '?')));
+                                    + ' вклинилось: ' + (between || '?'),
+                                    { slitterId: key.split('|')[0], dayKey: Number(key.split('|')[1]),
+                                      kind: 'insert', otherCutId: String(fixedWas[i].id), betweenIds: betweenIds }));
                             }
                         }
                     }
@@ -237,7 +246,9 @@
                     var parts = String(key).split('|');
                     out.push(ppViolation('DAY_CAPACITY', null,
                         'станок ' + parts[0] + ', день ' + parts[1] + ': ' + Math.round(min)
-                        + ' мин при потолке ' + Math.round(cap) + ' (превышение ' + Math.round(min - cap) + ')'));
+                        + ' мин при потолке ' + Math.round(cap) + ' (превышение ' + Math.round(min - cap) + ')',
+                        { slitterId: parts[0], dayKey: Number(parts[1]), loadMin: Math.round(min),
+                          capMin: Math.round(cap), overMin: Math.round(min - cap) }));
                 });
                 return out;
             }
@@ -278,7 +289,11 @@
                         'станок ' + parts[0] + ', день ' + parts[1] + ': свободно ' + Math.round(Number(u.freeMin) || 0)
                         + ' мин, а проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId)
                         + ' следующего дня стои́т ' + Math.round((Number(u.needMin) || 0) * 100) / 100
-                        + ' мин — день недоупакован');
+                        + ' мин — день недоупакован',
+                        { slitterId: parts[0], dayKey: Number(parts[1]),
+                          freeMin: Math.round(Number(u.freeMin) || 0),
+                          needMin: Math.round((Number(u.needMin) || 0) * 100) / 100,
+                          donorCutId: u.donorCutId == null ? null : String(u.donorCutId) });
                 });
             }
         },
@@ -333,7 +348,8 @@
                     var r = resolve(cutId) || {};
                     if (r.batchId) return;
                     seen[key] = true;
-                    out.push(ppViolation('CUT_BATCH', cutId, 'задание без «Партии сырья»: ' + (r.reason || 'источник партии не найден')));
+                    out.push(ppViolation('CUT_BATCH', cutId, 'задание без «Партии сырья»: ' + (r.reason || 'источник партии не найден'),
+                        { reason: String(r.reason || 'источник партии не найден') }));
                 }
                 (ops && ops.updates || []).forEach(function(u) { verify(u, u.cutId); });
                 (ops && ops.creates || []).forEach(function(cr) { verify(cr, cr.parentCutId); });

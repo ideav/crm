@@ -4,6 +4,7 @@
         invariants: PP_INVARIANTS,
         checkPlanInvariants: checkPlanInvariants,
         guardPlanOps: guardPlanOps,
+        formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
         ganttBaseFromLocation: ganttBaseFromLocation,   // #3713
@@ -2410,6 +2411,73 @@
     // записи: `ops.ruleBreaks` из buildSequenceOps — одна проверка на все пути (ТЗ §15).
     var RULE_BREAK_WEIGHT = 1e12;
 
+    // #4475: НАРУШЕНИЕ ПРАВИЛА → ФРАЗА ОПЕРАТОРУ. Реестр (05-invariants.js) отдаёт нарушения
+    // СТРУКТУРОЙ (правило, станок, день, минуты, задания) — здесь она превращается в текст на языке
+    // экрана: станок называется своей подписью, день — датой, задание — номером. Разговоров про
+    // консоль, имён правил и «так быть не должно» тут нет: это сообщение читает оператор, а
+    // разработчик читает журнал (console.error в buildSequenceOps, там полный разбор).
+    //   violations — [{ rule, cutId, slitterId, dayKey, … }] (ops.ruleAudit);
+    //   opts.slitterLabel(id) → подпись станка, opts.dayLabel(ГГГГММДД) → дата, opts.limit — сколько
+    //   нарушений называть поимённо (остаток не замалчиваем: «…и ещё N»).
+    // → { text, kind } либо null, если называть нечего.
+    function formatPlanAuditMessage(violations, opts) {
+        var list = (violations || []).filter(function(v) { return v && v.rule; });
+        if (!list.length) return null;
+        var o = opts || {};
+        var slitterLabel = typeof o.slitterLabel === 'function' ? o.slitterLabel : function(id) { return 'станок #' + id; };
+        var dayLabel = typeof o.dayLabel === 'function' ? o.dayLabel : function(key) { return String(key); };
+        var limit = Number(o.limit) > 0 ? Number(o.limit) : 3;
+        function where(v) {
+            var parts = [];
+            if (v.slitterId != null && String(v.slitterId) !== '') parts.push(slitterLabel(v.slitterId));
+            if (v.dayKey) parts.push(dayLabel(v.dayKey));
+            return parts.join(', ');
+        }
+        // Нарушение без структуры (старый вызов, чужой источник) фразу не ломает: называем правило
+        // человеческими словами и всё, что о нём известно, — вместо «№undefined».
+        function phrase(v) {
+            var place = where(v);
+            var at = place ? ' (' + place + ')' : '';
+            if (v.rule === 'DAY_CAPACITY') {
+                return 'день длиннее смены' + at
+                    + (v.loadMin > 0 ? ' — ' + v.loadMin + ' мин при потолке ' + v.capMin : '');
+            }
+            if (v.rule === 'DAY_FILL') {
+                return 'смена не набита до потолка' + at
+                    + (v.freeMin > 0 ? ' — свободно ' + v.freeMin + ' мин' : '')
+                    + (v.donorCutId ? ', а проход задания №' + v.donorCutId + ' стои́т ' + v.needMin + ' мин' : '');
+            }
+            if (v.rule === 'FIXED_BLOCK') {
+                if (v.kind === 'insert' && v.otherCutId) {
+                    return 'между зафиксированными (🔒) №' + v.otherCutId + ' и №' + v.cutId + ' встало №'
+                        + ((v.betweenIds || []).join(', №') || '?') + at;
+                }
+                return 'порядок зафиксированных (🔒) заданий изменён'
+                    + (v.otherCutId ? ': №' + v.otherCutId + ' ↔ №' + v.cutId
+                                    : (v.cutId ? ' (задание №' + v.cutId + ')' : '')) + at;
+            }
+            if (v.rule === 'CUT_BATCH') {
+                return 'задание №' + v.cutId + ' без «Партии сырья» (' + (v.reason || 'источник партии не найден') + ')';
+            }
+            return v.msg || v.rule;
+        }
+        var items = list.map(phrase);
+        var shown = items.slice(0, limit);
+        var rest = items.length - shown.length;
+        // «Партия сырья» — ошибка ДАННЫХ, её чинит оператор; остальное — отклонение раскладки,
+        // о котором он должен знать, но чинить его — не его работа.
+        var dataOnly = list.every(function(v) { return v.rule === 'CUT_BATCH'; });
+        var tail = dataOnly
+            ? ' Плану не из чего вывести партию — он считает этим заданиям лишнюю смену сырья.'
+            : ' План записан как есть — проверьте эти дни.';
+        return { text: 'В плане есть отклонения: ' + shown.join('; ')
+                     + (rest > 0 ? '; …и ещё ' + rest : '') + '.' + tail,
+                 kind: dataOnly ? 'error' : 'warning',
+                 // items — те же фразы отдельно: их берёт отказ «Упорядочить» (там свой хвост
+                 // «снимите 🔒 / освободите день», а плана-то как раз и не будет).
+                 items: items, shown: shown, rest: rest };
+    }
+
     // #4413: планируемая занятость станка заданием (мин) — «Наладка ножей» + «Сырьё/намотка» +
     // «Резка и Лидер», как её показывает очередь (#3846) и пересобирает #4408. Хранимых колонок нет
     // → «Длительность, минут». runsOverride (проходы кандидата) масштабирует намоточную часть: план
@@ -2987,10 +3055,12 @@
                 trace.stop = { code: 'none-rule', text: 'план НЕ изменён — кандидат нарушает жёсткое правило ТЗ §15: '
                     + rbAll.slice(0, 5).map(function(v){ return v.rule + ' (' + v.msg + ')'; }).join('; ') };
                 emitOptimizeTrace(trace);
-                self.notify('Пересчёт отклонён: предложенный план нарушает жёсткое правило — '
-                    + rbAll.slice(0, 2).map(function(v){ return v.rule === 'FIXED_BLOCK'
-                        ? 'зафиксированные задания одного дня переставлены' : 'день длиннее смены с нахлёстом'; }).join('; ')
-                    + '. Снимите лишние 🔒 или освободите день; детали в консоли', 'warning');
+                // #4475: называем, ЧТО именно не так, теми же словами, что и при записи плана.
+                var rbMsg = self.planAuditMessage(rbAll);
+                self.notify('Пересчёт отклонён — предложенный план нарушал бы правило: '
+                    + ((rbMsg && rbMsg.shown.join('; ')) || 'жёсткое правило ТЗ §15')
+                    + ((rbMsg && rbMsg.rest > 0) ? '; …и ещё ' + rbMsg.rest : '')
+                    + '. Снимите лишние 🔒 или освободите день.', 'warning');
                 return;
             }
             // #4469: день не набит до потолка смены, а закрыть дыру ни один кандидат не смог — это
@@ -3024,7 +3094,10 @@
         var ufBest = useA ? ufA : ufB;   // #4469: сколько дней остаётся недоупакованными
         var built = useA ? builtA : builtB;
         var changedUpdates = filterChangedUpdates(built.ops, built.cutsById);
-        var ops = { updates: changedUpdates, creates: built.ops.creates || [], deletes: built.ops.deletes || [] };
+        // #4475: отклонения выбранного кандидата едут вместе с операциями — о них скажут при ЗАПИСИ
+        // («Применить»), а не при расчёте: показанный предпросмотр ещё можно отменить.
+        var ops = { updates: changedUpdates, creates: built.ops.creates || [], deletes: built.ops.deletes || [],
+            audit: built.ops.ruleAudit || [] };
         trace.choice = { action: choice.action, title: useA ? 'со сменой станка' : 'порядок/дни на текущих станках' };
         self.fillOptimizeMovesTrace(trace, ops, useA ? plan.slitterByRecordId : null);
 
@@ -7687,11 +7760,46 @@
         }).then(function() {
             return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
         }).then(function() {
-            self.hideProgress(); self.setBusy(false); self.render(); return true;
+            self.hideProgress(); self.setBusy(false); self.render();
+            self.reportPlanAudit(ops && ops.audit);   // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
+            return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
+        });
+    };
+
+    // #4475: сказать оператору об отклонениях ЗАПИСАННОГО плана — ОДНИМ сообщением и на языке
+    // экрана (станок подписью, день датой, задание номером). Разбор для разработчика уже лежит в
+    // журнале (console.error в buildSequenceOps), сюда он не попадает: оператору нечего делать с
+    // именем правила. Пусто → молчим (говорить не о чем, а не «всё скрыли»).
+    // → массив нарушений, о которых сказали (для тестов и трассы).
+    AtexProductionPlanning.prototype.reportPlanAudit = function(violations) {
+        var msg = this.planAuditMessage(violations);
+        if (!msg || typeof this.notify !== 'function') return msg ? msg.items : [];
+        // Вид тоста пишем ЛИТЕРАЛОМ: по ним же проверяется, что у каждого вида есть фон в CSS
+        // (#4409, `experiments/atex-4409-optimize-trace.test.js` сканирует notify(..., 'вид')).
+        if (msg.kind === 'error') this.notify(msg.text, 'error');
+        else this.notify(msg.text, 'warning');
+        return msg.items;
+    };
+
+    // #4475: нарушения стража → фраза на языке ЭТОГО экрана (подписи станков и дни — из состояния
+    // контроллера). Отдаёт и цельный текст (запись плана), и отдельные фразы `items` (отказ
+    // «Упорядочить»: там свой хвост — «снимите лишние 🔒 или освободите день»). Пусто → null.
+    AtexProductionPlanning.prototype.planAuditMessage = function(violations) {
+        var list = (violations || []).filter(function(v) { return v && v.rule; });
+        if (!list.length) return null;
+        var byId = {};
+        (this.slitters || []).forEach(function(s) { byId[String(s.id)] = s.label || ('#' + s.id); });
+        return formatPlanAuditMessage(list, {
+            slitterLabel: function(id) { return byId[String(id)] || ('станок #' + id); },
+            dayLabel: function(key) {
+                var dt = dayKeyToDate(key);
+                return dt ? formatPlanDayHeading(dt.getTime(), 0) : String(key);
+            },
+            limit: 3
         });
     };
 
@@ -8093,60 +8201,37 @@
                 console.log('[pp] 🧵 #4452: «Партия сырья» проставлена в операции плана: ' + guard.filled.length,
                     { filled: guard.filled.slice(0, 40) });
             }
-            // #4452: партию не удалось разрешить ни одним источником — это ошибка ДАННЫХ, а не
-            // выбор планировщика: такое задание оплачивает ложную смену сырья с каждым соседом.
-            // Говорим оператору прямо в момент записи плана.
+            // #4475: РАСЧЁТ ПЛАНА ОПЕРАТОРУ НЕ ГОВОРИТ НИЧЕГО. buildSequenceOps зовут и для
+            // КАНДИДАТОВ «Упорядочить» (B и A), которые тут же выбрасываются, — тост отсюда сообщал
+            // о плане, которого не будет, и словами разработчика («так быть не должно — детали в
+            // консоли»). Нарушения уходят в ЖУРНАЛ (полный разбор, ниже) и вызывающему в
+            // `ops.ruleAudit`; оператору о них говорит тот, кто ПИШЕТ план (applySplitPlan →
+            // reportPlanAudit) или ОТКАЗЫВАЕТ («Упорядочить», #4471). Молчания нет — сменился адресат.
             var noBatch = (guard.violations || []).filter(function(v){ return v.rule === 'CUT_BATCH'; });
             if (noBatch.length) {
+                // #4452: партию не удалось разрешить ни одним источником — ошибка ДАННЫХ: такое
+                // задание оплачивает ложную смену сырья с каждым соседом.
                 console.error('[pp] ⛔ #4452: план пишется с заданиями БЕЗ «Партии сырья»: '
                     + noBatch.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
-                // Тост — не критичный путь: в юнит-тестах buildSequenceOps зовут без DOM.
-                try {
-                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
-                        self.notify('Заданий без «Партии сырья»: ' + noBatch.length + ' (№ '
-                            + noBatch.slice(0, 5).map(function(v){ return v.cutId; }).join(', ')
-                            + (noBatch.length > 5 ? ', …' : '') + '). Партию не из чего вывести —'
-                            + ' план считает им лишнюю смену сырья. Детали в консоли.', 'error');
-                    }
-                } catch (e) {}
             }
-            // #4464: 🔒-монолит разорван — это РЕГРЕССИЯ движка (ТЗ §15), а не выбор планировщика:
+            // #4464: 🔒-монолит разорван — РЕГРЕССИЯ движка (ТЗ §15), а не выбор планировщика:
             // порядок обязан соблюдаться по построению (слой размещения / упаковщик / пересортировка).
-            // Молчать нельзя ([[crm-no-silent-fallback]]): кричим в консоль и оператору.
             var blockViol = (guard.violations || []).filter(function(v){ return v.rule === 'FIXED_BLOCK'; });
             if (blockViol.length) {
                 console.error('[pp] ⛔ #4464: нарушен монолит зафиксированных заданий — '
                     + blockViol.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
-                try {
-                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
-                        self.notify('Зафиксированные задания дня переставлены/разорваны: ' + blockViol.length
-                            + '. Так быть не должно — детали в консоли.', 'error');
-                    }
-                } catch (e) {}
             }
             // #4467: день длиннее смены с нахлёстом — тоже регрессия движка (ТЗ §15): лишнее обязано
-            // уезжать на следующий день, а длинное — рваться по потолку. Кричим, а не пишем в лог.
+            // уезжать на следующий день, а длинное — рваться по потолку.
             var capViol = (guard.violations || []).filter(function(v){ return v.rule === 'DAY_CAPACITY'; });
             if (capViol.length) {
                 console.error('[pp] ⛔ #4467: день сверх потолка — ' + capViol.map(function(v){ return v.msg; }).join('; '));
-                try {
-                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
-                        self.notify('Дней сверх потолка смены: ' + capViol.length
-                            + '. Так быть не должно — детали в консоли.', 'error');
-                    }
-                } catch (e) {}
             }
-            // #4469: день недоупакован — тоже регрессия движка (ТЗ §15): разбитое по дням задание
-            // обязано отдать вчерашнему дню максимум проходов, влезающих под потолок. Кричим.
+            // #4469: день недоупакован — разбитое по дням задание обязано отдать вчерашнему дню
+            // максимум проходов, влезающих под потолок.
             var fillViol = (guard.violations || []).filter(function(v){ return v.rule === 'DAY_FILL'; });
             if (fillViol.length) {
                 console.error('[pp] ⛔ #4469: день недоупакован — ' + fillViol.map(function(v){ return v.msg; }).join('; '));
-                try {
-                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
-                        self.notify('Дней, не набитых до потолка смены: ' + fillViol.length
-                            + '. Так быть не должно — детали в консоли.', 'error');
-                    }
-                } catch (e) {}
             }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
@@ -8166,6 +8251,10 @@
             ops.ruleBreaks = (guard.violations || []).filter(function(v){
                 return v.rule === 'FIXED_BLOCK' || v.rule === 'DAY_CAPACITY';
             });
+            // #4475: ВСЁ, о чём стоит сказать оператору, если этот план будет ЗАПИСАН. Передаётся в
+            // applySplitPlan вместе с операциями (`ops.audit`) — фразу собирает formatPlanAuditMessage.
+            // FROZEN_DAY сюда не идёт: нарушающие операции страж уже отбросил (enforce), записи не будет.
+            ops.ruleAudit = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
         }
 
         var cutsById = {};
@@ -8207,9 +8296,12 @@
         // #4434 п.1: зафиксированное задание не удержало свой день — единственный допустимый случай
         // (день нерабочий: выходной/праздник/«Отпуск» станка). Не молчим: тост + консоль (уже в движке).
         if (ops && ops.fixedDayLost && ops.fixedDayLost.length) {
-            self.notify('Зафиксированных заданий сдвинуто: ' + ops.fixedDayLost.length
-                + ' — их день нерабочий (выходной/праздник или «Отпуск» станка). Замок дня в такой день'
-                + ' удержать нельзя, детали в консоли.', 'warning');
+            // #4475: называем сами задания — «детали в консоли» оператору ничего не даёт.
+            self.notify('Зафиксированные (🔒) задания сдвинуты: №'
+                + ops.fixedDayLost.slice(0, 3).map(function(f){ return f.cutId; }).join(', №')
+                + (ops.fixedDayLost.length > 3 ? ' и ещё ' + (ops.fixedDayLost.length - 3) : '')
+                + ' — их день нерабочий (выходной/праздник или «Отпуск» станка), замок дня в такой'
+                + ' день удержать нельзя.', 'warning');
         }
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
         // #4462: ИСТОРИЯ ВЫБОРА МЕСТА для подсказки в очереди — ТОЛЬКО по заданиям, которые план
@@ -8230,7 +8322,9 @@
                 return n > 0;
             });
         }
-        return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes });
+        // #4475: audit — отклонения, которые несёт ЗАПИСЫВАЕМЫЙ план; о них скажет applySplitPlan.
+        return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes,
+            audit: ops.ruleAudit || [] });
     };
 
     // #4306: ПЕРЕСТАНОВКА задания ВНУТРИ дня перетаскиванием мышью (drag-drop). Работает как ↑↓:
