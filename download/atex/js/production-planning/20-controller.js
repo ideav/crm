@@ -7842,6 +7842,25 @@
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4467: занятость станко-дня из самой раскладки (ops.dayLoad: «станок|смещение дня»)
+                // и потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст настройки. Ровно
+                // та арифметика, что стои́т в бейдже «(N мин)» у даты.
+                dayLoadMinutes: function(){
+                    var raw = (ops && ops.dayLoad) || null;
+                    if (!raw) return null;
+                    var out = {};
+                    Object.keys(raw).forEach(function(k){
+                        var parts = String(k).split('|');
+                        var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(parts[1]) * 86400000) / 1000)));
+                        out[parts[0] + '|' + dayKey] = raw[k];
+                    });
+                    return out;
+                },
+                dayCapacityMin: function(){
+                    var cap = (Number(dayWindow.cutEndMin) || 0) - (Number(dayWindow.startMin) || 0)
+                            - (Number(dayWindow.lunchDurationMin) || 0) + (Number(dayWindow.maxOverworkTuneMin) || 0);
+                    return cap > 0 ? cap : 0;
+                },
                 // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
                 // и в каком порядке (операции несут только изменившиеся записи, #3427).
                 planSnapshot: function(){
@@ -7893,9 +7912,22 @@
                     }
                 } catch (e) {}
             }
+            // #4467: день длиннее смены с нахлёстом — тоже регрессия движка (ТЗ §15): лишнее обязано
+            // уезжать на следующий день, а длинное — рваться по потолку. Кричим, а не пишем в лог.
+            var capViol = (guard.violations || []).filter(function(v){ return v.rule === 'DAY_CAPACITY'; });
+            if (capViol.length) {
+                console.error('[pp] ⛔ #4467: день сверх потолка — ' + capViol.map(function(v){ return v.msg; }).join('; '));
+                try {
+                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
+                        self.notify('Дней сверх потолка смены: ' + capViol.length
+                            + '. Так быть не должно — детали в консоли.', 'error');
+                    }
+                } catch (e) {}
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
-            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'; });
+            var watched = (guard.violations || []).filter(function(v){
+                return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK' && v.rule !== 'DAY_CAPACITY'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));

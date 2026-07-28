@@ -2756,6 +2756,50 @@
             }
         },
         {
+            id: 'DAY_CAPACITY',
+            tz: '§15 (потолок дня, #4467)',
+            actor: 'auto',
+            enforce: false,     // ПОКА только отчёт — см. ниже
+            title: 'Станко-день не длиннее смены с нахлёстом: сумма минут дня ≤ ёмкость + нахлёст',
+            // ЧТО ПРОВЕРЯЕТСЯ. Занятость станко-дня — наладка + намотка (лидер внутри намотки), ровно
+            // та сумма, что стои́т в бейдже «(N мин)» у даты. Потолок — ёмкость смены (окно резки минус
+            // обед) плюс нахлёст настройки. Превышение значит, что план обещает работу, которой в
+            // смене физически нет: день «разбухает», а бейдж показывает 690 при потолке 460 (#4467,
+            // рецидивы #4034/#3965 «опять 492 и 427»).
+            //
+            // ЗА НАПОЛНЕНИЕ ДНЯ ОТВЕЧАЕТ ОПЕРАТОР — за физику смены отвечает планировщик. Переносить и
+            // фиксировать сколько угодно заданий можно; лишнее уезжает на следующий день (сперва
+            // незафиксированное, затем 🔒 — не меняя своего порядка), а длинное рвётся по потолку.
+            //
+            // ПОЧЕМУ enforce:false. Отбрасывать операции нечего: переполнение дня — это НЕ отдельная
+            // «плохая» запись, а свойство всей раскладки; выбросив часть, мы получим дыры и потерянные
+            // задания (#4300/#4312). Соблюдение обеспечивает упаковщик (`splitMachineQueue`: 🔒 рвётся
+            // по потолку и уезжает целиком, если не влезает ни один проход), шлюз — АУДИТ: ловит
+            // регрессию на любом пути записи и кричит.
+            //
+            // ctx.dayLoadMinutes() → { 'станок|ГГГГММДД': минуты }, ctx.dayCapacityMin() → число.
+            // Источник нагрузки — сам движок (`planCutOperations` → `ops.dayLoad`): окна и разбиение
+            // по дням знает только он. Нет предикатов → правило не срабатывает (конвенция реестра).
+            check: function(ops, ctx) {
+                var loadFn = (ctx && typeof ctx.dayLoadMinutes === 'function') ? ctx.dayLoadMinutes : null;
+                var capFn = (ctx && typeof ctx.dayCapacityMin === 'function') ? ctx.dayCapacityMin : null;
+                if (!loadFn || !capFn) return [];
+                var cap = Number(capFn());
+                if (!isFinite(cap) || cap <= 0) return [];
+                var load = loadFn() || {};
+                var out = [];
+                Object.keys(load).forEach(function(key) {
+                    var min = Number(load[key]);
+                    if (!isFinite(min) || min <= cap + 1e-6) return;
+                    var parts = String(key).split('|');
+                    out.push(ppViolation('DAY_CAPACITY', null,
+                        'станок ' + parts[0] + ', день ' + parts[1] + ': ' + Math.round(min)
+                        + ' мин при потолке ' + Math.round(cap) + ' (превышение ' + Math.round(min - cap) + ')'));
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
@@ -5859,15 +5903,14 @@
                     var availCutsF = availFor(day, 'cuts');
                     var fittingF = (canRunF && availCutsF >= setupF) ? Math.floor((availCutsF - setupF) / perPassF) : 0;
                     if (fittingF < 0) fittingF = 0;
-                    // #4434 п.1: 🔒 НИКОГДА не меняет свой день. Если резка влезла бы в ПУСТОЙ день, а
-                    // не влезает лишь потому, что день УЖЕ занят другой работой, — кладём её ЦЕЛИКОМ на
-                    // её день с ПЕРЕГРУЗОМ (и кричим), а не разрываем: разрыв тут был бы следствием
-                    // чужой загрузки, а не размера самой резки. Разрыв #4304 остаётся ровно для своего
-                    // случая — резка длиннее целой смены (в пустой день тоже не влезает).
-                    var emptyAvailF = availCutsF + dayWholeOccupied(day);   // ёмкость дня БЕЗ его занятости
-                    var fitsEmptyF = canRunF && emptyAvailF >= setupF
-                        && Math.floor((emptyAvailF - setupF) / perPassF) >= st.remaining;
-                    if (!canRunF || fittingF >= st.remaining || fitsEmptyF) {
+                    // #4467: ПОТОЛОК ДНЯ СИЛЬНЕЕ ЗАМКА ДНЯ. Прежде (#4434 п.1) 🔒, влезавшая в ПУСТОЙ
+                    // день, но не в остаток занятого, клалась на свой день ЦЕЛИКОМ С ПЕРЕГРУЗОМ —
+                    // отсюда «день разбухает» (боевой сценарий: оператор переносит задания в день и
+                    // фиксирует их, пока сумма не перевалит за смену). Оператор отвечает за наполнение
+                    // дня, но не за физику: день не может быть длиннее смены с нахлёстом. Поэтому 🔒
+                    // теперь ведёт себя как обычная резка — рвётся по потолку (#4304), а если в остаток
+                    // дня не влезает ни одного прохода, уезжает на следующий день ЦЕЛИКОМ (ниже).
+                    if (!canRunF || fittingF >= st.remaining) {
                         // #3792: влезает целиком (в пределах нахлёста) ИЛИ вырожденная (0 проходов/без
                         // окна) — один сегмент на зафиксированном дне, БЕЗ разрыва.
                         var wsF = day * 1440 + dayStart + clock;
@@ -5877,14 +5920,21 @@
                             durationMin: round3(durF), isContinuation: false, parentCutId: null,
                             fixedDayLock: true });   // #4434 п.1: сегмент 🔒 — потолок нахлёста его с дня не выталкивает
                         clock += setupF + durF;
-                        if (canRunF && fittingF < st.remaining) {
-                            ppTraceWarn('#4434 ФИКС-резка ' + pick + ' оставлена на своём дне ' + day +
-                                ' С ПЕРЕГРУЗОМ (день занят другой работой): конец ' + ppClock(dayStart + clock) +
-                                '. Замок дня абсолютен — не переносим и не разрываем.');
-                        }
                         ppTrace('  ФИКС-резка ' + pick + ' целиком на дне ' + day + ': настр ' + Math.round(setupF) +
                             ' + намотка ' + Math.round(durF) + ' → занято ' + Math.round(clock));
                         prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
+                        continue;
+                    }
+                    // #4467: в ОСТАТОК дня не влезает НИ ОДНОГО прохода, а день уже занят — 🔒 уезжает
+                    // на следующий день ЦЕЛИКОМ. Прежде ей насильно оставляли один проход («хотя бы 1
+                    // проход держим на фикс-дне»), и день уходил за потолок. Взаимный порядок 🔒 при
+                    // этом сохраняется (#4464): якорь сдвигается на день вперёд, очередь не меняется.
+                    if (canRunF && fittingF <= 0 && clock > 0) {
+                        ppTraceWarn('#4467 ФИКС-резка ' + pick + ' не влезает в остаток дня ' + day +
+                            ' (занято ' + Math.round(clock) + ') — уезжает целиком на день ' + (day + 1) +
+                            ': потолок дня сильнее замка дня.');
+                        st.fixedDay = day + 1;
+                        leaveDay();   // на дне ещё есть 🔒 → остаёмся и добираем их (forceFixedDay)
                         continue;
                     }
                     // #4304: НЕ влезает — РАЗРЫВАЕМ зафиксированную резку по потолку дня. Голова с fittingF
@@ -7483,10 +7533,19 @@
             }
         }
         var updates = [], creates = [], deletes = [];
+        // #4467: занятость станко-дня (наладка + намотка; лидер уже внутри намотки) — ровно то, что
+        // показывает бейдж «(N мин)» у даты. Отдаём вместе с операциями: страж записи (инвариант
+        // DAY_CAPACITY) сверяет её с потолком дня, а считать её заново в контроллере нечем — окна и
+        // разбиение по дням знает только упаковщик. Ключ — «станок|смещение дня».
+        var dayLoad = {};
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
             var segs = segsByMachine[key];
+            segs.forEach(function(seg){
+                var dk = String(key) + '|' + Number(seg.dayOffset);
+                dayLoad[dk] = round3((dayLoad[dk] || 0) + (Number(seg.setupMin) || 0) + (Number(seg.durationMin) || 0));
+            });
             // #4061: снап окон к целым минутам — старт следующего сегмента = старт текущего + сумма
             // его колонок (без дрейфа Ганта/очереди). Упаковку/дни/проходы это не трогает.
             snapSplitSegmentWindows(segs);
@@ -7538,8 +7597,9 @@
         // #4462: placement — разбор выбора места (варианты, выбранное, две ближайшие альтернативы,
         // кто переносил после §8). Наружу нужен для подсказки карточки очереди: раньше он существовал
         // только строками в консоли, и «почему этот слот победил» приходилось искать в трейсе.
+        // #4467: dayLoad — занятость станко-дня из самой раскладки (для стража DAY_CAPACITY).
         return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
-                 placement: slotPlan ? (slotPlan.trace || null) : null };
+                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
@@ -18559,6 +18619,25 @@
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4467: занятость станко-дня из самой раскладки (ops.dayLoad: «станок|смещение дня»)
+                // и потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст настройки. Ровно
+                // та арифметика, что стои́т в бейдже «(N мин)» у даты.
+                dayLoadMinutes: function(){
+                    var raw = (ops && ops.dayLoad) || null;
+                    if (!raw) return null;
+                    var out = {};
+                    Object.keys(raw).forEach(function(k){
+                        var parts = String(k).split('|');
+                        var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(parts[1]) * 86400000) / 1000)));
+                        out[parts[0] + '|' + dayKey] = raw[k];
+                    });
+                    return out;
+                },
+                dayCapacityMin: function(){
+                    var cap = (Number(dayWindow.cutEndMin) || 0) - (Number(dayWindow.startMin) || 0)
+                            - (Number(dayWindow.lunchDurationMin) || 0) + (Number(dayWindow.maxOverworkTuneMin) || 0);
+                    return cap > 0 ? cap : 0;
+                },
                 // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
                 // и в каком порядке (операции несут только изменившиеся записи, #3427).
                 planSnapshot: function(){
@@ -18610,9 +18689,22 @@
                     }
                 } catch (e) {}
             }
+            // #4467: день длиннее смены с нахлёстом — тоже регрессия движка (ТЗ §15): лишнее обязано
+            // уезжать на следующий день, а длинное — рваться по потолку. Кричим, а не пишем в лог.
+            var capViol = (guard.violations || []).filter(function(v){ return v.rule === 'DAY_CAPACITY'; });
+            if (capViol.length) {
+                console.error('[pp] ⛔ #4467: день сверх потолка — ' + capViol.map(function(v){ return v.msg; }).join('; '));
+                try {
+                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
+                        self.notify('Дней сверх потолка смены: ' + capViol.length
+                            + '. Так быть не должно — детали в консоли.', 'error');
+                    }
+                } catch (e) {}
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
-            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'; });
+            var watched = (guard.violations || []).filter(function(v){
+                return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK' && v.rule !== 'DAY_CAPACITY'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
