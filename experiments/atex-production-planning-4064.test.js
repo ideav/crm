@@ -34,10 +34,11 @@ assert(inst.planLatenessDays([lateCut, okCut], null) === 5,
     'суммарное опоздание плана = 5 (только просроченная)');
 assert(inst.planLatenessDays([{ id: 'N', number: String(tsOf(2026, 6, 30)) }], null) === 0,
     'без срока (dueKey) → 0 (не опоздание)');
-// override planStart из ops-карты имеет приоритет над хранимым number
+// #4471: метрика меряет ПЛАН кандидата (ops), а не карту стартов: старт из ops.updates
+// перекрывает хранимый number.
 assert(inst.planLatenessDays([{ id: 'L', number: String(tsOf(2026, 6, 20)), dueKey: 20260625 }],
-        { L: tsOf(2026, 6, 28) }) === 3,
-    'planStartByCutId override (28.06) перекрывает number (20.06) → 3 дня опоздания');
+        { updates: [{ cutId: 'L', planStartTs: tsOf(2026, 6, 28), plannedRuns: 1 }], creates: [], deletes: [] }) === 3,
+    'старт из ops (28.06) перекрывает number (20.06) → 3 дня опоздания');
 
 // ── 2) runOptimizeQueue: срок старше переналадки (лексикографически) ──
 function runScenario(cfg) {

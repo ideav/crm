@@ -140,15 +140,17 @@ var VACATION = { '101': [{ id: 'v1', start: tsAt(0, VAC_FROM), end: tsAt(0, VAC_
 (function () {
     var cuts = [cutOf('T1', 0, 8 * 60, 60)];
     var c = ctrlSelf(cuts, VACATION);
-    assertEqual(c.planDowntimeConflicts(cuts, null, null), ['T1'],
+    assertEqual(c.planDowntimeConflicts(cuts, null), ['T1'],
         'задание, стоящее с 08:00 в отпуске 08:00–15:00, — нарушитель');
 
     // Тот же план, но задание сдвинуто за отпуск (как его ставит кандидат): нарушения нет.
-    var moved = {}; moved['T1'] = tsAt(0, VAC_TO);
-    assertEqual(c.planDowntimeConflicts(cuts, moved, { T1: 1 }), [],
+    // #4471: метрика меряет ПЛАН кандидата (ops) — старт, станок и минуты берутся из него.
+    var moved = { updates: [{ cutId: 'T1', planStartTs: tsAt(0, VAC_TO), plannedRuns: 1, slitterId: '101' }],
+                  creates: [], deletes: [] };
+    assertEqual(c.planDowntimeConflicts(cuts, moved), [],
         'после сдвига за окно простоя нарушений нет');
 
-    assertEqual(ctrlSelf(cuts, {}).planDowntimeConflicts(cuts, null, null), [],
+    assertEqual(ctrlSelf(cuts, {}).planDowntimeConflicts(cuts, null), [],
         'без «Отпуска» нарушений нет (обычный план)');
 })();
 

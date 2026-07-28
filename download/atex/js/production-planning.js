@@ -7661,6 +7661,12 @@
             var contIndexByHead = {};
             segs.forEach(function(seg, idx){
                 var ts = scheduleStartTimestamp(base, seg.windowStartMin);
+                // #4471: ЗАНЯТОСТЬ станка этим сегментом в ЦЕЛЫХ минутах — round(наладка) + ceil(намотка),
+                // ровно то, что уйдёт в колонки, сложит бейдж дня (#4131/#4149) и нарисует Гант. Отдаём
+                // вместе с операцией: объектив «Упорядочить» обязан мерить кандидата ЕГО минутами, а не
+                // хранимыми колонками прошлого плана (те описывают ДРУГУЮ раскладку — issue #4471).
+                var setupWhole = Math.round(round3(Number(seg.setupMin) || 0));
+                var occMin = setupWhole + Math.ceil(round3(Number(seg.durationMin) || 0));
                 // #4144: разложение setup-only ХВОСТА дня по колонкам — решение УПАКОВЩИКА (он считал
                 // room по дробному окну). Отдаём его вызывающему: писатель колонок обязан взять это, а не
                 // пересчитывать от снапнутого planStart (снап позже на накопленный ceil → room меньше).
@@ -7671,7 +7677,7 @@
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
                     usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
-                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                 } else {
                     var head = String(seg.parentCutId);
                     var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
@@ -7679,9 +7685,9 @@
                     var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
                     if (reuseId != null) {
                         usedByHead[head] = k + 1;
-                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                     } else {
-                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                     }
                 }
                 // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
@@ -13275,18 +13281,6 @@
         ]);
     };
 
-    // #4047: карта cutId → новое planStart (сек) из ops.updates — для оценки переналадки
-    // плана-кандидата. creates (новые сегменты разбиения) несут ту же конфигурацию, переналадки
-    // не добавляют → в оценке не нужны (запись без апдейта берёт хранимый planStart).
-    function planStartMapFromOps(ops) {
-        var m = {};
-        ((ops && ops.updates) || []).forEach(function(u) {
-            var ts = Number(u.planStartTs);
-            if (isFinite(ts) && ts > 0) m[String(u.cutId)] = ts;
-        });
-        return m;
-    }
-
     // #4064: один день опоздания в объективе «Упорядочить» весит больше любой переналадки — срок
     // (ТЗ §14) старший критерий. Объектив кандидата = дни_опоздания × LATE_DAY_WEIGHT + переналадка(мин),
     // поэтому chooseOptimizeCandidate сперва минимизирует опоздания, затем переналадку (лексикографически).
@@ -13302,6 +13296,11 @@
     // сотни-тысячи) и НИЖЕ срока: набивка дня тянет проходы НАЗАД, опозданий она не добавляет, а
     // план, который пакует день ценой просрочки, был бы хуже.
     var UNDERFILL_DAY_WEIGHT = 1e6;
+    // #4471: кандидат НАРУШАЕТ ЖЁСТКОЕ ПРАВИЛО ТЗ §15 (реестр PP_INVARIANTS: 🔒-монолит #4464, потолок
+    // дня #4467) — такой план не применяется, чем бы он ни был хорош: правило на то и жёсткое. Вес
+    // ниже «Отпуска» (там станок физически не работает) и выше срока. Считает не объектив, а СТРАЖ
+    // записи: `ops.ruleBreaks` из buildSequenceOps — одна проверка на все пути (ТЗ §15).
+    var RULE_BREAK_WEIGHT = 1e12;
 
     // #4413: планируемая занятость станка заданием (мин) — «Наладка ножей» + «Сырьё/намотка» +
     // «Резка и Лидер», как её показывает очередь (#3846) и пересобирает #4408. Хранимых колонок нет
@@ -13316,16 +13315,6 @@
         var runsNew = (runsOverride == null) ? runsNow : Math.max(0, Number(runsOverride) || 0);
         if (runsNow > 0 && runsNew !== runsNow) work = Math.round(work * (runsNew / runsNow));
         return Math.max(0, setup + work);
-    }
-
-    // #4413: проходы, которые кандидат назначает заданиям (updates планировщика) → { cutId: runs }.
-    // Нужны, чтобы мерить занятость ГОЛОВЫ разорванного задания по её проходам, а не по исходным.
-    function plannedRunsMapFromOps(ops) {
-        var m = {};
-        ((ops && ops.updates) || []).forEach(function(u) {
-            if (u && u.plannedRuns != null) m[String(u.cutId)] = Number(u.plannedRuns);
-        });
-        return m;
     }
 
     // #4047/#4064/#4413/#4440: выбор кандидата «Упорядочить». before/objC/objB/objA — КОМБИНИРОВАННЫЙ
@@ -13361,7 +13350,7 @@
     //     start:   { cutCount, fixedCount, slitterCount, windowLabel, lateBefore, coBefore,
     //                downtimeBefore, underfilledBefore },
     //     candidates: [{ key:'B'|'A', title, skipped?, reassignCount?, late, changeover,
-    //                    downtime, underfilled }],
+    //                    downtime, downtimeIds, underfilled, underfilledDays }],
     //     choice:  { action:'none'|'B'|'A', title },
     //     moves:   [{ cutId, slitterFrom, slitterTo, whenFrom, whenTo }], movesTotal,
     //     creates: [{ parentCutId, when, runs }], createsTotal,
@@ -13380,13 +13369,16 @@
         // срок §14 старше упаковки дня #4469, упаковка старше переналадки — см. веса
         // DOWNTIME_CONFLICT_WEIGHT/LATE_DAY_WEIGHT/UNDERFILL_DAY_WEIGHT): сперва задания в окне
         // «Отпуска», затем дни опоздания, затем недоупакованные дни, при равных — минуты переналадки.
-        function verdict(late, co, s, downtime, underfilled) {
+        function verdict(late, co, s, downtime, underfilled, underfilledRuleBreaks) {
             var dLate = round3(Number(late) - Number(s.lateBefore));
             var dCo = round3(Number(co) - Number(s.coBefore));
             var dtNow = Number(downtime), dtWas = Number(s.downtimeBefore);
             if (isFinite(dtNow) && isFinite(dtWas) && dtNow !== dtWas) {
                 return (dtNow < dtWas ? 'ЛУЧШЕ' : 'ХУЖЕ') + ': в окне «Отпуска» ' + dtWas + ' → ' + dtNow
                     + ' заданий (станок в это время не работает — старше срока)';
+            }
+            if (Number(underfilledRuleBreaks) > 0) {
+                return 'ХУЖЕ: план нарушает жёсткое правило ТЗ §15 — применять нельзя';
             }
             if (dLate < 0) return 'ЛУЧШЕ: опозданий ' + num(dLate) + ' дн';
             if (dLate > 0) return 'ХУЖЕ: опозданий +' + num(dLate) + ' дн (срок старше переналадки)';
@@ -13417,11 +13409,17 @@
         (t.candidates || []).forEach(function(c) {
             var head = 'КАНДИДАТ ' + c.key + ' (' + c.title + ')';
             if (c.skipped) { out.push(head + ': не считался — ' + c.skipped); return; }
+            // #4471: не только СЧЁТ, но и ВИНОВНЫЕ — иначе «ХУЖЕ: в «Отпуске» 0 → 1» не проверить
+            // и не понять, из-за какого задания выброшен весь план.
             out.push(head + (c.reassignCount != null ? ', переназначений станка ' + c.reassignCount : '')
                 + ': опозданий ' + num(c.late) + ' дн, переналадка ' + num(c.changeover) + ' мин'
-                + ((c.downtime || s.downtimeBefore) ? ', в «Отпуске» ' + (c.downtime || 0) : '')
-                + ((c.underfilled || s.underfilledBefore) ? ', недоупаковано дней ' + (c.underfilled || 0) : '')
-                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled));
+                + (c.ruleBreaks ? ', НАРУШЕНИЙ ТЗ §15: ' + c.ruleBreaks
+                    + ((c.ruleBreakMsgs || []).length ? ' (' + c.ruleBreakMsgs.join('; ') + ')' : '') : '')
+                + ((c.downtime || s.downtimeBefore) ? ', в «Отпуске» ' + (c.downtime || 0)
+                    + ((c.downtimeIds || []).length ? ' (' + c.downtimeIds.join(', ') + ')' : '') : '')
+                + ((c.underfilled || s.underfilledBefore) ? ', недоупаковано дней ' + (c.underfilled || 0)
+                    + ((c.underfilledDays || []).length ? ' (' + c.underfilledDays.join(', ') + ')' : '') : '')
+                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled, c.ruleBreaks));
         });
         var ch = t.choice || {};
         out.push(ch.action === 'none' || !ch.action
@@ -13480,18 +13478,18 @@
     // берут факт из хранимых колонок наладки (storedSetupTotals, = отчёт «Комбинации», плоские ножи),
     // а веса оставлены сравнению кандидатов. Порядок ВНУТРИ дня берём по РЕАЛЬНОМУ planStart (c.number
     // либо override из ops кандидата), а не 0 — иначе перестановка задач внутри дня/станка (главная
-    // работа «Упорядочить») в метрике не видна. planStartByCutId (опц.) — {cutId: planStartTs сек};
-    // нет записи → хранимый planStart резки.
-    AtexProductionPlanning.prototype.planChangeoverMin = function(cutsArray, planStartByCutId) {
+    // работа «Упорядочить») в метрике не видна. ops (опц.) — операции плана-кандидата; нет ops →
+    // ХРАНИМЫЙ план. #4471: станок берётся из плана (`u.slitterId`), а не из хранимой записи — слой
+    // размещения переназначает станок и в кандидате B, и переналадка считалась по ЧУЖИМ очередям.
+    // Новые сегменты (creates) в метрику не подаются: та же конфигурация, переналадки не добавляют.
+    AtexProductionPlanning.prototype.planChangeoverMin = function(cutsArray, ops) {
         var self = this;
-        var ov = planStartByCutId || null;
-        var slots = (cutsArray || []).map(function(c) {
-            var o = ov ? ov[String(c.id)] : null;
-            var ts = (o != null) ? Number(o)
-                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
+        var slots = this.planLayoutItems(cutsArray, ops).filter(function(it) { return !it.isCreate; }).map(function(it) {
+            var c = it.cut;
+            var ts = it.ts;
             return {
                 id: c.id,
-                slitterId: c.slitter && c.slitter.id,
+                slitterId: it.slitterId,
                 dayKey: ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate),
                 planStartMs: ts,
                 knifeWidths: c.knifeWidths, knifeCount: c.knifeCount,
@@ -13510,13 +13508,12 @@
 
     // #4413: задания плана, СТОЯЩИЕ в окне «Отпуска» своего станка (или в нерабочем дне) — станок
     // тогда не работает, план невыполним. Считаем на той же оси, что и планировщик
-    // (blockedRangesBySlitter, #3764): старт — override из ops кандидата, иначе хранимый planStart;
-    // занятость — хранимые колонки тайминга, масштабированные проходами кандидата (разрыв по дням
-    // укорачивает голову). Старший критерий «Упорядочить», выше срока: DOWNTIME_CONFLICT_WEIGHT.
-    // → массив id заданий-нарушителей.
-    AtexProductionPlanning.prototype.planDowntimeConflicts = function(cutsArray, planStartByCutId, plannedRunsByCutId) {
-        var ov = planStartByCutId || null;
-        var runsOv = plannedRunsByCutId || null;
+    // (blockedRangesBySlitter, #3764). Старший критерий «Упорядочить», выше срока:
+    // DOWNTIME_CONFLICT_WEIGHT. #4471: окно задания — из ПЛАНА, который меряем (planLayoutItems):
+    // станок и минуты кандидата от упаковщика, удалённые записи не считаем, новые сегменты считаем.
+    // ops (опц.) — операции кандидата; нет ops → ХРАНИМЫЙ план.
+    // → массив id заданий-нарушителей (без повторов, в порядке очереди).
+    AtexProductionPlanning.prototype.planDowntimeConflicts = function(cutsArray, ops) {
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         if (!isFinite(base)) return [];
         // Без метаданных окна простоя не читаются (стаб-self в юнит-тестах, как typeof-гарды выше):
@@ -13524,20 +13521,16 @@
         if (!this.meta || typeof this.blockedRangesBySlitter !== 'function') return [];
         var blocked = this.blockedRangesBySlitter(base);
         if (!blocked || !Object.keys(blocked).length) return [];
-        var items = (cutsArray || []).map(function(c) {
-            var o = ov ? ov[String(c.id)] : null;
-            var ts = (o != null) ? Number(o)
-                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
-            if (!(ts > 0)) return null;
-            var runsNew = runsOv ? runsOv[String(c.id)] : null;
-            return {
-                id: c.id,
-                slitterId: c.slitter && c.slitter.id,
-                windowStartMin: Math.round((ts * 1000 - base) / 60000),
-                occMin: cutOccupancyMinutes(c, runsNew)
-            };
-        }).filter(Boolean);
-        return downtimeConflictCuts(items, blocked);
+        var items = this.planLayoutItems(cutsArray, ops).map(function(it) {
+            return { id: it.id, slitterId: it.slitterId, windowStartMin: it.windowStartMin, occMin: it.occMin };
+        });
+        var seen = {}, out = [];
+        downtimeConflictCuts(items, blocked).forEach(function(id) {
+            var k = String(id);
+            if (seen[k]) return;   // #4471: голова и её новый сегмент — одна запись-нарушитель
+            seen[k] = true; out.push(id);
+        });
+        return out;
     };
 
     // #4469: наладка задания по ХРАНИМЫМ колонкам («Наладка ножей» + «Сырьё-намотка») — та часть
@@ -13548,20 +13541,91 @@
         return v > 0 ? v : 0;
     }
 
+    // #4471: план как список ЗАНЯТЫХ ОКОН станка — общая мерка для ВСЕХ членов объектива
+    // «Упорядочить» (переналадка, «Отпуск», упаковка дня). Каждый план меряется СВОИМИ данными:
+    //   ops == null — ХРАНИМЫЙ план: станок и минуты из записи (колонки наладки описывают именно его);
+    //   ops — план КАНДИДАТА: станок (`u.slitterId`) и минуты (`u.occMin`/`u.setupMin`) даёт упаковщик,
+    //     удалённые записи выброшены, новые сегменты (`ops.creates`) добавлены как работа.
+    // Раньше из ops брали только `planStartTs` и проходы, а станок и занятость — из ХРАНИМОЙ резки.
+    // Слой размещения (#4085) переназначает станок и в кандидате B, поэтому задание проверялось против
+    // окон «Отпуска» ЧУЖОГО станка (фантомный конфликт), а занятость бралась от прошлой раскладки —
+    // объектив врал, и «Упорядочить» выбрасывал план, снимавший две трети просрочки (issue #4471).
+    // Хранимых `occMin`/`setupMin` в операции нет (ручные ops в тестах) → фолбэк на колонки записи,
+    // масштабированные проходами кандидата.
+    //   → [{ id, cut, slitterId, ts, dayOffset, windowStartMin, runs, setupMin, workMin, occMin,
+    //        fixed, immovable, frozen, isCreate }]; порядок — очередь cuts, затем creates.
+    AtexProductionPlanning.prototype.planLayoutItems = function(cutsArray, ops) {
+        var self = this;
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        if (!isFinite(base)) return [];
+        var freezeOn = !!(this.meta && this.meta.freeze && this.freezeByDay && Object.keys(this.freezeByDay).length);
+        function frozenAt(ts) { return freezeOn && typeof self.dayIsFrozen === 'function' && !!self.dayIsFrozen(String(ts)); }
+        var upd = {}, del = {}, cutsById = {};
+        ((ops && ops.updates) || []).forEach(function(u) { if (u && u.cutId != null) upd[String(u.cutId)] = u; });
+        ((ops && ops.deletes) || []).forEach(function(id) { del[String(id)] = true; });
+        (cutsArray || []).forEach(function(c) { if (c && c.id != null) cutsById[String(c.id)] = c; });
+        var out = [];
+        function item(cut, op, ts, runs, isCreate) {
+            var storedSetup = cutSetupMinutes(cut);
+            var occ = (op && op.occMin != null) ? Math.max(0, Number(op.occMin))
+                : cutOccupancyMinutes(cut, (op && op.plannedRuns != null) ? op.plannedRuns : null);
+            var setup = (op && op.setupMin != null) ? Math.max(0, Number(op.setupMin))
+                : (isCreate ? 0 : storedSetup);   // продолжение наладки не несёт (#3280)
+            if (setup > occ) setup = occ;
+            return {
+                id: String(cut.id), cut: cut,
+                slitterId: String(((op && op.slitterId != null) ? op.slitterId
+                    : (cut.slitter && cut.slitter.id)) == null ? '' : ((op && op.slitterId != null) ? op.slitterId : cut.slitter.id)),
+                ts: ts, dayOffset: dayOffsetFromBase(String(ts), base),
+                windowStartMin: Math.round((Number(ts) * 1000 - base) / 60000),
+                runs: Math.max(0, Number(runs) || 0),
+                setupMin: setup, workMin: Math.max(0, occ - setup), occMin: occ,
+                // #4434: 🔒 держит свой день; #4381: начатое задание неприкосновенно, завершённое — не работа плана.
+                fixed: !!cut.fixed,
+                immovable: cutIsStarted(cut) || String(cut.status || '').trim() === 'Завершён',
+                frozen: frozenAt(ts), isCreate: !!isCreate
+            };
+        }
+        (cutsArray || []).forEach(function(c) {
+            if (!c || c.id == null || del[String(c.id)]) return;
+            var u = upd[String(c.id)];
+            var ts = (u && u.planStartTs != null) ? Number(u.planStartTs)
+                : (Number(c.number) > 0 ? Number(c.number) : Number(c.planDate));
+            if (!(ts > 0)) return;
+            var runs = (u && u.plannedRuns != null) ? u.plannedRuns : c.plannedRuns;
+            var it = item(c, u, ts, runs, false);
+            if (it.dayOffset != null) out.push(it);
+        });
+        ((ops && ops.creates) || []).forEach(function(cr) {
+            if (!cr || cr.planStartTs == null) return;
+            var head = cutsById[String(cr.parentCutId)];
+            if (!head) return;
+            // Занятости упаковщик не дал (ручные ops) — доля головы по проходам (#3280: та же конфигурация).
+            var op = cr;
+            if (cr.occMin == null) {
+                var headRuns = Number(head.plannedRuns) || 0;
+                var headWork = Math.max(0, cutOccupancyMinutes(head, null) - cutSetupMinutes(head));
+                op = { slitterId: cr.slitterId, plannedRuns: cr.plannedRuns, setupMin: 0,
+                       occMin: headRuns > 0 ? Math.round(headWork * ((Number(cr.plannedRuns) || 0) / headRuns)) : headWork };
+            }
+            var it = item(head, op, Number(cr.planStartTs), cr.plannedRuns, true);
+            if (it.dayOffset != null) out.push(it);
+        });
+        return out;
+    };
+
     // #4469 (ТЗ §15): станко-дни плана, которые остались НЕДОУПАКОВАННЫМИ — в остаток дня (до
     // потолка нахлёста резки) влезает хотя бы один проход первого задания следующего дня, а оно
     // целиком стои́т завтра. Такой план обещает оператору простой в конце смены и лишний день в
     // хвосте плана (issue #4469: 424 мин при потолке 455, назавтра 24 прохода по 2.33).
     //
-    // Меряем на той же оси, что планировщик: старт — override из ops кандидата, иначе хранимый
-    // planStart; занятость — хранимые колонки тайминга, масштабированные проходами кандидата;
-    // новые сегменты кандидата (ops.creates) считаем долей головы, удалённые (ops.deletes) — прочь.
+    // Меряем на той же оси, что планировщик, и ТЕМ ЖЕ планом (#4471, planLayoutItems): станок и
+    // минуты кандидата даёт упаковщик, удалённые записи выброшены, новые сегменты добавлены.
     // Потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст РЕЗКИ, минус «Отпуск»/
     // выходной этого дня (blockedRangesBySlitter — как ёмкость считает сам упаковщик, #3978).
     // Правило и исключения — общие с движком: underfilledLayoutDays (🔒 не донор, замороженный
     // день не трогаем, проход атомарен). → массив ключей «станок|ГГГГММДД».
     AtexProductionPlanning.prototype.planUnderfilledDays = function(cutsArray, ops) {
-        var self = this;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         if (!isFinite(base)) return [];
         // Стаб-self в юнит-тестах прототипа не несёт (как typeof-гарды ниже) — окно не прочитать.
@@ -13571,14 +13635,6 @@
         var capacity = cutEndMin - dayStartMin - (Number(w.lunchDurationMin) || 0);
         var ceiling = capacity + (Number(w.maxOverworkCutsMin) || 0);
         if (!(capacity > 0)) return [];
-        var upd = {}, del = {};
-        ((ops && ops.updates) || []).forEach(function(u){ if (u && u.cutId != null) upd[String(u.cutId)] = u; });
-        ((ops && ops.deletes) || []).forEach(function(id){ del[String(id)] = true; });
-        var cutsById = {};
-        (cutsArray || []).forEach(function(c){ if (c && c.id != null) cutsById[String(c.id)] = c; });
-        // #4436: замороженный день автоматика не трогает — ни как приёмник, ни как донор.
-        var freezeOn = !!(this.meta && this.meta.freeze && this.freezeByDay && Object.keys(this.freezeByDay).length);
-        function frozenDay(sec) { return freezeOn && typeof self.dayIsFrozen === 'function' && !!self.dayIsFrozen(String(sec)); }
         // #3978: минуты «Отпуска»/выходного внутри окна дня уменьшают его ёмкость.
         // Без метаданных окна простоя не читаются (стаб-self в юнит-тестах) — считаем день целым.
         var blocked = (this.meta && typeof this.blockedRangesBySlitter === 'function')
@@ -13594,45 +13650,14 @@
             return sum;
         }
         var byMachine = {}, mOrder = [];
-        function addItem(sid, ts, item) {
-            var day = dayOffsetFromBase(String(ts), base);
-            if (day == null) return;
-            var key = String(sid == null ? '' : sid);
+        this.planLayoutItems(cutsArray, ops).forEach(function(it){
+            var key = String(it.slitterId);
             if (!byMachine[key]) { byMachine[key] = []; mOrder.push(key); }
-            item.dayOffset = day;
-            item.windowStartMin = Math.round((Number(ts) * 1000 - base) / 60000);
-            byMachine[key].push(item);
-        }
-        (cutsArray || []).forEach(function(c){
-            if (!c || c.id == null || del[String(c.id)]) return;
-            var u = upd[String(c.id)];
-            var ts = (u && u.planStartTs != null) ? Number(u.planStartTs)
-                : (Number(c.number) > 0 ? Number(c.number) : Number(c.planDate));
-            if (!(ts > 0)) return;
-            var runs = (u && u.plannedRuns != null) ? Number(u.plannedRuns) : (Number(c.plannedRuns) || 0);
-            var setup = cutSetupMinutes(c);
-            var occ = cutOccupancyMinutes(c, (u && u.plannedRuns != null) ? u.plannedRuns : null);
-            addItem((u && u.slitterId != null) ? u.slitterId : (c.slitter && c.slitter.id), ts, {
-                cutId: String(c.id), runs: runs, setupMin: setup, durationMin: Math.max(0, occ - setup),
-                // #4434: 🔒 держит свой день — вчерашнему дню проходов не отдаёт.
-                fixedDayLock: !!c.fixed,
-                // #4381: начатое задание неприкосновенно; завершённое переразбивать нечего.
-                immovable: cutIsStarted(c) || String(c.status || '').trim() === 'Завершён',
-                frozen: frozenDay(ts)
-            });
-        });
-        // Новые сегменты кандидата: та же конфигурация, наладки продолжение не несёт (#3280).
-        ((ops && ops.creates) || []).forEach(function(cr){
-            if (!cr || cr.planStartTs == null) return;
-            var head = cutsById[String(cr.parentCutId)];
-            if (!head) return;
-            var runs = Number(cr.plannedRuns) || 0;
-            var headRuns = Number(head.plannedRuns) || 0;
-            var work = Math.max(0, cutOccupancyMinutes(head, null) - cutSetupMinutes(head));
-            addItem((cr.slitterId != null) ? cr.slitterId : (head.slitter && head.slitter.id), cr.planStartTs, {
-                cutId: String(cr.parentCutId), runs: runs, setupMin: 0,
-                durationMin: headRuns > 0 ? Math.round(work * (runs / headRuns)) : work,
-                fixedDayLock: false, frozen: frozenDay(cr.planStartTs)
+            byMachine[key].push({
+                cutId: it.id, dayOffset: it.dayOffset, windowStartMin: it.windowStartMin,
+                runs: it.runs, setupMin: it.setupMin, durationMin: it.workMin,
+                // #4434: 🔒 держит свой день — вчерашнему дню проходов не отдаёт; #4381: начатое не трогаем.
+                fixedDayLock: it.fixed, immovable: it.immovable, frozen: it.frozen
             });
         });
         var out = [];
@@ -13654,17 +13679,15 @@
     };
 
     // #4064: суммарные дни опоздания плана — Σ по резкам max(0, день размещения − срок). День
-    // размещения берём как в planChangeoverMin (override planStart из ops кандидата, иначе хранимый
-    // planStart/planDate резки), срок — dueKey (YYYYMMDD). Старший критерий «Упорядочить» (срок —
+    // размещения берём из ПЛАНА, который меряем (#4471, planLayoutItems: старт кандидата, иначе
+    // хранимый), срок — dueKey (YYYYMMDD). Старший критерий «Упорядочить» (срок —
     // ТЗ §14), выше переналадки: см. LATE_DAY_WEIGHT и chooseOptimizeCandidate.
-    AtexProductionPlanning.prototype.planLatenessDays = function(cutsArray, planStartByCutId) {
+    AtexProductionPlanning.prototype.planLatenessDays = function(cutsArray, ops) {
         var self = this;
-        var ov = planStartByCutId || null;
         var total = 0;
-        (cutsArray || []).forEach(function(c) {
-            var o = ov ? ov[String(c.id)] : null;
-            var ts = (o != null) ? Number(o)
-                : (Number(c.number) > 0 ? Number(c.number) : (Number(c.planDate) > 0 ? Number(c.planDate) : 0));
+        this.planLayoutItems(cutsArray, ops).filter(function(it) { return !it.isCreate; }).forEach(function(it) {
+            var c = it.cut;
+            var ts = it.ts;
             var pKey = ts > 0 ? planDateDayKey(String(ts)) : planDateDayKey(c.planDate);
             // #4211: срок — по тому же правилу, что панель «просрочено: N» (#4161 countOverdueCuts →
             // cutDueKeys с фолбэком из обеспечения), а НЕ только хранимый c.dueKey. Иначе у продолжения-
@@ -13702,6 +13725,10 @@
         // #4469: станко-дни, не набитые до потолка смены (ТЗ §15). Кандидат C переставляет ВНУТРИ дня —
         // состав дней тот же, поэтому его недоупаковка равна текущей.
         var ufBefore = [], ufB = [], ufA = [];
+        // #4471: нарушения жёстких правил ТЗ §15 в плане-кандидате (страж записи, ops.ruleBreaks).
+        // У ХРАНИМОГО плана их не меряем — операций нет; вето односторонне и намеренно: применять
+        // план, ломающий правило, нельзя, даже если текущий не идеален.
+        var rbB = [], rbA = [];
         // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
         // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
         // считались бы по хвостам непринятого плана).
@@ -13713,15 +13740,16 @@
             creates: [], createsTotal: 0, deletes: [], deletesTotal: 0, result: null, stop: null };
         // #4413/#4469: объектив лексикографический — сперва задания в окне «Отпуска» (невыполнимо),
         // затем опоздания (срок §14), затем недоупакованные дни (ТЗ §15), затем переналадка.
-        function combined(dt, late, uf, co) {
-            return dt * DOWNTIME_CONFLICT_WEIGHT + late * LATE_DAY_WEIGHT + uf * UNDERFILL_DAY_WEIGHT + co;
+        function combined(dt, rb, late, uf, co) {
+            return dt * DOWNTIME_CONFLICT_WEIGHT + rb * RULE_BREAK_WEIGHT
+                + late * LATE_DAY_WEIGHT + uf * UNDERFILL_DAY_WEIGHT + co;
         }
         try {
             coBefore = self.planChangeoverMin(self.cuts, null);
             lateBefore = self.planLatenessDays(self.cuts, null);
-            dtBefore = self.planDowntimeConflicts(self.cuts, null, null);
+            dtBefore = self.planDowntimeConflicts(self.cuts, null);
             ufBefore = self.planUnderfilledDays(self.cuts, null);
-            before = combined(dtBefore.length, lateBefore, ufBefore.length, coBefore);
+            before = combined(dtBefore.length, 0, lateBefore, ufBefore.length, coBefore);
             trace.start = {
                 cutCount: (self.cuts || []).length,
                 fixedCount: (self.cuts || []).filter(function(c) { return c && c.fixed; }).length,
@@ -13734,14 +13762,18 @@
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
             builtB = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
-            var mapB = planStartMapFromOps(builtB.ops);
-            coB = self.planChangeoverMin(self.cuts, mapB);
-            lateB = self.planLatenessDays(self.cuts, mapB);
-            dtB = self.planDowntimeConflicts(self.cuts, mapB, plannedRunsMapFromOps(builtB.ops));
+            // #4471: кандидат меряется СВОИМ планом целиком (станок и минуты от упаковщика), а не
+            // картой стартов поверх хранимых колонок — иначе объектив врёт и хороший план выбрасывается.
+            coB = self.planChangeoverMin(self.cuts, builtB.ops);
+            lateB = self.planLatenessDays(self.cuts, builtB.ops);
+            dtB = self.planDowntimeConflicts(self.cuts, builtB.ops);
             ufB = self.planUnderfilledDays(self.cuts, builtB.ops);
-            objB = combined(dtB.length, lateB, ufB.length, coB);
+            rbB = (builtB.ops && builtB.ops.ruleBreaks) || [];
+            objB = combined(dtB.length, rbB.length, lateB, ufB.length, coB);
             trace.candidates.push({ key: 'B', title: 'порядок/дни на текущих станках',
-                late: round3(lateB), changeover: round3(coB), downtime: dtB.length, underfilled: ufB.length });
+                late: round3(lateB), changeover: round3(coB), downtime: dtB.length, underfilled: ufB.length,
+                downtimeIds: dtB.slice(0, 10), underfilledDays: ufB.slice(0, 10),   // #4471: поимённо
+                ruleBreaks: rbB.length, ruleBreakMsgs: rbB.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
@@ -13758,17 +13790,19 @@
                     else c.slitter.id = plan.slitterByRecordId[mid];
                 });
                 builtA = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
-                var mapA = planStartMapFromOps(builtA.ops);
-                coA = self.planChangeoverMin(self.cuts, mapA);
-                lateA = self.planLatenessDays(self.cuts, mapA);
-                // #4413: конфликты с «Отпуском» меряем ПОКА станки подменены — иначе задание
-                // проверялось бы против простоев не того станка.
-                dtA = self.planDowntimeConflicts(self.cuts, mapA, plannedRunsMapFromOps(builtA.ops));
+                coA = self.planChangeoverMin(self.cuts, builtA.ops);
+                lateA = self.planLatenessDays(self.cuts, builtA.ops);
+                // #4413/#4471: конфликты с «Отпуском» — по станку ИЗ ПЛАНА кандидата (ops.slitterId),
+                // иначе задание проверяется против простоев не того станка.
+                dtA = self.planDowntimeConflicts(self.cuts, builtA.ops);
                 ufA = self.planUnderfilledDays(self.cuts, builtA.ops);
-                objA = combined(dtA.length, lateA, ufA.length, coA);
+                rbA = (builtA.ops && builtA.ops.ruleBreaks) || [];
+                objA = combined(dtA.length, rbA.length, lateA, ufA.length, coA);
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
                     reassignCount: Object.keys(plan.slitterByRecordId || {}).length,
-                    late: round3(lateA), changeover: round3(coA), downtime: dtA.length, underfilled: ufA.length });
+                    late: round3(lateA), changeover: round3(coA), downtime: dtA.length, underfilled: ufA.length,
+                    downtimeIds: dtA.slice(0, 10), underfilledDays: ufA.slice(0, 10),   // #4471: поимённо
+                    ruleBreaks: rbA.length, ruleBreakMsgs: rbA.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             } else {
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
@@ -13786,9 +13820,10 @@
                 coC = round3(coBefore - localC.gainMin);
                 // #4469: состав дней тот же — недоупаковка у C равна текущей (внутридневная перестановка
                 // проходов между днями не двигает).
-                objC = combined(dtBefore.length, lateBefore, ufBefore.length, coC);
+                objC = combined(dtBefore.length, 0, lateBefore, ufBefore.length, coC);   // C ничего не переносит — форма плана та же
                 trace.candidates.push({ key: 'C', title: 'перестановка внутри дней (дни и станки те же)',
-                    late: round3(lateBefore), changeover: coC, downtime: dtBefore.length, underfilled: ufBefore.length });
+                    late: round3(lateBefore), changeover: coC, downtime: dtBefore.length, underfilled: ufBefore.length,
+                    downtimeIds: dtBefore.slice(0, 10), underfilledDays: ufBefore.slice(0, 10) });
             } else {
                 trace.candidates.push({ key: 'C', title: 'перестановка внутри дней (дни и станки те же)',
                     skipped: 'внутри дней переставлять нечего (порядок уже лучший)' });
@@ -13835,6 +13870,19 @@
                 emitOptimizeTrace(trace);
                 self.notify('Отпуск станка не обойти: в его окне стоят задания — ' + dtBefore.length
                     + '. Переставить не удалось (нет свободного места). Освободите день или сдвиньте задания вручную (🗓)', 'warning');
+                return;
+            }
+            // #4471: кандидаты были, но каждый нарушал жёсткое правило ТЗ §15 — такой план не
+            // применяется. Молчать нельзя: без этого «Упорядочить» выглядит сломанной кнопкой.
+            var rbAll = rbB.concat(rbA);
+            if (rbAll.length) {
+                trace.stop = { code: 'none-rule', text: 'план НЕ изменён — кандидат нарушает жёсткое правило ТЗ §15: '
+                    + rbAll.slice(0, 5).map(function(v){ return v.rule + ' (' + v.msg + ')'; }).join('; ') };
+                emitOptimizeTrace(trace);
+                self.notify('Пересчёт отклонён: предложенный план нарушает жёсткое правило — '
+                    + rbAll.slice(0, 2).map(function(v){ return v.rule === 'FIXED_BLOCK'
+                        ? 'зафиксированные задания одного дня переставлены' : 'день длиннее смены с нахлёстом'; }).join('; ')
+                    + '. Снимите лишние 🔒 или освободите день; детали в консоли', 'warning');
                 return;
             }
             // #4469: день не набит до потолка смены, а закрыть дыру ни один кандидат не смог — это
@@ -19001,6 +19049,15 @@
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
             }
+            // #4471: нарушения ФОРМЫ ПЛАНА (ТЗ §15) — отдаём вместе с операциями. «Упорядочить»
+            // обязано знать, что кандидат нарушает жёсткое правило: применить такой план нельзя,
+            // а молчать о нём — значит снова оставить оператора с «кнопка ничего не делает».
+            // CUT_BATCH сюда НЕ входит: это ошибка ДАННЫХ записи (пустая партия), одинаковая у всех
+            // кандидатов и у текущего плана, — вето по ней заблокировало бы «Упорядочить» навсегда.
+            // FIXED_CUT_DAY тоже нет: у него есть ЗАКОННЫЙ случай (день 🔒 стал нерабочим, #4434 п.1).
+            ops.ruleBreaks = (guard.violations || []).filter(function(v){
+                return v.rule === 'FIXED_BLOCK' || v.rule === 'DAY_CAPACITY';
+            });
         }
 
         var cutsById = {};

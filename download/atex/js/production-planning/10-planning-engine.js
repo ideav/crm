@@ -4696,6 +4696,12 @@
             var contIndexByHead = {};
             segs.forEach(function(seg, idx){
                 var ts = scheduleStartTimestamp(base, seg.windowStartMin);
+                // #4471: ЗАНЯТОСТЬ станка этим сегментом в ЦЕЛЫХ минутах — round(наладка) + ceil(намотка),
+                // ровно то, что уйдёт в колонки, сложит бейдж дня (#4131/#4149) и нарисует Гант. Отдаём
+                // вместе с операцией: объектив «Упорядочить» обязан мерить кандидата ЕГО минутами, а не
+                // хранимыми колонками прошлого плана (те описывают ДРУГУЮ раскладку — issue #4471).
+                var setupWhole = Math.round(round3(Number(seg.setupMin) || 0));
+                var occMin = setupWhole + Math.ceil(round3(Number(seg.durationMin) || 0));
                 // #4144: разложение setup-only ХВОСТА дня по колонкам — решение УПАКОВЩИКА (он считал
                 // room по дробному окну). Отдаём его вызывающему: писатель колонок обязан взять это, а не
                 // пересчитывать от снапнутого planStart (снап позже на накопленный ceil → room меньше).
@@ -4706,7 +4712,7 @@
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
                     usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
-                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                 } else {
                     var head = String(seg.parentCutId);
                     var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
@@ -4714,9 +4720,9 @@
                     var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
                     if (reuseId != null) {
                         usedByHead[head] = k + 1;
-                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                     } else {
-                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined });
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
                     }
                 }
                 // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
