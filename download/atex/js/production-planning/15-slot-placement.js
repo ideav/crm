@@ -277,18 +277,33 @@
                  dayOffset: dayOff, placementDayKey: placementDayKey, byFactor: byFactor };
     }
 
-    // Лучший из двух кандидатов: меньше вес → меньше «качество» → меньше день → меньший станок →
+    // Порядок кандидатов: меньше вес → меньше «качество» → меньше день → меньший станок →
     // ПОЗЖЕ по индексу (при равной цене дописываем В КОНЕЦ, сохраняя входной порядок §7, а не
-    // разворачивая одинаковые конфиги).
+    // разворачивая одинаковые конфиги). <0 ⇒ a лучше b.
+    // #4462: вынесено из betterCand в СРАВНИТЕЛЬ, чтобы тем же правилом строить топ проигравших
+    // (история решения). Победитель и «ближайшие альтернативы» обязаны ранжироваться ОДИНАКОВО —
+    // иначе подсказка показывала бы вторым не того, кто реально проиграл выбору.
+    function cmpCand(a, b){
+        if (a.weight !== b.weight) return a.weight < b.weight ? -1 : 1;
+        if (a.quality !== b.quality) return a.quality < b.quality ? -1 : 1;
+        if (a.dayOffset !== b.dayOffset) return a.dayOffset < b.dayOffset ? -1 : 1;
+        var byM = String(a.machineId).localeCompare(String(b.machineId), 'ru');
+        if (byM !== 0) return byM < 0 ? -1 : 1;
+        return a.index >= b.index ? -1 : 1;
+    }
     function betterCand(a, b){
         if (!b) return a; if (!a) return b;
-        if (a.weight !== b.weight) return a.weight < b.weight ? a : b;
-        if (a.quality !== b.quality) return a.quality < b.quality ? a : b;
-        if (a.dayOffset !== b.dayOffset) return a.dayOffset < b.dayOffset ? a : b;
-        var byM = String(a.machineId).localeCompare(String(b.machineId), 'ru');
-        if (byM !== 0) return byM < 0 ? a : b;
-        return a.index >= b.index ? a : b;
+        return cmpCand(a, b) <= 0 ? a : b;
     }
+    // #4462: топ-N кандидатов в порядке cmpCand (N=3: победитель + две ближайшие альтернативы).
+    function pushTopCand(list, cand){
+        if (!list) return;
+        var i = 0;
+        while (i < list.length && cmpCand(list[i], cand) <= 0) i++;
+        list.splice(i, 0, cand);
+        if (list.length > TOP_CAND_N) list.length = TOP_CAND_N;
+    }
+    var TOP_CAND_N = 4;   // #4462: победитель + две альтернативы + запас на вычёркивание победителя
     function tagSlot(slot, machineId){ var s = slotExtend(slot, {}); s.slitterId = String(machineId); return s; }
 
     // §8.4-исключение: нет приемлемого кандидата → станок, освобождающийся раньше всех за период
@@ -371,9 +386,21 @@
         var lockSid = slot.lockSlitter != null ? String(slot.lockSlitter) : null;
         var lockDay = isFinite(Number(slot.lockDay)) ? Number(slot.lockDay) : null;
         var bestAny = null;
+        // #4462: lockSkipped — отброшено ЗАМКОМ дня (ручной перенос), отдельно от недопустимых по §9
+        // (skipped): это не «нельзя вставить», а «вы сами выбрали день», и в подсказке это разные строки.
         var tr = ctx.traceTasks ? { id: slot.id, dueKey: isFinite(Number(slot.dueKey)) ? Number(slot.dueKey) : null,
                                     isFoil: !!slot.isFoil, workMin: round3(slotWorkMin(slot, ctx)),
-                                    variants: 0, skipped: 0, first: null, bestInDue: null } : null;
+                                    variants: 0, skipped: 0, lockSkipped: 0, first: null, bestInDue: null,
+                                    alternatives: [], movedAfter: false, movedBy: null,
+                                    lockDay: lockDay, lockSlitter: lockSid } : null;
+        // #4462: ИСТОРИЯ РЕШЕНИЯ. betterCand схлопывает весь перебор в одного победителя, и проигравшие
+        // исчезали бесследно: в трассе (#4095) оставались «первый рассмотренный» и «выбранный», а вопрос
+        // оператора звучит иначе — «с чем сравнивали и насколько выбранное дешевле?». Держим топ-4 по
+        // ТОМУ ЖЕ сравнителю (чтобы после вычёркивания победителя осталось две альтернативы).
+        // Пул — ВСЕ просмотренные точки, включая отброшенные замком дня при ручном переносе: при замке
+        // самый дешёвый вариант часто лежит в другом дне, и молчать о нём нельзя — это и есть ответ на
+        // «нарушена ожидаемая математика весов» (место выбрал не вес, а ваш замок). Такие помечаются.
+        var topAll = tr ? [] : null;
         function candOf(sid, idx, sc){
             return { machineId: sid, index: idx, weight: sc.weight, quality: sc.quality, setupWeight: sc.setupWeight,
                      setupLinks: sc.setupLinks,   // #4457: число стыков — гейт §8.4 нормируется на него
@@ -393,10 +420,12 @@
                     // Дешёвший вариант, приземляющийся В СРОК (день ≤ срока) — для объяснения просрочки.
                     if (tr.dueKey != null && sc.placementDayKey != null && Number(sc.placementDayKey) <= tr.dueKey
                         && (!tr.bestInDue || cand.weight < tr.bestInDue.weight)) tr.bestInDue = cand;
+                    // #4462: запоминаем ДО фильтра замка — вариант из другого дня тоже часть ответа.
+                    pushTopCand(topAll, cand);
                 }
                 if (lockDay != null){                                 // #4221: только точки замкового дня
                     bestAny = betterCand(cand, bestAny);
-                    if (Number(sc.dayOffset) !== lockDay){ if (tr) tr.skipped++; continue; }
+                    if (Number(sc.dayOffset) !== lockDay){ if (tr) tr.lockSkipped++; continue; }
                 }
                 best = betterCand(cand, best);
             }
@@ -420,6 +449,18 @@
             tr.chosen = best ? { machineId: best.machineId, index: best.index, weight: best.weight, quality: best.quality,
                                  dayOffset: best.dayOffset, placementDayKey: best.placementDayKey,
                                  byFactor: best.byFactor || {}, fallback: !!best.fallback } : null;
+            // #4462: две ближайшие альтернативы = топ перебора без победителя, по ВСЕМ просмотренным
+            // точкам (другие станки и дни тоже). Δ = насколько альтернатива дороже выбранного; Δ<0
+            // означает, что более дешёвый вариант БЫЛ, и его отклонило не сравнение весов, а правило:
+            // замок дня ручного переноса (outOfLock) либо фолбэк §8.4. Ровно это и просили увидеть.
+            tr.alternatives = (topAll || []).filter(function(c){
+                return !(tr.chosen && String(c.machineId) === String(tr.chosen.machineId) && Number(c.index) === Number(tr.chosen.index));
+            }).slice(0, 2).map(function(c){
+                return { machineId: c.machineId, index: c.index, weight: c.weight, quality: c.quality,
+                         dayOffset: c.dayOffset, placementDayKey: c.placementDayKey, byFactor: c.byFactor || {},
+                         outOfLock: lockDay != null && Number(c.dayOffset) !== Number(lockDay),
+                         delta: round3(c.weight - (tr.chosen ? tr.chosen.weight : 0)) };
+            });
             tr.overdue = !!(best && tr.dueKey != null && best.placementDayKey != null && Number(best.placementDayKey) > tr.dueKey);
             ctx.traceTasks.push(tr);
         }
@@ -681,6 +722,7 @@
         var times = ctx.times, settings = ctx.settings;
         var W_DL = planWeight(settings, 'DEADLINE_COST_MN'), W_EX = planWeight(settings, 'EXACT_DEADLINE_COST_MN');
         var maxIters = Number(ctx.greedyMaxIters) || 300, EPS = 1e-6;
+        var moves = [];   // #4462: чьё место переопределил жадный проход (для честной подсказки карточки)
         function cutsOf(key){ return byMachine[key].filter(function(s){ return s && s.kind === 'cut'; }); }
         function idsOf(key){ return cutsOf(key).map(function(s){ return String(s.id); }); }
         // Мемо упаковщика: одна и та же очередь станка пакуется многократно (перебор точек вставки).
@@ -755,12 +797,12 @@
                     byMachine[best.tid].splice(best.idx, 0, tagSlot(T.slot, best.tid));
                     var h = hashState();
                     if (seen[h]){ byMachine[best.tid].splice(best.idx, 1); byMachine[T.sid].splice(T.pos, 0, T.slot); }   // виденное — вернуть, к следующему заданию
-                    else { seen[h] = 1; applied = true; }
+                    else { seen[h] = 1; applied = true; moves.push({ id: T.id, from: T.sid, to: best.tid }); }
                 } else byMachine[T.sid].splice(T.pos, 0, T.slot);   // вернуть T на место
             }
             if (!applied) break;
         }
-        return { occupancy: occupancy };
+        return { occupancy: occupancy, moves: moves };
     }
 
     // Порядок резок по станкам для splitMachineQueue (отпуска отбрасываются — они не резки).
@@ -827,6 +869,95 @@
              + ' (день~' + (c.placementDayKey == null ? '?' : c.placementDayKey)
              + (parts.length ? ('; ' + parts.join(', ')) : '; без штрафов') + ')';
     }
+    // #4462: подписи факторов штрафа ДЛЯ ОПЕРАТОРА (ключи byFactor приходят из transitionCost/
+    // scorePosition). Незнакомый ключ печатаем как есть — молча терять слагаемое веса нельзя.
+    var PLACE_FACTOR_LABELS = {
+        knife: 'ножи', material: 'сырьё/намотка', leader: 'лидер+втулка',
+        foilNotEnd: 'фольга не в конце дня', foilMove: 'перенос за фольгу',
+        deadline: 'просрочка', exactDeadline: 'впритык к сроку',
+        distance: 'простой другого станка', order: 'соседство заказа',
+        breakKnives: 'разрыв цепочки ножей', breakMaterial: 'разрыв цепочки сырья'
+    };
+    // #4462: разбор веса — только ПРИМЕНЁННЫЕ слагаемые. Аннигилированные (0) не печатаем: «ножи +0»
+    // ничего не объясняет, а десяток нулей прячет настоящую причину («вижу все применённые веса, кроме
+    // аннигилированных»). Крупные первыми — сверху то, что решило исход, а не то, что стои́т первым в объекте.
+    function formatFactorParts(byFactor){
+        var f = byFactor || {}, parts = [];
+        Object.keys(f).forEach(function(k){
+            var v = Number(f[k]) || 0;
+            if (!v) return;
+            parts.push({ k: k, v: v });
+        });
+        parts.sort(function(a, b){ return Math.abs(b.v) - Math.abs(a.v); });
+        return parts.map(function(p){ return (PLACE_FACTOR_LABELS[p.k] || p.k) + ' ' + (p.v > 0 ? '+' : '') + p.v; }).join(', ');
+    }
+    // #4462: одна строка кандидата для подсказки: где, почём и из чего вес. delta — насколько дороже
+    // выбранного (у самого выбранного нет).
+    function fmtPlaceCandLine(c){
+        if (!c) return '—';
+        var f = formatFactorParts(c.byFactor);
+        return 'станок ' + c.machineId + ', позиция ' + c.index
+             + (c.placementDayKey == null ? '' : (', день~' + c.placementDayKey))
+             + ' — вес ' + c.weight
+             + (c.delta == null ? '' : (c.delta === 0 ? ' (тот же вес)' : (' (' + (c.delta > 0 ? '+' : '') + c.delta + ')')))
+             + (f ? (': ' + f) : ': без штрафов')
+             // #4462: вариант вне выбранного дня отклонён ЗАМКОМ ручного переноса, а не ценой. Без этой
+             // пометки более дешёвая альтернатива читалась бы как ошибка планировщика.
+             + (c.outOfLock ? '  ← вне выбранного вами дня: отклонён замком переноса, не весом' : '');
+    }
+    // #4462: ИСТОРИЯ ПРИНЯТИЯ РЕШЕНИЯ одним заданием — текст для title карточки очереди
+    // (.atex-pp-cut-time). Отвечает на вопрос «почему именно этот слот победил»: сколько вариантов
+    // просмотрено, что выбрано и из каких весов сложилась цена, две ближайшие альтернативы с Δ.
+    // ЧИСТАЯ (покрыта тестом): DOM и настройки трассировки её не касаются — подсказка обязана быть
+    // и при выключенном логе [pp-slot].
+    function formatPlacementDecisionTitle(t){
+        if (!t || !t.chosen) return '';
+        var L = [];
+        var head = 'Выбор места (§8): рассмотрено вариантов ' + (Number(t.variants) || 0);
+        if (t.skipped) head += ', недопустимых ' + t.skipped;
+        if (t.lockSkipped) head += ', вне выбранного дня ' + t.lockSkipped;
+        if (t.dueKey != null) head += '; срок ' + t.dueKey;
+        L.push(head);
+        L.push('Выбрано: ' + fmtPlaceCandLine(t.chosen)
+             + (t.chosen.fallback ? '  [§8.4: подходящего соседа нет ни на одном станке — станок выбран правилом, не ценой]' : ''));
+        if ((t.alternatives || []).length){
+            L.push('Ближайшие альтернативы (Δ — насколько дороже выбранного):');
+            t.alternatives.forEach(function(a, i){ L.push('  ' + (i + 1) + ') ' + fmtPlaceCandLine(a)); });
+        } else {
+            L.push('Альтернатив нет: другой допустимой точки вставки перебор не нашёл.');
+        }
+        if (t.overdue){
+            L.push(t.bestInDue
+                ? ('⚠️ Оценка ставит ЗА СРОК: вариант в срок был (вес ' + t.bestInDue.weight + ' против ' + t.chosen.weight + ') — переналадка вышла дороже штрафа опоздания.')
+                : '⚠️ Оценка ставит ЗА СРОК: варианта в срок нет — ёмкость дней до срока исчерпана.');
+        }
+        if (t.movedAfter){
+            L.push('⚠️ После этого выбора задание переносил проход «' + (t.movedBy || 'последующий') + '»: итоговое место выбрано НЕ этим сравнением.');
+        } else if (t.reseqBy){
+            L.push('Порядок в дне после выбора ещё пересобирали: ' + t.reseqBy + ' (день и станок при этом не менялись).');
+        }
+        if (t.realDay != null){
+            L.push('Итог по реальной упаковке: день №' + t.realDay + ' от начала периода'
+                 + (t.overdueReal ? (' — ПОСЛЕ срока (день №' + t.dueDayOffset + ')') : ' — в срок'));
+        }
+        return L.join('\n');
+    }
+    // #4462: разбор размещения → карта cutId → подсказка. touchedIds (если задан) оставляет ТОЛЬКО
+    // задания, которые план реально тронул: подсказка о выборе места на карточке, которую последний
+    // пересчёт не двигал, вводила бы в заблуждение — она описывала бы прошлое решение.
+    function placementTitlesByCut(placement, touchedIds){
+        var out = {};
+        if (!placement || !placement.tasks) return out;
+        var want = null;
+        if (touchedIds){ want = {}; touchedIds.forEach(function(id){ want[String(id)] = 1; }); }
+        placement.tasks.forEach(function(t){
+            if (!t || t.id == null) return;
+            if (want && !want[String(t.id)]) return;
+            var title = formatPlacementDecisionTitle(t);
+            if (title) out[String(t.id)] = title;
+        });
+        return out;
+    }
     // #4095: структурный trace размещения → строки лога (ЧИСТАЯ, покрыта тестом). «день~» — ОЦЕНКА
     // порядка; «РЕАЛЬНЫЙ день» — из splitMachineQueue (арбитр срока, §12).
     function formatSlotPlacementTrace(trace){
@@ -847,6 +978,10 @@
                  + (t.skipped ? (' (+ ' + t.skipped + ' недопустимых пропущено)') : '') + ' ──');
             if (t.first) L.push('   ПЕРВЫЙ рассмотренный: ' + fmtSlotCand(t.first));
             if (t.chosen) L.push('   ВЫБРАН: ' + fmtSlotCand(t.chosen) + (t.chosen.fallback ? ' [фолбэк §8.4: некуда пристроить]' : ''));
+            // #4462: две ближайшие альтернативы — то же, что видит оператор в подсказке карточки.
+            (t.alternatives || []).forEach(function(a, i){
+                L.push('   альтернатива ' + (i + 1) + ' (Δ ' + (a.delta > 0 ? '+' : '') + a.delta + '): ' + fmtSlotCand(a));
+            });
             if (t.overdue){
                 if (t.bestInDue) L.push('   ⚠️ ОЦЕНКА за срок: день~' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
                      + '; вариант В СРОК БЫЛ (вес ' + t.bestInDue.weight + ' vs выбран ' + t.chosen.weight + ') — переналадка дороже штрафа опоздания');

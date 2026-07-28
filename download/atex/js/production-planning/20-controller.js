@@ -125,6 +125,8 @@
         slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,
         assignmentFromOccupancy: assignmentFromOccupancy,          // #4095: cutId→станок/порядок из занятости
         formatSlotPlacementTrace: formatSlotPlacementTrace,        // #4095: структурный trace размещения → строки лога
+        formatPlacementDecisionTitle: formatPlacementDecisionTitle, // #4462: история решения одного задания → подсказка карточки
+        placementTitlesByCut: placementTitlesByCut,                 // #4462: разбор → cutId→подсказка (только тронутые планом)
         slotTraceOn: slotTraceOn,                                  // #4095: трассировка слоя размещения включена?
         planQuality: planQuality,                       // #3989: факт vs идеал переналадок (ТЗ §13)
         planQualityView: planQualityView,               // #3989 Фаза 3: качество из cuts контроллера
@@ -385,6 +387,7 @@
         this.timingModalTitleEl = null;
         this.timingModalBodyEl = null;
         this._timingByCut = {};     // #3240: контекст тайминга на резку (setup+нормы+старт) для модалки
+        this._placementByCut = {};  // #4462: история выбора места (варианты/альтернативы/веса) → title карточки
         this.daySettings = {};      // DAY_START_HOUR/DAY_END_HOUR из таблицы «Настройка»
         this._lastCutPlanningDiagnosticKey = '';
         // #4306: ожидающий подтверждения предпросмотр «Пересчитать наладку» — { slitterId, ops,
@@ -7913,6 +7916,14 @@
                 + ' удержать нельзя, детали в консоли.', 'warning');
         }
         var changedUpdates = filterChangedUpdates(ops, built.cutsById);
+        // #4462: ИСТОРИЯ ВЫБОРА МЕСТА для подсказки в очереди — ТОЛЬКО по заданиям, которые план
+        // реально тронул (changedUpdates + головы новых сегментов). На нетронутой карточке разбор
+        // описывал бы прошлое, а не то, что оператор сейчас видит. Живёт до следующей пересборки:
+        // перечитывание очереди (reload) его не сбрасывает, иначе подсказка гасла бы сразу после
+        // перестановки — ровно в тот момент, когда её и открывают («почему сюда?»).
+        var touched4462 = changedUpdates.map(function(u){ return String(u.cutId); })
+            .concat(((ops && ops.creates) || []).map(function(cr){ return String(cr.parentCutId); }));
+        self._placementByCut = placementTitlesByCut(ops && ops.placement, touched4462);
         if (!changedUpdates.length && !(ops.creates || []).length && !(ops.deletes || []).length) {
             // #4175: переставлять/дробить нечего (план оптимален), НО заказное задание-сирота (#4163→#4175)
             // не участвует в ops и висит «нет связей». applySplitPlan здесь не зовётся, значит его
@@ -9639,11 +9650,16 @@
                 // #4394: в title — id задания (объекта «Задание в производство»), чтобы из
                 // очереди можно было сразу найти запись в CRM. Формат «id N» — как в списке
                 // отклонений (renderDeviationGroup).
+                // #4462: сюда же — ИСТОРИЯ ВЫБОРА МЕСТА последней пересборки (сколько вариантов
+                // просмотрено, чем выбранный слот дешевле двух ближайших альтернатив, из каких весов
+                // сложилась цена). Только у заданий, которые план тронул: у остальных подсказка
+                // описывала бы не их перестановку.
+                var placeWhy = (self._placementByCut || {})[String(c.id)];
                 timeEl = el('div', {
                     class: 'atex-pp-cut-time',
                     role: 'button',
                     tabindex: '0',
-                    title: 'Показать тайминг резки · id ' + c.id,
+                    title: 'Показать тайминг резки · id ' + c.id + (placeWhy ? ('\n\n' + placeWhy) : ''),
                     text: scheduleText
                 });
                 timeEl.addEventListener('click', function() {

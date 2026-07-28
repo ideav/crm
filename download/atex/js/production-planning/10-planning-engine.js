@@ -4038,7 +4038,10 @@
                 orderIdsByCut: opts.orderIdsByCut,   // #4194: множества заказов заданий (штраф/бонус смежности в scorePosition)
                 dayLockByCut: opts.dayLockByCut,   // #4221: замок дня/станка для переноса 🗓 «По весу» (позиция в дне по весу)
                 machineLockByCut: opts.machineLockByCut,   // #4225: замок станка (перенос «В пределах одного станка» — без миграции между станками)
-                trace: slotTraceOn()
+                // #4462: разбор выбора собираем ВСЕГДА, а не по тумблеру лога. Он теперь не только
+                // печатается в [pp-slot], но и уходит наружу (ops.placement) в подсказку карточки
+                // очереди: выключенный лог не должен отбирать у оператора объяснение выбора.
+                trace: true
             }));
         }
         // Разложить резки станка в порядке очереди (preserveOrder — по «Дате план»/planStart
@@ -4215,12 +4218,18 @@
         // ёмкость → пере-пакуем. Монотонно (relocatePass двигает лишь строго дешевле) + cap раундов.
         // Только при активном слое размещения и заданных сроках; иначе прежнее поведение не тронуто.
         var refineRounds = 0, refineMoves = 0;
+        // #4462: КТО тронул задание ПОСЛЕ §8-размещения. Подсказка карточки объясняет выбор §8, и если
+        // место потом переопределил другой проход, она обязана это сказать, а не выдавать сравнение
+        // весов за окончательное решение (иначе объяснение расходится с тем, что оператор видит).
+        var movedByPass = {};
+        function markMoved(id, passName){ if (id != null && !movedByPass[String(id)]) movedByPass[String(id)] = passName; }
         if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && slotRefineCtx) {
             var maxRounds = Number(opts.slotRefineRounds) || 4;
             for (var rr = 0; rr < maxRounds; rr++) {
                 var rel = relocatePass(slotPlan.occupancy, realDaysFrom(packed.segsByMachine), slotRefineCtx);
                 if (!rel.moves.length) break;
                 refineRounds++; refineMoves += rel.moves.length;
+                rel.moves.forEach(function(m){ markMoved(m.id, 'релокация §12'); });
                 var asg = assignmentFromOccupancy(slotPlan.occupancy);
                 slotPlan.slitterByCut = asg.slitterByCut; slotPlan.orderIdxByCut = asg.orderIdxByCut;
                 packed = packAll();
@@ -4282,7 +4291,7 @@
                     slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
                 if (rel2.moves.length) {
                     overduePass.moves += rel2.moves.length;
-                    rel2.moves.forEach(function(m){ overduePass.moveLog.push(m); });
+                    rel2.moves.forEach(function(m){ overduePass.moveLog.push(m); markMoved(m.id, 'спасение просрочки #4118'); });
                     var asg2 = assignmentFromOccupancy(occ4118);
                     if (!slotPlan) slotPlan = { occupancy: occ4118 };
                     slotPlan._rescued = true;   // #4200: пере-упаковка обязана взять этот порядок (см. orderMachineQueue)
@@ -4304,8 +4313,9 @@
             || (opts.dayLockByCut && Object.keys(opts.dayLockByCut).length)
             || (opts.machineLockByCut && Object.keys(opts.machineLockByCut).length);   // #4338: ручной перенос/порядок — не переоптимизируем
         if (slotPlan && slotPlan.occupancy && opts.dueDayByCut && opts.slotGreedy !== false && !greedyMovePath) {
-            greedyRefine(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
+            var greedyOut = greedyRefine(slotPlan.occupancy, opts.dueDayByCut, realPackFn,
                 slotExtend(refineCtx4200, { feasibleMachine: opts.feasibleMachineFor }));
+            (greedyOut.moves || []).forEach(function(m){ markMoved(m.id, 'жадный проход #4338'); });   // #4462
             var asgG = assignmentFromOccupancy(slotPlan.occupancy);
             slotPlan._rescued = true;   // пере-упаковка обязана взять этот порядок
             slotPlan.slitterByCut = asgG.slitterByCut; slotPlan.orderIdxByCut = asgG.orderIdxByCut;
@@ -4320,6 +4330,10 @@
         // поэтому неудача на одном станке не должна отменять выигрыш на остальных. Принимаем новый
         // порядок станка, только если пере-упаковка не отправила НИ ОДНУ его резку на более поздний
         // день и не сломала «фольга в конце дня» (#3717).
+        // #4462: reorderedMachines — станки, ЧЕЙ ПОРЯДОК переставили пост-проходы (#4139 пересортировка
+        // внутри дня, #4184 склейка островов). Поимённо «кто поехал» они не сообщают, поэтому в подсказке
+        // это отдельная, более слабая формулировка: «порядок в дне после выбора ещё пересортировали».
+        var reorderedMachines = {};
         var reseqPass = { machines: 0, skipped: 0 };
         if (slotPlan && !opts.preserveOrder && opts.intraDayResequence !== false) {
             var reseqTimes = planningChangeTimes(opts);
@@ -4368,6 +4382,7 @@
                 } else if (later || foilWorse) { reseqPass.skipped++; return; }   // инвариант важнее экономии
                 better.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
                 packed.segsByMachine[key] = trialSegs;
+                reorderedMachines[String(key)] = 'внутридневная пересортировка #4139';   // #4462
                 reseqPass.machines++;
             });
         }
@@ -4438,6 +4453,7 @@
                     if (!best) break;
                     best.cand.forEach(function(c, i){ slotPlan.orderIdxByCut[String(c.id)] = i; });
                     packed.segsByMachine[key] = best.segs;
+                    reorderedMachines[String(key)] = 'склейка островов сырья #4184';   // #4462
                     if (!applied){ applied = true; dedupPass.machines++; }
                 }
             });
@@ -4447,6 +4463,14 @@
         if (slotPlan && slotPlan.trace) {
             var finalReal = realDaysFrom(segsByMachine), overdueLeft = 0;
             (slotPlan.trace.tasks || []).forEach(function(t){
+                // #4462: место, выбранное §8, могли переопределить последующие проходы. Дописываем это
+                // в разбор — подсказка обязана сказать оператору, что итог не равен сравнению весов.
+                var pass = movedByPass[String(t.id)];
+                var finalMid = slotPlan.slitterByCut ? slotPlan.slitterByCut[String(t.id)] : null;
+                if (!pass && finalMid != null && t.chosen && String(finalMid) !== String(t.chosen.machineId)) pass = 'последующая пересборка';
+                if (pass){ t.movedAfter = true; t.movedBy = pass; }
+                t.finalMachineId = finalMid == null ? null : String(finalMid);
+                if (!t.movedAfter && finalMid != null && reorderedMachines[String(finalMid)]) t.reseqBy = reorderedMachines[String(finalMid)];
                 var rd = finalReal[String(t.id)];
                 if (rd == null) return;
                 t.realDay = rd;
@@ -4547,7 +4571,11 @@
         orphanDeletes.forEach(function(id){ if (deletes.indexOf(id) < 0) deletes.push(id); });
         // #4200: overdue — задания, ОСТАВШИЕСЯ за сроком по календарю после рескью #4118 (для громкого
         // отчёта в контроллере: console.error + тост, не молча). Пусто → плана без просрочки (гарантия).
-        return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual };
+        // #4462: placement — разбор выбора места (варианты, выбранное, две ближайшие альтернативы,
+        // кто переносил после §8). Наружу нужен для подсказки карточки очереди: раньше он существовал
+        // только строками в консоли, и «почему этот слот победил» приходилось искать в трейсе.
+        return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
+                 placement: slotPlan ? (slotPlan.trace || null) : null };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
