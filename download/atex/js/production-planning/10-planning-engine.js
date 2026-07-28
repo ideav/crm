@@ -2763,6 +2763,29 @@
             // #4068: влезает ли обычная (нерезервная) резка в ёмкость дня МИНУС резерв под фольгу —
             // хотя бы один проход или наладочный хвост. false → нефольга в бюджет дня исчерпана, пора
             // ставить резервную фольгу в зарезервированный хвост (конец дня). Зеркалит логику ниже.
+            // #4461: останется ли на дне место под 🔒 этого дня, если ВПЕРЁД неё положить свободную
+            // резку cand. Правило #3792 («на своём дне 🔒 берётся раньше свободных») защищало ЁМКОСТЬ —
+            // чтобы нахлёст свободных не вытеснил зафиксированную с её дня. Но оно диктовало и ПОЗИЦИЮ:
+            // 🔒 вставала в голову дня, обгоняя свободные, чей порядок уже выбран слоем размещения (§8)
+            // со всеми штрафами, включая штраф разрыва последовательности (#4454). Гарантию оставляем,
+            // позицию возвращаем очереди: свободную пропускаем вперёд, пока после неё каждая 🔒 этого
+            // дня ещё начинается в пределах ёмкости (наладка + один проход). Мерка — как pickFitsReduced.
+            function fixedRoomAfter(candId, fixedIds){
+                if (candId == null) return false;
+                if (!fixedIds || !fixedIds.length) return true;
+                var cst = state[candId], cap = effCapacity(day);
+                var used = round3(clock + setupCostFor(prevPhysical, cst.cut)
+                    + (cst.perPass > 0 ? cst.perPass + leader : 0));
+                var prevCut = cst.cut;
+                for (var fi = 0; fi < fixedIds.length; fi++){
+                    var fst = state[fixedIds[fi]];
+                    used = round3(used + setupCostFor(prevCut, fst.cut)
+                        + (fst.perPass > 0 ? fst.perPass + leader : 0));
+                    if (used > cap) return false;
+                    prevCut = fst.cut;
+                }
+                return true;
+            }
             function pickFitsReduced(id){
                 var reserve = reserveForDay(day);
                 if (reserve <= 0) return true;
@@ -2824,7 +2847,32 @@
                 // и сделает), а зафиксированное обязано лечь здесь — иначе указатель дня уйдёт вперёд и
                 // 🔒 «отстанет» (прежний путь: ветка stranded снимала замок и задание переезжало).
                 var dayExhausted = clock > 0 && (effCapacity(day) - clock) <= 0;
-                if (fixedToday.length && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedToday);
+                // #4461: 🔒 своего дня идёт вперёд свободных, ПОКА ЭТО НЕ СТОИТ ЛИШНЕЙ ПЕРЕНАЛАДКИ.
+                // Правило #3792 («на своём дне 🔒 берётся раньше свободных») защищало ЁМКОСТЬ — чтобы
+                // нахлёст свободных не вытеснил зафиксированную с её дня. Но оно брало 🔒 первой ВСЕГДА,
+                // а значит рвало блок одинаковых ножей, который слой размещения (§8) собрал со всеми
+                // штрафами, включая штраф разрыва последовательности (#4454). Боевой случай (ateh1,
+                // 29.07.2026, Станок 2): 647845 (110/55, 14 полос) → 🔒 647159 (150/59, 7 полос) →
+                // 646483 (110/55, 14 полос) — две смены ножей там, где §8 не оставил ни одной; день
+                // 459 мин вместо 429 (issue #4461). Замок 🔒 — на ДЕНЬ, а не на голову дня: пропускаем
+                // свободную вперёд, когда с текущей заправки она ДЕШЕВЛЕ, и только пока после неё 🔒
+                // этого дня ещё влезает в день (fixedRoomAfter) — гарантия #3792 цела. Ничья по
+                // переналадке остаётся за 🔒 (прежнее поведение, в т.ч. прикол 🗓 «в начало дня» #4221).
+                var freeCandNow = freeDue.length ? selectByConfig(freeDue)
+                                : (freeAny.length ? selectByConfig(freeAny) : null);
+                var yieldToFixedFree = false;
+                if (fixedToday.length && freeCandNow != null && !inProgress.length
+                    && !forceFixedDay[day] && !dayExhausted) {
+                    var freeSetup = setupCostFor(prevPhysical, state[freeCandNow].cut);
+                    var fixedSetup = null;
+                    fixedToday.forEach(function(fid){
+                        var v = setupCostFor(prevPhysical, state[fid].cut);
+                        if (fixedSetup == null || v < fixedSetup) fixedSetup = v;
+                    });
+                    yieldToFixedFree = freeSetup < fixedSetup && fixedRoomAfter(freeCandNow, fixedToday);
+                }
+                if (fixedToday.length && !yieldToFixedFree
+                    && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedToday);
                 else if (inProgress.length) pick = selectByConfig(inProgress);
                 else {
                     // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
@@ -2832,7 +2880,7 @@
                     // #4068: сперва обычная резка, влезающая в ёмкость дня МИНУС резерв под дедлайн-фольгу;
                     // когда нефольга в этот бюджет больше не влезает — ставим резервную фольгу этого дня
                     // в зарезервированный хвост (она вытесняет поздне-срочную нефольгу за срок, ТЗ §12).
-                    var cand = freeDue.length ? selectByConfig(freeDue) : (freeAny.length ? selectByConfig(freeAny) : null);
+                    var cand = freeCandNow;
                     if (cand != null && pickFitsReduced(cand)) pick = cand;
                     else if (resFoilToday.length) pick = selectByConfig(resFoilToday);
                     else if (cand != null) pick = cand;   // резерва под сегодня нет — обычное переполнение (day++ ниже)
