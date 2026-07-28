@@ -268,6 +268,12 @@
         if (brk.material) byFactor.breakMaterial = round3((byFactor.breakMaterial || 0) + brk.material);
         return { weight: round3(cost.weight + orderPenalty + brk.knives + brk.material),
                  quality: cost.quality, setupWeight: round3(setupWeight),
+                 // #4457: сколько РЕАЛЬНЫХ стыков у этой точки — 1 у дописывания в конец (только
+                 // вход), 2 у вставки в середину. Гейт §8.4 меряет setupWeight (сумму ПО СТЫКАМ)
+                 // порогом «смена ножей + смена сырья», а это цена ОДНОГО стыка: без нормировки
+                 // любая вставка в середину, требующая переналадки с обеих сторон, объявлялась
+                 // «некуда пристроить» — и задание уходило мимо всех штрафов.
+                 setupLinks: (beforePrev ? 1 : 0) + (nextCut ? 1 : 0),
                  dayOffset: dayOff, placementDayKey: placementDayKey, byFactor: byFactor };
     }
 
@@ -285,8 +291,12 @@
     }
     function tagSlot(slot, machineId){ var s = slotExtend(slot, {}); s.slitterId = String(machineId); return s; }
 
-    // §8.4-исключение: нет приемлемого кандидата (setup > KNIVES_CHANGE+MATERIAL_CHANGE) → станок,
-    // освобождающийся раньше всех за период (или без слотов). Кладём слот в КОНЕЦ такого станка.
+    // §8.4-исключение: нет приемлемого кандидата → станок, освобождающийся раньше всех за период
+    // (или без слотов). ТЗ §8.4 задаёт СТАНОК; позицию на нём выбираем дописыванием в конец, но
+    // вес считаем ЧЕСТНО (#4457): прежняя версия возвращала `weight: 0, quality: 0`, и трасса
+    // писала «вес 0 (без штрафов)» о варианте, который на деле стои́т переналадки. По такой записи
+    // невозможно понять, почему задание оказалось там, где оказалось, — а именно этот вопрос и
+    // задавали (issue #4457).
     function earliestFreeMachine(occupancy, slot, ctx, feasible){
         var byMachine = occupancy.byMachine, best = null;
         Object.keys(byMachine).forEach(function(sid){
@@ -298,7 +308,12 @@
                 || (cand.endDay === best.endDay && String(sid).localeCompare(String(best.machineId), 'ru') < 0)) best = cand;
         });
         if (!best) return null;
-        return { machineId: best.machineId, index: best.index, weight: 0, quality: 0, dayOffset: best.endDay, fallback: true };
+        var sc = scorePosition(byMachine[best.machineId], best.index, slot, slotExtend(ctx, { slitterId: best.machineId }));
+        return { machineId: best.machineId, index: best.index,
+                 weight: sc ? sc.weight : 0, quality: sc ? sc.quality : 0,
+                 setupWeight: sc ? sc.setupWeight : 0, byFactor: sc ? sc.byFactor : {},
+                 dayOffset: sc ? sc.dayOffset : best.endDay,
+                 placementDayKey: sc ? sc.placementDayKey : undefined, fallback: true };
     }
 
     // #4106 (ТЗ §8 п.6): предикат «большой простой между станками». Строит по ЗАНЯТОСТИ функцию
@@ -361,6 +376,7 @@
                                     variants: 0, skipped: 0, first: null, bestInDue: null } : null;
         function candOf(sid, idx, sc){
             return { machineId: sid, index: idx, weight: sc.weight, quality: sc.quality, setupWeight: sc.setupWeight,
+                     setupLinks: sc.setupLinks,   // #4457: число стыков — гейт §8.4 нормируется на него
                      dayOffset: sc.dayOffset, placementDayKey: sc.placementDayKey, byFactor: sc.byFactor };
         }
         Object.keys(byMachine).forEach(function(sid){
@@ -386,7 +402,14 @@
             }
         });
         if (best == null && bestAny != null) best = bestAny;          // #4221: замковый день переполнен — не терять задание
-        var accThreshold = planWeight(ctx.settings, 'KNIVES_CHANGE_COST_MN') + planWeight(ctx.settings, 'MATERIAL_CHANGE_COST_MN');
+        // §8.4: «ни у одного станка нет подходящего соседа — везде пришлось бы и ножи менять, и
+        // сырьё». Цена «и ножи, и сырьё» — это ОДИН стык; setupWeight суммирует ПО ВСЕМ стыкам
+        // точки. #4457: нормируем порог на число стыков лучшего кандидата, иначе вставка в
+        // середину (2 стыка) перебивала порог одного стыка почти всегда, и задание с уникальной
+        // комбинацией ножей уходило в фолбэк ВСЕГДА — мимо штрафов, в том числе мимо штрафа
+        // разрыва (#4454). На боевой это давало 4 слепые укладки за прогон (issue #4457).
+        var accLink = planWeight(ctx.settings, 'KNIVES_CHANGE_COST_MN') + planWeight(ctx.settings, 'MATERIAL_CHANGE_COST_MN');
+        var accThreshold = accLink * Math.max(1, (best && best.setupLinks) || 1);
         // #4221: замок дня/станка НЕ отпускаем на «самый свободный станок» — задание держит выбор
         // пользователя (день+станок), а не уходит на пустой станок ради экономии наладки.
         if (lockSid == null && lockDay == null && (!best || best.setupWeight > accThreshold)){
@@ -421,9 +444,23 @@
         var sc = scorePosition(withoutSelf, i, arr[i], slotExtend(ctx, ext));
         return sc ? sc.weight : Infinity;
     }
-    // Триггеры релокации (ТЗ §12): слот идёт ПОСЛЕ фольги в своём дне; или день ≥ его срока.
+    // Триггеры релокации (ТЗ §12): слот идёт ПОСЛЕ фольги в своём дне; день ≥ его срока; или он
+    // РАЗРЫВАЕТ последовательность (#4457).
     function shouldRelocate(arr, i, slot, dayByCut, ctx){
         if (slot.kind !== 'cut' || slot.fixed) return false;
+        // #4457: слот стои́т между двумя заданиями, которые без него — одна комбинация ножей или
+        // одно сырьё/партия. Штраф разрыва (#4454) в цене «остаться» УЖЕ считается, но без этого
+        // триггера его никто не спрашивает: релокация запускалась только по фольге и просрочке.
+        // Жадная укладка «по одному» разрыва не видит по построению — когда слот кладётся, будущих
+        // соседей ещё нет в очереди, последовательность возникает ПОЗЖЕ. Значит ловить разрыв
+        // можно только здесь, на собранной расстановке. Замер с боевой (issue #4457, ateh1):
+        // «остаться» 175 (в т.ч. breakKnives 50) против «в конец» 80 — и ноль переносов.
+        var prevCut = (i > 0 && arr[i - 1] && arr[i - 1].kind === 'cut') ? arr[i - 1] : null;
+        var nextCut = (arr[i + 1] && arr[i + 1].kind === 'cut') ? arr[i + 1] : null;
+        var carry = (!prevCut && i === 0 && ctx && ctx.prevSetupBySlitter && slot.slitterId != null)
+            ? ctx.prevSetupBySlitter[String(slot.slitterId)] : null;
+        var brk = breakSequencePenalty(prevCut, slot, nextCut, ctx && ctx.settings, carry);
+        if (brk.knives || brk.material) return true;
         var myDay = dayByCut ? dayByCut[slot.id] : (slot.dayOffset);
         if (isFinite(Number(myDay)) && isFinite(Number(slot.dueKey))){
             var dueOff = (ctx && ctx.dueDayByCut && ctx.dueDayByCut[slot.id] != null) ? Number(ctx.dueDayByCut[slot.id]) : null;
