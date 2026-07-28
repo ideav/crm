@@ -2428,6 +2428,52 @@
         });
     }
 
+    // #4469 (ТЗ §15): НЕДОУПАКОВАННЫЕ станко-дни раскладки — зеркало DAY_CAPACITY (#4467).
+    // Тот ловит день ДЛИННЕЕ смены, этот — день КОРОЧЕ, чем можно набить: если в остаток дня (до
+    // потолка нахлёста РЕЗКИ) влезает хотя бы один проход ПЕРВОГО задания следующего дня, день
+    // обязан был забрать часть завтрашней работы — задание рвётся по проходам (#3280), а всё, что
+    // стои́т после него, съезжает. Боевой случай: 424 мин при потолке 455, назавтра продолжение на
+    // 24 прохода по 2.33 мин (issue #4469).
+    //   segs — сегменты ОДНОГО станка [{ cutId, dayOffset, windowStartMin, runs, setupMin,
+    //          durationMin, setupOnly, fixedDayLock, immovable }];
+    //   opts.freeMinFor(day) → минуты от занятости дня до потолка резки (availFor(day,'cuts'));
+    //   opts.isFrozenDay(day) → день заморожен (автоматика в него не лезет, #4436).
+    // НЕ нарушение: донор зафиксирован 🔒 (замок дня абсолютен, #4434) или неприкосновенен
+    // (`immovable` — начатое #4381 / завершённое), день-приёмник или день-донор заморожен, у донора
+    // нет проходов (наладочный хвост #3635 п.5), в остаток не влезает даже один проход ВМЕСТЕ с
+    // наладкой донора, приёмник — день РАНЬШЕ «С» (туда не ставят, ТЗ §15), следующего дня нет.
+    // → [{ day, freeMin, needMin, donorCutId }] по возрастанию дня. Чистая, вход не мутирует.
+    function underfilledLayoutDays(segs, opts) {
+        opts = opts || {};
+        var freeFn = typeof opts.freeMinFor === 'function' ? opts.freeMinFor : null;
+        if (!freeFn) return [];
+        var frozen = typeof opts.isFrozenDay === 'function' ? opts.isFrozenDay : function() { return false; };
+        var firstOfDay = {}, days = [];
+        (segs || []).forEach(function(s) {
+            if (!s) return;
+            var d = Number(s.dayOffset);
+            if (!isFinite(d)) return;
+            if (!(d in firstOfDay)) { firstOfDay[d] = s; days.push(d); }
+            else if (Number(s.windowStartMin) < Number(firstOfDay[d].windowStartMin)) firstOfDay[d] = s;
+        });
+        days.sort(function(a, b) { return a - b; });
+        var out = [];
+        for (var i = 0; i + 1 < days.length; i++) {
+            var day = days[i], next = days[i + 1];
+            if (day < 0) continue;                                             // раньше «С» ничего не ставим (ТЗ §15)
+            if (frozen(day) || frozen(next)) continue;
+            var donor = firstOfDay[next];
+            if (donor.fixedDayLock || donor.immovable) continue;               // #4434: 🔒 держит свой день; #4381: начатое не трогаем
+            var runs = Number(donor.runs) || 0, dur = Number(donor.durationMin) || 0;
+            if (!(runs > 0) || !(dur > 0)) continue;                           // #3635 п.5: хвост без проходов
+            var need = round3((Number(donor.setupMin) || 0) + dur / runs);     // наладка донора + ОДИН проход
+            var free = round3(Number(freeFn(day)) || 0);
+            if (free + 1e-6 < need) continue;
+            out.push({ day: day, freeMin: free, needMin: need, donorCutId: String(donor.cutId) });
+        }
+        return out;
+    }
+
     // #3280: разбиение очереди ОДНОГО станка по рабочим дням на уровне проходов.
     // Длительность резки линейна по проходам (windingMinutes × «Кол-во план»), поэтому
     // резку, упирающуюся в конец рабочего окна, обрезаем по числу влезающих проходов;
@@ -3130,6 +3176,21 @@
                     leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 }
             }
+            // #4469 (ТЗ §15): недоупакованные дни этой раскладки — для стража DAY_FILL. Считаем ЗДЕСЬ,
+            // потому что мерка остатка — тот же гейт потолка, которым паковали (availFor(day,'cuts') по
+            // ЦЕЛОЙ занятости #4149); снаружи её не воспроизвести. applyDowntime ниже двигает окна, но
+            // dayOffset сегментов не меняет — числа те же. Отдаём свойством массива: контракт возврата
+            // splitMachineQueue (список сегментов) остаётся прежним, а planCutOperations собирает из
+            // этого ops.dayFill — ровно как ops.dayLoad для DAY_CAPACITY (#4467).
+            segments.underfilled = underfilledLayoutDays(segments, {
+                freeMinFor: function(d) { return availFor(d, 'cuts'); },
+                isFrozenDay: opts.frozenDayFor
+            });
+            (segments.underfilled || []).forEach(function(u) {
+                ppTraceWarn('#4469 ДЕНЬ НЕДОУПАКОВАН: день ' + u.day + ' — свободно ' + Math.round(u.freeMin) +
+                    ' мин, а проход задания ' + u.donorCutId + ' следующего дня стоит ' + round3(u.needMin) +
+                    ' мин: его надо было затянуть сюда.');
+            });
             // #3914: итог генерации (gapFill) по дням — какие дни превысили бюджет.
             ppTraceDaySummary('splitMachineQueue[gapFill] ИТОГ', segments,
                 function(s) { return (Number(s.setupMin) || 0) + (Number(s.durationMin) || 0); },
@@ -4613,6 +4674,9 @@
         // DAY_CAPACITY) сверяет её с потолком дня, а считать её заново в контроллере нечем — окна и
         // разбиение по дням знает только упаковщик. Ключ — «станок|смещение дня».
         var dayLoad = {};
+        // #4469: недоупакованные станко-дни этой раскладки (для стража DAY_FILL) — считает сам
+        // упаковщик своим гейтом потолка (underfilledLayoutDays в splitMachineQueue).
+        var dayFill = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
@@ -4620,6 +4684,10 @@
             segs.forEach(function(seg){
                 var dk = String(key) + '|' + Number(seg.dayOffset);
                 dayLoad[dk] = round3((dayLoad[dk] || 0) + (Number(seg.setupMin) || 0) + (Number(seg.durationMin) || 0));
+            });
+            (segs.underfilled || []).forEach(function(u){
+                dayFill.push({ key: String(key) + '|' + Number(u.day), slitterId: String(key), day: Number(u.day),
+                               freeMin: u.freeMin, needMin: u.needMin, donorCutId: u.donorCutId });
             });
             // #4061: снап окон к целым минутам — старт следующего сегмента = старт текущего + сумма
             // его колонок (без дрейфа Ганта/очереди). Упаковку/дни/проходы это не трогает.
@@ -4673,8 +4741,9 @@
         // кто переносил после §8). Наружу нужен для подсказки карточки очереди: раньше он существовал
         // только строками в консоли, и «почему этот слот победил» приходилось искать в трейсе.
         // #4467: dayLoad — занятость станко-дня из самой раскладки (для стража DAY_CAPACITY).
+        // #4469: dayFill — станко-дни, которые раскладка оставила недоупакованными (страж DAY_FILL).
         return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
-                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad };
+                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки

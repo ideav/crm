@@ -260,8 +260,11 @@ function stubOptimize(c, opts) {
 })();
 
 // 3b) Есть что показать → предпросмотр; трасса содержит перемещения, результат и СТОП.
+// #4469: задания стоя́т в РАЗНЫХ днях, и кандидат сводит их в один. Если оба положить в день 27.07,
+// а кандидату отдать переезд одного из них на 28.07, такой план оставит 27.07 с дырой (в остаток
+// дня влезал бы проход уехавшего задания) — ТЗ §15 это запрещает, и объектив его отвергнет.
 (function () {
-    var c = makeController([cutOf('11', DAY1, '101'), cutOf('12', DAY1, '101')]);
+    var c = makeController([cutOf('11', DAY1, '101'), cutOf('12', DAY2, '101')]);
     var notices = [];
     c.notify = function(msg, kind) { notices.push({ kind: kind, msg: msg }); };
     stubOptimize(c, { coBefore: 915, coAfter: 640, lateBefore: 0, lateAfter: 0,
