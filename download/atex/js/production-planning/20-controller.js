@@ -8088,12 +8088,24 @@
             if (ordered.length < 2) return;
             var dayByCut = {};
             ordered.forEach(function(c){ dayByCut[String(c.id)] = Math.floor((Number(c.planDate) * 1000 - base) / 86400000); });
-            var carry = carryBy[sid];
-            var entry = carry ? carryOverPrevCut(carry, ordered[0]) : null;
+            // #4459: предшественник первого подвижного задания — ФАКТИЧЕСКИЙ сосед слева на станке.
+            // Из входа выброшены замороженные (#4436), начатые (#4381) и завершённые задания, но на
+            // станке они СТОЯТ: с их ножами и сырьём станок входит в первый переставляемый день.
+            // Заправка `prevSetupBeforeWindow` (строго ДО base) годится лишь когда слева нет вообще
+            // ничего; иначе вход в день бесплатен для ЛЮБОГО кандидата, и DP ставит первым что
+            // угодно — на боевой так уникальные 18 ножей встали в 08:00 перед блоком из 15.
+            var chain = (self.cuts || []).filter(function(c){
+                if (!c || String(c.slitter && c.slitter.id) !== sid) return false;
+                var cts = Number(c.planDate);
+                if (!isFinite(cts) || cts <= 0) return false;
+                return Math.floor((cts * 1000 - base) / 86400000) >= 0;
+            }).sort(function(a, b){ return Number(a.planDate) - Number(b.planDate); });
+            var firstTs = Number(ordered[0].planDate);
+            var left = null;
+            chain.forEach(function(c){ if (Number(c.planDate) < firstTs) left = c; });
+            var entry = left || (carryBy[sid] ? carryOverPrevCut(carryBy[sid], ordered[0]) : null);
             var better = resequenceWithinDays(ordered, dayByCut, spanning, entry, times, weights);
             if (!better || better.length !== ordered.length) return;
-            var wasReal = runChainCost(ordered, entry, times, changeoverCost);
-            var newReal = runChainCost(better, entry, times, changeoverCost);
             var sameOrder = better.every(function(c, i){ return String(c.id) === String(ordered[i].id); });
             if (sameOrder) return;
             // Перестановка = переназначение УЖЕ занятых стартов дня новому порядку (как drag-drop
@@ -8104,14 +8116,30 @@
                 (slotsByDay[d] = slotsByDay[d] || []).push(Number(c.planDate));
             });
             Object.keys(slotsByDay).forEach(function(d){ slotsByDay[d].sort(function(a, b){ return a - b; }); });
-            var takenByDay = {};
+            var takenByDay = {}, moves = [];
             better.forEach(function(c){
                 var d = dayByCut[String(c.id)];
                 var idx = takenByDay[d] = (takenByDay[d] == null ? 0 : takenByDay[d] + 1);
                 var ts = slotsByDay[d][idx];
                 if (ts == null || Number(c.planDate) === ts) return;
-                updates.push({ cutId: String(c.id), planStartTs: ts, plannedRuns: c.plannedRuns });
+                moves.push({ cutId: String(c.id), planStartTs: ts, plannedRuns: c.plannedRuns });
             });
+            if (!moves.length) return;
+            // #4459: гейт ПО ФАКТУ — цех платит за ВСЮ очередь станка, вместе с неподвижными
+            // соседями. Движок считает подвижные задания подряд и вклинившегося между ними
+            // замороженного/начатого не видит, поэтому решение сверяем на пересобранной цепочке:
+            // выросли реальные минуты переналадки — перестановку этого станка не берём. Он же
+            // делает честным `gainMin` (панель «Качество плана» и текст предпросмотра #4402).
+            var chainPrev = carryBy[sid] ? carryOverPrevCut(carryBy[sid], chain[0]) : null;
+            var newTs = {};
+            moves.forEach(function(u){ newTs[String(u.cutId)] = u.planStartTs; });
+            var afterChain = chain.slice().sort(function(a, b){
+                return (newTs[String(a.id)] || Number(a.planDate)) - (newTs[String(b.id)] || Number(b.planDate));
+            });
+            var wasReal = runChainCost(chain, chainPrev, times, changeoverCost);
+            var newReal = runChainCost(afterChain, chainPrev, times, changeoverCost);
+            if (newReal > wasReal + 1e-9) return;
+            moves.forEach(function(u){ updates.push(u); });
             gainByMachine[sid] = round3(wasReal - newReal);
             gainMin += round3(wasReal - newReal);
         });
