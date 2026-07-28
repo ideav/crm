@@ -145,10 +145,93 @@ AUTO_INPUTS.forEach(function(input) {
         'наблюдатель FIXED_CUT_DAY операцию не отбрасывает (только считает)');
 })();
 
-// ── 5. Реестр не пуст и правила описаны ─────────────────────────────────────────────────────
+// ── 5. CUT_BATCH: задание обязано иметь «Партию сырья» (ТЗ §15, #4452) ───────────────────────
+// Задание 10 — партия своя; 11 — партии нет нигде (ни цепочка, ни расход, ни FIFO); 12 — своей
+// нет, но резольвер находит её по цепочке дробления. Заморозки в этой фикстуре нет, поэтому
+// срабатывает только CUT_BATCH.
+var BATCH = {
+    '10': { batchId: '900', source: 'own' },
+    '11': { batchId: '', source: '', reason: 'нет активной «Партии сырья» этого вида с остатком' },
+    '12': { batchId: '901', source: 'chain' }
+};
+var batchCtx = {
+    resolveBatchForCut: function(id) { return BATCH[String(id)] || { batchId: '', source: '', reason: 'задания нет в очереди' }; }
+};
+
+AUTO_INPUTS.forEach(function(input) {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '11', planStartTs: TS_FREE });
+    var v = planning.checkPlanInvariants(ops, batchCtx, 'auto');
+    assert(v.length === 1 && v[0].rule === 'CUT_BATCH' && v[0].cutId === '11',
+        'CUT_BATCH × ' + input + ': задание без «Партии сырья» — нарушение', '(' + v.length + ')');
+});
+
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '10', planStartTs: TS_FREE });
+    var v = planning.checkPlanInvariants(ops, batchCtx, 'auto');
+    assert(v.length === 0, 'КОНТРОЛЬ: задание со своей партией нарушением не считается');
+})();
+
+(function() {
+    var ops = emptyOps();
+    ops.creates.push({ parentCutId: '11', planStartTs: TS_FREE });
+    var v = planning.checkPlanInvariants(ops, batchCtx, 'auto');
+    assert(v.length === 1 && v[0].rule === 'CUT_BATCH',
+        'CUT_BATCH: продолжение по заданию без партии — нарушение (пустота расползается по цепочке)');
+})();
+
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '11', planStartTs: TS_FREE });
+    var v = planning.checkPlanInvariants(ops, batchCtx, 'human');
+    assert(v.length === 1 && v[0].rule === 'CUT_BATCH',
+        'CUT_BATCH действует и на ручное действие: задание без партии — брак при любом авторе (actor: any)');
+})();
+
+// Страж не отбрасывает операцию, а ЧИНИТ её: подставляет разрешённую партию в саму операцию,
+// чтобы запись плана её сохранила. Отказ от операции потерял бы работу — это не тот способ.
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '12', planStartTs: TS_FREE });
+    ops.creates.push({ parentCutId: '12', planStartTs: TS_FREE });
+    var r = planning.guardPlanOps(ops, batchCtx, 'auto');
+    assert(r.skipped === 0 && ops.updates.length === 1 && ops.creates.length === 1,
+        'CUT_BATCH ничего не отбрасывает (работа не теряется)', '(skipped=' + r.skipped + ')');
+    assert(String(ops.updates[0].materialBatchId) === '901' && String(ops.creates[0].materialBatchId) === '901',
+        'страж проставил разрешённую партию в операции — она уйдёт в базу', '(' + ops.updates[0].materialBatchId + '/' + ops.creates[0].materialBatchId + ')');
+    assert((r.violations || []).filter(function(v) { return v.rule === 'CUT_BATCH'; }).length === 0,
+        'после починки нарушения CUT_BATCH не остаётся');
+})();
+
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '10', planStartTs: TS_FREE });
+    planning.guardPlanOps(ops, batchCtx, 'auto');
+    assert(ops.updates[0].materialBatchId == null,
+        'у задания со СВОЕЙ партией страж ничего не переписывает (лишний _m_set не нужен)');
+})();
+
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '11', planStartTs: TS_FREE });
+    var r = planning.guardPlanOps(ops, batchCtx, 'auto');
+    var v = (r.violations || []).filter(function(x) { return x.rule === 'CUT_BATCH'; });
+    assert(v.length === 1 && /нет активной/.test(v[0].msg),
+        'неразрешимая партия доезжает до отчёта С ПРИЧИНОЙ, а не молчит', '(' + (v[0] && v[0].msg) + ')');
+})();
+
+(function() {
+    var ops = emptyOps();
+    ops.updates.push({ cutId: '11', planStartTs: TS_FREE });
+    var v = planning.checkPlanInvariants(ops, {}, 'auto');   // ctx без resolveBatchForCut
+    assert(v.length === 0, 'КОНВЕНЦИЯ РЕЕСТРА: нет предиката разрешения партии — правило молчит, а не винит всех');
+})();
+
+// ── 6. Реестр не пуст и правила описаны ─────────────────────────────────────────────────────
 (function() {
     var inv = planning.invariants || [];
-    assert(inv.length >= 2, 'в реестре есть правила', '(' + inv.length + ')');
+    assert(inv.length >= 3, 'в реестре есть правила', '(' + inv.length + ')');
     var ok = inv.every(function(i) { return i.id && i.tz && i.title && typeof i.check === 'function'; });
     assert(ok, 'у каждого правила есть id, ссылка на пункт ТЗ, формулировка и проверка');
 })();

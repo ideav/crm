@@ -253,6 +253,7 @@
         fifoBatchesForMaterial: fifoBatchesForMaterial,
         materialByCut: materialByCut,
         healContinuationMaterials: healContinuationMaterials,   // #3808
+        healCutBatches: healCutBatches,   // #4452: «Партия сырья» задания (ТЗ §15, CUT_BATCH)
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
         foilWindingMinutes: foilWindingMinutes,   // #3742
@@ -1695,6 +1696,72 @@
                 c.materialName = (self.materialNameById && self.materialNameById[String(c.materialId)]) || c.materialName || '';
             }
         });
+        this.healCutBatches();   // #4452: «Партия сырья» — после «Вида сырья» (FIFO-источник опирается на него)
+    };
+
+    // #4452 (ТЗ §15, CUT_BATCH): восстановить «Партию сырья» заданий В ПАМЯТИ сразу после загрузки
+    // очереди. Именно в памяти и именно здесь: changeoverParts сравнивает партии соседей, поэтому
+    // пустая партия должна исчезнуть ДО расчёта плана — иначе план оплатит смену сырья, которой
+    // нет, и никакая последующая запись в базу этого уже не вернёт. В базу восстановленное уйдёт
+    // при ближайшем сохранении плана (страж guardPlanOps проставляет партию в операции,
+    // applySplitPlan пишет её так же, как «Вид сырья»/«Тип намотки»).
+    AtexProductionPlanning.prototype.healCutBatches = function() {
+        var cuts = this.cuts || [];
+        if (!cuts.length) return { healed: [], unresolved: [] };
+        var headById = {};
+        var chains = mergeContinuationChains(cuts).chainByLogical || {};
+        Object.keys(chains).forEach(function(head) {
+            (chains[head] || [head]).forEach(function(m) { headById[String(m)] = String(head); });
+        });
+        var r = healCutBatches(cuts, {
+            chainHeadById: headById,
+            consumptionByCut: this.consumptionByCut || {},
+            genBatches: this.genBatches || []
+        });
+        this._batchHealReport = r;
+        this._batchUnresolvedReason = {};
+        var reasons = this._batchUnresolvedReason;
+        r.unresolved.forEach(function(u) { reasons[String(u.cutId)] = u.reason; });
+        if (r.healed.length) {
+            var bySource = { chain: 0, consumption: 0, fifo: 0 };
+            r.healed.forEach(function(h) { if (bySource[h.source] != null) bySource[h.source]++; });
+            console.log('[pp] 🧵 #4452: «Партия сырья» восстановлена у заданий: ' + r.healed.length
+                + ' (цепочка дробления ' + bySource.chain + ', «Расход сырья» ' + bySource.consumption
+                + ', FIFO активной партии ' + bySource.fifo + ')',
+                { healed: r.healed });
+        }
+        if (r.unresolved.length) {
+            // Не молчим (crm no-silent-fallback): партию не из чего вывести — это ошибка данных,
+            // и она стои́т ложной переналадки с каждым соседом того же сырья. Здесь — полная трасса
+            // «где именно»; тост оператору даёт страж в момент записи плана (там же, где правило
+            // действует по ТЗ: Сгенерировать / Упорядочить / Пересчитать наладку / перенос).
+            console.error('[pp] ⛔ #4452: задания БЕЗ «Партии сырья» (' + r.unresolved.length + '): '
+                + r.unresolved.slice(0, 20).map(function(u) { return u.cutId + ' — ' + u.reason; }).join('; ')
+                + (r.unresolved.length > 20 ? '; …ещё ' + (r.unresolved.length - 20) : ''));
+        }
+        return r;
+    };
+
+    // #4452: разрешение «Партии сырья» задания для стража плана (ctx.resolveBatchForCut).
+    // Партия уже вылечена в памяти (healCutBatches), поэтому источник различаем по
+    // c.batchHealedFrom: 'own' — стои́т в базе (переписывать нечего), остальное — восстановленное,
+    // его страж проставит в операции и запись плана сохранит.
+    AtexProductionPlanning.prototype.resolveBatchForCut = function(cutId) {
+        var key = String(cutId);
+        // Индекс по id: страж зовёт резольвер на КАЖДУЮ операцию плана, линейный поиск дал бы O(n²)
+        // на очереди в тысячи заданий. Индекс пересобирается при смене данных (_planDataVersion).
+        var ver = this._planDataVersion || 0;
+        if (!this._batchCutIndex || this._batchCutIndexVer !== ver) {
+            var idx = {};
+            (this.cuts || []).forEach(function(x) { if (x && x.id != null) idx[String(x.id)] = x; });
+            this._batchCutIndex = idx;
+            this._batchCutIndexVer = ver;
+        }
+        var c = this._batchCutIndex[key];
+        if (!c) return { batchId: '', source: '', reason: 'задания ' + key + ' нет в загруженной очереди' };
+        var b = (c.batchId != null) ? String(c.batchId).trim() : '';
+        if (b !== '') return { batchId: b, source: c.batchHealedFrom || 'own' };
+        return { batchId: '', source: '', reason: (this._batchUnresolvedReason || {})[key] || 'источник партии не найден' };
     };
 
     // Число привязок (обеспечений) к конкретной резке.
@@ -7169,6 +7236,18 @@
                         var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
                         if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
                     }
+                    // #4452 (ТЗ §15, CUT_BATCH): «Партия сырья» — задание обязано её иметь. Значение
+                    // разрешил страж (guardPlanOps → resolveBatchForCut: цепочка → «Расход сырья» →
+                    // FIFO), фолбэк — партия головы цепочки. Пишем ТОЛЬКО если ХРАНИМОЕ пусто/иное:
+                    // сравниваем с batchIdStored (снимок до лечения в памяти), иначе восстановленная
+                    // партия навсегда осталась бы только в памяти, а база — пустой.
+                    if (cutReqIds.materialBatch) {
+                        var ubatch = (u.materialBatchId != null && String(u.materialBatchId) !== '')
+                            ? String(u.materialBatchId) : batchForCutId(u.cutId);
+                        var batchOld = storedCut
+                            ? String((storedCut.batchIdStored != null ? storedCut.batchIdStored : storedCut.batchId) || '').trim() : '';
+                        if (ubatch && batchOld !== ubatch) fields['t' + cutReqIds.materialBatch] = ubatch;
+                    }
                     // #4128: «Тип намотки» = намотке головы цепочки. Запись становится сегментом
                     // этой резки здесь же — намотка в этот момент известна, пишем её. Только если
                     // хранимое пусто/иное (#4001), иначе лишний _m_set.
@@ -7261,7 +7340,10 @@
                             slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
                             // #4155: «Партия сырья» головы цепочки (не пустой parentCut.batchId,
                             // который отчёт cut_planning не отдаёт) — иначе продолжение без сырья.
-                            materialBatch: batchForCutId(parentId),
+                            // #4452: если у головы её нет, партию разрешил страж (cr.materialBatchId:
+                            // «Расход сырья» → FIFO активной партии) — продолжение не рождается пустым.
+                            materialBatch: (cr.materialBatchId != null && String(cr.materialBatchId) !== '')
+                                ? String(cr.materialBatchId) : batchForCutId(parentId),
                             // #3795: «Вид сырья» цепочки → продолжение. Карточка очереди берёт сырьё
                             // из cut_material (своего реквизита резки), а обеспечения продолжения не
                             // привязаны к нему по «Заданию», поэтому materialByCut его не восстановит.
@@ -7435,7 +7517,15 @@
             // в слот-режиме (#4085); сравнение — как в applySplitPlan (пустой станок → '').
             var slitterChanged = (u.slitterId != null)
                 && String(u.slitterId) !== (cut.slitter ? String(cut.slitter.id) : '');
-            return tsChanged || runsChanged || slitterChanged;
+            // #4452: страж восстановил «Партию сырья» (ТЗ §15, CUT_BATCH) — апдейт несёт ТОЛЬКО её,
+            // planStart и проходы прежние. Без этой ветки он отсеивался бы как «ничего не изменилось»,
+            // партия в базе оставалась пустой, и лишняя смена сырья возвращалась при каждом чтении.
+            // Сравниваем с ХРАНИМЫМ (batchIdStored, снимок до лечения), а не с c.batchId — тот уже
+            // вылечен в памяти и всегда «совпал бы».
+            var batchStored = String((cut.batchIdStored != null ? cut.batchIdStored : cut.batchId) || '');
+            var batchChanged = (u.materialBatchId != null && String(u.materialBatchId) !== '')
+                && String(u.materialBatchId) !== batchStored;
+            return tsChanged || runsChanged || slitterChanged || batchChanged;
         });
     }
 
@@ -7741,12 +7831,38 @@
                 isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
-                dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; }
+                dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
+                // (проставляет партию), а нарушением считает только то, что разрешить не удалось.
+                resolveBatchForCut: (self && typeof self.resolveBatchForCut === 'function')
+                    ? function(id){ return self.resolveBatchForCut(id); } : null
             }, 'auto');
             if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
+            // #4452: страж восстановил «Партию сырья» в операциях — она уйдёт в базу вместе с планом.
+            if ((guard.filled || []).length) {
+                console.log('[pp] 🧵 #4452: «Партия сырья» проставлена в операции плана: ' + guard.filled.length,
+                    { filled: guard.filled.slice(0, 40) });
+            }
+            // #4452: партию не удалось разрешить ни одним источником — это ошибка ДАННЫХ, а не
+            // выбор планировщика: такое задание оплачивает ложную смену сырья с каждым соседом.
+            // Говорим оператору прямо в момент записи плана.
+            var noBatch = (guard.violations || []).filter(function(v){ return v.rule === 'CUT_BATCH'; });
+            if (noBatch.length) {
+                console.error('[pp] ⛔ #4452: план пишется с заданиями БЕЗ «Партии сырья»: '
+                    + noBatch.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
+                // Тост — не критичный путь: в юнит-тестах buildSequenceOps зовут без DOM.
+                try {
+                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
+                        self.notify('Заданий без «Партии сырья»: ' + noBatch.length + ' (№ '
+                            + noBatch.slice(0, 5).map(function(v){ return v.cutId; }).join(', ')
+                            + (noBatch.length > 5 ? ', …' : '') + '). Партию не из чего вывести —'
+                            + ' план считает им лишнюю смену сырья. Детали в консоли.', 'error');
+                    }
+                } catch (e) {}
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
-            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
+            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));

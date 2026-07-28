@@ -98,6 +98,64 @@
                 });
                 return out;
             }
+        },
+        {
+            id: 'CUT_BATCH',
+            tz: '§15 (#4452)',
+            actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
+            enforce: false,     // отбрасывать нечего: пустая партия чинится подстановкой (fill), не отказом
+            title: 'Задание в производство обязано иметь «Партию сырья»',
+            // ПОЧЕМУ ЭТО ЖЁСТКОЕ ПРАВИЛО. Партия — часть сигнатуры переналадки: changeoverParts
+            // считает смену сырья по `prev.batchId !== next.batchId`. Задание с пустой партией
+            // даёт ЛОЖНУЮ смену сырья с каждым соседом того же сырья — план оплачивает
+            // переналадку, которой нет (issue #4452).
+            //
+            // ПОЧЕМУ FILL, А НЕ ЗАПРЕТ. Отбросить операцию значило бы потерять работу: задание
+            // никуда не денется, оно просто останется незапланированным и по-прежнему без партии.
+            // Поэтому страж СНАЧАЛА чинит — просит ctx.resolveBatchForCut разрешить партию
+            // (цепочка дробления → «Расход сырья» → FIFO активной партии, см. healCutBatches) и
+            // проставляет её в саму операцию, чтобы запись плана сохранила её в базу. Нарушением
+            // остаётся только то, что разрешить НЕ УДАЛОСЬ, — с причиной, чтобы «непонятно почему»
+            // (формулировка тикета) больше не повторялось.
+            //
+            // ctx.resolveBatchForCut(cutId) → { batchId, source: 'own'|'chain'|'consumption'|'fifo',
+            //   reason }. Предиката нет → правило не срабатывает (как и остальные здесь).
+            fill: function(ops, ctx) {
+                var resolve = (ctx && typeof ctx.resolveBatchForCut === 'function') ? ctx.resolveBatchForCut : null;
+                if (!resolve) return [];
+                var out = [];
+                function stamp(op, cutId) {
+                    if (!op || (op.materialBatchId != null && String(op.materialBatchId) !== '')) return;
+                    var r = resolve(cutId) || {};
+                    // source 'own' — партия уже стои́т в базе, переписывать её нечем и незачем.
+                    if (!r.batchId || r.source === 'own') return;
+                    op.materialBatchId = String(r.batchId);
+                    out.push({ cutId: cutId == null ? null : String(cutId), batchId: String(r.batchId), source: r.source || '' });
+                }
+                (ops && ops.updates || []).forEach(function(u) { stamp(u, u.cutId); });
+                (ops && ops.creates || []).forEach(function(cr) { stamp(cr, cr.parentCutId); });
+                return out;
+            },
+            check: function(ops, ctx) {
+                // Предиката нет — правило не срабатывает (общая конвенция реестра): разрешать
+                // партию нечем, и объявлять всё подряд нарушением было бы враньём.
+                var resolve = (ctx && typeof ctx.resolveBatchForCut === 'function') ? ctx.resolveBatchForCut : null;
+                if (!resolve) return [];
+                var out = [];
+                var seen = {};
+                function verify(op, cutId) {
+                    if (op && op.materialBatchId != null && String(op.materialBatchId) !== '') return;
+                    var key = String(cutId);
+                    if (seen[key]) return;
+                    var r = resolve(cutId) || {};
+                    if (r.batchId) return;
+                    seen[key] = true;
+                    out.push(ppViolation('CUT_BATCH', cutId, 'задание без «Партии сырья»: ' + (r.reason || 'источник партии не найден')));
+                }
+                (ops && ops.updates || []).forEach(function(u) { verify(u, u.cutId); });
+                (ops && ops.creates || []).forEach(function(cr) { verify(cr, cr.parentCutId); });
+                return out;
+            }
         }
     ];
 
@@ -113,11 +171,27 @@
         return out;
     }
 
-    // Страж записи: убирает из операций то, что нарушает правила с `enforce: true`, и возвращает
-    // ПОЛНЫЙ отчёт (включая правила-наблюдатели, которые пока только считают).
-    // Возвращает { ops, violations, skipped } — ops мутируется на месте (updates/deletes/creates
-    // заменяются отфильтрованными массивами), как и ожидают вызывающие.
+    // Починка операций перед проверкой: правило с `fill` дописывает в операцию недостающие
+    // данные (сегодня — «Партию сырья», CUT_BATCH). Возвращает список правок для трассы.
+    // Порядок «сначала fill, потом check» существенен: проверка обязана видеть уже починенное,
+    // иначе страж ругался бы на то, что сам только что исправил.
+    function repairPlanOps(ops, ctx, actor) {
+        var who = actor === 'human' ? 'human' : 'auto';
+        var out = [];
+        PP_INVARIANTS.forEach(function(inv) {
+            if (typeof inv.fill !== 'function') return;
+            if (inv.actor === 'auto' && who !== 'auto') return;
+            out = out.concat(inv.fill(ops, ctx) || []);
+        });
+        return out;
+    }
+
+    // Страж записи: чинит починяемое, убирает из операций то, что нарушает правила с
+    // `enforce: true`, и возвращает ПОЛНЫЙ отчёт (включая правила-наблюдатели, которые пока
+    // только считают). Возвращает { ops, violations, skipped, filled } — ops мутируется на месте
+    // (updates/deletes/creates заменяются отфильтрованными массивами), как и ожидают вызывающие.
     function guardPlanOps(ops, ctx, actor) {
+        var filled = repairPlanOps(ops, ctx, actor);
         var violations = checkPlanInvariants(ops, ctx, actor);
         var enforced = {};
         PP_INVARIANTS.forEach(function(inv) { if (inv.enforce) enforced[inv.id] = true; });
@@ -128,7 +202,7 @@
             hasEnforced = true;
             if (v.cutId != null) blockedCuts[String(v.cutId)] = true;
         });
-        if (!ops || !hasEnforced) return { ops: ops, violations: violations, skipped: 0 };
+        if (!ops || !hasEnforced) return { ops: ops, violations: violations, skipped: 0, filled: filled };
 
         // Отбрасываем ровно то, что нарушает enforce-правила: те же предикаты, что и в check.
         var frozenCut = ppCtxFn(ctx, 'isFrozenCut'), frozenTs = ppCtxFn(ctx, 'isFrozenTs');
@@ -146,6 +220,6 @@
             if (frozenCut(parent) || frozenTs(cr && cr.planStartTs)) { skipped++; return false; }
             return true;
         });
-        return { ops: ops, violations: violations, skipped: skipped };
+        return { ops: ops, violations: violations, skipped: skipped, filled: filled };
     }
 

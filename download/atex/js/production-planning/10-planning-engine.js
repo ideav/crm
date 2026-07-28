@@ -4892,6 +4892,80 @@
         return pickBatchFIFO(genBatches || [], mat) === null;
     }
 
+    // #4452 (ТЗ §15, инвариант CUT_BATCH): «Партия сырья» задания. Отчёт cut_planning её не
+    // отдаёт (rowsToPlanning → batchId:''), она приходит отдельным чтением записи (#4155) — и у
+    // заданий, которым её никто не проставил, остаётся пусто. Пустая партия стои́т РЕАЛЬНЫХ денег:
+    // changeoverParts считает смену сырья по `prev.batchId !== next.batchId`, поэтому задание с
+    // пустой партией даёт ложную MATERIAL_WINDING с КАЖДЫМ соседом того же сырья.
+    //
+    // Лечим В ПАМЯТИ (как healContinuationMaterials лечит «Вид сырья») ДО расчёта плана — иначе
+    // переналадка уже посчитана по пустоте, и запись в базу этого не исправит. Порядок источников
+    // — от достоверного к выводимому:
+    //   1) цепочка дробления — сегменты режут ОДИН физический рулон, партия у них общая;
+    //   2) «Расход сырья» (1079) — партия, которую задание реально списывает;
+    //   3) FIFO активной партии этого «Вида сырья» с остатком — тот же выбор, что делает
+    //      генерация (pickBatchFIFO), т.е. решение планировщика, а не выдумка.
+    // Ничего не нашлось — НЕ подставляем (crm no-silent-fallback): задание уходит в unresolved с
+    // причиной, вызывающий орёт в консоль и тостом.
+    //
+    // cuts мутируются: c.batchId (значение) и c.batchHealedFrom (источник, для трассы).
+    // opts: { chainHeadById: {cutId: headId}, consumptionByCut: {cutId:[{batchId}]}, genBatches }.
+    // → { healed: [{cutId, batchId, source}], unresolved: [{cutId, materialId, reason}] }
+    function healCutBatches(cuts, opts) {
+        var o = opts || {};
+        var list = cuts || [];
+        var byId = {};
+        list.forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        var headById = o.chainHeadById || {};
+        var membersByHead = {};
+        Object.keys(headById).forEach(function(id) {
+            var h = String(headById[id]);
+            (membersByHead[h] = membersByHead[h] || []).push(String(id));
+        });
+        function stored(c) { return (c && c.batchId != null) ? String(c.batchId).trim() : ''; }
+        // Снимок ХРАНИМОГО значения ДО лечения: дальше c.batchId — уже вылеченное, и без снимка
+        // запись плана решила бы «не изменилось» и оставила базу пустой (та же ловушка, что у
+        // «Вида сырья» в #4001: origMaterialById).
+        list.forEach(function(c) { if (c && c.id != null) c.batchIdStored = stored(c); });
+        var healed = [], unresolved = [];
+        list.forEach(function(c) {
+            if (!c || c.id == null || stored(c) !== '') return;
+            var id = String(c.id);
+            var batch = '', source = '';
+            // 1) любой сегмент цепочки дробления (голова первой — она источник истины #4155).
+            var head = headById[id] != null ? String(headById[id]) : id;
+            var chain = [head].concat(membersByHead[head] || []);
+            for (var i = 0; i < chain.length && batch === ''; i++) {
+                var sb = stored(byId[chain[i]]);
+                if (sb !== '') { batch = sb; source = 'chain'; }
+            }
+            // 2) «Расход сырья»: что задание списывает — то оно и режет.
+            if (batch === '') {
+                var cons = (o.consumptionByCut || {})[id] || [];
+                for (var j = 0; j < cons.length && batch === ''; j++) {
+                    var cb = (cons[j] && cons[j].batchId != null) ? String(cons[j].batchId).trim() : '';
+                    if (cb !== '') { batch = cb; source = 'consumption'; }
+                }
+            }
+            // 3) FIFO активной партии своего сырья с остатком — выбор генерации.
+            var mat = (c.materialId != null) ? String(c.materialId).trim() : '';
+            if (batch === '' && mat !== '') {
+                var fifo = pickBatchFIFO(o.genBatches || [], mat);
+                if (fifo) { batch = String(fifo); source = 'fifo'; }
+            }
+            if (batch === '') {
+                unresolved.push({ cutId: id, materialId: mat, reason: mat === ''
+                    ? 'у задания нет «Вида сырья» — партию выводить не из чего'
+                    : 'нет активной «Партии сырья» вида ' + mat + ' с остатком; цепочка дробления и «Расход сырья» пусты' });
+                return;
+            }
+            c.batchId = batch;
+            c.batchHealedFrom = source;
+            healed.push({ cutId: id, batchId: batch, source: source });
+        });
+        return { healed: healed, unresolved: unresolved };
+    }
+
     // Потребность резки в погонных метрах (#3120 группа C): длина прогона джамбо =
     // самая длинная обеспечиваемая позиция (параллельный слиттинг — все полосы режутся
     // за один прогон). supplyFootages — массив «Метраж, м» обеспечений резки.
