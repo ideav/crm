@@ -3461,6 +3461,12 @@
                 if (!fix) moveScope.weightPositionCutIds = [String(cut.id)];
             } else {
                 moveScope.pinCutIds = [String(cut.id)];
+                // #4464: ГДЕ именно в дне — решает оператор, а не планировщик. Раньше обе опции
+                // давали ГОЛОВУ дня: приколотое задание забирало правило «🔒 своего дня раньше
+                // свободных» (#3792), и «в конец дня» не работало вовсе. Теперь место идёт в
+                // раскладку явно (pinDayPosByCut → splitMachineQueue).
+                moveScope.pinDayPosByCut = {};
+                moveScope.pinDayPosByCut[String(cut.id)] = position;   // 'start' | 'end'
             }
             if (withinSlitter) {
                 moveScope.withinSlitterIds = (curSidStr !== '' && curSidStr !== sidStr)
@@ -7780,6 +7786,7 @@
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
+            pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             // #4434 п.1: 🔒 не удержало свой день (день нерабочий — выходной/праздник/«Отпуск») —
@@ -7835,6 +7842,15 @@
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
+                // и в каком порядке (операции несут только изменившиеся записи, #3427).
+                planSnapshot: function(){
+                    return (cuts || []).filter(function(c){ return c && c.id != null; }).map(function(c){
+                        return { id: String(c.id),
+                                 slitterId: String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id),
+                                 planStartTs: Number(c.planDate), fixed: !!c.fixed };
+                    });
+                },
                 // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
                 // (проставляет партию), а нарушением считает только то, что разрешить не удалось.
                 resolveBatchForCut: (self && typeof self.resolveBatchForCut === 'function')
@@ -7863,9 +7879,23 @@
                     }
                 } catch (e) {}
             }
+            // #4464: 🔒-монолит разорван — это РЕГРЕССИЯ движка (ТЗ §15), а не выбор планировщика:
+            // порядок обязан соблюдаться по построению (слой размещения / упаковщик / пересортировка).
+            // Молчать нельзя ([[crm-no-silent-fallback]]): кричим в консоль и оператору.
+            var blockViol = (guard.violations || []).filter(function(v){ return v.rule === 'FIXED_BLOCK'; });
+            if (blockViol.length) {
+                console.error('[pp] ⛔ #4464: нарушен монолит зафиксированных заданий — '
+                    + blockViol.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
+                try {
+                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
+                        self.notify('Зафиксированные задания дня переставлены/разорваны: ' + blockViol.length
+                            + '. Так быть не должно — детали в консоли.', 'error');
+                    }
+                } catch (e) {}
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
-            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH'; });
+            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));

@@ -193,6 +193,12 @@
         var next = machineSlots[index] || null;
         var prevCut = (prev && prev.kind === 'cut') ? prev : null;
         var nextCut = (next && next.kind === 'cut') ? next : null;
+        // #4464 (ТЗ §15): 🔒 одного дня — МОНОЛИТ. Точка между двумя зафиксированными заданиями
+        // ОДНОГО дня недопустима: оператор поставил их подряд, и вклиниваться туда нельзя ни
+        // размещению, ни релокации. На СТЫКЕ ДНЕЙ правило не действует (между хвостом дня N и
+        // головой дня N+1 монолита нет) — потому и сравниваем дни, а не просто соседство.
+        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed
+            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
         // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и

@@ -2657,6 +2657,105 @@
             }
         },
         {
+            id: 'FIXED_BLOCK',
+            tz: '§15 (🔒-монолит, #4464)',
+            actor: 'auto',
+            enforce: false,     // ПОКА только отчёт — см. ниже
+            title: 'Зафиксированные задания одного дня — монолит: порядок между собой не меняется, между ними ничего не вставляется',
+            // ЧТО ЗАПРЕЩЕНО. В пределах ОДНОГО дня одного станка: (1) менять взаимный порядок 🔒;
+            // (2) ставить между двумя 🔒, стоявшими подряд, что-либо ещё. ЧТО РАЗРЕШЕНО: двигать
+            // цепочку 🔒 целиком (сколько угодно), переставлять свободные задания вокруг неё,
+            // ставить свободное ВПЛОТНУЮ к 🔒. На СТЫКЕ ДНЕЙ правило не действует: хвост дня N и
+            // голова дня N+1 монолита не образуют (между ними и так ночь).
+            //
+            // ПОЧЕМУ enforce:false. Выбросить операцию нельзя: порядок этим не чинится — задание
+            // просто останется с прежним `planStart`, и день получит дыру или наложение (рецидив
+            // #4300/#4312). Запрет обеспечен ПО ПОСТРОЕНИЮ там, где собирается порядок: слой
+            // размещения (точка вставки между двумя 🔒 одного дня недопустима), упаковщик дня
+            // (после 🔒 сразу берётся следующее 🔒 монолита) и внутридневная пересортировка
+            // (`resequenceWithinDays` не переставляет 🔒). Шлюз — АУДИТ: ловит регрессию на всех
+            // путях записи разом и кричит в консоль.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed }] — ХРАНИМЫЙ план (что
+            // стои́т сейчас). Нет предиката → правило не срабатывает (общая конвенция реестра).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var snap = snapFn() || [];
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) { byId[k] = { id: k, sid: String(u.slitterId == null ? '' : u.slitterId),
+                                            ts: Number(u.planStartTs), fixed: !!isFixed(u.cutId) }; return; }
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                (ops && ops.creates || []).forEach(function(cr, i) {
+                    if (!cr || cr.planStartTs == null) return;
+                    byId['new:' + i] = { id: 'new:' + i, sid: String(cr.slitterId == null ? '' : cr.slitterId),
+                                         ts: Number(cr.planStartTs), fixed: false };
+                });
+                // Разложить план по (станок, день) в хронологии — так же читает очередь экран (#3923).
+                function byDay(rows) {
+                    var out = {};
+                    rows.forEach(function(r) {
+                        if (!isFinite(r.ts)) return;
+                        var key = r.sid + '|' + dayOfTs(r.ts);
+                        (out[key] = out[key] || []).push(r);
+                    });
+                    Object.keys(out).forEach(function(k) {
+                        out[k].sort(function(a, b) { return a.ts - b.ts; });
+                    });
+                    return out;
+                }
+                var wasByDay = byDay(snap.map(function(r) {
+                    return { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                             ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                }));
+                var nowByDay = byDay(Object.keys(byId).map(function(k) { return byId[k]; }));
+                var posNow = {};
+                Object.keys(nowByDay).forEach(function(key) {
+                    nowByDay[key].forEach(function(r, i) { posNow[r.id] = { key: key, i: i }; });
+                });
+                var out = [];
+                Object.keys(wasByDay).forEach(function(key) {
+                    var fixedWas = wasByDay[key].filter(function(r) { return r.fixed; });
+                    for (var i = 0; i < fixedWas.length; i++) {
+                        var a = posNow[fixedWas[i].id];
+                        if (!a || a.key !== key) continue;   // уехало на другой день/станок — это FIXED_CUT_DAY
+                        if (i + 1 < fixedWas.length) {
+                            var b = posNow[fixedWas[i + 1].id];
+                            if (!b || b.key !== key) continue;
+                            if (b.i < a.i) {
+                                out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
+                                    'зафиксированные задания дня переставлены местами: ' + fixedWas[i].id + ' ↔ ' + fixedWas[i + 1].id));
+                                continue;
+                            }
+                            // Стояли ПОДРЯД в хранимом плане → обязаны остаться соседями.
+                            var wasIdxA = wasByDay[key].indexOf(fixedWas[i]);
+                            var wasIdxB = wasByDay[key].indexOf(fixedWas[i + 1]);
+                            if (wasIdxB === wasIdxA + 1 && b.i !== a.i + 1) {
+                                var between = nowByDay[key].slice(a.i + 1, b.i).map(function(r) { return r.id; }).join(', ');
+                                out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
+                                    'между зафиксированными ' + fixedWas[i].id + ' и ' + fixedWas[i + 1].id
+                                    + ' вклинилось: ' + (between || '?')));
+                            }
+                        }
+                    }
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
@@ -5545,6 +5644,14 @@
             // #4068: влезает ли обычная (нерезервная) резка в ёмкость дня МИНУС резерв под фольгу —
             // хотя бы один проход или наладочный хвост. false → нефольга в бюджет дня исчерпана, пора
             // ставить резервную фольгу в зарезервированный хвост (конец дня). Зеркалит логику ниже.
+            // #4464: явное место в дне для приколотого ручным переносом 🗓 задания:
+            // 'start' — «в начало дня», 'end' — «в конец дня» (форма #4221). Задаёт контроллер
+            // (moveCutToDay → moveScope.pinDayPosByCut); пусто — место выбирает планировщик.
+            var pinDayPosMap = opts.pinDayPosByCut || {};
+            function pinDayPosOf(id){
+                var v = pinDayPosMap[String(id)];
+                return v === 'start' || v === 'end' ? v : '';
+            }
             // #4461: останется ли на дне место под 🔒 этого дня, если ВПЕРЁД неё положить свободную
             // резку cand. Правило #3792 («на своём дне 🔒 берётся раньше свободных») защищало ЁМКОСТЬ —
             // чтобы нахлёст свободных не вытеснил зафиксированную с её дня. Но оно диктовало и ПОЗИЦИЮ:
@@ -5642,19 +5749,42 @@
                 // переналадке остаётся за 🔒 (прежнее поведение, в т.ч. прикол 🗓 «в начало дня» #4221).
                 var freeCandNow = freeDue.length ? selectByConfig(freeDue)
                                 : (freeAny.length ? selectByConfig(freeAny) : null);
+                // #4464: ручной перенос 🗓 с явным местом в дне — «в начало дня» берём первой,
+                // «в конец дня» держим до последнего (после всех свободных этого дня). Прежде оба
+                // варианта давали ГОЛОВУ дня: приколотое задание забиралось правилом #3792, и
+                // «в конец» не работало вовсе. Место 🔒-монолита от этого не страдает — приколотое
+                // задание встаёт ПЕРЕД блоком или ПОСЛЕ него, но не между его звеньями.
+                var headPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'start'; });
+                var tailPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'end'; });
+                var fixedNow = fixedToday.filter(function(id){ return pinDayPosOf(id) !== 'end'; });
+                // #4464: МОНОЛИТ 🔒 — если только что легло зафиксированное задание этого дня, а
+                // следующее НЕразмещённое во входной очереди тоже 🔒 этого дня, берём именно его:
+                // вклиниваться между звеньями монолита нельзя (ТЗ §15).
+                var monolithNext = null;
+                if (!inProgress.length && prevPhysical && prevPhysical.fixed) {
+                    var pi = poolOrder.indexOf(String(prevPhysical.id));
+                    for (var mk = pi + 1; pi >= 0 && mk < poolOrder.length; mk++) {
+                        var mid = poolOrder[mk], mst = state[mid];
+                        if (!mst || !(mst.remaining > 0 || (mst.perPass <= 0 && !mst.placedEmpty))) continue;
+                        if (mst.cut && mst.cut.fixed && mst.fixedDay === day) monolithNext = mid;
+                        break;   // смотрим ровно на СЛЕДУЮЩЕЕ неразмещённое звено очереди
+                    }
+                }
                 var yieldToFixedFree = false;
-                if (fixedToday.length && freeCandNow != null && !inProgress.length
+                if (fixedNow.length && freeCandNow != null && !inProgress.length
                     && !forceFixedDay[day] && !dayExhausted) {
                     var freeSetup = setupCostFor(prevPhysical, state[freeCandNow].cut);
                     var fixedSetup = null;
-                    fixedToday.forEach(function(fid){
+                    fixedNow.forEach(function(fid){
                         var v = setupCostFor(prevPhysical, state[fid].cut);
                         if (fixedSetup == null || v < fixedSetup) fixedSetup = v;
                     });
                     yieldToFixedFree = freeSetup < fixedSetup && fixedRoomAfter(freeCandNow, fixedToday);
                 }
-                if (fixedToday.length && !yieldToFixedFree
-                    && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedToday);
+                if (monolithNext != null) pick = monolithNext;
+                else if (headPinToday.length && !inProgress.length) pick = selectByConfig(headPinToday);
+                else if (fixedNow.length && !yieldToFixedFree
+                    && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedNow);
                 else if (inProgress.length) pick = selectByConfig(inProgress);
                 else {
                     // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
@@ -5663,7 +5793,10 @@
                     // когда нефольга в этот бюджет больше не влезает — ставим резервную фольгу этого дня
                     // в зарезервированный хвост (она вытесняет поздне-срочную нефольгу за срок, ТЗ §12).
                     var cand = freeCandNow;
-                    if (cand != null && pickFitsReduced(cand)) pick = cand;
+                    // #4464: «в конец дня» — когда свободных кандидатов на этот день больше нет.
+                    if (cand == null && tailPinToday.length) cand = selectByConfig(tailPinToday);
+                    if (cand != null && state[cand].fixedDay != null) pick = cand;   // 🔒 — мимо резерва фольги
+                    else if (cand != null && pickFitsReduced(cand)) pick = cand;
                     else if (resFoilToday.length) pick = selectByConfig(resFoilToday);
                     else if (cand != null) pick = cand;   // резерва под сегодня нет — обычное переполнение (day++ ниже)
                     else {
@@ -6942,7 +7075,8 @@
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
-                orderAuthoritative: !!slotPlan   // #4085: порядок задан слоем размещения — не переигрывать
+                orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать
+                pinDayPosByCut: opts.pinDayPosByCut   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation
@@ -8181,6 +8315,17 @@
     // (день пойдёт по жадному кандидату, а не отменит пересортировку всей очереди станка).
     function dayGroups(run, spanningIds, maxNodes){
         var pinned = null, body = run.slice();
+        // #4464 (ТЗ §15): в дне ДВА и более 🔒 — их взаимный порядок и соседство неприкосновенны.
+        // Перебор порядка такого дня не ведём вовсе: единственный кандидат — текущий порядок. Так
+        // проще и честнее, чем учить ДП precedence-ограничениям: дни с несколькими 🔒 оператор
+        // разложил руками, и трогать их незачем. Один 🔒 в дне монолита не образует — такой день
+        // оптимизируется как прежде (двигать одиночное 🔒 внутри дня правило не запрещает).
+        var fixedN = 0;
+        for (var fi = 0; fi < body.length; fi++){ if (body[fi] && body[fi].fixed) fixedN++; }
+        if (fixedN >= 2){
+            return { groups: [body], isFoil: [body.some(function(c){ return !!(c && c.isFoil); })],
+                     starts: [0], ends: [0], pinnedIdx: -1, monolith: true };
+        }
         var lastCut = body[body.length - 1];
         if (spanningIds && spanningIds[String(lastCut.id)]) pinned = lastCut;
         var hasFoil = body.some(function(c){ return !!(c && c.isFoil); });
@@ -8256,7 +8401,7 @@
             if (cost[s0][e0] == null || total < cost[s0][e0]){ cost[s0][e0] = round3(total); path[s0][e0] = order; }
             starts[s0] = 1; ends[e0] = 1;
         });
-        return { cost: cost, path: path, rep: rep,
+        return { cost: cost, path: path, rep: rep, repOut: groups.map(function(g){ return g[g.length - 1]; }),
                  starts: Object.keys(starts).map(Number), ends: Object.keys(ends).map(Number) };
     }
 
@@ -8301,7 +8446,9 @@
                 path[s][e] = order.reverse();
             });
         });
-        return { cost: cost, path: path, rep: rep };
+        // #4464: repOut — конфигурация, которой группа ЗАКАНЧИВАЕТСЯ (вход в следующий день).
+        // Для групп по подписи совпадает с rep (подпись одна), для монолита 🔒 — последняя его резка.
+        return { cost: cost, path: path, rep: rep, repOut: groups.map(function(g){ return g[g.length - 1]; }) };
     }
 
     // Пересортировать очередь станка ПО ДНЯМ. dayByCut — РЕАЛЬНЫЙ день старта каждой резки из
@@ -8369,7 +8516,8 @@
                         if (next[e] == null || base + inner < next[e].cost) next[e] = { cost: base + inner, s: s, prevEnd: null };
                     } else {
                         Object.keys(state).forEach(function(pe){
-                            var prevRep = tables[i - 1].rep[Number(pe)];
+                            var prevTbl = tables[i - 1];   // #4464: выход дня — по ПОСЛЕДНЕЙ резке группы
+                            var prevRep = (prevTbl.repOut || prevTbl.rep)[Number(pe)];
                             var c = state[pe].cost + sequencingCost(prevRep, tbl.rep[s], times, settings) + inner;
                             if (next[e] == null || c < next[e].cost) next[e] = { cost: c, s: s, prevEnd: Number(pe) };
                         });
@@ -9690,6 +9838,12 @@
         var next = machineSlots[index] || null;
         var prevCut = (prev && prev.kind === 'cut') ? prev : null;
         var nextCut = (next && next.kind === 'cut') ? next : null;
+        // #4464 (ТЗ §15): 🔒 одного дня — МОНОЛИТ. Точка между двумя зафиксированными заданиями
+        // ОДНОГО дня недопустима: оператор поставил их подряд, и вклиниваться туда нельзя ни
+        // размещению, ни релокации. На СТЫКЕ ДНЕЙ правило не действует (между хвостом дня N и
+        // головой дня N+1 монолита нет) — потому и сравниваем дни, а не просто соседство.
+        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed
+            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
         // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и
@@ -14024,6 +14178,12 @@
                 if (!fix) moveScope.weightPositionCutIds = [String(cut.id)];
             } else {
                 moveScope.pinCutIds = [String(cut.id)];
+                // #4464: ГДЕ именно в дне — решает оператор, а не планировщик. Раньше обе опции
+                // давали ГОЛОВУ дня: приколотое задание забирало правило «🔒 своего дня раньше
+                // свободных» (#3792), и «в конец дня» не работало вовсе. Теперь место идёт в
+                // раскладку явно (pinDayPosByCut → splitMachineQueue).
+                moveScope.pinDayPosByCut = {};
+                moveScope.pinDayPosByCut[String(cut.id)] = position;   // 'start' | 'end'
             }
             if (withinSlitter) {
                 moveScope.withinSlitterIds = (curSidStr !== '' && curSidStr !== sidStr)
@@ -18343,6 +18503,7 @@
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
+            pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             // #4434 п.1: 🔒 не удержало свой день (день нерабочий — выходной/праздник/«Отпуск») —
@@ -18398,6 +18559,15 @@
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
+                // и в каком порядке (операции несут только изменившиеся записи, #3427).
+                planSnapshot: function(){
+                    return (cuts || []).filter(function(c){ return c && c.id != null; }).map(function(c){
+                        return { id: String(c.id),
+                                 slitterId: String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id),
+                                 planStartTs: Number(c.planDate), fixed: !!c.fixed };
+                    });
+                },
                 // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
                 // (проставляет партию), а нарушением считает только то, что разрешить не удалось.
                 resolveBatchForCut: (self && typeof self.resolveBatchForCut === 'function')
@@ -18426,9 +18596,23 @@
                     }
                 } catch (e) {}
             }
+            // #4464: 🔒-монолит разорван — это РЕГРЕССИЯ движка (ТЗ §15), а не выбор планировщика:
+            // порядок обязан соблюдаться по построению (слой размещения / упаковщик / пересортировка).
+            // Молчать нельзя ([[crm-no-silent-fallback]]): кричим в консоль и оператору.
+            var blockViol = (guard.violations || []).filter(function(v){ return v.rule === 'FIXED_BLOCK'; });
+            if (blockViol.length) {
+                console.error('[pp] ⛔ #4464: нарушен монолит зафиксированных заданий — '
+                    + blockViol.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
+                try {
+                    if (typeof self.notify === 'function' && typeof document !== 'undefined') {
+                        self.notify('Зафиксированные задания дня переставлены/разорваны: ' + blockViol.length
+                            + '. Так быть не должно — детали в консоли.', 'error');
+                    }
+                } catch (e) {}
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
-            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH'; });
+            var watched = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));

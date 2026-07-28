@@ -100,6 +100,105 @@
             }
         },
         {
+            id: 'FIXED_BLOCK',
+            tz: '§15 (🔒-монолит, #4464)',
+            actor: 'auto',
+            enforce: false,     // ПОКА только отчёт — см. ниже
+            title: 'Зафиксированные задания одного дня — монолит: порядок между собой не меняется, между ними ничего не вставляется',
+            // ЧТО ЗАПРЕЩЕНО. В пределах ОДНОГО дня одного станка: (1) менять взаимный порядок 🔒;
+            // (2) ставить между двумя 🔒, стоявшими подряд, что-либо ещё. ЧТО РАЗРЕШЕНО: двигать
+            // цепочку 🔒 целиком (сколько угодно), переставлять свободные задания вокруг неё,
+            // ставить свободное ВПЛОТНУЮ к 🔒. На СТЫКЕ ДНЕЙ правило не действует: хвост дня N и
+            // голова дня N+1 монолита не образуют (между ними и так ночь).
+            //
+            // ПОЧЕМУ enforce:false. Выбросить операцию нельзя: порядок этим не чинится — задание
+            // просто останется с прежним `planStart`, и день получит дыру или наложение (рецидив
+            // #4300/#4312). Запрет обеспечен ПО ПОСТРОЕНИЮ там, где собирается порядок: слой
+            // размещения (точка вставки между двумя 🔒 одного дня недопустима), упаковщик дня
+            // (после 🔒 сразу берётся следующее 🔒 монолита) и внутридневная пересортировка
+            // (`resequenceWithinDays` не переставляет 🔒). Шлюз — АУДИТ: ловит регрессию на всех
+            // путях записи разом и кричит в консоль.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed }] — ХРАНИМЫЙ план (что
+            // стои́т сейчас). Нет предиката → правило не срабатывает (общая конвенция реестра).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var snap = snapFn() || [];
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) { byId[k] = { id: k, sid: String(u.slitterId == null ? '' : u.slitterId),
+                                            ts: Number(u.planStartTs), fixed: !!isFixed(u.cutId) }; return; }
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                (ops && ops.creates || []).forEach(function(cr, i) {
+                    if (!cr || cr.planStartTs == null) return;
+                    byId['new:' + i] = { id: 'new:' + i, sid: String(cr.slitterId == null ? '' : cr.slitterId),
+                                         ts: Number(cr.planStartTs), fixed: false };
+                });
+                // Разложить план по (станок, день) в хронологии — так же читает очередь экран (#3923).
+                function byDay(rows) {
+                    var out = {};
+                    rows.forEach(function(r) {
+                        if (!isFinite(r.ts)) return;
+                        var key = r.sid + '|' + dayOfTs(r.ts);
+                        (out[key] = out[key] || []).push(r);
+                    });
+                    Object.keys(out).forEach(function(k) {
+                        out[k].sort(function(a, b) { return a.ts - b.ts; });
+                    });
+                    return out;
+                }
+                var wasByDay = byDay(snap.map(function(r) {
+                    return { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                             ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                }));
+                var nowByDay = byDay(Object.keys(byId).map(function(k) { return byId[k]; }));
+                var posNow = {};
+                Object.keys(nowByDay).forEach(function(key) {
+                    nowByDay[key].forEach(function(r, i) { posNow[r.id] = { key: key, i: i }; });
+                });
+                var out = [];
+                Object.keys(wasByDay).forEach(function(key) {
+                    var fixedWas = wasByDay[key].filter(function(r) { return r.fixed; });
+                    for (var i = 0; i < fixedWas.length; i++) {
+                        var a = posNow[fixedWas[i].id];
+                        if (!a || a.key !== key) continue;   // уехало на другой день/станок — это FIXED_CUT_DAY
+                        if (i + 1 < fixedWas.length) {
+                            var b = posNow[fixedWas[i + 1].id];
+                            if (!b || b.key !== key) continue;
+                            if (b.i < a.i) {
+                                out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
+                                    'зафиксированные задания дня переставлены местами: ' + fixedWas[i].id + ' ↔ ' + fixedWas[i + 1].id));
+                                continue;
+                            }
+                            // Стояли ПОДРЯД в хранимом плане → обязаны остаться соседями.
+                            var wasIdxA = wasByDay[key].indexOf(fixedWas[i]);
+                            var wasIdxB = wasByDay[key].indexOf(fixedWas[i + 1]);
+                            if (wasIdxB === wasIdxA + 1 && b.i !== a.i + 1) {
+                                var between = nowByDay[key].slice(a.i + 1, b.i).map(function(r) { return r.id; }).join(', ');
+                                out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
+                                    'между зафиксированными ' + fixedWas[i].id + ' и ' + fixedWas[i + 1].id
+                                    + ' вклинилось: ' + (between || '?')));
+                            }
+                        }
+                    }
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул

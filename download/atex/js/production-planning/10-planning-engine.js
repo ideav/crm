@@ -2763,6 +2763,14 @@
             // #4068: влезает ли обычная (нерезервная) резка в ёмкость дня МИНУС резерв под фольгу —
             // хотя бы один проход или наладочный хвост. false → нефольга в бюджет дня исчерпана, пора
             // ставить резервную фольгу в зарезервированный хвост (конец дня). Зеркалит логику ниже.
+            // #4464: явное место в дне для приколотого ручным переносом 🗓 задания:
+            // 'start' — «в начало дня», 'end' — «в конец дня» (форма #4221). Задаёт контроллер
+            // (moveCutToDay → moveScope.pinDayPosByCut); пусто — место выбирает планировщик.
+            var pinDayPosMap = opts.pinDayPosByCut || {};
+            function pinDayPosOf(id){
+                var v = pinDayPosMap[String(id)];
+                return v === 'start' || v === 'end' ? v : '';
+            }
             // #4461: останется ли на дне место под 🔒 этого дня, если ВПЕРЁД неё положить свободную
             // резку cand. Правило #3792 («на своём дне 🔒 берётся раньше свободных») защищало ЁМКОСТЬ —
             // чтобы нахлёст свободных не вытеснил зафиксированную с её дня. Но оно диктовало и ПОЗИЦИЮ:
@@ -2860,19 +2868,42 @@
                 // переналадке остаётся за 🔒 (прежнее поведение, в т.ч. прикол 🗓 «в начало дня» #4221).
                 var freeCandNow = freeDue.length ? selectByConfig(freeDue)
                                 : (freeAny.length ? selectByConfig(freeAny) : null);
+                // #4464: ручной перенос 🗓 с явным местом в дне — «в начало дня» берём первой,
+                // «в конец дня» держим до последнего (после всех свободных этого дня). Прежде оба
+                // варианта давали ГОЛОВУ дня: приколотое задание забиралось правилом #3792, и
+                // «в конец» не работало вовсе. Место 🔒-монолита от этого не страдает — приколотое
+                // задание встаёт ПЕРЕД блоком или ПОСЛЕ него, но не между его звеньями.
+                var headPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'start'; });
+                var tailPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'end'; });
+                var fixedNow = fixedToday.filter(function(id){ return pinDayPosOf(id) !== 'end'; });
+                // #4464: МОНОЛИТ 🔒 — если только что легло зафиксированное задание этого дня, а
+                // следующее НЕразмещённое во входной очереди тоже 🔒 этого дня, берём именно его:
+                // вклиниваться между звеньями монолита нельзя (ТЗ §15).
+                var monolithNext = null;
+                if (!inProgress.length && prevPhysical && prevPhysical.fixed) {
+                    var pi = poolOrder.indexOf(String(prevPhysical.id));
+                    for (var mk = pi + 1; pi >= 0 && mk < poolOrder.length; mk++) {
+                        var mid = poolOrder[mk], mst = state[mid];
+                        if (!mst || !(mst.remaining > 0 || (mst.perPass <= 0 && !mst.placedEmpty))) continue;
+                        if (mst.cut && mst.cut.fixed && mst.fixedDay === day) monolithNext = mid;
+                        break;   // смотрим ровно на СЛЕДУЮЩЕЕ неразмещённое звено очереди
+                    }
+                }
                 var yieldToFixedFree = false;
-                if (fixedToday.length && freeCandNow != null && !inProgress.length
+                if (fixedNow.length && freeCandNow != null && !inProgress.length
                     && !forceFixedDay[day] && !dayExhausted) {
                     var freeSetup = setupCostFor(prevPhysical, state[freeCandNow].cut);
                     var fixedSetup = null;
-                    fixedToday.forEach(function(fid){
+                    fixedNow.forEach(function(fid){
                         var v = setupCostFor(prevPhysical, state[fid].cut);
                         if (fixedSetup == null || v < fixedSetup) fixedSetup = v;
                     });
                     yieldToFixedFree = freeSetup < fixedSetup && fixedRoomAfter(freeCandNow, fixedToday);
                 }
-                if (fixedToday.length && !yieldToFixedFree
-                    && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedToday);
+                if (monolithNext != null) pick = monolithNext;
+                else if (headPinToday.length && !inProgress.length) pick = selectByConfig(headPinToday);
+                else if (fixedNow.length && !yieldToFixedFree
+                    && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedNow);
                 else if (inProgress.length) pick = selectByConfig(inProgress);
                 else {
                     // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
@@ -2881,7 +2912,10 @@
                     // когда нефольга в этот бюджет больше не влезает — ставим резервную фольгу этого дня
                     // в зарезервированный хвост (она вытесняет поздне-срочную нефольгу за срок, ТЗ §12).
                     var cand = freeCandNow;
-                    if (cand != null && pickFitsReduced(cand)) pick = cand;
+                    // #4464: «в конец дня» — когда свободных кандидатов на этот день больше нет.
+                    if (cand == null && tailPinToday.length) cand = selectByConfig(tailPinToday);
+                    if (cand != null && state[cand].fixedDay != null) pick = cand;   // 🔒 — мимо резерва фольги
+                    else if (cand != null && pickFitsReduced(cand)) pick = cand;
                     else if (resFoilToday.length) pick = selectByConfig(resFoilToday);
                     else if (cand != null) pick = cand;   // резерва под сегодня нет — обычное переполнение (day++ ниже)
                     else {
@@ -4160,7 +4194,8 @@
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
-                orderAuthoritative: !!slotPlan   // #4085: порядок задан слоем размещения — не переигрывать
+                orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать
+                pinDayPosByCut: opts.pinDayPosByCut   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation
@@ -5399,6 +5434,17 @@
     // (день пойдёт по жадному кандидату, а не отменит пересортировку всей очереди станка).
     function dayGroups(run, spanningIds, maxNodes){
         var pinned = null, body = run.slice();
+        // #4464 (ТЗ §15): в дне ДВА и более 🔒 — их взаимный порядок и соседство неприкосновенны.
+        // Перебор порядка такого дня не ведём вовсе: единственный кандидат — текущий порядок. Так
+        // проще и честнее, чем учить ДП precedence-ограничениям: дни с несколькими 🔒 оператор
+        // разложил руками, и трогать их незачем. Один 🔒 в дне монолита не образует — такой день
+        // оптимизируется как прежде (двигать одиночное 🔒 внутри дня правило не запрещает).
+        var fixedN = 0;
+        for (var fi = 0; fi < body.length; fi++){ if (body[fi] && body[fi].fixed) fixedN++; }
+        if (fixedN >= 2){
+            return { groups: [body], isFoil: [body.some(function(c){ return !!(c && c.isFoil); })],
+                     starts: [0], ends: [0], pinnedIdx: -1, monolith: true };
+        }
         var lastCut = body[body.length - 1];
         if (spanningIds && spanningIds[String(lastCut.id)]) pinned = lastCut;
         var hasFoil = body.some(function(c){ return !!(c && c.isFoil); });
@@ -5474,7 +5520,7 @@
             if (cost[s0][e0] == null || total < cost[s0][e0]){ cost[s0][e0] = round3(total); path[s0][e0] = order; }
             starts[s0] = 1; ends[e0] = 1;
         });
-        return { cost: cost, path: path, rep: rep,
+        return { cost: cost, path: path, rep: rep, repOut: groups.map(function(g){ return g[g.length - 1]; }),
                  starts: Object.keys(starts).map(Number), ends: Object.keys(ends).map(Number) };
     }
 
@@ -5519,7 +5565,9 @@
                 path[s][e] = order.reverse();
             });
         });
-        return { cost: cost, path: path, rep: rep };
+        // #4464: repOut — конфигурация, которой группа ЗАКАНЧИВАЕТСЯ (вход в следующий день).
+        // Для групп по подписи совпадает с rep (подпись одна), для монолита 🔒 — последняя его резка.
+        return { cost: cost, path: path, rep: rep, repOut: groups.map(function(g){ return g[g.length - 1]; }) };
     }
 
     // Пересортировать очередь станка ПО ДНЯМ. dayByCut — РЕАЛЬНЫЙ день старта каждой резки из
@@ -5587,7 +5635,8 @@
                         if (next[e] == null || base + inner < next[e].cost) next[e] = { cost: base + inner, s: s, prevEnd: null };
                     } else {
                         Object.keys(state).forEach(function(pe){
-                            var prevRep = tables[i - 1].rep[Number(pe)];
+                            var prevTbl = tables[i - 1];   // #4464: выход дня — по ПОСЛЕДНЕЙ резке группы
+                            var prevRep = (prevTbl.repOut || prevTbl.rep)[Number(pe)];
                             var c = state[pe].cost + sequencingCost(prevRep, tbl.rep[s], times, settings) + inner;
                             if (next[e] == null || c < next[e].cost) next[e] = { cost: c, s: s, prevEnd: Number(pe) };
                         });
