@@ -8473,10 +8473,17 @@
                 if (c.fixed) fixedNow[key] = true;
                 dayKeyNow[key] = planDateDayKey(c.planDate);
             });
+            // #4494: задание, которое ОПЕРАТОР сам перенёс сейчас (🗓). Только ему разрешён разрыв по
+            // потолку в замороженном дне: день не может быть длиннее смены, а состав дня при этом не
+            // меняется — лишнее уезжает продолжением. Признак — тот же, по которому #4490 резервирует
+            // ему место в дне (moveScope.wholeDayCutIds).
+            var manualMoveNow = {};
+            ((moveScope && moveScope.wholeDayCutIds) || []).forEach(function(id){ manualMoveNow[String(id)] = true; });
             var guard = guardPlanOps(ops, {
                 isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
                 isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
+                isManualMoveCut: function(id){ return !!manualMoveNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
                 // #4467: занятость станко-дня из самой раскладки (ops.dayLoad: «станок|смещение дня»)

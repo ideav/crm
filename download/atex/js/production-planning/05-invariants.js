@@ -54,6 +54,32 @@
         return (ctx && typeof ctx[name] === 'function') ? ctx[name] : function() { return false; };
     }
 
+    // #4494: операция — это РАЗРЫВ ПО ПОТОЛКУ задания, которое оператор вручную перенёс в
+    // замороженный день? Такие операции заморозку не нарушают: состав дня не меняется, лишнее
+    // уезжает. Разрешаются ровно две формы:
+    //   • update ЭТОГО задания, остающийся в ТОМ ЖЕ дне (планировщик уменьшил ему проходы);
+    //   • create ЕГО продолжения на день, который НЕ заморожен (остаток уехал).
+    // Всё остальное по замороженному дню (переезд, удаление, чужие задания, новые задания в этот
+    // день) остаётся запретом. Чистая; нет предикатов — false (исключения нет).
+    function isFrozenDayTrim(op, ctx) {
+        if (!op) return false;
+        var manual = (ctx && typeof ctx.isManualMoveCut === 'function') ? ctx.isManualMoveCut : null;
+        if (!manual) return false;
+        var cutId = op.cutId != null ? op.cutId : op.parentCutId;
+        if (cutId == null || !manual(cutId)) return false;
+        var frozenTs = ppCtxFn(ctx, 'isFrozenTs');
+        if (op.cutId != null) {
+            // Разрыв оставляет задание в его дне: сравниваем ХРАНИМЫЙ день с предлагаемым.
+            var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
+            var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+            if (!dayOfCut || !dayOfTs) return false;
+            var was = dayOfCut(op.cutId), now = dayOfTs(op.planStartTs);
+            return was != null && now != null && was === now;
+        }
+        // Продолжение: остаток обязан уехать ИЗ замороженного дня.
+        return op.planStartTs != null && !frozenTs(op.planStartTs);
+    }
+
     var PP_INVARIANTS = [
         {
             id: 'FROZEN_DAY',
@@ -65,11 +91,26 @@
             // Просрочка, возникшая из-за отказа, — это информация (задание уезжает на ближайший
             // доступный день и подсвечивается), а не повод нарушить заморозку (решение 27.07.2026,
             // тикеты #4338 → #4347 → #4436).
+            //
+            // #4494: ОДНО ИСКЛЮЧЕНИЕ — РАЗРЫВ ПО ПОТОЛКУ у задания, которое оператор САМ перенёс в
+            // замороженный день (ctx.isManualMoveCut). День не может быть длиннее смены (решение
+            // заказчика 29.07.2026): задание занимает там ровно столько, сколько есть, а остаток
+            // уезжает продолжением на ближайший свободный день. Так же потолок уже сильнее замка дня
+            // 🔒 (#4467) — заморозка тут ничем не отличается: 761 минута в смене физически не
+            // помещается (боевая ateh, Станок 3, 28.07). Заморозка при этом ЦЕЛА:
+            //   • разрешён только update ЭТОГО задания, остающийся в ЕГО ЖЕ дне (меняются проходы,
+            //     не день) — переезд из замороженного дня по-прежнему запрет;
+            //   • разрешён только create ЕГО продолжения ВНЕ замороженного дня — остаток обязан уехать;
+            //   • чужие задания дня, удаления и новые задания в этот день — запрет, как раньше.
+            // Нет предиката (старый вызывающий) — исключения нет, поведение прежнее.
             check: function(ops, ctx) {
                 var frozenCut = ppCtxFn(ctx, 'isFrozenCut'), frozenTs = ppCtxFn(ctx, 'isFrozenTs');
                 var out = [];
                 (ops && ops.updates || []).forEach(function(u) {
-                    if (frozenCut(u.cutId)) out.push(ppViolation('FROZEN_DAY', u.cutId, 'сдвиг задания из замороженного дня'));
+                    if (frozenCut(u.cutId)) {
+                        if (isFrozenDayTrim(u, ctx)) return;   // #4494: разрыв по потолку в своём дне
+                        out.push(ppViolation('FROZEN_DAY', u.cutId, 'сдвиг задания из замороженного дня'));
+                    }
                     else if (frozenTs(u.planStartTs)) out.push(ppViolation('FROZEN_DAY', u.cutId, 'перенос задания В замороженный день'));
                 });
                 (ops && ops.deletes || []).forEach(function(id) {
@@ -77,7 +118,10 @@
                 });
                 (ops && ops.creates || []).forEach(function(cr) {
                     var parent = cr && cr.parentCutId;
-                    if (frozenCut(parent)) out.push(ppViolation('FROZEN_DAY', parent, 'новый сегмент по заданию замороженного дня'));
+                    if (frozenCut(parent)) {
+                        if (isFrozenDayTrim(cr, ctx)) return;   // #4494: остаток уезжает из замороженного дня
+                        out.push(ppViolation('FROZEN_DAY', parent, 'новый сегмент по заданию замороженного дня'));
+                    }
                     else if (frozenTs(cr && cr.planStartTs)) out.push(ppViolation('FROZEN_DAY', parent, 'новое задание В замороженный день'));
                 });
                 return out;
@@ -509,6 +553,8 @@
         var frozenCut = ppCtxFn(ctx, 'isFrozenCut'), frozenTs = ppCtxFn(ctx, 'isFrozenTs');
         var skipped = 0;
         ops.updates = (ops.updates || []).filter(function(u) {
+            // #4494: разрыв по потолку задания ручного переноса — не нарушение, пропускаем.
+            if (isFrozenDayTrim(u, ctx)) return true;
             if (frozenCut(u.cutId) || frozenTs(u.planStartTs)) { skipped++; return false; }
             return true;
         });
@@ -518,6 +564,8 @@
         });
         ops.creates = (ops.creates || []).filter(function(cr) {
             var parent = cr && cr.parentCutId;
+            // #4494: продолжение задания ручного переноса, уезжающее ИЗ замороженного дня, — пропускаем.
+            if (isFrozenDayTrim(cr, ctx)) return true;
             if (frozenCut(parent) || frozenTs(cr && cr.planStartTs)) { skipped++; return false; }
             return true;
         });
