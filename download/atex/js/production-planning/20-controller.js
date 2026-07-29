@@ -6783,6 +6783,13 @@
     // что тайминг уже записан, — иначе кнопка исчезала бы сама, ничего не сохранив.
     AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds, opts) {
         var dryRun4401 = !!(opts && opts.dryRun);
+        // #4499: КОЛОНКИ БЕРЁМ У УПАКОВЩИКА, если он их посчитал (`ops.*.planCols` → applySplitPlan).
+        // Раньше эта функция считала переналадку ЗАНОВО, по своей развёртке очереди — и на разбитых
+        // по дням заданиях и наладочных хвостах расходилась с раскладкой до +75 минут на день.
+        // Бейдж дня и мерка потолка складываются ИЗ ЭТИХ КОЛОНОК, поэтому расхождение выглядело как
+        // «502 мин при 460» на честно упакованном дне. Для заданий, которых план не касался
+        // (карта пуста), считаем как раньше.
+        var planColsBy = (opts && opts.planCols) || {};
         var meta = this.meta.cut;
         var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
@@ -6961,6 +6968,15 @@
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
                 var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
                 var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
+                // #4499: у этого сегмента есть числа УПАКОВЩИКА — они и есть правда. Сумма трёх
+                // колонок тогда в точности равна занятости сегмента, а значит бейдж дня равен тому,
+                // что напаковано, и потолок меряется по одной арифметике, а не по двум.
+                var planCols = planColsBy[String(c.id)];
+                if (planCols) {
+                    wantK = Math.round(Number(planCols.knife) || 0);
+                    wantM = Math.round(Number(planCols.material) || 0);
+                    wantT = Math.round(Number(planCols.cutTime) || 0);
+                }
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
@@ -7038,9 +7054,11 @@
 
     // #4401: onlyIds — писать тайминг ТОЛЬКО этим заданиям (кнопка «↻ Пересчитать наладку»
     // ограничивает набор своим станком и видимыми днями). null — как раньше, вся очередь.
-    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds) {
+    // #4499: planCols — колонки, посчитанные УПАКОВЩИКОМ (cutId → {knife, material, cutTime}).
+    // Их даёт applySplitPlan из `ops`; для остальных заданий колонки считаются как раньше.
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds, planCols) {
         var self = this;
-        var res = this.computeCutSetupUpdates(onlyIds || null);
+        var res = this.computeCutSetupUpdates(onlyIds || null, planCols ? { planCols: planCols } : null);
         var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
         // «Время старта» (planStart) на пути ПЛАНИРОВАНИЯ пишет splitMachineQueue/applySplitPlan —
@@ -7771,6 +7789,11 @@
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
         // ⚠️ Первая колонка (плановое время старта) пишется ТОЛЬКО через _m_save (GUIDE
         // issue #775: _m_set первую колонку НЕ задаёт). Остальные реквизиты — _m_set.
+        // #4499: КОЛОНКИ, ПОСЧИТАННЫЕ УПАКОВЩИКОМ. Их пишет persistCutSetupColumns ниже — вместо
+        // повторного расчёта переналадки по развёртке очереди. Для обновляемых записей id известен
+        // сразу, для создаваемых продолжений — когда `_m_new` вернёт id (ниже, по месту).
+        var planColsByCut = {};
+        (ops.updates || []).forEach(function(u) { if (u && u.planCols) planColsByCut[String(u.cutId)] = u.planCols; });
         var updateTasks = (ops.updates || []).map(function(u) {
             return function() { return Promise.resolve().then(function() {
                 var storedCut = cutsById[String(u.cutId)];   // #4001: хранимые значения — для записи ТОЛЬКО изменившихся полей
@@ -7957,6 +7980,7 @@
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
                             if (!bId) throw new Error('Сервер не вернул id продолжения задания');
+                            if (cr && cr.planCols) planColsByCut[String(bId)] = cr.planCols;   // #4499
                             // #4171: трасса КОРНЯ сироты (#4163/#4168) — продолжение с ПУСТОЙ намоткой рвёт
                             // continuationSignature и висит «нет связей». После фикса windingForCutId это НЕ
                             // должно случаться; если случилось — печатаем, ПОЧЕМУ голова не резолвится.
@@ -8072,7 +8096,7 @@
         }).then(function() { return self.reload(); }).then(function() {
             return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
-            return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
+            return self.persistCutSetupColumns(null, planColsByCut);   // #3698 + #4499: колонки — от упаковщика
         }).then(function() {
             return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
         }).then(function() {

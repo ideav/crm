@@ -5984,6 +5984,29 @@
         function setupCostFor(prev, c) {
             return setupPartsFor(prev, c).reduce(function(s, p){ return s + (Number(p.minutes) || 0); }, 0);
         }
+        // #4499: РАЗЛОЖЕНИЕ наладки сегмента по колонкам «Наладка ножей» / «Сырьё-намотка».
+        // Колонки обязаны нести ТО ЖЕ, что напаковал упаковщик: их сумма — это бейдж дня и мерка
+        // потолка. Раньше их считала отдельная функция контроллера по своей развёртке очереди, и
+        // две арифметики расходились на разбитых по дням заданиях и наладочных хвостах — до +75
+        // минут на день, то есть «502 при 460» в бейдже при честной раскладке упаковщика.
+        //   total — сумма, реально записанная в setupMin сегмента (в вырожденных ветках к ней
+        //   добавлен лидер, у продолжения это слитый остаток настройки — компонентов у него нет).
+        // Расхождение частей с total кладём в «Наладку ножей», чтобы сумма колонок СОВПАДАЛА с
+        // занятостью сегмента до минуты.
+        function setupColsFor(prev, c, total, isCont) {
+            var t = round3(Number(total) || 0);
+            if (!(t > 0)) return { knife: 0, material: 0 };
+            if (isCont) return { knife: t, material: 0 };
+            var k = 0, m = 0;
+            setupPartsFor(prev, c).forEach(function(pt) {
+                if (pt && pt.code === 'MATERIAL_WINDING') m += Number(pt.minutes) || 0;
+                else k += Number(pt.minutes) || 0;
+            });
+            k = round3(k); m = round3(m);
+            var sum = round3(k + m);
+            if (sum !== t) k = round3(k + (t - sum));
+            return { knife: k, material: m };
+        }
         // #3739: gap-fill. Вместо простоя в хвосте смены тянем будущую резку вперёд (раньше
         // срока — допустимо, «с запасом по сроку») и заполняем день; нахлёст за конец смены
         // разрешён. Выбор следующей резки — по НЕПРЕРЫВНОСТИ КОНФИГУРАЦИИ (минимальная
@@ -6396,9 +6419,11 @@
                         // окна) — один сегмент на зафиксированном дне, БЕЗ разрыва.
                         var wsF = day * 1440 + dayStart + clock;
                         var durF = canRunF ? st.remaining * perPassF : 0;
+                        var colsF = setupColsFor(prevPhysical, c, setupF, st.isCont);   // #4499
                         segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
                             windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
                             durationMin: round3(durF), isContinuation: false, parentCutId: null,
+                            setupKnifeMin: colsF.knife, setupMaterialMin: colsF.material,
                             fixedDayLock: true });   // #4434 п.1: сегмент 🔒 — потолок нахлёста его с дня не выталкивает
                         clock += setupF + durF;
                         ppTrace('  ФИКС-резка ' + pick + ' целиком на дне ' + day + ': настр ' + Math.round(setupF) +
@@ -6426,9 +6451,11 @@
                     var passesNowF = fittingF > 0 ? fittingF : 1;   // хотя бы 1 проход держим на фикс-дне
                     var wsF2 = day * 1440 + dayStart + clock;
                     var durF2 = passesNowF * perPassF;
+                    var colsF2 = setupColsFor(prevPhysical, c, setupF, st.isCont);   // #4499
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowF,
                         windowStartMin: round3(wsF2), startMin: round3(wsF2 + setupF), setupMin: round3(setupF),
                         durationMin: round3(durF2), isContinuation: false, parentCutId: null,
+                        setupKnifeMin: colsF2.knife, setupMaterialMin: colsF2.material,
                         fixedDayLock: true });   // #4434 п.1: голова 🔒 остаётся на зафиксированном дне
                     st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('#4304 ЗАФИКС-резка ' + pick + ' РАЗОРВАНА по потолку дня: ' + passesNowF +
@@ -6448,9 +6475,11 @@
                 if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) {
                     var s0 = leader + setupCostFor(prevPhysical, c);
                     var w0 = day * 1440 + dayStart + clock;
+                    var cols0 = setupColsFor(prevPhysical, c, s0, st.isCont);   // #4499
                     segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
                         windowStartMin: round3(w0), startMin: round3(w0 + s0), setupMin: round3(s0),
-                        durationMin: 0, isContinuation: false, parentCutId: null });
+                        durationMin: 0, isContinuation: false, parentCutId: null,
+                        setupKnifeMin: cols0.knife, setupMaterialMin: cols0.material });
                     clock += s0;
                     prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
                     continue;
@@ -6481,9 +6510,11 @@
                 if (fittingG > 0) {
                     var passesNowG = Math.min(st.remaining, fittingG);
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
+                    var colsGn = setupColsFor(prevPhysical, c, setupG, st.isCont);   // #4499
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
-                        durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
+                        durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null,
+                        setupKnifeMin: colsGn.knife, setupMaterialMin: colsGn.material });
                     st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
                     // #4434 п.1: остаток — на следующий день, НО уйти с текущего можно, только если на
                     // нём не осталось 🔒 (иначе зафиксированное «отстаёт» от указателя дня и переезжает).
@@ -6527,9 +6558,11 @@
                     // настройку + 1 проход с нахлёстом, остальное на следующий день (#3821: единственный
                     // случай, где нахлёстный проход сохраняется, иначе резка не разместилась бы никогда).
                     var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
+                    var colsO = setupColsFor(prevPhysical, c, setupG, st.isCont);   // #4499
                     segments.push({ cutId: pick, dayOffset: day, runs: 1,
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
-                        durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null });
+                        durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null,
+                        setupKnifeMin: colsO.knife, setupMaterialMin: colsO.material });
                     st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('вырожденно: настройка+1 проход (' + Math.round(setupG + perPassEffG) + ' мин) длиннее целого дня — кладём 1 проход с нахлёстом, остаток ' + st.remaining + ' → день ' + (day + 1));
                     clock += setupG + durO;
@@ -6574,10 +6607,12 @@
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
                 var setup0 = leader + setupCostFor(prevPhysical, c);   // #3688/#3853: первая резка — от заправки станка (carryPrevSetup)
                 var ws0 = day * 1440 + dayStart + clock;
+                var colsZ = setupColsFor(prevPhysical, c, setup0, false);   // #4499
                 segments.push({ cutId: String(cid), dayOffset: day, runs: runs, windowStartMin: round3(ws0),
                     startMin: round3(ws0 + setup0), setupMin: round3(setup0),
                     durationMin: round3((runs > 0 && perPass > 0) ? runs * perPass : 0),
-                    isContinuation: false, parentCutId: null });
+                    isContinuation: false, parentCutId: null,
+                    setupKnifeMin: colsZ.knife, setupMaterialMin: colsZ.material });
                 clock += setup0 + ((runs > 0 && perPass > 0) ? runs * perPass : 0);
                 prevPhysical = c; prevPhysicalDay = day;
                 return;
@@ -6637,10 +6672,12 @@
                 var passesNow = Math.min(remaining, maxPasses);
                 var windowStart = day * 1440 + dayStart + clock;
                 var segDur = passesNow * perPassEff;
+                var colsN = setupColsFor(prevPhysical, c, setup, isCont);   // #4499
                 segments.push({ cutId: String(cid), dayOffset: day, runs: passesNow,
                     windowStartMin: round3(windowStart), startMin: round3(windowStart + setup),
                     setupMin: round3(setup), durationMin: round3(segDur),
-                    isContinuation: isCont, parentCutId: isCont ? String(cid) : null });
+                    isContinuation: isCont, parentCutId: isCont ? String(cid) : null,
+                    setupKnifeMin: colsN.knife, setupMaterialMin: colsN.material });
                 clock += setup + segDur;
                 remaining -= passesNow;
                 prevPhysical = c; prevPhysicalDay = day;
@@ -8075,6 +8112,16 @@
                 // хранимыми колонками прошлого плана (те описывают ДРУГУЮ раскладку — issue #4471).
                 var setupWhole = Math.round(round3(Number(seg.setupMin) || 0));
                 var occMin = setupWhole + Math.ceil(round3(Number(seg.durationMin) || 0));
+                // #4499: КОЛОНКИ СЕГМЕНТА — то, что напаковал упаковщик, а не отдельный пересчёт.
+                // knife+material = setupWhole, cutTime = вся намотка с лидером ⇒ сумма трёх колонок
+                // РАВНА occMin, то есть бейджу дня и мерке потолка. Раньше их считал контроллер по
+                // своей развёртке очереди, и на разбитых по дням заданиях/наладочных хвостах две
+                // арифметики расходились — в бейдже появлялись минуты, которых в плане нет.
+                var kMin = Math.round(round3(Number(seg.setupKnifeMin) || 0));
+                var mMin = Math.round(round3(Number(seg.setupMaterialMin) || 0));
+                if (kMin + mMin !== setupWhole) kMin = setupWhole - mMin;   // сумма обязана сойтись
+                if (kMin < 0) { kMin = setupWhole; mMin = 0; }
+                var planCols = { knife: kMin, material: mMin, cutTime: occMin - setupWhole };
                 // #4144: разложение setup-only ХВОСТА дня по колонкам — решение УПАКОВЩИКА (он считал
                 // room по дробному окну). Отдаём его вызывающему: писатель колонок обязан взять это, а не
                 // пересчитывать от снапнутого planStart (снап позже на накопленный ceil → room меньше).
@@ -8085,7 +8132,7 @@
                     var head0 = String(seg.cutId);
                     contIndexByHead[head0] = 0;
                     usedByHead[head0] = 1;   // голова цепочки всегда занята первым сегментом
-                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
+                    updates.push({ cutId: head0, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole, planCols: planCols });
                 } else {
                     var head = String(seg.parentCutId);
                     var k = (contIndexByHead[head] = (contIndexByHead[head] || 0) + 1);
@@ -8093,9 +8140,9 @@
                     var reuseId = chain[k];   // chain[0]=голова, chain[1..]=записи-продолжения
                     if (reuseId != null) {
                         usedByHead[head] = k + 1;
-                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
+                        updates.push({ cutId: String(reuseId), sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole, planCols: planCols });
                     } else {
-                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole });
+                        creates.push({ parentCutId: head, sequence: idx + 1, planStartTs: ts, plannedRuns: seg.runs, slitterId: slotPlan ? key : undefined, occMin: occMin, setupMin: setupWhole, planCols: planCols });
                     }
                 }
                 // #3892: «ID первой части» (голова цепочки) НЕ кладём в ops — applySplitPlan
@@ -18174,6 +18221,13 @@
     // что тайминг уже записан, — иначе кнопка исчезала бы сама, ничего не сохранив.
     AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds, opts) {
         var dryRun4401 = !!(opts && opts.dryRun);
+        // #4499: КОЛОНКИ БЕРЁМ У УПАКОВЩИКА, если он их посчитал (`ops.*.planCols` → applySplitPlan).
+        // Раньше эта функция считала переналадку ЗАНОВО, по своей развёртке очереди — и на разбитых
+        // по дням заданиях и наладочных хвостах расходилась с раскладкой до +75 минут на день.
+        // Бейдж дня и мерка потолка складываются ИЗ ЭТИХ КОЛОНОК, поэтому расхождение выглядело как
+        // «502 мин при 460» на честно упакованном дне. Для заданий, которых план не касался
+        // (карта пуста), считаем как раньше.
+        var planColsBy = (opts && opts.planCols) || {};
         var meta = this.meta.cut;
         var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
@@ -18352,6 +18406,15 @@
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
                 var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
                 var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
+                // #4499: у этого сегмента есть числа УПАКОВЩИКА — они и есть правда. Сумма трёх
+                // колонок тогда в точности равна занятости сегмента, а значит бейдж дня равен тому,
+                // что напаковано, и потолок меряется по одной арифметике, а не по двум.
+                var planCols = planColsBy[String(c.id)];
+                if (planCols) {
+                    wantK = Math.round(Number(planCols.knife) || 0);
+                    wantM = Math.round(Number(planCols.material) || 0);
+                    wantT = Math.round(Number(planCols.cutTime) || 0);
+                }
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
                 // Пустое хранимое (cur пуст) → всегда «изменилось» → force-write (#3778).
@@ -18429,9 +18492,11 @@
 
     // #4401: onlyIds — писать тайминг ТОЛЬКО этим заданиям (кнопка «↻ Пересчитать наладку»
     // ограничивает набор своим станком и видимыми днями). null — как раньше, вся очередь.
-    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds) {
+    // #4499: planCols — колонки, посчитанные УПАКОВЩИКОМ (cutId → {knife, material, cutTime}).
+    // Их даёт applySplitPlan из `ops`; для остальных заданий колонки считаются как раньше.
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds, planCols) {
         var self = this;
-        var res = this.computeCutSetupUpdates(onlyIds || null);
+        var res = this.computeCutSetupUpdates(onlyIds || null, planCols ? { planCols: planCols } : null);
         var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
         // «Время старта» (planStart) на пути ПЛАНИРОВАНИЯ пишет splitMachineQueue/applySplitPlan —
@@ -19162,6 +19227,11 @@
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
         // ⚠️ Первая колонка (плановое время старта) пишется ТОЛЬКО через _m_save (GUIDE
         // issue #775: _m_set первую колонку НЕ задаёт). Остальные реквизиты — _m_set.
+        // #4499: КОЛОНКИ, ПОСЧИТАННЫЕ УПАКОВЩИКОМ. Их пишет persistCutSetupColumns ниже — вместо
+        // повторного расчёта переналадки по развёртке очереди. Для обновляемых записей id известен
+        // сразу, для создаваемых продолжений — когда `_m_new` вернёт id (ниже, по месту).
+        var planColsByCut = {};
+        (ops.updates || []).forEach(function(u) { if (u && u.planCols) planColsByCut[String(u.cutId)] = u.planCols; });
         var updateTasks = (ops.updates || []).map(function(u) {
             return function() { return Promise.resolve().then(function() {
                 var storedCut = cutsById[String(u.cutId)];   // #4001: хранимые значения — для записи ТОЛЬКО изменившихся полей
@@ -19348,6 +19418,7 @@
                         return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                             var bId = res && (res.obj || res.id || res.i);
                             if (!bId) throw new Error('Сервер не вернул id продолжения задания');
+                            if (cr && cr.planCols) planColsByCut[String(bId)] = cr.planCols;   // #4499
                             // #4171: трасса КОРНЯ сироты (#4163/#4168) — продолжение с ПУСТОЙ намоткой рвёт
                             // continuationSignature и висит «нет связей». После фикса windingForCutId это НЕ
                             // должно случаться; если случилось — печатаем, ПОЧЕМУ голова не резолвится.
@@ -19463,7 +19534,7 @@
         }).then(function() { return self.reload(); }).then(function() {
             return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
-            return self.persistCutSetupColumns();   // #3698: активности переналадки по итогам план-разбиения
+            return self.persistCutSetupColumns(null, planColsByCut);   // #3698 + #4499: колонки — от упаковщика
         }).then(function() {
             return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
         }).then(function() {
