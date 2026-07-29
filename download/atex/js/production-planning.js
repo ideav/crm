@@ -5891,6 +5891,17 @@
             }
             return round3(total);
         }
+        // #4497: вытесненное потолком задание нельзя «увезти» в ЗАМОРОЖЕННЫЙ день — автоматика
+        // его не трогает (ТЗ §15, #4326/#4347), и запись по такому дню страж выбрасывает: задание
+        // молча остаётся в прежнем дне, а день так и стои́т переполненным (боевое: 502 мин при 460
+        // после ручного переноса «из 30 в 29», когда 30 заморожен). Едем к ближайшему СВОБОДНОМУ
+        // дню — то же решение, что #4494 принял для остатка задания ручного переноса.
+        function nextUnfrozenDay(d) {
+            if (!opts.frozenDayFor) return d;
+            var n = d, guard = 0;
+            while (opts.frozenDayFor(n) && guard++ < 400) n += 1;
+            return n;
+        }
         function availFor(d, kind, exceptId) {
             var occWhole = dayWholeOccupied(d);   // #4149: потолок считаем по ЦЕЛОЙ занятости (= колонки/бейдж), не по дробному clock
             var reserveWhole = wholeReserve(d, exceptId);   // #4488: место под задание ручного переноса
@@ -6403,7 +6414,7 @@
                         ppTraceWarn('#4467 ФИКС-резка ' + pick + ' не влезает в остаток дня ' + day +
                             ' (занято ' + Math.round(clock) + ') — уезжает целиком на день ' + (day + 1) +
                             ': потолок дня сильнее замка дня.');
-                        st.fixedDay = day + 1;
+                        st.fixedDay = nextUnfrozenDay(day + 1);
                         leaveDay();   // на дне ещё есть 🔒 → остаёмся и добираем их (forceFixedDay)
                         continue;
                     }
@@ -19457,7 +19468,8 @@
             return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
-            self.reportPlanAudit(ops && ops.audit);   // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
+            self.reportPlanAudit(ops && ops.audit);          // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
+            self.reportOverfilledDays(ops && ops.audit);     // #4497: день длиннее смены — по ХРАНИМЫМ минутам
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -19471,6 +19483,44 @@
     // журнале (console.error в buildSequenceOps), сюда он не попадает: оператору нечего делать с
     // именем правила. Пусто → молчим (говорить не о чем, а не «всё скрыли»).
     // → массив нарушений, о которых сказали (для тестов и трассы).
+    // #4497: ПОТОЛОК ДНЯ ПРОВЕРЯЕМ ПО ТОМУ ЖЕ, ЧТО ВИДИТ ОПЕРАТОР — по ХРАНИМЫМ минутам
+    // («Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер», ровно сумма бейджа «(N мин)»), и
+    // делаем это в ОБЩЕЙ точке записи плана: через applySplitPlan проходят «Сгенерировать»,
+    // «Упорядочить», ручной перенос 🗓, ↑↓ и перетаскивание.
+    //
+    // ПОЧЕМУ НЕ ХВАТАЛО ТОГО, ЧТО БЫЛО. Правило `DAY_CAPACITY` реестра меряет `ops.dayLoad` —
+    // числа САМОГО упаковщика. Они всегда в пределах потолка (проверено перебором раскладок),
+    // поэтому нарушение по хранимым колонкам этот шлюз поймать не может в принципе: он спрашивает
+    // подсудимого. А `levelDayLoad`/`warnOverfilledDays` звались только с ручных путей ↑↓ и
+    // перетаскивания — перенос между днями и обе кнопки заканчивались молча. Отсюда «502 мин» в
+    // бейдже без единого слова (боевое, Станок 1, 29.07.2026).
+    //
+    // Здесь НЕ переставляем: перенесённое задание обязано лежать целиком (#4488), а на путях
+    // кнопок раскладку уже сделал упаковщик. Задача — не дать переполнению пройти МОЛЧА.
+    //
+    // ОДНО СООБЩЕНИЕ (#4475): если про потолок дня уже сказал аудит плана (`DAY_CAPACITY` в
+    // `ops.audit` — упаковщик сам увидел перебор), второй тост не шлём: факт тот же, мерки разные.
+    // В консоль пишем всегда — разработчику нужна ИМЕННО хранимая сумма, аудит её не меряет.
+    //   audited — отклонения плана (`ops.audit`), о которых уже сказал reportPlanAudit.
+    // → массив станков, у которых нашлись переполненные дни (для тестов).
+    AtexProductionPlanning.prototype.reportOverfilledDays = function(audited) {
+        if (typeof this.overfilledDaysOf !== 'function') return [];   // стаб-self в юнит-тестах
+        var self = this, hit = [];
+        var saidAlready = (audited || []).some(function(v) { return v && v.rule === 'DAY_CAPACITY'; });
+        (this.slitters || []).forEach(function(s) {
+            var sid = String(s && s.id == null ? '' : s.id);
+            if (sid === '') return;
+            var days = self.overfilledDaysOf(sid);
+            if (!days.length) return;
+            hit.push(sid);
+            if (typeof console !== 'undefined' && console.error) {
+                console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам', { slitterId: sid, days: days });
+            }
+            if (!saidAlready && typeof self.warnOverfilledDays === 'function') self.warnOverfilledDays(sid);
+        });
+        return hit;
+    };
+
     AtexProductionPlanning.prototype.reportPlanAudit = function(violations) {
         var msg = this.planAuditMessage(violations);
         if (!msg || typeof this.notify !== 'function') return msg ? msg.items : [];
