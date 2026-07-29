@@ -18230,8 +18230,13 @@
     // mergeableOrderGroups); остальные записи в неё вливаются и удаляются.
     // Данные не теряем — это главное:
     //   • «Партия ГП» поглощаемого задания той же ШИРИНЫ вливается в партию головы: «Обеспечения»
-    //     перевешиваются на партию головы (реквизит «Партия ГП»), рулоны/план суммируются, «ID заказа»
+    //     переходят на партию головы (реквизит «Партия ГП»), рулоны/план суммируются, «ID заказа»
     //     объединяется; сама партия-донор удаляется;
+    //   • #4483: если ПОЗИЦИЮ донорского обеспечения голова уже обеспечивает из той же партии,
+    //     перевешивать нельзя — вышла бы ВТОРАЯ связь задания с одним и тем же заказом (боевая ateh,
+    //     заказ 4443: 400 м/120 рул + 200 м/60 рул на позиции 646600, панель «Связанные позиции (2)»).
+    //     Метраж и рулоны складываются в головное «Обеспечение», донорское удаляется: у пары
+    //     (позиция × «Партия ГП») ровно одна запись;
     //   • партия ширины, которой у головы нет, ПЕРЕЕЗЖАЕТ под голову целиком (`_m_move&up=`);
     //   • «Кол-во план» партий головы пересчитывается: полос × новые проходы;
     //   • голова получает сумму проходов и пересчитанные «Длительность, минут» / «Тайминг».
@@ -18275,6 +18280,11 @@
         var fbPlannedReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.planned);
         var fbOrderReq = reqIdByName(fbMeta, FINISHED_BATCH_REQ.orderId);
         var supBatchReq = reqIdByName(supMeta, SUPPLY_REQ.finishedBatch);
+        // #4483: чем СКЛАДЫВАТЬ обеспечения, которые сходятся на одной позиции.
+        var supFootageReq = reqIdByName(supMeta, SUPPLY_REQ.footage);
+        var supRollsReq = reqIdByName(supMeta, SUPPLY_REQ.rolls);
+        var supFootageIdx = columnIndex(supMeta, SUPPLY_REQ.footage);
+        var supRollsIdx = columnIndex(supMeta, SUPPLY_REQ.rolls);
         if (!runsReqId || !supBatchReq) {
             console.error('[pp] ❌ #4424: объединение заданий невозможно — нет реквизита «' +
                 (!runsReqId ? CUT_PLANNED_RUNS_NAMES[0] : SUPPLY_REQ.finishedBatch) + '» в метаданных');
@@ -18294,6 +18304,38 @@
                     });
                 });
         }
+        // #4483: значения «Обеспечений» ОДНОЙ ПОЗИЦИИ из БД (отчёт cut_planning «Кол-во рулонов» не
+        // отдаёт) → { supplyId: { footage, rolls } }. Кэш на позицию: доноров у неё бывает несколько,
+        // и каждый следующий складывается с УЖЕ увеличенным головным.
+        var supplyValuesByPosition = {};
+        function supplyValuesOfPosition(positionId) {
+            var key = String(positionId == null ? '' : positionId);
+            if (key === '') return Promise.resolve({});
+            if (supplyValuesByPosition[key]) return Promise.resolve(supplyValuesByPosition[key]);
+            return self.getJson('object/' + supMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(key) + '&LIMIT=0,500')
+                .then(function(rows) {
+                    var out = {};
+                    (rows || []).forEach(function(rec) {
+                        var r = rec.r || [];
+                        out[String(rec.i)] = {
+                            footage: supFootageIdx >= 0 ? stripNum(r[supFootageIdx]) : 0,
+                            rolls: supRollsIdx >= 0 ? stripNum(r[supRollsIdx]) : 0
+                        };
+                    });
+                    supplyValuesByPosition[key] = out;
+                    return out;
+                })
+                .catch(function(err) {
+                    console.warn('[pp] #4483: не прочитать «Обеспечения» позиции ' + key + ': ' + ((err && err.message) || err));
+                    supplyValuesByPosition[key] = {};
+                    return {};
+                });
+        }
+        // #4483: донорское обеспечение — на «Партию ГП» головы (прежнее поведение).
+        function moveSupplyToBatch(supplyId, batchId) {
+            var f = {}; f['t' + supBatchReq] = String(batchId);
+            return self.post('_m_set/' + encodeURIComponent(supplyId) + '?JSON', f);
+        }
         function mergeOrderIds(a, b) {
             var seen = {}, out = [];
             (String(a || '') + ',' + String(b || '')).split(',').forEach(function(x) {
@@ -18303,7 +18345,7 @@
             });
             return out.join(',');
         }
-        var mergedCount = 0, report = [];
+        var mergedCount = 0, report = [], foldedSupplies = 0;   // #4483: сколько связей влито вместо задвоения
         var chain = groups.reduce(function(acc, g) {
             return acc.then(function() {
                 var head = cutById[g.headId];
@@ -18313,6 +18355,14 @@
                 return batchesOf(g.headId).then(function(headBatches) {
                     var byWidth = {};
                     headBatches.forEach(function(b) { byWidth[stripWidthKey(b.width)] = b; });
+                    // #4483: какие позиции голова уже обеспечивает — с ними донорские обеспечения
+                    // складываются, а не встают второй записью. Первое обеспечение позиции —
+                    // приёмник (у исправных данных оно единственное).
+                    var headSupByPosition = {};
+                    (supByCut[String(g.headId)] || []).forEach(function(s) {
+                        var pid = String(s && s.positionId == null ? '' : s.positionId);
+                        if (pid !== '' && !headSupByPosition[pid]) headSupByPosition[pid] = s;
+                    });
                     // Каждого донора обрабатываем последовательно: партии → обеспечения → удаление записи.
                     return donors.reduce(function(dChain, donor) {
                         return dChain.then(function() {
@@ -18326,12 +18376,45 @@
                                             return self.post('_m_move/' + encodeURIComponent(db.id) + '?JSON&up=' + encodeURIComponent(g.headId), {})
                                                 .then(function() { byWidth[stripWidthKey(db.width)] = db; });
                                         }
-                                        // Обеспечения донорской партии — на партию головы.
+                                        // Обеспечения донорской партии — на партию головы. #4483: если эту
+                                        // ПОЗИЦИЮ голова уже обеспечивает из той же партии, перевешивать нельзя —
+                                        // получится ВТОРАЯ связь задания с одним заказом (боевая ateh, заказ 4443:
+                                        // 400 м/120 рул + 200 м/60 рул на позиции 646600). Складываем метраж и
+                                        // рулоны в головное «Обеспечение», донорское удаляем: у пары
+                                        // (позиция × «Партия ГП») ровно одна запись.
                                         var moveSup = supplies.filter(function(s) { return String(s.finishedBatchId) === String(db.id); })
                                             .reduce(function(sChain, s) {
                                                 return sChain.then(function() {
-                                                    var f = {}; f['t' + supBatchReq] = String(target.id);
-                                                    return self.post('_m_set/' + encodeURIComponent(s.id) + '?JSON', f);
+                                                    var pid = String(s.positionId == null ? '' : s.positionId);
+                                                    var headSup = pid !== '' ? headSupByPosition[pid] : null;
+                                                    if (!headSup) {
+                                                        // Позиции у головы нет — связь переносим как есть; следующий
+                                                        // донор той же позиции сложится уже с ней.
+                                                        return moveSupplyToBatch(s.id, target.id).then(function() {
+                                                            if (pid !== '') headSupByPosition[pid] = s;
+                                                        });
+                                                    }
+                                                    return supplyValuesOfPosition(pid).then(function(vals) {
+                                                        var h = vals[String(headSup.id)], d = vals[String(s.id)];
+                                                        if (!h || !d || !(supFootageReq || supRollsReq)) {
+                                                            // Значений нет — сложить нечего. Связь с заказом важнее
+                                                            // аккуратности записи: перевешиваем и ГОВОРИМ (ТЗ §14).
+                                                            console.warn('[pp] #4483: не сложить «Обеспечения» позиции ' + pid +
+                                                                ' (нет значений в БД) — донорское ' + s.id + ' перевешиваю на партию ' + target.id);
+                                                            return moveSupplyToBatch(s.id, target.id);
+                                                        }
+                                                        var footage = round3((h.footage || 0) + (d.footage || 0));
+                                                        var rolls = round3((h.rolls || 0) + (d.rolls || 0));
+                                                        var f = {};
+                                                        if (supFootageReq) f['t' + supFootageReq] = footage > 0 ? String(footage) : '';
+                                                        if (supRollsReq) f['t' + supRollsReq] = rolls > 0 ? String(rolls) : '';
+                                                        return self.post('_m_set/' + encodeURIComponent(headSup.id) + '?JSON', f)
+                                                            .then(function() {
+                                                                h.footage = footage; h.rolls = rolls;   // следующий донор складывается с этим
+                                                                foldedSupplies += 1;
+                                                                return self.post('_m_del/' + encodeURIComponent(s.id) + '?JSON', {});
+                                                            });
+                                                    });
                                                 });
                                             }, Promise.resolve());
                                         return moveSup.then(function() {
@@ -18376,8 +18459,10 @@
         }, Promise.resolve());
         return chain.then(function() {
             if (!mergedCount) return 0;
-            console.log('[pp] 🔗 #4424 объединено заданий: ' + mergedCount + ' — ' + report.join('; '));
-            self.notify('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')', 'success');
+            console.log('[pp] 🔗 #4424 объединено заданий: ' + mergedCount + ' — ' + report.join('; ')
+                + (foldedSupplies ? ('; #4483 связей влито в существующие: ' + foldedSupplies) : ''));
+            self.notify('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')'
+                + (foldedSupplies ? (' · связей с позициями влито: ' + foldedSupplies) : ''), 'success');
             return self.reload().then(function() { return mergedCount; });
         }).catch(function(err) {
             console.error('[pp] ❌ #4424 объединение заданий прервано:', err && err.message, err && err.stack);

@@ -5,8 +5,10 @@
 // голова = ПЕРВОЕ ПО ПОРЯДКУ (минимальная «Дата план»), остальные вливаются и удаляются.
 //
 // Данные при этом не теряются:
-//   • «Партия ГП» донора той же ШИРИНЫ вливается в партию головы: «Обеспечения» перевешиваются на
-//     партию головы, рулоны суммируются, «ID заказа» объединяется, партия-донор удаляется;
+//   • «Партия ГП» донора той же ШИРИНЫ вливается в партию головы: «Обеспечения» переходят на партию
+//     головы, рулоны суммируются, «ID заказа» объединяется, партия-донор удаляется. #4483:
+//     обеспечение позиции, которую голова уже обеспечивает из той же партии, не перевешивается
+//     второй записью, а ВЛИВАЕТСЯ в головное (метраж и рулоны складываются, донорское удаляется);
 //   • партия ширины, которой у головы нет, переезжает под голову целиком (`_m_move&up=`);
 //   • «Кол-во план» партий головы = полос × новые проходы; голова получает сумму проходов и
 //     пересчитанные «Длительность, минут» / «Тайминг».
@@ -110,10 +112,12 @@ function cutOf(id, dayOff, minute, runs, orderId, over) {
 })();
 
 // ── Стенд контроллера с фейковой БД ─────────────────────────────────────────
-var CUT_TABLE = '1078', FB_TABLE = '1081', SUP_TABLE = '1075';
+var CUT_TABLE = '1078', FB_TABLE = '1081', SUP_TABLE = '1077';
 var REQ = { runs: '16403', duration: '26584', timing: '26990',
-    fbWidth: 'w', fbStrips: 's', fbRolls: 'r', fbPlanned: 'p', fbOrder: 'o', supBatch: 'sb' };
-function makeController(cuts, batchesByCut, supplies, freezeByDay) {
+    fbWidth: 'w', fbStrips: 's', fbRolls: 'r', fbPlanned: 'p', fbOrder: 'o',
+    supFootage: 'sf', supBatch: 'sb', supRolls: 'sr' };
+// #4483: значения обеспечений позиции (метраж/рулоны) — их код читает из БД, чтобы сложить.
+function makeController(cuts, batchesByCut, supplies, freezeByDay, supplyValuesByPosition) {
     var c = Object.create(Controller.prototype);
     c.cuts = cuts;
     c.supplies = supplies || [];
@@ -128,7 +132,11 @@ function makeController(cuts, batchesByCut, supplies, freezeByDay) {
             { id: REQ.fbRolls, val: 'Кол-во рулонов' }, { id: REQ.fbPlanned, val: 'Кол-во план' },
             { id: REQ.fbOrder, val: 'ID заказа' }
         ] },
-        supply: { id: SUP_TABLE, reqs: [{ id: REQ.supBatch, val: 'Партия ГП' }] }
+        supply: { id: SUP_TABLE, reqs: [
+            { id: REQ.supFootage, val: 'Метраж, м' },
+            { id: REQ.supBatch, val: 'Партия ГП' },
+            { id: REQ.supRolls, val: 'Кол-во рулонов' }
+        ] }
     };
     c.opTimes = { WIND_300: 1.2 }; c.changeTimes = {}; c.daySettings = {};
     c.positionLengthById = {}; c.genPositions = []; c.footageBySupply = {};
@@ -143,6 +151,12 @@ function makeController(cuts, batchesByCut, supplies, freezeByDay) {
     c.getJson = function (path) {
         var m = /F_U=([^&]+)/.exec(path);
         var cutId = m ? decodeURIComponent(m[1]) : '';
+        if (path.indexOf('object/' + SUP_TABLE + '/') === 0) {
+            // Обеспечения позиции: [главное, Метраж, Партия ГП, Кол-во рулонов].
+            return Promise.resolve(((supplyValuesByPosition || {})[cutId] || []).map(function (s) {
+                return { i: s.id, u: cutId, r: ['1', String(s.footage), String(s.batchId) + ':1', String(s.rolls)] };
+            }));
+        }
         return Promise.resolve((batchesByCut[cutId] || []).map(function (b) {
             var r = []; r[0] = b.width; r[1] = b.strips; r[2] = b.rolls; r[3] = b.planned; r[4] = b.orderId || '';
             return { i: b.id, r: r };
@@ -174,15 +188,24 @@ function postFor(c, prefix) { return c.posts.filter(function (p) { return p.path
         { id: 'sC', cutId: 'C', finishedBatchId: 'bC80', positionId: 'p1', rolls: 11 },
         { id: 'sC2', cutId: 'C', finishedBatchId: 'bC55', positionId: 'p2', rolls: 8 }
     ];
-    var c = makeController(cuts, batches, supplies, null);
+    var supplyValues = {
+        p1: [{ id: 'sA', batchId: 'bA80', footage: 300, rolls: 11 },
+             { id: 'sB', batchId: 'bB80', footage: 17100, rolls: 627 },
+             { id: 'sC', batchId: 'bC80', footage: 300, rolls: 11 }],
+        p2: [{ id: 'sC2', batchId: 'bC55', footage: 300, rolls: 8 }]
+    };
+    var c = makeController(cuts, batches, supplies, null, supplyValues);
     c.mergeSameOrderTasks().then(function (n) {
         assertEqual(n, 2, 'слито две записи — обе в голову A');
 
-        // Обеспечения доноров перевешены на партию головы той же ширины.
-        var supMoves = postFor(c, '_m_set/sB').concat(postFor(c, '_m_set/sC'));
-        assertEqual(supMoves.length, 2, 'обеспечения донорских партий 80 мм перевешены');
-        assert(supMoves.every(function (p) { return p.fields['t' + REQ.supBatch] === 'bA80'; }),
-            'перевешены именно на «Партию ГП» головы');
+        // #4483: обеспечения доноров на ТУ ЖЕ позицию p1 влиты в головное, а не встали второй связью.
+        assertEqual(postFor(c, '_m_set/sB').length, 0, 'донорское обеспечение p1 не перевешено');
+        assert(pathsOf(c).indexOf('_m_del/sB') !== -1 && pathsOf(c).indexOf('_m_del/sC') !== -1,
+            'донорские обеспечения p1 удалены после вливания');
+        var supSets = postFor(c, '_m_set/sA');
+        var lastSup = supSets[supSets.length - 1];
+        assertEqual(lastSup && lastSup.fields['t' + REQ.supRolls], '649', 'рулоны головного обеспечения = 11+627+11');
+        assertEqual(lastSup && lastSup.fields['t' + REQ.supFootage], '17700', 'метраж головного обеспечения = 300+17100+300');
         assertEqual(postFor(c, '_m_set/sC2').length, 0,
             'обеспечение партии, которой у головы нет, не трогаем — переезжает вместе с партией');
 
