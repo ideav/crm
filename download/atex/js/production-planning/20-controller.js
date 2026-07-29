@@ -6871,8 +6871,13 @@
             var deferKnifeToCont = {};      // id продолжения → перенесённые ножи его хвостов
             var deferMaterialToCont = {};   // id продолжения → перенесённая смена сырья его хвостов
             var tailKeep = {};              // id хвоста → { knife, material } что ОСТАЁТСЯ в дне N
+            // #4433: дробление хвоста считаем по ВСЕЙ очереди станка, onlySet здесь не применяем.
+            // onlyIds ограничивает НАБОР ЗАПИСИ (см. док функции), а дробление — это расчёт: хвост
+            // дня N и его продолжение из дня N+1 делят одну наладку. Отсекать по снимку нельзя ни с
+            // одной стороны: хвост вне снимка обязан отдать продолжению остаток (иначе у продолжения
+            // «пропадают» вынесенные минуты), а хвост внутри снимка обязан видеть продолжение вне
+            // снимка (иначе решает, что уносить некуда, и держит ПОЛНУЮ наладку в дне N).
             arr.forEach(function(c, i) {
-                if (onlySet && !onlySet[String(c.id)]) return;        // только резки снимка (scope)
                 if (stripNum(c.plannedRuns) !== 0) return;            // хвост = 0 проходов (setup-only, #3635 п.5)
                 var cc = cols[String(c.id)] || {};
                 var fullK = Math.round(cc.knifeMin || 0), fullM = Math.round(cc.materialWindingMin || 0);
@@ -6913,7 +6918,6 @@
                 var root = chainRoot4026(c), target = null, sameCfgFallback = null, chainFound = false;
                 for (var j = i + 1; j < arr.length; j++) {
                     var d = arr[j];
-                    if (onlySet && !onlySet[String(d.id)]) continue;
                     var dc = cols[String(d.id)] || {};
                     var dZero = Math.round(dc.knifeMin || 0) === 0 && Math.round(dc.materialWindingMin || 0) === 0;
                     if (chainRoot4026(d) === root && String(d.id) !== String(c.id)) {
