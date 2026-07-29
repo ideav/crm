@@ -2954,13 +2954,35 @@
                 var yieldToFixedFree = false;
                 if (fixedNow.length && freeCandNow != null && !inProgress.length
                     && !forceFixedDay[day] && !dayExhausted) {
-                    var freeSetup = setupCostFor(prevPhysical, state[freeCandNow].cut);
-                    var fixedSetup = null;
-                    fixedNow.forEach(function(fid){
-                        var v = setupCostFor(prevPhysical, state[fid].cut);
-                        if (fixedSetup == null || v < fixedSetup) fixedSetup = v;
-                    });
-                    yieldToFixedFree = freeSetup < fixedSetup && fixedRoomAfter(freeCandNow, fixedToday);
+                    // #4487: КОГДА пропускать свободную вперёд 🔒. Мерка — тот же ПОРЯДОК §8, что и у
+                    // всех остальных заданий: слой размещения уже сравнил ВСЕ штрафы (переналадка,
+                    // разрыв последовательности #4454, срок, фольга), и переигрывать его одним
+                    // попарным сравнением заправки нельзя. Прежняя мерка (`freeSetup < fixedSetup`)
+                    // при РАВНОЙ цене заправки — а на пустом станке в начале дня она равна у всех —
+                    // оставляла 🔒 в голове дня, и задание, перенесённое «По весу» к своему близнецу
+                    // по ножам, отрывалось от него: две смены ножей 110 в дне вместо одной (issue
+                    // #4487). Порядок §8 авторитетен → идём по нему; фолбэк-порядок пакера (без слоя
+                    // размещения) считает по-прежнему, по цене заправки.
+                    // Гарантия #3792 (замок держит ДЕНЬ) не трогается: пропускаем свободную ТОЛЬКО
+                    // пока после неё каждая 🔒 этого дня ещё влезает в день (fixedRoomAfter).
+                    var earlierByOrder;
+                    if (orderAuthoritative) {
+                        var minFixedIdx = null;
+                        fixedNow.forEach(function(fid){
+                            var v = state[fid].idx;
+                            if (minFixedIdx == null || v < minFixedIdx) minFixedIdx = v;
+                        });
+                        earlierByOrder = state[freeCandNow].idx < minFixedIdx;
+                    } else {
+                        var freeSetup = setupCostFor(prevPhysical, state[freeCandNow].cut);
+                        var fixedSetup = null;
+                        fixedNow.forEach(function(fid){
+                            var v = setupCostFor(prevPhysical, state[fid].cut);
+                            if (fixedSetup == null || v < fixedSetup) fixedSetup = v;
+                        });
+                        earlierByOrder = freeSetup < fixedSetup;
+                    }
+                    yieldToFixedFree = earlierByOrder && fixedRoomAfter(freeCandNow, fixedToday);
                 }
                 if (monolithNext != null) pick = monolithNext;
                 else if (headPinToday.length && !inProgress.length) pick = selectByConfig(headPinToday);
