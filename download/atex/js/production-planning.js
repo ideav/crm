@@ -1652,6 +1652,90 @@
         return parts.join(' · ');
     }
 
+    // #4479: РАЗБОР расхождений, найденных автоматической проверкой «↻ Пересчитать наладку», —
+    // что именно разошлось у КАЖДОГО задания. Вход — те же два массива, по которым детектор
+    // (recalcMismatchRows) получает число для счётчика кнопки:
+    //   timingUpdates: [{ cutId, knife, material, cutTime, wasKnife, wasMaterial, wasCutTime }] —
+    //     хранимые колонки наладки против расчёта по текущему порядку соседей;
+    //   startUpdates:  [{ cutId, ts, wasTs }] — хранимый planStart против пересборки дня встык.
+    // Задание, попавшее в оба массива, даёт ОДНУ строку с двумя признаками.
+    // → { rows: [row], byId: { cutId: row }, ids: [cutId] }; ids — в том же порядке, в каком их
+    //   перечисляет счётчик (сперва колонки, затем старты). Чистая.
+    //   row = { cutId, timing: [{key,label,from,to}], timingChanged, startChanged, whenFrom, whenTo }
+    function setupMismatchRows(timingUpdates, startUpdates) {
+        var TIMING_COLS = [
+            { key: 'knife', label: 'наладка ножей', to: 'knife', was: 'wasKnife' },
+            { key: 'material', label: 'сырьё/намотка', to: 'material', was: 'wasMaterial' },
+            { key: 'cutTime', label: 'резка и лидер', to: 'cutTime', was: 'wasCutTime' }
+        ];
+        // Прежнее значение колонки: пусто/не число → null («не было»), иначе целые минуты.
+        function prevMin(v) {
+            if (v == null || String(v).trim() === '') return null;
+            var n = Number(String(v).replace(',', '.'));
+            return isFinite(n) ? Math.round(n) : null;
+        }
+        var byId = {}, rows = [], ids = [];
+        function rowFor(cutId) {
+            var id = String(cutId);
+            if (!byId[id]) {
+                byId[id] = { cutId: id, timing: [], timingChanged: false,
+                    startChanged: false, whenFrom: '—', whenTo: '—' };
+                rows.push(byId[id]);
+                ids.push(id);
+            }
+            return byId[id];
+        }
+        (timingUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var diffs = [];
+            TIMING_COLS.forEach(function(col) {
+                var to = Math.round(Number(u[col.to]) || 0);
+                var from = prevMin(u[col.was]);
+                // Пустая колонка — тоже расхождение: пересчёт её заполнит, и она уже посчитана
+                // счётчиком кнопки. Показываем честно «— → N», а не прячем как «ничего не менялось».
+                if (from === to) return;
+                diffs.push({ key: col.key, label: col.label, from: from, to: to });
+            });
+            if (!diffs.length) return;
+            var row = rowFor(u.cutId);
+            row.timing = diffs;
+            row.timingChanged = true;
+        });
+        (startUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var to = Number(u.ts) || 0, from = Number(u.wasTs) || 0;
+            if (to === from) return;
+            var row = rowFor(u.cutId);
+            row.startChanged = true;
+            row.whenFrom = formatPlanStamp(from);
+            row.whenTo = formatPlanStamp(to);
+        });
+        return { rows: rows, byId: byId, ids: ids };
+    }
+
+    // #4479: короткая подпись бейджа на карточке — СУТЬ отклонения («наладка», «старт»,
+    // «наладка · старт»). Чистая.
+    function setupMismatchSummary(row) {
+        if (!row) return '';
+        var parts = [];
+        if (row.timingChanged) parts.push('наладка');
+        if (row.startChanged) parts.push('старт');
+        return parts.join(' · ');
+    }
+
+    // #4479: подсказка бейджа — ДЕТАЛИ отклонения «было → стало» и чем оно чинится. Чистая.
+    function setupMismatchTitle(row) {
+        if (!row) return '';
+        var parts = [];
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        if (row.startChanged) parts.push('старт ' + row.whenFrom + ' → ' + row.whenTo);
+        if (!parts.length) return '';
+        return 'Расхождение с текущим порядком заданий: ' + parts.join(' · ')
+            + '\nПриводит в соответствие кнопка «↻ Пересчитать наладку»';
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
     // для дропдауна привязки и плашек «Связанные позиции». Подпись:
     // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).
@@ -2574,6 +2658,11 @@
     // `computeCutSetupUpdates`/`persistCutSetupColumns` (тайминг) в `20-controller.js`, предел
     // потоков — `MAX_PARALLEL_WRITES` (`10-planning-engine.js`). Тест —
     // `experiments/atex-production-planning-4477.test.js`.
+    // Так же не ложится запрет ТЗ §15 о ВИДИМОСТИ ОТКЛОНЕНИЙ (#4479: найденное автоматической
+    // проверкой оператор может увидеть на самих заданиях) — он про экран, а не про план. Его держит
+    // ЕДИНЫЙ РАЗБОР: `recalcMismatchRows` (`20-controller.js`) отдаёт и число для кнопки
+    // «↻ Пересчитать наладку», и строки для бейджей карточек — считаются они один раз и разойтись не
+    // могут. Тест — `experiments/atex-pp-4479-mismatch-badges.test.js`.
     //
     // КОГО ОГРАНИЧИВАЕТ. `actor: 'auto'` — только автоматику (Сгенерировать / Упорядочить /
     // Пересчитать наладку / авто-разбиение по дням). Ручное действие оператора проходит без
@@ -11061,6 +11150,9 @@
         slitterTabIndexMap: slitterTabIndexMap, // #4444: станок → порядковый номер закладки
         planChangeStation: planChangeStation,   // #4444: колонка «станок» списка «Деталей» (3 или 3 → 5)
         planChangeSummary: planChangeSummary,   // #4417: короткая подпись изменения («старт · станок · тайминг»)
+        setupMismatchRows: setupMismatchRows,       // #4479: что разошлось у каждого задания (бейджи очереди)
+        setupMismatchSummary: setupMismatchSummary, // #4479: суть отклонения на бейдже («наладка · старт»)
+        setupMismatchTitle: setupMismatchTitle,     // #4479: детали отклонения в подсказке бейджа
         formatPlanStamp: formatPlanStamp,       // #4409/#4417: unix-секунды → «ДД.ММ ЧЧ:ММ»
         isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
@@ -11447,6 +11539,26 @@
     // функций из стека — чтобы источник ЛЮБОЙ записи (в т.ч. резки-сироты «нет связей») читался в
     // консоли без догадок; на ответе — созданный id, на отказе — код и текст ошибки.
     var _ppWriteSeq = 0;
+
+    // #4477/#4480: ЖЁСТКИЙ ПОТОЛОК ОДНОВРЕМЕННЫХ ЗАПИСЕЙ — в ЕДИНСТВЕННОЙ точке, через которую
+    // проходят ВСЕ команды `_m_*` (post ниже). `runWithConcurrency` остаётся планировщиком фазы,
+    // но правило «не больше MAX_PARALLEL_WRITES одновременно» держит семафор: только так его
+    // соблюдают и ВЛОЖЕННЫЕ пулы (фаза creates разбиения — пул сегментов внутри пула цепочек),
+    // иначе пятёрка пулов по пять дала бы 25 запросов разом.
+    // Слот занимается ПЕРЕД отправкой и освобождается на ответе (успех или отказ). Взаимной
+    // блокировки нет: запрос, держащий слот, не ждёт другого запроса — цепочка `post → then → post`
+    // освобождает слот до захвата следующего.
+    var _ppWriteSlots = 0, _ppWriteWaiting = [];
+    function ppAcquireWriteSlot() {
+        if (_ppWriteSlots < MAX_PARALLEL_WRITES) { _ppWriteSlots += 1; return Promise.resolve(); }
+        return new Promise(function(resolve) { _ppWriteWaiting.push(resolve); });
+    }
+    function ppReleaseWriteSlot() {
+        var next = _ppWriteWaiting.shift();
+        if (next) next();            // слот передаём ожидающему напрямую — счётчик не трогаем
+        else if (_ppWriteSlots > 0) _ppWriteSlots -= 1;
+    }
+
     function ppWriteKind(path) {
         var m = /_m_(\w+)\/([^?]*)/.exec(String(path == null ? '' : path));
         if (m) return { op: m[1], target: decodeURIComponent(m[2]) };
@@ -11518,7 +11630,12 @@
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
+    // #4477/#4480: отправка идёт ЧЕРЕЗ СЕМАФОР (ppAcquireWriteSlot) — потолок одновременных
+    // записей держится здесь, в единственной общей точке, а не в каждом пуле по отдельности.
+    // Трасса #4177 печатается ПОСЛЕ захвата слота: её номера обязаны отражать порядок реальной
+    // ОТПРАВКИ, иначе по логу не прочитать, сколько запросов шло разом (issue #4480 — лог).
     AtexProductionPlanning.prototype.post = function(path, params) {
+        var self = this;
         // #4402: пока висит предпросмотр «Упорядочить», очередь на экране — ПРОЕКЦИЯ в памяти
         // (включая синтетические id продолжений), а в БД прежний план. Любая запись в этот
         // момент пишется «не от того» состояния, поэтому запись закрыта наглухо: сперва
@@ -11531,32 +11648,36 @@
         Object.keys(params || {}).forEach(function(k) {
             if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
         });
-        var _trace = tracePpWrite(path, params, this);   // #4177: подробная трасса записи
-        return fetch(this.url(path), {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        }).then(function(resp) {
-            return resp.text().then(function(text) {
-                var result;
-                try { result = text ? JSON.parse(text) : {}; }
-                catch (e) {
-                    if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
-                    _trace.fail('parse', text.slice(0, 200));
-                    throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
-                }
-                // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
-                // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
-                // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
-                // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
-                if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
-                _trace.ok(result);
-                return result;
-            });
-        }, function(err) {
-            _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
-            throw err;
+        return ppAcquireWriteSlot().then(function() {
+            var _trace = tracePpWrite(path, params, self);   // #4177: подробная трасса записи
+            function release(v) { ppReleaseWriteSlot(); return v; }
+            function releaseThrow(e) { ppReleaseWriteSlot(); throw e; }
+            return fetch(self.url(path), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            }).then(function(resp) {
+                return resp.text().then(function(text) {
+                    var result;
+                    try { result = text ? JSON.parse(text) : {}; }
+                    catch (e) {
+                        if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
+                        _trace.fail('parse', text.slice(0, 200));
+                        throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
+                    }
+                    // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
+                    // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
+                    // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
+                    // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
+                    if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
+                    _trace.ok(result);
+                    return result;
+                });
+            }, function(err) {
+                _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
+                throw err;
+            }).then(release, releaseThrow);
         });
     };
 
@@ -13299,6 +13420,7 @@
     // больше не «захватывается» — автогенерация вольна двигать задание по времени и очереди.
     AtexProductionPlanning.prototype.setCutsFixed = function(cutIds, value, opts) {
         var self = this;
+        this._ppOp = 'setCutsFixed';   // #4177/#4480
         var o = opts || {};
         if (this.busy) return Promise.resolve(false);
         var ids = (cutIds || []).map(function(x) { return String(x); })
@@ -14624,6 +14746,7 @@
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
     AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId, withinSlitter) {
         var self = this;
+        this._ppOp = 'moveCutToDay';   // #4177/#4480: трасса обязана называть АВТОРА записи
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
         // #4381: начатое задание не переносим. Кнопка «🗓» у него убрана, но метод зовут и иначе
@@ -14967,6 +15090,7 @@
     // (#4294), поэтому досрочные, уехавшие в свой фактический день, пересборка не тронет.
     AtexProductionPlanning.prototype.settleDeviations = function(groups) {
         var self = this;
+        this._ppOp = 'settleDeviations';   // #4177/#4480
         if (this.busy) return Promise.resolve(false);
         var cutMeta = this.meta && this.meta.cut;
         if (!cutMeta || cutMeta.id == null) {
@@ -18031,6 +18155,7 @@
     //   index, dir  — позиция и направление (-1 вверх / +1 вниз).
     AtexProductionPlanning.prototype.moveCutInDay = function(sameDayCuts, index, dir) {
         var self = this;
+        this._ppOp = 'moveCutInDay';   // #4177/#4480
         var arr = sameDayCuts || [];
         var target = index + dir;
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return Promise.resolve(false);
@@ -18668,10 +18793,21 @@
                     var arr = demandByBatchSeg[bId] || (demandByBatchSeg[bId] = []);
                     (item.shares || []).forEach(function(sh, i) { arr[i] = round3((arr[i] || 0) + ((sh && sh.rolls) || 0)); });
                 });
-                var cChain = Promise.resolve();
+                // #4480: ВНУТРИ родительской цепочки записи тоже независимы — и трасса переноса
+                // показала, что именно этот хвост шёл строго по одному (WRITE#25…#30, пик 1),
+                // пока три другие фазы держали пятёрку. Зависимость здесь ровно одна: id
+                // продолжения возвращает `_m_new`, поэтому дети ждут его. Всё остальное — разные
+                // записи, и они идут пулом. Потолок соблюдается семафором в `post` (вложенные
+                // пулы суммарно не дают больше MAX_PARALLEL_WRITES).
+                //   шаг 1: правка резки A (её Обеспечения + Партии ГП) — один пул;
+                //   шаг 2: продолжения B — пул сегментов, внутри сегмента цепочка по новому id.
+                // Барьер между шагами оставлен намеренно: доля сегмента 0 у Обеспечения A должна
+                // быть записана до того, как появятся Обеспечения сегментов 1..N (иначе между
+                // запросами существует момент, когда покрытие позиции задвоено).
+                var aFixTasks = [];
                 // 2a) уменьшить Обеспечение A до доли сегмента 0.
                 shareBySupply.forEach(function(item) {
-                    cChain = cChain.then(function() {
+                    aFixTasks.push(function() {
                         var sh = item.shares[0] || { rolls: 0, footage: 0 };
                         var f = buildSupplyFieldsForFinishedBatch(supMeta, {
                             finishedBatchId: item.s.finishedBatchId,
@@ -18684,7 +18820,7 @@
                 // 2a-bis) #3433: «Партии ГП» резки A пересчитать под сегмент 0 — «Кол-во
                 // план» = полосы × проходов A (aRuns), «Кол-во рулонов» = спрос сегмента 0.
                 (parentStrips || []).forEach(function(st) {
-                    cChain = cChain.then(function() {
+                    aFixTasks.push(function() {
                         var seg0 = (demandByBatchSeg[String(st.id)] || [])[0] || 0;
                         var f = buildFinishedBatchFields(fbMeta, {
                             planned: finishedBatchRolls(st.qty, aRuns),
@@ -18694,10 +18830,11 @@
                         return self.post('_m_set/' + st.id + '?JSON', f);
                     });
                 });
-                // 2b) каждое продолжение B (сегменты 1..N).
-                crs.forEach(function(cr, ci) {
+                var cChain = runWithConcurrency(aFixTasks, MAX_PARALLEL_WRITES);
+                // 2b) каждое продолжение B (сегменты 1..N) — разные записи, идут параллельно.
+                var segTasks = crs.map(function(cr, ci) {
                     var segIdx = ci + 1;
-                    cChain = cChain.then(function() {
+                    return function() {
                         var cutFields = buildFields(cutReqIds, {
                             status: (parentCut && parentCut.status) || CUT_STATUSES[0],
                             slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
@@ -18749,44 +18886,52 @@
                                 var mf = {}; mf[mainKey] = String(ts2);
                                 return self.post('_m_save/' + bId + '?JSON', mf);
                             });
-                            (parentStrips || []).forEach(function(st) {
-                                bChain = bChain.then(function() {
-                                    // #3431/#3433: st.qty — полос за проход; «Кол-во план»
-                                    // продолжения = полосы × проходов сегмента (cr.plannedRuns);
-                                    // «Кол-во рулонов» = спрос этого сегмента; «ID заказа»
-                                    // копируется из родительской полосы.
-                                    var segDemand = (demandByBatchSeg[String(st.id)] || [])[segIdx] || 0;
-                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
-                                        planned: finishedBatchRolls(st.qty, cr.plannedRuns),
-                                        rolls: segDemand > 0 ? segDemand : '',
-                                        orderId: st.orderId || '', active: '1' });
-                                    return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
-                                        var nid = r2 && (r2.obj || r2.id || r2.i);
-                                        if (nid) stripMap[String(st.id)] = String(nid);
-                                    });
-                                });
+                            // #4480: «Партии ГП» продолжения — независимые записи под одним
+                            // родителем bId: пулом. Барьер после них обязателен — «Обеспечения»
+                            // ниже вешаются на СОЗДАННУЮ партию (stripMap), которой до ответа нет.
+                            bChain = bChain.then(function() {
+                                return runWithConcurrency((parentStrips || []).map(function(st) {
+                                    return function() {
+                                        // #3431/#3433: st.qty — полос за проход; «Кол-во план»
+                                        // продолжения = полосы × проходов сегмента (cr.plannedRuns);
+                                        // «Кол-во рулонов» = спрос этого сегмента; «ID заказа»
+                                        // копируется из родительской полосы.
+                                        var segDemand = (demandByBatchSeg[String(st.id)] || [])[segIdx] || 0;
+                                        var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
+                                            planned: finishedBatchRolls(st.qty, cr.plannedRuns),
+                                            rolls: segDemand > 0 ? segDemand : '',
+                                            orderId: st.orderId || '', active: '1' });
+                                        return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
+                                            var nid = r2 && (r2.obj || r2.id || r2.i);
+                                            if (nid) stripMap[String(st.id)] = String(nid);
+                                        });
+                                    };
+                                }), MAX_PARALLEL_WRITES);
                             });
-                            shareBySupply.forEach(function(item) {
-                                bChain = bChain.then(function() {
-                                    var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
-                                    // #4158: даже при НУЛЕВОЙ доле (floor=0 и метраж→0) создаём
-                                    // связующее Обеспечение — иначе задание-продолжение не привязано
-                                    // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
-                                    if (item.s.positionId == null) return;
-                                    var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
-                                    var f = buildSupplyFieldsForFinishedBatch(supMeta, {
-                                        finishedBatchId: fb,
-                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
-                                        active: '1', status: SUPPLY_STATUSES[0]
-                                    });
-                                    return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
-                                });
+                            // #4480: «Обеспечения» продолжения — тоже независимые записи, пулом.
+                            bChain = bChain.then(function() {
+                                return runWithConcurrency(shareBySupply.map(function(item) {
+                                    return function() {
+                                        var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
+                                        // #4158: даже при НУЛЕВОЙ доле (floor=0 и метраж→0) создаём
+                                        // связующее Обеспечение — иначе задание-продолжение не привязано
+                                        // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
+                                        if (item.s.positionId == null) return;
+                                        var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
+                                        var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                            finishedBatchId: fb,
+                                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
+                                            active: '1', status: SUPPLY_STATUSES[0]
+                                        });
+                                        return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
+                                    };
+                                }), MAX_PARALLEL_WRITES);
                             });
                             return bChain;
                         });
-                    });
+                    };
                 });
-                return cChain;
+                return cChain.then(function() { return runWithConcurrency(segTasks, MAX_PARALLEL_WRITES); });
             }).then(splitBump).catch(softSkip); };
         });
 
@@ -18812,14 +18957,18 @@
                     }
                 });
         
+                // #4480: порядок ступеней обязателен (обеспечения → партии ГП → сама резка:
+                // удаление родителя раньше детей даёт 409 «есть ссылки»), а ВНУТРИ ступени
+                // записи независимы — пулом. Было по одному запросу за раз.
                 // 1) удаляем обеспечения (отсутствующие — пропускаем, #3895)
-                var inner = Promise.resolve();
-                supplyIds.forEach(function(sid) {
-                    inner = inner.then(function() { return delMissingOk(sid); });
-                });
+                var inner = runWithConcurrency(supplyIds.map(function(sid) {
+                    return function() { return delMissingOk(sid); };
+                }), MAX_PARALLEL_WRITES);
                 // 2) удаляем партии ГП
-                Object.keys(fbIds).forEach(function(fbId) {
-                    inner = inner.then(function() { return delMissingOk(fbId); });
+                inner = inner.then(function() {
+                    return runWithConcurrency(Object.keys(fbIds).map(function(fbId) {
+                        return function() { return delMissingOk(fbId); };
+                    }), MAX_PARALLEL_WRITES);
                 });
                 // 3) удаляем саму резку
                 inner = inner.then(function() { return delMissingOk(cutId); });
@@ -19415,6 +19564,7 @@
     //   dayCuts — резки дня в порядке показа (по planStart); dragId — перетаскиваемое; targetId — на кого бросили.
     AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId) {
         var self = this;
+        this._ppOp = 'reorderCutInDay';   // #4177/#4480
         if (this.busy) return Promise.resolve(false);
         var arr = (dayCuts || []).slice();
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
@@ -19644,6 +19794,7 @@
     // → Promise<число исправленных заданий>.
     AtexProductionPlanning.prototype.reconcilePlanStarts = function() {
         var self = this;
+        this._ppOp = 'reconcilePlanStarts';   // #4177/#4480
         var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
         var fixes = [];
@@ -19791,12 +19942,17 @@
     // #4408: сюда же — задания, у которых разошёлся СТАРТ (recalcStartUpdates): после перестановки
     // конфигурация соседей может совпасть (колонки те же), а день всё равно поедет внахлёст.
     // Пусто → пересчитывать нечего, кнопки нет.
-    AtexProductionPlanning.prototype.recalcMismatchIds = function(slitterId) {
-        if (!this.meta || !this.meta.cut) return [];
-        if (!(this.cuts && this.cuts.length)) return [];
+    // #4479: отдаёт не только идентификаторы, но и РАЗБОР («было → стало» по каждой колонке и по
+    // старту) — из него карточки очереди рисуют бейджи. Счётчик кнопки и бейджи считаются из одного
+    // результата, поэтому разойтись не могут: сколько названо, столько и помечено.
+    // → { rows, byId, ids } (setupMismatchRows).
+    AtexProductionPlanning.prototype.recalcMismatchRows = function(slitterId) {
+        var none = { rows: [], byId: {}, ids: [] };
+        if (!this.meta || !this.meta.cut) return none;
+        if (!(this.cuts && this.cuts.length)) return none;
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
-        if (!scopeIds.length) return [];
+        if (!scopeIds.length) return none;
         // Полный расчёт идёт по ВСЕЙ очереди станка (у не-первой резки иначе нет предшественника) и
         // стоит десятки миллисекунд, а renderQueue зовут на каждый ввод в поиске. Кэшируем по подписи:
         // станок + окно фильтра + версия загруженных данных + slitterQueueSignature (порядок,
@@ -19805,18 +19961,17 @@
             + String((this.filter && this.filter.dateTo) || '') + '|' + String(this._planDataVersion || 0)
             + '|' + slitterQueueSignature(this.cuts, sid);
         var cache = this._setupMismatchCache;
-        if (cache && cache.key === key) return cache.ids;
+        if (cache && cache.key === key) return cache.res;
         var res = this.computeCutSetupUpdates(scopeIds, { dryRun: true });
-        var seen = {}, ids = [];
-        (res.updates || []).forEach(function(u) {
-            var id = String(u.cutId);
-            if (!seen[id]) { seen[id] = true; ids.push(id); }
-        });
-        this.recalcStartUpdates(sid, { updates: res.updates || [] }).forEach(function(u) {   // #4408: разъехавшиеся старты
-            if (!seen[u.cutId]) { seen[u.cutId] = true; ids.push(u.cutId); }
-        });
-        this._setupMismatchCache = { key: key, ids: ids };
-        return ids;
+        var startOps = this.recalcStartUpdates(sid, { updates: res.updates || [] });   // #4408: разъехавшиеся старты
+        var out = setupMismatchRows(res.updates || [], startOps);
+        this._setupMismatchCache = { key: key, res: out };
+        return out;
+    };
+
+    // #4401: идентификаторы расхождений — счётчик кнопки «↻ Пересчитать наладку».
+    AtexProductionPlanning.prototype.recalcMismatchIds = function(slitterId) {
+        return this.recalcMismatchRows(slitterId).ids;
     };
 
     // #4401/#4408: «↻ Пересчитать наладку» — ТАЙМИНГ И ВРЕМЯ СТАРТА, БЕЗ ПЕРЕПЛАНИРОВАНИЯ.
@@ -19836,6 +19991,7 @@
     // норма — соседи совпали по конфигурации), а успешный пересчёт говорит коротко.
     AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId, opts) {
         var self = this;
+        this._ppOp = 'recalcSetupTiming';   // #4177/#4480
         var auto = !!(opts && opts.auto);
         if (this.busy) return Promise.resolve(false);
         // #4402: на экране непринятый план «Упорядочить» (проекция в памяти, синтетические id
@@ -20976,8 +21132,12 @@
         // этого станка в видимых днях с расчётом по ТЕКУЩЕМУ порядку (recalcMismatchIds, dryRun) и
         // показываем кнопку, только если что-то разошлось. Ничего не разошлось — кнопки нет.
         // #4408: расхождением считается и разъехавшееся ВРЕМЯ СТАРТА (день едет внахлёст/с дырами).
+        // #4479: тот же результат даёт бейджи на карточках (mismatchByCut ниже) — счётчик кнопки и
+        // пометки на заданиях считаются из ОДНОГО разбора, поэтому не могут разойтись.
         var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
-        var mismatchIds = actDirtyId ? self.recalcMismatchIds(actDirtyId) : [];
+        var mismatch = actDirtyId ? self.recalcMismatchRows(actDirtyId) : { rows: [], byId: {}, ids: [] };
+        var mismatchIds = mismatch.ids;
+        var mismatchByCut = mismatch.byId;
         if (mismatchIds.length) {
             // #4430: вид и ЛИПКОСТЬ кнопки — в CSS (.atex-pp-recalc-setup): она приклеена к верху
             // экрана, иначе в длинной очереди уезжала вверх и расхождение чинить было нечем.
@@ -21245,6 +21405,14 @@
             if (previewChange) {
                 infoChildren.push(el('span', { class: 'atex-pp-cut-chg-badge',
                     title: planChangeTitle(previewChange), text: planChangeSummary(previewChange) }));
+            }
+            // #4479: расхождение, из-за которого над очередью висит «↻ Пересчитать наладку», —
+            // на самом задании: бейдж говорит СУТЬ («наладка», «старт»), подсказка — «было → стало».
+            // Иначе кнопка называет число, а какие это задания и что с ними не так — не найти.
+            var mismatchRow = mismatchByCut[String(c.id)];
+            if (mismatchRow) {
+                infoChildren.push(el('span', { class: 'atex-pp-cut-mismatch-badge',
+                    title: setupMismatchTitle(mismatchRow), text: setupMismatchSummary(mismatchRow) }));
             }
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
