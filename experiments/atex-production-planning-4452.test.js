@@ -28,16 +28,23 @@ function cut(over) {
 }
 function codes(parts) { return (parts || []).map(function(p) { return p.code; }).sort().join(','); }
 
-// ── 1. Цена пустой партии: ложная смена сырья между соседями ОДНОГО сырья ────────────────────
+// ── 1. Партия в цену переналадки не входит (#4481) ───────────────────────────────────────────
+// Правило изменено решением заказчика 29.07.2026: поставить другой рулон ТОГО ЖЕ сырья времени
+// не требует, поэтому пустая или другая партия наладки не создаёт. Инвариант CUT_BATCH при этом
+// остаётся: партия — учётные данные (какой рулон режем) и тай-брейк «не перемонтировать рулон».
 (function() {
     var prev = cut({ id: 'A', batchId: '900' });
     var next = cut({ id: 'B', batchId: '' });          // партия утеряна
-    assert(codes(planning.changeoverParts(prev, next, TIMES)) === 'MATERIAL_WINDING',
-        'пустая партия у соседа = ЛОЖНАЯ смена сырья (та самая лишняя переналадка тикета)');
+    assert(codes(planning.changeoverParts(prev, next, TIMES)) === '',
+        '#4481: пустая партия у соседа переналадки НЕ создаёт');
 
     var same = cut({ id: 'B', batchId: '900' });
     assert(codes(planning.changeoverParts(prev, same, TIMES)) === '',
         'КОНТРОЛЬ: та же партия у обоих — переналадки нет');
+
+    var otherMat = cut({ id: 'B', batchId: '900', materialId: 'MR194' });
+    assert(codes(planning.changeoverParts(prev, otherMat, TIMES)) === 'MATERIAL_WINDING',
+        'КОНТРОЛЬ: смена самого СЫРЬЯ переналадку по-прежнему создаёт');
 })();
 
 // ── 2. Резольвер: партия цепочки дробления ───────────────────────────────────────────────────
@@ -134,8 +141,8 @@ var GEN_BATCHES = [
     var absent = c.resolveBatchForCut('999');
     assert(absent.batchId === '' && /нет в загруженной очереди/.test(absent.reason), 'неизвестное задание — с причиной, а не молча', '(' + absent.reason + ')');
 
-    assert(codes(planning.changeoverParts(c.cuts[0], c.cuts[1], TIMES)) === 'MATERIAL_WINDING',
-        'РАЗНЫЕ партии одного сырья — смена сырья считается честно (лечение не «склеивает» всё подряд)');
+    assert(codes(planning.changeoverParts(c.cuts[0], c.cuts[1], TIMES)) === '',
+        '#4481: РАЗНЫЕ партии одного сырья переналадки не стоят (лечение партии — про учёт, не про время)');
 })();
 
 console.log('\n' + passed + '/' + total + ' passed');

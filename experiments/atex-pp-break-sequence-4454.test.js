@@ -87,11 +87,17 @@ function weightAt(arr, index, s) {
 (function() {
     var A = slot('A', 'MW411', '900', K15);
     var B = slot('B', 'MW411', '900', K15);
-    // Те же ножи, ДРУГАЯ партия того же сырья → рвётся только последовательность сырья/партии.
+    // #4481: другая партия ТОГО ЖЕ сырья — не смена сырья, значит и последовательность не рвётся:
+    // вставка между двумя заданиями одной заправки бесплатна независимо от партий.
     var otherBatch = slot('X', 'MW411', '999', K15);
     var sc1 = planning.scorePosition([A, B], 1, otherBatch, CTX);
-    assert(sc1.byFactor.breakMaterial === SETTINGS.BREAK_MATERIAL_COST_MN && !sc1.byFactor.breakKnives,
-        'другая партия — штраф разрыва ТОЛЬКО по сырью/партии', '(' + JSON.stringify(sc1.byFactor) + ')');
+    assert(!sc1.byFactor.breakMaterial && !sc1.byFactor.breakKnives,
+        '#4481: другая партия того же сырья последовательность не рвёт', '(' + JSON.stringify(sc1.byFactor) + ')');
+    // Разрыв по сырью проверяем сменой САМОГО сырья — это по-прежнему разрыв.
+    var otherMat = slot('X2', 'MR194', '900', K15);
+    var sc1b = planning.scorePosition([A, B], 1, otherMat, CTX);
+    assert(sc1b.byFactor.breakMaterial === SETTINGS.BREAK_MATERIAL_COST_MN && !sc1b.byFactor.breakKnives,
+        'другое сырьё — штраф разрыва ТОЛЬКО по сырью', '(' + JSON.stringify(sc1b.byFactor) + ')');
 
     // То же сырьё и партия, ДРУГИЕ ножи → рвётся только последовательность ножей.
     var otherKnives = slot('Y', 'MW411', '900', K18);

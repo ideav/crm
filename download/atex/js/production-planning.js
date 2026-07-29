@@ -2868,10 +2868,10 @@
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
             enforce: false,     // отбрасывать нечего: пустая партия чинится подстановкой (fill), не отказом
             title: 'Задание в производство обязано иметь «Партию сырья»',
-            // ПОЧЕМУ ЭТО ЖЁСТКОЕ ПРАВИЛО. Партия — часть сигнатуры переналадки: changeoverParts
-            // считает смену сырья по `prev.batchId !== next.batchId`. Задание с пустой партией
-            // даёт ЛОЖНУЮ смену сырья с каждым соседом того же сырья — план оплачивает
-            // переналадку, которой нет (issue #4452).
+            // ПОЧЕМУ ЭТО ЖЁСТКОЕ ПРАВИЛО. Партия — учёт сырья: какой физический рулон режет
+            // задание (расход, прослеживаемость) и тай-брейк «не перемонтировать рулон» при
+            // равной цене порядка. Времени переналадки она не стои́т: подпись заправки — вид
+            // сырья и намотка (materialSetupSig, #4481).
             //
             // ПОЧЕМУ FILL, А НЕ ЗАПРЕТ. Отбросить операцию значило бы потерять работу: задание
             // никуда не денется, оно просто останется незапланированным и по-прежнему без партии.
@@ -3096,15 +3096,31 @@
             String(prev.batchId) !== String(next.batchId));
     }
 
+    // #4481 (ТЗ §15): ЧТО СЧИТАЕТСЯ СМЕНОЙ СЫРЬЯ — одна функция на весь модуль. Подпись заправки
+    // станка: ВИД СЫРЬЯ и НАПРАВЛЕНИЕ НАМОТКИ. «Партия сырья» в неё НЕ входит: поставить другой
+    // рулон того же сырья времени не требует, в том числе переход «партия не указана» ↔ «указана»
+    // (решение заказчика 29.07.2026). Через эту функцию идут ВСЕ потребители — реальные минуты
+    // (changeoverParts), вес §8 (materialChangeNeeded → transitionCost) и подпись конфигурации
+    // для перестановки внутри дня (cutConfigSig), — поэтому правило нельзя соблюсти в одном месте
+    // и забыть в другом (симптом #4481: «после перепланирования появляются наладки при том же
+    // сырье» — на стыке партий начислялось MATERIAL_WINDING).
+    // Партия остаётся в данных (учёт сырья, #4452) и в тай-брейке «не перемонтировать рулон»
+    // (isRollRemount, 0.001 мин) — но минут наладки не стои́т.
+    function materialSetupSig(c){
+        return String(c && c.materialId == null ? '' : c.materialId) + '|' + normWinding(c && c.winding);
+    }
+    function materialSetupChanged(prev, next){
+        if (!prev || !next) return false;
+        return materialSetupSig(prev) !== materialSetupSig(next);
+    }
+
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
         var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0; // #3600: фикс. время любой смены ножей (по умолч. 30 мин), независимо от числа ножей
         var parts = [];
         if (!prev || !next) return parts;
-        var matWindChange = String(prev.materialId) !== String(next.materialId)
-            || normWinding(prev.winding) !== normWinding(next.winding)
-            || String(prev.batchId) !== String(next.batchId);
+        var matWindChange = materialSetupChanged(prev, next);   // #4481: партия в подпись не входит
         // #3600: любая смена набора ножей ИЛИ сужение ролика → ФИКСИРОВАННО KNIFE (30 мин)
         // «на всё вместе», независимо от числа переставленных ножей (раньше #3472: стоимость =
         // KNIFE_MOVE × число перестановок). Смена сырья/намотки считается отдельно (ниже).
@@ -3113,7 +3129,7 @@
         var moves = knifeMoves(effKnifeWidths(prev), effKnifeWidths(next));
         var knifeChanged = moves > 0 || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
         if (knifeChanged && knifeTime > 0) parts.push({ code: 'KNIFE', label: 'смена ножей / сужение ролика', minutes: round3(knifeTime) });
-        if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки / партии', minutes: round3(matWind) });
+        if (matWindChange && matWind > 0) parts.push({ code: 'MATERIAL_WINDING', label: 'смена сырья / намотки', minutes: round3(matWind) });
         return parts;
     }
 
@@ -8085,12 +8101,13 @@
 
     // #4452 (ТЗ §15, инвариант CUT_BATCH): «Партия сырья» задания. Отчёт cut_planning её не
     // отдаёт (rowsToPlanning → batchId:''), она приходит отдельным чтением записи (#4155) — и у
-    // заданий, которым её никто не проставил, остаётся пусто. Пустая партия стои́т РЕАЛЬНЫХ денег:
-    // changeoverParts считает смену сырья по `prev.batchId !== next.batchId`, поэтому задание с
-    // пустой партией даёт ложную MATERIAL_WINDING с КАЖДЫМ соседом того же сырья.
+    // заданий, которым её никто не проставил, остаётся пусто. Партия нужна как УЧЁТНЫЕ данные:
+    // какой физический рулон режет задание (расход сырья, прослеживаемость) и тай-брейк «не
+    // перемонтировать рулон» при равной цене порядка. Минут наладки она НЕ стои́т — подпись
+    // заправки это вид сырья и намотка (materialSetupSig, #4481).
     //
-    // Лечим В ПАМЯТИ (как healContinuationMaterials лечит «Вид сырья») ДО расчёта плана — иначе
-    // переналадка уже посчитана по пустоте, и запись в базу этого не исправит. Порядок источников
+    // Лечим В ПАМЯТИ (как healContinuationMaterials лечит «Вид сырья») ДО расчёта плана — чтобы
+    // план записал в базу разрешённую партию, а не пустоту. Порядок источников
     // — от достоверного к выводимому:
     //   1) цепочка дробления — сегменты режут ОДИН физический рулон, партия у них общая;
     //   2) «Расход сырья» (1079) — партия, которую задание реально списывает;
@@ -8471,13 +8488,13 @@
     // (§8 п.4/5) — она только склеивает одинаковые конфигурации.
 
     // Подпись конфигурации: набор ножей (МУЛЬТИМНОЖЕСТВО, как effKnifeWidths) + ширина ролика
-    // (её сужение — тоже смена ножей, changeoverParts) + сырьё/намотка/партия. Резки с одинаковой
-    // подписью стоят подряд БЕСПЛАТНО (changeoverParts → []), поэтому в переборе они — один узел.
+    // (её сужение — тоже смена ножей, changeoverParts) + подпись заправки (сырьё/намотка,
+    // materialSetupSig — партия в неё не входит, #4481). Резки с одинаковой подписью стоят подряд
+    // БЕСПЛАТНО (changeoverParts → []), поэтому в переборе они — один узел.
     function cutConfigSig(c){
         var w = effKnifeWidths(c).slice().sort();
         return w.join(',') + '|' + (Number(c && c.rollerWidth) || 0)
-            + '|' + String(c && c.materialId) + '|' + normWinding(c && c.winding)
-            + '|' + ((c && c.batchId) == null ? '' : String(c.batchId));
+            + '|' + materialSetupSig(c);
     }
     // Σ стоимости цепочки, считая переход от prev (заправка станка / хвост прошлого дня).
     // costFn — sequencingCost (цель порядка, #3996) либо changeoverCost (реальные минуты наладки).
@@ -9635,16 +9652,10 @@
         return knifeMoves(effKnifeWidths(prev), effKnifeWidths(next)) > 0
             || (Number(prev.rollerWidth) || 0) > (Number(next.rollerWidth) || 0);
     }
-    // Нужна ли смена сырья/намотки/партии prev→next — как changeoverParts.
+    // Нужна ли смена сырья/намотки prev→next — тем же мерилом, что и реальные минуты
+    // (materialSetupSig, #4481: партия в подпись не входит).
     function materialChangeNeeded(prev, next){
-        if (!prev || !next) return false;
-        // batchId нормализуем null/undefined → '' (carryOverPrevCut так же нейтрализует партию),
-        // иначе первая резка с незаданной партией ложно считалась бы сменой сырья.
-        var pb = prev.batchId == null ? '' : String(prev.batchId);
-        var nb = next.batchId == null ? '' : String(next.batchId);
-        return String(prev.materialId) !== String(next.materialId)
-            || normWinding(prev.winding) !== normWinding(next.winding)
-            || pb !== nb;
+        return materialSetupChanged(prev, next);
     }
 
     // Стоимость ОДНОГО направленного перехода prev→next (ТЗ §8): вес (минуты штрафа) + «качество».
