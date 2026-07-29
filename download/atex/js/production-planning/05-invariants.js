@@ -311,6 +311,86 @@
             }
         },
         {
+            id: 'CHAIN_CONTIGUOUS',
+            tz: '§15 (#4488)',
+            actor: 'any',       // хвост нельзя оставлять ни автоматике, ни человеку
+            enforce: false,     // отбрасывать нечего: разрыв чинится СШИВАНИЕМ задания, а не отказом
+            title: 'Части задания, разорванного по дням, идут непрерывно: между ними нет чужих заданий',
+            // ЧТО ПРОВЕРЯЕТСЯ. Задание, не влезшее в смену, живёт цепочкой записей (голова +
+            // продолжения, общий «ID первой части»). Работа непрерывна: продолжение начинается там,
+            // где кончилась голова, — следующим на том же станке. Если между частями встало чужое
+            // задание, работа разорвана: станок перезаправляют туда-обратно, а оператор видит
+            // огрызок в один проход (issue #4488: голова в 1 проход на 3-м месте дня, 11 проходов —
+            // назавтра).
+            //
+            // ПОЧЕМУ enforce:false. Выбросить операцию нельзя: разрыв — свойство раскладки, а не
+            // одной записи; отказ оставил бы задание разорванным ровно так же. Чинится он ДО
+            // планирования — части сшиваются в одну запись (`mergeSplitChain` на ручных путях), и
+            // дальше планировщик режет уже целое от нового места. Правило здесь — детектор: если
+            // сработало, значит какой-то путь снова кладёт части врозь.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed, chainId }]. `chainId` —
+            // маркер цепочки («ID первой части»); нет его ни у одной записи → правило не срабатывает
+            // (общая конвенция реестра: нет данных — нет обвинений).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var snap = snapFn() || [];
+                if (!snap.some(function(r) { return r && r.chainId != null && String(r.chainId) !== ''; })) return [];
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs), chain: String(r.chainId == null ? '' : r.chainId) };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) return;   // запись вне снимка — цепочки по ней не знаем
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                var rows = Object.keys(byId).map(function(k) { return byId[k]; })
+                    .filter(function(r) { return isFinite(r.ts); });
+                // Порядок на станке — по времени старта, как читает очередь экран (#3923).
+                var bySlitter = {};
+                rows.forEach(function(r) { (bySlitter[r.sid] = bySlitter[r.sid] || []).push(r); });
+                Object.keys(bySlitter).forEach(function(sid) {
+                    bySlitter[sid].sort(function(a, b) { return a.ts - b.ts; });
+                });
+                var out = [];
+                Object.keys(bySlitter).forEach(function(sid) {
+                    var seq = bySlitter[sid];
+                    var pos = {};
+                    seq.forEach(function(r, i) { pos[r.id] = i; });
+                    var chains = {};
+                    seq.forEach(function(r) {
+                        if (r.chain === '') return;
+                        (chains[r.chain] = chains[r.chain] || []).push(r);
+                    });
+                    Object.keys(chains).forEach(function(chainId) {
+                        var parts = chains[chainId];
+                        if (parts.length < 2) return;
+                        for (var i = 1; i < parts.length; i++) {
+                            var prev = parts[i - 1], cur = parts[i];
+                            var gap = pos[cur.id] - pos[prev.id];
+                            if (gap === 1) continue;   // части идут подряд — работа непрерывна
+                            var between = seq.slice(pos[prev.id] + 1, pos[cur.id]).map(function(r) { return r.id; });
+                            out.push(ppViolation('CHAIN_CONTIGUOUS', cur.id,
+                                'части задания разорваны: между ' + prev.id + ' и ' + cur.id + ' вклинилось: '
+                                + (between.join(', ') || '?'),
+                                { slitterId: sid, headCutId: String(prev.id), chainId: String(chainId),
+                                  betweenIds: between.map(String),
+                                  dayKey: dayOfTs(cur.ts) }));
+                        }
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул

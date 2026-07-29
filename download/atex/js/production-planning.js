@@ -2952,6 +2952,86 @@
             }
         },
         {
+            id: 'CHAIN_CONTIGUOUS',
+            tz: '§15 (#4488)',
+            actor: 'any',       // хвост нельзя оставлять ни автоматике, ни человеку
+            enforce: false,     // отбрасывать нечего: разрыв чинится СШИВАНИЕМ задания, а не отказом
+            title: 'Части задания, разорванного по дням, идут непрерывно: между ними нет чужих заданий',
+            // ЧТО ПРОВЕРЯЕТСЯ. Задание, не влезшее в смену, живёт цепочкой записей (голова +
+            // продолжения, общий «ID первой части»). Работа непрерывна: продолжение начинается там,
+            // где кончилась голова, — следующим на том же станке. Если между частями встало чужое
+            // задание, работа разорвана: станок перезаправляют туда-обратно, а оператор видит
+            // огрызок в один проход (issue #4488: голова в 1 проход на 3-м месте дня, 11 проходов —
+            // назавтра).
+            //
+            // ПОЧЕМУ enforce:false. Выбросить операцию нельзя: разрыв — свойство раскладки, а не
+            // одной записи; отказ оставил бы задание разорванным ровно так же. Чинится он ДО
+            // планирования — части сшиваются в одну запись (`mergeSplitChain` на ручных путях), и
+            // дальше планировщик режет уже целое от нового места. Правило здесь — детектор: если
+            // сработало, значит какой-то путь снова кладёт части врозь.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed, chainId }]. `chainId` —
+            // маркер цепочки («ID первой части»); нет его ни у одной записи → правило не срабатывает
+            // (общая конвенция реестра: нет данных — нет обвинений).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var snap = snapFn() || [];
+                if (!snap.some(function(r) { return r && r.chainId != null && String(r.chainId) !== ''; })) return [];
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs), chain: String(r.chainId == null ? '' : r.chainId) };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) return;   // запись вне снимка — цепочки по ней не знаем
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                var rows = Object.keys(byId).map(function(k) { return byId[k]; })
+                    .filter(function(r) { return isFinite(r.ts); });
+                // Порядок на станке — по времени старта, как читает очередь экран (#3923).
+                var bySlitter = {};
+                rows.forEach(function(r) { (bySlitter[r.sid] = bySlitter[r.sid] || []).push(r); });
+                Object.keys(bySlitter).forEach(function(sid) {
+                    bySlitter[sid].sort(function(a, b) { return a.ts - b.ts; });
+                });
+                var out = [];
+                Object.keys(bySlitter).forEach(function(sid) {
+                    var seq = bySlitter[sid];
+                    var pos = {};
+                    seq.forEach(function(r, i) { pos[r.id] = i; });
+                    var chains = {};
+                    seq.forEach(function(r) {
+                        if (r.chain === '') return;
+                        (chains[r.chain] = chains[r.chain] || []).push(r);
+                    });
+                    Object.keys(chains).forEach(function(chainId) {
+                        var parts = chains[chainId];
+                        if (parts.length < 2) return;
+                        for (var i = 1; i < parts.length; i++) {
+                            var prev = parts[i - 1], cur = parts[i];
+                            var gap = pos[cur.id] - pos[prev.id];
+                            if (gap === 1) continue;   // части идут подряд — работа непрерывна
+                            var between = seq.slice(pos[prev.id] + 1, pos[cur.id]).map(function(r) { return r.id; });
+                            out.push(ppViolation('CHAIN_CONTIGUOUS', cur.id,
+                                'части задания разорваны: между ' + prev.id + ' и ' + cur.id + ' вклинилось: '
+                                + (between.join(', ') || '?'),
+                                { slitterId: sid, headCutId: String(prev.id), chainId: String(chainId),
+                                  betweenIds: between.map(String),
+                                  dayKey: dayOfTs(cur.ts) }));
+                        }
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
@@ -7086,27 +7166,39 @@
         return out;
     }
 
-    // #4357: надо ли ОТВЯЗАТЬ запись от цепочки дробления при ручном переносе 🗓.
-    // Для планировщика цепочка «голова + продолжения по дням» — ОДНО логическое задание:
-    // mergeContinuationChains схлопывает её в копию ГОЛОВЫ (её станок, её день) с суммой проходов, а
-    // сегменты пере-нарезает упаковщик. Значит перенесённого ПРОДОЛЖЕНИЯ во входе плана нет вообще:
-    // пересборка, которой завершается перенос, восстанавливает его от головы — станок и день,
-    // выбранные оператором, стираются (issue #4357: хвост 640812 уехал на Станок 3, пересборка
-    // вернула его на Станок 1/23.07, а тост уже сказал «перенесено»). Замки переноса (pinCutIds /
-    // weightPositionCutIds / machineLockByCut) тут бессильны — они адресуются по id сегмента,
-    // которого во входе нет.
-    // Поэтому продолжение при переносе ОТВЯЗЫВАЕМ: пишем ему «ID первой части» = свой id — дальше
-    // это самостоятельное задание на СВОИ проходы (голова остаётся со своими), и перенос доживает до
-    // конца. Цена честная: работа больше не непрерывна — два задания, две наладки, значки ←/→ между
-    // ними исчезают. ГОЛОВУ не отвязываем: её перенос двигает всю цепочку — это и так работает.
-    // → id записи, которой надо проставить маркер, либо null (не сегмент / голова / нет цепочки).
-    function daySplitDetachCutId(cuts, cutId) {
+    // #4357 (отменено #4488): отвязка перенесённого сегмента от цепочки. Правило ТЗ §15 «хвостов не
+    // остаётся» сделало её вредной: она превращала одну работу в два задания с двумя наладками.
+    // Вместо неё перенос СШИВАЕТ части (`mergeSplitChain`) и планирует вставку целого задания.
+
+    // #4488: очередь ДНЯ, в котором стои́т задание, — записи того же станка и того же дня по времени
+    // старта (порядок, который читает экран, #3923). Нужна после сшивания частей: список дня,
+    // с которым пришли ↑↓/перетаскивание, к этому моменту устарел (записей стало меньше).
+    // Чистая, вход не мутирует. Нет задания/дня — пустой массив.
+    function dayQueueOf(cuts, cut) {
+        if (!cut) return [];
+        var sid = String((cut.slitter && cut.slitter.id) == null ? '' : cut.slitter.id);
+        var dayKey = planDateDayKey(cut.planDate);
+        if (dayKey == null) return [];
+        return (cuts || []).filter(function(c) {
+            if (!c) return false;
+            var csid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            return csid === sid && planDateDayKey(c.planDate) === dayKey;
+        }).sort(function(a, b) { return Number(a.planDate) - Number(b.planDate); });
+    }
+
+    // #4488: ЧАСТИ задания, разорванного по дням, — записи его цепочки в порядке дней (первая —
+    // голова). Одна запись (задание целое) → массив из неё же; нет такой записи → пусто. Чистая,
+    // вход не мутирует. По ней перенос понимает, что тащат часть, и сшивает задание перед вставкой
+    // (`mergeSplitChain`), а диалог переноса говорит оператору, сколько частей поедет вместе.
+    function splitChainPartsOf(cuts, cutId) {
         var id = String(cutId == null ? '' : cutId);
-        if (id === '') return null;
-        var chain = chainRecordIdsForCut(cuts, id);
-        if (!chain || chain.length < 2) return null;   // не разорвано по дням — отвязывать нечего
-        if (String(chain[0]) === id) return null;      // голова — переносится вся цепочка
-        return id;
+        if (id === '') return [];
+        var byId = {};
+        (cuts || []).forEach(function(c){ if (c && c.id != null) byId[String(c.id)] = c; });
+        if (!byId[id]) return [];
+        var chain = chainRecordIdsForCut(cuts || [], id) || [];
+        if (chain.length < 2) return [byId[id]];
+        return chain.map(function(x){ return byId[String(x)]; }).filter(Boolean);
     }
 
     // #4294: id записей заданий, запланированных РАНЬШЕ базы «С» (в прошлые рабочие дни), которые НЕ
@@ -11275,7 +11367,8 @@
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
-        daySplitDetachCutId: daySplitDetachCutId,       // #4357: перенос сегмента — отвязать от цепочки
+        splitChainPartsOf: splitChainPartsOf,           // #4488: части задания, разорванного по дням
+        dayQueueOf: dayQueueOf,                         // #4488: очередь дня задания (после сшивания частей)
         cutsBeforeWindowToKeep: cutsBeforeWindowToKeep, // #4294: задания прошлых дней (раньше «С») — не пере-планировать
         excludedCutBlockedRanges: excludedCutBlockedRanges, // #4434 п.2: время станка под исключённые из раскладки задания
         prevSetupBeforeWindow: prevSetupBeforeWindow,   // #4300/#4312: заправка станка из его последнего задания раньше «С» (нет дыры после первого задания)
@@ -14691,15 +14784,17 @@
         content.appendChild(el('p', { class: 'atex-pp-hint',
             text: 'Задание № ' + (formatCutNumber(cut.number) || cut.id) + ' · ' +
                 (cut.materialName || (cut.materialId ? '#' + cut.materialId : '—')) }));
-        // #4357: это ПРОДОЛЖЕНИЕ разорванного по дням задания — предупреждаем ДО переноса: перенести
-        // кусок отдельно можно, только сделав его самостоятельным заданием (иначе пересборка вернёт
-        // его к голове — см. daySplitDetachCutId). Голове такого предупреждения не даём: она тянет
-        // за собой всю цепочку.
-        if (daySplitDetachCutId(this.cuts || [], cut.id)) {
+        // #4488: это часть задания, разорванного по дням, — говорим ДО переноса, что поедет ЦЕЛОЕ.
+        // Части сшиваются в одну запись перед планированием вставки (ТЗ §15: хвостов не остаётся),
+        // поэтому неважно, за какую часть тянут. Прежнее поведение (#4357: перенесённый сегмент
+        // становился ОТДЕЛЬНЫМ заданием со своей наладкой) отменено этим правилом.
+        var chainParts4488 = splitChainPartsOf(this.cuts || [], cut.id);
+        if (chainParts4488.length > 1) {
+            var otherRuns4488 = chainParts4488.reduce(function(sum, c) { return sum + (stripNum(c.plannedRuns) || 0); }, 0);
             content.appendChild(el('p', { class: 'atex-pp-hint atex-pp-move-detach-warn',
-                text: '⚠ Это продолжение задания, разорванного по дням. При переносе оно станет '
-                    + 'ОТДЕЛЬНЫМ заданием на свои проходы (своя наладка, связь ←/→ с головой пропадёт). '
-                    + 'Чтобы перенести задание целиком — переносите его первую часть.' }));
+                text: 'ℹ Задание разорвано по дням на ' + chainParts4488.length + ' части. При переносе они '
+                    + 'соберутся в ОДНО задание (' + otherRuns4488 + ' проходов) и поедут вместе; '
+                    + 'если целое не влезет в день, планировщик разрежет его заново от нового места.' }));
         }
 
         // #3631: произвольный день — обычный календарный input type=date (без ограничений).
@@ -14796,7 +14891,36 @@
     // отдельной «Очередности» нет. Фиксация (если отмечена) пишется _m_set.
     // Если цель вне фильтра [С; По] — расширяем диапазон (в нужную сторону), чтобы
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
+    // #4488: ПЕРЕД планированием вставки задание собирается из частей (ТЗ §15: хвостов не остаётся).
+    // Тащат любую часть — едет целое: mergeSplitChain сливает цепочку в перетаскиваемую запись, и
+    // дальше идёт обычный перенос уже цельного задания. Сшивать нечего → сразу обычный путь.
     AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId, withinSlitter) {
+        var self = this;
+        if (this.busy) return Promise.resolve(false);
+        if (!cut) return Promise.resolve(false);
+        if (cutIsStarted(cut)) { this.notify('Начатое задание нельзя перенести', 'info'); return Promise.resolve(false); }
+        var moveId = String(cut.id);
+        // Вызовы через прототип: метод зовут и на самодельных объектах (`prototype.moveCutToDay.call(self)`
+        // в тестах и deep-link), у которых цепочки прототипов нет.
+        var moveWhole = AtexProductionPlanning.prototype.moveWholeCutToDay;
+        if (splitChainPartsOf(this.cuts || [], moveId).length < 2) {
+            return moveWhole.call(this, cut, targetDateStr, position, fix, targetSlitterId, withinSlitter);
+        }
+        var stitch = (typeof this.mergeSplitChain === 'function')
+            ? this.mergeSplitChain(moveId)
+            : AtexProductionPlanning.prototype.mergeSplitChain.call(this, moveId);
+        return stitch.then(function(stitched) {
+            // Сшивание перечитало очередь — берём свежую запись (объект `cut` из прежней загрузки устарел).
+            var fresh = (self.cuts || []).filter(function(c) { return c && String(c.id) === moveId; })[0];
+            if (!fresh && stitched) {
+                self.notify('Задание не найдено после сборки из частей', 'error');
+                return false;
+            }
+            return moveWhole.call(self, fresh || cut, targetDateStr, position, fix, targetSlitterId, withinSlitter);
+        });
+    };
+
+    AtexProductionPlanning.prototype.moveWholeCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId, withinSlitter) {
         var self = this;
         this._ppOp = 'moveCutToDay';   // #4177/#4480: трасса обязана называть АВТОРА записи
         if (this.busy) return Promise.resolve(false);
@@ -14845,11 +14969,10 @@
             if (String(csid == null ? '' : csid) !== sidStr) return false;
             return planDateDayKey(c.planDate) === targetDayKey;
         });
-        // #4357: переносим СЕГМЕНТ разорванного по дням задания (продолжение) — отвязываем его от
-        // цепочки, иначе перенос стирает пересборка: планировщик схлопывает цепочку в голову и
-        // пере-нарезает сегменты заново (daySplitDetachCutId, движок). Голова → null (её перенос
-        // двигает всю цепочку). Нет реквизита «ID первой части» → отвязать нечем (легаси-база).
-        var detachId = firstPartReqId ? daySplitDetachCutId(this.cuts || [], cut.id) : null;
+        // #4488: отвязки сегмента (#4357) здесь больше нет — цепочку сшивает `moveCutToDay` ДО этого
+        // места, и сюда приходит цельное задание. Если запись всё же осталась частью (сшить не смогли
+        // — например, часть уже начата), маркер не трогаем: разрывать связь молча нельзя.
+        var detachId = null;
         var plan = planMoveSequences(cut.id, dayCuts, position);
         // #3923: желаемый порядок дня → плейсхолдер-planStart. Точные значения не важны — важен
         // ПОРЯДОК; autoSequenceQueue(preserveOrder) ниже переупакует и целевой, и исходный день
@@ -14932,6 +15055,11 @@
             // (при смене станка) исходный. Прочие станки не трогаем; задания между станками не кидаем
             // (buildSequenceOps замыкает каждое задание на свой станок при scope >1).
             var moveScope = {};
+            // #4488 (ТЗ §15): задание, которое двигал ОПЕРАТОР, встаёт в выбранный день ЦЕЛИКОМ —
+            // независимо от положения в дне и от галки «Зафиксировать». Соседи уезжают на следующий
+            // день сами (сначала незафиксированные, затем 🔒); само перенесённое рвётся в последнюю
+            // очередь — когда вытеснять больше некого.
+            moveScope.wholeDayCutIds = [String(cut.id)];
             // #4390: «Зафиксировать» → задание ложится на ВЫБРАННЫЙ день ЖЁСТКО, точным упаковщиком.
             // Мягкий замок дня «по весу» (weightPositionCutIds → dayLockByCut) держит задание ПОДВИЖНЫМ,
             // а его целевой день проверяет ЭВРИСТИКОЙ ёмкости слоя размещения (prefixDayOffset/capacityMin),
@@ -18205,7 +18333,7 @@
     // обмен ничего не даст, подсказываем «Упорядочить».
     //   sameDayCuts — резки дня в порядке показа (по planStart);
     //   index, dir  — позиция и направление (-1 вверх / +1 вниз).
-    AtexProductionPlanning.prototype.moveCutInDay = function(sameDayCuts, index, dir) {
+    AtexProductionPlanning.prototype.moveCutInDay = function(sameDayCuts, index, dir, alreadyStitched) {
         var self = this;
         this._ppOp = 'moveCutInDay';   // #4177/#4480
         var arr = sameDayCuts || [];
@@ -18213,6 +18341,22 @@
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return Promise.resolve(false);
         var a = arr[index], b = arr[target];
         if (!a || !b) return Promise.resolve(false);
+        // #4488: перестановка — тоже перемещение: если задание разорвано по дням, между его частями
+        // встанет сосед. Сшиваем ДО обмена и повторяем действие уже по свежей очереди дня (ТЗ §15).
+        if (!alreadyStitched) {
+            var stitchIds = [a, b].filter(function(c) { return splitChainPartsOf(self.cuts || [], c.id).length > 1; })
+                .map(function(c) { return String(c.id); });
+            if (stitchIds.length) {
+                return stitchIds.reduce(function(chain, id) {
+                    return chain.then(function() { return self.mergeSplitChain(id); });
+                }, Promise.resolve()).then(function() {
+                    var fresh = dayQueueOf(self.cuts || [], a);
+                    var i = fresh.map(function(c) { return String(c.id); }).indexOf(String(a.id));
+                    if (i < 0) { self.render(); return false; }
+                    return self.moveCutInDay(fresh, i, dir, true);
+                });
+            }
+        }
         // #4392: порядок в очереди (↑↓) МЕНЯЕМ и для зафиксированных заданий — фиксация держит ДЕНЬ,
         // а не позицию внутри дня. Перестановка = обмен planStart в пределах ТОГО ЖЕ дня (ниже),
         // день сохраняется, замок не нарушается. Прежний запрет (#3508 п.3) снят.
@@ -18273,9 +18417,15 @@
     // Не объединяем: начатые (#4381), задания замороженных дней (#4326), завершённые, складские
     // (без заказа) и уже единую цепочку дробления (общий «ID первой части»).
     // → Promise<число слитых записей>; 0 — сливать нечего (идемпотентно).
-    AtexProductionPlanning.prototype.mergeSameOrderTasks = function() {
+    // #4488: opts.groups — ГОТОВЫЕ группы слияния вместо `mergeableOrderGroups` (так сюда приходит
+    // сшивание цепочки дробления, `mergeSplitChain`): та же машинерия — партии, обеспечения,
+    // сумма проходов, удаление доноров, — но состав группы решает вызывающий.
+    // opts.headFields — дополнительные поля в `_m_set` головы (маркер цепочки, замок).
+    // opts.label(n) — своя фраза оператору вместо «Объединено заданий одного заказа».
+    AtexProductionPlanning.prototype.mergeSameOrderTasks = function(opts) {
         var self = this;
-        this._ppOp = 'mergeSameOrderTasks';   // #4177: контекст трассы записей
+        var forcedGroups = opts && opts.groups;
+        this._ppOp = forcedGroups ? 'mergeSplitChain' : 'mergeSameOrderTasks';   // #4177: контекст трассы записей
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!cutMeta || !fbMeta || !supMeta) return Promise.resolve(0);
         // Кого объединять нельзя (см. выше).
@@ -18290,7 +18440,7 @@
             var off = dayOffsetFromBase(c.planDate, baseMs4424);
             if (off != null && off < 0) skipIds[String(c.id)] = 1;
         });
-        var groups = mergeableOrderGroups(this.cuts || [], { skipIds: skipIds });
+        var groups = forcedGroups || mergeableOrderGroups(this.cuts || [], { skipIds: skipIds });
         if (!groups.length) return Promise.resolve(0);
         var cutById = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutById[String(c.id)] = c; });
@@ -18468,6 +18618,9 @@
                             fields['t' + durReqId] = dur > 0 ? String(Math.ceil(dur)) : '';
                         }
                         if (timingReqId) fields['t' + timingReqId] = cutTimingDetails(runLength, g.runs, self.opTimes, !!head.isFoil);
+                        // #4488: поля, которые задаёт вызывающий (маркер цепочки на себя, замок).
+                        var extra = (opts && opts.headFields) || null;
+                        if (extra) Object.keys(extra).forEach(function(k) { fields[k] = extra[k]; });
                         return self.post('_m_set/' + encodeURIComponent(g.headId) + '?JSON', fields).then(function() {
                             return Object.keys(byWidth).reduce(function(uChain, w) {
                                 var b = byWidth[w];
@@ -18487,17 +18640,71 @@
                 });
             });
         }, Promise.resolve());
+        var label = (opts && typeof opts.label === 'function') ? opts.label : null;
         return chain.then(function() {
             if (!mergedCount) return 0;
-            console.log('[pp] 🔗 #4424 объединено заданий: ' + mergedCount + ' — ' + report.join('; ')
+            var what = label ? label(mergedCount) : ('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')');
+            console.log('[pp] 🔗 ' + (forcedGroups ? '#4488 сшито частей задания: ' : '#4424 объединено заданий: ')
+                + mergedCount + ' — ' + report.join('; ')
                 + (foldedSupplies ? ('; #4483 связей влито в существующие: ' + foldedSupplies) : ''));
-            self.notify('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')'
-                + (foldedSupplies ? (' · связей с позициями влито: ' + foldedSupplies) : ''), 'success');
+            self.notify(what + (foldedSupplies ? (' · связей с позициями влито: ' + foldedSupplies) : ''), 'success');
             return self.reload().then(function() { return mergedCount; });
         }).catch(function(err) {
-            console.error('[pp] ❌ #4424 объединение заданий прервано:', err && err.message, err && err.stack);
-            self.notify('Не удалось объединить задания одного заказа: ' + (err && err.message || err), 'error');
+            console.error('[pp] ❌ ' + (forcedGroups ? '#4488 сшивание задания прервано:' : '#4424 объединение заданий прервано:'),
+                err && err.message, err && err.stack);
+            self.notify((forcedGroups ? 'Не удалось собрать задание из частей: ' : 'Не удалось объединить задания одного заказа: ')
+                + (err && err.message || err), 'error');
             return self.reload().then(function() { return mergedCount; });
+        });
+    };
+
+    // #4488: СШИТЬ ЗАДАНИЕ ИЗ ЧАСТЕЙ перед тем, как планировать его вставку (ТЗ §15).
+    // Задание, разорванное по дням, живёт цепочкой записей (голова + продолжения, общий «ID первой
+    // части»). Ручной перенос двигает ОДНУ запись — и хвост остаётся в прежнем дне: оператор тащит
+    // задание, а уезжает огрызок (боевая ateh: голова в 1 проход встала на 3-е место, 11 проходов
+    // остались назавтра). Планировщик пересобрать цепочку уже не мог — перенос ставит на неё замок.
+    // Поэтому ПЕРЕД планированием вставки все части сливаются в ОДНУ запись:
+    //   • приёмник — та запись, КОТОРУЮ ТАЩАТ (она и поедет на выбранное место);
+    //   • проходы суммируются, «Длительность»/«Тайминг» пересчитываются;
+    //   • «Партии ГП» и «Обеспечения» частей сливаются (#4424/#4483), записи-части удаляются;
+    //   • «ID первой части» приёмника указывает на него самого — задание снова цельное;
+    //   • замок 🔒 с любой из частей переходит на результат (иначе правило не сработало бы там, где
+    //     оно и понадобилось: перенос сам ставит замок на перенесённое).
+    // Сшивать нечего (задание целое) → 0 и ни одной записи в БД (идемпотентно).
+    // → Promise<число влитых частей>.
+    AtexProductionPlanning.prototype.mergeSplitChain = function(cutId) {
+        var self = this;
+        var cutMeta = this.meta && this.meta.cut;
+        if (!cutMeta) return Promise.resolve(0);
+        var id = String(cutId == null ? '' : cutId);
+        if (id === '') return Promise.resolve(0);
+        var partRecords = splitChainPartsOf(this.cuts || [], id);
+        if (partRecords.length < 2) return Promise.resolve(0);
+        var parts = partRecords.map(function(c) { return String(c.id); });
+        var cutById = {};
+        partRecords.forEach(function(c) { cutById[String(c.id)] = c; });
+        // Начатую часть не трогаем (#4381): её проходы уже идут на станке, слить их некуда.
+        var started = parts.filter(function(p) { return cutIsStarted(cutById[p]); });
+        if (started.length) {
+            this.notify('Задание уже начато частями — сшить нельзя (' + started.join(', ') + ')', 'info');
+            return Promise.resolve(0);
+        }
+        var donors = parts.filter(function(p) { return p !== id; });
+        var runs = parts.reduce(function(sum, p) { return sum + (stripNum(cutById[p] && cutById[p].plannedRuns) || 0); }, 0);
+        var anyFixed = parts.some(function(p) { return !!(cutById[p] && cutById[p].fixed); });
+        var head = cutById[id] || {};
+        var headFields = {};
+        var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
+        if (firstPartReqId) headFields['t' + firstPartReqId] = id;   // цепочки больше нет — задание цельное
+        var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
+        if (fixedReqId && anyFixed && !head.fixed) headFields['t' + fixedReqId] = '1';
+        var mergeFn = (typeof this.mergeSameOrderTasks === 'function')
+            ? this.mergeSameOrderTasks.bind(this) : AtexProductionPlanning.prototype.mergeSameOrderTasks.bind(this);
+        return mergeFn({
+            groups: [{ headId: id, memberIds: [id].concat(donors), runs: runs,
+                       orderId: String(head.orderId == null ? '' : head.orderId) }],
+            headFields: headFields,
+            label: function(n) { return 'Задание собрано из частей: ' + (n + 1) + ' → 1 (проходов ' + runs + ')'; }
         });
     };
 
@@ -19300,8 +19507,8 @@
         // упаковщик резервирует под него место в этом дне, и соседи уезжают на следующий день сами.
         // День берём из того же плейсхолдер-якоря, что и замок (dayAnchorByCut → смещение от «С»).
         var wholeDayByCut = {};
-        if (moveScope) {
-            [].concat(moveScope.pinCutIds || [], moveScope.weightPositionCutIds || []).forEach(function(id) {
+        if (moveScope && moveScope.wholeDayCutIds && moveScope.wholeDayCutIds.length) {
+            moveScope.wholeDayCutIds.forEach(function(id) {
                 var off = dayAnchorByCut[String(id)];
                 if (off != null) wholeDayByCut[String(id)] = off;
             });
@@ -19559,11 +19766,14 @@
                 },
                 // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
                 // и в каком порядке (операции несут только изменившиеся записи, #3427).
+                // #4488: chainId («ID первой части») — по нему правило CHAIN_CONTIGUOUS видит, какие
+                // записи суть части одного задания и не разъехались ли они по станку.
                 planSnapshot: function(){
                     return (cuts || []).filter(function(c){ return c && c.id != null; }).map(function(c){
                         return { id: String(c.id),
                                  slitterId: String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id),
-                                 planStartTs: Number(c.planDate), fixed: !!c.fixed };
+                                 planStartTs: Number(c.planDate), fixed: !!c.fixed,
+                                 chainId: String(c.firstPartId == null ? '' : c.firstPartId).trim() };
                     });
                 },
                 // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
@@ -19710,10 +19920,20 @@
     // #4392: зафиксированные (🔒) — НЕ «стены»: их можно переставлять и тащить сквозь них (день держит
     // фиксация, перестановка меняет planStart в пределах того же дня). «Стена» осталась у начатого (#4381).
     //   dayCuts — резки дня в порядке показа (по planStart); dragId — перетаскиваемое; targetId — на кого бросили.
-    AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId) {
+    AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId, alreadyStitched) {
         var self = this;
         this._ppOp = 'reorderCutInDay';   // #4177/#4480
         if (this.busy) return Promise.resolve(false);
+        // #4488: перетаскивание разорванного задания — сперва сшиваем его части (ТЗ §15), затем
+        // переставляем уже целое по свежей очереди дня.
+        if (!alreadyStitched && splitChainPartsOf(this.cuts || [], dragId).length > 1) {
+            var dragged = (this.cuts || []).filter(function(c) { return c && String(c.id) === String(dragId); })[0];
+            return this.mergeSplitChain(dragId).then(function() {
+                var fresh = dayQueueOf(self.cuts || [], dragged);
+                if (!fresh.length) { self.render(); return false; }
+                return self.reorderCutInDay(fresh, dragId, targetId, true);
+            });
+        }
         var arr = (dayCuts || []).slice();
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey) { self.notify('Не найден реквизит даты резки', 'error'); return Promise.resolve(false); }

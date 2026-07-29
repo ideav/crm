@@ -78,22 +78,22 @@ function placeOf(ops, id) {
              runs: Number(u.plannedRuns) };
 }
 
-// ── 1) Правило отвязки — daySplitDetachCutId ──────────────────────────────────────────────────────
+// ── 1) Части задания — splitChainPartsOf (#4488 заменил отвязку сшиванием) ────────────────────────
 var chainCuts = [seg('640784', '1277', 0, 109, '640784', true), seg('640812', '1277', 1, 49, '640784', false)];
-assert(P.daySplitDetachCutId(chainCuts, '640812') === '640812',
-    '#4357: ПРОДОЛЖЕНИЕ цепочки при переносе отвязывается (маркер = свой id)');
-assert(P.daySplitDetachCutId(chainCuts, '640784') === null,
-    '#4357: ГОЛОВА не отвязывается — её перенос двигает всю цепочку');
-assert(P.daySplitDetachCutId([filler('F1', 0)], 'F1') === null,
-    '#4357: целое (не разорванное) задание отвязывать нечего');
-assert(P.daySplitDetachCutId(chainCuts, '') === null && P.daySplitDetachCutId([], 'X') === null,
-    '#4357: пустой ввод — null (без исключений)');
-// Цепочка из трёх дней: середина и хвост — оба продолжения.
+assert(P.splitChainPartsOf(chainCuts, '640812').map(function (c) { return c.id; }).join(',') === '640784,640812',
+    '#4488: по ЛЮБОЙ части видны все части задания в порядке дней (голова первой)');
+assert(P.splitChainPartsOf(chainCuts, '640784').length === 2,
+    '#4488: по голове — те же части (перенос двигает задание целиком)');
+assert(P.splitChainPartsOf([filler('F1', 0)], 'F1').length === 1,
+    '#4488: целое задание — одна часть, сшивать нечего');
+assert(P.splitChainPartsOf(chainCuts, '').length === 0 && P.splitChainPartsOf([], 'X').length === 0,
+    '#4488: пустой ввод — пусто (без исключений)');
+// Цепочка из трёх дней: части видны по любой из них.
 var chain3 = [seg('H', '1277', 0, 100, 'H', true), seg('C1', '1277', 1, 100, 'H', false),
               seg('C2', '1277', 2, 50, 'H', false)];
-assert(P.daySplitDetachCutId(chain3, 'C1') === 'C1' && P.daySplitDetachCutId(chain3, 'C2') === 'C2'
-    && P.daySplitDetachCutId(chain3, 'H') === null,
-    '#4357: в цепочке 3+ дней отвязываются и середина, и хвост, но не голова');
+assert(P.splitChainPartsOf(chain3, 'C1').length === 3 && P.splitChainPartsOf(chain3, 'C2').length === 3
+    && P.splitChainPartsOf(chain3, 'H').length === 3,
+    '#4488: в цепочке 3+ дней все три части видны по середине, хвосту и голове');
 
 // ── 2) Репро: пока сегмент в цепочке, перенос стирается пересборкой ───────────────────────────────
 // Запись хвоста УЖЕ переписана переносом на Станок 3 / 22.07 (день 0) — так её оставил moveCutToDay,
@@ -110,21 +110,20 @@ assert(P.daySplitDetachCutId(chain3, 'C1') === 'C1' && P.daySplitDetachCutId(cha
         '#4357 репро: и на прежний день 23.07 (день 1), за срок — перенос стёрт целиком — = день ' + (tail && tail.day));
 })();
 
-// ── 3) Фикс: отвязанный сегмент остаётся там, куда его перенесли ──────────────────────────────────
+// ── 3) Фикс #4488: цепочка СШИТА — планировщик получает одну запись там, куда её перенесли ────────
 (function () {
-    // Единственное отличие от репро — у хвоста СВОЙ «ID первой части» (это и пишет фикс).
-    var ops = resequence([seg('640784', '1277', 0, 109, '640784', true),
-                          seg('640812', '1282', 0, 49, '640812', true),
+    // Так выглядит вход после mergeSplitChain: одна запись (сумма проходов 109+49) на выбранном
+    // станке и дне, со своим «ID первой части». Отвязки сегмента (#4357) больше нет — она делала из
+    // одной работы два задания с двумя наладками (правило #4488: хвостов не остаётся).
+    var ops = resequence([seg('640812', '1282', 0, 158, '640812', true),
                           filler('F1', 0), filler('F2', 0)], MOVE_SCOPE);
-    var tail = placeOf(ops, '640812'), head = placeOf(ops, '640784');
-    assert(tail && tail.slitter === '1282',
-        '#4357 фикс: отвязанный хвост остаётся на выбранном станке 1282 (Станок 3) — = ' + (tail && tail.slitter));
-    assert(tail && tail.day === 0,
-        '#4357 фикс: и на выбранном дне 22.07 (день 0) — в срок, а не за сроком — = день ' + (tail && tail.day));
-    assert(tail && tail.runs === 49 && head && head.runs === 109,
-        '#4357 фикс: проходы не потерялись и не задвоились — голова 109, хвост 49 (было 158)');
-    assert(head && head.slitter === '1277' && head.day === 0,
-        '#4357 фикс: голова осталась на своём станке и дне (её перенос не трогали)');
+    var whole = placeOf(ops, '640812');
+    assert(whole && whole.slitter === '1282',
+        '#4488 фикс: слитое задание остаётся на выбранном станке 1282 (Станок 3) — = ' + (whole && whole.slitter));
+    assert(whole && whole.day === 0,
+        '#4488 фикс: и на выбранном дне 22.07 (день 0) — в срок, а не за сроком — = день ' + (whole && whole.day));
+    assert(whole && whole.runs > 0,
+        '#4488 фикс: проходы на месте (что не влезло в смену, планировщик отрежет от НОВОГО места)');
 })();
 
 // ── 4) Проводка: moveCutToDay пишет маркер отвязки именно продолжению ─────────────────────────────
@@ -133,11 +132,21 @@ assert(P.daySplitDetachCutId(chain3, 'C1') === 'C1' && P.daySplitDetachCutId(cha
     // «ID первой части»). reqIdByName ищет по ИМЕНИ реквизита.
     var cutMeta = { id: '1078', reqs: [
         { id: '1156', val: 'Слиттер' }, { id: '81530', val: 'Зафиксировано' },
-        { id: '196458', val: 'ID первой части' }] };
+        { id: '196458', val: 'ID первой части' }, { id: '16403', val: 'Кол-во резок план' }] };
+    // #4488: перенос части задания сшивает цепочку — стенду нужны метаданные «Партии ГП» и
+    // «Обеспечения» (их сливает та же машинерия) и чтение по F_U (в стенде записей нет).
+    var fbMeta = { id: '1081', reqs: [
+        { id: 'w', val: 'Ширина, мм' }, { id: 's', val: 'Кол-во полос' }, { id: 'r', val: 'Кол-во рулонов' },
+        { id: 'p', val: 'Кол-во план' }, { id: 'o', val: 'ID заказа' }] };
+    var supMeta = { id: '1077', reqs: [
+        { id: '1149', val: 'Метраж, м' }, { id: '15016', val: 'Партия ГП' }, { id: '16424', val: 'Кол-во рулонов' }] };
     function stubSelf(cuts) {
         var posts = [];
         return {
-            posts: posts, busy: false, cuts: cuts, meta: { cut: cutMeta },
+            posts: posts, busy: false, cuts: cuts,
+            meta: { cut: cutMeta, finishedBatch: fbMeta, supply: supMeta },
+            supplies: [], positionLengthById: {}, footageBySupply: {},
+            getJson: function () { return Promise.resolve([]); },
             filter: { date: '2026-07-22', dateTo: '2026-07-23' },
             slitters: [{ id: '1277', label: 'Станок 1' }, { id: '1282', label: 'Станок 3' }],
             daySettings: {}, changeTimes: {}, opTimes: {},
@@ -159,16 +168,22 @@ assert(P.daySplitDetachCutId(chain3, 'C1') === 'C1' && P.daySplitDetachCutId(cha
     var cuts = [seg('640784', '1277', 0, 109, '640784', true), seg('640812', '1277', 1, 49, '640784', false)];
 
     // (а) переносим ХВОСТ на Станок 3, 22.07, «в начало дня», с фиксацией — как в issue.
+    // #4488: вместо отвязки цепочка СШИВАЕТСЯ в перетаскиваемую запись, и едет целое задание.
     var selfTail = stubSelf(cuts);
     return Controller.prototype.moveCutToDay.call(selfTail, cuts[1], '2026-07-22', 'start', true, '1282', true)
         .then(function () {
             var f = fieldsOf(selfTail, '640812') || {};
             assert(f['t196458'] === '640812',
-                '#4357 проводка: продолжению записан «ID первой части» = свой id (отвязка) — = ' + f['t196458']);
-            assert(f['t1156'] === '1282',
-                '#4357 проводка: и новый станок 1282 в том же _m_set — = ' + f['t1156']);
-            assert(/отвязано от разорванного задания/.test(selfTail.lastNotify || ''),
-                '#4357 проводка: оператору сказано, что кусок стал отдельным заданием — «' + selfTail.lastNotify + '»');
+                '#4488 проводка: у слитого задания «ID первой части» = свой id — оно снова цельное — = ' + f['t196458']);
+            assert(f['t16403'] === '158',
+                '#4488 проводка: проходы сложены (109 + 49) — хвост подтянулся, а не остался — = ' + f['t16403']);
+            assert(selfTail.posts.some(function (p) { return p.path.indexOf('_m_del/640784') === 0; }),
+                '#4488 проводка: вторая часть удалена — двух записей одной работы не осталось');
+            // Целое (158 проходов) в смену не влезает — планировщик режет его от НОВОГО места и
+            // говорит об этом: сколько проходов встало на выбранный день и сколько уехало. Это и есть
+            // разница с прежним поведением: рвётся собранное задание, а не остаётся забытый хвост.
+            assert(/собрано из частей|перенесено|разорвано по дням/i.test(selfTail.lastNotify || ''),
+                '#4488 проводка: оператору сказано, что стало с заданием — «' + selfTail.lastNotify + '»');
 
             // (б) переносим ГОЛОВУ — маркер не трогаем (двигается вся цепочка).
             var cuts2 = [seg('640784', '1277', 0, 109, '640784', true), seg('640812', '1277', 1, 49, '640784', false)];
@@ -176,10 +191,10 @@ assert(P.daySplitDetachCutId(chain3, 'C1') === 'C1' && P.daySplitDetachCutId(cha
             return Controller.prototype.moveCutToDay.call(selfHead, cuts2[0], '2026-07-22', 'start', true, '1282', true)
                 .then(function () {
                     var fh = fieldsOf(selfHead, '640784') || {};
-                    assert(fh['t196458'] === undefined,
-                        '#4357 проводка: ГОЛОВЕ маркер отвязки не пишется (перенос двигает всю цепочку)');
+                    assert(fh['t196458'] === '640784' || fh['t196458'] === undefined,
+                        '#4488 проводка: у головы маркер цепочки остаётся её собственным id');
                     assert(!/отвязано/.test(selfHead.lastNotify || ''),
-                        '#4357 проводка: и про отвязку оператору не врём — «' + selfHead.lastNotify + '»');
+                        '#4488 проводка: об отвязке речи больше нет — «' + selfHead.lastNotify + '»');
 
                     // (в) целое задание (не цепочка) — тоже без отвязки.
                     var solo = [filler('F1', 0)];
