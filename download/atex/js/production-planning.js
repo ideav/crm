@@ -5943,6 +5943,46 @@
                 };
                 poolOrder.push(id);
             });
+            // #4491 (ТЗ §15): ХРАНИМЫЙ порядок 🔒-МОНОЛИТА по дням. Пара 🔒, стоявшая в дне ПОДРЯД,
+            // обязана остаться подряд — в том числе когда в этот день приезжает 🔒 из другого дня
+            // (её вытеснил потолок, #4467/#4488) и очередь §8 ставит её МЕЖДУ звеньями. Звенья
+            // берём по ХРАНИМОМУ плану (planDate + свой день), а не по очереди размещения:
+            // приезжая 🔒 звеном чужого монолита не является и вклиниваться в него не вправе.
+            // st.anchor — СВОЙ день задания (fixedDay мутируется при вытеснении, anchor нет).
+            var storedFixedSeqByDay = {};
+            poolOrder.forEach(function(id){
+                var st = state[id];
+                if (!st || !(st.cut && st.cut.fixed) || st.anchor == null) return;
+                (storedFixedSeqByDay[st.anchor] = storedFixedSeqByDay[st.anchor] || []).push(id);
+            });
+            Object.keys(storedFixedSeqByDay).forEach(function(d){
+                storedFixedSeqByDay[d].sort(function(a, b){
+                    var ta = Number(state[a].cut && state[a].cut.planDate);
+                    var tb = Number(state[b].cut && state[b].cut.planDate);
+                    if (!isFinite(ta) || ta <= 0) ta = Infinity;
+                    if (!isFinite(tb) || tb <= 0) tb = Infinity;
+                    return (ta - tb) || (state[a].idx - state[b].idx);
+                });
+            });
+            // #4491: звено монолита нельзя взять РАНЬШЕ своих предшественников по хранимому дню.
+            // Без этого первое звено уехавшего монолита выбирает очередь §8 — и пара, стоявшая
+            // подряд, приезжает в новый день в обратном порядке (боевое: Q → P вместо P → Q).
+            function monolithReady(id) {
+                var st = state[id];
+                if (!st || st.anchor == null) return true;
+                var seq = storedFixedSeqByDay[st.anchor] || [];
+                var i = seq.indexOf(String(id));
+                for (var k = 0; k < i; k++) {
+                    var pst = state[seq[k]];
+                    if (!pst) continue;
+                    if (pst.remaining > 0 || (pst.perPass <= 0 && !pst.placedEmpty)) return false;
+                }
+                return true;
+            }
+            function monolithFilter(ids) {
+                var ready = ids.filter(monolithReady);
+                return ready.length ? ready : ids;   // страховка от тупика: пусто — берём как есть
+            }
             function pending() {
                 return poolOrder.filter(function(id){ return state[id].remaining > 0 || (state[id].perPass <= 0 && !state[id].placedEmpty); });
             }
@@ -6124,18 +6164,39 @@
                 // задание встаёт ПЕРЕД блоком или ПОСЛЕ него, но не между его звеньями.
                 var headPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'start'; });
                 var tailPinToday = fixedToday.filter(function(id){ return pinDayPosOf(id) === 'end'; });
-                var fixedNow = fixedToday.filter(function(id){ return pinDayPosOf(id) !== 'end'; });
+                // #4491: среди 🔒 этого дня берём только те, чьи предшественники по монолиту уже
+                // размещены — иначе уехавшая пара приезжает в новый день в обратном порядке.
+                var fixedNow = monolithFilter(fixedToday.filter(function(id){ return pinDayPosOf(id) !== 'end'; }));
                 // #4464: МОНОЛИТ 🔒 — если только что легло зафиксированное задание этого дня, а
                 // следующее НЕразмещённое во входной очереди тоже 🔒 этого дня, берём именно его:
                 // вклиниваться между звеньями монолита нельзя (ТЗ §15).
                 var monolithNext = null;
                 if (!inProgress.length && prevPhysical && prevPhysical.fixed) {
-                    var pi = poolOrder.indexOf(String(prevPhysical.id));
-                    for (var mk = pi + 1; pi >= 0 && mk < poolOrder.length; mk++) {
-                        var mid = poolOrder[mk], mst = state[mid];
+                    // #4491: следующее звено берём из ХРАНИМОГО монолита ДНЯ последней 🔒, а не из
+                    // очереди §8. Иначе 🔒, приехавшая из другого дня, встаёт в очереди между
+                    // звеньями и рвёт пару, стоявшую подряд (боевой случай: X → C → Y вместо
+                    // X → Y → C). Звено берём, только если оно всё ещё в ТЕКУЩЕМ дне.
+                    var prevSt = state[String(prevPhysical.id)];
+                    var seq = (prevSt && prevSt.anchor != null) ? (storedFixedSeqByDay[prevSt.anchor] || []) : [];
+                    var si = seq.indexOf(String(prevPhysical.id));
+                    for (var mk = si + 1; si >= 0 && mk < seq.length; mk++) {
+                        var mid = seq[mk], mst = state[mid];
                         if (!mst || !(mst.remaining > 0 || (mst.perPass <= 0 && !mst.placedEmpty))) continue;
-                        if (mst.cut && mst.cut.fixed && mst.fixedDay === day) monolithNext = mid;
-                        break;   // смотрим ровно на СЛЕДУЮЩЕЕ неразмещённое звено очереди
+                        if (mst.fixedDay === day) monolithNext = mid;
+                        break;   // смотрим ровно на СЛЕДУЮЩЕЕ неразмещённое звено монолита
+                    }
+                    // #4491 (ИСКЛЮЧЕНИЕ): задание, которое оператор ПРЯМО СЕЙЧАС переносит в этот
+                    // день «по весу», вправе встроиться внутрь монолита — место ему выбрал §8 по
+                    // минимальному штрафу, и это решение человека. Порядок ОСТАЛЬНЫХ звеньев при
+                    // этом не меняется: монолит лишь расступается в одной точке.
+                    if (monolithNext != null && wholeDayIds.length) {
+                        var pi491 = poolOrder.indexOf(String(prevPhysical.id));
+                        for (var pk = pi491 + 1; pi491 >= 0 && pk < poolOrder.length; pk++) {
+                            var pid = poolOrder[pk], pst = state[pid];
+                            if (!pst || !(pst.remaining > 0 || (pst.perPass <= 0 && !pst.placedEmpty))) continue;
+                            if (wholeDayBy[pid] != null && pst.fixedDay === day) monolithNext = null;   // пропускаем перенесённое
+                            break;
+                        }
                     }
                 }
                 var yieldToFixedFree = false;
