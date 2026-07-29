@@ -424,6 +424,26 @@
     // функций из стека — чтобы источник ЛЮБОЙ записи (в т.ч. резки-сироты «нет связей») читался в
     // консоли без догадок; на ответе — созданный id, на отказе — код и текст ошибки.
     var _ppWriteSeq = 0;
+
+    // #4477/#4480: ЖЁСТКИЙ ПОТОЛОК ОДНОВРЕМЕННЫХ ЗАПИСЕЙ — в ЕДИНСТВЕННОЙ точке, через которую
+    // проходят ВСЕ команды `_m_*` (post ниже). `runWithConcurrency` остаётся планировщиком фазы,
+    // но правило «не больше MAX_PARALLEL_WRITES одновременно» держит семафор: только так его
+    // соблюдают и ВЛОЖЕННЫЕ пулы (фаза creates разбиения — пул сегментов внутри пула цепочек),
+    // иначе пятёрка пулов по пять дала бы 25 запросов разом.
+    // Слот занимается ПЕРЕД отправкой и освобождается на ответе (успех или отказ). Взаимной
+    // блокировки нет: запрос, держащий слот, не ждёт другого запроса — цепочка `post → then → post`
+    // освобождает слот до захвата следующего.
+    var _ppWriteSlots = 0, _ppWriteWaiting = [];
+    function ppAcquireWriteSlot() {
+        if (_ppWriteSlots < MAX_PARALLEL_WRITES) { _ppWriteSlots += 1; return Promise.resolve(); }
+        return new Promise(function(resolve) { _ppWriteWaiting.push(resolve); });
+    }
+    function ppReleaseWriteSlot() {
+        var next = _ppWriteWaiting.shift();
+        if (next) next();            // слот передаём ожидающему напрямую — счётчик не трогаем
+        else if (_ppWriteSlots > 0) _ppWriteSlots -= 1;
+    }
+
     function ppWriteKind(path) {
         var m = /_m_(\w+)\/([^?]*)/.exec(String(path == null ? '' : path));
         if (m) return { op: m[1], target: decodeURIComponent(m[2]) };
@@ -495,7 +515,12 @@
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
+    // #4477/#4480: отправка идёт ЧЕРЕЗ СЕМАФОР (ppAcquireWriteSlot) — потолок одновременных
+    // записей держится здесь, в единственной общей точке, а не в каждом пуле по отдельности.
+    // Трасса #4177 печатается ПОСЛЕ захвата слота: её номера обязаны отражать порядок реальной
+    // ОТПРАВКИ, иначе по логу не прочитать, сколько запросов шло разом (issue #4480 — лог).
     AtexProductionPlanning.prototype.post = function(path, params) {
+        var self = this;
         // #4402: пока висит предпросмотр «Упорядочить», очередь на экране — ПРОЕКЦИЯ в памяти
         // (включая синтетические id продолжений), а в БД прежний план. Любая запись в этот
         // момент пишется «не от того» состояния, поэтому запись закрыта наглухо: сперва
@@ -508,32 +533,36 @@
         Object.keys(params || {}).forEach(function(k) {
             if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
         });
-        var _trace = tracePpWrite(path, params, this);   // #4177: подробная трасса записи
-        return fetch(this.url(path), {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        }).then(function(resp) {
-            return resp.text().then(function(text) {
-                var result;
-                try { result = text ? JSON.parse(text) : {}; }
-                catch (e) {
-                    if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
-                    _trace.fail('parse', text.slice(0, 200));
-                    throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
-                }
-                // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
-                // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
-                // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
-                // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
-                if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
-                _trace.ok(result);
-                return result;
-            });
-        }, function(err) {
-            _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
-            throw err;
+        return ppAcquireWriteSlot().then(function() {
+            var _trace = tracePpWrite(path, params, self);   // #4177: подробная трасса записи
+            function release(v) { ppReleaseWriteSlot(); return v; }
+            function releaseThrow(e) { ppReleaseWriteSlot(); throw e; }
+            return fetch(self.url(path), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            }).then(function(resp) {
+                return resp.text().then(function(text) {
+                    var result;
+                    try { result = text ? JSON.parse(text) : {}; }
+                    catch (e) {
+                        if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
+                        _trace.fail('parse', text.slice(0, 200));
+                        throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
+                    }
+                    // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
+                    // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
+                    // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
+                    // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
+                    if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
+                    _trace.ok(result);
+                    return result;
+                });
+            }, function(err) {
+                _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
+                throw err;
+            }).then(release, releaseThrow);
         });
     };
 
@@ -2276,6 +2305,7 @@
     // больше не «захватывается» — автогенерация вольна двигать задание по времени и очереди.
     AtexProductionPlanning.prototype.setCutsFixed = function(cutIds, value, opts) {
         var self = this;
+        this._ppOp = 'setCutsFixed';   // #4177/#4480
         var o = opts || {};
         if (this.busy) return Promise.resolve(false);
         var ids = (cutIds || []).map(function(x) { return String(x); })
@@ -3601,6 +3631,7 @@
     // перенесённое задание не исчезло из очереди. Перенос двигает и зафиксированные.
     AtexProductionPlanning.prototype.moveCutToDay = function(cut, targetDateStr, position, fix, targetSlitterId, withinSlitter) {
         var self = this;
+        this._ppOp = 'moveCutToDay';   // #4177/#4480: трасса обязана называть АВТОРА записи
         if (this.busy) return Promise.resolve(false);
         if (!cut) return Promise.resolve(false);
         // #4381: начатое задание не переносим. Кнопка «🗓» у него убрана, но метод зовут и иначе
@@ -3944,6 +3975,7 @@
     // (#4294), поэтому досрочные, уехавшие в свой фактический день, пересборка не тронет.
     AtexProductionPlanning.prototype.settleDeviations = function(groups) {
         var self = this;
+        this._ppOp = 'settleDeviations';   // #4177/#4480
         if (this.busy) return Promise.resolve(false);
         var cutMeta = this.meta && this.meta.cut;
         if (!cutMeta || cutMeta.id == null) {
@@ -7008,6 +7040,7 @@
     //   index, dir  — позиция и направление (-1 вверх / +1 вниз).
     AtexProductionPlanning.prototype.moveCutInDay = function(sameDayCuts, index, dir) {
         var self = this;
+        this._ppOp = 'moveCutInDay';   // #4177/#4480
         var arr = sameDayCuts || [];
         var target = index + dir;
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return Promise.resolve(false);
@@ -7645,10 +7678,21 @@
                     var arr = demandByBatchSeg[bId] || (demandByBatchSeg[bId] = []);
                     (item.shares || []).forEach(function(sh, i) { arr[i] = round3((arr[i] || 0) + ((sh && sh.rolls) || 0)); });
                 });
-                var cChain = Promise.resolve();
+                // #4480: ВНУТРИ родительской цепочки записи тоже независимы — и трасса переноса
+                // показала, что именно этот хвост шёл строго по одному (WRITE#25…#30, пик 1),
+                // пока три другие фазы держали пятёрку. Зависимость здесь ровно одна: id
+                // продолжения возвращает `_m_new`, поэтому дети ждут его. Всё остальное — разные
+                // записи, и они идут пулом. Потолок соблюдается семафором в `post` (вложенные
+                // пулы суммарно не дают больше MAX_PARALLEL_WRITES).
+                //   шаг 1: правка резки A (её Обеспечения + Партии ГП) — один пул;
+                //   шаг 2: продолжения B — пул сегментов, внутри сегмента цепочка по новому id.
+                // Барьер между шагами оставлен намеренно: доля сегмента 0 у Обеспечения A должна
+                // быть записана до того, как появятся Обеспечения сегментов 1..N (иначе между
+                // запросами существует момент, когда покрытие позиции задвоено).
+                var aFixTasks = [];
                 // 2a) уменьшить Обеспечение A до доли сегмента 0.
                 shareBySupply.forEach(function(item) {
-                    cChain = cChain.then(function() {
+                    aFixTasks.push(function() {
                         var sh = item.shares[0] || { rolls: 0, footage: 0 };
                         var f = buildSupplyFieldsForFinishedBatch(supMeta, {
                             finishedBatchId: item.s.finishedBatchId,
@@ -7661,7 +7705,7 @@
                 // 2a-bis) #3433: «Партии ГП» резки A пересчитать под сегмент 0 — «Кол-во
                 // план» = полосы × проходов A (aRuns), «Кол-во рулонов» = спрос сегмента 0.
                 (parentStrips || []).forEach(function(st) {
-                    cChain = cChain.then(function() {
+                    aFixTasks.push(function() {
                         var seg0 = (demandByBatchSeg[String(st.id)] || [])[0] || 0;
                         var f = buildFinishedBatchFields(fbMeta, {
                             planned: finishedBatchRolls(st.qty, aRuns),
@@ -7671,10 +7715,11 @@
                         return self.post('_m_set/' + st.id + '?JSON', f);
                     });
                 });
-                // 2b) каждое продолжение B (сегменты 1..N).
-                crs.forEach(function(cr, ci) {
+                var cChain = runWithConcurrency(aFixTasks, MAX_PARALLEL_WRITES);
+                // 2b) каждое продолжение B (сегменты 1..N) — разные записи, идут параллельно.
+                var segTasks = crs.map(function(cr, ci) {
                     var segIdx = ci + 1;
-                    cChain = cChain.then(function() {
+                    return function() {
                         var cutFields = buildFields(cutReqIds, {
                             status: (parentCut && parentCut.status) || CUT_STATUSES[0],
                             slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
@@ -7726,44 +7771,52 @@
                                 var mf = {}; mf[mainKey] = String(ts2);
                                 return self.post('_m_save/' + bId + '?JSON', mf);
                             });
-                            (parentStrips || []).forEach(function(st) {
-                                bChain = bChain.then(function() {
-                                    // #3431/#3433: st.qty — полос за проход; «Кол-во план»
-                                    // продолжения = полосы × проходов сегмента (cr.plannedRuns);
-                                    // «Кол-во рулонов» = спрос этого сегмента; «ID заказа»
-                                    // копируется из родительской полосы.
-                                    var segDemand = (demandByBatchSeg[String(st.id)] || [])[segIdx] || 0;
-                                    var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
-                                        planned: finishedBatchRolls(st.qty, cr.plannedRuns),
-                                        rolls: segDemand > 0 ? segDemand : '',
-                                        orderId: st.orderId || '', active: '1' });
-                                    return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
-                                        var nid = r2 && (r2.obj || r2.id || r2.i);
-                                        if (nid) stripMap[String(st.id)] = String(nid);
-                                    });
-                                });
+                            // #4480: «Партии ГП» продолжения — независимые записи под одним
+                            // родителем bId: пулом. Барьер после них обязателен — «Обеспечения»
+                            // ниже вешаются на СОЗДАННУЮ партию (stripMap), которой до ответа нет.
+                            bChain = bChain.then(function() {
+                                return runWithConcurrency((parentStrips || []).map(function(st) {
+                                    return function() {
+                                        // #3431/#3433: st.qty — полос за проход; «Кол-во план»
+                                        // продолжения = полосы × проходов сегмента (cr.plannedRuns);
+                                        // «Кол-во рулонов» = спрос этого сегмента; «ID заказа»
+                                        // копируется из родительской полосы.
+                                        var segDemand = (demandByBatchSeg[String(st.id)] || [])[segIdx] || 0;
+                                        var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
+                                            planned: finishedBatchRolls(st.qty, cr.plannedRuns),
+                                            rolls: segDemand > 0 ? segDemand : '',
+                                            orderId: st.orderId || '', active: '1' });
+                                        return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
+                                            var nid = r2 && (r2.obj || r2.id || r2.i);
+                                            if (nid) stripMap[String(st.id)] = String(nid);
+                                        });
+                                    };
+                                }), MAX_PARALLEL_WRITES);
                             });
-                            shareBySupply.forEach(function(item) {
-                                bChain = bChain.then(function() {
-                                    var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
-                                    // #4158: даже при НУЛЕВОЙ доле (floor=0 и метраж→0) создаём
-                                    // связующее Обеспечение — иначе задание-продолжение не привязано
-                                    // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
-                                    if (item.s.positionId == null) return;
-                                    var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
-                                    var f = buildSupplyFieldsForFinishedBatch(supMeta, {
-                                        finishedBatchId: fb,
-                                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
-                                        active: '1', status: SUPPLY_STATUSES[0]
-                                    });
-                                    return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
-                                });
+                            // #4480: «Обеспечения» продолжения — тоже независимые записи, пулом.
+                            bChain = bChain.then(function() {
+                                return runWithConcurrency(shareBySupply.map(function(item) {
+                                    return function() {
+                                        var sh = item.shares[segIdx] || { rolls: 0, footage: 0 };
+                                        // #4158: даже при НУЛЕВОЙ доле (floor=0 и метраж→0) создаём
+                                        // связующее Обеспечение — иначе задание-продолжение не привязано
+                                        // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
+                                        if (item.s.positionId == null) return;
+                                        var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
+                                        var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                            finishedBatchId: fb,
+                                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
+                                            active: '1', status: SUPPLY_STATUSES[0]
+                                        });
+                                        return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
+                                    };
+                                }), MAX_PARALLEL_WRITES);
                             });
                             return bChain;
                         });
-                    });
+                    };
                 });
-                return cChain;
+                return cChain.then(function() { return runWithConcurrency(segTasks, MAX_PARALLEL_WRITES); });
             }).then(splitBump).catch(softSkip); };
         });
 
@@ -7789,14 +7842,18 @@
                     }
                 });
         
+                // #4480: порядок ступеней обязателен (обеспечения → партии ГП → сама резка:
+                // удаление родителя раньше детей даёт 409 «есть ссылки»), а ВНУТРИ ступени
+                // записи независимы — пулом. Было по одному запросу за раз.
                 // 1) удаляем обеспечения (отсутствующие — пропускаем, #3895)
-                var inner = Promise.resolve();
-                supplyIds.forEach(function(sid) {
-                    inner = inner.then(function() { return delMissingOk(sid); });
-                });
+                var inner = runWithConcurrency(supplyIds.map(function(sid) {
+                    return function() { return delMissingOk(sid); };
+                }), MAX_PARALLEL_WRITES);
                 // 2) удаляем партии ГП
-                Object.keys(fbIds).forEach(function(fbId) {
-                    inner = inner.then(function() { return delMissingOk(fbId); });
+                inner = inner.then(function() {
+                    return runWithConcurrency(Object.keys(fbIds).map(function(fbId) {
+                        return function() { return delMissingOk(fbId); };
+                    }), MAX_PARALLEL_WRITES);
                 });
                 // 3) удаляем саму резку
                 inner = inner.then(function() { return delMissingOk(cutId); });
@@ -8392,6 +8449,7 @@
     //   dayCuts — резки дня в порядке показа (по planStart); dragId — перетаскиваемое; targetId — на кого бросили.
     AtexProductionPlanning.prototype.reorderCutInDay = function(dayCuts, dragId, targetId) {
         var self = this;
+        this._ppOp = 'reorderCutInDay';   // #4177/#4480
         if (this.busy) return Promise.resolve(false);
         var arr = (dayCuts || []).slice();
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
@@ -8621,6 +8679,7 @@
     // → Promise<число исправленных заданий>.
     AtexProductionPlanning.prototype.reconcilePlanStarts = function() {
         var self = this;
+        this._ppOp = 'reconcilePlanStarts';   // #4177/#4480
         var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
         var fixes = [];
@@ -8813,6 +8872,7 @@
     // норма — соседи совпали по конфигурации), а успешный пересчёт говорит коротко.
     AtexProductionPlanning.prototype.recalcSetupTiming = function(slitterId, opts) {
         var self = this;
+        this._ppOp = 'recalcSetupTiming';   // #4177/#4480
         var auto = !!(opts && opts.auto);
         if (this.busy) return Promise.resolve(false);
         // #4402: на экране непринятый план «Упорядочить» (проекция в памяти, синтетические id
