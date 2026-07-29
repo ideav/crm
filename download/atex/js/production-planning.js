@@ -5727,9 +5727,37 @@
             if (lunch && lunchDone[d]) sum += lunch.durationMin;   // обед уже вставлен — как в дробном clock
             return sum;
         }
-        function availFor(d, kind) {
+        // #4488 (ТЗ §15): ЗАДАНИЕ РУЧНОГО ПЕРЕНОСА ВСТАЁТ В ДЕНЬ ЦЕЛИКОМ. Оператор двигает задание
+        // сознательно; рвать по потолку именно ЕГО, пока в дне стои́т то, что можно подвинуть, —
+        // значит не выполнить перенос (issue #4488: на выбранный день лёг ОДИН проход из двенадцати,
+        // остальные остались хвостом в следующем дне). Поэтому его полная занятость РЕЗЕРВИРУЕТСЯ в
+        // его дне: соседи считают остаток дня уже без неё и уезжают на следующий день сами — сначала
+        // незафиксированные, затем 🔒 (порядок выбора не меняется). Само перенесённое рвётся В
+        // ПОСЛЕДНЮЮ ОЧЕРЕДЬ: когда резерв снят (оно и есть текущий кандидат), ему доступна ВСЯ
+        // ёмкость дня, и разрыв случается, только если оно не влезает даже в пустую смену.
+        //   wholeDayByCut: { cutId: dayOffset } — задаёт контроллер (moveCutToDay → moveScope).
+        // Резерв снимается, как только задание размещено (remaining = 0), и не действует на другие дни.
+        var wholeDayBy = opts.wholeDayByCut || {};
+        var wholeDayIds = Object.keys(wholeDayBy);
+        function wholeReserve(d, exceptId) {
+            if (!wholeDayIds.length) return 0;
+            var total = 0;
+            for (var wi = 0; wi < wholeDayIds.length; wi++) {
+                var id = wholeDayIds[wi];
+                if (String(id) === String(exceptId)) continue;
+                var st = state[id];
+                if (!st || !(st.remaining > 0) || !(st.perPass > 0)) continue;   // размещено или вырожденное
+                // День берём АКТУАЛЬНЫЙ: у 🔒 он мог сдвинуться (нерабочий день, #4467).
+                var wDay = (st.fixedDay != null) ? st.fixedDay : Number(wholeDayBy[id]);
+                if (!isFinite(wDay) || wDay !== d) continue;
+                total += setupCostFor(prevPhysical, st.cut) + st.remaining * (st.perPass + leader);
+            }
+            return round3(total);
+        }
+        function availFor(d, kind, exceptId) {
             var occWhole = dayWholeOccupied(d);   // #4149: потолок считаем по ЦЕЛОЙ занятости (= колонки/бейдж), не по дробному clock
-            var base = effCapacity(d) - occWhole;
+            var reserveWhole = wholeReserve(d, exceptId);   // #4488: место под задание ручного переноса
+            var base = effCapacity(d) - occWhole - reserveWhole;
             if (!overworkOn || !hasWindow) return base;
             var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
             var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
@@ -5741,7 +5769,8 @@
             // (TOTAL_INTERVALS) поглощает нахлёст, а не растёт за конец смены.
             // #3978: минус простой внутри окна дня (dayLostToBlock) — как в effCapacity.
             // #4149: минус ЦЕЛАЯ занятость дня (occWhole) — потолок держится на хранимой раскладке.
-            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - occWhole;
+            // #4488: минус место под задание ручного переноса (reserveWhole) — оно ложится целиком.
+            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - occWhole - reserveWhole;
         }
         // #3974: якорь дня несёт ТОЛЬКО «Зафиксировано» (🔒) — фикс-резка держит свой день
         // (fixedDay ниже). Свободные задания якоря не имеют (dayAnchorByCut #3658 отменён): день
@@ -6137,7 +6166,7 @@
                     var canRunF = st.remaining > 0 && st.perPass > 0 && hasWindow;
                     // #4304: сколько проходов влезает в день до потолка нахлёста РЕЗКИ (как обычная резка,
                     // #3821/#3847). availFor уже учёл занятость дня и обед.
-                    var availCutsF = availFor(day, 'cuts');
+                    var availCutsF = availFor(day, 'cuts', pick);   // #4488: своё место под резервом не считаем
                     var fittingF = (canRunF && availCutsF >= setupF) ? Math.floor((availCutsF - setupF) / perPassF) : 0;
                     if (fittingF < 0) fittingF = 0;
                     // #4467: ПОТОЛОК ДНЯ СИЛЬНЕЕ ЗАМКА ДНЯ. Прежде (#4434 п.1) 🔒, влезавшая в ПУСТОЙ
@@ -6222,8 +6251,8 @@
                 // #3847: ёмкость хвоста с учётом разрешённого нахлёста. Для проходов потолок —
                 // DAY_END_HOUR+MAX_OVERWORK_CUTS, для настройки — DAY_END_HOUR+MAX_OVERWORK_TUNE
                 // (фича выкл → обычная ёмкость до cutEndMin, как #3821). #4068: минус резерв под фольгу.
-                var availCutsG = availFor(day, 'cuts') - reserveNF;
-                var availTuneG = availFor(day, 'tune') - reserveNF;
+                var availCutsG = availFor(day, 'cuts', pick) - reserveNF;   // #4488
+                var availTuneG = availFor(day, 'tune', pick) - reserveNF;
                 // #3821/#3847: в хвост дня кладём проходы, влезающие в ёмкость С УЧЁТОМ нахлёста —
                 // последний проход обязан кончиться ≤ DAY_END_HOUR+MAX_OVERWORK_CUTS (нахлёст за
                 // конец смены ограничен, а не «один любой проход» #3760 и не «строго встык» #3821:
@@ -6254,7 +6283,7 @@
                     // ОДНОЙ карточкой (#3847), день не раздут за нахлёст (#3939). Остаток настройки
                     // (pendingSetup) + проходы уходят на день N+1. НЕТ настройки (та же конфигурация,
                     // #3821: setupG=0) — ничего в хвост, иначе пустой сегмент.
-                    var tailAvailG = availFor(day, 'tune') - reserveNF;         // до потолка нахлёста настройки (#3847); #4068: минус резерв
+                    var tailAvailG = availFor(day, 'tune', pick) - reserveNF;   // до потолка нахлёста настройки (#3847); #4068: минус резерв; #4488
                     // Продолжение несёт слитый остаток настройки (pendingSetup) — компонентов у него нет,
                     // делить нечего: либо влезает целиком, либо не кладём.
                     var setupPartsG = st.isCont ? [{ minutes: setupG }] : setupPartsFor(prevPhysical, c);
@@ -6348,7 +6377,7 @@
                 var avail = effCapacity(day) - clock;
                 // #3847: проходы — до потолка DAY_END_HOUR+MAX_OVERWORK_CUTS, настройка-хвост — до
                 // DAY_END_HOUR+MAX_OVERWORK_TUNE (фича выкл → обычная ёмкость до cutEndMin).
-                var maxPasses = Math.floor((availFor(day, 'cuts') - setup) / perPassEff);
+                var maxPasses = Math.floor((availFor(day, 'cuts', pick) - setup) / perPassEff);   // #4488
                 if (maxPasses < 1) {
                     // #3635 п.5: первый проход в остаток дня уже не влезает → в хвост дня N кладём
                     // отдельный сегмент НАСТРОЙКИ, а намотку начинаем с дня N+1 как продолжение.
@@ -6368,7 +6397,7 @@
                         // подмножество, дотягивающее до потолка (ножи 30), а гейт «≤ потолка» его отвергал —
                         // хвост не клался почти никогда (issue #4144). Остаток настройки (pendingSetup) — на
                         // продолжение; ничего под потолком — вся резка на чистый следующий день.
-                        var tailAvail = availFor(day, 'tune');
+                        var tailAvail = availFor(day, 'tune', pick);   // #4488
                         var setupParts = setupPartsFor(prevPhysical, c);
                         var chosen = chooseTailSetupSubset(setupParts, tailAvail);
                         if (chosen) {
@@ -7378,7 +7407,8 @@
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
                 orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать
-                pinDayPosByCut: opts.pinDayPosByCut   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
+                pinDayPosByCut: opts.pinDayPosByCut,   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
+                wholeDayByCut: opts.wholeDayByCut      // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation
@@ -19266,6 +19296,16 @@
                 if (off != null) dayLockByCut[String(id)] = off;
             });
         }
+        // #4488 (ТЗ §15): задание, которое двигал ОПЕРАТОР, встаёт в выбранный день ЦЕЛИКОМ —
+        // упаковщик резервирует под него место в этом дне, и соседи уезжают на следующий день сами.
+        // День берём из того же плейсхолдер-якоря, что и замок (dayAnchorByCut → смещение от «С»).
+        var wholeDayByCut = {};
+        if (moveScope) {
+            [].concat(moveScope.pinCutIds || [], moveScope.weightPositionCutIds || []).forEach(function(id) {
+                var off = dayAnchorByCut[String(id)];
+                if (off != null) wholeDayByCut[String(id)] = off;
+            });
+        }
         // #4085: слой размещения (модель #3985) — включается настройкой SLOT_PLACEMENT=1 (по умолчанию
         // ВЫКЛ → прежний путь orderCuts + текущий станок). Даёт planCutOperations допустимость станка
         // (стоп-лист сырья + лимит ширины джамбо) и нерабочие дни станка (выходные/праздники + отпуск).
@@ -19432,6 +19472,7 @@
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
+            wholeDayByCut: wholeDayByCut,   // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ, соседи уступают
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             // #4434 п.1: 🔒 не удержало свой день (день нерабочий — выходной/праздник/«Отпуск») —
