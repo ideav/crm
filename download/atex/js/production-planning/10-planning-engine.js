@@ -6358,6 +6358,65 @@
         return { ordered: ordered };
     }
 
+    // #4477: ПЛЕЙСХОЛДЕР-СТАРТЫ переноса на другой день — по образцу перетаскивания (#4306):
+    // существующие времена дня ОСТАЮТСЯ у своих заданий, новое время минтуется ТОЛЬКО для
+    // вставляемого. Прежде день перенумеровывался целиком (день+i·минут), и перенос одного
+    // задания давал команду на сохранение КАЖДОМУ заданию дня — при том, что порядок соседей
+    // не менялся, а точные времена всё равно тут же пересобирал `autoSequenceQueue(preserveOrder)`
+    // (issue #4477: «много запросов на простое изменение»).
+    //
+    // Значения важны только ПОРЯДКОМ и ДНЁМ (место в дне планировщик получает явно —
+    // `pinDayPosByCut`, #4464). Поэтому вставляемому хватает времени между соседями:
+    // в начало — до первого, в конец — после последнего, в середину — середина промежутка.
+    //   ordered  — желаемый порядок id (planMoveSequences), включая перемещаемое;
+    //   dayCuts  — задания целевого дня БЕЗ перемещаемого (их planDate — источник времён);
+    //   movedId  — перемещаемое задание;
+    //   targetTs — начало смены целевого дня (день пуст либо перенумерация — отсюда).
+    // → { byCut: { id: ts }, renumbered: bool }. renumbered=true — времена дня непригодны
+    // (пусты, совпадают, не по возрастанию) либо минтуемое уехало бы в чужой день: тогда день
+    // перенумеровывается целиком, как раньше. Вход не мутирует.
+    function planMoveStarts(ordered, dayCuts, movedId, targetTs) {
+        var ids = (ordered || []).map(function(id) { return String(id); });
+        var moved = String(movedId);
+        var base = Math.round(Number(targetTs));
+        function renumber() {
+            var by = {};
+            ids.forEach(function(id, i) { by[id] = base + i * 60; });
+            return { byCut: by, renumbered: true };
+        }
+        if (!ids.length || !isFinite(base)) return renumber();
+        var byId = {};
+        (dayCuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        var mi = ids.indexOf(moved);
+        if (mi < 0) return renumber();
+        var times = [], sound = true;
+        ids.forEach(function(id) {
+            if (id === moved) return;
+            var c = byId[id];
+            var t = Math.round(Number(c && c.planDate));
+            if (!isFinite(t) || t <= 0) { sound = false; return; }
+            if (times.length && t <= times[times.length - 1]) sound = false;   // не по возрастанию/совпали (#3885)
+            times.push(t);
+        });
+        if (!sound || times.length !== ids.length - 1) return renumber();
+        if (!times.length) {
+            var only = {}; only[moved] = base;
+            return { byCut: only, renumbered: false };
+        }
+        var ts;
+        if (mi === 0) ts = times[0] - 60;
+        else if (mi === times.length) ts = times[times.length - 1] + 60;
+        else ts = Math.floor((times[mi - 1] + times[mi]) / 2);
+        // Место для вставки должно РЕАЛЬНО быть: промежуток в секунду ниоткуда порядок не задаст.
+        if (!isFinite(ts) || (mi > 0 && ts <= times[mi - 1]) || (mi < times.length && ts >= times[mi])) return renumber();
+        // Минтуемое время обязано остаться в ЦЕЛЕВОМ дне (иначе перенос уедет в соседний).
+        if (planDateDayKey(ts) !== planDateDayKey(base)) return renumber();
+        var out = {};
+        out[moved] = ts;
+        ids.forEach(function(id) { if (id !== moved) out[id] = Math.round(Number(byId[id].planDate)); });
+        return { byCut: out, renumbered: false };
+    }
+
     // #4306: чистый расчёт перестановки задания ВНУТРИ дня перетаскиванием (drag-drop). Порядок дня
     // задаёт planStart; при drag набор сохранённых времён дня ПЕРЕСТАВЛЯЕТСЯ под новый порядок (реальные
     // времена сохраняются, лишь меняют владельца) — как обобщённый ↑↓-своп на произвольную позицию.
@@ -6851,5 +6910,42 @@
             }
             pump();
         });
+    }
+
+    // #4477 (ТЗ §15): ОДНО число потоков массовой записи на весь модуль. Раньше «5» лежало
+    // отдельной локальной переменной в каждом месте записи (MAX_PARALLEL_SAVES / _DELETES /
+    // _SETUP / _SPLIT), а часть путей вообще писала цепочкой в один поток — правило «в 5 потоков»
+    // соблюдал тот, кто про него помнил. Теперь предел один и его видно из любого места.
+    var MAX_PARALLEL_WRITES = 5;
+
+    // #4477 (ТЗ §15): ОТСЕВ ЗАПИСЕЙ-ПУСТЫШЕК для «Времени старта» (главное значение t{tableId},
+    // пишется только через _m_save — GUIDE issue #775). Команда на сохранение значения, которое
+    // уже лежит в базе, — это лишний запрос: оператор видит «много запросов на простое изменение»
+    // (issue #4477), а очередь ждёт их завершения. Тайминг («Наладка ножей»/«Сырьё-намотка»/
+    // «Резка и Лидер») отсеивается там же, где считается, — computeCutSetupUpdates (#4001/#3778).
+    //   items      — [{ cutId, ts, wasTs }]; wasTs можно не задавать — возьмём из storedById;
+    //   storedById — карта id → запись очереди (this.cuts), хранимый старт = planDate, иначе number.
+    // → [{ cutId, ts, wasTs }] только реально изменившихся, по одной записи на задание (дубль по
+    // одному id в параллельном пуле — гонка «кто последний», поэтому оставляем ПЕРВЫЙ).
+    // Чистая функция: вход не мутирует, DOM/сети не касается.
+    function changedStartWrites(items, storedById) {
+        var out = [], seen = {};
+        (items || []).forEach(function(it) {
+            if (!it || it.cutId == null) return;
+            var id = String(it.cutId);
+            if (id === '' || seen[id]) return;
+            var ts = Math.round(Number(it.ts));
+            if (!isFinite(ts) || ts <= 0) return;
+            var was = it.wasTs;
+            if (was == null && storedById) {
+                var c = storedById[id];
+                if (c) was = (c.planDate != null && c.planDate !== '') ? c.planDate : c.number;
+            }
+            var wasNum = planTsSeconds(was);   // хранимое приходит и секундами, и мс, и строкой даты
+            if (wasNum != null && wasNum > 0 && wasNum === ts) return;   // не изменилось — команды не даём
+            seen[id] = true;
+            out.push({ cutId: id, ts: ts, wasTs: (wasNum != null && wasNum > 0) ? wasNum : null });
+        });
+        return out;
     }
 

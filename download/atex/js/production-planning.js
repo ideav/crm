@@ -2567,6 +2567,14 @@
     // могут проигрывать друг другу, это норма, и «фольга не последняя» — не дефект, а результат
     // сравнения весов (см. панель качества плана, ТЗ §13).
     //
+    // ЧЕГО ЗДЕСЬ НЕТ. Правила проверяются по ОПЕРАЦИЯМ ПЛАНА (updates/creates/deletes), поэтому
+    // запрет ТЗ §15 о МАССОВОЙ ЗАПИСИ (#4477: независимые запросы — пулом до 5 потоков; значение,
+    // которое уже лежит в базе, не сохраняем) сюда не ложится — он про запросы, а не про план.
+    // Его держит ШЛЮЗ ЗАПИСИ: `postCutStarts` («Время старта», метод `saveCutStarts`) и
+    // `computeCutSetupUpdates`/`persistCutSetupColumns` (тайминг) в `20-controller.js`, предел
+    // потоков — `MAX_PARALLEL_WRITES` (`10-planning-engine.js`). Тест —
+    // `experiments/atex-production-planning-4477.test.js`.
+    //
     // КОГО ОГРАНИЧИВАЕТ. `actor: 'auto'` — только автоматику (Сгенерировать / Упорядочить /
     // Пересчитать наладку / авто-разбиение по дням). Ручное действие оператора проходит без
     // предупреждения (решение заказчика 27.07.2026), но пишется в журнал: иначе на вопрос
@@ -9339,6 +9347,65 @@
         return { ordered: ordered };
     }
 
+    // #4477: ПЛЕЙСХОЛДЕР-СТАРТЫ переноса на другой день — по образцу перетаскивания (#4306):
+    // существующие времена дня ОСТАЮТСЯ у своих заданий, новое время минтуется ТОЛЬКО для
+    // вставляемого. Прежде день перенумеровывался целиком (день+i·минут), и перенос одного
+    // задания давал команду на сохранение КАЖДОМУ заданию дня — при том, что порядок соседей
+    // не менялся, а точные времена всё равно тут же пересобирал `autoSequenceQueue(preserveOrder)`
+    // (issue #4477: «много запросов на простое изменение»).
+    //
+    // Значения важны только ПОРЯДКОМ и ДНЁМ (место в дне планировщик получает явно —
+    // `pinDayPosByCut`, #4464). Поэтому вставляемому хватает времени между соседями:
+    // в начало — до первого, в конец — после последнего, в середину — середина промежутка.
+    //   ordered  — желаемый порядок id (planMoveSequences), включая перемещаемое;
+    //   dayCuts  — задания целевого дня БЕЗ перемещаемого (их planDate — источник времён);
+    //   movedId  — перемещаемое задание;
+    //   targetTs — начало смены целевого дня (день пуст либо перенумерация — отсюда).
+    // → { byCut: { id: ts }, renumbered: bool }. renumbered=true — времена дня непригодны
+    // (пусты, совпадают, не по возрастанию) либо минтуемое уехало бы в чужой день: тогда день
+    // перенумеровывается целиком, как раньше. Вход не мутирует.
+    function planMoveStarts(ordered, dayCuts, movedId, targetTs) {
+        var ids = (ordered || []).map(function(id) { return String(id); });
+        var moved = String(movedId);
+        var base = Math.round(Number(targetTs));
+        function renumber() {
+            var by = {};
+            ids.forEach(function(id, i) { by[id] = base + i * 60; });
+            return { byCut: by, renumbered: true };
+        }
+        if (!ids.length || !isFinite(base)) return renumber();
+        var byId = {};
+        (dayCuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        var mi = ids.indexOf(moved);
+        if (mi < 0) return renumber();
+        var times = [], sound = true;
+        ids.forEach(function(id) {
+            if (id === moved) return;
+            var c = byId[id];
+            var t = Math.round(Number(c && c.planDate));
+            if (!isFinite(t) || t <= 0) { sound = false; return; }
+            if (times.length && t <= times[times.length - 1]) sound = false;   // не по возрастанию/совпали (#3885)
+            times.push(t);
+        });
+        if (!sound || times.length !== ids.length - 1) return renumber();
+        if (!times.length) {
+            var only = {}; only[moved] = base;
+            return { byCut: only, renumbered: false };
+        }
+        var ts;
+        if (mi === 0) ts = times[0] - 60;
+        else if (mi === times.length) ts = times[times.length - 1] + 60;
+        else ts = Math.floor((times[mi - 1] + times[mi]) / 2);
+        // Место для вставки должно РЕАЛЬНО быть: промежуток в секунду ниоткуда порядок не задаст.
+        if (!isFinite(ts) || (mi > 0 && ts <= times[mi - 1]) || (mi < times.length && ts >= times[mi])) return renumber();
+        // Минтуемое время обязано остаться в ЦЕЛЕВОМ дне (иначе перенос уедет в соседний).
+        if (planDateDayKey(ts) !== planDateDayKey(base)) return renumber();
+        var out = {};
+        out[moved] = ts;
+        ids.forEach(function(id) { if (id !== moved) out[id] = Math.round(Number(byId[id].planDate)); });
+        return { byCut: out, renumbered: false };
+    }
+
     // #4306: чистый расчёт перестановки задания ВНУТРИ дня перетаскиванием (drag-drop). Порядок дня
     // задаёт planStart; при drag набор сохранённых времён дня ПЕРЕСТАВЛЯЕТСЯ под новый порядок (реальные
     // времена сохраняются, лишь меняют владельца) — как обобщённый ↑↓-своп на произвольную позицию.
@@ -9832,6 +9899,43 @@
             }
             pump();
         });
+    }
+
+    // #4477 (ТЗ §15): ОДНО число потоков массовой записи на весь модуль. Раньше «5» лежало
+    // отдельной локальной переменной в каждом месте записи (MAX_PARALLEL_SAVES / _DELETES /
+    // _SETUP / _SPLIT), а часть путей вообще писала цепочкой в один поток — правило «в 5 потоков»
+    // соблюдал тот, кто про него помнил. Теперь предел один и его видно из любого места.
+    var MAX_PARALLEL_WRITES = 5;
+
+    // #4477 (ТЗ §15): ОТСЕВ ЗАПИСЕЙ-ПУСТЫШЕК для «Времени старта» (главное значение t{tableId},
+    // пишется только через _m_save — GUIDE issue #775). Команда на сохранение значения, которое
+    // уже лежит в базе, — это лишний запрос: оператор видит «много запросов на простое изменение»
+    // (issue #4477), а очередь ждёт их завершения. Тайминг («Наладка ножей»/«Сырьё-намотка»/
+    // «Резка и Лидер») отсеивается там же, где считается, — computeCutSetupUpdates (#4001/#3778).
+    //   items      — [{ cutId, ts, wasTs }]; wasTs можно не задавать — возьмём из storedById;
+    //   storedById — карта id → запись очереди (this.cuts), хранимый старт = planDate, иначе number.
+    // → [{ cutId, ts, wasTs }] только реально изменившихся, по одной записи на задание (дубль по
+    // одному id в параллельном пуле — гонка «кто последний», поэтому оставляем ПЕРВЫЙ).
+    // Чистая функция: вход не мутирует, DOM/сети не касается.
+    function changedStartWrites(items, storedById) {
+        var out = [], seen = {};
+        (items || []).forEach(function(it) {
+            if (!it || it.cutId == null) return;
+            var id = String(it.cutId);
+            if (id === '' || seen[id]) return;
+            var ts = Math.round(Number(it.ts));
+            if (!isFinite(ts) || ts <= 0) return;
+            var was = it.wasTs;
+            if (was == null && storedById) {
+                var c = storedById[id];
+                if (c) was = (c.planDate != null && c.planDate !== '') ? c.planDate : c.number;
+            }
+            var wasNum = planTsSeconds(was);   // хранимое приходит и секундами, и мс, и строкой даты
+            if (wasNum != null && wasNum > 0 && wasNum === ts) return;   // не изменилось — команды не даём
+            seen[id] = true;
+            out.push({ cutId: id, ts: ts, wasTs: (wasNum != null && wasNum > 0) ? wasNum : null });
+        });
+        return out;
     }
 
     // ============================================================================
@@ -10983,6 +11087,8 @@
         insertDayIso: insertDayIso,   // #4396
         buildFields: buildFields,
         runWithConcurrency: runWithConcurrency,   // #3998: пул сохранений с лимитом потоков
+        MAX_PARALLEL_WRITES: MAX_PARALLEL_WRITES, // #4477: единый предел потоков массовой записи (ТЗ §15)
+        changedStartWrites: changedStartWrites,   // #4477: отсев записей-пустышек «Времени старта»
         maxNumericCutNumber: maxNumericCutNumber,
         nextCutMainValue: nextCutMainValue,
         splitMachineQueue: splitMachineQueue,
@@ -11123,6 +11229,7 @@
         byKnifeCountDesc: byKnifeCountDesc,
         planQueues: planQueues,
         planMoveSequences: planMoveSequences,   // #3602/#3923
+        planMoveStarts: planMoveStarts,         // #4477: плейсхолдер-старты переноса — только вставляемому
         planDragReorder: planDragReorder,       // #4306: перестановка задания внутри дня перетаскиванием
         unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
@@ -13207,9 +13314,11 @@
         this.setBusy(true);
         this.showProgress((value ? 'Фиксация' : 'Снятие фиксации') + ' заданий…', ids.length);
         var done = 0;
-        var chain = Promise.resolve();
-        ids.forEach(function(id) {
-            chain = chain.then(function() {
+        // #4477 (ТЗ §15): записи независимы (каждая — свой _m_set/<cutId>), пишем пулом до
+        // MAX_PARALLEL_WRITES потоков — было цепочкой в один поток, и «Зафиксировать» по всей
+        // очереди тянулось лесенкой запросов.
+        return runWithConcurrency(ids.map(function(id) {
+            return function() {
                 var fields = {}; fields[fieldKey] = flag;
                 var u = setupById[String(id)];   // #3778: дополняем флаг снимком тайминга
                 if (u) {
@@ -13218,9 +13327,8 @@
                 }
                 return self.post('_m_set/' + encodeURIComponent(id) + '?JSON', fields)
                     .then(function() { self.updateProgress(++done); });
-            });
-        });
-        return chain.then(function() {
+            };
+        }), MAX_PARALLEL_WRITES).then(function() {
             return self.reload();
         }).then(function() {
             // #4388: неустойчивый дефект — после снятия/постановки фиксации кнопка 🔒
@@ -14337,16 +14445,26 @@
         var ids = Object.keys(slitterByRecordId || {});
         if (!ids.length) return Promise.resolve(false);
         var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
-        var writes = ids.map(function(mid) {
-            var newSid = slitterByRecordId[mid];
-            var fields = {}; fields['t' + slitterReqId] = newSid;
-            return self.post('_m_set/' + encodeURIComponent(mid) + '?JSON', fields).then(function() {
-                var cc = cutsById[String(mid)];
-                if (cc) { if (!cc.slitter) cc.slitter = { id: newSid, label: '' }; else cc.slitter.id = newSid; }
-            });
+        // #4477 (ТЗ §15): станок пишем только там, где он ДЕЙСТВИТЕЛЬНО меняется, и пулом до
+        // MAX_PARALLEL_WRITES потоков. Было Promise.all — все записи цепочек разом, без предела
+        // (сотня одновременных _m_set на большой очереди).
+        var writes = ids.filter(function(mid) {
+            var cc = cutsById[String(mid)];
+            var curSid = (cc && cc.slitter && cc.slitter.id != null) ? String(cc.slitter.id) : '';
+            return String(slitterByRecordId[mid]) !== curSid;
         });
-        console.log('[pp] ⚙️ Упорядочить: смена станка у ' + writes.length + ' записей (#4047)');
-        return Promise.all(writes).then(function() { return true; });
+        console.log('[pp] ⚙️ Упорядочить: смена станка у ' + writes.length + ' записей из ' + ids.length + ' (#4047/#4477)');
+        if (!writes.length) return Promise.resolve(false);
+        return runWithConcurrency(writes.map(function(mid) {
+            return function() {
+                var newSid = slitterByRecordId[mid];
+                var fields = {}; fields['t' + slitterReqId] = newSid;
+                return self.post('_m_set/' + encodeURIComponent(mid) + '?JSON', fields).then(function() {
+                    var cc = cutsById[String(mid)];
+                    if (cc) { if (!cc.slitter) cc.slitter = { id: newSid, label: '' }; else cc.slitter.id = newSid; }
+                });
+            };
+        }), MAX_PARALLEL_WRITES).then(function() { return true; });
     };
 
     // #3508 п.4: иконка «🔒» в карточке — переключить фиксацию одного задания
@@ -14547,22 +14665,30 @@
         // двигает всю цепочку). Нет реквизита «ID первой части» → отвязать нечем (легаси-база).
         var detachId = firstPartReqId ? daySplitDetachCutId(this.cuts || [], cut.id) : null;
         var plan = planMoveSequences(cut.id, dayCuts, position);
-        // #3923: желаемый порядок дня → плейсхолдер-planStart (целевой день 08:00 + i·минут).
-        // Точные значения не важны — важен ПОРЯДОК; autoSequenceQueue(preserveOrder) ниже
-        // переупакует и целевой, и исходный день встык по сохранённому planStart.
-        var placeholderByCut = {};
-        plan.ordered.forEach(function(id, i) { placeholderByCut[String(id)] = targetTs + i * 60; });
+        // #3923: желаемый порядок дня → плейсхолдер-planStart. Точные значения не важны — важен
+        // ПОРЯДОК; autoSequenceQueue(preserveOrder) ниже переупакует и целевой, и исходный день
+        // встык по сохранённому planStart.
+        // #4477: соседи по целевому дню порядок не меняют — их времена ОСТАЮТСЯ прежними, новое
+        // минтуется только вставляемому заданию (planMoveStarts). Прежняя перенумерация дня
+        // целиком давала команду на сохранение каждому заданию дня, и все они тут же
+        // переписывались упаковщиком.
+        var placeholderByCut = planMoveStarts(plan.ordered, dayCuts, cut.id, targetTs).byCut;
 
         this.setBusy(true);
-        this.showProgress('Перенос задания…', 1 + dayCuts.length);
-        var done = 0;
         var fixFieldKey = (fix && fixedReqId) ? 't' + fixedReqId : null;
-        var chain = Promise.resolve();
         // 1) Перемещаемое задание: planStart (главное значение) → _m_save; затем фиксация/смена
-        //    станка → _m_set (если есть). «Очередность» больше не пишем.
-        chain = chain.then(function() {
-            var mainFields = {}; mainFields[mainKey] = String(placeholderByCut[String(cut.id)] || targetTs);
-            return self.post('_m_save/' + encodeURIComponent(cut.id) + '?JSON', mainFields);
+        //    станка → _m_set (если есть). «Очередность» больше не пишем. Внутри одной записи
+        //    порядок обязателен (_m_save → _m_set), с чужими записями — независимо.
+        // 2) Прочие задания целевого дня — плейсхолдер-planStart (только изменившиеся).
+        // #4477: и то, и другое — через шлюз saveCutStarts (пул до 5 потоков, пустышки отсеяны).
+        var starts = [{ cutId: String(cut.id), ts: placeholderByCut[String(cut.id)] || targetTs }];
+        dayCuts.forEach(function(c) {
+            var ph = placeholderByCut[String(c.id)];
+            if (ph != null) starts.push({ cutId: String(c.id), ts: ph, wasTs: c.planDate });
+        });
+        return postCutStarts(self, starts, {
+            onPlan: function(n) { self.showProgress('Перенос задания…', n); },
+            onWrite: function(done) { self.updateProgress(done); }
         }).then(function() {
             var fields = {};
             if (fixFieldKey) fields[fixFieldKey] = '1';
@@ -14570,19 +14696,7 @@
             if (detachId) fields['t' + firstPartReqId] = String(detachId);   // #4357: сегмент → самостоятельное задание
             if (!Object.keys(fields).length) return;
             return self.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields);
-        }).then(function() { self.updateProgress(++done); });
-        // 2) Прочие задания целевого дня — плейсхолдер-planStart (только изменившиеся).
-        dayCuts.forEach(function(c) {
-            var ph = placeholderByCut[String(c.id)];
-            chain = chain.then(function() {
-                if (ph == null || Number(c.planDate) === Number(ph)) { self.updateProgress(++done); return; }
-                var mainFields = {}; mainFields[mainKey] = String(ph);
-                return self.post('_m_save/' + encodeURIComponent(c.id) + '?JSON', mainFields)
-                    .then(function() { self.updateProgress(++done); });
-            });
-        });
-
-        return chain.then(function() {
+        }).then(function() {
             return self.reload();
         }).then(function() {
             // Цель вне фильтра [С; По] → расширяем диапазон в нужную сторону, чтобы
@@ -14848,7 +14962,6 @@
             this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error');
             return Promise.resolve(false);
         }
-        var mainKey = 't' + cutMeta.id;
         var win = this.workingWindow();
         var plan = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
@@ -14869,16 +14982,11 @@
 
         this.setBusy(true);
         this.showProgress('Урегулирование отклонений…', writes.length);
-        var done = 0;
-        var chain = Promise.resolve();
-        writes.forEach(function(p) {
-            chain = chain.then(function() {
-                var fields = {}; fields[mainKey] = String(p.planStart);
-                return self.post('_m_save/' + encodeURIComponent(p.id) + '?JSON', fields)
-                    .then(function() { self.updateProgress(++done); });
-            });
-        });
-        return chain.then(function() {
+        // #4477: пулом до 5 потоков через шлюз (было — цепочкой в один поток); совпавшее с
+        // хранимым отсеяно и выше (writes), и в самом шлюзе.
+        return postCutStarts(self, writes.map(function(p) {
+            return { cutId: p.id, ts: p.planStart, wasTs: planTsSeconds((byId[String(p.id)] || {}).planDate) };
+        }), { onWrite: function(done) { self.updateProgress(done); } }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
@@ -14952,7 +15060,7 @@
         // «Обеспечение» (независимы друг от друга — листовые записи), дожидаемся ВСЕХ, затем
         // параллельно сносим резки (backend каскадит подчинённые Партии ГП/Полосы/Расход,
         // поддеревья разных резок не пересекаются). Порядок _m_del в базе неважен.
-        var MAX_PARALLEL_DELETES = 5;
+        var MAX_PARALLEL_DELETES = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
@@ -15075,7 +15183,7 @@
         // комментарий выше). #4292: записи цепочки сносим ПОСЛЕДОВАТЕЛЬНО в ОБРАТНОМ порядке (хвост →
         // голова): продолжения ссылаются на голову («ID первой части», #3892), удаление головы раньше
         // продолжений может дать 409.
-        var MAX_PARALLEL_DELETES = 5;
+        var MAX_PARALLEL_DELETES = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
@@ -17174,7 +17282,7 @@
         // #3998: каждая резка-сегмент — независимая задача (создание резки → её «Партий ГП»/
         // втулок/обеспечений); собираем задачи и гоняем пулом не более MAX_PARALLEL_SAVES
         // одновременно. Порядок в базе неважен — сортировка по planStart (первая колонка 1078).
-        var MAX_PARALLEL_SAVES = 5;
+        var MAX_PARALLEL_SAVES = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
         var saveTasks = [];
         layouts.forEach(function(lay, layIdx) {
           var units = segmentsByLayout[layIdx] || [];
@@ -17815,6 +17923,60 @@
         return { reqs: reqs, updates: updates };
     };
 
+    // #4477 (ТЗ §15): ЕДИНЫЙ ШЛЮЗ ЗАПИСИ «ВРЕМЕНИ СТАРТА». Через него идут ВСЕ пути, которые
+    // двигают задания по времени: ручной перенос 🗓 (moveCutToDay), ↑↓ (moveCutInDay),
+    // перетаскивание (reorderCutInDay), «↻ Пересчитать наладку» (recalcSetupTiming), сведение
+    // стартов после записи плана (reconcilePlanStarts), «Урегулировать отклонения»
+    // (settleDeviations). Шлюз держит ДВА правила разом, поэтому их нельзя забыть в очередном
+    // обработчике (issue #4477 — правило нарушали ровно те пути, которые писали сами):
+    //   • НЕ ИЗМЕНИЛОСЬ — НЕ СОХРАНЯЕМ: команду даём только заданию, у которого хранимый старт
+    //     отличается от нового (changedStartWrites; хранимое берём из this.cuts, если вызывающий
+    //     не передал wasTs). Ноль изменений — ноль запросов, промис резолвится нулём;
+    //   • ПАРАЛЛЕЛЬНО, до MAX_PARALLEL_WRITES потоков: задания независимы (каждое — свой
+    //     _m_save/<cutId>), порядок записи в базе неважен (#4000), как сохранение/удаление/
+    //     разбиение/тайминг (#3998/#4005/#4014/#4023).
+    // Первая колонка (плановое время старта, DATETIME) пишется ТОЛЬКО через _m_save с
+    // t{tableId} — _m_set её не задаёт (GUIDE issue #775).
+    //   items — [{ cutId, ts, wasTs? }]; opts.onWrite(done, total) — прогресс по факту записи.
+    // → Promise<число записанных заданий>. Ошибка реджектит промис ПЕРВОЙ ошибкой — вызывающий
+    // сообщает о ней сам (у каждого пути своя формулировка).
+    //
+    // Шлюз — функция МОДУЛЯ (метод прототипа ниже лишь её зовёт): пути записи обращаются к нему
+    // напрямую (postCutStarts(self, …)), поэтому его нельзя «не унаследовать» и обойти.
+    function postCutStarts(self, items, opts) {
+        var o = opts || {};
+        if (!(items && items.length)) return Promise.resolve(0);   // писать нечего — и метаданные ни при чём
+        var meta = self.meta || {};
+        var mainKey = (meta.cut && meta.cut.id != null) ? 't' + meta.cut.id : null;
+        if (!mainKey) {
+            if (typeof self.notify === 'function') self.notify('Не найден реквизит даты резки', 'error');
+            return Promise.reject(new Error('#4477: нет главного реквизита таблицы «' + TABLE.cut + '» — некуда писать время старта'));
+        }
+        var storedById = {};
+        (self.cuts || []).forEach(function(c) { if (c && c.id != null) storedById[String(c.id)] = c; });
+        var writes = changedStartWrites(items, storedById);
+        // Прогресс считаем по ТОМУ, ЧТО ПИШЕМ: полоса, размеченная на весь набор, застревала бы
+        // на «1 из 7», когда шесть заданий отсеяны как неизменившиеся.
+        if (typeof o.onPlan === 'function') o.onPlan(writes.length);
+        if (!writes.length) return Promise.resolve(0);
+        var done = 0;
+        return runWithConcurrency(writes.map(function(w) {
+            return function() {
+                var fields = {}; fields[mainKey] = String(w.ts);
+                return self.post('_m_save/' + encodeURIComponent(w.cutId) + '?JSON', fields).then(function(r) {
+                    done += 1;   // счётчик безопасен: JS однопоточен
+                    if (typeof o.onWrite === 'function') o.onWrite(done, writes.length);
+                    return r;
+                });
+            };
+        }), MAX_PARALLEL_WRITES).then(function() { return writes.length; });
+    }
+
+    // Тот же шлюз как метод — для вызова извне (и из тестов): вся логика в postCutStarts.
+    AtexProductionPlanning.prototype.saveCutStarts = function(items, opts) {
+        return postCutStarts(this, items, opts);
+    };
+
     // #4401: onlyIds — писать тайминг ТОЛЬКО этим заданиям (кнопка «↻ Пересчитать наладку»
     // ограничивает набор своим станком и видимыми днями). null — как раньше, вся очередь.
     AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds) {
@@ -17830,7 +17992,7 @@
         // неважен (#4000). Раньше это был последовательный chain.then — «последний набор запросов»
         // после «Создать»/«Упорядочить» шёл лесенкой в 1 поток (окно висело на 100%). Гоняем пулом
         // до MAX_PARALLEL_SETUP потоков, как сохранение/удаление/разбиение (#3998/#4005/#4014).
-        var MAX_PARALLEL_SETUP = 5;
+        var MAX_PARALLEL_SETUP = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
         var tasks = updates.map(function(u) {
             return function() {
                 var fields = setupTimingFields(reqs, u);
@@ -17878,10 +18040,8 @@
             return Promise.resolve(false);
         }
         this.setBusy(true);
-        var fA = {}; fA[mainKey] = String(tsB);
-        var fB = {}; fB[mainKey] = String(tsA);
-        return self.post('_m_save/' + encodeURIComponent(a.id) + '?JSON', fA)
-            .then(function() { return self.post('_m_save/' + encodeURIComponent(b.id) + '?JSON', fB); })
+        // #4477: обмен — две независимые записи, пишем пулом через шлюз (было — одна за другой).
+        return postCutStarts(self, [{ cutId: a.id, ts: tsB, wasTs: tsA }, { cutId: b.id, ts: tsA, wasTs: tsB }])
             .then(function() { return self.reload(); })
             .then(function() {
                 self.setBusy(false);
@@ -18382,7 +18542,7 @@
         // обеспечения→Партии ГП→резка). Per-задача softSkip (#3895) глотает «No such record» — не
         // роняет пул; реальная ошибка реджектит пул ПЕРВОЙ ошибкой (обрыв как у прежней цепочки →
         // терминальный catch). Счётчик splitDone (++) безопасен — JS однопоточен.
-        var MAX_PARALLEL_SPLIT = 5;
+        var MAX_PARALLEL_SPLIT = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
         // ⚠️ Первая колонка (плановое время старта) пишется ТОЛЬКО через _m_save (GUIDE
@@ -19261,11 +19421,11 @@
         }
         if (!plan.assignments.length) return Promise.resolve(false);
         this.setBusy(true);
-        var chain = Promise.resolve();
-        plan.assignments.forEach(function(w) {
-            chain = chain.then(function() { var f = {}; f[mainKey] = String(w.planStartTs); return self.post('_m_save/' + encodeURIComponent(w.id) + '?JSON', f); });
-        });
-        return chain.then(function() { return self.reload(); }).then(function() {
+        // #4477: перестановка — независимые записи, пишем пулом через шлюз (было — цепочкой в
+        // один поток). Совпавшие с хранимым planDragReorder уже не отдаёт, шлюз проверяет ещё раз.
+        return postCutStarts(self, plan.assignments.map(function(w) {
+            return { cutId: w.id, ts: w.planStartTs, wasTs: byId[String(w.id)] && byId[String(w.id)].planDate };
+        })).then(function() { return self.reload(); }).then(function() {
             self.setBusy(false);
             var dc = byId[String(dragId)];
             var sid = (dc && dc.slitter && dc.slitter.id != null) ? String(dc.slitter.id) : '';
@@ -19495,12 +19655,8 @@
                         + ' (' + Math.round((Number(f.up.ts) - Number(f.up.wasTs)) / 60) + ' мин)';
                 }).join('; '));
         } catch (e) {}
-        return runWithConcurrency(fixes.map(function(f) {
-            return function() {
-                var fields = {}; fields[mainKey] = String(f.up.ts);
-                return self.post('_m_save/' + encodeURIComponent(f.up.cutId) + '?JSON', fields);
-            };
-        }), 5).then(function() {
+        // #4477: через шлюз saveCutStarts — пул до 5 потоков, совпавшее с хранимым не пишем.
+        return postCutStarts(self, fixes.map(function(f) { return f.up; })).then(function() {
             return self.reload();
         }).then(function() { return fixes.length; });
     };
@@ -19716,14 +19872,9 @@
         this.setBusy(true);
         this.showProgress('Пересчёт наладки…', 1);
         return this.persistCutSetupColumns(scopeIds).then(function() {
-            // #4408: planStart — ТОЛЬКО _m_save с главным значением t{tableId} (_m_set первую
-            // колонку не задаёт, GUIDE issue #775). Разные задания независимы — пулом, как колонки.
-            return runWithConcurrency(startOps.map(function(u) {
-                return function() {
-                    var f = {}; f[mainKey] = String(u.ts);
-                    return self.post('_m_save/' + encodeURIComponent(u.cutId) + '?JSON', f);
-                };
-            }), 5);
+            // #4408/#4477: planStart — через шлюз saveCutStarts (пул до 5 потоков, совпавшее с
+            // хранимым не пишем; recalcStartUpdates и сам отдаёт только разъехавшиеся).
+            return postCutStarts(self, startOps);
         }).then(function() {
             return self.reload();
         }).then(function() {
