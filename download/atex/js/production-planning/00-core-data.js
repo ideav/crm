@@ -1651,6 +1651,90 @@
         return parts.join(' · ');
     }
 
+    // #4479: РАЗБОР расхождений, найденных автоматической проверкой «↻ Пересчитать наладку», —
+    // что именно разошлось у КАЖДОГО задания. Вход — те же два массива, по которым детектор
+    // (recalcMismatchRows) получает число для счётчика кнопки:
+    //   timingUpdates: [{ cutId, knife, material, cutTime, wasKnife, wasMaterial, wasCutTime }] —
+    //     хранимые колонки наладки против расчёта по текущему порядку соседей;
+    //   startUpdates:  [{ cutId, ts, wasTs }] — хранимый planStart против пересборки дня встык.
+    // Задание, попавшее в оба массива, даёт ОДНУ строку с двумя признаками.
+    // → { rows: [row], byId: { cutId: row }, ids: [cutId] }; ids — в том же порядке, в каком их
+    //   перечисляет счётчик (сперва колонки, затем старты). Чистая.
+    //   row = { cutId, timing: [{key,label,from,to}], timingChanged, startChanged, whenFrom, whenTo }
+    function setupMismatchRows(timingUpdates, startUpdates) {
+        var TIMING_COLS = [
+            { key: 'knife', label: 'наладка ножей', to: 'knife', was: 'wasKnife' },
+            { key: 'material', label: 'сырьё/намотка', to: 'material', was: 'wasMaterial' },
+            { key: 'cutTime', label: 'резка и лидер', to: 'cutTime', was: 'wasCutTime' }
+        ];
+        // Прежнее значение колонки: пусто/не число → null («не было»), иначе целые минуты.
+        function prevMin(v) {
+            if (v == null || String(v).trim() === '') return null;
+            var n = Number(String(v).replace(',', '.'));
+            return isFinite(n) ? Math.round(n) : null;
+        }
+        var byId = {}, rows = [], ids = [];
+        function rowFor(cutId) {
+            var id = String(cutId);
+            if (!byId[id]) {
+                byId[id] = { cutId: id, timing: [], timingChanged: false,
+                    startChanged: false, whenFrom: '—', whenTo: '—' };
+                rows.push(byId[id]);
+                ids.push(id);
+            }
+            return byId[id];
+        }
+        (timingUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var diffs = [];
+            TIMING_COLS.forEach(function(col) {
+                var to = Math.round(Number(u[col.to]) || 0);
+                var from = prevMin(u[col.was]);
+                // Пустая колонка — тоже расхождение: пересчёт её заполнит, и она уже посчитана
+                // счётчиком кнопки. Показываем честно «— → N», а не прячем как «ничего не менялось».
+                if (from === to) return;
+                diffs.push({ key: col.key, label: col.label, from: from, to: to });
+            });
+            if (!diffs.length) return;
+            var row = rowFor(u.cutId);
+            row.timing = diffs;
+            row.timingChanged = true;
+        });
+        (startUpdates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var to = Number(u.ts) || 0, from = Number(u.wasTs) || 0;
+            if (to === from) return;
+            var row = rowFor(u.cutId);
+            row.startChanged = true;
+            row.whenFrom = formatPlanStamp(from);
+            row.whenTo = formatPlanStamp(to);
+        });
+        return { rows: rows, byId: byId, ids: ids };
+    }
+
+    // #4479: короткая подпись бейджа на карточке — СУТЬ отклонения («наладка», «старт»,
+    // «наладка · старт»). Чистая.
+    function setupMismatchSummary(row) {
+        if (!row) return '';
+        var parts = [];
+        if (row.timingChanged) parts.push('наладка');
+        if (row.startChanged) parts.push('старт');
+        return parts.join(' · ');
+    }
+
+    // #4479: подсказка бейджа — ДЕТАЛИ отклонения «было → стало» и чем оно чинится. Чистая.
+    function setupMismatchTitle(row) {
+        if (!row) return '';
+        var parts = [];
+        (row.timing || []).forEach(function(t) {
+            parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
+        });
+        if (row.startChanged) parts.push('старт ' + row.whenFrom + ' → ' + row.whenTo);
+        if (!parts.length) return '';
+        return 'Расхождение с текущим порядком заданий: ' + parts.join(' · ')
+            + '\nПриводит в соответствие кнопка «↻ Пересчитать наладку»';
+    }
+
     // Строки отчёта positions_list (JSON_KV) → [{ id, label, width, length, qty }]
     // для дропдауна привязки и плашек «Связанные позиции». Подпись:
     // «<номер заказа>/<номер позиции> · <ширина>мм * <метраж>м» (#3231).

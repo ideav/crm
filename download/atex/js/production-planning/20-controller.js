@@ -38,6 +38,9 @@
         slitterTabIndexMap: slitterTabIndexMap, // #4444: станок → порядковый номер закладки
         planChangeStation: planChangeStation,   // #4444: колонка «станок» списка «Деталей» (3 или 3 → 5)
         planChangeSummary: planChangeSummary,   // #4417: короткая подпись изменения («старт · станок · тайминг»)
+        setupMismatchRows: setupMismatchRows,       // #4479: что разошлось у каждого задания (бейджи очереди)
+        setupMismatchSummary: setupMismatchSummary, // #4479: суть отклонения на бейдже («наладка · старт»)
+        setupMismatchTitle: setupMismatchTitle,     // #4479: детали отклонения в подсказке бейджа
         formatPlanStamp: formatPlanStamp,       // #4409/#4417: unix-секунды → «ДД.ММ ЧЧ:ММ»
         isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
@@ -8768,12 +8771,17 @@
     // #4408: сюда же — задания, у которых разошёлся СТАРТ (recalcStartUpdates): после перестановки
     // конфигурация соседей может совпасть (колонки те же), а день всё равно поедет внахлёст.
     // Пусто → пересчитывать нечего, кнопки нет.
-    AtexProductionPlanning.prototype.recalcMismatchIds = function(slitterId) {
-        if (!this.meta || !this.meta.cut) return [];
-        if (!(this.cuts && this.cuts.length)) return [];
+    // #4479: отдаёт не только идентификаторы, но и РАЗБОР («было → стало» по каждой колонке и по
+    // старту) — из него карточки очереди рисуют бейджи. Счётчик кнопки и бейджи считаются из одного
+    // результата, поэтому разойтись не могут: сколько названо, столько и помечено.
+    // → { rows, byId, ids } (setupMismatchRows).
+    AtexProductionPlanning.prototype.recalcMismatchRows = function(slitterId) {
+        var none = { rows: [], byId: {}, ids: [] };
+        if (!this.meta || !this.meta.cut) return none;
+        if (!(this.cuts && this.cuts.length)) return none;
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
-        if (!scopeIds.length) return [];
+        if (!scopeIds.length) return none;
         // Полный расчёт идёт по ВСЕЙ очереди станка (у не-первой резки иначе нет предшественника) и
         // стоит десятки миллисекунд, а renderQueue зовут на каждый ввод в поиске. Кэшируем по подписи:
         // станок + окно фильтра + версия загруженных данных + slitterQueueSignature (порядок,
@@ -8782,18 +8790,17 @@
             + String((this.filter && this.filter.dateTo) || '') + '|' + String(this._planDataVersion || 0)
             + '|' + slitterQueueSignature(this.cuts, sid);
         var cache = this._setupMismatchCache;
-        if (cache && cache.key === key) return cache.ids;
+        if (cache && cache.key === key) return cache.res;
         var res = this.computeCutSetupUpdates(scopeIds, { dryRun: true });
-        var seen = {}, ids = [];
-        (res.updates || []).forEach(function(u) {
-            var id = String(u.cutId);
-            if (!seen[id]) { seen[id] = true; ids.push(id); }
-        });
-        this.recalcStartUpdates(sid, { updates: res.updates || [] }).forEach(function(u) {   // #4408: разъехавшиеся старты
-            if (!seen[u.cutId]) { seen[u.cutId] = true; ids.push(u.cutId); }
-        });
-        this._setupMismatchCache = { key: key, ids: ids };
-        return ids;
+        var startOps = this.recalcStartUpdates(sid, { updates: res.updates || [] });   // #4408: разъехавшиеся старты
+        var out = setupMismatchRows(res.updates || [], startOps);
+        this._setupMismatchCache = { key: key, res: out };
+        return out;
+    };
+
+    // #4401: идентификаторы расхождений — счётчик кнопки «↻ Пересчитать наладку».
+    AtexProductionPlanning.prototype.recalcMismatchIds = function(slitterId) {
+        return this.recalcMismatchRows(slitterId).ids;
     };
 
     // #4401/#4408: «↻ Пересчитать наладку» — ТАЙМИНГ И ВРЕМЯ СТАРТА, БЕЗ ПЕРЕПЛАНИРОВАНИЯ.
@@ -9953,8 +9960,12 @@
         // этого станка в видимых днях с расчётом по ТЕКУЩЕМУ порядку (recalcMismatchIds, dryRun) и
         // показываем кнопку, только если что-то разошлось. Ничего не разошлось — кнопки нет.
         // #4408: расхождением считается и разъехавшееся ВРЕМЯ СТАРТА (день едет внахлёст/с дырами).
+        // #4479: тот же результат даёт бейджи на карточках (mismatchByCut ниже) — счётчик кнопки и
+        // пометки на заданиях считаются из ОДНОГО разбора, поэтому не могут разойтись.
         var actDirtyId = (activeGroup && activeGroup.slitter && activeGroup.slitter.id != null) ? String(activeGroup.slitter.id) : '';
-        var mismatchIds = actDirtyId ? self.recalcMismatchIds(actDirtyId) : [];
+        var mismatch = actDirtyId ? self.recalcMismatchRows(actDirtyId) : { rows: [], byId: {}, ids: [] };
+        var mismatchIds = mismatch.ids;
+        var mismatchByCut = mismatch.byId;
         if (mismatchIds.length) {
             // #4430: вид и ЛИПКОСТЬ кнопки — в CSS (.atex-pp-recalc-setup): она приклеена к верху
             // экрана, иначе в длинной очереди уезжала вверх и расхождение чинить было нечем.
@@ -10222,6 +10233,14 @@
             if (previewChange) {
                 infoChildren.push(el('span', { class: 'atex-pp-cut-chg-badge',
                     title: planChangeTitle(previewChange), text: planChangeSummary(previewChange) }));
+            }
+            // #4479: расхождение, из-за которого над очередью висит «↻ Пересчитать наладку», —
+            // на самом задании: бейдж говорит СУТЬ («наладка», «старт»), подсказка — «было → стало».
+            // Иначе кнопка называет число, а какие это задания и что с ними не так — не найти.
+            var mismatchRow = mismatchByCut[String(c.id)];
+            if (mismatchRow) {
+                infoChildren.push(el('span', { class: 'atex-pp-cut-mismatch-badge',
+                    title: setupMismatchTitle(mismatchRow), text: setupMismatchSummary(mismatchRow) }));
             }
             if (timeEl) infoChildren.push(timeEl);
             infoChildren.push(el('span', { class: 'atex-pp-cut-name', title: materialText, text: materialText }));
