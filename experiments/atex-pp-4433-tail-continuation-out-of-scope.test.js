@@ -148,5 +148,48 @@ function withStoredFromFullScope() {
         'открытый правый край диапазона — кнопки нет');
 })();
 
+// ── Часть 3. Ножи хвоста не уезжают на ПОСТОРОННЕЕ задание ───────────────────
+// Второй симптом из #4433: «предлагает добавить настройку ножей, хотя они те же самые» — бейдж
+// «наладка ножей 0 → 30» висел на задании, у которого конфигурация СОВПАДАЕТ с предыдущим.
+//
+// Так выходило, когда из снимка выпадало ПРОДОЛЖЕНИЕ цепочки (день вне [С; По] либо день
+// ЗАМОРОЖЕН — recalcScopeCutIds отсекает и то, и другое, #4436): скан вперёд его не видел,
+// «цепочки нет» → срабатывал фолбэк «ближайшая резка той же конфигурации» и ножи хвоста
+// приземлялись на чужое задание, которое никакой наладки не требует.
+(function () {
+    // T (день 0, хвост) → C (день 1, продолжение цепочки T) → U (день 2, та же конфигурация, но
+    // СВОЯ цепочка). Снимок — дни 0 и 2: день 1 выпал (заморожен/вне диапазона).
+    var cuts = [
+        icut({ id: 'P', mat: 'MW411',  kw: [70], runs: 4, dur: 436, day: 0, min: 8 * 60 }),
+        icut({ id: 'T', mat: 'MWR200', kw: [50], runs: 0, dur: 0,   day: 0, min: 16 * 60 + 1, first: 'T' }),
+        icut({ id: 'C', mat: 'MWR200', kw: [50], runs: 8, dur: 26,  day: 1, min: 8 * 60,      first: 'T' }),
+        icut({ id: 'U', mat: 'MWR200', kw: [50], runs: 5, dur: 20,  day: 2, min: 8 * 60,      first: 'U' })
+    ];
+    var byFull = {};
+    makeCtrl(cuts).computeCutSetupUpdates(null).updates.forEach(function(u) { byFull[String(u.cutId)] = u; });
+    cuts.forEach(function(c) {
+        var u = byFull[String(c.id)];
+        if (!u) return;
+        c.storedKnifeSetupMin = String(u.knife);
+        c.storedMaterialWindingMin = String(u.material);
+        c.storedCutAndLeaderMin = String(u.cutTime);
+    });
+
+    // Контроль: при полном горизонте ножи хвоста забирает ПРОДОЛЖЕНИЕ, а не U.
+    assertEqual({ knife: byFull.C.knife, material: byFull.C.material }, { knife: 30, material: 0 },
+        'контроль: ножи хвоста T ушли на продолжение C');
+    assertEqual(byFull.U === undefined || byFull.U.knife === 0, true,
+        'контроль: U (та же конфигурация, чужая цепочка) наладки не получает');
+
+    var out = {};
+    makeCtrl(cuts).computeCutSetupUpdates(['P', 'T', 'U'], { dryRun: true }).updates.forEach(function(u) {
+        out[String(u.cutId)] = { knife: u.knife, material: u.material };
+    });
+    assertEqual(out.U, undefined,
+        '#4433: продолжение вне снимка — ножи хвоста НЕ уезжают на постороннее задание той же конфигурации');
+    assertEqual(out, {},
+        '#4433: снимок без дня продолжения не рождает расхождений вовсе');
+})();
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;
