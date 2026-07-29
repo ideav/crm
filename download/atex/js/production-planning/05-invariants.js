@@ -187,18 +187,27 @@
                     nowByDay[key].forEach(function(r, i) { posNow[r.id] = { key: key, i: i }; });
                 });
                 var out = [];
+                // #4491: пару 🔒 проверяем ТАМ, ГДЕ ОНА ОКАЗАЛАСЬ, а не только в её прежнем дне.
+                // Прежде пара пропускалась, если хоть одно звено сменило день (`a.key !== key`) —
+                // а боевой случай выглядит ровно так: потолок дня (#4467) увозит монолит на
+                // следующий день, и там его звенья переставлялись или раздвигались, а шлюз молчал.
+                // Теперь достаточно, чтобы ОБА звена оказались в одном дне одного станка: где бы
+                // монолит ни очутился, порядок и соседство внутри него обязаны сохраниться.
+                // Разъехались по РАЗНЫМ дням — это FIXED_CUT_DAY (законный переезд по потолку),
+                // соседства там требовать нечего: между днями и так ночь.
                 Object.keys(wasByDay).forEach(function(key) {
                     var fixedWas = wasByDay[key].filter(function(r) { return r.fixed; });
                     for (var i = 0; i < fixedWas.length; i++) {
                         var a = posNow[fixedWas[i].id];
-                        if (!a || a.key !== key) continue;   // уехало на другой день/станок — это FIXED_CUT_DAY
+                        if (!a) continue;   // задание удалено — это FIXED_CUT_DAY
                         if (i + 1 < fixedWas.length) {
                             var b = posNow[fixedWas[i + 1].id];
-                            if (!b || b.key !== key) continue;
+                            if (!b || b.key !== a.key) continue;   // звенья в разных днях — FIXED_CUT_DAY
+                            var atKey = a.key;   // день, ГДЕ пара оказалась (свой или тот, куда переехала)
                             if (b.i < a.i) {
                                 out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
                                     'зафиксированные задания дня переставлены местами: ' + fixedWas[i].id + ' ↔ ' + fixedWas[i + 1].id,
-                                    { slitterId: key.split('|')[0], dayKey: Number(key.split('|')[1]),
+                                    { slitterId: atKey.split('|')[0], dayKey: Number(atKey.split('|')[1]),
                                       kind: 'swap', otherCutId: String(fixedWas[i].id) }));
                                 continue;
                             }
@@ -206,12 +215,12 @@
                             var wasIdxA = wasByDay[key].indexOf(fixedWas[i]);
                             var wasIdxB = wasByDay[key].indexOf(fixedWas[i + 1]);
                             if (wasIdxB === wasIdxA + 1 && b.i !== a.i + 1) {
-                                var betweenIds = nowByDay[key].slice(a.i + 1, b.i).map(function(r) { return String(r.id); });
+                                var betweenIds = nowByDay[atKey].slice(a.i + 1, b.i).map(function(r) { return String(r.id); });
                                 var between = betweenIds.join(', ');
                                 out.push(ppViolation('FIXED_BLOCK', fixedWas[i + 1].id,
                                     'между зафиксированными ' + fixedWas[i].id + ' и ' + fixedWas[i + 1].id
                                     + ' вклинилось: ' + (between || '?'),
-                                    { slitterId: key.split('|')[0], dayKey: Number(key.split('|')[1]),
+                                    { slitterId: atKey.split('|')[0], dayKey: Number(atKey.split('|')[1]),
                                       kind: 'insert', otherCutId: String(fixedWas[i].id), betweenIds: betweenIds }));
                             }
                         }

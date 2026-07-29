@@ -111,5 +111,57 @@ function adjacent(ord, a, b) { return ord.indexOf(b) === ord.indexOf(a) + 1; }
         '#4491-D: свободное между двумя 🔒 одного дня не встаёт (#4464)', '(' + ord.join(' → ') + ')');
 })();
 
+// ── E: ШЛЮЗ видит нарушение и в дне-ПРИЁМНИКЕ ──────────────────────────────────────────────
+// Прежде правило FIXED_BLOCK пропускало пару, если хоть одно звено сменило день (`a.key !== key`),
+// а именно так выглядит боевой случай: потолок дня (#4467) увозит монолит на следующий день, и
+// там его звенья переставлялись/раздвигались молча. Теперь пару проверяем ТАМ, ГДЕ ОНА ОКАЗАЛАСЬ.
+(function () {
+    var DAY = 86400;
+    // Хранимый план: день 0 — F1🔒(08:00) F2🔒(09:00); X — свободное того же дня.
+    var snapshot = [
+        { id: 'F1', slitterId: '1', planStartTs: D0, fixed: true },
+        { id: 'F2', slitterId: '1', planStartTs: D0 + 3600, fixed: true },
+        { id: 'X',  slitterId: '1', planStartTs: D0 + 7200, fixed: false }
+    ];
+    var ctx = {
+        planSnapshot: function () { return snapshot; },
+        isFixedCut: function (id) { return String(id) === 'F1' || String(id) === 'F2'; },
+        dayKeyOfTs: function (ts) { return Number(P.planDateDayKey(String(ts))); }
+    };
+    function fixedBlock(ops) {
+        return P.checkPlanInvariants(ops, ctx, 'auto').filter(function (v) { return v.rule === 'FIXED_BLOCK'; });
+    }
+    // Монолит уехал на день 1 ЦЕЛИКОМ и там раздвинут вставкой X — нарушение.
+    var wedgedNextDay = { updates: [
+        { cutId: 'F1', slitterId: '1', planStartTs: D0 + DAY },
+        { cutId: 'X',  slitterId: '1', planStartTs: D0 + DAY + 1800 },
+        { cutId: 'F2', slitterId: '1', planStartTs: D0 + DAY + 3600 }], creates: [], deletes: [] };
+    var vWedge = fixedBlock(wedgedNextDay);
+    assert(vWedge.length > 0,
+        '#4491-E: шлюз ловит вставку между 🔒 в дне-ПРИЁМНИКЕ (раньше молчал)', '(' + JSON.stringify(vWedge) + ')');
+
+    // Монолит уехал на день 1 и там переставлен местами — нарушение.
+    var swappedNextDay = { updates: [
+        { cutId: 'F2', slitterId: '1', planStartTs: D0 + DAY },
+        { cutId: 'F1', slitterId: '1', planStartTs: D0 + DAY + 3600 }], creates: [], deletes: [] };
+    var vSwap = fixedBlock(swappedNextDay);
+    assert(vSwap.length > 0 && vSwap[0].kind === 'swap',
+        '#4491-E: шлюз ловит перестановку 🔒 в дне-приёмнике', '(' + JSON.stringify(vSwap) + ')');
+
+    // Монолит уехал на день 1 ЦЕЛИКОМ, порядок и соседство целы — нарушения нет.
+    var movedWhole = { updates: [
+        { cutId: 'F1', slitterId: '1', planStartTs: D0 + DAY },
+        { cutId: 'F2', slitterId: '1', planStartTs: D0 + DAY + 3600 }], creates: [], deletes: [] };
+    assert(fixedBlock(movedWhole).length === 0,
+        '#4491-E: переезд монолита целиком нарушением НЕ считается', '(' + JSON.stringify(fixedBlock(movedWhole)) + ')');
+
+    // Звенья разъехались по РАЗНЫМ дням — это FIXED_CUT_DAY (потолок), FIXED_BLOCK молчит.
+    var splitAcrossDays = { updates: [
+        { cutId: 'F2', slitterId: '1', planStartTs: D0 + DAY }], creates: [], deletes: [] };
+    assert(fixedBlock(splitAcrossDays).length === 0,
+        '#4491-E: разъезд звеньев по дням — не FIXED_BLOCK (между днями и так ночь)',
+        '(' + JSON.stringify(fixedBlock(splitAcrossDays)) + ')');
+})();
+
 console.log('\n' + passed + '/' + total + ' проверок пройдено');
 if (passed !== total) process.exitCode = 1;
