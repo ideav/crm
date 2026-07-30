@@ -10,10 +10,6 @@ atex-cut-gantt.test.js
 atex-issue-3700-cut-and-leader.test.js
 atex-production-planning-3619.test.js
 atex-production-planning-3909.test.js
-atex-production-planning-4163.test.js
-atex-production-planning-4168.test.js
-atex-production-planning-4171.test.js
-atex-production-planning-4173.test.js
 atex-production-planning.test.js
 issue-2941-control-char-scan.test.js
 issue-2990-atex-brand-template.test.js
