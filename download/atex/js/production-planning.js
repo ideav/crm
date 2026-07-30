@@ -12241,6 +12241,8 @@
         // работает для ЛЮБОГО правила с `mode: 'drop'`, а не только для заморозки.
         guardPlanOpsWith: guardPlanOpsWith,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
+        formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
+        cutShortLabel: cutShortLabel,                   // #4531: задание одной строкой (как первая строка карточки)
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
         ganttBaseFromLocation: ganttBaseFromLocation,   // #3713
@@ -20526,12 +20528,23 @@
             if (!days.length) return;
             hit.push(sid);
             if (typeof console !== 'undefined' && console.error) {
-                console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам', { slitterId: sid, days: days });
+                console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам',
+                    { slitterId: sid, days: overfilledDaysBrief(days) });
             }
-            if (!saidAlready && typeof self.warnOverfilledDays === 'function') self.warnOverfilledDays(sid);
         });
+        // #4531: ОДНО сообщение на все станки. Прежде тост слался в цикле — по станку на каждый, и
+        // оператор получал стопку одинаковых на вид предупреждений без единого имени станка.
+        if (hit.length && !saidAlready && typeof this.warnOverfilledDays === 'function') this.warnOverfilledDays(hit);
         return hit;
     };
+
+    // Переполненные дни в журнал — без объекта задания (#4531 кладёт его рядом для подписи).
+    function overfilledDaysBrief(days) {
+        return (days || []).map(function(d) {
+            return { dayOffset: d.dayOffset, endMin: d.endMin, overMin: d.overMin,
+                     capMin: d.capMin, cutId: d.cutId, seq: d.seq };
+        });
+    }
 
     AtexProductionPlanning.prototype.reportPlanAudit = function(violations) {
         var msg = this.planAuditMessage(violations);
@@ -21775,7 +21788,10 @@
     // без тостов и записей. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня
     // против потолка резки (cutEndMin + нахлёст резки). Это та же арифметика, что стои́т в бейдже
     // «(N мин)», только выраженная в конце дня — обед и «Отпуск» уже сидят в хранимых стартах.
-    // → массив [{ dayOffset, endMin, overMin }].
+    // #4531: вместе с днём отдаём ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
+    // в дне (`seq` — тот же, что на карточке: позиция по возрастанию planStart) и потолок (`capMin`).
+    // Фразу оператору собирает печать (formatOverfilledDaysMessage), детектор только меряет.
+    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid);
@@ -21787,7 +21803,7 @@
         var cutEnd = Number(win.cutEndMin);
         if (!isFinite(cutEnd) || !isFinite(base)) return [];
         var over = Number(win.maxOverworkCutsMin) || 0;
-        var endByDay = {};
+        var byDay = {};
         (this.cuts || []).forEach(function(c) {
             if (!c || !inScope[String(c.id)]) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
@@ -21796,28 +21812,102 @@
             var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
                     + Math.round(stripNum(c.storedCutAndLeaderMin));
             var day = Math.floor(ws / 1440);
-            var end = ws + occ - day * 1440;
-            if (!(endByDay[day] > end)) endByDay[day] = end;
+            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, end: ws + occ - day * 1440 });
         });
-        return Object.keys(endByDay).map(Number).sort(function(a, b) { return a - b; })
-            .filter(function(d) { return endByDay[d] > cutEnd + over + 1; })
-            .map(function(d) { return { dayOffset: d, endMin: endByDay[d], overMin: Math.round(endByDay[d] - cutEnd) }; });
+        return Object.keys(byDay).map(Number).sort(function(a, b) { return a - b; })
+            .map(function(d) {
+                // Порядок в дне — по сохранённому planStart (тем же, чем нумерует карточки очередь).
+                var items = byDay[d].map(function(it, i) { it._i = i; return it; })
+                    .sort(function(a, b) { return (a.ws - b.ws) || (a._i - b._i); });
+                var worst = items[0], worstAt = 0;
+                items.forEach(function(it, i) { if (it.end >= worst.end) { worst = it; worstAt = i; } });
+                return { dayOffset: d, endMin: worst.end, overMin: Math.round(worst.end - cutEnd),
+                         capMin: cutEnd, cutId: worst.cut.id, seq: worstAt + 1, cut: worst.cut };
+            })
+            .filter(function(r) { return r.endMin > cutEnd + over + 1; });
     };
 
+    // #4531: ПЕРЕПОЛНЕННЫЙ СТАНКО-ДЕНЬ → ФРАЗА ОПЕРАТОРУ. Прежний текст называл дату и минуты
+    // перебора — ровно то, что и так стои́т в бейдже «(N мин)» шапки дня, — и уходил ОТДЕЛЬНЫМ
+    // сообщением на каждый станок: три станка давали стопку одинаковых на вид предупреждений, ни в
+    // одном из которых не сказано, ни какой это станок, ни какое задание не влезло (issue #4531).
+    // Собираем ОДНУ фразу на все станко-дни и называем в ней место (станок + день), мерку (конец
+    // дня против потолка смены) и виновника (номер задания в дне + сырьё и размеры — как на карточке).
+    //   entries — [{ slitterId, dayOffset, endMin, overMin, capMin, seq, cutLabel }];
+    //   opts.slitterLabel(id) → подпись станка, opts.dayLabel(dayOffset) → дата дня,
+    //   opts.clock(min) → ЧЧ:ММ, opts.limit — сколько станко-дней называть поимённо
+    //   (остаток не замалчиваем: «…и ещё N»).
+    // → { text, shown, rest } либо null, если называть нечего.
+    function formatOverfilledDaysMessage(entries, opts) {
+        var list = (entries || []).filter(function(e) { return e; });
+        if (!list.length) return null;
+        var o = opts || {};
+        var slitterLabel = typeof o.slitterLabel === 'function' ? o.slitterLabel : function(id) { return 'станок #' + id; };
+        var dayLabel = typeof o.dayLabel === 'function' ? o.dayLabel : function(d) { return 'день ' + d; };
+        var clock = typeof o.clock === 'function' ? o.clock : function(m) { return String(Math.round(m)) + ' мин'; };
+        var limit = Number(o.limit) > 0 ? Number(o.limit) : 3;
+        var items = list.map(function(e) {
+            var place = [];
+            if (e.slitterId != null && String(e.slitterId) !== '') place.push(slitterLabel(e.slitterId));
+            place.push(dayLabel(e.dayOffset));
+            var who = e.seq > 0 ? ('№ ' + e.seq + (e.cutLabel ? ' «' + e.cutLabel + '»' : '')) : (e.cutLabel || '');
+            return place.join(', ') + ' — до ' + clock(e.endMin) + ' при потолке ' + clock(e.capMin)
+                + ' (+' + Math.round(e.overMin) + ' мин)'
+                + (who ? ', последнее задание ' + who : '');
+        });
+        var shown = items.slice(0, limit);
+        var rest = items.length - shown.length;
+        return { text: 'Не помещается в смену: ' + shown.join('; ') + (rest > 0 ? '; …и ещё ' + rest : '')
+                     + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».',
+                 shown: shown, rest: rest, items: items };
+    }
+
+    // #4531: задание одной строкой — сырьё, намотка и размеры, как в первой строке карточки
+    // («MW308 IN — 450 х 12»). По ней задание находится в очереди глазами.
+    function cutShortLabel(cut) {
+        if (!cut) return '';
+        var head = [];
+        var mat = cut.materialName || (cut.materialId != null && String(cut.materialId) !== '' ? '#' + cut.materialId : '');
+        if (mat) head.push(String(mat));
+        var wind = normWinding(cut.winding);
+        if (wind) head.push(wind);
+        var dims = formatCutDimensions(cut, null);
+        return head.join(' ') + (head.length && dims ? ' — ' : '') + dims;
+    }
+
     // #4408: переполнение дня, которое автоматика убрать не смогла (замороженный день #4436,
-    // единственный проход длиннее смены), — молчать нельзя (ТЗ §14/#4059): показываем день и
-    // минуты перебора. → массив [{ dayOffset, endMin, overMin }] (он же уходит в тост).
-    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var days = this.overfilledDaysOf(sid);
+    // единственный проход длиннее смены), — молчать нельзя (ТЗ §14/#4059): показываем станок, день,
+    // минуты перебора и задание, которым день кончается.
+    // #4531: принимает ОДИН станок (ручные пути ↑↓ и «↻ Пересчитать наладку») или СПИСОК станков
+    // (шлюз записи плана) и в обоих случаях говорит ОДНИМ сообщением.
+    // → массив [{ slitterId, dayOffset, endMin, overMin, capMin, cutId, seq }] (он же уходит в тост).
+    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterIds) {
+        var self = this;
+        var ids = (Array.isArray(slitterIds) ? slitterIds : [slitterIds])
+            .map(function(v) { return String(v == null ? '' : v); });
+        var days = [];
+        ids.forEach(function(sid) {
+            (self.overfilledDaysOf(sid) || []).forEach(function(d) {
+                var row = {};
+                Object.keys(d).forEach(function(k) { if (k !== 'cut') row[k] = d[k]; });
+                row.slitterId = sid;
+                row.cutLabel = cutShortLabel(d.cut);
+                days.push(row);
+            });
+        });
         if (!days.length) return days;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        this.notify('Не помещается в смену: ' + days.map(function(d) {
-            return formatPlanDayHeading(base, d.dayOffset) + ' до ' + formatClock(d.endMin)
-                + ' (+' + d.overMin + ' мин)';
-        }).join('; ') + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».', 'warning');
+        var byId = {};
+        (this.slitters || []).forEach(function(s) { byId[String(s.id)] = s.label || ('станок #' + s.id); });
+        var msg = formatOverfilledDaysMessage(days, {
+            slitterLabel: function(id) { return byId[String(id)] || ('станок #' + id); },
+            dayLabel: function(dayOffset) { return formatPlanDayHeading(base, dayOffset); },
+            clock: formatClock,
+            limit: 3
+        });
+        if (msg) this.notify(msg.text, 'warning');
         if (typeof console !== 'undefined' && console.warn) {
-            console.warn('[pp] #4408: день не помещается в смену', { slitterId: sid, days: days });
+            console.warn('[pp] #4408: день не помещается в смену', { slitterIds: ids, days: days });
         }
         return days;
     };
