@@ -8764,12 +8764,59 @@
             // «Сгенерировать» на стабильном плане её не чинит. Восстановили → render.
             return self.reconcileOrphanOrderSupplies().then(function(n) {
                 if (n > 0) self.render();
-                return n > 0;
+                // #4519: переставлять нечего — но день мог остаться ДЛИННЕЕ смены (перенесённое
+                // задание приколото целиком, #4488). Потолок старше ответа «план оптимален».
+                return self.levelOverfilledAfterWrite(moveScope, n > 0);
             });
         }
         // #4475: audit — отклонения, которые несёт ЗАПИСЫВАЕМЫЙ план; о них скажет applySplitPlan.
         return self.applySplitPlan({ updates: changedUpdates, creates: ops.creates, deletes: ops.deletes,
-            audit: ops.ruleAudit || [] });
+            audit: ops.ruleAudit || [] }).then(function(applied) {
+                return self.levelOverfilledAfterWrite(moveScope, applied);
+            });
+    };
+
+    // #4519 (ТЗ §15): ПОСЛЕ ЛЮБОЙ ПЕРЕСБОРКИ ДЕНЬ СВЕРХ ПОТОЛКА ВЫРАВНИВАЕТСЯ САМ. Разрыв последнего
+    // задания дня по потолку и перенос остатка на следующий день умеет `levelDayLoad` (#4473), но
+    // звался он только из «↻ Пересчитать наладку»: после ручного переноса 🗓 день оставался распухшим
+    // (боевое — Пн 03.08.2026, 757 мин при потолке 460), и оператору приходилось нажимать
+    // «Упорядочить»/«Пересчитать наладку» руками (issue #4519).
+    //
+    // ПОЧЕМУ ЗДЕСЬ. `autoSequenceQueueAfterMerge` — ОБЩАЯ точка: через неё проходят «Сгенерировать»,
+    // «Упорядочить», «Пересчитать наладку», ручной перенос 🗓, ↑↓ и перетаскивание. Оба её выхода
+    // (записали план / писать было нечего) обязаны оставить день в пределах смены.
+    //
+    // ПОЧЕМУ ЭТО ПОМОГАЕТ, ЕСЛИ УПАКОВЩИК УЖЕ ПАКОВАЛ. Перенесённое задание приколото «целиком»
+    // (#4488, `wholeDayCutIds`) — упаковщик его не рвёт, и день честно уходит за потолок. Выравнивание
+    // зовёт ту же раскладку БЕЗ этого прикола (`levelDayLoad` → withinSlitterIds), поэтому последнее
+    // задание дня рвётся по потолку, а остаток уезжает продолжением — ровно то, что оператор получал
+    // руками.
+    //
+    // РЕКУРСИИ НЕТ: выравнивание пишет план тем же путём, поэтому на время его работы стои́т флаг —
+    // второй круг не запускается, и «разгрузить нечем» (в дне одни 🔒 по одному проходу, проход
+    // неделим) заканчивается честным предупреждением `warnOverfilledDays`, а не циклом.
+    // → Promise<результат исходной операции> (значение не подменяем: вызывающие смотрят на него).
+    AtexProductionPlanning.prototype.levelOverfilledAfterWrite = function(moveScope, result) {
+        var self = this;
+        if (this._levelingDays) return Promise.resolve(result);
+        if (typeof this.overfilledDaysOf !== 'function' || typeof this.levelDayLoad !== 'function') {
+            return Promise.resolve(result);   // стаб-self в юнит-тестах
+        }
+        var ids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
+            ? moveScope.withinSlitterIds.map(String)
+            : (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
+        var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid).length > 0; });
+        if (!over.length) return Promise.resolve(result);
+        this._levelingDays = true;
+        return over.reduce(function(chain, sid) {
+            return chain.then(function() { return self.levelDayLoad(sid); });
+        }, Promise.resolve()).then(function() {
+            self._levelingDays = false;
+            return result;
+        }).catch(function(err) {
+            self._levelingDays = false;
+            throw err;
+        });
     };
 
     // #4306: ПЕРЕСТАНОВКА задания ВНУТРИ дня перетаскиванием мышью (drag-drop). Работает как ↑↓:
