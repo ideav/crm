@@ -23,7 +23,12 @@
 //   E — реестр PP_INVARIANTS (FIXED_NO_PUSH) на всех входах автоматики: create-хвост и приезжее
 //       задание перед 🔒 — нарушение; стоявшее перед ней раньше, вторая 🔒, переезд 🔒 в другой
 //       день и ручной перенос — не нарушение;
-//   F — упаковщик: ручной перенос 🗓 встраивает задание перед 🔒 по порядку §8 (правило не про него).
+//   F — упаковщик: ручной перенос 🗓 встраивает задание перед 🔒 по порядку §8 (правило не про него);
+//   G — «хранимое место» — это место НА ТОМ ЖЕ СТАНКЕ: задание из того же дня, но с другого станка,
+//       перед 🔒 не стояло и встаёт после неё;
+//   H — разрешение спрашивается у ВСЕХ 🔒 дня, а не у готовых к укладке: 🔒 ручного переноса стои́т
+//       первой и правилу уступает, но остальные 🔒 дня этим шлюз не открывают (issue #4506, боевое:
+//       Станок 1, Чт 30.07.2026 — шесть заданий встали перед 649432/653120, те уехали в конец дня).
 //
 // Run with: node experiments/atex-pp-4497-fixed-insert-after.test.js
 
@@ -47,6 +52,7 @@ function cut(id, work, o) {
     o = o || {};
     return { id: id, materialId: 'M1', winding: 'OUT', batchId: 'B1', knifeWidths: [50], knifeCount: 1,
              rollerWidth: 0, isFoil: false, plannedRuns: o.runs || 1, fixed: !!o.fixed,
+             slitter: o.sid != null ? { id: o.sid } : undefined,
              planDate: o.ts != null ? String(o.ts) : undefined,
              _work: work, _anchor: o.fixed ? (o.anchor != null ? o.anchor : 0) : null, _day: o.day };
 }
@@ -279,6 +285,57 @@ function startOf(segs, id) {
     // Та же расстановка БЕЗ ручного переноса — X уходит за 🔒.
     assert(ids(pack([A, X, L]), 0).join(' → ') === 'A → L → X',
         'F2 без ручного переноса то же задание встаёт после 🔒', '(' + ids(pack([A, X, L]), 0).join(' → ') + ')');
+})();
+
+// ── G. Хранимое место — на ТОМ ЖЕ станке (боевое: Станок 1, 30.07.2026) ──────────────────────
+(function () {
+    // 🔒 L лежит на Станке 1 в 12:00. A и B лежат в ТОМ ЖЕ дне, но на Станке 2, в 08:00 и 09:00 —
+    // слой размещения переводит их на Станок 1. Перед L они НЕ стояли: здесь они новые.
+    var L = cut('L', 90, { fixed: true, anchor: 0, day: 0, ts: 5000, sid: '1' });
+    var A = cut('A', 60, { day: 0, ts: 1000, sid: '2' });
+    var B = cut('B', 60, { day: 0, ts: 2000, sid: '2' });
+    assert(ids(pack([A, B, L]), 0).join(' → ') === 'L → A → B',
+        'G1 приезжие с ДРУГОГО станка встают ПОСЛЕ 🔒, а не в голову её дня',
+        '(' + ids(pack([A, B, L]), 0).join(' → ') + ')');
+    // Контроль: те же задания, но хранимо на ЭТОМ станке — их место перед 🔒 законно.
+    var A1 = cut('A', 60, { day: 0, ts: 1000, sid: '1' });
+    var B1 = cut('B', 60, { day: 0, ts: 2000, sid: '1' });
+    assert(ids(pack([A1, B1, L]), 0).join(' → ') === 'A → B → L',
+        'G2 свои же задания того же станка остаются впереди 🔒',
+        '(' + ids(pack([A1, B1, L]), 0).join(' → ') + ')');
+    // Слой размещения §8: та же мерка на точке вставки.
+    var TS0 = Math.floor(new Date(2026, 6, 30, 8, 0, 0).getTime() / 1000);
+    function slot(id, o) {
+        return P.slotFromCut({ id: id, slitter: { id: o.sid }, materialId: 'M1', winding: 'OUT',
+                               knifeWidths: [50], knifeCount: 1, rollerWidth: 0, plannedRuns: 1,
+                               isFoil: false, fixed: !!o.fixed, workMin: o.wm,
+                               planDate: String(TS0 + (o.ts || 0)) });
+    }
+    var ctx = { settings: {}, capacityMin: 450, times: TIMES, perPass: 0,
+                baseMidnightMs: new Date(2026, 6, 30).getTime() };
+    var arr = [slot('L', { sid: '1', fixed: true, wm: 90, ts: 14400 })];
+    assert(P.scorePosition(arr, 0, slot('A', { sid: '2', wm: 60, ts: 0 }), ctx) === null,
+        'G3 §8: точка перед 🔒 недопустима для задания, хранимого на ДРУГОМ станке');
+    assert(P.scorePosition(arr, 0, slot('A', { sid: '1', wm: 60, ts: 0 }), ctx) !== null,
+        'G4 §8: для задания ЭТОГО станка, стоявшего раньше 🔒, точка перед ней законна');
+})();
+
+// ── H. Разрешение — у ВСЕХ 🔒 дня, а не у готовых к укладке (issue #4506) ─────────────────────
+(function () {
+    // День 0: первой стои́т 🔒 M, которую оператор переносит «по весу» с фиксацией (плейсхолдер —
+    // голова дня), за ней хранимые 🔒 F1 и F2. Свободные A и B лежат в ДРУГОМ дне и подтягиваются
+    // сюда. M правилу уступает (ручной перенос), но F1/F2 — нет: A и B встают ПОСЛЕ них.
+    var M = cut('M', 10, { fixed: true, anchor: 0, day: 0, ts: 1000 });
+    var F1 = cut('F1', 60, { fixed: true, anchor: 0, day: 0, ts: 4000 });
+    var F2 = cut('F2', 60, { fixed: true, anchor: 0, day: 0, ts: 5000 });
+    var A = cut('A', 30, { day: 1, ts: 90000 });
+    var B = cut('B', 30, { day: 1, ts: 91000 });
+    var got = ids(pack([A, B, M, F1, F2], { wholeDayByCut: { M: 0 } }), 0);
+    assert(got.join(' → ') === 'M → F1 → F2 → A → B',
+        'H1 через 🔒 ручного переноса не проходят чужие задания — F1/F2 держат своё место',
+        '(' + got.join(' → ') + ')');
+    assert(got.indexOf('F1') === 1 && got.indexOf('F2') === 2,
+        'H2 хранимые 🔒 остались подряд сразу за перенесённой, а не в конце дня', '(' + got.join(' → ') + ')');
 })();
 
 console.log('\n' + passed + '/' + total + ' passed');

@@ -6431,11 +6431,25 @@
                 var v = Number(state[id] && state[id].cut && state[id].cut.planDate);
                 return (isFinite(v) && v > 0) ? v : null;
             }
+            // Хранимый СТАНОК задания (`c.slitter.id`); слой размещения назначает новый станок, а этот
+            // остаётся тем, где задание лежало. null — неизвестен (очередь одного станка в тестах).
+            function storedSidOf(id){
+                var c = state[id] && state[id].cut;
+                var sid = c && ((c.slitter && c.slitter.id != null) ? c.slitter.id : c.slitterId);
+                return (sid == null || String(sid) === '') ? null : String(sid);
+            }
             function storedBeforeFixed(candId, fixedId){
                 var fst = state[fixedId];
                 if (!fst || fst.anchor == null) return false;   // хранимого дня 🔒 нет — сравнивать нечем
                 var a = storedPlanTs(candId), b = storedPlanTs(fixedId);
                 if (a == null || b == null || a >= b) return false;   // стояло позже / хранимого времени нет
+                // #4497 follow-up: «стоял перед ней» — это место НА ТОМ ЖЕ СТАНКЕ. Задание, лежавшее в
+                // тот же день на ДРУГОМ станке, перед этой 🔒 не стояло: приехав сюда, оно новое для дня
+                // и обязано встать после неё. Без сравнения станков шесть заданий, переехавших со
+                // Станка 2, вставали в голову дня Станка 1 и выдавливали 🔒 на следующий день (боевое:
+                // Станок 1, Чт 30.07.2026 — 649432 и 653120 сдвинуты, одна 🔒 уехала на 31.07).
+                var cs = storedSidOf(candId), fs = storedSidOf(fixedId);
+                if (cs !== fs) return false;
                 var cDay = storedDayBy[String(candId)];
                 // Хранимый день задания: из карты (её даёт planCutOperations) либо — если карту не
                 // передали — по «Дате план» относительно 🔒: одна смена = ±12 ч от её старта.
@@ -6447,10 +6461,13 @@
             //   • это ФОЛЬГА, а кандидат — нефольга: «фольга всегда в конец дня» (#3717) той же
             //     твёрдости, и 🔒-фольга от уступки не страдает — она остаётся последней в дне;
             //   • кандидат стоял перед ней в ХРАНИМОМ плане (его место не переворачиваем).
-            function fixedYieldsTo(fixedId, candId){
+            function fixedYieldsTo(fixedId, candId, atDay){
                 if (wholeDayBy[fixedId] != null) return true;
                 if (storedPlanTs(fixedId) == null) return true;   // хранимого места у 🔒 нет — защищать нечего
                 var fst = state[fixedId], cst = state[candId];
+                // Приезжая 🔒 (её день сдвинул потолок, #4467/#4491): в ЭТОМ дне её место не хранимое —
+                // защищать нечего, порядок между 🔒 держит FIXED_BLOCK, а день — FIXED_CUT_DAY.
+                if (atDay != null && fst && fst.anchor !== atDay) return true;
                 if (fst && cst && fst.cut && cst.cut && fst.cut.isFoil && !cst.cut.isFoil) return true;
                 return storedBeforeFixed(candId, fixedId);
             }
@@ -6477,7 +6494,7 @@
                     var fid = poolOrder[bi], fst2 = state[fid];
                     if (!fst2 || fst2.fixedDay !== nd) continue;
                     if (!(fst2.remaining > 0 || (fst2.perPass <= 0 && !fst2.placedEmpty))) continue;   // уже размещена
-                    if (fixedYieldsTo(fid, id)) continue;
+                    if (fixedYieldsTo(fid, id, nd)) continue;
                     blocked = true; break;
                 }
                 if (!blocked) return true;
@@ -6626,8 +6643,15 @@
                     // заправки. Фолбэк-порядок пакера (без слоя размещения) считает по цене заправки.
                     // Гарантия #3792 (замок держит ДЕНЬ) не трогается: пропускаем свободную ТОЛЬКО
                     // пока после неё каждая 🔒 этого дня ещё влезает в день (fixedRoomAfter).
+                    // #4506: спрашиваем ВСЕ 🔒 ЭТОГО ДНЯ (`fixedToday`), а не только готовых к укладке
+                    // (`fixedNow` — после фильтра монолита #4491 там бывает ровно одна). Боевой случай:
+                    // первой в дне стои́т 🔒, которую оператор переносит прямо сейчас; она правилу
+                    // уступает — и через открывшийся шлюз проходили ВСЕ свободные, обгоняя остальные 🔒
+                    // дня, которых в `fixedNow` ещё не было (Станок 1, Чт 30.07.2026: шесть заданий
+                    // встали перед 649432 и 653120, а те уехали в конец дня). Разрешение обязано быть
+                    // у КАЖДОЙ 🔒, стоящей в дне, — как и у гарантии ёмкости `fixedRoomAfter` ниже.
                     var mayPassFixed = wholeDayBy[String(freeCandNow)] != null
-                        || fixedNow.every(function(fid){ return fixedYieldsTo(fid, freeCandNow); });
+                        || fixedToday.every(function(fid){ return fixedYieldsTo(fid, freeCandNow, day); });
                     var earlierByOrder;
                     if (orderAuthoritative) {
                         var minFixedIdx = null;
@@ -10743,9 +10767,11 @@
                  knifeWidths: cut.knifeWidths, knifeCount: cut.knifeCount, rollerWidth: cut.rollerWidth,
                  isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId,
                  plannedRuns: Number(cut.plannedRuns) || 0, dueKey: dk, fixed: !!cut.fixed, firstPartId: fp,
-                 // #4497: ХРАНИМОЕ время старта («Дата план», сек). По нему видно, чьё место в дне
-                 // защищать (у 🔒) и кто стоял перед ней раньше (у свободного задания).
+                 // #4497: ХРАНИМОЕ место задания — время старта («Дата план», сек) и станок, где оно
+                 // лежит. По ним видно, чьё место в дне защищать (у 🔒) и кто стоял перед ней раньше.
+                 // storedSid НЕ перезаписывается при назначении станка (tagSlot меняет slitterId).
                  storedTs: (function(){ var t = Number(cut.planDate); return (isFinite(t) && t > 0) ? t : undefined; })(),
+                 storedSid: sid == null ? undefined : String(sid),
                  orderIds: (ords && Object.keys(ords).length) ? ords : undefined,
                  workMin: isFinite(Number(cut.workMin)) ? Number(cut.workMin) : undefined,
                  dayOffset: isFinite(Number(cut.dayOffset)) ? Number(cut.dayOffset) : undefined };
@@ -10858,9 +10884,13 @@
             if (f.manualMove) continue;
             if (f.isFoil && !slot.isFoil) continue;   // #3717: фольга обязана остаться последней
             if (f.storedTs == null) continue;         // хранимого места у 🔒 нет — защищать нечего
-            // Стоял перед этой 🔒 в ХРАНИМОМ плане (одна смена = ±12 ч от её старта) — место своё.
+            // Стоял перед этой 🔒 в ХРАНИМОМ плане — на ТОМ ЖЕ станке (задание из того же дня, но с
+            // ДРУГОГО станка перед ней не стояло: здесь оно новое) и раньше по времени (одна смена =
+            // ±12 ч от её старта).
             if (slot.storedTs != null && slot.storedTs < f.storedTs
-                && (f.storedTs - slot.storedTs) < 43200) continue;
+                && (f.storedTs - slot.storedTs) < 43200
+                && (slot.storedSid == null ? null : String(slot.storedSid))
+                   === (f.storedSid == null ? null : String(f.storedSid))) continue;
             if (dayOff == null){
                 var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
                 dayOff = prefixDayOffset(withSlot, index, ctx);

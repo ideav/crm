@@ -29,9 +29,11 @@
                  knifeWidths: cut.knifeWidths, knifeCount: cut.knifeCount, rollerWidth: cut.rollerWidth,
                  isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId,
                  plannedRuns: Number(cut.plannedRuns) || 0, dueKey: dk, fixed: !!cut.fixed, firstPartId: fp,
-                 // #4497: ХРАНИМОЕ время старта («Дата план», сек). По нему видно, чьё место в дне
-                 // защищать (у 🔒) и кто стоял перед ней раньше (у свободного задания).
+                 // #4497: ХРАНИМОЕ место задания — время старта («Дата план», сек) и станок, где оно
+                 // лежит. По ним видно, чьё место в дне защищать (у 🔒) и кто стоял перед ней раньше.
+                 // storedSid НЕ перезаписывается при назначении станка (tagSlot меняет slitterId).
                  storedTs: (function(){ var t = Number(cut.planDate); return (isFinite(t) && t > 0) ? t : undefined; })(),
+                 storedSid: sid == null ? undefined : String(sid),
                  orderIds: (ords && Object.keys(ords).length) ? ords : undefined,
                  workMin: isFinite(Number(cut.workMin)) ? Number(cut.workMin) : undefined,
                  dayOffset: isFinite(Number(cut.dayOffset)) ? Number(cut.dayOffset) : undefined };
@@ -144,9 +146,13 @@
             if (f.manualMove) continue;
             if (f.isFoil && !slot.isFoil) continue;   // #3717: фольга обязана остаться последней
             if (f.storedTs == null) continue;         // хранимого места у 🔒 нет — защищать нечего
-            // Стоял перед этой 🔒 в ХРАНИМОМ плане (одна смена = ±12 ч от её старта) — место своё.
+            // Стоял перед этой 🔒 в ХРАНИМОМ плане — на ТОМ ЖЕ станке (задание из того же дня, но с
+            // ДРУГОГО станка перед ней не стояло: здесь оно новое) и раньше по времени (одна смена =
+            // ±12 ч от её старта).
             if (slot.storedTs != null && slot.storedTs < f.storedTs
-                && (f.storedTs - slot.storedTs) < 43200) continue;
+                && (f.storedTs - slot.storedTs) < 43200
+                && (slot.storedSid == null ? null : String(slot.storedSid))
+                   === (f.storedSid == null ? null : String(f.storedSid))) continue;
             if (dayOff == null){
                 var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
                 dayOff = prefixDayOffset(withSlot, index, ctx);
