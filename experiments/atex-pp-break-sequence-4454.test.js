@@ -1,13 +1,14 @@
-// #4454 — штраф за РАЗБИЕНИЕ последовательности: BREAK_KNIVES_COST_MN / BREAK_MATERIAL_COST_MN.
+// #4454 — РАЗБИЕНИЕ ПОСЛЕДОВАТЕЛЬНОСТИ дороже, чем готовый шов.
 //
 // ЧТО ЛОВИМ. Планировщик ставит подряд одинаковые комбинации ножей и сырья, чтобы не платить
-// переналадку. Вклиниться в такую цепочку значит заплатить ДВЕ переналадки вместо нуля — но
-// стоимость вставки считается как сумма двух переходов (`insertionCost`) и НЕ возвращает
-// стоимость разрушенного перехода prev→next. Поэтому «внутрь однородной цепочки» и «в шов между
-// разными» стои́т одинаково, ничью решает betterCand — и задание садится в середину цепочки
-// (на скрине тикета: MW308 49 мм/18 полос встаёт между двумя MW411 59 мм/15 полос на стыке дней).
+// переналадку. Вклиниться в такую цепочку значит заплатить ДВЕ переналадки вместо нуля, а встать
+// в уже существующий шов — одну (вторая там уже оплачена). На скрине тикета MW308 49 мм/18 полос
+// садится между двумя MW411 59 мм/15 полос на стыке дней — то есть в самое дорогое место.
 //
-// Штрафы из «Настройки» 269 (ТЗ §8.2, числа §14) делают разрыв дорогим явно.
+// КАК ЭТО ОБЕСПЕЧЕНО (ТЗ §8.1): вес места — честная разница
+// `цена(prev→slot) + цена(slot→next) − цена(prev→next)`. Разорванная однородная цепочка не
+// возвращает ничего (перехода между соседями не было), готовый шов возвращает свою переналадку.
+// Поэтому разрыв стои́т ровно вдвое дороже шва сам по себе, без отдельных весов (#4510).
 //
 // Run with: node experiments/atex-pp-break-sequence-4454.test.js
 
@@ -26,9 +27,10 @@ var TIMES = { MATERIAL_WINDING: 15, KNIFE: 30 };
 var SETTINGS = {
     KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
     LEADER_COST_MN: 0, FOIL_NOTEND_COST_MN: 0, DEADLINE_COST_MN: 0, EXACT_DEADLINE_COST_MN: 0,
-    ORDER_DIFF_PENALTY_MN: 0, MAX_SLOTS_DISTANCE_HR: 0,
-    BREAK_KNIVES_COST_MN: 50, BREAK_MATERIAL_COST_MN: 40
+    ORDER_DIFF_PENALTY_MN: 0, MAX_SLOTS_DISTANCE_HR: 0
 };
+// Цена одного перехода по тем же весам — мерка, с которой сверяем вес места.
+function tw(prev, next) { return planning.transitionCost(prev, next, { settings: SETTINGS }).weight; }
 // Ёмкость дня огромная — оценка дня не должна вмешиваться в сравнение весов.
 var CTX = { settings: SETTINGS, times: TIMES, capacityMin: 100000, slitterId: '1' };
 
@@ -57,9 +59,9 @@ function weightAt(arr, index, s) {
 
     assert(inside > atEnd, 'вклинивание в цепочку дороже, чем дописать в конец',
         '(внутрь ' + inside + ' vs в конец ' + atEnd + ')');
-    assert(inside - atEnd >= SETTINGS.BREAK_KNIVES_COST_MN + SETTINGS.BREAK_MATERIAL_COST_MN,
-        'разница включает оба штрафа разрыва (ножи + сырьё/партия)',
-        '(Δ=' + (inside - atEnd) + ', ожидали ≥ ' + (SETTINGS.BREAK_KNIVES_COST_MN + SETTINGS.BREAK_MATERIAL_COST_MN) + ')');
+    assert(inside === tw(A, X) + tw(X, B),
+        'разрыв платит ОБА перехода целиком — возвращать нечего (переналадки между A и B не было)',
+        '(внутрь ' + inside + ', переходы ' + tw(A, X) + '+' + tw(X, B) + ')');
 })();
 
 // ── 2. Шов между РАЗНЫМИ заданиями штрафа разрыва не несёт ───────────────────────────────────
@@ -68,8 +70,9 @@ function weightAt(arr, index, s) {
     var C = slot('C', 'MWR200', '902', K18);   // A и C — уже разные: переналадка между ними ЕСТЬ
     var X = slot('X', 'MW308', '901', K18);
     var sc = planning.scorePosition([A, C], 1, X, CTX);
-    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
-        'встать в уже существующий шов — не разрыв, штрафа нет', '(' + JSON.stringify(sc.byFactor) + ')');
+    assert(sc.byFactor.seam === -tw(A, C) && sc.weight === tw(A, X) + tw(X, C) - tw(A, C),
+        'встать в уже существующий шов — переналадка A→C зачтена обратно',
+        '(' + JSON.stringify(sc.byFactor) + ', вес ' + sc.weight + ')');
 })();
 
 // ── 3. Продолжение той же комбинации внутрь цепочки — не разрыв ──────────────────────────────
@@ -78,9 +81,8 @@ function weightAt(arr, index, s) {
     var B = slot('B', 'MW411', '900', K15);
     var same = slot('S', 'MW411', '900', K15);   // тот же набор ножей и та же партия
     var sc = planning.scorePosition([A, B], 1, same, CTX);
-    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
-        'своё же задание внутрь своей цепочки — последовательность не рвётся', '(' + JSON.stringify(sc.byFactor) + ')');
-    assert(sc.weight === 0, 'и стои́т ноль (никакой переналадки не появилось)', '(вес ' + sc.weight + ')');
+    assert(sc.weight === 0, 'своё же задание внутрь своей цепочки стои́т ноль (переналадки не появилось)',
+        '(вес ' + sc.weight + ', ' + JSON.stringify(sc.byFactor) + ')');
 })();
 
 // ── 4. Штрафы раздельные: рвётся только сырьё / только ножи ──────────────────────────────────
@@ -91,42 +93,36 @@ function weightAt(arr, index, s) {
     // вставка между двумя заданиями одной заправки бесплатна независимо от партий.
     var otherBatch = slot('X', 'MW411', '999', K15);
     var sc1 = planning.scorePosition([A, B], 1, otherBatch, CTX);
-    assert(!sc1.byFactor.breakMaterial && !sc1.byFactor.breakKnives,
-        '#4481: другая партия того же сырья последовательность не рвёт', '(' + JSON.stringify(sc1.byFactor) + ')');
-    // Разрыв по сырью проверяем сменой САМОГО сырья — это по-прежнему разрыв.
+    assert(sc1.weight === 0,
+        '#4481: другая партия того же сырья последовательность не рвёт — вставка бесплатна',
+        '(вес ' + sc1.weight + ', ' + JSON.stringify(sc1.byFactor) + ')');
+    // Разрыв по сырью проверяем сменой САМОГО сырья — это по-прежнему разрыв: две смены сырья.
     var otherMat = slot('X2', 'MR194', '900', K15);
     var sc1b = planning.scorePosition([A, B], 1, otherMat, CTX);
-    assert(sc1b.byFactor.breakMaterial === SETTINGS.BREAK_MATERIAL_COST_MN && !sc1b.byFactor.breakKnives,
-        'другое сырьё — штраф разрыва ТОЛЬКО по сырью', '(' + JSON.stringify(sc1b.byFactor) + ')');
+    assert(sc1b.weight === 2 * SETTINGS.MATERIAL_CHANGE_COST_MN && sc1b.byFactor.seam == null,
+        'другое сырьё на тех же ножах — ДВЕ смены сырья, зачитывать нечего',
+        '(вес ' + sc1b.weight + ', ' + JSON.stringify(sc1b.byFactor) + ')');
 
     // То же сырьё и партия, ДРУГИЕ ножи → рвётся только последовательность ножей.
     var otherKnives = slot('Y', 'MW411', '900', K18);
     var sc2 = planning.scorePosition([A, B], 1, otherKnives, CTX);
-    assert(sc2.byFactor.breakKnives === SETTINGS.BREAK_KNIVES_COST_MN && !sc2.byFactor.breakMaterial,
-        'другие ножи — штраф разрыва ТОЛЬКО по ножам', '(' + JSON.stringify(sc2.byFactor) + ')');
+    assert(sc2.weight === tw(A, otherKnives) + tw(otherKnives, B) && sc2.byFactor.material == null,
+        'другие ножи на том же сырье — ДВЕ смены ножей, зачитывать нечего',
+        '(вес ' + sc2.weight + ', ' + JSON.stringify(sc2.byFactor) + ')');
 })();
 
-// ── 5. Веса читаются из «Настройки»: 0 выключает штраф ───────────────────────────────────────
+// ── 5. Цена разрыва — из тех же весов «Настройки», отдельного веса у него нет ────────────────
 (function() {
     var A = slot('A', 'MW411', '900', K15);
     var B = slot('B', 'MW411', '900', K15);
     var X = slot('X', 'MW308', '901', K18);
-    var off = {};
-    Object.keys(SETTINGS).forEach(function(k) { off[k] = SETTINGS[k]; });
-    off.BREAK_KNIVES_COST_MN = 0; off.BREAK_MATERIAL_COST_MN = 0;
-    var sc = planning.scorePosition([A, B], 1, X, { settings: off, times: TIMES, capacityMin: 100000, slitterId: '1' });
-    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
-        'BREAK_*=0 в «Настройке» выключает штраф (аварийный рубильник)', '(' + JSON.stringify(sc.byFactor) + ')');
-})();
-
-// ── 6. Дефолты кода — значения тикета ────────────────────────────────────────────────────────
-(function() {
-    assert(planning.planWeight({}, 'BREAK_KNIVES_COST_MN') === 50, 'дефолт BREAK_KNIVES_COST_MN = 50',
-        '(' + planning.planWeight({}, 'BREAK_KNIVES_COST_MN') + ')');
-    assert(planning.planWeight({}, 'BREAK_MATERIAL_COST_MN') === 40, 'дефолт BREAK_MATERIAL_COST_MN = 40',
-        '(' + planning.planWeight({}, 'BREAK_MATERIAL_COST_MN') + ')');
-    assert(planning.planWeight({ BREAK_KNIVES_COST_MN: '70' }, 'BREAK_KNIVES_COST_MN') === 70,
-        'значение из «Настройки» перебивает дефолт');
+    var soft = {};
+    Object.keys(SETTINGS).forEach(function(k) { soft[k] = SETTINGS[k]; });
+    soft.KNIVES_CHANGE_COST_MN = 0; soft.KNIVES_INCREASE_COST_MN = 0;   // ножи не жалко — остаётся сырьё
+    var sc = planning.scorePosition([A, B], 1, X, { settings: soft, times: TIMES, capacityMin: 100000, slitterId: '1' });
+    assert(sc.weight === 2 * SETTINGS.MATERIAL_CHANGE_COST_MN,
+        'обнулили вес ножей — разрыв подешевел ровно на них (цену задают веса переналадки)',
+        '(вес ' + sc.weight + ', ' + JSON.stringify(sc.byFactor) + ')');
 })();
 
 // ── 7. Ядро тикета: РАЗРЫВ и ШОВ больше не стоят одинаково ──────────────────────────────────
@@ -145,7 +141,7 @@ function weightAt(arr, index, s) {
 
     var atBreak = weightAt(arr, 1, X);   // РАЗРЫВ последовательности A|B
     var atSeam = weightAt(arr, 3, X);    // ШОВ C|D
-    assert(atBreak > atSeam, 'разрыв последовательности дороже шва (переходы стоят поровну — решает штраф разрыва)',
+    assert(atBreak === 2 * atSeam, 'разрыв последовательности ровно вдвое дороже шва: две переналадки против одной',
         '(разрыв ' + atBreak + ' vs шов ' + atSeam + ')');
 
     var best = null;
@@ -175,18 +171,19 @@ function withWork(s, work) { s.workMin = work; return s; }
     var tail = withWork(slot('tail', 'MR194', '903', K18), 150);
     var arr = [head, tail];
 
-    // Чужое сырьё на тех же ножах — рвётся последовательность СЫРЬЯ.
+    // Чужое сырьё на тех же ножах — рвётся последовательность СЫРЬЯ: две смены вместо нуля.
     var otherMat = withWork(slot('Y', 'MW308', '901', K15), 100);
     var sc = planning.scorePosition(arr, 0, otherMat, carryCtx);
-    assert(sc.byFactor.breakMaterial === SETTINGS.BREAK_MATERIAL_COST_MN,
+    assert(sc.weight === 2 * SETTINGS.MATERIAL_CHANGE_COST_MN && sc.byFactor.seam == null,
         'СТЫК ДНЕЙ: вклинивание между заправкой станка и первой резкой дня — разрыв по сырью',
-        '(' + JSON.stringify(sc.byFactor) + ')');
+        '(вес ' + sc.weight + ', ' + JSON.stringify(sc.byFactor) + ')');
 
     // Чужие ножи на том же сырье — рвётся последовательность НОЖЕЙ.
     var otherKn = withWork(slot('Z', 'MW411', '900', K18), 100);
     var sc2 = planning.scorePosition(arr, 0, otherKn, carryCtx);
-    assert(sc2.byFactor.breakKnives === SETTINGS.BREAK_KNIVES_COST_MN,
-        'СТЫК ДНЕЙ: то же, по ножам', '(' + JSON.stringify(sc2.byFactor) + ')');
+    assert(sc2.byFactor.seam == null && sc2.byFactor.knife > 0 && sc2.byFactor.material == null,
+        'СТЫК ДНЕЙ: то же, по ножам — обе смены ножей платятся целиком',
+        '(вес ' + sc2.weight + ', ' + JSON.stringify(sc2.byFactor) + ')');
 
     // И главное: начало дня перестаёт быть самым дешёвым местом для чужака.
     var occ = planning.seedOccupancy(arr, [], ['1']);
@@ -201,8 +198,9 @@ function withWork(s, work) { s.workMin = work; return s; }
     var arr = [head];
     var same = withWork(slot('S', 'MW411', '900', K15), 100);
     var sc = planning.scorePosition(arr, 0, same, carryCtx);
-    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
-        'КОНТРОЛЬ: продолжение заправки в начале дня — не разрыв', '(' + JSON.stringify(sc.byFactor) + ')');
+    assert(sc.weight === 0,
+        'КОНТРОЛЬ: продолжение заправки в начале дня — не разрыв, стои́т ноль',
+        '(вес ' + sc.weight + ', ' + JSON.stringify(sc.byFactor) + ')');
 })();
 
 (function() {
@@ -212,8 +210,8 @@ function withWork(s, work) { s.workMin = work; return s; }
     var arr = [head];
     var X2 = withWork(slot('X', 'MW308', '901', [29, 29, 29]), 100);
     var sc = planning.scorePosition(arr, 0, X2, carryCtx);
-    assert(!(sc.byFactor.breakKnives || sc.byFactor.breakMaterial),
-        'КОНТРОЛЬ: заправка и первая резка дня разные — это шов, а не последовательность',
+    assert(sc.byFactor.seam < 0,
+        'КОНТРОЛЬ: заправка и первая резка дня разные — это шов, его переналадка зачтена',
         '(' + JSON.stringify(sc.byFactor) + ')');
 })();
 

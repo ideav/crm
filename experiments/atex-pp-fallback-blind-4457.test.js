@@ -12,8 +12,7 @@
 //  2. Жадная укладка «по одному» разрыв не видит ПО ПОСТРОЕНИЮ: когда слот кладётся, будущих
 //     соседей ещё нет, последовательность возникает позже. Ловить разрыв можно только на
 //     собранной расстановке — в проходе релокации; но его триггеры были только «фольга» и
-//     «просрочка». Замер: «остаться» 175 (в т.ч. breakKnives 50) против «в конец» 80 —
-//     и НОЛЬ переносов.
+//     «просрочка», и задание оставалось в разрыве при НУЛЕ переносов.
 //
 // Run with: node experiments/atex-pp-fallback-blind-4457.test.js
 
@@ -33,8 +32,7 @@ var TIMES = { MATERIAL_WINDING: 15, KNIFE: 30 };
 var SETTINGS = {
     KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 35, MATERIAL_CHANGE_COST_MN: 15,
     LEADER_COST_MN: 0, FOIL_NOTEND_COST_MN: 0, DEADLINE_COST_MN: 0, EXACT_DEADLINE_COST_MN: 0,
-    ORDER_DIFF_PENALTY_MN: 0, MAX_SLOTS_DISTANCE_HR: 0, CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3,
-    BREAK_KNIVES_COST_MN: 50, BREAK_MATERIAL_COST_MN: 40
+    ORDER_DIFF_PENALTY_MN: 0, MAX_SLOTS_DISTANCE_HR: 0, CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3
 };
 var CTX = { settings: SETTINGS, times: TIMES, capacityMin: 450 };
 function slot(id, mat, batch, knives, work) {
@@ -61,9 +59,10 @@ function wedged() {
     var without = [arr[0], arr[2], arr[3], arr[4]];
     var stay = planning.scorePosition(without, 1, arr[1], CTX);
     var end = planning.scorePosition(without, 4, arr[1], CTX);
-    assert(stay.byFactor.breakKnives === SETTINGS.BREAK_KNIVES_COST_MN,
-        'штраф разрыва в цене «остаться» есть', '(' + JSON.stringify(stay.byFactor) + ')');
-    assert(stay.weight > end.weight + 50, 'и «остаться» заметно дороже «встать в конец»',
+    assert(stay.byFactor.seam == null,
+        'цена «остаться» зачёта не получает — переналадки между соседями без него не было',
+        '(' + JSON.stringify(stay.byFactor) + ')');
+    assert(stay.weight > end.weight, 'и «остаться» дороже «встать в конец»',
         '(остаться ' + stay.weight + ' vs в конец ' + end.weight + ')');
 })();
 

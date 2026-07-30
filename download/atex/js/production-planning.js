@@ -10393,12 +10393,11 @@
         LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
         CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3, SLOT_SPLIT_COST_MN: 2, MAX_DISTANCE_COST_MN: 25,
         MAX_SLOTS_DISTANCE_HR: 24, MAX_OUTAGE_PLANNABLE_HR: 48, DAY_DURATION_MN: 450, INTERVAL_DURATION_MN: 10,
-        ORDER_DIFF_PENALTY_MN: 10,  // #4194: смежность заказа — штраф за разрыв заказа чужой вставкой / бонус за соседство своего заказа
-        // #4454: РАЗБИЕНИЕ последовательности — вставка между двумя соседями, которым переналадка
-        // друг относительно друга НЕ нужна (одна комбинация ножей / одно сырьё и партия). Такой
-        // разрыв создаёт ДВЕ переналадки с нуля там, где не было ни одной, — и это отдельный вес,
-        // а не следствие суммы переходов (см. breakSequencePenalty, ТЗ §8.2).
-        BREAK_KNIVES_COST_MN: 50, BREAK_MATERIAL_COST_MN: 40
+        ORDER_DIFF_PENALTY_MN: 10   // #4194: смежность заказа — штраф за разрыв заказа чужой вставкой / бонус за соседство своего заказа
+        // #4454/#4510: РАЗБИЕНИЕ последовательности отдельного веса не имеет. Вставка между двумя
+        // соседями, которым переналадка друг относительно друга не нужна, создаёт ДВЕ переналадки
+        // с нуля — и ровно столько же стои́т по честной разнице §8.1 (`scorePosition`, зачёт
+        // снятого шва): разрывать нечего, зачитывать нечего.
     };
     // Значение веса/лимита: из настроек, иначе дефолт ТЗ. Нечисловое → дефолт.
     function planWeight(settings, key){
@@ -10935,50 +10934,36 @@
         if (prevCut && nextCut && ordersOverlap(prevCut.orderIds, nextCut.orderIds)) return w;   // штраф: разрывает чужой заказ
         return 0;
     }
-    // #4454 (ТЗ §8.2, числа §14): ШТРАФ ЗА РАЗБИЕНИЕ ПОСЛЕДОВАТЕЛЬНОСТИ. Планировщик ставит подряд
-    // одинаковые комбинации ножей и одно сырьё, чтобы не платить переналадку. Вклиниться в такую
-    // цепочку значит создать ДВЕ переналадки с нуля там, где не было ни одной.
-    //
-    // ПОЧЕМУ ОТДЕЛЬНЫМ ВЕСОМ, А НЕ «САМО ПОСЧИТАЕТСЯ». Стоимость вставки — сумма ДВУХ переходов
-    // prev→slot и slot→next (`insertionCost`), и стоимость РАЗРУШЕННОГО перехода prev→next она не
-    // возвращает. Поэтому позиция внутри однородной цепочки и позиция в уже существующем шве
-    // получают ОДИНАКОВЫЙ вес, когда вставляемое задание чужое обоим:
-    //     внутрь цепочки (prev≡next): (K+M) + (K+M), реально +2 переналадки;
-    //     в шов (prev≠next):          (K+M) + (K+M), реально +1 (шов уже оплачен).
-    // Ничью решает betterCand (качество/день/индекс) — и задание садится в середину цепочки, в том
-    // числе на стыке дней (issue #4454). Разрыв обязан стоить дороже явно.
+    // #4454 (ТЗ §12): РАЗБИЕНИЕ ПОСЛЕДОВАТЕЛЬНОСТИ — ТРИГГЕР пересмотра места. Планировщик ставит
+    // подряд одинаковые комбинации ножей и одно сырьё, чтобы не платить переналадку; задание,
+    // вклинившееся в такую цепочку, обязано быть пере-спрошено на собранной расстановке (§12):
+    // место выбирается по одному, и в момент вставки будущих соседей ещё нет. ЦЕНУ разрыва считает
+    // сам вес места (§8.1, честная разница — см. `scorePosition`): разрыв однородной цепочки стои́т
+    // двух переналадок, готовый шов — одной. Отдельных весов у триггера нет.
     //
     // СТЫК ДНЕЙ. «Предыдущим» бывает не только соседний слот. Когда предыдущий день вне входа
     // планировщика (прошлое / вне окна [С;По]), его хвост приходит ЗАПРАВКОЙ СТАНКА
     // (`prevSetupBySlitter`, #4288) — и позиция 0 очереди станка оказывается точкой ВНУТРИ
     // последовательности «заправка → первая резка дня». Разрыв там ровно такой же: рулон снимут и
-    // поставят обратно. Без этой ветки начало дня остаётся самой дешёвой щелью для чужого задания
-    // (в замере: вес 30 против 45 и 110 у остальных позиций) — «вклинилось в начало дня» (#4454).
-    // У заправки нет ни партии, ни лидера, поэтому сырьё с ней сравниваем по ВИДУ и НАМОТКЕ —
-    // так же, как их нейтрализует `carryOverPrevCut`; сравнивать партию было бы выдумкой.
+    // поставят обратно (#4454). У заправки нет ни партии, ни лидера, поэтому сырьё с ней сравниваем
+    // по ВИДУ и НАМОТКЕ — так же, как их нейтрализует `carryOverPrevCut`; партия была бы выдумкой.
     function sameMaterialWinding(a, b){
         if (!a || !b) return false;
         return String(a.materialId) === String(b.materialId) && normWinding(a.winding) === normWinding(b.winding);
     }
     // prevSetup — сырая заправка станка ({materialId, winding, knifeWidths}) вместо соседа-слота.
-    function breakSequencePenalty(prevCut, slot, nextCut, settings, prevSetup){
-        if (!slot || !nextCut) return { knives: 0, material: 0 };
+    function breaksSequence(prevCut, slot, nextCut, prevSetup){
+        if (!slot || !nextCut) return { knives: false, material: false };
         var before = prevCut || prevSetup;
-        if (!before) return { knives: 0, material: 0 };
+        if (!before) return { knives: false, material: false };
         var carry = !prevCut;   // сравниваем с заправкой, а не с реальным соседом
-        var out = { knives: 0, material: 0 };
         // Ножи: before и next — одна комбинация, а слот её меняет.
-        if (!knifeChangeNeeded(before, nextCut) && knifeChangeNeeded(before, slot)){
-            out.knives = planWeight(settings, 'BREAK_KNIVES_COST_MN') || 0;
-        }
+        var knives = !knifeChangeNeeded(before, nextCut) && knifeChangeNeeded(before, slot);
         // Сырьё/намотка(/партия у реальных соседей): before и next режут один рулон, а слот
         // встаёт между ними чужим.
         var matSame = carry ? sameMaterialWinding(before, nextCut) : !materialChangeNeeded(before, nextCut);
         var matBreaks = carry ? !sameMaterialWinding(before, slot) : materialChangeNeeded(before, slot);
-        if (matSame && matBreaks){
-            out.material = planWeight(settings, 'BREAK_MATERIAL_COST_MN') || 0;
-        }
-        return out;
+        return { knives: knives, material: matSame && matBreaks };
     }
     function scorePosition(machineSlots, index, slot, ctx){
         ctx = ctx || {};
@@ -11062,19 +11047,30 @@
         // #4194: штраф/бонус смежности заказа — в ВЕС (не в setupWeight: гейт §8.4-фолбэка по setup не трогаем).
         var orderPenalty = orderAdjacencyPenalty(prevCut, slot, nextCut, ctx.settings);
         if (orderPenalty) byFactor.order = round3((byFactor.order || 0) + orderPenalty);
-        // #4454: штраф за разбиение последовательности — тоже в ВЕС и мимо setupWeight: гейт §8.4
-        // («некуда пристроить» → самый свободный станок) сравнивает ЧИСТУЮ переналадку с
-        // KNIVES_CHANGE+MATERIAL_CHANGE; подмешав туда штраф разрыва, мы бы гнали задания на пустой
-        // станок вместо того, чтобы просто выбрать другую точку вставки на этом же.
-        // #4454: на позиции 0 «предыдущим» выступает ЗАПРАВКА станка (#4288) — стык дней, когда
-        // предыдущий день вне входа планировщика. Берём её СЫРОЙ (не нейтрализованный beforePrev):
-        // beforePrev подогнан под slot (партия/лидер = slot), сравнивать с ним nextCut нельзя.
+        // #4510 (ТЗ §8.1): ЗАЧЁТ СНЯТОГО ШВА. Цена места — НА СКОЛЬКО ДОРОЖЕ станет очередь, а не
+        // сколько стоят два новых перехода. Вставая между prev и next, задание не только создаёт
+        // переходы prev→slot и slot→next, но и УБИРАЕТ переход prev→next: он больше не случится.
+        // Без вычета «встать в готовый шов, где переналадка уже оплачена» стои́т столько же, сколько
+        // «разорвать однородную цепочку», и место рядом со СВОЕЙ комбинацией ножей проигрывает
+        // чужому шву: у близнеца по ножам соседи обычно одного сырья, и приезжее задание платило за
+        // них дважды (issue #4510: задание 32.5×27 встало в голову дня, хотя в том же дне стои́т
+        // задание с той же комбинацией). С вычетом порядок мест совпадает с реальными минутами
+        // наладки: разрыв однородной цепочки = две переналадки, готовый шов = одна.
+        // На позиции 0 «предыдущим» выступает ЗАПРАВКА станка (#4288/#4454) — стык дней, когда
+        // предыдущий день вне входа планировщика. Берём её СЫРОЙ (не нейтрализованный beforePrev:
+        // тот подогнан под slot) и нейтрализуем партию/лидер уже под nextCut.
         var carrySetupRaw = (!prevCut && index === 0 && ctx.prevSetupBySlitter && ctx.slitterId != null)
             ? ctx.prevSetupBySlitter[String(ctx.slitterId)] : null;
-        var brk = breakSequencePenalty(prevCut, slot, nextCut, ctx.settings, carrySetupRaw);
-        if (brk.knives) byFactor.breakKnives = round3((byFactor.breakKnives || 0) + brk.knives);
-        if (brk.material) byFactor.breakMaterial = round3((byFactor.breakMaterial || 0) + brk.material);
-        return { weight: round3(cost.weight + orderPenalty + brk.knives + brk.material),
+        var brokenPrev = prevCut;
+        if (!brokenPrev && carrySetupRaw && nextCut){
+            brokenPrev = carryOverPrevCut(carrySetupRaw, nextCut);
+            brokenPrev.leader = nextCut.leader; brokenPrev.sleeveId = nextCut.sleeveId;
+        }
+        // Переход после «хвоста» прошлого дня и так бесплатен (§8.4) — снимать нечего.
+        var seamCredit = (brokenPrev && nextCut && !ctxBefore.freeAfterCarry)
+            ? round3(transitionCost(brokenPrev, nextCut, { settings: ctx.settings }).weight) : 0;
+        if (seamCredit) byFactor.seam = round3((byFactor.seam || 0) - seamCredit);
+        return { weight: round3(cost.weight + orderPenalty - seamCredit),
                  quality: cost.quality, setupWeight: round3(setupWeight),
                  // #4457: сколько РЕАЛЬНЫХ стыков у этой точки — 1 у дописывания в конец (только
                  // вход), 2 у вставки в середину. Гейт §8.4 меряет setupWeight (сумму ПО СТЫКАМ)
@@ -11298,17 +11294,17 @@
     function shouldRelocate(arr, i, slot, dayByCut, ctx){
         if (slot.kind !== 'cut' || slot.fixed) return false;
         // #4457: слот стои́т между двумя заданиями, которые без него — одна комбинация ножей или
-        // одно сырьё/партия. Штраф разрыва (#4454) в цене «остаться» УЖЕ считается, но без этого
-        // триггера его никто не спрашивает: релокация запускалась только по фольге и просрочке.
-        // Жадная укладка «по одному» разрыва не видит по построению — когда слот кладётся, будущих
-        // соседей ещё нет в очереди, последовательность возникает ПОЗЖЕ. Значит ловить разрыв
-        // можно только здесь, на собранной расстановке. Замер с боевой (issue #4457, ateh1):
-        // «остаться» 175 (в т.ч. breakKnives 50) против «в конец» 80 — и ноль переносов.
+        // одно сырьё/партия. Цена разрыва в «остаться» УЖЕ считается (#4510: зачёт снятого шва —
+        // разорванная цепочка не возвращает ничего, готовый шов возвращает свою переналадку), но
+        // без этого триггера её никто не спрашивает: релокация запускалась только по фольге и
+        // просрочке. Жадная укладка «по одному» разрыва не видит по построению — когда слот
+        // кладётся, будущих соседей ещё нет в очереди, последовательность возникает ПОЗЖЕ. Значит
+        // ловить разрыв можно только здесь, на собранной расстановке (issue #4457).
         var prevCut = (i > 0 && arr[i - 1] && arr[i - 1].kind === 'cut') ? arr[i - 1] : null;
         var nextCut = (arr[i + 1] && arr[i + 1].kind === 'cut') ? arr[i + 1] : null;
         var carry = (!prevCut && i === 0 && ctx && ctx.prevSetupBySlitter && slot.slitterId != null)
             ? ctx.prevSetupBySlitter[String(slot.slitterId)] : null;
-        var brk = breakSequencePenalty(prevCut, slot, nextCut, ctx && ctx.settings, carry);
+        var brk = breaksSequence(prevCut, slot, nextCut, carry);
         if (brk.knives || brk.material) return true;
         var myDay = dayByCut ? dayByCut[slot.id] : (slot.dayOffset);
         if (isFinite(Number(myDay)) && isFinite(Number(slot.dueKey))){
@@ -11659,8 +11655,7 @@
         var KEYS = ['DEADLINE_COST_MN','EXACT_DEADLINE_COST_MN','FOIL_NOTEND_COST_MN','KNIVES_CHANGE_COST_MN',
                     'KNIVES_INCREASE_COST_MN','MATERIAL_CHANGE_COST_MN','LEADER_COST_MN','MAX_DISTANCE_COST_MN',
                     'CHANGE_SLITTER_COST_MN','CHANGE_DAY_COST_MN','SLOT_SPLIT_COST_MN','MAX_SLOTS_DISTANCE_HR','MAX_OUTAGE_PLANNABLE_HR',
-                    'ORDER_DIFF_PENALTY_MN',    // #4194: смежность заказа
-                    'BREAK_KNIVES_COST_MN','BREAK_MATERIAL_COST_MN'];   // #4454: разбиение последовательности
+                    'ORDER_DIFF_PENALTY_MN'];   // #4194: смежность заказа
         var vars = KEYS.map(function(k){
             var raw = s[k];
             var fromTable = raw != null && String(raw).trim() !== '' && isFinite(Number(raw));
@@ -11678,7 +11673,9 @@
     function fmtSlotCand(c){
         if (!c) return '—';
         var f = c.byFactor || {}, parts = [];
-        Object.keys(f).forEach(function(k){ if (f[k]) parts.push(k + ' +' + f[k]); });
+        // Знак берём у самого слагаемого: бонус соседства заказа (#4194) и зачёт снятого шва
+        // (#4510) отрицательны, и «+-95» в трассе читалось бы как опечатка.
+        Object.keys(f).forEach(function(k){ if (f[k]) parts.push(k + ' ' + (f[k] > 0 ? '+' : '') + f[k]); });
         return 'станок ' + c.machineId + ' поз ' + c.index + ' → вес ' + c.weight
              + ' (день~' + (c.placementDayKey == null ? '?' : c.placementDayKey)
              + (parts.length ? ('; ' + parts.join(', ')) : '; без штрафов') + ')';
@@ -11690,7 +11687,7 @@
         foilNotEnd: 'фольга не в конце дня', foilMove: 'перенос за фольгу',
         deadline: 'просрочка', exactDeadline: 'впритык к сроку',
         distance: 'простой другого станка', order: 'соседство заказа',
-        breakKnives: 'разрыв цепочки ножей', breakMaterial: 'разрыв цепочки сырья'
+        seam: 'зачёт снятого шва'   // #4510: переналадка prev→next, которой больше не будет
     };
     // #4462: разбор веса — только ПРИМЕНЁННЫЕ слагаемые. Аннигилированные (0) не печатаем: «ножи +0»
     // ничего не объясняет, а десяток нулей прячет настоящую причину («вижу все применённые веса, кроме
