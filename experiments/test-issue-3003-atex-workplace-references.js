@@ -33,7 +33,19 @@ const requiredTables = [
     'Пользователь'
 ];
 
-const metadataNames = new Set(metadata.map(function(item) { return item.val; }));
+// #3160: у таблиц появился alias — «Задание на втулки» лежит как val="К-во план",
+// alias="Задание на втулки". Продукт ищет таблицу по val ИЛИ alias (core.tableByName /
+// matchesName), поэтому и проверка спрашивает оба имени.
+function tableAlias(item) {
+    if (item && item.alias) return item.alias;
+    try { return JSON.parse((item && item.attrs) || '{}').alias || ''; } catch (e) { return ''; }
+}
+const metadataNames = new Set();
+metadata.forEach(function(item) {
+    if (item.val) metadataNames.add(item.val);
+    const a = tableAlias(item);
+    if (a) metadataNames.add(a);
+});
 requiredTables.forEach(function(name) {
     assert(metadataNames.has(name), 'metadata contains table "' + name + '"');
 });

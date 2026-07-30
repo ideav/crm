@@ -11,7 +11,8 @@ assert(
     'PowerShell 5.1 should detect the Cyrillic script as UTF-8 via BOM'
 );
 
-assert(script.includes('[string]$BaseUrl = "https://integram.io"'), 'default API host should match MCP docs');
+// Хост по умолчанию — ideav.ru: тот же, что называет база знаний (docs/kb/README.md).
+assert(script.includes('[string]$BaseUrl = "https://ideav.ru"'), 'default API host should match MCP docs');
 assert(script.includes('$script:Tables["User"]'), 'script should reuse the existing system User table');
 assert(!script.includes('"Users"'), 'script should not create a duplicate plural Users table');
 assert(!script.includes('"Projects"'), 'script should use singular Russian table names, not plural English names');

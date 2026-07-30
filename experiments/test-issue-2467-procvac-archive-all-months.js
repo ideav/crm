@@ -9,7 +9,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function assert(condition, message) {

@@ -3,6 +3,7 @@ const path = require('path');
 
 const docPath = path.join(__dirname, '..', 'docs', 'integram-app-workflow.md');
 const text = fs.readFileSync(docPath, 'utf8');
+const kb = fs.readFileSync(path.join(__dirname, '..', 'docs', 'kb', 'crud.md'), 'utf8');
 
 const checks = [
   {
@@ -14,12 +15,18 @@ const checks = [
     message: 'docs must list F_I as a useful object filter',
   },
   {
-    ok: text.includes('vals.id'),
+    // Формулировка про id записи живёт в самой таблице параметров.
+    ok: text.includes('только запись с `id=<recordId>`'),
     message: 'docs must explain that F_I filters by the object record id',
   },
   {
-    ok: text.includes('`F_I` не является `F_{colId}`'),
+    ok: text.includes('фильтры по колонкам или специальные параметры `F_U`/`F_I`'),
     message: 'docs must distinguish special F_I from generic F_{colId} filters',
+  },
+  {
+    // Та же пара параметров описана в базе знаний (docs/kb/ — источник истины по API).
+    ok: kb.includes('`F_I={recordId}`') && kb.includes('`F_U={parentId}`'),
+    message: 'docs/kb/crud.md lists F_I and F_U object filters',
   },
 ];
 

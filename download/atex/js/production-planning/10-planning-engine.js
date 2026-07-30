@@ -181,7 +181,7 @@
         if (!nextCut) return null;
         var batchId = (nextCut.batchId == null ? '' : nextCut.batchId);
         if (!prevSetup) {
-            return { materialId: ' none', winding: ' none', batchId: batchId,
+            return { materialId: '\u0000none', winding: '\u0000none', batchId: batchId,
                      knifeWidths: [], knifeCount: 0, rollerWidth: 0 };
         }
         return { materialId: prevSetup.materialId, winding: prevSetup.winding, batchId: batchId,

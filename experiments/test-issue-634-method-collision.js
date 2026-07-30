@@ -24,6 +24,19 @@
  */
 
 // Simulate the bug
+// Тест демонстрационный: DOM ему нужен только чтобы вернуть узел из createMenuItem.
+// Node без браузера — подставляем минимальный document.
+if (typeof document === 'undefined') {
+    global.Node = function Node() {};
+    global.document = {
+        createElement: function(tag) {
+            const node = Object.create(global.Node.prototype);
+            node.tagName = String(tag).toUpperCase();
+            return node;
+        }
+    };
+}
+
 class BuggyMainAppController {
     // First method definition (line ~216 in original)
     createMenuItem(item, level, hasChildren) {

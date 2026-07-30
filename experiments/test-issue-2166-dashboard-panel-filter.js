@@ -62,6 +62,7 @@ ${extractFunctionMaybe('dashCellRgColumn')}
 ${extractFunctionMaybe('dashCellReportGroup')}
 ${extractFunctionMaybe('dashCollectReportGroups')}
 ${extractFunctionMaybe('dashResolveReportCellValue')}
+${extractFunction('dashCaptureQueryHeaders')}
 ${extractFunction('dashGetRepVals')}
 ${extractFunction('dashGetRepDone')}
 ${extractFunction('dashGetRep')}

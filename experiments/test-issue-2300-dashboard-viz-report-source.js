@@ -51,6 +51,7 @@ ${extractFunction('dashReportValueLabel')}
 ${extractFunction('dashReportAddOrdered')}
 ${extractFunction('dashCollectReportVizData')}
 ${extractFunction('dashPanelGetVizReportData')}
+${extractFunction('dashChartMeasureValue')}
 ${extractFunction('dashCollectPanelData')}
 ${extractFunction('dashBuildReportFieldOptions')}
 ${extractFunction('dashBuildReportFieldMapHtml')}

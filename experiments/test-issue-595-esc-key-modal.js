@@ -72,7 +72,7 @@ console.log('\n--- Test 4: Modal Esc handler coverage ---');
     const fs = require('fs');
     const path = require('path');
 
-    const filePath = path.join(__dirname, '..', 'assets', 'js', 'integram-table.js');
+    const filePath = path.join(__dirname, '..', 'js', 'integram-table.js');
     const content = fs.readFileSync(filePath, 'utf8');
 
     // Count Esc key handlers

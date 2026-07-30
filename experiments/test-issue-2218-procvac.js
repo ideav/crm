@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function assert(condition, message) {
@@ -142,7 +142,7 @@ const statusColumn = columns.find((col) => col.key === 'status');
     assert(helpers.renderCell(statusRow, statusColumn, 'active').includes(className), `${label} status gets ${className}`);
 });
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 [
     'procvac-status--in-work',
     'procvac-status--not-started',

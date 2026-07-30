@@ -1,7 +1,8 @@
 // Engine pattern from ASSETS_DEPLOYMENT.md:
 // \{([A-ZА-Я0-9\.&_ \-]*?[^ ;\r\n])}
 const fs = require('fs');
-const content = fs.readFileSync('/tmp/gh-issue-solver-1778569276756/templates/funnel.html', 'utf8');
+const path = require('path');
+const content = fs.readFileSync(path.join(__dirname, '..', 'templates', 'funnel.html'), 'utf8');
 const re = /\{([A-ZА-Я0-9\.&_ \-]*?[^ ;\r\n])\}/g;
 const matches = [];
 let m;

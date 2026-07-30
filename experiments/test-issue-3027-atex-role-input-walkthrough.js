@@ -130,7 +130,6 @@ const createPosition = orderHelpers.buildCreatePositionRequest({
     orderId: '30027',
     qty: '10',
     rawId: '1237',
-    cutTypeId: '302704',
     width: '57',
     length: '1200',
     sleeve: '76',
@@ -139,7 +138,9 @@ const createPosition = orderHelpers.buildCreatePositionRequest({
 });
 assert.strictEqual(createPosition.url, '/atex/_m_new/' + positionMeta.id + '?JSON&up=30027', 'position is created as a child of the manager order');
 body = new URLSearchParams(createPosition.body);
-assert.strictEqual(body.get('t' + reqId(positionMeta, 'Тип резки')), '302704', 'position uses the calculated non-standard cut type');
+// #3097: «Тип резки» упразднён — раскладку ножей считает планирование (динамические «Полосы»
+// под резкой), а позиция несёт ширину/длину/втулку напрямую.
+assert.strictEqual(body.get('t' + reqId(positionMeta, 'Ширина, мм')), '57', 'position carries the requested strip width');
 assert.strictEqual(body.get('t' + reqId(positionMeta, 'Ширина, мм')), '57', 'position records the requested roll width');
 
 const positionStatus = orderHelpers.buildSetStatusRequest({
@@ -151,18 +152,19 @@ const positionStatus = orderHelpers.buildSetStatusRequest({
 });
 assert.strictEqual(positionStatus.url, '/atex/_m_set/30028?JSON', 'position status transition is a write, not a dashboard read');
 
-// Cut calculation workspace: dispatcher enters the non-standard cut geometry.
-const cutCalc = require('../download/atex/js/cut-calc.js');
-const cutSummary = cutCalc.calc.computeSummary('910', [
-    { width: '57', qty: '10' },
-    { width: '40', qty: '8' }
-], '25');
-assert.deepStrictEqual(cutSummary, {
-    totalKnives: 18,
-    usedWidth: 890,
-    remainder: 20,
-    withinTolerance: true
-}, 'non-standard 57x10+40x8 cut is calculated from user-entered strips');
+// #3097: отдельного рабочего места расчёта («cut-calc») больше нет — раскладку ножей под
+// нетиповую резку считает ядро планирования (cut-layout.js), из ширин самих позиций заказа.
+const cutLayout = require('../download/atex/js/cut-layout.js').layout;
+const cutSummary = cutLayout.composeLayout(910, [
+    { width: 57, qty: 10, positionId: '30028' },
+    { width: 40, qty: 8, positionId: '30029' }
+], [], 25);
+assert.strictEqual(cutSummary.strips.reduce((sum, s) => sum + s.qty, 0), 18,
+    'non-standard 57x10+40x8 cut yields 18 knives');
+assert.deepStrictEqual(
+    { used: cutSummary.used, remainder: cutSummary.remainder, withinTolerance: cutSummary.withinTolerance },
+    { used: 890, remainder: 20, withinTolerance: true },
+    'non-standard 57x10+40x8 cut fits the jumbo within tolerance');
 
 // Production planning workspace: dispatcher creates a cut and links it to the order position.
 const productionPlanning = require('../download/atex/js/production-planning.js');
@@ -172,7 +174,6 @@ const supplyMeta = byName('Обеспечение');
 
 const cutFields = planning.buildFields({
     slitter: reqId(cutMeta, 'Слиттер'),
-    cutType: reqId(cutMeta, 'Тип резки'),
     materialBatch: reqId(cutMeta, 'Партия сырья'),
     planDate: reqId(cutMeta, 'Дата план'),
     status: reqId(cutMeta, 'Статус'),
@@ -185,7 +186,7 @@ const cutFields = planning.buildFields({
     status: 'В очереди',
     notes: 'АТХ-3027: планирование после расчета нетиповой резки'
 });
-assert.strictEqual(cutFields['t' + reqId(cutMeta, 'Тип резки')], '302704', 'planned production cut references the calculated cut type');
+// #3097: у производственной резки «Типа резки» больше нет — конфигурацию задают её «Полосы».
 assert.strictEqual(cutFields['t' + reqId(cutMeta, 'Статус')], 'В очереди', 'planned production cut enters the queue');
 
 const supplyFields = planning.buildFields({
@@ -201,8 +202,13 @@ assert.strictEqual(supplyFields['t' + reqId(supplyMeta, 'Производств�
 
 // Sleeve cutter workspace: operator enters task data and advances by buttons.
 const sleeve = require('../download/atex/js/sleeve-cutter.js');
-assert.strictEqual(sleeve.core.nextStatus('Ожидает'), 'В работе', 'first sleeve button advances to work');
-assert.strictEqual(sleeve.core.nextStatus('В работе'), 'Готово', 'second sleeve button finishes the task');
+// #3869/PR#3870: пульт втулкореза перестроен по образцу слиттера — статус не переключается
+// отдельной функцией, а ВЫВОДИТСЯ из проставленных полей задания (начато/завершено/факт).
+assert.strictEqual(sleeve.core.statusFromFields({}), 'Ожидает', 'untouched sleeve task waits');
+assert.strictEqual(sleeve.core.statusFromFields({ started: '1780963200' }), 'В работе',
+    'first sleeve button (start) advances to work');
+assert.strictEqual(sleeve.core.statusFromFields({ started: '1780963200', finished: '1780970400', factQty: '10' }), 'Готово',
+    'second sleeve button (finish with fact) finishes the task');
 assert.deepStrictEqual(sleeve.core.summarize([
     { planQty: '10', factQty: '10', status: 'Готово' }
 ]), {

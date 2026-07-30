@@ -110,7 +110,10 @@ cssFiles.forEach((file) => {
                 const hexes = sensitiveHexes(value, checkSurface, checkText);
                 if (hexes.length === 0) return;
 
-                if (prop.startsWith('--') && hasDarkOverride(rules, selector, prop)) return;
+                // Тёмная тема обеспечена, если у ТОГО ЖЕ селектора и свойства есть правило под
+                // [data-theme="dark"] — неважно, переменная это или обычное свойство. Ровно так
+                // сделаны легенда Ганта и окно прогресса планирования.
+                if (hasDarkOverride(rules, selector, prop)) return;
 
                 failures.push(file + ':' + rule.line + ' ' + selector + ' ' + prop + ': ' + value);
             });

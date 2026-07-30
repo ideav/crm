@@ -1,9 +1,10 @@
 // Regression test for issue #3306 / #3304.
 //
-// `#selectLink` is commented out in templates/upload.html (it has been since the
-// file was created). When importParse() runs with an empty #input and no file
-// selected — exactly the state reached while restoring a saved upload set via
-// setAutoParent() — it falls through to `$('#selectLink').val().length`.
+// `#selectLink` (поле «…или укажите ссылку на файл») может отсутствовать в DOM в момент
+// вызова — именно так и происходило, когда поле было закомментировано в шаблоне. Когда
+// importParse() запускается с пустым #input и без выбранного файла — состояние, в которое
+// попадает восстановление сохранённого набора через setAutoParent(), — он доходит до чтения
+// значения `#selectLink`.
 // jQuery's .val() on an empty set returns `undefined`, so reading `.length`
 // throws "Cannot read properties of undefined (reading 'length')". That crash
 // aborts the `case 'type'` handler before the #createParent checkbox is
@@ -33,10 +34,12 @@ for (var i = template.indexOf('{', start); i < template.length; i++) {
 }
 var importParseSrc = template.slice(start, end);
 
-// ── Confirm the precondition: #selectLink is NOT a live element ───────────────
-check('#selectLink is commented out in the template (no live input)',
-  /<!--[\s\S]*id="selectLink"[\s\S]*-->/.test(template) &&
-  !/<input[^>]*id="selectLink"[^>]*>(?![\s\S]*-->)/.test(template.replace(/<!--[\s\S]*?-->/g, '')));
+// ── Предусловие: значение #selectLink читается ЗАЩИЩЁННО ─────────────────────
+// Поле в шаблоне есть, но код не вправе полагаться на его наличие: при пустом наборе
+// jQuery `.val()` вернёт undefined, и обращение к `.length` уронит обработчик (#3304/#3306).
+check('importParse() reads #selectLink defensively (no bare .val().length)',
+  /\$\('#selectLink'\)\.val\(\)\s*\|\|/.test(template) &&
+  !/\$\('#selectLink'\)\.val\(\)\.length/.test(template));
 
 // ── Minimal jQuery shim reproducing the semantics importParse() relies on ─────
 // Known element ids resolve to a node; unknown ids resolve to an empty set

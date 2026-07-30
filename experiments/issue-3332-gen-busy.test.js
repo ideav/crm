@@ -55,20 +55,42 @@ ctrl.loadPreferredWidths = function() { loadCalls++; return preloadPromise; };
 // Стаб уведомления (без DOM).
 var notified = [];
 ctrl.notify = function(msg, kind) { notified.push({ msg: msg, kind: kind }); };
+// Окно прогресса рисует DOM — в node его нет; на предмет теста (кнопка/крутилка) оно не влияет.
+// #3457: generateCuts перед планированием перечитывает позиции и план — сети в node нет,
+// а предмет теста (кнопка/крутилка на время preferable_widths) от них не зависит.
+ctrl.loadPositions = function() { return Promise.resolve(); };
+ctrl.reload = function() { return Promise.resolve(); };
+ctrl.render = function() {};
+ctrl.showProgress = function() {};
+ctrl.updateProgress = function() {};
+ctrl.hideProgress = function() {};
 
 assert(genBtn.disabled === false, 'до клика кнопка активна');
 assert(genSpinner.style.display === 'none', 'до клика крутилка скрыта');
 
 ctrl.generateCuts(null);
 
-// Синхронно после клика: запрос ушёл, кнопка деактивирована, крутилка видна.
-assert(loadCalls === 1, 'loadPreferredWidths вызван (идёт запрос preferable_widths)');
-assert(genBtn.disabled === true, 'во время запросов кнопка деактивирована');
-assert(genSpinner.style.display === '', 'во время запросов крутилка видна');
+// #3457: перед ходовыми ширинами generateCuts перечитывает позиции и план (асинхронно),
+// поэтому запрос preferable_widths уходит не в том же тике, что клик. Занятость кнопки
+// выставляется сразу — её и проверяем синхронно, а сам запрос ждём микрозадачами.
+assert(genBtn.disabled === true, 'сразу после клика кнопка деактивирована');
+assert(genSpinner.style.display === '', 'сразу после клика крутилка видна');
 
-// Завершаем запросы — кнопка должна снова стать активной, крутилка скрыться.
-resolvePreload([]);
-preloadPromise.then(function() {}).then(function() {
+// Ждём, пока асинхронная преамбула дойдёт до запроса ходовых ширин.
+function tick(n) {
+    var p = Promise.resolve();
+    for (var i = 0; i < n; i++) p = p.then(function() {});
+    return p;
+}
+
+tick(20).then(function() {
+    assert(loadCalls === 1, 'loadPreferredWidths вызван (идёт запрос preferable_widths)');
+    assert(genBtn.disabled === true, 'во время запросов кнопка деактивирована');
+    assert(genSpinner.style.display === '', 'во время запросов крутилка видна');
+    // Завершаем запросы — кнопка должна снова стать активной, крутилка скрыться.
+    resolvePreload([]);
+    return tick(20);
+}).then(function() {
     assert(genBtn.disabled === false, 'после запросов кнопка снова активна');
     assert(genSpinner.style.display === 'none', 'после запросов крутилка скрыта');
     console.log('\n' + passed + ' passed, ' + failed + ' failed');

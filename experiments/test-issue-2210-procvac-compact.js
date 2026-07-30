@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 const sandbox = {
@@ -45,7 +45,7 @@ const template = fs.readFileSync(path.join(rootDir, 'templates', 'sportzania', '
 assert(!template.includes('procvac-refresh'), 'refresh button is removed from procvac template');
 assert(!template.includes('procvac-status'), 'status element is removed from procvac template');
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 const cellRule = css.match(/\.procvac-cell\s*{[^}]+}/);
 assert(cellRule, 'procvac cell rule exists');
 assert(/padding:\s*2px 4px;/.test(cellRule[0]), 'procvac cells use compact 2px 4px padding');

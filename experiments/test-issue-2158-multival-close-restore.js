@@ -6,7 +6,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const dashHtml = fs.readFileSync(path.join(__dirname, '../templates/dash.html'), 'utf8');
+// Скрипт дашборда вынесен из шаблона в отдельный файл (templates/dash.html подключает
+// <script src="/js/dash.js">), поэтому исходник читаем оттуда.
+const dashHtml = fs.readFileSync(path.join(__dirname, '../js/dash.js'), 'utf8');
 
 let passed = 0;
 let failed = 0;
@@ -100,8 +102,11 @@ assert(
     'close button handler restores td.textContent to originalVal'
 );
 
+// Ищем ВНУТРИ обработчика «Закрыть», а не по глобальному порядку вхождений: сброс фона
+// встречается в файле и раньше (в других ветках сохранения).
+const closeHandler = dashHtml.slice(dashHtml.indexOf("getElementById('dash-multival-close')"));
 assert(
-    dashHtml.includes("td.style.backgroundColor = ''") && dashHtml.indexOf("td.style.backgroundColor = ''") > dashHtml.indexOf('dash-multival-close'),
+    closeHandler.slice(0, closeHandler.indexOf('});')).includes("td.style.backgroundColor = ''"),
     'close button handler resets backgroundColor'
 );
 

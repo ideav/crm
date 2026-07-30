@@ -78,8 +78,14 @@ assert(
     'docs/atex_workplaces.md links the issue #3029 human tester instruction'
 );
 
+// #3160: таблицу ищем по val ИЛИ alias — как продукт (core.tableByName / matchesName).
+// «Задание на втулки» лежит как val="К-во план", alias="Задание на втулки".
+function tableAlias(item) {
+    if (item && item.alias) return item.alias;
+    try { return JSON.parse((item && item.attrs) || '{}').alias || ''; } catch (e) { return ''; }
+}
 function table(name) {
-    const item = metadata.find(function(t) { return t.val === name; });
+    const item = metadata.find(function(t) { return t.val === name || tableAlias(t) === name; });
     assert(item, 'metadata contains table ' + name);
     return item;
 }
@@ -116,7 +122,9 @@ function req(meta, name) {
     ['Производственная резка', ['Слиттер', 'Тип резки', 'Партия сырья', 'Дата план', 'Статус', 'Счётчик нач.', 'Счётчик кон.', 'Погонаж факт, м', 'Брак, м²']],
     ['Обеспечение', ['Метраж, м', 'Производственная резка', 'Партия ГП', 'Статус']],
     ['Расход сырья', ['Израсходовано, м²', 'Партия сырья']],
-    ['Задание на втулки', ['Кол-во план', 'Втулкорез', 'Диаметр, мм', 'Кол-во факт', 'Статус']],
+    // #3160: плановое количество втулок — ГЛАВНОЕ значение таблицы (первая колонка,
+    // val="К-во план"), а не отдельный реквизит; реквизитами остались втулкорез/диаметр/факт/статус.
+    ['Задание на втулки', ['Втулкорез', 'Диаметр, мм', 'Кол-во факт', 'Статус']],
     ['Партия ГП', ['Производственная резка', 'Ширина, мм', 'Кол-во рулонов', 'Метраж, м', 'Адрес хранения', 'Статус']]
 ].forEach(function(pair) {
     const meta = table(pair[0]);

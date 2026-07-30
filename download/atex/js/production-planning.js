@@ -3712,7 +3712,7 @@
         if (!nextCut) return null;
         var batchId = (nextCut.batchId == null ? '' : nextCut.batchId);
         if (!prevSetup) {
-            return { materialId: ' none', winding: ' none', batchId: batchId,
+            return { materialId: '\u0000none', winding: '\u0000none', batchId: batchId,
                      knifeWidths: [], knifeCount: 0, rollerWidth: 0 };
         }
         return { materialId: prevSetup.materialId, winding: prevSetup.winding, batchId: batchId,
@@ -22848,7 +22848,7 @@
         // тому же, что разделяет дни блоком уборки и датой-заголовком, — а НЕ по хранимой
         // «Дате план». Иначе резки одной хранимой даты, переехавшие расписанием на следующий
         // день (не влезли в текущий), продолжали сквозную нумерацию (№5 на новом дне вместо №1).
-        function cutSchedDayKey(c) { var d = schedDay(schedById[String(c.id)]); return d == null ? ' ' : String(d); }
+        function cutSchedDayKey(c) { var d = schedDay(schedById[String(c.id)]); return d == null ? '\u0000' : String(d); }
         var dayCutsBySched = {};
         activeGroup.cuts.forEach(function(c) {
             var key = cutSchedDayKey(c);

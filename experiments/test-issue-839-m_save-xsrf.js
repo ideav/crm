@@ -37,7 +37,9 @@ if (!saveEditedRecordContent.includes('_m_save')) {
 console.log('PASS: _m_save is used in saveEditedRecord');
 
 // Test 2: Verify XSRF token is added for FormData (file uploads)
-const xsrfFormDataPattern = /if\s*\(\s*hasFiles\s*\)\s*\{[\s\S]*?_xsrf/;
+// Имя флага «есть новые файлы» менялось (hasFiles → hasNewFiles), поэтому проверяем СУТЬ:
+// в ветке, где тело запроса собирается как FormData (multipart), к нему добавляется _xsrf.
+const xsrfFormDataPattern = /new FormData\(\)[\s\S]{0,400}?\.append\(\s*'_xsrf'/;
 if (!xsrfFormDataPattern.test(saveEditedRecordContent)) {
     console.error('FAIL: XSRF token is not added for FormData (file uploads)');
     process.exit(1);

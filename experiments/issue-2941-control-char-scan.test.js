@@ -23,6 +23,12 @@ const repoRoot = path.join(__dirname, '..');
 // excluded — they legitimately contain control bytes.
 const SCAN_EXTENSIONS = ['.php', '.js', '.css', '.html', '.htm', '.sql'];
 
+// Сторонние МИНИФИЦИРОВАННЫЕ библиотеки не сканируем: управляющие байты в них законны (SheetJS
+// держит в строках двоичные таблицы CFB/кодировок), а править вендорный бандл нельзя — он
+// обновляется целиком. Проверка сторожит НАШ исходник: невидимый байт, который туда занесли
+// редактором или копипастой (issue #2941 — ESC внутри ключа `$row["t"]` в index.php).
+const VENDOR_RE = /(^|\/)(vendor|node_modules)\/|\.min\.js$|\bxlsx[\d.]*\.full\.min\.js$/;
+
 // Allowed C0 whitespace: tab (0x09), line feed (0x0A), carriage return (0x0D).
 const ALLOWED = new Set([0x09, 0x0a, 0x0d]);
 function isForbidden(byte) {
@@ -57,6 +63,7 @@ let scanned = 0;
 for (const rel of trackedFiles()) {
     const ext = path.extname(rel).toLowerCase();
     if (!SCAN_EXTENSIONS.includes(ext)) continue;
+    if (VENDOR_RE.test(rel)) continue;
     scanned++;
     const hits = findControlChars(path.join(repoRoot, rel));
     if (hits.length) {

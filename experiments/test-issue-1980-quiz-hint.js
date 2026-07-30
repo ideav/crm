@@ -18,10 +18,14 @@ includesRequiredSnippet('onclick="quizHintClose()"', 'quiz hint close button mus
 includesRequiredSnippet("workspace: 'quiz'", 'quiz hint must initialize the quiz workspace');
 includesRequiredSnippet('steps: 1', 'quiz hint must declare exactly one step');
 
-const paragraphMatch = html.match(/<div id="quiz-hint-1"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
-assert(paragraphMatch, 'quiz hint description paragraph is missing');
+// Описание подсказки разбито на НЕСКОЛЬКО абзацев — берём их все до кнопок блока,
+// иначе счёт предложений меряет только первый абзац.
+const blockMatch = html.match(/<div id="quiz-hint-1"[\s\S]*?(?=<div style="display:flex)/);
+assert(blockMatch, 'quiz hint block is missing');
+const paragraphs = [...blockMatch[0].matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].map((m) => m[1]);
+assert(paragraphs.length, 'quiz hint description paragraph is missing');
 
-const plainText = paragraphMatch[1]
+const plainText = paragraphs.join(' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const rootDir = path.join(__dirname, '..');
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);

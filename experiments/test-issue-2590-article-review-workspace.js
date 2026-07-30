@@ -17,9 +17,16 @@ const articleHeadings = [...plan.matchAll(/^### (\d+)\. (.+)$/gm)].map((match) =
     title: match[2]
 }));
 
-if (articleHeadings.length !== 15) {
-    throw new Error(`Expected 15 article topics, found ${articleHeadings.length}`);
+// План серии пополняется, поэтому число тем не прибито гвоздём: важно, что темы есть и
+// пронумерованы подряд с 1 — по этой нумерации рабочее место раскладывает разборы.
+if (articleHeadings.length < 15) {
+    throw new Error(`Expected at least 15 article topics, found ${articleHeadings.length}`);
 }
+articleHeadings.forEach((heading, index) => {
+    if (heading.number !== index + 1) {
+        throw new Error(`Article topics must be numbered 1..N without gaps; got ${heading.number} at position ${index + 1}`);
+    }
+});
 
 if (!fs.existsSync(readmePath)) {
     throw new Error('Expected docs/integram-article-reviews/README.md to exist');

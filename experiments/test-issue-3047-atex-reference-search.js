@@ -40,7 +40,9 @@ assert.deepStrictEqual(
 
 [
     'templates/atex/intake.html',
-    'templates/atex/cut-calc.html',
+    // #3097: рабочее место «cut-calc» упразднено вместе с «Типом резки» — раскладку ножей
+    // считает планирование (cut-layout/cut-optimizer).
+
     'templates/atex/production-planning.html',
     'templates/atex/slitter.html',
     'templates/atex/sleeve-cutter.html',
@@ -56,25 +58,21 @@ const cases = [
         required: ['AtexRefSearch', 'BATCH_REQ.material']
     },
     {
-        file: 'download/atex/js/cut-calc.js',
-        forbidden: "el('select', { class: 'atex-cc-input', id: 'atex-cc-material' })",
-        required: ['AtexRefSearch', 'CUT_REQ.material']
-    },
-    {
         file: 'download/atex/js/production-planning.js',
         forbidden: "var sel = el('select', { class: 'atex-pp-input' });",
-        required: ['AtexRefSearch', 'CUT_REQ.slitter', 'CUT_REQ.cutType', 'CUT_REQ.materialBatch']
+        // #3097: «Тип резки» упразднён — CUT_REQ.cutType больше нет.
+        required: ['AtexRefSearch', 'CUT_REQ.slitter', 'CUT_REQ.materialBatch']
     },
     {
         file: 'download/atex/js/slitter.js',
         forbidden: "var sel = el('select', { class: 'atex-sl-input' });",
-        required: ['AtexRefSearch', 'CONS_REQ.batch']
+        // Партия сырья слиттера — CUT_REQ.batch (прежний CONS_REQ снят вместе с #3097).
+        required: ['AtexRefSearch', 'CUT_REQ.batch']
     },
-    {
-        file: 'download/atex/js/sleeve-cutter.js',
-        forbidden: "var sel = el('select', { class: 'atex-sc-input' });",
-        required: ['AtexRefSearch', 'TASK_REQ.cutter']
-    },
+    // #3869/PR#3870: «Пульт втулкореза» перестроен по образцу слиттера — выбор ВТУЛКОРЕЗА
+    // остаётся обычным <select>: это короткий список станков, а не длинный справочник,
+    // ради которого заводился поиск (#3047 — «workplaces that still edit LONG reference lists»).
+
     {
         file: 'download/atex/js/warehouse.js',
         required: ['AtexRefSearch', 'helper.selectHtml', 'cuttingOptionsHtml', 'batchOptionsHtml']

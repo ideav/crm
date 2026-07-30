@@ -6,6 +6,10 @@ const source = fs.readFileSync('js/app.js', 'utf8');
 const classStart = source.indexOf('class AuthManager');
 const classEnd = source.indexOf('// ============================================================\n// App initialization');
 const authSource = source.slice(classStart, classEnd);
+// #3962: AuthManager строит URL через apiScheme() (http:// на локальном хосте, https:// иначе).
+// Берём НАСТОЯЩУЮ функцию из js/app.js, а не заглушку, — иначе схему проверял бы сам тест.
+const schemeStart = source.indexOf('function apiScheme()');
+const schemeSource = source.slice(schemeStart, source.indexOf('}', schemeStart) + 1);
 
 let fetchCall = null;
 const context = {
@@ -21,11 +25,12 @@ const context = {
         };
     },
     CookieUtil: { get: () => '', set: () => {} },
+    window: { location: { protocol: 'https:' } },
     validateToken: async () => ({})
 };
 
 vm.createContext(context);
-vm.runInContext(`${authSource}; this.AuthManager = AuthManager;`, context);
+vm.runInContext(`${schemeSource}\n${authSource}; this.AuthManager = AuthManager;`, context);
 
 (async () => {
     const auth = new context.AuthManager({ host: 'app.integram.io' });

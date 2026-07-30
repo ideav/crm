@@ -36,9 +36,11 @@ function cut(id, runs, runLength, knives) {
 }
 
 // 1) Пустой станок: резка стартует в начале смены (08:00), setup = лидер 2 мин.
+// #3688: лидер (BETWEEN_CUTS) вынесен в КОНЕЦ резки и в стартовую наладку не входит —
+// у первой резки пустого станка переналадки нет вовсе, setupMin = 0.
 assertEqual(
     planning.freeSlotForQueue([], prospect(), OPTS),
-    { windowStartMin: 480, startMin: 482, finishMin: 502, durationMin: 20, setupMin: 2, day: 0 },
+    { windowStartMin: 480, startMin: 480, finishMin: 500, durationMin: 20, setupMin: 0, day: 0 },
     'freeSlotForQueue: пустой станок → старт 08:00'
 );
 
@@ -48,7 +50,7 @@ var optsOne = { windPoints: WIND, shiftStartMin: 480, shiftEndMin: 990, runLengt
 //   c1: setup 2, 482–492. Проспект: setup 2, 494–514, окно с 492.
 assertEqual(
     planning.freeSlotForQueue(one, prospect(), optsOne),
-    { windowStartMin: 492, startMin: 494, finishMin: 514, durationMin: 20, setupMin: 2, day: 0 },
+    { windowStartMin: 492, startMin: 492, finishMin: 512, durationMin: 20, setupMin: 0, day: 0 },
     'freeSlotForQueue: после существующей резки в тот же день'
 );
 
@@ -59,7 +61,7 @@ var full = [cut('c1', 5, 1000)];
 var optsFull = { windPoints: WIND, shiftStartMin: 480, shiftEndMin: 990, runLengthByCut: { c1: 1000 } };
 assertEqual(
     planning.freeSlotForQueue(full, prospect(), optsFull),
-    { windowStartMin: 1920, startMin: 1922, finishMin: 1942, durationMin: 20, setupMin: 2, day: 1 },
+    { windowStartMin: 1920, startMin: 1920, finishMin: 1940, durationMin: 20, setupMin: 0, day: 1 },
     'freeSlotForQueue: нет места сегодня → перенос на след. рабочий день'
 );
 

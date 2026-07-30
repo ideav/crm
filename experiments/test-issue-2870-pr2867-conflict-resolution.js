@@ -99,20 +99,24 @@ function testFilterDeleteKeepsBatchEndpoint() {
     const bulkExportSource = readSource('js/integram-table/23-bulk-export.js');
     const methodSource = extractMethod(bulkExportSource, 'bulkDeleteByFilter');
 
+    // #3260: удаление по фильтру делает СЕРВЕР одним запросом `_m_del_select` — он сам
+    // выбирает подходящие id тем же фильтром, что и подсчёт, и удаляет их пакетом. Прежняя
+    // схема (выгрузить до 1 000 000 строк ради id и слать их чанками) исчерпывала память PHP.
+    // Свойство «не по запросу на запись» от этого только усилилось: запрос ровно один.
     assertIncludes(
         methodSource,
-        '_m_del_batch/${ this.objectTableId }?JSON',
-        'filter delete must use the batch endpoint'
+        "params.set('_m_del_select', '1')",
+        'filter delete must ask the server to select and delete in one request'
     );
     assertIncludes(
         methodSource,
-        'for (let i = 0; i < records.length; i += FILTER_DELETE_CHUNK)',
-        'filter delete should send sequential chunks'
+        'this.appendCurrentFilters(new URLSearchParams())',
+        'filter delete must reuse the same filter as the count'
     );
-    assertIncludes(
+    assertNotIncludes(
         methodSource,
         'loadDataFromTableForExport(0, 1000000)',
-        'filter delete should reuse the export loader so filters and page params stay consistent'
+        'filter delete must not load every row just to collect ids (#3260)'
     );
     assertNotIncludes(
         methodSource,

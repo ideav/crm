@@ -27,6 +27,9 @@ function dashTrace() {}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
+${extractFunction('dashMatrixLabelScore')}
+${extractFunction('dashNormalizeMatrixKey')}
+${extractFunction('dashMatrixLabelMatches')}
 ${extractFunction('dashGetVal')}
 ${extractFunction('dashResolveValueCell')}
 

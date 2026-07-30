@@ -147,9 +147,13 @@ function testCssRules() {
         css.includes('.subordinate-table tbody tr:hover .subordinate-drag-handle-td .subordinate-row-number'),
         'CSS should hide modal subordinate row numbers when the row control icon is visible'
     );
+    // На десктопе прятать номер не нужно: иконка правки стоит в ПРОТИВОПОЛОЖНОМ углу ячейки
+    // (.edit-icon — bottom/right, .subordinate-row-number — top/left), они не накладываются.
+    // Наложение возможно там, где иконка становится строчной (мобильная ширина), — там номер и
+    // скрывается.
     assert(
-        css.includes('.editable-cell:hover .subordinate-row-number-with-edit-icon'),
-        'CSS should hide table-source row numbers when the edit icon is visible'
+        /@media \(max-width: 768px\)[\s\S]*?\.editable-cell \.subordinate-row-number-with-edit-icon\s*\{[^}]*display:\s*none/.test(css),
+        'CSS should hide table-source row numbers where the edit icon goes inline (mobile)'
     );
 }
 

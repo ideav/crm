@@ -29,7 +29,9 @@ function extractFunction(name) {
     throw new Error('Unclosed function ' + name);
 }
 
-const ctx = { require, console };
+// #2742: dashGetPanelValuesDone заглядывает в DOM панели (getElementById(panelKey)) за
+// колонками широкой формы. В node DOM нет — панели «нет», и функция идёт обычной веткой.
+const ctx = { require, console, document: { getElementById: () => null } };
 vm.createContext(ctx);
 vm.runInContext(`
 var dashModelData = {};
@@ -54,6 +56,8 @@ ${extractFunction('dashDecodePanelFilterPart')}
 ${extractFunction('dashPanelLocalFilterState')}
 ${extractFunction('dashMergePanelFilterState')}
 ${extractFunction('dashParseSrcValue')}
+${extractFunction('dashDrainPendingPanelRows')}
+let dashPendingPanelRows = {};   // очередь строк панели, ждущих появления DOM
 ${extractFunction('dashGetPanelValuesDone')}
 `, ctx);
 

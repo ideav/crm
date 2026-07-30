@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const sourcePath = path.join(__dirname, '..', 'js', 'procvac.js');
+const sourcePath = path.join(__dirname, '..', 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 const sandbox = {

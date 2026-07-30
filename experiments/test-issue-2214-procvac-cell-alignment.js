@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function createElement(id) {
@@ -98,7 +98,7 @@ Promise.resolve()
         assertCellHasClass(grid.innerHTML, 'startDate', 'procvac-cell--date');
         assertCellHasClass(grid.innerHTML, 'deadline', 'procvac-cell--date');
 
-        const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+        const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
         assert(/\.procvac-cell--numeric\s*{[^}]*text-align:\s*right;/.test(css), 'numeric cells are right-aligned in CSS');
         assert(/\.procvac-cell--date\s*{[^}]*text-align:\s*center;/.test(css), 'date cells are center-aligned in CSS');
 

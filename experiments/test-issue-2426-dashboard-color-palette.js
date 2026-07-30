@@ -102,9 +102,11 @@ vm.runInContext(code, ctx);
         { label: 'A', data: [1, 2] },
         { label: 'B', data: [3, 4] }
     ], {}, ['#1B50F3', '#A4B9FA']);
-    assertEqual(area[0].borderColor, '#1B50F3', 'area chart uses first custom palette color');
-    assertEqual(area[0].backgroundColor, 'rgba(27,80,243,0.3)', 'area chart uses translucent first custom color');
-    assertEqual(area[1].borderColor, '#A4B9FA', 'area chart uses second custom palette color');
+    // Область рисуется СПЛОШНОЙ заливкой без обводки (borderWidth: 0), поэтому цвет палитры
+    // виден в backgroundColor — borderColor у таких наборов больше не задаётся.
+    assertEqual(area[0].backgroundColor, '#1B50F3', 'area chart uses first custom palette color');
+    assertEqual(area[0].borderWidth, 0, 'area chart datasets are drawn without a border');
+    assertEqual(area[1].backgroundColor, '#A4B9FA', 'area chart uses second custom palette color');
 }
 
 {

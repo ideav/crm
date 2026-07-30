@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function assert(condition, message) {
@@ -64,7 +64,7 @@ if (!helpers) {
     throw new Error('window.ProcVacTesting is not exposed');
 }
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 assert(/\.procvac-editor--floating\s*{[^}]*position:\s*fixed;/.test(css), 'reference select is fixed-positioned over the table');
 assert(/\.procvac-editor--floating\s*{[^}]*z-index:\s*20;/.test(css), 'reference select renders above sticky table chrome');
 assert(/\.procvac-editor--floating\s*{[^}]*box-shadow:/.test(css), 'floating reference select has visible separation from table cells');

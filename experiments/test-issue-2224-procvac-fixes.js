@@ -43,7 +43,7 @@ function jsonResponse(payload) {
         'IntegramTable CSS loads before the form helper script',
     );
 
-    const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+    const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
     assert(
         /\.procvac-head-cell:last-child\s+\.procvac-col-resize-handle\s*{[^}]*right:\s*0;/.test(css),
         'last ProcVac resize handle stays inside the grid scroll area',

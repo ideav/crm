@@ -368,7 +368,7 @@
         var order = [];
         function ensure(slitter) {
             var s = slitter || { id: null, label: '' };
-            var key = s.id == null || String(s.id) === '' ? ' none' : String(s.id);
+            var key = s.id == null || String(s.id) === '' ? '\u0000none' : String(s.id);
             if (!groups[key]) {
                 groups[key] = {
                     key: key,

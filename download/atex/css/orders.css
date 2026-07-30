@@ -1,6 +1,9 @@
 .atex-orders {
     --atex-orders-info-bg: #eff6ff;
     --atex-orders-info-text: #1e40af;
+    /* Подсветка строк справочного дропдауна — через токены, иначе тёмная тема остаётся светлой. */
+    --atex-orders-ref-hover: #e2e8f0;
+    --atex-orders-ref-pick: #eff6ff;
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -15,6 +18,8 @@
 [data-theme="dark"] .atex-orders {
     --atex-orders-info-bg: rgba(96, 165, 250, 0.16);
     --atex-orders-info-text: #93c5fd;
+    --atex-orders-ref-hover: rgba(148, 163, 184, 0.22);
+    --atex-orders-ref-pick: rgba(96, 165, 250, 0.18);
 }
 
 .atex-orders * {
@@ -156,7 +161,7 @@
 }
 
 .atex-orders-ref-clear:hover {
-    background: #e2e8f0;
+    background: var(--atex-orders-ref-hover);
     color: var(--text-primary, #111827);
 }
 
@@ -178,7 +183,7 @@
     display: block;
     width: 100%;
     border: 0;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
     background: transparent;
     color: var(--text-primary, #111827);
     padding: 7px 10px;
@@ -193,7 +198,7 @@
 
 .atex-orders-ref-option:hover,
 .atex-orders-ref-option.is-active {
-    background: #eff6ff;
+    background: var(--atex-orders-ref-pick);
 }
 
 .atex-orders-ref-option.is-selected {

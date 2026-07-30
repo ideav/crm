@@ -39,7 +39,8 @@ assert(!template.includes('data-client-table="103"'), 'template does not hardcod
 assert(template.includes('data-user="{_global_.user}"'), 'template passes the current login for client isolation');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
-assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
+// #3051: каталог репозитория — atex/, боевая база — ateh, поэтому деплой идёт в custom/ateh/
+assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/ateh/'), 'update.conf deploys atex templates');
 assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/atex/js/'), 'update.conf deploys atex js');
 assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/atex/css/'), 'update.conf deploys atex css');
 

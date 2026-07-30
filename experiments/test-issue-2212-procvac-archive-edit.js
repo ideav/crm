@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 const sandbox = {
@@ -55,7 +55,7 @@ assert(activeCell.includes('procvac-cell--editable'), 'active cells with editabl
 assert(archiveCell.includes('procvac-cell--editable'), 'archive cells with editable columns render as editable');
 assert(!/dataset\.section\s*===\s*['"]archive['"]/.test(source), 'archive cells are not blocked from entering edit mode');
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 const searchInputRule = css.match(/\.procvac-search input\s*{[^}]+}/);
 assert(searchInputRule, 'procvac search input rule exists');
 assert(/padding:\s*5px 10px 5px 32px;/.test(searchInputRule[0]), 'search input uses requested compact padding');

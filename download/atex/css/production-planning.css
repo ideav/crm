@@ -452,7 +452,7 @@
    Красный — срок раньше планирования (не успеваем); жёлтый — срок дальше план+DAYS_FORECAST
    (делаем сильно заранее); в окне — без изменения (цвет выше). */
 .atex-pp-cut-material .atex-pp-strip-row.is-overdue {
-    color: #b91c1c;
+    color: var(--pp-warn);
     font-weight: 600;
     background: rgba(185, 28, 28, .10);
     border-radius: 4px;
@@ -469,7 +469,7 @@
    вместо срока в конце строки слово «Склад»/«Отходы». Отдельный класс (не is-overdue):
    это не просрочка по сроку, а назначение полосы. */
 .atex-pp-cut-material .atex-pp-strip-row.is-nonorder {
-    color: #b91c1c;
+    color: var(--pp-warn);
     font-weight: 600;
     background: rgba(185, 28, 28, .10);
     border-radius: 4px;
@@ -1264,7 +1264,9 @@
     width: 100%;
     max-width: 360px;
     background: #ffffff;
-    border: 1px solid #d9dee5;
+    /* Цвет рамки — токеном: тёмная тема правит border-color, а сокращённая запись border
+       со своим цветом расходится с ней по имени свойства. */
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
     padding: 20px 22px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, .25);

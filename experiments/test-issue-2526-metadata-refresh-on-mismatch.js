@@ -207,9 +207,15 @@ console.log('=== Test issue #2526: metadata refresh on row column count mismatch
         };
 
         // Stub fetch() to return a 6-column row
+        const ROWS_449192 = [{ i: 449192, u: 1, o: 1, r: ['84', '30.04.2026', '2355', '1126', '10', '1778493414'] }];
         global.fetch = async (url) => ({
             ok: true,
-            json: async () => [{ i: 449192, u: 1, o: 1, r: ['84', '30.04.2026', '2355', '1126', '10', '1778493414'] }]
+            // fetchJson читает ответ как ТЕКСТ (чтобы показать не-JSON ответ превью), поэтому
+            // заглушка обязана отдавать text(); json() оставляем для остальных вызовов.
+            json: async () => ROWS_449192,
+            text: async () => JSON.stringify(ROWS_449192),
+            status: 200,
+            statusText: 'OK'
         });
 
         const result = await t.loadDataFromTable(false);

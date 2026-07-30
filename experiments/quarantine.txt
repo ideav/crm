@@ -1,58 +1,8 @@
-# Красные тесты на момент включения гейта (27.07.2026, main ae48c0ee): 64 из 266 файлов.
-# Разобрано: 4 (#4515/PR#4522, устаревшие тесты удаления сирот) + 8 atex-планирования (#4531).
-# Это ДОЛГ, а не норма. Правило: список только сокращается; добавлять новые строки нельзя —
-# новый красный тест чинится или удаляется в том же PR. Разбирать в порядке свежести тикета.
-# Формат: имя файла внутри experiments/ (комментарии после # игнорируются).
-
-issue-2941-control-char-scan.test.js
-issue-2990-atex-brand-template.test.js
-issue-3017-ideav-wording.test.js
-issue-3332-gen-busy.test.js
-test-atex-pp-cut-for-position.js
-test-issue-1879-dashboard-grouped-value.js
-test-issue-1944-create-perelidoz-script.js
-test-issue-1976-register-endpoint.js
-test-issue-1980-quiz-hint.js
-test-issue-2079-sticky-header.js
-test-issue-2152-dashboard-matrix-save.js
-test-issue-2158-multival-close-restore.js
-test-issue-2166-dashboard-panel-filter.js
-test-issue-2206-procvac.js
-test-issue-2210-procvac-compact.js
-test-issue-2212-procvac-archive-edit.js
-test-issue-2214-procvac-cell-alignment.js
-test-issue-2218-procvac.js
-test-issue-2220-procvac-reference-editor.js
-test-issue-2222-procvac-actions.js
-test-issue-2224-procvac-fixes.js
-test-issue-2228-procvac-section-summary.js
-test-issue-2230-procvac-row-hover.js
-test-issue-2288-dashboard-selected-chart-rows.js
-test-issue-2300-dashboard-viz-report-source.js
-test-issue-2328-dashboard-panel-notes.js
-test-issue-2372-subordinate-row-number.js
-test-issue-2426-dashboard-color-palette.js
-test-issue-2465-procvac-archive-months.js
-test-issue-2467-procvac-archive-all-months.js
-test-issue-2471-ai-chat.js
-test-issue-2474-ai-chat-global.js
-test-issue-2481-ai-providers.js
-test-issue-2526-metadata-refresh-on-mismatch.js
-test-issue-2559-funnel-template-engine.js
-test-issue-2590-article-review-workspace.js
-test-issue-2679-panel-query-local-filter.js
-test-issue-2827-xcom-match.js
-test-issue-2870-pr2867-conflict-resolution.js
-test-issue-2876-docs-query-reference.js
-test-issue-2883-doc-object-filters.js
-test-issue-2920-atex-portal.js
-test-issue-3003-atex-workplace-references.js
-test-issue-3027-atex-role-input-walkthrough.js
-test-issue-3029-atex-human-tester-instruction.js
-test-issue-3043-atex-workplaces-theme.js
-test-issue-3047-atex-reference-search.js
-test-issue-3374-xlsx-range-to-input.js
-test-issue-595-esc-key-modal.js
-test-issue-634-method-collision.js
-test-issue-839-m_save-xsrf.js
-upload-importparse-selectlink.test.js
+# Карантин регрессионной сети (issue #4515) — ПУСТ.
+#
+# Список заводился 27.07.2026 (main ae48c0ee) как ДОЛГ: 64 красных файла из 266. Правило —
+# список только сокращается, новый красный тест чинится или удаляется в том же PR.
+# Разобран полностью: 4 (#4522) + 8 atex-планирования (#4531) + оставшиеся 52 (#4533).
+#
+# Формат (если долг когда-нибудь появится снова): имя файла внутри experiments/,
+# комментарии после # игнорируются. Пустой список = гейт покрывает ВСЮ сеть.

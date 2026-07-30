@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function assert(condition, message) {
@@ -90,7 +90,7 @@ const archiveHeader = helpers.renderSectionHeader('archive', 'Архив', rows)
 assert(archiveHeader.includes('id="procvac-archive-toggle"'), 'archive section still renders its expand toggle');
 assert(archiveHeader.indexOf('procvac-section-statuses') < archiveHeader.indexOf('procvac-archive-toggle'), 'status badges render before the archive toggle');
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 const titleHeaderRule = css.match(/\.procvac-head-cell--title\s*{[^}]+}/);
 assert(titleHeaderRule, 'title header sticky rule exists');
 assert(/position:\s*sticky;/.test(titleHeaderRule[0]), 'title header is sticky');

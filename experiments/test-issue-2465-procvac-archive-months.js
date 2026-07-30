@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 
 const rootDir = path.join(__dirname, '..');
-const sourcePath = path.join(rootDir, 'js', 'procvac.js');
+const sourcePath = path.join(rootDir, 'download', 'sportzania', 'js', 'procvac.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 
 function assert(condition, message) {
@@ -135,7 +135,7 @@ assert(activeHireTypeHtml.includes('Лагерь 1'), 'active section includes t
 assert(activeHireTypeHtml.includes('ОШ 1'), 'active section includes the ОШ count');
 assertEqual(helpers.renderSectionHireTypeSummary('archive', grouped.archive), '', 'archive header does not render active hire-type summary');
 
-const css = fs.readFileSync(path.join(rootDir, 'css', 'procvac.css'), 'utf8');
+const css = fs.readFileSync(path.join(rootDir, 'download', 'sportzania', 'css', 'procvac.css'), 'utf8');
 assert(/\.procvac-archive-month-filter\s*{/.test(css), 'archive month filter has a CSS rule');
 assert(/\.procvac-section-hire-type-badge\s*{/.test(css), 'hire-type summary badges have a CSS rule');
 

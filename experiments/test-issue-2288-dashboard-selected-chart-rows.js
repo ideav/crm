@@ -159,6 +159,7 @@ ${extractFunctionIfPresent('dashCollectVizSelectedRows')}
 ${extractFunction('dashBuildVizRowsHtml')}
 ${extractFunction('dashSyncVizRowAllCheck')}
 ${extractFunction('dashInitVizRowBulkControls')}
+${extractFunction('dashCollectVizCustomOptions')}
 ${extractFunction('dashCollectPanelData')}
 function dashCollectVizSize() { return null; }
 function dashCollectPanelMaxWidth() { return null; }

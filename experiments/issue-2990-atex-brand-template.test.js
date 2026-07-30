@@ -50,8 +50,9 @@ assert(
 
 var updateConf = read('update.conf');
 assert(
-    updateConf.indexOf('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/') !== -1,
-    'update.conf deploys templates/atex/* to templates/custom/atex/'
+    updateConf.indexOf('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/ateh/') !== -1,
+    // #3051: каталог репозитория — atex/, боевая база — ateh, поэтому деплой идёт в custom/ateh/
+    'update.conf deploys templates/atex/* to templates/custom/ateh/'
 );
 
 fs.readdirSync(repoPath('templates/atex'))

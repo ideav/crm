@@ -4,7 +4,8 @@ const vm = require('vm');
 const assert = require('assert');
 
 const root = path.join(__dirname, '..');
-const templatePath = path.join(root, 'templates', 'xcom', 'match.html');
+// #3588/PR#3590: рабочее место переименовано match.html → matching.html.
+const templatePath = path.join(root, 'templates', 'xcom', 'matching.html');
 const scriptPath = path.join(root, 'js', 'xcom-match.js');
 const stylePath = path.join(root, 'css', 'xcom-match.css');
 const updateConfPath = path.join(root, 'update.conf');
@@ -107,8 +108,11 @@ assert.strictEqual(parsedMatch.pathname, '/xcom/report/%D0%A1%D0%BE%D0%BF%D0%BE%
 assert(parsedMatch.searchParams.has('JSON'), 'match report requests JSON');
 assert.strictEqual(parsedMatch.searchParams.get('FR_SKU'), 'ABC-10');
 assert.strictEqual(parsedMatch.searchParams.get('FR_Наименование_позиции'), 'кабель');
-assert.strictEqual(parsedMatch.searchParams.get('sku_id'), '555');
-assert.strictEqual(parsedMatch.searchParams.get('sku_value'), 'ABC-10');
+// Выбранная строка передаётся отчёту той же конвенцией FR_{имя поля}, что и остальные фильтры
+// (issue #2827: «параметры как FR_{название поля}»): первое поле строки — FR_RFP, а ссылочные
+// значения — FR_{поле}ID. Отдельных sku_id/sku_value запрос не принимает.
+assert.strictEqual(parsedMatch.searchParams.get('FR_RFP'), 'ABC-10');
+assert.strictEqual(parsedMatch.searchParams.has('sku_id'), false);
 
 const report = helpers.normalizeReportResponse({
     columns: [

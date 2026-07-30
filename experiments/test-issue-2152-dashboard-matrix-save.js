@@ -22,7 +22,9 @@ function extractFunction(name) {
     throw new Error('Unclosed function ' + name);
 }
 
-assert(source.includes("DASH_MATRIX_TYPE_ID = '155551'"),
+// Тип матрицы задан по месту (соседние поля вынесены в DASH_MATRIX_*_FIELD_ID), поэтому
+// проверяем ПОВЕДЕНИЕ: чтение и запись матрицы идут в объект 155551.
+assert(source.includes("'object/155551?JSON_OBJ'") && source.includes("'t155551='"),
     'matrix saves must target object type 155551');
 assert(source.includes("DASH_MATRIX_LINE_FIELD_ID = '155553'") && source.includes("DASH_MATRIX_COL_FIELD_ID = '155554'"),
     'matrix search must use row and column field ids');
@@ -82,6 +84,15 @@ function makeCell(dataset) {
 ${extractFunction('dashTodayYMD')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashFormatNumberText')}
+${extractFunction('dashMatrixLabelScore')}
+${extractFunction('dashNormalizeMatrixKey')}
+${extractFunction('dashMatrixLabelMatches')}
+${extractFunction('dashRecordLabel')}
+${extractFunction('dashRecordReqIndex')}
+${extractFunction('dashFindTypeMetadata')}
+var dashMetadata = null;   // кэш /metadata; в тесте не нужен — метка ячейки берётся из dataset
+${extractFunction('dashMatrixDashLabel')}
+const DASH_MATRIX_LABEL_FIELD_ID = '155557';
 ${extractFunction('dashMatrixRecordIds')}
 ${extractFunction('dashMatrixUsesDates')}
 ${extractFunction('dashMatrixSheetInputValue')}
@@ -124,13 +135,14 @@ td = makeCell({
 calls = [];
 dashSaveMatrixValue(td, '333');
 assert(calls[0].method === 'GET', 'multiple ids should search before saving');
-assert(calls[0].url === 'object/155551?JSON_OBJ&FR_155552=2026-04-01&TO_155552=2026-04-30&F_155553=NPS%20%D1%80%D0%BE%D0%B4%D0%B8%D1%82%D0%B5%D0%BB%D0%B5%D0%B9&F_155554=17-19%20%D0%B0%D0%BF%D1%80%D0%B5%D0%BB%D1%8F',
-    'matrix search should include date, row, and column filters');
+// К дате/строке/колонке добавился фильтр МЕТКИ дашборда (F_155557): у ячейки без метки — «!%».
+assert(calls[0].url === 'object/155551?JSON_OBJ&FR_155552=2026-04-01&TO_155552=2026-04-30&F_155553=NPS%20%D1%80%D0%BE%D0%B4%D0%B8%D1%82%D0%B5%D0%BB%D0%B5%D0%B9&F_155554=17-19%20%D0%B0%D0%BF%D1%80%D0%B5%D0%BB%D1%8F&F_155557=!%',
+    'matrix search should include date, row, column and dashboard-label filters');
 
 dashModelData.fp1904.noDates = '1';
 calls = [];
 dashSaveMatrixValue(td, '333');
-assert(calls[0].url === 'object/155551?JSON_OBJ&F_155553=NPS%20%D1%80%D0%BE%D0%B4%D0%B8%D1%82%D0%B5%D0%BB%D0%B5%D0%B9&F_155554=17-19%20%D0%B0%D0%BF%D1%80%D0%B5%D0%BB%D1%8F',
+assert(calls[0].url === 'object/155551?JSON_OBJ&F_155553=NPS%20%D1%80%D0%BE%D0%B4%D0%B8%D1%82%D0%B5%D0%BB%D0%B5%D0%B9&F_155554=17-19%20%D0%B0%D0%BF%D1%80%D0%B5%D0%BB%D1%8F&F_155557=!%',
     'matrix search should omit date filters unless panel NoDates is an empty string');
 
 dashModelData.fp1904.noDates = '';
@@ -148,12 +160,14 @@ dashMatrixValueSearchDone([], { td, newVal: '999', searchUrl: dashMatrixSearchUr
 assert(!calls[0].vars.includes('t155552='), 'create should omit date when NoDates is not empty');
 
 calls = [];
-dashMatrixValueSearchDone([{ i: 155561, r: ['old'] }], { td, newVal: '444', searchUrl: dashMatrixSearchUrl(td) });
+// У найденной записи метка ПУСТАЯ — как и у ячейки дашборда: только такие записи считаются
+// «той же» (запись с меткой принадлежит другому дашборду и не должна перезаписываться).
+dashMatrixValueSearchDone([{ i: 155561, r: ['old'], 'Метка': '' }], { td, newVal: '444', searchUrl: dashMatrixSearchUrl(td) });
 assert(calls[0].url === '_m_save/155561?JSON', 'single search result should be updated');
 assert(calls[0].vars === 't155551=444', 'single search result update should pass t155551');
 
 calls = [];
-dashMatrixValueSearchDone([{ i: 155561, r: ['old'] }], { td, newVal: '', searchUrl: dashMatrixSearchUrl(td) });
+dashMatrixValueSearchDone([{ i: 155561, r: ['old'], 'Метка': '' }], { td, newVal: '', searchUrl: dashMatrixSearchUrl(td) });
 assert(calls[0].url === '_m_del/155561?JSON', 'single search result should be deleted when cleared');
 
 modal = null;
