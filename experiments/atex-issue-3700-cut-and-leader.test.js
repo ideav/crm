@@ -44,9 +44,11 @@ var winNo = (trNo.endMs - trNo.startMs) / 60000;
 assertEqual(gantt.cutBarMinutes(plannedNoStore), winNo, 'cutBarMinutes: без cut_time — окно cutTimeRange (фолбэк)');
 assertEqual(gantt.cutBarMinutes(plannedNoStore) !== 20, true, 'cutBarMinutes: фолбэк ≠ хранимое значение другой резки');
 
-// Начатая резка — фактическое окло (план/cut_time игнорируем, как и наладку).
+// #4334: у начатой резки геометрия та же ПЛАНОВАЯ — факт (08:10–09:20 = 70 мин) бар не растягивает,
+// он только красит его (cutStatus). Гант — инструмент планирования: «если оператор начал позже или
+// наоборот выполнил завтрашнее, диспетчер перепланирует сам» (заказчик, issue #4334).
 var started = { planDate: '06.05.2026 08:00', startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', cutTimeMin: 20 };
-assertEqual(gantt.cutBarMinutes(started), 70, 'cutBarMinutes: начатая — фактическое окно (70), cut_time игнорируется');
+assertEqual(gantt.cutBarMinutes(started), 20, 'cutBarMinutes #4334: начатая — плановые 20, факт (70) бар не двигает');
 
 // ── cutBarSegments: ширина сегмента резки масштабирует cut_time ──
 // ppm=2 px/мин, minPx=8 → 20 мин × 2 = 40px (а грубое окно дало бы иное).

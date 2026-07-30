@@ -1,16 +1,9 @@
 # Красные тесты на момент включения гейта (27.07.2026, main ae48c0ee): 64 из 266 файлов.
+# Разобрано: 4 (#4515/PR#4522, устаревшие тесты удаления сирот) + 8 atex-планирования (#4531).
 # Это ДОЛГ, а не норма. Правило: список только сокращается; добавлять новые строки нельзя —
 # новый красный тест чинится или удаляется в том же PR. Разбирать в порядке свежести тикета.
 # Формат: имя файла внутри experiments/ (комментарии после # игнорируются).
 
-atex-cut-gantt-4007.test.js
-atex-cut-gantt-4066.test.js
-atex-cut-gantt-4131.test.js
-atex-cut-gantt.test.js
-atex-issue-3700-cut-and-leader.test.js
-atex-production-planning-3619.test.js
-atex-production-planning-3909.test.js
-atex-production-planning.test.js
 issue-2941-control-char-scan.test.js
 issue-2990-atex-brand-template.test.js
 issue-3017-ideav-wording.test.js

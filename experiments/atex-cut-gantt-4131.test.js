@@ -70,7 +70,9 @@ assertEqual(g.machineDayStatText({ count: 34, min: 1298, widthPx: 107.5 }), '34 
 assertEqual(g.machineDayStatText({ count: 34, min: 1298, widthPx: 107 }), '34', 'на пиксель уже — усыхает до числа заданий');
 assertEqual(g.machineDayStatText({ count: 34, min: 1298, widthPx: 50 }), '34', 'узкая колонка (месяц ≈50px) — только число заданий');
 assertEqual(g.machineDayStatText({ count: 34, min: 1298, widthPx: 20 }), '', 'совсем узкая — пусто, минуты в подсказке');
-assertEqual(g.machineDayStatText({ count: 128, min: 10298, widthPx: 120 }), '128 (10298 мин)', 'длинная подпись (15 симв.) влезает в 120px');
+// Оценка масштабируется с длиной: «128 (10298 мин)» — 15 симв., нужно 10 + 15×7.5 = 122.5px.
+assertEqual(g.machineDayStatText({ count: 128, min: 10298, widthPx: 122.5 }), '128 (10298 мин)', 'длинная подпись (15 симв.) влезает ровно в 122.5px');
+assertEqual(g.machineDayStatText({ count: 128, min: 10298, widthPx: 120 }), '128', 'той же подписи 120px уже мало — усыхает до числа заданий');
 assertEqual(g.machineDayStatText({ count: 128, min: 10298, widthPx: 110 }), '128', 'та же подпись в 110px — только число');
 assertEqual(g.machineDayStatText({ count: 3, min: 0, widthPx: 20 }), '3', 'нет минут — подпись и есть «N» (как в итоге станка)');
 assertEqual(g.machineDayStatText({ count: 0, min: 0, widthPx: 500 }), '', 'нет заданий — нет подписи');

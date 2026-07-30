@@ -364,8 +364,8 @@ assertEqual(laidFitSmall.pxPerMin, 1, 'layoutGroups #3704: fitTrackPx меньш
 var laidZoomFit = gantt.layoutGroups(layoutCuts, weekRange, NOW, {}, { pxPerMin: 1, zoom: 0.25, fitTrackPx: 2520 });
 assertEqual(laidZoomFit.pxPerMin, 2, 'layoutGroups #3704: «−» ниже экрана упирается в «вписать в экран»');
 
-// ── #3708: бар не заходит за старт следующего задания (округление длительностей вверх) ──
-// cutBarTime с maxEndMs обрезает конец до старта следующего.
+// ── #3708/#4099: обрезка по соседу — ЯВНЫЙ аргумент cutBarTime, а не поведение дорожки ──
+// cutBarTime с maxEndMs обрезает конец до переданного предела (зовут те, кому предел известен).
 var cutOvershoot = { planDate: '2026-06-10 08:00', duration: 21, leaderMin: 16 };   // намотка 21 + лидер 16 = 37
 assertEqual(gantt.cutBarTime(cutOvershoot, 30), '08:00-09:07 (67 мин)',
     'cutBarTime: без обрезки — наладка 30 + резка+лидер 37 = 67 мин (конец 09:07)');
@@ -373,7 +373,9 @@ assertEqual(gantt.cutBarTime(cutOvershoot, 30, gantt.parseDateTimeMs('2026-06-10
     'cutBarTime #3708: конец обрезан до старта следующего (09:06)');
 assertEqual(gantt.cutBarTime(cutOvershoot, 30, gantt.parseDateTimeMs('2026-06-10 10:00')), '08:00-09:07 (67 мин)',
     'cutBarTime #3708: clamp позже конца — без изменений');
-// layoutGroups: два задания подряд на станке, бар первого «перелезал» бы на 1 мин — режется встык.
+// #4099 «рисуй как есть»: layoutGroups предел НЕ подставляет — у Ганта каждая резка на своей
+// строке, и минута нахлёста показывается как есть, а не прячется обрезкой (issue #4099: «откуда
+// что-то после 16:30 и ещё параллельно?» — правда о плане важнее ровной картинки).
 var overlapCuts = [
     { id: 'A', planDate: '2026-06-10 08:00', duration: 21, plannedRuns: 8, leaderMin: 16, setupKnifeMin: 30, sequence: 1, slitter: { id: '1', label: 'Станок 1' } },
     { id: 'B', planDate: '2026-06-10 09:06', duration: 44, plannedRuns: 10, leaderMin: 20, sequence: 2, slitter: { id: '1', label: 'Станок 1' } }
@@ -381,13 +383,14 @@ var overlapCuts = [
 var laidClamp = gantt.layoutGroups(overlapCuts, gantt.ganttRange('2026-06-10', 'day'),
     gantt.parseDateTimeMs('2026-06-10 07:00'), {}, { pxPerMin: 1 });
 var ct = laidClamp.groups[0].tasks;
-assertEqual([ct[0].cut.id, ct[0].leftPx, ct[0].widthPx], ['A', 0, 66],
-    'layoutGroups #3708: бар A обрезан с 67 до 66 мин (старт B)');
-assertEqual(ct[0].barText, '08:00-09:06 (66 мин)', 'layoutGroups #3708: подпись A совпадает с планом (до 09:06)');
-assertEqual(ct[0].leftPx + ct[0].widthPx, ct[1].leftPx, 'layoutGroups #3708: A встык к B — налезания нет');
-// #3770: заголовок станка суммирует минуты всех баров (A=66 + B=64 → «2 (130 мин)»).
-assertEqual([ct[0].barMin, ct[1].barMin, laidClamp.groups[0].tasksMin], [66, 64, 130],
-    'layoutGroups #3770: tasksMin = сумма минут баров станка (66+64=130)');
+assertEqual([ct[0].cut.id, ct[0].leftPx, ct[0].widthPx], ['A', 0, 67],
+    'layoutGroups #4099: бар A — полные 67 мин плана, по соседу не обрезан');
+assertEqual(ct[0].barText, '08:00-09:07 (67 мин)', 'layoutGroups #4099: подпись A — плановое окно (до 09:07)');
+assertEqual(ct[0].leftPx + ct[0].widthPx - ct[1].leftPx, 1,
+    'layoutGroups #4099: минута нахлёста на B видна как есть, а не спрятана обрезкой');
+// #3770: заголовок станка суммирует минуты всех баров (A=67 + B=64 → «2 (131 мин)»).
+assertEqual([ct[0].barMin, ct[1].barMin, laidClamp.groups[0].tasksMin], [67, 64, 131],
+    'layoutGroups #3770: tasksMin = сумма минут баров станка (67+64=131)');
 // #4334: завершённое показывается ПО ПЛАНУ — фактический финиш (09:10) бар не растягивает;
 // без cut_time/длительности окно = плановый старт + 30 мин (легаси-фолбэк), 30px при 1px/мин.
 var doneThenNext = [

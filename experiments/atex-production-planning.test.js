@@ -202,16 +202,16 @@ var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
       materialBatch: { id: null, label: '' },
-      planDate: '06.05.2026', status: 'В работе', sequence: null, fixed: false,
+      planDate: '06.05.2026', status: 'В работе', startDate: '', endDate: '', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', isFoil: false,
-      orderId: '', orderApprovalDate: '', leaders: [] },
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', firstPartId: '', isFoil: false,
+      orderId: '', orderApprovalDate: '', leaders: [], sleeves: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
-      planDate: '27.05.2026', status: 'Ожидает', sequence: null, fixed: false,
+      planDate: '27.05.2026', status: 'Ожидает', startDate: '', endDate: '', sequence: null, fixed: false,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', isFoil: false,
-      orderId: '', orderApprovalDate: '', leaders: [] }
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', firstPartId: '', isFoil: false,
+      orderId: '', orderApprovalDate: '', leaders: [], sleeves: [] }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
 // #3472: cut_leader собирается в leaders[] (различные); легаси-смешение → несколько.
 var leadPlan = planning.rowsToPlanning([
@@ -225,8 +225,8 @@ assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
     [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
     'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: 0 },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: 0 }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
@@ -262,8 +262,8 @@ assertEqual(issue3209Plan.cuts.map(function(cut) {
     { id: '23370', number: '1780837653', length: 700, visible: true }
 ], 'rowsToPlanning #3209/#3242: timestamp cut_plan_date, cut_length, and blank approval still produce visible cuts');
 assertEqual(issue3209Plan.supplies, [
-    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 800, rolls: 6 },
-    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, footage: 600, rolls: 3 }
+    { id: '23352', positionId: '21101', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, dueKey: null, footage: 800, rolls: 6 },
+    { id: '23353', positionId: '21102', cutId: '23316', finishedBatchId: '', orderNo: '3690', positionWidth: 60, positionLength: 0, dueKey: null, footage: 600, rolls: 3 }
 ], 'rowsToPlanning #3209: carries supply footage/rolls + order_no (#3624) + position dims (#3633) from report rows');
 assertEqual(planning.cutRunLength(issue3209Plan.cuts[0], issue3209Plan.supplies, {}), 1200,
     'cutRunLength #3209: cut_length is available as run-length fallback');
@@ -391,22 +391,31 @@ assertEqual(planning.isMaterialBlocked(['1','2'], 1), true, 'isMaterialBlocked: 
 assertEqual(planning.isMaterialBlocked([], '1'), false, 'isMaterialBlocked: пустой список');
 assertEqual(planning.isMaterialBlocked(['1'], ''), false, 'isMaterialBlocked: пустой материал');
 
-// ── groupBySlitter сортирует резки внутри станка по sequence (возр., пустые в конец, стабильно) ──
+// ── #3923: порядок внутри станка задаёт planStart (день плана → planStart → ножи убыв.).
+// «Очередность» (sequence) больше не хранится и на порядок не влияет. ──
 var seqCuts = [
-    { id:'1', slitter:{id:'10',label:'Станок 1'}, sequence:2 },
-    { id:'2', slitter:{id:'10',label:'Станок 1'}, sequence:1 },
-    { id:'3', slitter:{id:'10',label:'Станок 1'}, sequence:null },
-    { id:'4', slitter:{id:'10',label:'Станок 1'}, sequence:1 }
+    { id:'1', slitter:{id:'10',label:'Станок 1'}, planDate:'1780970400', sequence:2 },   // 10:00
+    { id:'2', slitter:{id:'10',label:'Станок 1'}, planDate:'1780963200', sequence:1 },   // 08:00
+    { id:'3', slitter:{id:'10',label:'Станок 1'}, planDate:'1780974000', sequence:null },// 11:00
+    { id:'4', slitter:{id:'10',label:'Станок 1'}, planDate:'1780966800', sequence:1 }    // 09:00
 ];
 var g = planning.groupBySlitter(seqCuts)[0];
-assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'], 'сорт по sequence (возр), когда knifeCount не задан; равные стабильно, пустые в конец');
+assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'],
+    '#3923: порядок — по planStart (08:00, 09:00, 10:00, 11:00), а не по «Очередности»');
+// Без planStart переставлять не по чему: порядок входа сохраняется (стабильная сортировка).
+var noStart = planning.groupBySlitter([
+    { id:'x', slitter:{id:'10',label:'Станок 1'}, sequence:2 },
+    { id:'y', slitter:{id:'10',label:'Станок 1'}, sequence:1 }
+])[0];
+assertEqual(noStart.cuts.map(function(c){return c.id;}), ['x','y'],
+    '#3923: без planStart и ножей порядок входа сохранён (sequence не поднимает y выше)');
 var gKnives = planning.groupBySlitter([
     { id:'low-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:1, knifeCount:3 },
     { id:'high-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2, knifeCount:7 },
     { id:'mid-seq', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:3, knifeCount:5 }
 ])[0];
-assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['low-seq','high-seq','mid-seq'],
-    'groupBySlitter #3268: сохранённая sequence задаёт видимый порядок и расписание');
+assertEqual(gKnives.cuts.map(function(c){ return c.id; }), ['high-seq','mid-seq','low-seq'],
+    '#3923: planStart у всех троих неизвестен → фолбэк «ножи по убыванию» (7, 5, 3)');
 var gKnivesFallback = planning.groupBySlitter([
     { id:'few-no-seq', slitter:{id:'11',label:'Станок 1'}, planDate:'2026-06-07', sequence:null, knifeCount:3 },
     { id:'many-no-seq', slitter:{id:'11',label:'Станок 1'}, planDate:'2026-06-07', sequence:null, knifeCount:7 }
@@ -420,20 +429,20 @@ var gKnivesTs = planning.groupBySlitter([
     { id:'many', slitter:{id:'20',label:'Станок 2'}, planDate:'1780919777', sequence:2, knifeCount:15 }
 ])[0];
 assertEqual(gKnivesTs.cuts.map(function(c){ return c.id; }), ['few','many'],
-    'groupBySlitter #3268: unix-штампы одного дня не перебивают сохранённую sequence');
+    '#3923: unix-штампы одного дня задают порядок (few 1780919776 раньше many 1780919777)');
 var gDays = planning.groupBySlitter([
     { id:'d2-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-08', sequence:1 },
     { id:'d1-2', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:2 },
     { id:'d1-1', slitter:{id:'10',label:'Станок 1'}, planDate:'2026-06-07', sequence:1 }
 ])[0];
-assertEqual(gDays.cuts.map(function(c){return c.id;}), ['d1-1','d1-2','d2-1'],
-    'groupBySlitter: одинаковые sequence разных дней сортируются по дню плана');
+assertEqual(gDays.cuts.map(function(c){return c.id;}), ['d1-2','d1-1','d2-1'],
+    'groupBySlitter: сперва ДЕНЬ плана (07.06 раньше 08.06); внутри дня без planStart — порядок входа');
 // ── rowsToPlanning читает cut_sequence → number|null ──
 var rp = planning.rowsToPlanning([
     { cut_id:'100', cut_no:'5', cut_sequence:'3', supply_id:'' },
     { cut_id:'101', cut_no:'6', cut_sequence:'', supply_id:'' }
 ]);
-assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
+assertEqual(rp.cuts[0].sequence, null, '#3923: cut_sequence из отчёта не читается — «Очередность» не хранится');
 assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
 var runsPlan = planning.rowsToPlanning([
     { cut_id:'runs-1', cut_no:'1', cut_planned_runs:'3', cut_length:'450', supply_id:'' }
@@ -503,7 +512,9 @@ function clone(o,patch){ var c={}; for(var k in o) c[k]=o[k]; for(var k in (patc
 assertEqual(planning.changeoverCost(base, clone(base), null), 0, 'cost: идентичные → 0');
 assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), null), 15, 'cost: смена сырья = 15');
 assertEqual(planning.changeoverCost(base, clone(base,{winding:'OUT'}), null), 15, 'cost: смена намотки = 15 (та же операция)');
-assertEqual(planning.changeoverCost(base, clone(base,{batchId:'b2'}), null), 15, 'cost: смена партии = смена сырья = 15');
+// #4481: смена ПАРТИИ того же сырья — не переналадка: рулон меняют и внутри партии, станок
+// при этом не перестраивают.
+assertEqual(planning.changeoverCost(base, clone(base,{batchId:'b2'}), null), 0, 'cost #4481: смена партии того же сырья — не переналадка (0)');
 // #3600: 4 ножа[60] → набор 20 ножей[20] (общих ширин нет) — любая смена ножей = фикс. 30.
 assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null), 30, 'cost #3600: смена ножей = фикс. 30 (независимо от числа)');
 // #3600: ножи те же, ролик сужается → это смена ножей = фикс. 30.
@@ -537,10 +548,14 @@ assertEqual(planning.orderCuts(setupMinuteCuts, { strategy: planning.PLANNING_ST
     'orderCuts #3785: внутри сырья A полосы по убыванию (8,6), затем сырьё B (7)');
 assertEqual(planning.orderedChangeoverCost(setupMinuteCuts), 75,
     'orderCuts #3783: группировка сырья (75) дешевле разбивки по ножам (90)');
-// Фольга строго в конце
+// #4085: «фольга в конец дня» (#3717) — ЛОКАЛЬНЫЙ ШТРАФ слоя размещения (FOIL_NOTEND_COST_MN) и
+// ключ isFoil-last упаковщика, а не признак orderCuts: тот считает только минимум переналадки.
+// Сам инвариант по дням проверяет atex-production-planning-3717.test.js (сквозной прогон плана).
 var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
 var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
-assertEqual(outFoil[outFoil.length-1], '1', 'orderCuts: Фольга в конце');
+var inPlain = [ cut('1',{m:'A'}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
+assertEqual(outFoil, planning.orderCuts(inPlain).map(function(c){return c.id;}),
+    'orderCuts #4085: фольга — не ключ порядка (тот же порядок, что и без неё)');
 // #3600: смена набора ножей (фикс. 30) дороже смены сырья (15).
 assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null) >
             planning.changeoverCost(base, clone(base,{materialId:'9'}), null), true, 'changeoverCost #3600: смена ножей (30) дороже смены сырья (15)');
@@ -714,18 +729,17 @@ assertEqual(planning.nextSequenceForCuts([
   { id:'other-slitter', planDate:'2026-06-07', slitter:{id:'20'}, sequence:7 }
 ], '10', '2026-06-07'), 4, 'nextSequenceForCuts #3215: следующий номер внутри станка и дня');
 
-// ── moveInQueue ──
-function qc(id,seq){ return { id:id, sequence:seq }; }
-function byCut(a){ return (a||[]).slice().sort(function(x,y){ return x.cutId<y.cutId?-1:x.cutId>y.cutId?1:0; }); }
-// down: a/b swap → a:2, b:1 (order-independent)
-assertEqual(byCut(planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1}]), 'moveInQueue вниз: swap a/b');
-// up: b/c swap → b:3, c:2
-assertEqual(byCut(planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)],2,-1)), byCut([{cutId:'b',sequence:3},{cutId:'c',sequence:2}]), 'moveInQueue вверх: swap b/c');
-assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 0, -1), [], 'граница вверх → []');
-assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 1, 1), [], 'граница вниз → []');
-// null normalization: a/b swap among nulls → new order [b,a,c] → b:1,a:2,c:3 (all changed)
-assertEqual(byCut(planning.moveInQueue([qc('a',null),qc('b',null),qc('c',null)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1},{cutId:'c',sequence:3}]), 'null → нормализация 1..N');
-var src=[qc('a',1),qc('b',2)]; planning.moveInQueue(src,0,1); assertEqual(src[0].id,'a','вход не мутируется');
+// ── «Очередность» (#3923) ──
+// Порядок задаёт planStart, а не хранимый номер: `moveInQueue` (обмен номеров соседей) снят
+// вместе с реквизитом. Перестановку ↑↓ теперь делает контроллер обменом planStart в пределах дня
+// (`moveCutInDay`) — её проверяют atex-production-planning-3923.test.js и
+// atex-production-planning-4392.test.js.
+assertEqual(typeof planning.moveInQueue, 'undefined',
+    '#3923: moveInQueue снят вместе с «Очередностью» — порядок задаёт planStart');
+// Писатель очередности (saveSequences) снят там же. Плановое время старта (главное значение
+// t1078) все пути пишут через ЕДИНЫЙ шлюз postCutStarts/saveCutStarts — atex-production-planning-4477.test.js.
+assertEqual(typeof api.Controller.prototype.saveSequences, 'undefined',
+    '#3923/#4477: saveSequences снят — старт пишется шлюзом saveCutStarts');
 
 // ── Хелперы генерации резок ──
 
@@ -995,8 +1009,8 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'', position_length:'', sleeve_id:'8192', sleeve_ready:'X' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, leader:'', sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false },
-  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, leader:'', sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false }
+  { id:'10', materialId:'5', width:60, qty:30, length:1200, windDir:'', windLength:1200, leader:'', sleeveId:'35561', sleeveReady:false, dueKey: Infinity, orderId:'900', approved:false, materialType:'', isFoil:false },
+  { id:'11', materialId:'5', width:0, qty:0, length:0, windDir:'', windLength:0, leader:'', sleeveId:'8192', sleeveReady:true, dueKey: Infinity, orderId:'', approved:false, materialType:'', isFoil:false }
 ], 'rowsToGenPositions #3340/#3433: sleeve_id/sleeve_ready + order_id («ID заказа»); пустые ширина/кол-во/длина → 0');
 // #3472: «Лидер» читается из колонки отчёта (order_leader/position_leader); нет колонки → пусто.
 assertEqual(planning.rowsToGenPositions([{ position_id:'1', order_leader:'Софмикс' }])[0].leader, 'Софмикс',
@@ -1147,8 +1161,12 @@ var sameDayIso3249 = dt3249.getFullYear() + '-' + pad3249(dt3249.getMonth() + 1)
 var dayKey3249 = dt3249.getFullYear() * 10000 + (dt3249.getMonth() + 1) * 100 + dt3249.getDate();
 assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), sameDayIso3249), true,
     'isCutVisible #3249: unix-штамп planDate совпадает с днём фильтра → видна');
-assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), '2000-01-02'), false,
-    'isCutVisible #3249: unix-штамп planDate ≠ день фильтра → скрыта');
+// #3974: фильтр — ДИАПАЗОН [С; По], а не один день. Одна «С» отсекает только то, что РАНЬШЕ неё;
+// верхняя граница открыта, пока не задана «По».
+assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), '2000-01-02'), true,
+    'isCutVisible #3974: позже «С» при пустой «По» → видна (верхняя граница открыта)');
+assertEqual(planning.isCutVisible(vc({planDate:String(ts3249)}), '2000-01-02', '2000-01-03'), false,
+    'isCutVisible #3974: за пределами [С; По] → скрыта');
 assertEqual(planning.planDateDayKey('2026-06-08'), 20260608, 'planDateDayKey: ISO-дата → YYYYMMDD');
 assertEqual(planning.planDateDayKey(String(ts3249)), dayKey3249, 'planDateDayKey #3249: unix-штамп → календарный день YYYYMMDD');
 assertEqual(planning.planDateDayKey('') === Infinity, true, 'planDateDayKey: пусто → Infinity');
@@ -1266,10 +1284,10 @@ assertEqual(plannedCutDuration(600, 3, opT), 12,
 assertEqual(plannedCutDuration(600, 0, opT), 0,
     'plannedCutDurationMinutes #3223: без плановых проходов длительность 0');
 assertEqual(planning.cutTimingDetails(600, 3, opT),
-    'Метраж прохода: 600 м\nПлановых проходов: 3\nНамотка 1 прохода: 4 мин\nИтого резка: 4 * 3 = 12 мин\nНорма намотки: WIND_600=4 мин',
+    'Метраж прохода: 600 м\nПлановых проходов: 3\nНорма намотки: WIND_600=4 мин\nНамотка: 4 * 3 = 12 мин\nЛидер: 2 * 3 = 6 мин\nИтого резка: 12 + 6 = 18 мин',
     'cutTimingDetails #3240: расшифровка длительности с релевантной нормой (точное совпадение метража)');
 assertEqual(planning.cutTimingDetails(750, 1, opT),
-    'Метраж прохода: 750 м\nПлановых проходов: 1\nНамотка 1 прохода: 4.5 мин\nИтого резка: 4.5 * 1 = 4.5 мин\nНормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)',
+    'Метраж прохода: 750 м\nПлановых проходов: 1\nНормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)\nНамотка: 4.5 * 1 = 4.5 мин\nЛидер: 2 * 1 = 2 мин\nИтого резка: 4.5 + 2 = 6.5 мин',
     'cutTimingDetails #3240: интерполяция показывает обе окружающие нормы');
 
 // #3240: relevantWindingNorms — какие WIND_* реально применяются для метража.
@@ -1287,17 +1305,17 @@ var toBase = { materialId:'1', winding:'IN', batchId:'b', knifeCount:4, knifeWid
 function toClone(extra){ var o = {}; Object.keys(toBase).forEach(function(k){ o[k] = toBase[k]; }); if (extra) Object.keys(extra).forEach(function(k){ o[k] = extra[k]; }); return o; }
 assertEqual(planning.changeoverParts(toBase, toClone(), null), [], 'changeoverParts: идентичные → нет операций');
 assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2'}), null),
-    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки', minutes:15}],
     'changeoverParts: смена сырья → MATERIAL_WINDING 15');
 assertEqual(planning.changeoverParts(toBase, toClone({materialId:'2', knifeCount:9, knifeWidths:[10,10,10,10,10,10,10,10,10]}), null),
-    [{code:'KNIFE', label:'смена ножей / сужение ролика', minutes:30}, {code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    [{code:'KNIFE', label:'смена ножей / сужение ролика', minutes:30}, {code:'MATERIAL_WINDING', label:'смена сырья / намотки', minutes:15}],
     'changeoverParts #3688: сырьё+ножи → СНАЧАЛА ножи 30, ПОТОМ смена сырья 15');
 assertEqual(planning.changeoverParts(null, toBase, null), [], 'changeoverParts: нет предыдущей → []');
 // #3688: лидер вынесен в КОНЕЦ резки — в setupBreakdown (ПЕРЕД резкой) лидера больше нет.
 assertEqual(planning.setupBreakdown(null, toBase, null), [],
     'setupBreakdown #3688: первая резка без флага/заправки → [] (лидер в конце)');
 assertEqual(planning.setupBreakdown(toBase, toClone({materialId:'2'}), null),
-    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки', minutes:15}],
     'setupBreakdown #3688: смена сырья (без лидера)');
 // Σ minutes setupBreakdown == setupMin расписания (переналадка 15, лидер теперь в конце).
 var sbSched = planning.buildSchedule([toBase, toClone({materialId:'2'})], { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480 });
@@ -1318,14 +1336,16 @@ assertEqual(planning.firstSetupParts({ knifeCount:4 }, { KNIFE:0 }), [],
 // #3688: лидер вынесен в конец. setupBreakdown ПЕРЕД резкой — без флага [], с флагом — настройка ножей.
 assertEqual(planning.setupBreakdown(null, toBase, null), [],
     'setupBreakdown #3688: первая задача без флага → [] (лидер в конце)');
+// #4296: сырьё на ПУСТОЙ станок тоже ставят с нуля — первая резка платит и заправку сырья.
 assertEqual(planning.setupBreakdown(null, toBase, null, { firstCutSetup:true }),
-    [{code:'KNIFE', label:'настройка ножей', minutes:30}],
-    'setupBreakdown #3688: первая задача с флагом → настройка ножей (лидер в конце)');
+    [{code:'KNIFE', label:'настройка ножей', minutes:30},
+     {code:'MATERIAL_WINDING', label:'заправка сырья', minutes:15}],
+    'setupBreakdown #4296: первая резка пустого станка — настройка ножей + заправка сырья');
 // buildSchedule с firstCutSetup: первая резка резервирует настройку ножей (ПЕРЕД резкой),
 // лидер 2 — в конце (leaderMin); вторая (та же конфигурация) — без переналадки (setupMin 0).
 var fsSched = planning.buildSchedule([toBase, toClone()],
     { windPoints: pts, runLengthByCut: {}, shiftStartMin: 480, firstCutSetup: true });
-assertEqual(fsSched[0].setupMin, 30, 'buildSchedule #3688: первая резка — настройка ножей 30 (лидер 2 в конце)');
+assertEqual(fsSched[0].setupMin, 45, 'buildSchedule #4296: первая резка — ножи 30 + заправка сырья 15 (лидер 2 в конце)');
 assertEqual(fsSched[0].leaderMin, 2, 'buildSchedule #3688: лидер 2 — после намотки (leaderMin)');
 assertEqual(planning.setupBreakdown(null, toBase, null, { firstCutSetup:true }).reduce(function(s,p){return s+p.minutes;},0),
     fsSched[0].setupMin, 'buildSchedule #3688: Σ setupBreakdown(первая, флаг) == setupMin расписания');
@@ -1365,13 +1385,17 @@ assertEqual(tlCtx.norms, [{m:600,min:4}], 'buildCutTimingCtx: релевантн
 var tlLines = planning.cutTimingTimelineLines(tlCtx);
 var tlBold = tlLines.filter(function(l){ return l.bold; });
 assertEqual(tlBold.length, 1, 'cutTimingTimelineLines: ровно одна жирная строка');
-assertEqual(/^.*Итого резка: 4 \* 1 = 4 мин$/.test(tlBold[0].text), true, 'cutTimingTimelineLines: жирная строка — «Итого резка»');
+assertEqual(/^.*Итого резка: 4 \+ 2 = 6 мин$/.test(tlBold[0].text), true,
+    'cutTimingTimelineLines #3401: жирная строка — «Итого резка» = намотка + лидер');
 var tlStart = planning.formatClock(tlSc.startMin);
 var tlSetupStart = planning.formatClock(tlSc.startMin - 15);   // #3688: окно-старт = старт − переналадка (без лидера)
 assertEqual(tlBold[0].text.indexOf(tlStart + ' · ') === 0, true, 'cutTimingTimelineLines: «Итого резка» начинается со старта резки');
 var tlText = tlLines.map(function(l){ return l.text; }).join('\n');
-assertEqual(tlText.indexOf(tlSetupStart + ' · смена сырья / намотки / партии — 15 мин') >= 0, true, 'cutTimingTimelineLines #3688: смена сырья от старта окна');
-assertEqual(tlText.indexOf(planning.formatClock(tlSc.finishMin) + ' · лидер между резками — 2 мин') >= 0, true, 'cutTimingTimelineLines #3688: лидер между резками — ПОСЛЕ намотки (в конце)');
+assertEqual(tlText.indexOf(tlSetupStart + ' · смена сырья / намотки — 15 мин') >= 0, true, 'cutTimingTimelineLines #3688: смена сырья от старта окна');
+// #3401: лидер заправляется перед КАЖДОЙ резкой цуга, поэтому в расшифровке он отдельной
+// строкой «Лидер: <база> * <проходов>», а в хронологию входит уже внутри «Итого резка».
+assertEqual(tlText.indexOf('Лидер: 2 * 1 = 2 мин') >= 0, true,
+    'cutTimingTimelineLines #3401: лидер показан отдельной строкой (× число резок цуга)');
 assertEqual(/Норма намотки: WIND_600=4 мин/.test(tlText), true, 'cutTimingTimelineLines: только релевантная норма');
 assertEqual(tlLines[tlLines.length-1].text, planning.formatClock(tlSc.finishMin + 2) + ' · готово', 'cutTimingTimelineLines #3688: финальная строка — готово (после лидера)');
 
@@ -1420,7 +1444,7 @@ assertEqual(schedStoredDuration[0], { cutId:'D', startMin:480, finishMin:492.5, 
 assertEqual(planning.setupBreakdown(null, { plannedRuns:3 }, null), [],
     'setupBreakdown #3688: первая резка без заправки → [] (лидер 6 — в конце)');
 assertEqual(planning.setupBreakdown(toBase, toClone({materialId:'2', plannedRuns:4}), null),
-    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки / партии', minutes:15}],
+    [{code:'MATERIAL_WINDING', label:'смена сырья / намотки', minutes:15}],
     'setupBreakdown #3688: смена сырья 15 (лидер 8 — в конце)');
 assertEqual(planning.setupBreakdown(null, {}, null), [],
     'setupBreakdown #3688: пусто → [] (без prev/флага/заправки)');
@@ -1513,7 +1537,7 @@ assertEqual(planning.parseClockMinutes('8:00', 0), 480, 'parseClockMinutes #3215
 assertEqual(planning.parseClockMinutes('17', 0), 1020, 'parseClockMinutes #3215: 17 → 1020');
 assertEqual(planning.parseClockMinutes('мусор', 123), 123, 'parseClockMinutes #3215: мусор → fallback');
 var win3215 = planning.resolveWorkingWindow({ DAY_START_HOUR:'8:00', DAY_END_HOUR:'17:00' }, 30);
-assertEqual(win3215, { startMin:480, endMin:1020, cutEndMin:990, cleanupMin:30, lunchStartMin:null, lunchDurationMin:0 },
+assertEqual(win3215, { startMin:480, endMin:1020, cutEndMin:990, cleanupMin:30, lunchStartMin:null, lunchDurationMin:0, maxOverworkCutsMin:null, maxOverworkTuneMin:null },
     'resolveWorkingWindow #3215: резки до 16:30, уборка 30 мин до 17:00');
 var sched3215 = planning.buildSchedule(schedCuts, {
     windPoints: pts,
@@ -1526,7 +1550,7 @@ assertEqual(planning.dayCleanups(sched3215, { cleanupMin: win3215.cleanupMin, sh
     { day:1, startMin:2430, finishMin:2460, durationMin:30 }
 ], 'dayCleanups #3215: DAY_END_HOUR задаёт конец уборки, не конец резок');
 assertEqual(planning.resolveWorkingWindow({ DAY_START_HOUR:'9:15', DAY_END_HOUR:'18:00' }, 45),
-    { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45, lunchStartMin:null, lunchDurationMin:0 },
+    { startMin:555, endMin:1080, cutEndMin:1035, cleanupMin:45, lunchStartMin:null, lunchDurationMin:0, maxOverworkCutsMin:null, maxOverworkTuneMin:null },
     'resolveWorkingWindow #3215: произвольное окно и CLEANUP_SHIFT');
 
 // ── #3562: зафиксированные задания больше не «прикалываются» — buildSchedule пакует встык ──
@@ -1905,8 +1929,8 @@ function runGenerateCutsDeferredGpTest() {
             'runGenerateCuts #3280: t1078 = плановое время старта (08:00 дня), а не время создания');
         assertEqual(cutPost.fields.t16403, 1,
             'runGenerateCuts #3215: t16403 пишет Кол-во план');
-        assertEqual(cutPost.fields.t24308, 1,
-            'runGenerateCuts #3215: t24308 пишет Очередность при создании');
+        assertEqual(cutPost.fields.t24308, undefined,
+            'runGenerateCuts #3923: «Очередность» (t24308) не пишется — порядок задаёт planStart');
         assertEqual(cutPost.fields.t26584, 6,
             'runGenerateCuts #3223/#3635: t26584 пишет Длительность, минут целой ВВЕРХ (5.9 → 6)');
         assertEqual(cutPost.fields.t26990, planning.cutTimingDetails(1200, 1, opT),
@@ -2059,8 +2083,8 @@ function runGenerateCutsSequenceByKnivesTest() {
         { mat: 'M', windDir: 'IN', windLength: 600, positionsCovered: ['p-many'], strips: [{ width: 40, qty: 15, purpose: 'Заказ', positionIds: ['p-many'] }] }
     ], []).then(function() {
         var cutPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; });
-        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [2, 1],
-            'runGenerateCuts #3263: новые резки одного станка получают очередь по ножам убыв. (15 раньше 5)');
+        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [undefined, undefined],
+            'runGenerateCuts #3923: «Очередность» не пишется — порядок новых резок задаёт planStart (t1078)');
     });
 }
 
@@ -2129,8 +2153,8 @@ function runGenerateCutsFatigueStrategyTest() {
         { mat: 'B', windDir: 'IN', windLength: 600, positionsCovered: ['p-mid'], strips: [{ width: 60, qty: 1, purpose: 'Заказ', positionIds: ['p-mid'] }] }
     ], [], planning.PLANNING_STRATEGY_FATIGUE).then(function() {
         var cutPosts = posts.filter(function(p) { return p.path.indexOf('_m_new/1078') === 0; });
-        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [3, 1, 2],
-            'runGenerateCuts #3272: fatigue-вариант пишет очередь «сложные раньше» при создании');
+        assertEqual(cutPosts.map(function(p) { return p.fields.t24308; }), [undefined, undefined, undefined],
+            'runGenerateCuts #3923: и в fatigue-варианте «Очередность» не пишется (порядок — в planStart)');
     });
 }
 
@@ -2235,37 +2259,6 @@ function runCreateCutMainValueTest() {
     });
 }
 
-// #3280: saveSequences пишет очередность И плановое время старта (t1078) одним _m_set.
-function runSaveSequencesT1078Test() {
-    var controller = Object.create(api.Controller.prototype);
-    var posts = [];
-    controller.meta = {
-        cut: { id: '1078', val: 'Производственная резка', reqs: [
-            req('1156', 'Слиттер'),
-            req('24308', 'Очередность'),
-            req('1162', 'Статус')
-        ] }
-    };
-    controller.setBusy = function() {};
-    controller.reload = function() { return Promise.resolve(); };
-    controller.render = function() {};
-    controller.notify = function() {};
-    controller.post = function(path, fields) {
-        posts.push({ path: path, fields: fields || {} });
-        return Promise.resolve({ obj: 'ok' });
-    };
-    return controller.saveSequences(
-        [{ cutId: 'c1', sequence: 3, planStartTs: 1780992000 }],
-        { silent: true }
-    ).then(function(ok) {
-        assertEqual(ok, true, 'saveSequences: успешное сохранение → true');
-        assertEqual(posts.length, 1, 'saveSequences: один _m_set на резку');
-        assertEqual(posts[0].path, '_m_set/c1?JSON', 'saveSequences: _m_set по cutId');
-        assertEqual(posts[0].fields.t24308, '3', 'saveSequences: пишет очередность t{reqId}');
-        assertEqual(posts[0].fields.t1078, '1780992000', 'saveSequences #3280: пишет время старта в t1078 (главное значение)');
-    });
-}
-
 // #3280: applySplitPlan — update A + create продолжения B (копия Полос + доля Обеспечения) + delete.
 function runApplySplitPlanTest() {
     var controller = Object.create(api.Controller.prototype);
@@ -2303,7 +2296,8 @@ function runApplySplitPlanTest() {
         var saveA = one('_m_save/A?JSON');
         assertEqual(saveA && saveA.fields.t1078, '1000', 'applySplitPlan: A — время старта через _m_save t1078 (DATETIME первая колонка)');
         var setA = one('_m_set/A?JSON');
-        assertEqual(setA && setA.fields.t24308, '1', 'applySplitPlan: A — очередность через _m_set');
+        assertEqual(setA && setA.fields.t24308, undefined,
+            'applySplitPlan #3923: «Очередность» не пишется — порядок задаёт planStart (t1078 через _m_save)');
         assertEqual(setA && setA.fields.t1078, undefined, 'applySplitPlan: A — t1078 НЕ через _m_set (игнорируется сервером)');
         assertEqual(setA && setA.fields.t16403, '10', 'applySplitPlan: A — проходы сегодня (10)');
         var setSup = one('_m_set/sup1?JSON');
@@ -2336,7 +2330,7 @@ assertEqual(
         [{ id: 'c1', plannedRuns: 10 }],
         { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: { c1: 10 } }
     ),
-    [{ cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null }],
+    [{ cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null, setupKnifeMin: 0, setupMaterialMin: 0 }],
     'splitMachineQueue: резка целиком в одном дне → один сегмент'
 );
 // 2) Резка не влезает — обрезается по проходам, остаток продолжается на след. день без setup.
@@ -2346,8 +2340,8 @@ assertEqual(
         { dayStartMin: 0, dayEndMin: 100, times: splitTimes, perPassByCut: { c1: 10 } }
     ),
     [
-        { cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null },
-        { cutId: 'c1', dayOffset: 1, runs: 5, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 50, isContinuation: true, parentCutId: 'c1' }
+        { cutId: 'c1', dayOffset: 0, runs: 10, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 100, isContinuation: false, parentCutId: null, setupKnifeMin: 0, setupMaterialMin: 0 },
+        { cutId: 'c1', dayOffset: 1, runs: 5, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 50, isContinuation: true, parentCutId: 'c1', setupKnifeMin: 0, setupMaterialMin: 0 }
     ],
     'splitMachineQueue: перелив дня → продолжение на след. день, setup=0 (ножи остаются)'
 );
@@ -2359,10 +2353,10 @@ assertEqual(
         { dayStartMin: 0, dayEndMin: 100, leader: 5, times: splitTimes, perPassByCut: { c1: 10 } }
     ),
     [
-        { cutId: 'c1', dayOffset: 0, runs: 6, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 90, isContinuation: false, parentCutId: null },
-        { cutId: 'c1', dayOffset: 1, runs: 6, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1' },
-        { cutId: 'c1', dayOffset: 2, runs: 6, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1' },
-        { cutId: 'c1', dayOffset: 3, runs: 2, windowStartMin: 4320, startMin: 4320, setupMin: 0, durationMin: 30, isContinuation: true, parentCutId: 'c1' }
+        { cutId: 'c1', dayOffset: 0, runs: 6, windowStartMin: 0, startMin: 0, setupMin: 0, durationMin: 90, isContinuation: false, parentCutId: null, setupKnifeMin: 0, setupMaterialMin: 0 },
+        { cutId: 'c1', dayOffset: 1, runs: 6, windowStartMin: 1440, startMin: 1440, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1', setupKnifeMin: 0, setupMaterialMin: 0 },
+        { cutId: 'c1', dayOffset: 2, runs: 6, windowStartMin: 2880, startMin: 2880, setupMin: 0, durationMin: 90, isContinuation: true, parentCutId: 'c1', setupKnifeMin: 0, setupMaterialMin: 0 },
+        { cutId: 'c1', dayOffset: 3, runs: 2, windowStartMin: 4320, startMin: 4320, setupMin: 0, durationMin: 30, isContinuation: true, parentCutId: 'c1', setupKnifeMin: 0, setupMaterialMin: 0 }
     ],
     'splitMachineQueue #3401: лидер на каждый проход (perPass+leader); хвост по дням, продолжения без setup'
 );
@@ -2386,7 +2380,7 @@ assertEqual(
         [{ id: 'z', plannedRuns: 0 }],
         { dayStartMin: 480, dayEndMin: 990, times: splitTimes, perPassByCut: {} }
     ),
-    [{ cutId: 'z', dayOffset: 0, runs: 0, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 0, isContinuation: false, parentCutId: null }],
+    [{ cutId: 'z', dayOffset: 0, runs: 0, windowStartMin: 480, startMin: 480, setupMin: 0, durationMin: 0, isContinuation: false, parentCutId: null, setupKnifeMin: 0, setupMaterialMin: 0 }],
     'splitMachineQueue: нулевые проходы → один сегмент без разбиения'
 );
 
@@ -2439,8 +2433,8 @@ var ops = planning.planCutOperations(
     [withSig('c1', '1780963200', 15)],
     { perPassByCut: { c1: 10 }, dayStartMin: 0, dayEndMin: 100, times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
-assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 }], 'planCutOperations: первый сегмент → update существующей записи (10 проходов сегодня)');
-assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
+assertEqual(ops.updates, [{ cutId: 'c1', sequence: 1, planStartTs: 1780963200, plannedRuns: 10, occMin: 100, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 100 } }], 'planCutOperations: первый сегмент → update существующей записи (10 проходов сегодня)');
+assertEqual(ops.creates, [{ parentCutId: 'c1', sequence: 2, planStartTs: 1781049600, plannedRuns: 5, occMin: 50, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 50 } }], 'planCutOperations: остаток → create продолжения на след. день (5 проходов)');
 assertEqual(ops.deletes, [], 'planCutOperations: нет прежних продолжений → нет удалений');
 
 // ── #3421: «Сгенерировать резки» пересобирает СОХРАНЁННУЮ очередь существующих резок ──
@@ -2510,11 +2504,14 @@ var ops3658 = planning.planCutOperations(
     { preserveOrder: true, planBaseMidnightMs: b3658, dayAnchorByCut: anchor3658,
       perPassByCut: { may30: 5, jun4: 5 }, dayStartMin: 480, dayEndMin: 990, times: { BETWEEN_CUTS: 0 } }
 );
+// #3974 (ТЗ §15 «раньше даты «С» ничего не ставится»): day-anchor «Даты план» отменён —
+// свободное задание из прошлого перепаковывается ОТ БАЗЫ, а не остаётся за её пределами.
+// День держит только 🔒. Полная модель окна размещения — atex-production-planning-3974.test.js.
 var u3658 = {}; ops3658.updates.forEach(function(u) { u3658[u.cutId] = u.planStartTs; });
-assertEqual(u3658.may30, Math.floor(Date.UTC(2026, 4, 30, 8, 0, 0) / 1000),
-    'planCutOperations #3658: задание 30.05 осталось на 30.05 08:00 (не уехало в 4.06)');
-assertEqual(u3658.jun4, Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000),
-    'planCutOperations #3658: задание 4.06 — на 4.06 08:00');
+assertEqual(u3658.may30, Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000),
+    'planCutOperations #3974: свободное задание 30.05 подтянуто к базе 4.06 08:00 (раньше «С» не ставим)');
+assertEqual(u3658.jun4, Math.floor(Date.UTC(2026, 5, 4, 8, 0, 0) / 1000) + 300,
+    'planCutOperations #3974: следующее встаёт встык за ним (08:05)');
 
 // ── #3660: scope — перепланируем ТОЛЬКО выбранный диапазон дат, не лезем в чужие даты ──
 // Генерация на 31.05 (scope [31.05;31.05]) не должна трогать задание 5.06.
@@ -2528,8 +2525,10 @@ var ops3660 = planning.planCutOperations(
       perPassByCut: { m31: 5, j5: 5 }, dayStartMin: 480, dayEndMin: 990, times: { BETWEEN_CUTS: 0 },
       scopeFromKey: planning.planDateDayKey('2026-05-31'), scopeToKey: planning.planDateDayKey('2026-05-31') }
 );
-assertEqual(ops3660.updates.map(function(u) { return u.cutId; }), ['m31'],
-    'planCutOperations #3660: scope 31.05 — в ops только 31.05, задание 5.06 НЕ трогаем');
+// #3974: фильтра входа по «Дате план» ∈ [С; По] (#3660) больше нет — планировщик получает ВСЁ
+// необеспеченное и раскладывает от «С», переливаясь за «По». Отбор входа делает вызывающий.
+assertEqual(ops3660.updates.map(function(u) { return u.cutId; }), ['m31', 'j5'],
+    'planCutOperations #3974: вход не фильтруется по [С; По] — планируется всё переданное');
 assertEqual(ops3660.creates.length === 0 && ops3660.deletes.length === 0, true,
     'planCutOperations #3660: вне scope — без creates/deletes (будущее не перепланируется)');
 // Без scope (оба null) — обрабатываем оба (обратная совместимость).
@@ -2554,8 +2553,8 @@ var ops3427 = planning.planCutOperations(
       times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
 assertEqual(ops3427.updates,
-    [ { cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 },
-      { cutId: 'B', sequence: 2, planStartTs: 1781049600, plannedRuns: 5 } ],
+    [ { cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10, occMin: 100, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 100 } },
+      { cutId: 'B', sequence: 2, planStartTs: 1781049600, plannedRuns: 5, occMin: 50, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 50 } } ],
     'planCutOperations #3427: оба сегмента → update существующих записей цепочки (B переиспользована)');
 assertEqual(ops3427.creates, [], 'planCutOperations #3427: продолжение не пересоздаётся');
 assertEqual(ops3427.deletes, [], 'planCutOperations #3427: запись B не удаляется');
@@ -2567,7 +2566,7 @@ var ops3427grow = planning.planCutOperations(
     { perPassByCut: { A: 10 }, dayStartMin: 0, dayEndMin: 100,
       times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
-assertEqual(ops3427grow.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10 }],
+assertEqual(ops3427grow.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 10, occMin: 100, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 100 } }],
     'planCutOperations #3427 (рост): голова — update');
 assertEqual(ops3427grow.creates.length, 2, 'planCutOperations #3427 (рост): 2 продолжения создаются (записей цепочки нет)');
 assertEqual(ops3427grow.deletes, [], 'planCutOperations #3427 (рост): без удалений');
@@ -2579,7 +2578,7 @@ var ops3427shrink = planning.planCutOperations(
     { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
       times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
-assertEqual(ops3427shrink.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 9 }],
+assertEqual(ops3427shrink.updates, [{ cutId: 'A', sequence: 1, planStartTs: 1780963200, plannedRuns: 9, occMin: 90, setupMin: 0, planCols: { knife: 0, material: 0, cutTime: 90 } }],
     'planCutOperations #3427 (сжатие): один сегмент → update головы (9 проходов)');
 assertEqual(ops3427shrink.creates, [], 'planCutOperations #3427 (сжатие): без создания');
 assertEqual(ops3427shrink.deletes, ['B', 'C'], 'planCutOperations #3427 (сжатие): лишние записи B,C удаляются');
@@ -2605,6 +2604,9 @@ function runGenerateCutsReannotatesActualWidthTest() {
     controller.setGenBusy = function() {};
     controller.render = function() {};
     controller.reload = function() { return Promise.resolve(); };
+    controller.showProgress = function() {};   // прогресс рисует DOM — в node его нет
+    controller.hideProgress = function() {};
+    controller.notify = function() {};
     // Как настоящий loadPositions: пересоздаёт genPositions с НОМИНАЛЬНОЙ шириной заказа.
     controller.loadPositions = function() {
         controller.genPositions = [{ id: 'p1', materialId: 'M', width: 60, qty: 1 }];
@@ -2692,7 +2694,7 @@ function runFixSnapshotTimingTest() {
     });
 }
 
-runSaveSequencesT1078Test()
+Promise.resolve()
     .then(runFixSnapshotTimingTest)
     .then(runApplySplitPlanTest)
     .then(runPreferredWidthsFilterTest)
