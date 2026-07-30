@@ -62,7 +62,9 @@ function seq(ops) {
     // отрывалось от своего близнеца по ножам. Место в дне ЯВНО задаёт только «в начало»/«в конец»
     // дня (pinDayPosByCut, #4464) — это проверяет отдельный тест.
     var cutsPin = [cut('P', 'MA'), cut('Q', 'MB'), cut('R', 'MA'), cut('M', 'MB', '1', DAY0, true)];
-    var sp = seq(P.planCutOperations(cutsPin, opts({ dayAnchorByCut: { M: 0 } }, pp)));
+    // #4488/#4497: перенос 🗓 всегда передаёт wholeDayByCut (задание оператора ложится в день целиком),
+    // и именно по этому признаку запрет «перед 🔒 ничего не ставить» (#4497) ручной перенос не связывает.
+    var sp = seq(P.planCutOperations(cutsPin, opts({ dayAnchorByCut: { M: 0 }, wholeDayByCut: { M: 0 } }, pp)));
     var idsPin = sp.map(function (o) { return o.id; });
     console.log('  С фиксацией:', idsPin.join(','));
     var iMp = idsPin.indexOf('M'), iQp = idsPin.indexOf('Q');

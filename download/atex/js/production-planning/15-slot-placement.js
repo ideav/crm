@@ -29,6 +29,9 @@
                  knifeWidths: cut.knifeWidths, knifeCount: cut.knifeCount, rollerWidth: cut.rollerWidth,
                  isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId,
                  plannedRuns: Number(cut.plannedRuns) || 0, dueKey: dk, fixed: !!cut.fixed, firstPartId: fp,
+                 // #4497: ХРАНИМОЕ время старта («Дата план», сек). По нему видно, чьё место в дне
+                 // защищать (у 🔒) и кто стоял перед ней раньше (у свободного задания).
+                 storedTs: (function(){ var t = Number(cut.planDate); return (isFinite(t) && t > 0) ? t : undefined; })(),
                  orderIds: (ords && Object.keys(ords).length) ? ords : undefined,
                  workMin: isFinite(Number(cut.workMin)) ? Number(cut.workMin) : undefined,
                  dayOffset: isFinite(Number(cut.dayOffset)) ? Number(cut.dayOffset) : undefined };
@@ -118,6 +121,43 @@
         return true;
     }
 
+    // #4497 (ТЗ §15): встанет ли slot на позицию index ПЕРЕД ЗАФИКСИРОВАННЫМ (🔒) заданием В ЕГО ЖЕ
+    // ДНЕ. Замок 🔒 держит не только день, но и место в дне: вставленное перед ней задание сдвигает
+    // её — и весь паровоз 🔒 за ней — на своё время + длительность («Сгенерировать вставляет задание
+    // в начало дня, двигая весь паровоз зафиксированных», issue #4497). Дни по очереди станка не
+    // убывают, поэтому смотрим ПЕРВУЮ 🔒 после точки вставки и сравниваем её день с днём приземления
+    // слота: на СТЫКЕ ДНЕЙ правило не действует (между хвостом дня N и головой дня N+1 и так ночь).
+    // День 🔒 берём по очереди БЕЗ слота — это её законный день; день слота — со вставкой.
+    // Правило НЕ ограничивает:
+    //   • приезжую 🔒 (взаимный порядок 🔒 судит FIXED_BLOCK, #4464/#4491);
+    //   • ручной перенос — и сам переносимый слот (замок дня/станка «по весу», #4221), и 🔒, которую
+    //     оператор двигает ПРЯМО СЕЙЧАС (`manualMove`): ТЗ §15 — ручное действие оператора этими
+    //     запретами не связано;
+    //   • НЕФОЛЬГУ перед зафиксированной ФОЛЬГОЙ: «фольга всегда в конец дня» (#3717) — правило той же
+    //     твёрдости, и место 🔒-фольги от него не страдает (она и остаётся последней в дне).
+    function pushesFixedSameDay(machineSlots, index, slot, ctx){
+        if (!slot || slot.fixed || slot.lockDay != null || slot.lockSlitter != null) return false;
+        var dayOff = null;
+        for (var j = index; j < machineSlots.length; j++){
+            var f = machineSlots[j];
+            if (!f || f.kind !== 'cut' || !f.fixed) continue;
+            if (f.manualMove) continue;
+            if (f.isFoil && !slot.isFoil) continue;   // #3717: фольга обязана остаться последней
+            if (f.storedTs == null) continue;         // хранимого места у 🔒 нет — защищать нечего
+            // Стоял перед этой 🔒 в ХРАНИМОМ плане (одна смена = ±12 ч от её старта) — место своё.
+            if (slot.storedTs != null && slot.storedTs < f.storedTs
+                && (f.storedTs - slot.storedTs) < 43200) continue;
+            if (dayOff == null){
+                var withSlot = machineSlots.slice(0, index).concat([slot], machineSlots.slice(index));
+                dayOff = prefixDayOffset(withSlot, index, ctx);
+            }
+            var fDay = prefixDayOffset(machineSlots, j, ctx);
+            if (fDay === dayOff) return true;
+            if (fDay > dayOff) return false;   // дни по очереди станка не убывают — дальше только позже
+        }
+        return false;
+    }
+
     // Стоимость вставки slot на позицию index станка (ТЗ §8: вес + «качество» двух переходов) |
     // null если позиция недопустима. Срок/фольга/простой — на переходе prev→slot (о самом слоте).
     // #4194: пересекаются ли множества «заказов» двух заданий (объекты-множества {orderId: true}).
@@ -199,6 +239,8 @@
         // головой дня N+1 монолита нет) — потому и сравниваем дни, а не просто соседство.
         if (prevCut && nextCut && prevCut.fixed && nextCut.fixed
             && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
+        // #4497 (ТЗ §15): перед 🔒 её дня ставить нельзя — вставленное сдвинуло бы её (см. выше).
+        if (pushesFixedSameDay(machineSlots, index, slot, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
         // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и
@@ -665,6 +707,10 @@
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
                         if (!canInsertAt(tarr, idx)) continue;
+                        // #4497 (ТЗ §15): перед 🔒 её дня не встаёт и СПАСЕНИЕ ПРОСРОЧКИ. Замок 🔒 —
+                        // жёсткое правило, просрочка — видимая информация (её называет панель #4161 и
+                        // лог #4200), ровно как с заморозкой дня: правило сильнее срока.
+                        if (pushesFixedSameDay(tarr, idx, slot, slotExtend(ctx, { slitterId: tid }))) continue;
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
@@ -788,6 +834,8 @@
                     var tarr = byMachine[tid], mBest = null;
                     for (var idx = 0; idx <= tarr.length; idx++){
                         if (!canInsertAt(tarr, idx)) continue;
+                        // #4497 (ТЗ §15): жадный проход тоже не ставит задание перед 🔒 её дня.
+                        if (pushesFixedSameDay(tarr, idx, T.slot, slotExtend(ctx, { slitterId: tid }))) continue;
                         tarr.splice(idx, 0, tagSlot(T.slot, tid));
                         var newCostTid = machineCost(tid);
                         tarr.splice(idx, 1);
@@ -1017,12 +1065,17 @@
         var slitterIds = (ctx.slitterIds && ctx.slitterIds.length) ? ctx.slitterIds.slice() : distinctSlitterIds(cutsList);
         var dayLockBy = ctx.dayLockByCut || {};   // #4221: cutId → день-смещение замка (перенос 🗓 «По весу»)
         var machineLockBy = ctx.machineLockByCut || {};   // #4225: cutId → станок замка (перенос «В пределах одного станка»)
+        // #4497: задания, которые оператор двигает ПРЯМО СЕЙЧАС. Запрет «перед 🔒 ничего не ставим»
+        // на них не действует (ТЗ §15: ручное действие оператора не ограничено) — ни когда двигают
+        // само задание, ни когда двигают 🔒, рядом с которой выбирается место.
+        var manualMoveBy = ctx.manualMoveByCut || {};
         var fixedSlots = [], movable = [];
         (cutsList || []).forEach(function(c){
             var id = String(c.id);
             var s = slotFromCut(c, dueKeyBy[id], orderIdsBy[id]);
             s.workMin = (Number(perPass[id]) || 0) * (Number(c.plannedRuns) || 0);
             if (s.slitterId == null && c.slitter) s.slitterId = String(c.slitter.id);
+            if (manualMoveBy[id]) s.manualMove = true;   // #4497: перенос оператора правилом не связан
             // #4221: перенос 🗓 «По весу» — задание НЕ приколото позицией (как 🔒), а «замкнуто» на
             // ВЫБРАННЫЙ день и станок: кладём его как ПОДВИЖНОЕ (позиция в дне по весу scorePosition),
             // но с lockDay/lockSlitter (placeSlot держит день/станок). Замок ловит день сам (порядок

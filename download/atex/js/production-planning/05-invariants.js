@@ -274,6 +274,126 @@
             }
         },
         {
+            id: 'FIXED_NO_PUSH',
+            tz: '§15 (#4497)',
+            actor: 'auto',
+            enforce: false,     // ПОКА только отчёт — см. ниже
+            title: 'Перед зафиксированным (🔒) заданием автоматика ничего не ставит: 🔒 не сдвигают ни новое задание, ни хвост разбиения',
+            // ЧТО ЗАПРЕЩЕНО. Поставить в дне 🔒 ПЕРЕД ней то, чего перед ней не было: новое задание
+            // «Сгенерировать», приезжее с другого дня/станка, хвост разбиения соседа. Симптом до
+            // правила: «Сгенерировать вставляет задание в начало дня, двигая весь паровоз
+            // зафиксированных заданий после него» (issue #4497) — замок держал ДЕНЬ, но не место в
+            // дне, и все 🔒 уезжали на своё время + длительность вставленного.
+            //
+            // ЧТО РАЗРЕШЕНО: задание, стоявшее перед этой 🔒 в ХРАНИМОМ плане, остаётся на месте
+            // (иначе правило переворачивало бы дни на путях ручного порядка); 🔒 сдвигает ДРУГАЯ 🔒
+            // (законный переезд по потолку, #4467/#4491 — их взаимный порядок судит FIXED_BLOCK);
+            // время старта 🔒 внутри её дня может стать РАНЬШЕ (соседи ушли — дыр в дне не держим,
+            // #4300); переезд 🔒 в другой день — дело FIXED_CUT_DAY, соседства там требовать нечего.
+            // Ручной перенос (ctx.isManualMoveCut) не ограничен: ТЗ §15 — «ручное действие оператора
+            // этими запретами не ограничено», а задание, которое оператор несёт «по весу» прямо
+            // сейчас, вправе встроиться туда, где §8 насчитал минимальный штраф (#4487/#4491).
+            //
+            // ЦЕПОЧКА, А НЕ ЗАПИСЬ. Разбитое по дням задание живёт цепочкой записей, и при пересборке
+            // хвост пересоздаётся заново (новый id). Сравнивать по id значило бы объявлять нарушением
+            // ИДЕМПОТЕНТНУЮ пересборку того же плана, поэтому «кто стоял перед 🔒» считаем по
+            // ЦЕПОЧКЕ («ID первой части», chainId снимка): хвост той же работы на том же месте —
+            // не сдвиг.
+            //
+            // ПОЧЕМУ enforce:false. Выбросить операцию нельзя: порядок этим не чинится — задание
+            // осталось бы с прежним `planStart`, и день получил бы дыру или наложение (рецидив
+            // #4300/#4312), как и у FIXED_BLOCK. Запрет обеспечен ПО ПОСТРОЕНИЮ: слой размещения
+            // (точка вставки перед 🔒 её дня недопустима), упаковщик (🔒 своего дня берётся раньше
+            // свободных; задание не рвётся в день, чья голова 🔒 — уезжает целиком) и внутридневная
+            // пересортировка (день с 🔒 не переупорядочивается). Шлюз — АУДИТ: ловит регрессию на
+            // всех путях записи разом.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed, chainId }] — ХРАНИМЫЙ план.
+            // Нет предиката → правило не срабатывает (общая конвенция реестра).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var snap = snapFn() || [];
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                var isManual = ppCtxFn(ctx, 'isManualMoveCut');
+                function chainKey(r) {
+                    var c = (r && r.chainId != null) ? String(r.chainId).trim() : '';
+                    return c !== '' ? c : String(r && r.id);
+                }
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var chainById = {}, storedById = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    var k = String(r.id);
+                    chainById[k] = chainKey(r);
+                    storedById[k] = { id: k, chain: chainById[k], sid: String(r.slitterId == null ? '' : r.slitterId),
+                                      ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                });
+                var byId = {};
+                Object.keys(storedById).forEach(function(k) {
+                    var s = storedById[k];
+                    byId[k] = { id: s.id, label: s.id, chain: s.chain, sid: s.sid, ts: s.ts, fixed: s.fixed };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) {
+                        byId[k] = { id: k, label: k, chain: k, sid: String(u.slitterId == null ? '' : u.slitterId),
+                                    ts: Number(u.planStartTs), fixed: !!isFixed(u.cutId) };
+                        return;
+                    }
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                (ops && ops.creates || []).forEach(function(cr, i) {
+                    if (!cr || cr.planStartTs == null) return;
+                    var parent = cr.parentCutId == null ? '' : String(cr.parentCutId);
+                    // Хвост 🔒 считаем зафиксированным: его день диктует потолок (#4304/#4467), и
+                    // «🔒 сдвигает другая 🔒» — не нарушение этого правила (см. выше).
+                    byId['new:' + i] = { id: 'new:' + i, label: parent || ('new:' + i),
+                                         chain: chainById[parent] || parent || ('new:' + i),
+                                         sid: String(cr.slitterId == null ? '' : cr.slitterId),
+                                         ts: Number(cr.planStartTs), fixed: !!isFixed(parent) };
+                });
+                // Разложить план по (станок, день) в хронологии — так же читает очередь экран (#3923).
+                function byDay(rows) {
+                    var out = {};
+                    rows.forEach(function(r) {
+                        if (!isFinite(r.ts)) return;
+                        (out[r.sid + '|' + dayOfTs(r.ts)] = out[r.sid + '|' + dayOfTs(r.ts)] || []).push(r);
+                    });
+                    Object.keys(out).forEach(function(k) { out[k].sort(function(a, b) { return a.ts - b.ts; }); });
+                    return out;
+                }
+                var storedRows = Object.keys(storedById).map(function(k) { return storedById[k]; });
+                var wasByDay = byDay(storedRows);
+                var nowByDay = byDay(Object.keys(byId).map(function(k) { return byId[k]; }));
+                var out = [];
+                Object.keys(nowByDay).forEach(function(key) {
+                    var rows = nowByDay[key];
+                    rows.forEach(function(f, fi) {
+                        if (!f.fixed || isManual(f.id)) return;   // ручной перенос самой 🔒 — выбор оператора
+                        var st = storedById[f.id];
+                        // 🔒 сменила день/станок — это FIXED_CUT_DAY (законный переезд по потолку).
+                        if (!st || st.sid !== f.sid || !isFinite(st.ts) || (st.sid + '|' + dayOfTs(st.ts)) !== key) return;
+                        var beforeStored = {};
+                        (wasByDay[key] || []).forEach(function(r) { if (r.ts < st.ts) beforeStored[r.chain] = true; });
+                        var pushedBy = rows.slice(0, fi).filter(function(r) {
+                            return !r.fixed && !isManual(r.id) && !beforeStored[r.chain];
+                        });
+                        if (!pushedBy.length) return;
+                        var labels = pushedBy.map(function(r) { return String(r.label); });
+                        out.push(ppViolation('FIXED_NO_PUSH', f.id,
+                            'перед зафиксированным ' + f.id + ' встало: ' + labels.join(', '),
+                            { slitterId: key.split('|')[0], dayKey: Number(key.split('|')[1]),
+                              kind: 'before', beforeIds: labels }));
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'DAY_CAPACITY',
             tz: '§15 (потолок дня, #4467)',
             actor: 'auto',

@@ -228,6 +228,45 @@ AUTO_INPUTS.forEach(function(input) {
     assert(v.length === 0, 'КОНВЕНЦИЯ РЕЕСТРА: нет предиката разрешения партии — правило молчит, а не винит всех');
 })();
 
+// ── 5b. FIXED_NO_PUSH (#4497) на всех входах автоматики ─────────────────────────────────────
+// Перед 🔒 автоматика ничего не ставит. Хранимый план: 🔒 «3» стои́т в свободном дне в 10:00,
+// свободное «2» — в 12:00 (после неё). Любой вход, поставивший «2» перед 🔒, ловится правилом.
+(function() {
+    var TS_LOCK = Date.UTC(2026, 6, 29, 10, 0, 0);
+    var TS_AFTER = Date.UTC(2026, 6, 29, 12, 0, 0);
+    var pushCtx = {
+        isFixedCut: ctx.isFixedCut,
+        dayKeyOfCut: ctx.dayKeyOfCut,
+        dayKeyOfTs: ctx.dayKeyOfTs,
+        planSnapshot: function() {
+            return [{ id: '3', slitterId: '1', planStartTs: TS_LOCK, fixed: true, chainId: '' },
+                    { id: '2', slitterId: '1', planStartTs: TS_AFTER, fixed: false, chainId: '' }];
+        }
+    };
+    AUTO_INPUTS.forEach(function(input) {
+        var ops = emptyOps();
+        ops.updates.push({ cutId: '2', slitterId: '1', planStartTs: Date.UTC(2026, 6, 29, 9, 0, 0) });
+        var v = planning.checkPlanInvariants(ops, pushCtx, 'auto')
+            .filter(function(x) { return x.rule === 'FIXED_NO_PUSH'; });
+        assert(v.length === 1 && v[0].cutId === '3',
+            'FIXED_NO_PUSH × ' + input + ': свободное задание встало перед 🔒 — нарушение', '(' + v.length + ')');
+    });
+    // Ручное действие оператора правилом не ограничено (ТЗ §15).
+    var manual = emptyOps();
+    manual.updates.push({ cutId: '2', slitterId: '1', planStartTs: Date.UTC(2026, 6, 29, 9, 0, 0) });
+    var mctx = {}; Object.keys(pushCtx).forEach(function(k) { mctx[k] = pushCtx[k]; });
+    mctx.isManualMoveCut = function(id) { return String(id) === '2'; };
+    assert(planning.checkPlanInvariants(manual, mctx, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_PUSH'; }).length === 0,
+        'FIXED_NO_PUSH: ручной перенос оператора не ограничен');
+    // КОНВЕНЦИЯ РЕЕСТРА: нет снимка плана — правило молчит.
+    var bare = emptyOps();
+    bare.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_LOCK });
+    assert(planning.checkPlanInvariants(bare, { isFixedCut: ctx.isFixedCut }, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_PUSH'; }).length === 0,
+        'FIXED_NO_PUSH: без хранимого плана правило не срабатывает (конвенция реестра)');
+})();
+
 // ── 6. Реестр не пуст и правила описаны ─────────────────────────────────────────────────────
 (function() {
     var inv = planning.invariants || [];

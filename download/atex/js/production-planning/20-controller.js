@@ -2494,6 +2494,10 @@
                     + (v.otherCutId ? ': №' + v.otherCutId + ' ↔ №' + v.cutId
                                     : (v.cutId ? ' (задание №' + v.cutId + ')' : '')) + at;
             }
+            if (v.rule === 'FIXED_NO_PUSH') {
+                return 'перед зафиксированным (🔒) №' + v.cutId + ' встало №'
+                    + ((v.beforeIds || []).join(', №') || '?') + at;
+            }
             if (v.rule === 'CUT_BATCH') {
                 return 'задание №' + v.cutId + ' без «Партии сырья» (' + (v.reason || 'источник партии не найден') + ')';
             }
@@ -8625,6 +8629,14 @@
                 console.error('[pp] ⛔ #4464: нарушен монолит зафиксированных заданий — '
                     + blockViol.map(function(v){ return '#' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
             }
+            // #4497: перед 🔒 что-то встало — регрессия движка (ТЗ §15): порядок обязан соблюдаться по
+            // построению (слой размещения не даёт точки перед 🔒, упаковщик берёт 🔒 раньше свободных и
+            // не рвёт задание в день, чья голова 🔒).
+            var pushViol = (guard.violations || []).filter(function(v){ return v.rule === 'FIXED_NO_PUSH'; });
+            if (pushViol.length) {
+                console.error('[pp] ⛔ #4497: зафиксированное задание сдвинуто вставкой — '
+                    + pushViol.map(function(v){ return v.msg; }).join('; '));
+            }
             // #4467: день длиннее смены с нахлёстом — тоже регрессия движка (ТЗ §15): лишнее обязано
             // уезжать на следующий день, а длинное — рваться по потолку.
             var capViol = (guard.violations || []).filter(function(v){ return v.rule === 'DAY_CAPACITY'; });
@@ -8641,7 +8653,7 @@
             // сработали бы. По этому журналу и решается, включать ли им запрет.
             var watched = (guard.violations || []).filter(function(v){
                 return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'
-                    && v.rule !== 'DAY_CAPACITY' && v.rule !== 'DAY_FILL'; });
+                    && v.rule !== 'DAY_CAPACITY' && v.rule !== 'DAY_FILL' && v.rule !== 'FIXED_NO_PUSH'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
@@ -8653,7 +8665,9 @@
             // кандидатов и у текущего плана, — вето по ней заблокировало бы «Упорядочить» навсегда.
             // FIXED_CUT_DAY тоже нет: у него есть ЗАКОННЫЙ случай (день 🔒 стал нерабочим, #4434 п.1).
             ops.ruleBreaks = (guard.violations || []).filter(function(v){
-                return v.rule === 'FIXED_BLOCK' || v.rule === 'DAY_CAPACITY';
+                // #4497: «перед 🔒 ничего не ставим» — тоже форма плана: кандидат, который сдвигает
+                // зафиксированное, не применяется, и причина называется оператору.
+                return v.rule === 'FIXED_BLOCK' || v.rule === 'DAY_CAPACITY' || v.rule === 'FIXED_NO_PUSH';
             });
             // #4475: ВСЁ, о чём стоит сказать оператору, если этот план будет ЗАПИСАН. Передаётся в
             // applySplitPlan вместе с операциями (`ops.audit`) — фразу собирает formatPlanAuditMessage.

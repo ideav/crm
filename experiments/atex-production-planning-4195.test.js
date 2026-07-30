@@ -93,7 +93,9 @@ assert(dayOf(builtGen, 'U') >= 1,
 
 // (b) РУЧНОЙ ПЕРЕНОС 🗓 (moveScope.pinCutIds непуст): фолбэк ВКЛ — срок U из обеспечения виден →
 // штраф DEADLINE_COST возвращает U В СРОК на day0. Пин на A1 (несущее задание переноса) не мешает U.
-var builtMove = Controller.prototype.buildSequenceOps.call(fakeSelf(cuts, supplies, genPositions), cuts, 'SETUP', false, { pinCutIds: ['A1'] });
+// #4488/#4497: ручной перенос 🗓 всегда несёт и wholeDayCutIds — задание встаёт в день целиком, и
+// запрет «перед 🔒 ничего не ставить» (#4497) на приколотое переносом задание не действует.
+var builtMove = Controller.prototype.buildSequenceOps.call(fakeSelf(cuts, supplies, genPositions), cuts, 'SETUP', false, { pinCutIds: ['A1'], wholeDayCutIds: ['A1'] });
 assert(dayOf(builtMove, 'U') <= 0,
     '#4195 фикс: при ручном переносе (moveScope) срок U из обеспечения honorится → U В СРОК (day ' + dayOf(builtMove, 'U') + ' ≤ 0)');
 

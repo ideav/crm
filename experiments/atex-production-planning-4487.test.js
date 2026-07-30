@@ -98,7 +98,7 @@ function neighbours(order, id) {
 // ── A/B/C: «По весу» + «Зафиксировать» ──────────────────────────────────────────────────────
 (function () {
     var cuts = dayCuts().concat([movedCut(-60, true)]);   // плейсхолдер «в голову дня», 🔒
-    var ops = runPlan(cuts);
+    var ops = runPlan(cuts, { wholeDayByCut: { X: 0 } });   // #4488: перенос кладёт задание в день целиком
     var ord = orderOf(ops);
     var nb = neighbours(ord, 'X');
     assert(nb[0] === 'B' || nb[1] === 'B',
@@ -153,7 +153,9 @@ function neighbours(order, id) {
         cut('X', 'MW308',  'IN',  K([[110, 8]]), 110,  -60, true)    // перенесённое «По весу» + 🔒
     ];
     var carry = { materialId: 'MR194', winding: 'OUT', knifeWidths: K([[40, 22]]), rollerWidth: 40 };
-    var ops = runPlan(cuts, { prevSetupBySlitter: { '1': carry } });
+    // #4488/#4497: перенос 🗓 передаёт wholeDayByCut — задание оператора ложится в день целиком, и
+    // запрет «перед 🔒 ничего не ставить» (#4497) его не связывает: место ему выбирает §8.
+    var ops = runPlan(cuts, { prevSetupBySlitter: { '1': carry }, wholeDayByCut: { X: 0 } });
     var ord = orderOf(ops);
     var nb = neighbours(ord, 'X');
     assert(nb[0] === 'B' || nb[1] === 'B',
