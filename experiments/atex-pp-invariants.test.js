@@ -137,12 +137,17 @@ AUTO_INPUTS.forEach(function(input) {
     ops.updates.push({ cutId: '3', planStartTs: TS_FROZEN });
     var before = ops.updates.length;
     planning.guardPlanOps(ops, ctx, 'auto');
-    // FROZEN_DAY (enforce) отбросит эту операцию; проверяем, что наблюдатель сам по себе не отбрасывает:
+    // ОЖИДАНИЕ ИЗМЕНЕНО (#4512, решение заказчика 30.07.2026). Здесь утверждалось, что
+    // FIXED_CUT_DAY — НАБЛЮДАТЕЛЬ и операцию не отбрасывает. Приёмка #4512 требует обратного:
+    // «страж записи, правило FIXED_CUT_DAY — включается запрет: операция, уводящая 🔒 в другой день,
+    // до базы не доходит ни с какого пути записи». Теперь правило `mode: 'drop'`, и переезд
+    // зафиксированного задания автоматикой отбрасывается — даже когда день-приёмник не заморожен.
     var ops2 = emptyOps();
     ops2.updates.push({ cutId: '3', planStartTs: Date.UTC(2026, 6, 30, 8, 0, 0) });   // переезд в НЕзамороженный день
     var r2 = planning.guardPlanOps(ops2, ctx, 'auto');
-    assert(before === 1 && r2.skipped === 0 && ops2.updates.length === 1,
-        'наблюдатель FIXED_CUT_DAY операцию не отбрасывает (только считает)');
+    assert(before === 1 && r2.skipped === 1 && ops2.updates.length === 0,
+        'FIXED_CUT_DAY отбрасывает переезд 🔒 автоматикой (#4512: запрет, а не наблюдение)',
+        'skipped=' + r2.skipped + ' осталось=' + ops2.updates.length);
 })();
 
 // ── 5. CUT_BATCH: задание обязано иметь «Партию сырья» (ТЗ §15, #4452) ───────────────────────

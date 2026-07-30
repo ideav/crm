@@ -2819,36 +2819,74 @@
             id: 'FIXED_CUT_DAY',
             tz: '§15 (🔒, #3508)',
             actor: 'auto',
-            mode: 'audit',      // страж СЧИТАЕТ и кричит, но операцию не выбрасывает — причина в why
-            why: 'законный переезд существует: день 🔒 стал нерабочим — упаковщик сдвигает и сообщает '
-                 + '(#4434 п.1). Пока этот случай не отделён от настоящего нарушения, страж только считает и '
-                 + 'пишет в журнал',
+            mode: 'drop',       // #4512: операция, увозящая 🔒 из её дня, до записи не доходит
             title: 'Автогенерация не меняет ДЕНЬ зафиксированного задания и не удаляет его',
             // Внутри своего дня зафиксированное задание пересчитывать можно (сдвиг времени старта
             // после смены порядка соседей) — запрещён именно переезд на другой день.
             //
-            // ПОЧЕМУ mode:'audit'. Существует законный случай переезда: день зафиксированного
-            // задания стал нерабочим — тогда упаковщик сдвигает его и сообщает об этом
-            // («Зафиксированных заданий сдвинуто: N», #4434 п.1). Пока этот случай не отделён от
-            // настоящих нарушений, страж только СЧИТАЕТ и пишет в журнал. Включать запрет — после
-            // того, как в журнале станет видно, что срабатывает лишь на нерабочих днях (тогда
-            // условие уточняется), либо что не срабатывает вовсе (тогда mode:'drop' безопасен).
+            // ПОЧЕМУ ТЕПЕРЬ ЗАПРЕТ, А НЕ АУДИТ (#4511/#4512/#4513, решение заказчика 30.07.2026:
+            // «не вытеснять и не переносить зафиксированные задания из дня — НИ ПРИ КАКИХ
+            // ОБСТОЯТЕЛЬСТВАХ»). Наблюдателем правило было по одной причине: «законный переезд (день
+            // 🔒 стал нерабочим) не отделён от настоящего нарушения». С #4514 он ОТДЕЛЁН и назван
+            // движком явно: упаковщик снимает замок ТОЛЬКО когда день физически нерабочий
+            // (`dayFullyBlocked` — окно смены целиком накрыто выходным/праздником/«Отпуском»), и
+            // сообщает об этом через `onFixedDayLost` → `ops.fixedDayLost`. Контроллер отдаёт этот
+            // вердикт стражу предикатом `isFixedReleasedCut`. Поэтому страж больше НЕ ПЕРЕСЧИТЫВАЕТ
+            // законность: он спрашивает того, кто её установил, — и всё остальное отбрасывает.
+            //
+            // Симптом, который правило закрывает: #4513 — зафиксированный «паровоз» из 30.07 целиком
+            // выкинут в 31.07 ради нескольких незафиксированных, причём с ложным вердиктом «день
+            // нерабочий» про обычную пятницу. Упаковщик это уже не делает (#4514), но правило жило
+            // только в нём и в прозе §15 — остальные пути записи его не соблюдали. Тикеты
+            // #4511/#4512/#4513 сообщают об одном и том же в третий раз именно поэтому.
+            //
+            // ПОЧЕМУ ОТБРАСЫВАНИЕ ЗДЕСЬ БЕЗОПАСНО (в отличие от FIXED_BLOCK). Выброшенная операция
+            // означает «задание остаётся там, где стои́т» — а это и есть требуемый результат. Дыры в
+            // дне не возникает: 🔒 никуда не уезжала. День при этом вправе уйти за потолок — так и
+            // решено 30.07.2026, и это видно оператору (см. DAY_CAPACITY: такой перебор законен).
+            //
+            // РУЧНОЕ ДЕЙСТВИЕ. Страж зовётся с actor:'auto' ВСЕГДА — даже когда пересчёт вызвал
+            // перенос оператора (поэтому и у FROZEN_DAY исключение сделано предикатом, #4494). Значит
+            // одного actor'а недостаточно: задание, которое оператор несёт ПРЯМО СЕЙЧАС
+            // (`ctx.isManualMoveCut` из `moveScope.wholeDayCutIds`), правилом не ограничено — ТЗ §15,
+            // и это же разрешают #4487/#4491 («по весу» вправе встроиться внутрь 🔒-блока). Запрет
+            // защищает ОСТАЛЬНЫЕ 🔒 дня — ровно то, о чём #4511/#4512: «делаю перенос, а оно
+            // выкидывает зафиксированные из этого дня».
             check: function(ops, ctx) {
                 var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                var released = ppCtxFn(ctx, 'isFixedReleasedCut');   // #4512: вердикт упаковщика
+                var manual = ppCtxFn(ctx, 'isManualMoveCut');        // задание, которое оператор двигает СЕЙЧАС
                 var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
                 var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
                 var out = [];
                 (ops && ops.updates || []).forEach(function(u) {
                     if (!isFixed(u.cutId) || !dayOfCut || !dayOfTs) return;
+                    if (released(u.cutId)) return;   // день физически нерабочий — переезд законен
+                    if (manual(u.cutId)) return;     // оператор несёт ЭТУ 🔒 сам — ТЗ §15, он не ограничен
                     var was = dayOfCut(u.cutId), will = dayOfTs(u.planStartTs);
                     if (was != null && will != null && was !== will) {
-                        out.push(ppViolation('FIXED_CUT_DAY', u.cutId, 'зафиксированное задание уезжает с ' + was + ' на ' + will));
+                        out.push(ppViolation('FIXED_CUT_DAY', u.cutId, 'зафиксированное задание уезжает с ' + was + ' на ' + will,
+                            { dayWas: was, dayWill: will }));
                     }
                 });
                 (ops && ops.deletes || []).forEach(function(id) {
-                    if (isFixed(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
+                    if (isFixed(id) && !released(id) && !manual(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
                 });
                 return out;
+            },
+            // Те же предикаты, что и в check (иначе страж выбрасывал бы не то, о чём отчитался).
+            drop: function(op, ctx, kind) {
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                var released = ppCtxFn(ctx, 'isFixedReleasedCut');
+                var manual = ppCtxFn(ctx, 'isManualMoveCut');
+                if (!isFixed(op.cutId) || released(op.cutId) || manual(op.cutId)) return false;
+                if (kind === 'delete') return true;
+                if (kind === 'create') return false;   // продолжение — дело CHAIN_CONTIGUOUS, не переезд 🔒
+                var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!dayOfCut || !dayOfTs) return false;
+                var was = dayOfCut(op.cutId), will = dayOfTs(op.planStartTs);
+                return was != null && will != null && was !== will;
             }
         },
         {
@@ -3117,6 +3155,12 @@
             // ctx.dayLoadMinutes() → { 'станок|ГГГГММДД': минуты }, ctx.dayCapacityMin() → число.
             // Источник нагрузки — сам движок (`planCutOperations` → `ops.dayLoad`): окна и разбиение
             // по дням знает только он. Нет предикатов → правило не срабатывает (конвенция реестра).
+            // #4512 (решение заказчика 30.07.2026): ЗАКОННЫЙ ПЕРЕБОР. Если в дне стои́т 🔒, которую
+            // вытеснять НЕЛЬЗЯ, день обязан её вместить — и вправе уйти за потолок. Такой день —
+            // не нарушение, а следствие приоритета «замок сильнее потолка» (обратно #4467). Список
+            // таких станко-дней даёт упаковщик (`onFixedDayHeld` → `ops.fixedDayHeld`), а не
+            // пересчёт в страже. Без этого исключения аудит ругался бы на КАЖДЫЙ такой день, а
+            // сообщения стража оператор видит с #4475 — то есть мы бы штатно врали ему в лицо.
             check: function(ops, ctx) {
                 var loadFn = (ctx && typeof ctx.dayLoadMinutes === 'function') ? ctx.dayLoadMinutes : null;
                 var capFn = (ctx && typeof ctx.dayCapacityMin === 'function') ? ctx.dayCapacityMin : null;
@@ -3124,10 +3168,14 @@
                 var cap = Number(capFn());
                 if (!isFinite(cap) || cap <= 0) return [];
                 var load = loadFn() || {};
+                var heldFn = (ctx && typeof ctx.fixedHeldDays === 'function') ? ctx.fixedHeldDays : null;
+                var held = {};
+                (heldFn ? (heldFn() || []) : []).forEach(function(k) { held[String(k)] = true; });
                 var out = [];
                 Object.keys(load).forEach(function(key) {
                     var min = Number(load[key]);
                     if (!isFinite(min) || min <= cap + 1e-6) return;
+                    if (held[String(key)]) return;   // #4512: перебор из-за неснимаемой 🔒 — законен
                     var parts = String(key).split('|');
                     out.push(ppViolation('DAY_CAPACITY', null,
                         'станок ' + parts[0] + ', день ' + parts[1] + ': ' + Math.round(min)
@@ -6754,6 +6802,8 @@
                     // иначе разрыв по потолку просто перекладывал бы перегруз в следующий
                     // замороженный день. Чужие продолжения доводим как раньше — их наладка здесь.
                     inProgress = inProgress.filter(function(id){ return wholeDayIds.indexOf(String(id)) === -1; });
+                    // #4512: и остаток, родившийся разрывом 🔒 по потолку, — тоже не доводим здесь.
+                    inProgress = inProgress.filter(function(id){ return !state[id].splitFromFixed; });
                     if (!inProgress.length && !fixedToday.length) { day += 1; clock = 0; continue; }
                     freeDue = []; freeAny = []; resFoilToday = [];
                 }
@@ -6925,6 +6975,12 @@
                                     state[id].strandedOwnDay = true;   // #4512: лестница #4467 её больше не выталкивает
                                     var fd = state[id].fixedDay;
                                     if (backDay == null || fd < backDay) backDay = fd;
+                                    // #4512: сообщаем, что замок УДЕРЖАН — симметрично onFixedDayLost. По
+                                    // этому вердикту страж DAY_CAPACITY знает, что перебор дня ЗАКОННЫЙ:
+                                    // день вместил 🔒, которую вытеснять нельзя. Иначе аудит ругался бы на
+                                    // каждый такой день, а его сообщения видит оператор (#4475).
+                                    // Станок упаковщик не знает (его очередь одна) — сопоставит контроллер по заданию.
+                                    if (typeof opts.onFixedDayHeld === 'function') opts.onFixedDayHeld(String(id), fd);
                                 });
                                 ppTraceWarn('#4512 ЗАМОК ЦЕЛ: зафикс-резки ' + keepOwnDay.join(', ') +
                                     ' остаются в своих днях (день рабочий) — возвращаемся на день ' + backDay +
@@ -6995,20 +7051,25 @@
                         prevPhysical = c; prevPhysicalDay = day; st.remaining = 0; st.placedEmpty = true;
                         continue;
                     }
-                    // #4467: в ОСТАТОК дня не влезает НИ ОДНОГО прохода, а день уже занят — 🔒 уезжает
-                    // на следующий день ЦЕЛИКОМ. Прежде ей насильно оставляли один проход («хотя бы 1
-                    // проход держим на фикс-дне»), и день уходил за потолок. Взаимный порядок 🔒 при
-                    // этом сохраняется (#4464): якорь сдвигается на день вперёд, очередь не меняется.
-                    // #4512: резку, ВЕРНУТУЮ в свой день блокером (её день рабочий), лестница #4467
-                    // больше не выталкивает — иначе она снова окажется «застрявшей», и цикл забуксует.
-                    if (canRunF && fittingF <= 0 && clock > 0 && !st.strandedOwnDay) {
-                        ppTraceWarn('#4467 ФИКС-резка ' + pick + ' не влезает в остаток дня ' + day +
-                            ' (занято ' + Math.round(clock) + ') — уезжает целиком на день ' + (day + 1) +
-                            ': потолок дня сильнее замка дня.');
-                        st.fixedDay = nextUnfrozenDay(day + 1);
-                        leaveDay();   // на дне ещё есть 🔒 → остаёмся и добираем их (forceFixedDay)
-                        continue;
-                    }
+                    // ЛЕСТНИЦА #4467 СНЯТА (#4511/#4512/#4513, решение заказчика 30.07.2026).
+                    //
+                    // Здесь стоял вывоз 🔒 на следующий день целиком, когда в остаток дня не влезает ни
+                    // одного прохода: «потолок дня сильнее замка дня» (#4467, решение 28.07.2026). Это
+                    // решение ОТМЕНЕНО обратным: «не вытеснять и не переносить зафиксированные задания
+                    // из дня — НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ. Можно разорвать последнее задание и
+                    // перенести на другой день» (#4512). Боевая цена прежнего порядка — #4513:
+                    // зафиксированный «паровоз» из 30.07 целиком уехал в 31.07 ради нескольких
+                    // незафиксированных заданий.
+                    //
+                    // Что происходит вместо вывоза: управление ПАДАЕТ НИЖЕ, в ветку #4304 — 🔒 РВЁТСЯ
+                    // по потолку дня. Голова (хотя бы один проход) остаётся на зафиксированном дне,
+                    // остаток уезжает продолжением. Это дословно то, что разрешил заказчик, и путь этот
+                    // уже существовал и покрыт тестами — новой механики не появляется.
+                    // День при этом вправе уйти за потолок: перебор ИЗ-ЗА неснимаемой 🔒 законен и
+                    // нарушением не считается (страж DAY_CAPACITY о таких днях молчит — `fixedHeldDays`).
+                    //
+                    // Вытеснять по-прежнему НАДО, но только НЕЗАФИКСИРОВАННЫХ соседей (#4511) — этим
+                    // занимается основная ветка упаковщика, её правило не касается.
                     // #4304: НЕ влезает — РАЗРЫВАЕМ зафиксированную резку по потолку дня. Голова с fittingF
                     // проходами (хотя бы 1, чтобы фикс-день нёс проходы) остаётся на зафиксированном дне;
                     // остаток — продолжением на следующий день. fixedDay снимаем: остаток идёт штатной
@@ -7024,6 +7085,11 @@
                         setupKnifeMin: colsF2.knife, setupMaterialMin: colsF2.material,
                         fixedDayLock: true });   // #4434 п.1: голова 🔒 остаётся на зафиксированном дне
                     st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
+                    // #4512: остаток РОЖДЁН разрывом 🔒 сегодня — для замороженного дня он НОВЫЙ, а
+                    // не «недоведённое продолжение, чья наладка здесь». Кладём его по тому же
+                    // правилу, что и остаток ручного переноса (#4494, решение заказчика 29.07.2026):
+                    // к ближайшему СВОБОДНОМУ дню, замороженные пропускаем.
+                    st.splitFromFixed = true;
                     ppTraceWarn('#4304 ЗАФИКС-резка ' + pick + ' РАЗОРВАНА по потолку дня: ' + passesNowF +
                         ' проходов на дне ' + day + ' (конец ' + ppClock(dayStart + clock + setupF + durF2) + '), остаток ' +
                         st.remaining + ' проходов → день ' + (day + 1));
@@ -20647,6 +20713,7 @@
             ? function(dayOffset){ return self.dayIsFrozen(planBaseMidnightMs + Number(dayOffset) * 86400000); }
             : null;
         var fixedDayLost = [];   // #4434 п.1: 🔒, которым не удалось удержать свой день (день нерабочий)
+        var fixedDayHeld = [];   // #4512: 🔒, УДЕРЖАННЫЕ в своём дне — их день вправе уйти за потолок
         // #4434 п.2: задание, которое ВИДНО в очереди, но НЕ попало во вход планировщика (цепочка
         // прошлых дней #4294, чужой станок при переносе «в пределах станка»), стои́т своим сегментом
         // внутри окна и физически занимает станок. Без резерва упаковщик набивал тот же день с 08:00
@@ -20692,6 +20759,12 @@
             onFixedDayLost: function(cutId, fixedDay, placedDay) {
                 fixedDayLost.push({ cutId: String(cutId), fixedDay: fixedDay, placedDay: placedDay });
             },
+            // #4512 (решение заказчика 30.07.2026): 🔒 УДЕРЖАНА в своём дне — вытеснять её нельзя,
+            // поэтому день вправе уйти за потолок. Вердикт нужен стражу DAY_CAPACITY, чтобы не
+            // объявлять такой перебор нарушением (его сообщения видит оператор, #4475).
+            onFixedDayHeld: function(cutId, fixedDay) {
+                fixedDayHeld.push({ cutId: String(cutId), fixedDay: fixedDay });
+            },
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: prevSetupBySlitter,   // #3876: станок в отпуске обнулён; #4300/#4312: заправка из заданий прошлых дней
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
@@ -20716,6 +20789,7 @@
         }
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
+        if (fixedDayHeld.length && ops) ops.fixedDayHeld = fixedDayHeld;   // #4512
         // #4436: ЗАПИСЬ в замороженный день отсекаем. Планировщик его СЧИТАЕТ (иначе у первой резки
         // следующего дня неверный предшественник и в плане появляется фантомная «дыра в полчаса»,
         // #4438), но НЕ МЕНЯЕТ: обновления «Даты план», удаления и новые сегменты по заданиям
@@ -20739,8 +20813,18 @@
             // потолку в замороженном дне: день не может быть длиннее смены, а состав дня при этом не
             // меняется — лишнее уезжает продолжением. Признак — тот же, по которому #4490 резервирует
             // ему место в дне (moveScope.wholeDayCutIds).
+            // #4512: «оператор двигает ЭТО задание сейчас» — одно понятие, собранное из ВСЕХ полей,
+            // которыми контроллер это выражает. Реальный путь ставит `wholeDayCutIds` всегда (#4488) и
+            // дополнительно `pinCutIds` («в начало/в конец дня») либо `weightPositionCutIds` («по
+            // весу», #4506). Читать только первое — значит зависеть от того, каким полем позвали:
+            // синтетический scope с одним `pinCutIds` уже дал бы стражу «это не ручной перенос» и
+            // отброшенную операцию по заданию, которое оператор несёт сам.
             var manualMoveNow = {};
-            ((moveScope && moveScope.wholeDayCutIds) || []).forEach(function(id){ manualMoveNow[String(id)] = true; });
+            [(moveScope && moveScope.wholeDayCutIds) || [],
+             (moveScope && moveScope.pinCutIds) || [],
+             (moveScope && moveScope.weightPositionCutIds) || []].forEach(function(list){
+                list.forEach(function(id){ manualMoveNow[String(id)] = true; });
+            });
             var guard = guardPlanOps(ops, {
                 isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
                 isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
@@ -20748,6 +20832,33 @@
                 isManualMoveCut: function(id){ return !!manualMoveNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4512: замок снят упаковщиком ЗАКОННО (день физически нерабочий) — единственный
+                // случай, когда 🔒 вправе сменить день. Страж НЕ пересчитывает законность: он
+                // спрашивает того, кто её установил (`onFixedDayLost` → `ops.fixedDayLost`).
+                isFixedReleasedCut: function(id){
+                    var lost = (ops && ops.fixedDayLost) || [];
+                    for (var i = 0; i < lost.length; i++) if (String(lost[i].cutId) === String(id)) return true;
+                    return false;
+                },
+                // #4512: станко-дни, где 🔒 УДЕРЖАНА (вытеснять нельзя) — их перебор законен.
+                // Ключ — как у dayLoadMinutes («станок|ГГГГММДД»): станок берём по самому заданию,
+                // упаковщик его не знает.
+                fixedHeldDays: function(){
+                    var heldRows = (ops && ops.fixedDayHeld) || [];
+                    if (!heldRows.length) return [];
+                    var sidByCut = {};
+                    (cuts || []).forEach(function(c){ if (c && c.id != null) sidByCut[String(c.id)] = String(c.slitterId == null ? '' : c.slitterId); });
+                    var out = [];
+                    heldRows.forEach(function(h){
+                        var sid = sidByCut[String(h.cutId)];
+                        if (sid == null) return;
+                        var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(h.fixedDay) * 86400000) / 1000)));
+                        if (dayKey == null || dayKey === Infinity) return;
+                        var key = sid + '|' + dayKey;
+                        if (out.indexOf(key) === -1) out.push(key);
+                    });
+                    return out;
+                },
                 // #4467: занятость станко-дня из самой раскладки (ops.dayLoad: «станок|смещение дня»)
                 // и потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст настройки. Ровно
                 // та арифметика, что стои́т в бейдже «(N мин)» у даты.

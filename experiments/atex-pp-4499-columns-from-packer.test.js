@@ -121,18 +121,28 @@ function dayOfTs(ts) { return Math.floor((Number(ts) * 1000 - BASE) / 86400000);
 })();
 
 // ── D: перебор — сумма колонок дня не превышает потолок ─────────────────────────────────────
+// СВОЙСТВО СУЖЕНО (#4512, решение заказчика 30.07.2026). Раньше проверялось «НИ ОДИН день не за
+// потолком» по всем сгенерированным раскладкам. Фикстура делает зафиксированными ~половину заданий
+// (`fixed = r() < 0.5`), а вытеснять 🔒 теперь нельзя ни при каких обстоятельствах: день, набитый
+// одними 🔒, ЗАКОННО уходит за потолок (приёмка #4512 называет это следствие прямо). Поэтому
+// свойство больше не универсально — оно остаётся верным для дней БЕЗ зафиксированных заданий, где
+// вытеснять есть кого. Дни с 🔒 считаем отдельно и печатаем, чтобы охват был виден, а не потерян.
 (function () {
-    var over = 0, days = 0, worst = null;
+    var over = 0, days = 0, worst = null, skippedFixedDays = 0;
     for (var seed = 1; seed <= 1500; seed++) {
-        var ops;
-        try { ops = plan(fixture(rnd(seed))); } catch (e) { continue; }
-        var byDay = {};
+        var f, ops;
+        try { f = fixture(rnd(seed)); ops = plan(f); } catch (e) { continue; }
+        var fixedIds = {};
+        f.cuts.forEach(function (c) { if (c.fixed) fixedIds[String(c.id)] = true; });
+        var byDay = {}, hasFixed = {};
         allOps(ops).forEach(function (u) {
             if (!u || !u.planCols) return;
             var d = dayOfTs(u.planStartTs);
             byDay[d] = (byDay[d] || 0) + Math.round(u.planCols.knife) + Math.round(u.planCols.material) + Math.round(u.planCols.cutTime);
+            if (fixedIds[String(u.cutId)]) hasFixed[d] = true;
         });
         Object.keys(byDay).forEach(function (d) {
+            if (hasFixed[d]) { skippedFixedDays++; return; }   // #4512: перебор из-за неснимаемой 🔒 законен
             days++;
             var m = Math.round(byDay[d]);
             if (m > CAP + TUNE + 40) {   // 40 — запас на обед внутри окна дня
@@ -141,7 +151,8 @@ function dayOfTs(ts) { return Math.floor((Number(ts) * 1000 - BASE) / 86400000);
             }
         });
     }
-    assert(days > 1000, '#4499-D: проверено станко-дней: ' + days);
+    assert(days > 100, '#4499-D: проверено станко-дней БЕЗ 🔒: ' + days
+        + ' (дней с 🔒 пропущено как законный перебор: ' + skippedFixedDays + ')');
     assert(over === 0,
         '#4499-D: НИ ОДИН день не выходит за потолок по сумме колонок',
         over ? '(переполненных ' + over + ', худший ' + JSON.stringify(worst) + ')' : '');
