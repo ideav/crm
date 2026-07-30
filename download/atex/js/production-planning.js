@@ -3862,6 +3862,21 @@
         return { knifeMin: round3(knife), materialWindingMin: round3(mat) };
     }
 
+    // #4529: ОСТАТОК наладки, который хвост дня N НЕ успел и уносит на продолжение (день N+1) —
+    // те же ИМЕНОВАННЫЕ компоненты, а не одно число. Без кодов продолжение раскладывало остаток
+    // целиком в «Наладку ножей»: хвост держит ножи 30, продолжение получало «ножи 15» вместо
+    // «смена сырья 15», по цепочке выходило 45 минут ножей при одной смене 30 — и наблюдатель
+    // CHAIN_SETUP_ONCE (§15) честно сообщал о двойной наладке на верно упакованном плане.
+    //   parts — все компоненты наладки; chosen — результат chooseTailSetupSubset (что осталось
+    //   в дне N). Сравниваем по ССЫЛКЕ на элемент: минуты у компонентов совпадают сплошь и рядом.
+    // → [{ code, minutes }] (пусто, если хвост забрал всё).
+    function remainingSetupParts(parts, chosen) {
+        var keep = (chosen && chosen.keep) || [];
+        return (parts || []).filter(function(p){
+            return (Number(p && p.minutes) || 0) > 0 && keep.indexOf(p) < 0;
+        });
+    }
+
     // #4111: наладка setup-only ХВОСТА дня, поделённая между днём N и продолжением (день N+1) —
     // ХРАНИМЫЕ колонки задания, что оператор увидит в карточке дня N (computeCutSetupUpdates).
     // Правило то же, что у упаковщика (chooseTailSetupSubset — наибольшее подмножество под потолком
@@ -6523,15 +6538,18 @@
         // две арифметики расходились на разбитых по дням заданиях и наладочных хвостах — до +75
         // минут на день, то есть «502 при 460» в бейдже при честной раскладке упаковщика.
         //   total — сумма, реально записанная в setupMin сегмента (в вырожденных ветках к ней
-        //   добавлен лидер, у продолжения это слитый остаток настройки — компонентов у него нет).
+        //   добавлен лидер).
+        //   contParts (#4529) — компоненты ОСТАТКА наладки, унесённого на это продолжение хвостом
+        //   дня N (remainingSetupParts). Есть они — раскладываем остаток по его настоящим кодам;
+        //   нет (остаток известен только числом) — всё в «Наладку ножей», как раньше.
         // Расхождение частей с total кладём в «Наладку ножей», чтобы сумма колонок СОВПАДАЛА с
         // занятостью сегмента до минуты.
-        function setupColsFor(prev, c, total, isCont) {
+        function setupColsFor(prev, c, total, isCont, contParts) {
             var t = round3(Number(total) || 0);
             if (!(t > 0)) return { knife: 0, material: 0 };
-            if (isCont) return { knife: t, material: 0 };
+            if (isCont && !(contParts && contParts.length)) return { knife: t, material: 0 };
             var k = 0, m = 0;
-            setupPartsFor(prev, c).forEach(function(pt) {
+            (isCont ? contParts : setupPartsFor(prev, c)).forEach(function(pt) {
                 if (pt && pt.code === 'MATERIAL_WINDING') m += Number(pt.minutes) || 0;
                 else k += Number(pt.minutes) || 0;
             });
@@ -6563,7 +6581,8 @@
                     fixedDay: (c && c.fixed && anchorByCut[id] != null) ? anchorByCut[id] : null,
                     // #4068: резервная дедлайн-фольга ставится ТОЛЬКО на этот день (в хвост, конец дня).
                     resFoilDay: (resFoilDayByCut[id] != null && isFinite(Number(resFoilDayByCut[id]))) ? Number(resFoilDayByCut[id]) : null,
-                    isCont: false, pendingSetup: 0
+                    isCont: false, pendingSetup: 0,
+                    pendingParts: null   // #4529: компоненты остатка наладки, унесённого хвостом на продолжение
                 };
                 poolOrder.push(id);
             });
@@ -7081,7 +7100,7 @@
                         // окна) — один сегмент на зафиксированном дне, БЕЗ разрыва.
                         var wsF = day * 1440 + dayStart + clock;
                         var durF = canRunF ? st.remaining * perPassF : 0;
-                        var colsF = setupColsFor(prevPhysical, c, setupF, st.isCont);   // #4499
+                        var colsF = setupColsFor(prevPhysical, c, setupF, st.isCont, st.pendingParts);   // #4499/#4529
                         segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
                             windowStartMin: round3(wsF), startMin: round3(wsF + setupF), setupMin: round3(setupF),
                             durationMin: round3(durF), isContinuation: false, parentCutId: null,
@@ -7120,13 +7139,13 @@
                     var passesNowF = fittingF > 0 ? fittingF : 1;   // хотя бы 1 проход держим на фикс-дне
                     var wsF2 = day * 1440 + dayStart + clock;
                     var durF2 = passesNowF * perPassF;
-                    var colsF2 = setupColsFor(prevPhysical, c, setupF, st.isCont);   // #4499
+                    var colsF2 = setupColsFor(prevPhysical, c, setupF, st.isCont, st.pendingParts);   // #4499/#4529
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowF,
                         windowStartMin: round3(wsF2), startMin: round3(wsF2 + setupF), setupMin: round3(setupF),
                         durationMin: round3(durF2), isContinuation: false, parentCutId: null,
                         setupKnifeMin: colsF2.knife, setupMaterialMin: colsF2.material,
                         fixedDayLock: true });   // #4434 п.1: голова 🔒 остаётся на зафиксированном дне
-                    st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
+                    st.remaining -= passesNowF; st.isCont = true; st.pendingSetup = 0; st.pendingParts = null; st.fixedDay = null; prevPhysical = c; prevPhysicalDay = day;
                     // #4512: остаток РОЖДЁН разрывом 🔒 сегодня — для замороженного дня он НОВЫЙ, а
                     // не «недоведённое продолжение, чья наладка здесь». Кладём его по тому же
                     // правилу, что и остаток ручного переноса (#4494, решение заказчика 29.07.2026):
@@ -7149,7 +7168,7 @@
                 if (!(st.remaining > 0) || !(st.perPass > 0) || !hasWindow) {
                     var s0 = leader + setupCostFor(prevPhysical, c);
                     var w0 = day * 1440 + dayStart + clock;
-                    var cols0 = setupColsFor(prevPhysical, c, s0, st.isCont);   // #4499
+                    var cols0 = setupColsFor(prevPhysical, c, s0, st.isCont, st.pendingParts);   // #4499/#4529
                     segments.push({ cutId: pick, dayOffset: day, runs: st.remaining,
                         windowStartMin: round3(w0), startMin: round3(w0 + s0), setupMin: round3(s0),
                         durationMin: 0, isContinuation: false, parentCutId: null,
@@ -7194,12 +7213,12 @@
                 if (fittingG > 0) {
                     var passesNowG = Math.min(st.remaining, fittingG);
                     var wsG = day * 1440 + dayStart + clock, durG = passesNowG * perPassEffG;
-                    var colsGn = setupColsFor(prevPhysical, c, setupG, st.isCont);   // #4499
+                    var colsGn = setupColsFor(prevPhysical, c, setupG, st.isCont, st.pendingParts);   // #4499/#4529
                     segments.push({ cutId: pick, dayOffset: day, runs: passesNowG,
                         windowStartMin: round3(wsG), startMin: round3(wsG + setupG), setupMin: round3(setupG),
                         durationMin: round3(durG), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null,
                         setupKnifeMin: colsGn.knife, setupMaterialMin: colsGn.material });
-                    st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
+                    st.remaining -= passesNowG; st.isCont = true; st.pendingSetup = 0; st.pendingParts = null; prevPhysical = c; prevPhysicalDay = day;
                     // #4434 п.1: остаток — на следующий день, НО уйти с текущего можно, только если на
                     // нём не осталось 🔒 (иначе зафиксированное «отстаёт» от указателя дня и переезжает).
                     if (st.remaining > 0) { clock += setupG + durG; leaveDay(); ppTrace('  положено ' + passesNowG + ' проходов (' + Math.round(setupG + durG) + ' мин), остаток ' + st.remaining + ' → день ' + day); }     // остаток проходов — на следующий день
@@ -7232,6 +7251,7 @@
                             setupKnifeMin: colsG ? colsG.knifeMin : null, setupMaterialMin: colsG ? colsG.materialWindingMin : null });
                         clock += tailSetupG; prevPhysical = c; prevPhysicalDay = day;
                         st.isCont = true; st.pendingSetup = round3(setupG - tailSetupG);
+                        st.pendingParts = remainingSetupParts(setupPartsG, chosenG);   // #4529: остаток — своими кодами
                         ppTrace('  проход не влез — в хвост дня положена настройка ' + Math.round(tailSetupG) +
                             ' мин (нахлёст ≤ ' + Math.round(maxOverworkTune != null ? maxOverworkTune : 0) + '), остаток настройки ' +
                             Math.round(st.pendingSetup) + ' + проходы → день ' + (day + 1));
@@ -7246,12 +7266,12 @@
                     // настройку + 1 проход с нахлёстом, остальное на следующий день (#3821: единственный
                     // случай, где нахлёстный проход сохраняется, иначе резка не разместилась бы никогда).
                     var wsO = day * 1440 + dayStart + clock, durO = 1 * perPassEffG;
-                    var colsO = setupColsFor(prevPhysical, c, setupG, st.isCont);   // #4499
+                    var colsO = setupColsFor(prevPhysical, c, setupG, st.isCont, st.pendingParts);   // #4499/#4529
                     segments.push({ cutId: pick, dayOffset: day, runs: 1,
                         windowStartMin: round3(wsO), startMin: round3(wsO + setupG), setupMin: round3(setupG),
                         durationMin: round3(durO), isContinuation: st.isCont, parentCutId: st.isCont ? pick : null,
                         setupKnifeMin: colsO.knife, setupMaterialMin: colsO.material });
-                    st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; prevPhysical = c; prevPhysicalDay = day;
+                    st.remaining -= 1; st.isCont = true; st.pendingSetup = 0; st.pendingParts = null; prevPhysical = c; prevPhysicalDay = day;
                     ppTraceWarn('вырожденно: настройка+1 проход (' + Math.round(setupG + perPassEffG) + ' мин) длиннее целого дня — кладём 1 проход с нахлёстом, остаток ' + st.remaining + ' → день ' + (day + 1));
                     clock += setupG + durO;
                     leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
@@ -7290,6 +7310,7 @@
             var remaining = runs;
             var isCont = false;
             var pendingSetup = 0;   // #3635 п.5: остаток настройки, перенесённый на продолжение след. дня
+            var pendingParts = null;   // #4529: его компоненты (ножи/сырьё) — чтобы продолжение писало их в СВОИ колонки
             insertLunchBefore();  // #3342: обед перед началом этой резки
             // Резка без проходов/длительности — один сегментик без раскладки по проходам.
             if (!(runs > 0) || !(perPass > 0) || !hasWindow) {
@@ -7351,6 +7372,7 @@
                             prevPhysical = c; prevPhysicalDay = day;
                             isCont = true;                          // проходы дня N+1 — продолжение
                             pendingSetup = round3(setup - tailSetup);   // остаток настройки → на продолжение
+                        pendingParts = remainingSetupParts(setupParts, chosen);   // #4529: остаток — своими кодами
                             day += 1; clock = 0; continue;
                         }
                     }
@@ -7360,7 +7382,7 @@
                 var passesNow = Math.min(remaining, maxPasses);
                 var windowStart = day * 1440 + dayStart + clock;
                 var segDur = passesNow * perPassEff;
-                var colsN = setupColsFor(prevPhysical, c, setup, isCont);   // #4499
+                var colsN = setupColsFor(prevPhysical, c, setup, isCont, pendingParts);   // #4499/#4529
                 segments.push({ cutId: String(cid), dayOffset: day, runs: passesNow,
                     windowStartMin: round3(windowStart), startMin: round3(windowStart + setup),
                     setupMin: round3(setup), durationMin: round3(segDur),
@@ -7371,6 +7393,7 @@
                 prevPhysical = c; prevPhysicalDay = day;
                 isCont = true;   // дальнейшие сегменты этой резки — продолжения (ножи остаются)
                 pendingSetup = 0;   // #3635 п.5: остаток настройки применён к этому сегменту — больше не добавляем
+                pendingParts = null;
             }
         });
         // #3914: итог базовой ветки по дням (на случай, если gapFill выключен).
@@ -18986,6 +19009,12 @@
         if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
         if (reqs.matReq) fields['t' + reqs.matReq] = String(u.material);
         if (reqs.cutTimeReq) fields['t' + reqs.cutTimeReq] = String(u.cutTime);   // #3700
+        // #4529: «Длительность, минут» пишется ВМЕСТЕ с «Резкой и Лидером» — это одно и то же
+        // число в двух видах (лидер = BETWEEN_CUTS × проходов). Порознь они расходятся: норма
+        // намотки меняется (#4501 — узкие полосы), план пишет новую «Резку и Лидер», а старая
+        // «Длительность» остаётся — и детектор, который считает «Резку и Лидер» ИЗ НЕЁ, вечно
+        // просит пересчёт (issue #4529: «резка и лидер 20 → 14 мин» сразу после «Сгенерировать»).
+        if (reqs.durationReq && u.duration != null) fields['t' + reqs.durationReq] = String(u.duration);
         return fields;
     }
 
@@ -19093,11 +19122,12 @@
         // (карта пуста), считаем как раньше.
         var planColsBy = (opts && opts.planCols) || {};
         var meta = this.meta.cut;
-        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null, durationReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
         reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
         reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
         reqs.cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        reqs.durationReq = reqIdByName(meta, CUT_REQ.duration);      // #4529: пишется вместе с «Резкой и Лидером»
         if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
         var onlySet = null;
         if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
@@ -19111,6 +19141,31 @@
         //    резка другого дня — отсюда была бы ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        // #4529: НАМОТКА СЕГМЕНТА — ЖИВАЯ НОРМА, а не хранимая «Длительность, минут». «Резка и
+        // Лидер» = намотка + BETWEEN_CUTS × проходов, и упаковщик считает её по норме из «Времени
+        // операции» (plannedCutDurationMinutes → windPointsForCut). Хранимая «Длительность»
+        // переписывается только при СМЕНЕ проходов, поэтому после правки нормы (#4501: полоса
+        // ≤ 30 мм наматывается по своей серии) она описывает прежний мир: план пишет «Резку и
+        // Лидер» 20, а детектор, считавший её ИЗ «Длительности», требовал 14 — вечная красная
+        // «↻ Пересчитать наладку», которая, если её нажать, ломает раскладку дня (issue #4529).
+        // Считаем ТЕМ ЖЕ выражением, что и писатель сегментов (splitSegTimingFields) и
+        // предпросмотр (durationForSegment): норма и длина прогона — по ГОЛОВЕ цепочки, у
+        // продолжения своих полос и своей длины нет.
+        //   Нет норм намотки/длины прогона — молча обнулять задание нельзя: держим хранимое
+        //   (общая конвенция «нет данных — нет обвинений»). → минуты намотки либо null.
+        var cutsByIdSetup = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutsByIdSetup[String(c.id)] = c; });
+        var opTimesSetup = this.opTimes, suppliesSetup = this.supplies, posLenSetup = this.positionLengthById;
+        var hasWindNorms = !!(opTimesSetup && Object.keys(opTimesSetup).some(function(k) { return /^WIND_/.test(k); }));
+        function windingMinFor(c, runs) {
+            if (!(runs > 0)) return 0;                       // setup-only хвост (#4021) — намотки нет
+            if (!hasWindNorms) return null;
+            var fp = (c && c.firstPartId != null) ? String(c.firstPartId).trim() : '';
+            var head = cutsByIdSetup[fp !== '' ? fp : String(c && c.id)] || c;
+            var runLen = cutRunLength(head, suppliesSetup, posLenSetup);
+            if (!(runLen > 0)) return null;
+            return Math.ceil(plannedCutDurationMinutes(runLen, runs, opTimesSetup, head));   // #4501: норма по самой узкой полосе
+        }
         // #3876: тот же источник заправки, что и план (splitMachineQueue): станок в отпуске на
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
@@ -19273,7 +19328,12 @@
                 // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
                 var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
+                // #4529: намотка — по ЖИВОЙ норме (windingMinFor), как у упаковщика; норм/длины
+                // прогона нет — держим хранимую «Длительность».
+                var liveW = windingMinFor(c, runsC);
+                var wantWKnown = liveW != null;
+                var wantW = wantWKnown ? liveW : Math.round(stripNum(c.duration));
+                var wantT = Math.round(wantW + betweenCuts * leaderRuns);
                 // #4499: у этого сегмента есть числа УПАКОВЩИКА — они и есть правда. Сумма трёх
                 // колонок тогда в точности равна занятости сегмента, а значит бейдж дня равен тому,
                 // что напаковано, и потолок меряется по одной арифметике, а не по двум.
@@ -19282,6 +19342,9 @@
                     wantK = Math.round(Number(planCols.knife) || 0);
                     wantM = Math.round(Number(planCols.material) || 0);
                     wantT = Math.round(Number(planCols.cutTime) || 0);
+                    // #4529: «Длительность» — та же величина без лидера, иначе пара колонок разъедется.
+                    wantW = Math.max(0, wantT - Math.round(betweenCuts * leaderRuns));
+                    wantWKnown = true;   // числа упаковщика знают намотку сегмента точно
                 }
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
@@ -19289,15 +19352,24 @@
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
+                // #4529: «Длительность, минут» — часть той же записи. Расхождение по ней ОДНО
+                // «Резка и Лидер» не всегда показывает (лидер целочислен, а норма могла измениться
+                // ровно на лидер), поэтому спрашиваем и её; пустую не выдумываем (durationReq нет
+                // в метаданных или живой нормы нет → wantW равен хранимому и diff пуст).
+                var durChanged = wantWKnown && changed(reqs.durationReq, c.duration, wantW);
                 if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
-                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)
+                    || durChanged) {
                     updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT,
-                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin, wasCutTime: c.storedCutAndLeaderMin });
+                        duration: (reqs.durationReq && wantWKnown) ? wantW : null,
+                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin,
+                        wasCutTime: c.storedCutAndLeaderMin, wasDuration: c.duration });
                     if (dryRun4401) return;                       // #4401: детектор — состояние не меняем
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
                     c.storedCutAndLeaderMin = String(wantT);
+                    if (reqs.durationReq && wantWKnown) c.duration = String(wantW);
                 }
             });
         });

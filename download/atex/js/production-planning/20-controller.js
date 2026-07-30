@@ -6776,6 +6776,12 @@
         if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
         if (reqs.matReq) fields['t' + reqs.matReq] = String(u.material);
         if (reqs.cutTimeReq) fields['t' + reqs.cutTimeReq] = String(u.cutTime);   // #3700
+        // #4529: «Длительность, минут» пишется ВМЕСТЕ с «Резкой и Лидером» — это одно и то же
+        // число в двух видах (лидер = BETWEEN_CUTS × проходов). Порознь они расходятся: норма
+        // намотки меняется (#4501 — узкие полосы), план пишет новую «Резку и Лидер», а старая
+        // «Длительность» остаётся — и детектор, который считает «Резку и Лидер» ИЗ НЕЁ, вечно
+        // просит пересчёт (issue #4529: «резка и лидер 20 → 14 мин» сразу после «Сгенерировать»).
+        if (reqs.durationReq && u.duration != null) fields['t' + reqs.durationReq] = String(u.duration);
         return fields;
     }
 
@@ -6883,11 +6889,12 @@
         // (карта пуста), считаем как раньше.
         var planColsBy = (opts && opts.planCols) || {};
         var meta = this.meta.cut;
-        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null, durationReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
         reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
         reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
         reqs.cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        reqs.durationReq = reqIdByName(meta, CUT_REQ.duration);      // #4529: пишется вместе с «Резкой и Лидером»
         if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
         var onlySet = null;
         if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
@@ -6901,6 +6908,31 @@
         //    резка другого дня — отсюда была бы ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        // #4529: НАМОТКА СЕГМЕНТА — ЖИВАЯ НОРМА, а не хранимая «Длительность, минут». «Резка и
+        // Лидер» = намотка + BETWEEN_CUTS × проходов, и упаковщик считает её по норме из «Времени
+        // операции» (plannedCutDurationMinutes → windPointsForCut). Хранимая «Длительность»
+        // переписывается только при СМЕНЕ проходов, поэтому после правки нормы (#4501: полоса
+        // ≤ 30 мм наматывается по своей серии) она описывает прежний мир: план пишет «Резку и
+        // Лидер» 20, а детектор, считавший её ИЗ «Длительности», требовал 14 — вечная красная
+        // «↻ Пересчитать наладку», которая, если её нажать, ломает раскладку дня (issue #4529).
+        // Считаем ТЕМ ЖЕ выражением, что и писатель сегментов (splitSegTimingFields) и
+        // предпросмотр (durationForSegment): норма и длина прогона — по ГОЛОВЕ цепочки, у
+        // продолжения своих полос и своей длины нет.
+        //   Нет норм намотки/длины прогона — молча обнулять задание нельзя: держим хранимое
+        //   (общая конвенция «нет данных — нет обвинений»). → минуты намотки либо null.
+        var cutsByIdSetup = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutsByIdSetup[String(c.id)] = c; });
+        var opTimesSetup = this.opTimes, suppliesSetup = this.supplies, posLenSetup = this.positionLengthById;
+        var hasWindNorms = !!(opTimesSetup && Object.keys(opTimesSetup).some(function(k) { return /^WIND_/.test(k); }));
+        function windingMinFor(c, runs) {
+            if (!(runs > 0)) return 0;                       // setup-only хвост (#4021) — намотки нет
+            if (!hasWindNorms) return null;
+            var fp = (c && c.firstPartId != null) ? String(c.firstPartId).trim() : '';
+            var head = cutsByIdSetup[fp !== '' ? fp : String(c && c.id)] || c;
+            var runLen = cutRunLength(head, suppliesSetup, posLenSetup);
+            if (!(runLen > 0)) return null;
+            return Math.ceil(plannedCutDurationMinutes(runLen, runs, opTimesSetup, head));   // #4501: норма по самой узкой полосе
+        }
         // #3876: тот же источник заправки, что и план (splitMachineQueue): станок в отпуске на
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
@@ -7063,7 +7095,12 @@
                 // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
                 var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
+                // #4529: намотка — по ЖИВОЙ норме (windingMinFor), как у упаковщика; норм/длины
+                // прогона нет — держим хранимую «Длительность».
+                var liveW = windingMinFor(c, runsC);
+                var wantWKnown = liveW != null;
+                var wantW = wantWKnown ? liveW : Math.round(stripNum(c.duration));
+                var wantT = Math.round(wantW + betweenCuts * leaderRuns);
                 // #4499: у этого сегмента есть числа УПАКОВЩИКА — они и есть правда. Сумма трёх
                 // колонок тогда в точности равна занятости сегмента, а значит бейдж дня равен тому,
                 // что напаковано, и потолок меряется по одной арифметике, а не по двум.
@@ -7072,6 +7109,9 @@
                     wantK = Math.round(Number(planCols.knife) || 0);
                     wantM = Math.round(Number(planCols.material) || 0);
                     wantT = Math.round(Number(planCols.cutTime) || 0);
+                    // #4529: «Длительность» — та же величина без лидера, иначе пара колонок разъедется.
+                    wantW = Math.max(0, wantT - Math.round(betweenCuts * leaderRuns));
+                    wantWKnown = true;   // числа упаковщика знают намотку сегмента точно
                 }
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
@@ -7079,15 +7119,24 @@
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
+                // #4529: «Длительность, минут» — часть той же записи. Расхождение по ней ОДНО
+                // «Резка и Лидер» не всегда показывает (лидер целочислен, а норма могла измениться
+                // ровно на лидер), поэтому спрашиваем и её; пустую не выдумываем (durationReq нет
+                // в метаданных или живой нормы нет → wantW равен хранимому и diff пуст).
+                var durChanged = wantWKnown && changed(reqs.durationReq, c.duration, wantW);
                 if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
-                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)
+                    || durChanged) {
                     updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT,
-                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin, wasCutTime: c.storedCutAndLeaderMin });
+                        duration: (reqs.durationReq && wantWKnown) ? wantW : null,
+                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin,
+                        wasCutTime: c.storedCutAndLeaderMin, wasDuration: c.duration });
                     if (dryRun4401) return;                       // #4401: детектор — состояние не меняем
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
                     c.storedCutAndLeaderMin = String(wantT);
+                    if (reqs.durationReq && wantWKnown) c.duration = String(wantW);
                 }
             });
         });
