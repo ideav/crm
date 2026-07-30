@@ -8623,7 +8623,7 @@
         // Проверка идёт через РЕЕСТР (05-invariants.js, PP_INVARIANTS), а не условиями по месту:
         // то же правило обязано действовать на всех путях записи, и оно должно быть одно.
         if (ops) {
-            var frozenNow = {}, fixedNow = {}, dayKeyNow = {};
+            var frozenNow = {}, fixedNow = {}, dayKeyNow = {}, cutsById = {};
             var freezeOn = !!(self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length);
             (cuts || []).forEach(function(c){
                 if (!c || c.id == null) return;
@@ -8631,6 +8631,7 @@
                 if (freezeOn && self.dayIsFrozen(c.planDate)) frozenNow[key] = true;
                 if (c.fixed) fixedNow[key] = true;
                 dayKeyNow[key] = planDateDayKey(c.planDate);
+                cutsById[key] = c;   // #4524: корень цепочки дробления для правила CHAIN_SETUP_ONCE
             });
             // #4494: задание, которое ОПЕРАТОР сам перенёс сейчас (🗓). Только ему разрешён разрыв по
             // потолку в замороженном дне: день не может быть длиннее смены, а состав дня при этом не
@@ -8689,7 +8690,24 @@
                 // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
                 // (проставляет партию), а нарушением считает только то, что разрешить не удалось.
                 resolveBatchForCut: (self && typeof self.resolveBatchForCut === 'function')
-                    ? function(id){ return self.resolveBatchForCut(id); } : null
+                    ? function(id){ return self.resolveBatchForCut(id); } : null,
+                // #4524: минуты ОДНОЙ смены ножей и ОДНОЙ смены сырья — те же, которыми считает
+                // упаковщик (this.changeTimes), и корень цепочки дробления задания. По ним правило
+                // CHAIN_SETUP_ONCE видит, не посчитали ли наладку разорванного задания дважды.
+                knifeSetupMin: function(){
+                    var t = self.changeTimes || {};
+                    return Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0;
+                },
+                materialSetupMin: function(){
+                    var t = self.changeTimes || {};
+                    return Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
+                },
+                chainIdOfCut: function(id){
+                    var c = cutsById[String(id)];
+                    if (!c) return null;
+                    var fp = String(c.firstPartId == null ? '' : c.firstPartId).trim();
+                    return fp !== '' ? fp : String(c.id);
+                }
             }, 'auto');
             if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
             // #4452: страж восстановил «Партию сырья» в операциях — она уйдёт в базу вместе с планом.

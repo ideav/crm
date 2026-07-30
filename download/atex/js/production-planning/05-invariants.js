@@ -666,6 +666,81 @@
                 (ops && ops.creates || []).forEach(function(cr) { verify(cr, cr.parentCutId); });
                 return out;
             }
+        },
+        {
+            id: 'CHAIN_SETUP_ONCE',
+            tz: '§15 (#4524)',
+            actor: 'any',       // двойная наладка — брак независимо от того, кто её создал
+            mode: 'audit',     // отбрасывать нечего: лишние минуты чинятся расчётом, а не отказом от записи
+            why: 'отбрасывать нечего: лишние минуты наладки чинятся РАСЧЁТОМ (changeoverParts не берёт '
+                 + 'переналадку между звеньями одной цепочки), а не отказом от записи — без записи '
+                 + 'задание останется незапланированным и с той же двойной наладкой',
+            title: 'Наладка задания, разорванного по дням, платится ОДИН раз на всю цепочку',
+            // ЧТО ПРОВЕРЯЕТСЯ. Задание, не влезшее в смену, живёт цепочкой записей (голова +
+            // продолжения, общий «ID первой части»). Ножи ему настраивают ОДИН раз: хвост дня N
+            // держит столько наладки, сколько влезло до потолка нахлёста, продолжение — остаток
+            // (#4030/#4111). Сумма по цепочке равна ОДНОЙ смене ножей и ОДНОЙ смене сырья — станок
+            // как настроили вечером, так он и стои́т утром (правило «ножи те же с прошлого дня»).
+            // Если сумма больше, наладку посчитали ДВАЖДЫ: оператор видит красную «↻ Пересчитать
+            // наладку» на задании, у которого ножи не менялись (issue #4524: хвост 03.08 держит
+            // 30 мин, а продолжению 04.08 детектор просит ещё 30).
+            //
+            // ПОЧЕМУ ЭТО ПРАВИЛО, А НЕ ПРОВЕРКА В ОДНОМ РАСЧЁТЕ. «Нужна ли переналадка» спрашивают
+            // ПЯТЬ потребителей (упаковщик, колонки, детектор, панель качества, слой размещения), и
+            // каждый выводил ответ сам — из своих входов. Поэтому правило возвращалось: чинили один
+            // путь, остальные продолжали считать по-своему. Ответ теперь один (`changeoverParts` +
+            // `sameSplitChain`), а это правило — храповик: если какой-то путь снова начнёт считать
+            // наладку сам, шлюз скажет об этом на ВСЕХ входах записи разом.
+            //
+            // ctx.knifeSetupMin() / ctx.materialSetupMin() → минуты ОДНОЙ смены (из «Настройки»);
+            // колонки берём у упаковщика (`planCols`, #4499) — он один решает, сколько наладки
+            // остаётся в дне N. Нет предикатов или нет planCols → правило не срабатывает (общая
+            // конвенция реестра: нет данных — нет обвинений).
+            check: function(ops, ctx) {
+                var knifeFn = (ctx && typeof ctx.knifeSetupMin === 'function') ? ctx.knifeSetupMin : null;
+                var matFn = (ctx && typeof ctx.materialSetupMin === 'function') ? ctx.materialSetupMin : null;
+                var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+                if (!knifeFn || !matFn || !chainFn) return [];
+                var knifeOne = Math.round(Number(knifeFn()) || 0);
+                var matOne = Math.round(Number(matFn()) || 0);
+                if (knifeOne <= 0 && matOne <= 0) return [];
+                var byChain = {};
+                function add(chainId, cutId, cols) {
+                    if (!cols) return;
+                    var key = String(chainId == null ? '' : chainId);
+                    if (key === '') return;
+                    var acc = byChain[key] = byChain[key] || { knife: 0, material: 0, ids: [] };
+                    acc.knife += Math.round(Number(cols.knife) || 0);
+                    acc.material += Math.round(Number(cols.material) || 0);
+                    acc.ids.push(String(cutId));
+                }
+                (ops && ops.updates || []).forEach(function(u) {
+                    if (u) add(chainFn(u.cutId), u.cutId, u.planCols);
+                });
+                (ops && ops.creates || []).forEach(function(cr) {
+                    if (cr) add(chainFn(cr.parentCutId), cr.parentCutId, cr.planCols);
+                });
+                var out = [];
+                Object.keys(byChain).forEach(function(chainId) {
+                    var acc = byChain[chainId];
+                    if (acc.ids.length < 2) return;   // цепочки нет — одному звену платить один раз и положено
+                    if (acc.knife > knifeOne) {
+                        out.push(ppViolation('CHAIN_SETUP_ONCE', acc.ids[acc.ids.length - 1],
+                            'наладка ножей посчитана дважды: по цепочке ' + chainId + ' сумма ' + acc.knife
+                            + ' мин при одной смене ' + knifeOne + ' мин (звенья: ' + acc.ids.join(', ') + ')',
+                            { chainId: String(chainId), kind: 'knife', sumMin: acc.knife, oneMin: knifeOne,
+                              partIds: acc.ids.slice() }));
+                    }
+                    if (acc.material > matOne) {
+                        out.push(ppViolation('CHAIN_SETUP_ONCE', acc.ids[acc.ids.length - 1],
+                            'смена сырья посчитана дважды: по цепочке ' + chainId + ' сумма ' + acc.material
+                            + ' мин при одной смене ' + matOne + ' мин (звенья: ' + acc.ids.join(', ') + ')',
+                            { chainId: String(chainId), kind: 'material', sumMin: acc.material, oneMin: matOne,
+                              partIds: acc.ids.slice() }));
+                    }
+                });
+                return out;
+            }
         }
     ];
 

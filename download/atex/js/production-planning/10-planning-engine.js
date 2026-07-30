@@ -125,12 +125,40 @@
         return materialSetupSig(prev) !== materialSetupSig(next);
     }
 
+    // #4524 (ТЗ §15): КОРЕНЬ ЦЕПОЧКИ ДРОБЛЕНИЯ — «ID первой части» (у головы он указывает на себя,
+    // у продолжений — на голову). Нормализуем так же, как группировка цепочек #3892.
+    function splitChainRoot(cut){
+        var fp = (cut && cut.firstPartId != null) ? String(cut.firstPartId).trim() : '';
+        if (fp !== '') return fp;
+        var id = (cut && cut.id != null) ? String(cut.id).trim() : '';
+        return id;
+    }
+    // #4524 (ТЗ §15): ДВА ЗВЕНА ОДНОЙ ЦЕПОЧКИ ДРОБЛЕНИЯ. Хвост дня N и его продолжение в дне N+1 —
+    // это ОДНО задание, разрезанное потолком смены: те же ножи, тот же рулон, та же намотка.
+    // Переналадки между ними не бывает ПО ПОСТРОЕНИЮ — станок как настроили вечером, так он и
+    // стои́т утром (правило «ножи те же с прошлого дня» ТЗ §15; длинный отпуск снимает заправку
+    // ОТДЕЛЬНО — через `setupResetCutIds`, до этой проверки).
+    function sameSplitChain(prev, next){
+        if (!prev || !next) return false;
+        var a = splitChainRoot(prev), b = splitChainRoot(next);
+        if (a === '' || b === '') return false;
+        if (a !== b) return false;
+        return String(prev.id) !== String(next.id);
+    }
+
     function changeoverParts(prev, next, times){
         var t = times || DEFAULT_OP_TIMES;
         var matWind = Number(t.MATERIAL_WINDING != null ? t.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING) || 0;
         var knifeTime = Number(t.KNIFE != null ? t.KNIFE : DEFAULT_OP_TIMES.KNIFE) || 0; // #3600: фикс. время любой смены ножей (по умолч. 30 мин), независимо от числа ножей
         var parts = [];
         if (!prev || !next) return parts;
+        // #4524: между звеньями ОДНОЙ цепочки дробления переналадки нет. Мерка одна для всех, кто
+        // спрашивает про наладку (упаковщик, колонки, детектор «↻ Пересчитать наладку», панель
+        // качества, слой размещения), — иначе правило выводится заново в каждом и расходится:
+        // хватало «пустых» ширин полос у одного из звеньев или более широкого ролика у хвоста,
+        // чтобы продолжению начислилась ВТОРАЯ наладка тех же ножей (issue #4524: хвост 03.08
+        // держит 30 мин, а продолжению 04.08 детектор просит ещё 30).
+        if (sameSplitChain(prev, next)) return parts;
         var matWindChange = materialSetupChanged(prev, next);   // #4481: партия в подпись не входит
         // #3600: любая смена набора ножей ИЛИ сужение ролика → ФИКСИРОВАННО KNIFE (30 мин)
         // «на всё вместе», независимо от числа переставленных ножей (раньше #3472: стоимость =
