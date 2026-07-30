@@ -582,6 +582,26 @@
     font-weight: 400;
     color: var(--pp-muted);
 }
+/* #4531: день не помещается в смену — видно в его шапке, а не только в предупреждении. Сумма
+   минут становится тревожной, а рядом встаёт бейдж с перебором; подробности (до какого часа идёт
+   работа, потолок, задание-виновник) — в подсказке бейджа. */
+.atex-pp-day-date.is-over { border-bottom-color: var(--pp-warn); }
+.atex-pp-day-date.is-over .atex-pp-day-mins { color: var(--pp-warn); font-weight: 700; }
+.atex-pp-day-over {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--pp-warn);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    cursor: help;
+}
+/* Выходной день уже залит красным — там бейдж и минуты выворачиваем, иначе красное по красному
+   не читается (правило .is-over идёт после .is-dayoff и при равной специфичности побеждало бы). */
+.atex-pp-day-date.is-dayoff .atex-pp-day-over { background: #fff; color: var(--pp-warn); }
+.atex-pp-day-date.is-dayoff.is-over .atex-pp-day-mins { color: rgba(255, 255, 255, .85); }
 
 /* Контролы внутри карточки: вверх/вниз/Полосы (#3120 п.1). Клик по ним не
    выбирает резку (#3149) — поэтому курсор-стрелка, а не «указатель» карточки. */
