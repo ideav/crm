@@ -45,6 +45,7 @@
         setupMismatchSummary: setupMismatchSummary, // #4479: суть отклонения на бейдже («наладка · старт»)
         setupMismatchTitle: setupMismatchTitle,     // #4479: детали отклонения в подсказке бейджа
         formatPlanStamp: formatPlanStamp,       // #4409/#4417: unix-секунды → «ДД.ММ ЧЧ:ММ»
+        planStartDayKey: planStartDayKey,       // #4518: unix-секунды → YYYYMMDD (день старта)
         isPreviewCutId: isPreviewCutId,         // #4402
         groupBySlitter: groupBySlitter,
         mergeStationTabs: mergeStationTabs,
@@ -3193,9 +3194,11 @@
     // #4409: раздел ПЕРЕМЕЩЕНИЯ трассы — что куда уехало относительно ТЕКУЩЕЙ очереди (self.cuts
     // ещё не подменена проекцией). Поимённо печатаем первые OPT_TRACE_MOVES_LIMIT, остаток
     // не замалчиваем (formatOptimizeTrace допишет «…и ещё N»).
-    AtexProductionPlanning.prototype.fillOptimizeMovesTrace = function(trace, ops, slitterByRecordId) {
+    // #4518: baseCuts — очередь, от которой считаем «было». По умолчанию текущая (`this.cuts`), но
+    // предпросмотр перезаписывает её проекцией и передаёт СНИМОК: иначе «было» и «стало» совпали бы.
+    AtexProductionPlanning.prototype.fillOptimizeMovesTrace = function(trace, ops, slitterByRecordId, baseCuts) {
         var byId = {};
-        (this.cuts || []).forEach(function(c) { if (c) byId[String(c.id)] = c; });
+        (baseCuts || this.cuts || []).forEach(function(c) { if (c) byId[String(c.id)] = c; });
         var slitterName = {};
         (this.slitters || []).forEach(function(s) { slitterName[String(s.id)] = s.label || s.name || ('#' + s.id); });
         function label(sid) {
@@ -3260,6 +3263,44 @@
         };
     };
 
+    // #4518: колонки наладки УПАКОВЩИКА для проекции предпросмотра — та же карта, что «Применить»
+    // отдаёт в persistCutSetupColumns (#4499), только сегменты дробления записей ещё не имеют и
+    // адресуются синтетическим id `preview:N`. projectPlanOnCuts возвращает `createdFrom` —
+    // соответствие `createdIds[i]` ↔ `ops.creates[createdFrom[i]]` (создание без головы пропущено,
+    // поэтому позиции не совпадают один в один). Чистая.
+    // → { byCut: {cutId → {knife, material, cutTime}}, createIndex: {previewId → индекс в creates} }
+    function previewPlanCols(ops, projected) {
+        var byCut = {}, createIndex = {};
+        ((ops && ops.updates) || []).forEach(function(u) {
+            if (u && u.planCols) byCut[String(u.cutId)] = u.planCols;
+        });
+        var creates = (ops && ops.creates) || [];
+        var ids = (projected && projected.createdIds) || [];
+        var from = (projected && projected.createdFrom) || [];
+        ids.forEach(function(pid, i) {
+            var cr = creates[from[i]];
+            if (!cr) return;
+            createIndex[String(pid)] = from[i];
+            if (cr.planCols) byCut[String(pid)] = cr.planCols;
+        });
+        return { byCut: byCut, createIndex: createIndex };
+    }
+
+    // #4518: снять колонки упаковщика с заданий тех СТАНКО-ДНЕЙ, порядок в которых поменяла
+    // полировка #4446: у соседей другая конфигурация, и числа упаковщика этот день уже не описывают.
+    // Мутирует переданную карту (её же читает следующий computeCutSetupUpdates).
+    function dropPlanColsForTouchedDays(byCut, cuts, movedUpdates) {
+        var touched = {};
+        (movedUpdates || []).forEach(function(u) { if (u) touched[String(u.cutId)] = true; });
+        var keyOf = function(c) {
+            var sid = String((c && c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            return sid + '|' + planStartDayKey(Number(c && (c.planDate || c.number)));
+        };
+        var days = {};
+        (cuts || []).forEach(function(c) { if (c && touched[String(c.id)]) days[keyOf(c)] = true; });
+        (cuts || []).forEach(function(c) { if (c && days[keyOf(c)]) delete byCut[String(c.id)]; });
+    }
+
     // #4402: показать предпросмотр пересчитанного плана. Проецирует ops (+ смену станков) на
     // КОПИЮ очереди, пересчитывает на ней колонки наладки (в памяти, без записи) и запоминает
     // _pendingPlan вместе со СНИМКОМ исходных резок — «Отменить» и F5 возвращают прежний план.
@@ -3297,9 +3338,15 @@
             }
         });
         this.cuts = projected.cuts;
-        // Колонки наладки проекции — в памяти (без записи). updates несут прежние значения (was*),
-        // из них #4417 берёт изменения ТАЙМИНГА: их не видно по planStart, но применение их запишет.
-        var setupRes = this.computeCutSetupUpdates(null);
+        // #4518: ОДНА АРИФМЕТИКА. Колонки наладки предпросмотра берём У УПАКОВЩИКА (`ops.*.planCols`,
+        // #4499) — ровно как их берёт «Применить» (applySplitPlan → persistCutSetupColumns). Считать
+        // их здесь заново значит мерить план ВТОРЫМ независимым расчётом: день выходит «несведённым»,
+        // #4444 переписывает старты, и оператор получает десяток правок «на 2 минуты», которых в
+        // плане упаковщика не было, а трасса «Упорядочить» перестаёт совпадать с «Деталями»
+        // (issue #4518: лог «ПЕРЕМЕЩЕНИЯ: 23», в модалке 21, времена на 2–6 минут другие).
+        var planCols = previewPlanCols(pend.ops, projected);
+        this._previewCreateIndex = planCols.createIndex;
+        var setupRes = this.computeCutSetupUpdates(null, { planCols: planCols.byCut });
         // #4446: ГЛОБАЛЬНЫЙ кандидат выигрывает по всему горизонту, но внутри ОТДЕЛЬНОГО дня может
         // оставить заведомо худший порядок — оператор сравнивает свой ручной план с предложенным по
         // одному дню и видит, что предложенный хуже («левый план — предлагаемый — хуже правого — его
@@ -3311,7 +3358,11 @@
             this.applyPreviewStarts(polished.updates.map(function(u) {
                 return { cutId: String(u.cutId), ts: Number(u.planStartTs) };
             }), pend.ops);
-            setupRes = this.computeCutSetupUpdates(null);   // порядок в дне сменился — колонки наладки другие
+            // #4518: полировка сменила СОСЕДЕЙ в затронутых станко-днях — числа упаковщика этот
+            // порядок больше не описывают, и для таких дней колонки считаем заново. Остальные дни
+            // продолжают меряться числами упаковщика, иначе вернулась бы вторая арифметика целиком.
+            dropPlanColsForTouchedDays(planCols.byCut, this.cuts, polished.updates);
+            setupRes = this.computeCutSetupUpdates(null, { planCols: planCols.byCut });
             try {
                 console.log('[pp] ⚙️ #4446: порядок ВНУТРИ дней подчищен поверх выбранного кандидата — '
                     + 'заданий ' + polished.updates.length + ', переналадка −' + round3(polished.gainMin) + ' мин');
@@ -3325,13 +3376,14 @@
         // норме. Записываемый план мы уже сводим встык (#4438, reconcilePlanStarts) — значит и
         // ПОКАЗЫВАТЬ надо сведённый, иначе предпросмотр показывает то, чего никогда не будет.
         // Сводим ПРОЕКЦИЮ и тем же сдвигом правим ops, чтобы «Применить» записал ровно показанное.
-        var stitched = this.reconcilePreviewStarts(pend.ops);
-        if (stitched) setupRes = this.computeCutSetupUpdates(null);   // порядок в дне не менялся, но колонки перечитываем от новых стартов
+        // #4518: сверяем ТЕМИ ЖЕ колонками, что показаны, — иначе сведение меряет одно, а карточки
+        // показывают другое, и «сведённым встык» оказывается план, который встык уже стоял.
+        var stitched = this.reconcilePreviewStarts(pend.ops, setupRes.updates);
+        if (stitched) setupRes = this.computeCutSetupUpdates(null, { planCols: planCols.byCut });   // старты новые — колонки перечитываем от них
         pend.after = this.computeQualityStats(scopeFromKey, scopeToKey);
         pend.snapshot = snapshot;
         pend.createdIds = projected.createdIds;
         pend.deletedIds = projected.deletedIds;
-        pend.movedCount = projected.changedIds.length;
         // #4417: разбор «что у кого поменялось» — для модалки «Детали» и пометки карточек в очереди.
         // Считаем ПОСЛЕ пересчёта колонок наладки: тайминг проекции к этому моменту уже в памяти.
         var changes = planChangeRows(snapshot, projected.cuts, setupRes.updates,
@@ -3340,6 +3392,10 @@
               // о том, куда переключаться). Считаем по тем же данным, что рисуют вкладки.
               tabIndexById: slitterTabIndexMap(this.slitters, snapshot.concat(projected.cuts)) });
         pend.changes = changes;
+        // #4518: ОДНО ЧИСЛО НА ВСЕХ. Панель, лог и трасса брали `projected.changedIds` — счёт ДО
+        // полировки (#4446) и сведения (#4444), а «Детали» и «Применить» — то, что осталось ПОСЛЕ.
+        // Оператор видел «переставлено 23» рядом со списком из 21 строки.
+        pend.movedCount = changes.movedCount;
         projected.cuts.forEach(function(c) {
             var row = changes.byId[String(c.id)];
             if (row && row.kind === 'moved') c.previewChanged = row;   // карточку помечаем «изменено»
@@ -3349,6 +3405,11 @@
             + ', новых сегментов ' + projected.createdIds.length + ', удаляется ' + projected.deletedIds.length
             + ' (в БД НЕ записано)');
         if (pend.trace) {
+            // #4518: перемещения в трассе — ИТОГОВЫЕ (после полировки и сведения): «изначальный
+            // расчёт» в логе и список в «Деталях» обязаны быть одним и тем же планом. Времена «было»
+            // берём из СНИМКА — this.cuts к этому моменту уже проекция.
+            this.fillOptimizeMovesTrace(pend.trace, pend.ops,
+                pend.reassign ? pend.reassign.slitterByRecordId : null, snapshot);
             pend.trace.result = { before: pend.before, after: pend.after };
             pend.trace.stop = { code: 'preview', text: 'предпросмотр показан — в БД НЕ записано, ждём «Применить» / «Отменить»' };
             emitOptimizeTrace(pend.trace);
@@ -8844,6 +8905,7 @@
     // (id `preview:N`) записи нет — ему правим соответствующую строку ops.creates (projectPlanOnCuts
     // нумерует их по порядку). starts: [{ cutId, ts }]. → число применённых.
     AtexProductionPlanning.prototype.applyPreviewStarts = function(starts, ops) {
+        var self = this;
         var byId = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
         var updateByCut = {};
@@ -8857,8 +8919,13 @@
             c.number = String(st.ts);
             n++;
             if (isPreviewCutId(st.cutId)) {
-                var idx = Number(String(st.cutId).slice(String(st.cutId).indexOf(':') + 1));
-                if (creates[idx - 1]) creates[idx - 1].planStartTs = st.ts;
+                // #4518: соответствие `preview:N` ↔ строка ops.creates даёт projectPlanOnCuts
+                // (`createdFrom`): создание, у которого головы нет в очереди, сегмента не порождает,
+                // и «N-й preview = N-й create» тогда промахивается на одну строку.
+                var map = self._previewCreateIndex || {};
+                var idx = map[String(st.cutId)];
+                if (idx == null) idx = Number(String(st.cutId).slice(String(st.cutId).indexOf(':') + 1)) - 1;
+                if (creates[idx]) creates[idx].planStartTs = st.ts;
                 return;
             }
             if (updateByCut[String(st.cutId)]) updateByCut[String(st.cutId)].planStartTs = st.ts;
@@ -8869,14 +8936,17 @@
         return n;
     };
 
-    AtexProductionPlanning.prototype.reconcilePreviewStarts = function(ops) {
+    // #4518: setupUpdates — колонки, которыми предпросмотр УЖЕ мерит план (у него они от упаковщика,
+    // #4499). Без них сведение считало занятость своим расчётом и «правило» встык уже сведённый день.
+    AtexProductionPlanning.prototype.reconcilePreviewStarts = function(ops, setupUpdates) {
         var self = this;
         if (!(this.cuts && this.cuts.length)) return 0;
         var starts = [];
+        var opts = setupUpdates ? { updates: setupUpdates } : null;
         (this.slitters || []).forEach(function(s) {
             var sid = String(s && s.id == null ? '' : s.id);
             if (sid === '') return;
-            self.recalcStartUpdates(sid).forEach(function(u) { starts.push({ cutId: String(u.cutId), ts: u.ts }); });
+            self.recalcStartUpdates(sid, opts).forEach(function(u) { starts.push({ cutId: String(u.cutId), ts: u.ts }); });
         });
         var fixed = this.applyPreviewStarts(starts, ops);
         if (fixed) {
@@ -9459,7 +9529,16 @@
         (row.timing || []).forEach(function(t) {
             parts.push(t.label + ' ' + (t.from == null ? '—' : t.from) + ' → ' + t.to + ' мин');
         });
-        return parts.join(' · ') || (row.slitterChanged ? 'только станок' : 'только время старта');
+        if (parts.length) return parts.join(' · ');
+        // #4518: минуты наладки те же — тогда называем, что ИМЕННО поменялось. Прежняя подпись
+        // говорила «только время старта» заданию, уехавшему на другой день, и «только станок» —
+        // тому, у кого сменились и станок, и день: строка спорила с колонкой старта прямо над ней.
+        var what = [];
+        if (row.slitterChanged) what.push('станок');
+        if (row.dayChanged) what.push('день');
+        else if (row.startChanged) what.push('время старта');
+        if (!what.length) return '';
+        return (what.length === 1 ? 'только ' : '') + what.join(' и ');
     }
 
     // #4417: «Детали» — модалка со ВСЕМИ изменёнными заданиями непринятого плана. Панель даёт

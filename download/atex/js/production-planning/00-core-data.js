@@ -1483,13 +1483,14 @@
             if (u.slitterId != null) setSlitter(c, u.slitterId);
             setDuration(c, byId[String(c.firstPartId)] || c);
         });
-        var previewSeq = 0;
-        (o.creates || []).forEach(function(cr) {
+        var previewSeq = 0, createdFrom = [];
+        (o.creates || []).forEach(function(cr, crIdx) {
             if (!cr) return;
             var head = byId[String(cr.parentCutId)];
             if (!head) return;   // головы нет в очереди — рисовать продолжение не от чего
             var seg = clonePlanningCut(head);
             previewSeq += 1;
+            createdFrom.push(crIdx);   // #4518: `preview:N` ↔ индекс в ops.creates (создание без головы пропущено)
             seg.id = PREVIEW_CUT_ID_PREFIX + previewSeq;
             seg.previewNew = true;          // карточка: «появится после «Применить»»
             seg.firstPartId = String(cr.parentCutId);
@@ -1518,7 +1519,8 @@
                 return false;
             });
         }
-        return { cuts: out, createdIds: createdIds, deletedIds: deletedIds, changedIds: Object.keys(changed) };
+        return { cuts: out, createdIds: createdIds, deletedIds: deletedIds, changedIds: Object.keys(changed),
+                 createdFrom: createdFrom };   // #4518: createdIds[i] построен из ops.creates[createdFrom[i]]
     }
 
     // #4409/#4417: unix-секунды планового старта → «ДД.ММ ЧЧ:ММ». Общий формат для трассы
@@ -1530,6 +1532,16 @@
         if (isNaN(d.getTime())) return '—';
         function p2(x) { return (x < 10 ? '0' : '') + x; }
         return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+
+    // #4518: КАЛЕНДАРНЫЙ ДЕНЬ планового старта (unix-секунды → YYYYMMDD). Нужен там, где «сдвиг
+    // времени» и «переезд на другой день» — разные события для человека. Пусто/мусор → null.
+    function planStartDayKey(ts) {
+        var n = Number(ts);
+        if (!isFinite(n) || n <= 0) return null;
+        var d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return null;
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
     }
 
     // #4417: РАЗБОР непринятого плана «Упорядочить» — что именно поменялось у каждого задания.
@@ -1614,11 +1626,15 @@
             var slitterChanged = sidOf(c) !== sidOf(was);
             var timing = timingByCut[id] || [];
             if (!startChanged && !slitterChanged && !timing.length) return;   // задание не тронуто
+            // #4518: переезд на ДРУГОЙ ДЕНЬ — отдельное событие. Для цеха «сдвинулось на 8 минут» и
+            // «уехало на завтра» — разные новости, а по одному флагу startChanged они неразличимы.
+            var dayChanged = startChanged
+                && planStartDayKey(startTs(was)) !== planStartDayKey(startTs(c));
             moved.push({ kind: 'moved', cutId: id, label: cutLabel(c),
                 whenFrom: formatPlanStamp(startTs(was)), whenTo: formatPlanStamp(startTs(c)), startTs: startTs(c),
                 slitterFrom: slitterLabel(sidOf(was)), slitterTo: slitterLabel(sidOf(c)),
                 slitterTabFrom: slitterTab(sidOf(was)), slitterTabTo: slitterTab(sidOf(c)),
-                startChanged: startChanged, slitterChanged: slitterChanged,
+                startChanged: startChanged, slitterChanged: slitterChanged, dayChanged: dayChanged,
                 timingChanged: !!timing.length, timing: timing, parentCutId: '' });
         });
         (snapshot || []).forEach(function(c) {
