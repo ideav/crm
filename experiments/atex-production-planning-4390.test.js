@@ -6,10 +6,11 @@
 // дня «по весу» (weightPositionCutIds → dayLockByCut) кладёт задание в раскладке ПОДВИЖНЫМ (см.
 // computeSlotPlacement: ветка dayLock проверяется РАНЬШЕ `else if (c.fixed)`), переопределяя фиксацию.
 //
-// Часть A (движок): на ЗАМОРОЖЕННОМ целевом дне ФИКС-якорь держится, а мягкий замок дня — нет
-//   (подтверждает: чтобы удержать день, задание должно идти ФИКСИРОВАННЫМ, а не подвижным по весу).
-// Часть B (контроллер): moveCutToDay при fix=true НЕ отдаёт задание в weightPositionCutIds (идёт
-//   ФИКС-якорем), а тост печатается по ФАКТИЧЕСКОМУ дню после раскладки (при сдвиге — предупреждение).
+// Часть A (движок): на ЗАМОРОЖЕННОМ целевом дне ДЕНЬ держит ФИКС-якорь, а мягкий замок дня сам по
+//   себе (без «Зафиксировано») — нет. Поэтому «Зафиксировать» и удерживает выбранный день.
+// Часть B (контроллер): moveCutToDay при fix=true отдаёт задание в weightPositionCutIds — МЕСТО в дне
+//   выбирают веса (#4506), а ДЕНЬ держит фикс-якорь (Зафиксировано=1 + «Дата план»); тост печатается
+//   по ФАКТИЧЕСКОМУ дню после раскладки (при сдвиге — предупреждение).
 //
 // Run with: node experiments/atex-production-planning-4390.test.js
 
@@ -80,6 +81,15 @@ assert(mLockDay !== 1,
 assert(mLockNoFreeze === 1,
     '#4390-A контроль: без заморозки тот же мягкий замок держит день 1 (= ' + mLockNoFreeze + ') — виноват замороженный день');
 
+// #4506: боевая комбинация «Зафиксировать» + «По весу» — фикс-якорь И замок дня вместе. День держит
+// якорь (даже замороженный), место в дне выбирают веса.
+var mBothFrozen = dayOfCut(
+    planning.planCutOperations(fillers().concat([cut('M', 'MA', 1, true)]),
+        opts(Object.assign({ dayAnchorByCut: { M: 1 }, dayLockByCut: { M: 1 }, wholeDayByCut: { M: 1 } }, frozenDay1), pp)),
+    'M');
+assert(mBothFrozen === 1,
+    '#4506: «Зафиксировать» + «По весу» вместе — выбранный (замороженный) день удержан фикс-якорем (= ' + mBothFrozen + ')');
+
 // ── Часть B: контроллер moveCutToDay — fix ⇒ ФИКС-якорь (без weightPositionCutIds) + честный тост ──
 function stubSelf(movedCut, landDayOff, capture) {
     return {
@@ -116,9 +126,11 @@ function runMove(fix, position, landDay) {
 Promise.resolve()
     .then(function () { return runMove(true, 'weight', 27); })   // «Зафиксировать» + «По весу», легло на цель 27
     .then(function (cap) {
-        var hasWeightLock = !!(cap.moveScope && cap.moveScope.weightPositionCutIds && cap.moveScope.weightPositionCutIds.length);
-        assert(!hasWeightLock,
-            '#4390-B: fix=true + «По весу» — задание НЕ отдано в мягкий замок дня (weightPositionCutIds отсутствует → идёт ФИКС-якорем)');
+        var wlFix = cap.moveScope && cap.moveScope.weightPositionCutIds;
+        assert(!!(wlFix && wlFix.length === 1 && String(wlFix[0]) === 'C1'),
+            '#4506: fix=true + «По весу» — задание отдано в замок дня (место в дне выбирают веса), день держит фикс-якорь');
+        assert(!!(cap.moveScope && cap.moveScope.wholeDayCutIds && cap.moveScope.wholeDayCutIds.length === 1),
+            '#4488: перенесённое задание помечено как «ложится в день целиком»');
         assert(cap.notify && cap.notify.kind === 'success' && /27\.07\.2026/.test(cap.notify.msg),
             '#4390-B: легло на целевой день → тост success с датой 27.07 (' + (cap.notify && cap.notify.msg) + ')');
     })
