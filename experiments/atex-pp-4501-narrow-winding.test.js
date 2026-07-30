@@ -143,6 +143,11 @@ assertEqual(planning.normalizeOperationTimes([
     'normalizeOperationTimes: «Код» w<=30 → канонический ключ WIND_W30_<метры>');
 assertEqual(planning.normalizeOperationTimes([{ code: 'WIND_300', minutes: 1.2, widthCode: 'j<=910' }]),
     { WIND_300: 1.2 }, 'условие не про ширину полосы («j») норму намотки не переносит');
+// Поля разошлись — выигрывает «Код операции»: в справочнике написано W30, значит порог 30.
+assertEqual(planning.normalizeOperationTimes([{ code: 'WIND_W30_600', minutes: 8, widthCode: 'w<=25' }]),
+    { WIND_W30_600: 8 }, 'порог из «Кода операции» колонка «Код» НЕ переопределяет');
+assertEqual(planning.normalizeOperationTimes([{ code: 'WIND_W30_600', minutes: 8, widthCode: 'w<=30' }]),
+    { WIND_W30_600: 8 }, 'дублирующее условие в «Коде» ничего не ломает (тот же ключ)');
 
 // ─────────── 8. Загрузчик читает колонку «Код» таблицы 13588 ─────────────────
 var ctrl = Object.create(api.Controller.prototype);
