@@ -6126,7 +6126,7 @@
         //   storedDayByCut: { cutId: dayOffset } — ХРАНИМЫЙ день задания (тот же расчёт, что
         //   dayAnchorByCut: смещение «Даты план» от «С»); своё время старта берём из c.planDate.
         var storedDayBy = opts.storedDayByCut || {};
-        function wholeReserve(d, exceptId) {
+        function wholeReserve(d, exceptId, fixedOnly) {
             if (!wholeDayIds.length) return 0;
             var total = 0;
             for (var wi = 0; wi < wholeDayIds.length; wi++) {
@@ -6134,6 +6134,8 @@
                 if (String(id) === String(exceptId)) continue;
                 var st = state[id];
                 if (!st || !(st.remaining > 0) || !(st.perPass > 0)) continue;   // размещено или вырожденное
+                // #4512: считаем резерв только зафиксированных переносов — см. reserveAgainst.
+                if (fixedOnly && st.fixedDay == null) continue;
                 // День берём АКТУАЛЬНЫЙ: у 🔒 он мог сдвинуться (нерабочий день, #4467).
                 var wDay = (st.fixedDay != null) ? st.fixedDay : Number(wholeDayBy[id]);
                 if (!isFinite(wDay) || wDay !== d) continue;
@@ -6152,9 +6154,27 @@
             while (opts.frozenDayFor(n) && guard++ < 400) n += 1;
             return n;
         }
+        // #4512 (ТЗ §15, решение заказчика 30.07.2026): РЕЗЕРВ ЧУЖОГО ЗАДАНИЯ НЕ ВЫТАЛКИВАЕТ 🔒 С ЕГО
+        // ДНЯ. Резерв #4488 держит место под задание РУЧНОГО ПЕРЕНОСА, и вычитался он у всех соседей
+        // подряд — включая зафиксированные. Для 🔒 это значило «в остаток дня не влезает ни одного
+        // прохода» → ветка #4467 увозила её на следующий день: свободное задание отбирало место у
+        // замка. Причём впустую — освободившееся место переносимое даже не занимало (боевое: день с
+        // двумя 🔒 по 165 мин после переноса свободного остался с ОДНОЙ 🔒 и дырой в 295 минут, а
+        // перенесённое уехало в следующий день вслед за вытесненной).
+        // Теперь 🔒 своего дня видит ёмкость БЕЗ этого резерва: место уступают только свободные
+        // соседи (ровно то, что #4488 и задумывал — «сначала незафиксированные»). Само переполнение
+        // дня правило не отменяет: лестница #4467 (реальная нехватка минут) действует как прежде.
+        // Для 🔒 своего дня из резерва исключаются НЕЗАФИКСИРОВАННЫЕ переносы: свободное задание
+        // не отбирает место у замка. Перенос САМОЙ 🔒 (оператор и зафиксировал, и подвинул) резерв
+        // сохраняет — там лестница #4467 решает, как прежде (#4497).
+        function reserveAgainst(d, exceptId) {
+            var stEx = exceptId == null ? null : state[String(exceptId)];
+            var isFixedHere = !!(stEx && stEx.fixedDay != null && stEx.fixedDay === d);
+            return wholeReserve(d, exceptId, isFixedHere);
+        }
         function availFor(d, kind, exceptId) {
             var occWhole = dayWholeOccupied(d);   // #4149: потолок считаем по ЦЕЛОЙ занятости (= колонки/бейдж), не по дробному clock
-            var reserveWhole = wholeReserve(d, exceptId);   // #4488: место под задание ручного переноса
+            var reserveWhole = reserveAgainst(d, exceptId);   // #4488: место под задание ручного переноса; #4512: не против 🔒
             var base = effCapacity(d) - occWhole - reserveWhole;
             if (!overworkOn || !hasWindow) return base;
             var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
@@ -6714,6 +6734,31 @@
                             // НЕ трогаем — она остаётся на своём прошлом дне (#3974).
                             var stranded = rem.filter(function(id){ return state[id].fixedDay != null && state[id].fixedDay >= 0; });
                             if (!stranded.length) break;
+                            // #4512 (ТЗ §15, решение заказчика 30.07.2026): БЛОКЕР «🔒 НЕ ВЫКИДЫВАЕМ».
+                            // Эта ветка объявляла причиной «день нерабочий» ВСЁ, что сюда дошло, и снимала
+                            // замок. Трассировка боевого случая (issue #4513, ateh 30.07.2026) показала
+                            // ложные вердикты: «задание 648799 не удержало свой день 1 — день нерабочий,
+                            // размещено с дня 8», хотя день 1 = пт 31.07.2026 — обычный рабочий день
+                            // (в «Календаре» исключений нет, «Отпуск станка» пуст, заморозка только по
+                            // 29.07). Так зафиксированный паровоз улетал на неделю вперёд, освобождая день
+                            // незафиксированным заданиям. Теперь замок снимается ТОЛЬКО когда день ФИЗИЧЕСКИ
+                            // нерабочий (`dayFullyBlocked` — окно смены целиком накрыто выходным/праздником/
+                            // «Отпуском»). Иначе возвращаем указатель на день 🔒 и кладём её ТАМ: день уйдёт
+                            // за потолок (это видно оператору), но задание останется в своём дне.
+                            var keepOwnDay = stranded.filter(function(id){ return !dayFullyBlocked(state[id].fixedDay); });
+                            if (keepOwnDay.length) {
+                                var backDay = null;
+                                keepOwnDay.forEach(function(id){
+                                    state[id].strandedOwnDay = true;   // #4512: лестница #4467 её больше не выталкивает
+                                    var fd = state[id].fixedDay;
+                                    if (backDay == null || fd < backDay) backDay = fd;
+                                });
+                                ppTraceWarn('#4512 ЗАМОК ЦЕЛ: зафикс-резки ' + keepOwnDay.join(', ') +
+                                    ' остаются в своих днях (день рабочий) — возвращаемся на день ' + backDay +
+                                    '; день может уйти за потолок.');
+                                day = backDay; clock = dayWholeOccupied(backDay);
+                                continue;
+                            }
                             stranded.forEach(function(id){
                                 var lostDay = state[id].fixedDay;
                                 state[id].fixedDay = null;   // разместить на своём дне физически нельзя
@@ -6781,7 +6826,9 @@
                     // на следующий день ЦЕЛИКОМ. Прежде ей насильно оставляли один проход («хотя бы 1
                     // проход держим на фикс-дне»), и день уходил за потолок. Взаимный порядок 🔒 при
                     // этом сохраняется (#4464): якорь сдвигается на день вперёд, очередь не меняется.
-                    if (canRunF && fittingF <= 0 && clock > 0) {
+                    // #4512: резку, ВЕРНУТУЮ в свой день блокером (её день рабочий), лестница #4467
+                    // больше не выталкивает — иначе она снова окажется «застрявшей», и цикл забуксует.
+                    if (canRunF && fittingF <= 0 && clock > 0 && !st.strandedOwnDay) {
                         ppTraceWarn('#4467 ФИКС-резка ' + pick + ' не влезает в остаток дня ' + day +
                             ' (занято ' + Math.round(clock) + ') — уезжает целиком на день ' + (day + 1) +
                             ': потолок дня сильнее замка дня.');
