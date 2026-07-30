@@ -4,6 +4,9 @@
         invariants: PP_INVARIANTS,
         checkPlanInvariants: checkPlanInvariants,
         guardPlanOps: guardPlanOps,
+        // #4515: страж по произвольному набору правил — этим тест проверяет, что отбрасывание
+        // работает для ЛЮБОГО правила с `mode: 'drop'`, а не только для заморозки.
+        guardPlanOpsWith: guardPlanOpsWith,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713

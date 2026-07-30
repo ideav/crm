@@ -19,3 +19,18 @@ jobs:
           node-version: '20'
       - name: Прогон гейта
         run: bash scripts/run-tests.sh
+
+  # Храповик (#4515): зелёный гейт ничего не значит, если ожидание теста правится тем же PR, что и
+  # код. Отдельной работой — чтобы в списке чеков было видно, что именно покраснело.
+  ratchet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # нужна история: сравниваем с merge-base базовой ветки
+      - name: Ослабление ожиданий существующих тестов
+        env:
+          RATCHET_DECLARATION: ${{ github.event.pull_request.body }}
+        run: bash scripts/check-test-ratchet.sh "origin/${{ github.event.pull_request.base.ref }}"
