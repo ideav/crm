@@ -8484,6 +8484,7 @@
             ? function(dayOffset){ return self.dayIsFrozen(planBaseMidnightMs + Number(dayOffset) * 86400000); }
             : null;
         var fixedDayLost = [];   // #4434 п.1: 🔒, которым не удалось удержать свой день (день нерабочий)
+        var fixedDayHeld = [];   // #4512: 🔒, УДЕРЖАННЫЕ в своём дне — их день вправе уйти за потолок
         // #4434 п.2: задание, которое ВИДНО в очереди, но НЕ попало во вход планировщика (цепочка
         // прошлых дней #4294, чужой станок при переносе «в пределах станка»), стои́т своим сегментом
         // внутри окна и физически занимает станок. Без резерва упаковщик набивал тот же день с 08:00
@@ -8529,6 +8530,12 @@
             onFixedDayLost: function(cutId, fixedDay, placedDay) {
                 fixedDayLost.push({ cutId: String(cutId), fixedDay: fixedDay, placedDay: placedDay });
             },
+            // #4512 (решение заказчика 30.07.2026): 🔒 УДЕРЖАНА в своём дне — вытеснять её нельзя,
+            // поэтому день вправе уйти за потолок. Вердикт нужен стражу DAY_CAPACITY, чтобы не
+            // объявлять такой перебор нарушением (его сообщения видит оператор, #4475).
+            onFixedDayHeld: function(cutId, fixedDay) {
+                fixedDayHeld.push({ cutId: String(cutId), fixedDay: fixedDay });
+            },
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: prevSetupBySlitter,   // #3876: станок в отпуске обнулён; #4300/#4312: заправка из заданий прошлых дней
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
@@ -8553,6 +8560,7 @@
         }
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
+        if (fixedDayHeld.length && ops) ops.fixedDayHeld = fixedDayHeld;   // #4512
         // #4436: ЗАПИСЬ в замороженный день отсекаем. Планировщик его СЧИТАЕТ (иначе у первой резки
         // следующего дня неверный предшественник и в плане появляется фантомная «дыра в полчаса»,
         // #4438), но НЕ МЕНЯЕТ: обновления «Даты план», удаления и новые сегменты по заданиям
@@ -8575,8 +8583,18 @@
             // потолку в замороженном дне: день не может быть длиннее смены, а состав дня при этом не
             // меняется — лишнее уезжает продолжением. Признак — тот же, по которому #4490 резервирует
             // ему место в дне (moveScope.wholeDayCutIds).
+            // #4512: «оператор двигает ЭТО задание сейчас» — одно понятие, собранное из ВСЕХ полей,
+            // которыми контроллер это выражает. Реальный путь ставит `wholeDayCutIds` всегда (#4488) и
+            // дополнительно `pinCutIds` («в начало/в конец дня») либо `weightPositionCutIds` («по
+            // весу», #4506). Читать только первое — значит зависеть от того, каким полем позвали:
+            // синтетический scope с одним `pinCutIds` уже дал бы стражу «это не ручной перенос» и
+            // отброшенную операцию по заданию, которое оператор несёт сам.
             var manualMoveNow = {};
-            ((moveScope && moveScope.wholeDayCutIds) || []).forEach(function(id){ manualMoveNow[String(id)] = true; });
+            [(moveScope && moveScope.wholeDayCutIds) || [],
+             (moveScope && moveScope.pinCutIds) || [],
+             (moveScope && moveScope.weightPositionCutIds) || []].forEach(function(list){
+                list.forEach(function(id){ manualMoveNow[String(id)] = true; });
+            });
             var guard = guardPlanOps(ops, {
                 isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
                 isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
@@ -8584,6 +8602,33 @@
                 isManualMoveCut: function(id){ return !!manualMoveNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
+                // #4512: замок снят упаковщиком ЗАКОННО (день физически нерабочий) — единственный
+                // случай, когда 🔒 вправе сменить день. Страж НЕ пересчитывает законность: он
+                // спрашивает того, кто её установил (`onFixedDayLost` → `ops.fixedDayLost`).
+                isFixedReleasedCut: function(id){
+                    var lost = (ops && ops.fixedDayLost) || [];
+                    for (var i = 0; i < lost.length; i++) if (String(lost[i].cutId) === String(id)) return true;
+                    return false;
+                },
+                // #4512: станко-дни, где 🔒 УДЕРЖАНА (вытеснять нельзя) — их перебор законен.
+                // Ключ — как у dayLoadMinutes («станок|ГГГГММДД»): станок берём по самому заданию,
+                // упаковщик его не знает.
+                fixedHeldDays: function(){
+                    var heldRows = (ops && ops.fixedDayHeld) || [];
+                    if (!heldRows.length) return [];
+                    var sidByCut = {};
+                    (cuts || []).forEach(function(c){ if (c && c.id != null) sidByCut[String(c.id)] = String(c.slitterId == null ? '' : c.slitterId); });
+                    var out = [];
+                    heldRows.forEach(function(h){
+                        var sid = sidByCut[String(h.cutId)];
+                        if (sid == null) return;
+                        var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(h.fixedDay) * 86400000) / 1000)));
+                        if (dayKey == null || dayKey === Infinity) return;
+                        var key = sid + '|' + dayKey;
+                        if (out.indexOf(key) === -1) out.push(key);
+                    });
+                    return out;
+                },
                 // #4467: занятость станко-дня из самой раскладки (ops.dayLoad: «станок|смещение дня»)
                 // и потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст настройки. Ровно
                 // та арифметика, что стои́т в бейдже «(N мин)» у даты.
