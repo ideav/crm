@@ -268,6 +268,9 @@
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
         foilWindingMinutes: foilWindingMinutes,   // #3742
+        narrowWindingTiersFromTimes: narrowWindingTiersFromTimes,   // #4501: ярусы узкой намотки
+        minStripWidthOfCut: minStripWidthOfCut,                     // #4501
+        normalizeOperationTimes: normalizeOperationTimes,           // #4501: «Код операции» + колонка «Код»
         windPointsForCut: windPointsForCut,
         windingMinutes: windingMinutes,
         relevantWindingNorms: relevantWindingNorms,
@@ -1567,19 +1570,24 @@
     // «Код операции»; главное значение записи = минуты). this.opTimes = {КОД: мин},
     // this.changeTimes = веса переналадок для changeoverCost. Если таблицы/кодов нет —
     // changeTimes=null (changeoverCost берёт DEFAULT_OP_TIMES).
+    // #4501: читаем и колонку «Код» (условие по ширине полосы, `w<=30`) — normalizeOperationTimes
+    // приводит такую строку к каноническому ключу WIND_W30_<метры>, чтобы движок знал одну форму.
     AtexProductionPlanning.prototype.loadOperationTimes = function() {
         var self = this;
         var list = this._metaAll || [];
         var meta = tableByName(list, 'Время операции, мин');
         if (!meta) { this.opTimes = {}; this.changeTimes = null; return Promise.resolve(); }
         var codeIdx = columnIndex(meta, 'Код операции');
+        var widthCodeIdx = columnIndex(meta, 'Код');   // #4501: условие по ширине полосы
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
-            var raw = {};
-            (rows || []).forEach(function(rec) {
+            var raw = normalizeOperationTimes((rows || []).map(function(rec) {
                 var r = rec.r || [];
-                var code = codeIdx >= 0 ? String(r[codeIdx] == null ? '' : r[codeIdx]).trim() : '';
-                if (code) raw[code] = Number(r[0]) || 0;   // r[0] — главное значение = минуты
-            });
+                return {
+                    code: codeIdx >= 0 ? r[codeIdx] : '',
+                    minutes: r[0],   // r[0] — главное значение = минуты
+                    widthCode: widthCodeIdx >= 0 ? r[widthCodeIdx] : ''
+                };
+            }));
             self.opTimes = raw;
             self.changeTimes = {
                 MATERIAL_WINDING: raw.MATERIAL_WINDING != null ? raw.MATERIAL_WINDING : DEFAULT_OP_TIMES.MATERIAL_WINDING,
@@ -1853,8 +1861,14 @@
             status: reqIdByName(meta, CUT_REQ.status),
             notes: reqIdByName(meta, CUT_REQ.notes)
         };
-        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, d.isFoil); // #3606
-        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, d.isFoil);
+        // #4501: полосы создаваемой резки — ширины выбранных позиций (уже фактические, #3372):
+        // по самой узкой выбирается норма намотки.
+        var draftCut = { isFoil: d.isFoil, knifeWidths: selectedPositions.map(function(pid) {
+            var p = posById[String(pid)];
+            return p ? p.width : 0;
+        }) };
+        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, draftCut); // #3606/#4501
+        var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, draftCut);
         var cutMainState = { last: this.lastCutMainValue };
         var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
         this.lastCutMainValue = cutMainState.last;
@@ -1974,17 +1988,20 @@
             var producedPosRolls = round3(stripsPerPass * plannedRuns);
             var sleeveTasks = positionSleeveTasksForLayout(lay, posForCalc, plannedRuns);
             // Ножи проспекта (для оценки переналадки в расписании) — ширины полос ×их количество.
+            // #4501: они же — источник самой узкой полосы для нормы намотки, поэтому считаются
+            // ДО тайминга.
             var knifeWidths = [];
             (lay.strips || []).forEach(function(s) {
                 var w = Number(s.width) || 0, q = Math.round(Number(s.qty) || 0);
                 for (var i = 0; i < q; i++) knifeWidths.push(w);
             });
+            var prospectCut = { isFoil: position.isFoil, knifeWidths: knifeWidths };
             return {
                 forKey: String(positionId) + '|' + qty,
                 positionId: String(position.id), position: position, qty: qty,
                 materialId: mat, layout: lay, plannedRuns: plannedRuns, runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, position.isFoil), // #3606
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, position.isFoil),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, prospectCut), // #3606/#4501
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, prospectCut),
                 batches: batches, posWidth: position.width, stripsPerPass: stripsPerPass,
                 producedPosRolls: producedPosRolls, supplyRolls: qty,
                 stockRolls: round3(Math.max(0, producedPosRolls - qty)),
@@ -3269,7 +3286,7 @@
                 var P = Math.max(0, Math.round(Number(runs) || 0));
                 if (!(P > 0)) return 0;
                 return Math.ceil(plannedCutDurationMinutes(
-                    cutRunLength(headCut, self.supplies, self.positionLengthById), P, self.opTimes, !!(headCut && headCut.isFoil)));
+                    cutRunLength(headCut, self.supplies, self.positionLengthById), P, self.opTimes, headCut));   // #4501: норма по самой узкой полосе
             }
         });
         this.cuts = projected.cuts;
@@ -3425,7 +3442,7 @@
                 materialId: c.materialId, winding: c.winding, batchId: c.batchId,
                 knifeWidths: c.knifeWidths, knifeCount: c.knifeCount, isFoil: !!c.isFoil,
                 width: c.width, planDate: c.planDate, plannedRuns: runs, runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, runs, self.opTimes, !!c.isFoil)
+                duration: plannedCutDurationMinutes(runLength, runs, self.opTimes, c)   // #3606/#4501
             };
         }
         var movable = openLogical.filter(function(c) { return !c.fixed; }).map(descOf);
@@ -4933,8 +4950,8 @@
             });
             var plan = planPassesUpdates(cut.id, batches, self.supplies, needByPosition, runs);
             var runLength = cutRunLength(cut, self.supplies, self.positionLengthById);
-            var durWas = Math.ceil(plannedCutDurationMinutes(runLength, was, self.opTimes, !!cut.isFoil));
-            var durNow = Math.ceil(plannedCutDurationMinutes(runLength, runs, self.opTimes, !!cut.isFoil));
+            var durWas = Math.ceil(plannedCutDurationMinutes(runLength, was, self.opTimes, cut));   // #4501
+            var durNow = Math.ceil(plannedCutDurationMinutes(runLength, runs, self.opTimes, cut));
             self.openCutPassesConfirm(cut, was, runs, durWas, durNow, plan, back);
             return true;
         }).catch(function(err) {
@@ -5039,7 +5056,7 @@
         var fields = {};
         fields['t' + runsReq] = String(runs);
         if (durReq) fields['t' + durReq] = durNow > 0 ? String(durNow) : '';
-        if (timingReq) fields['t' + timingReq] = cutTimingDetails(runLength, runs, this.opTimes, !!cut.isFoil);
+        if (timingReq) fields['t' + timingReq] = cutTimingDetails(runLength, runs, this.opTimes, cut);   // #4501
         var slitterId = (cut.slitter && cut.slitter.id) || '';
         var written = { batches: 0, supplies: 0 };
         this.setBusy(true);
@@ -6090,9 +6107,11 @@
                 width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
                 planDate: cutMainValue,
-                // #3830: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, !!(lay && lay.isFoil))
+                duration: 0   // #4501: считаем ниже — норма зависит от полос самого дескриптора
             };
+            // #3830/#4501: рабочие минуты резки (намотка) — чтобы выбор станка учитывал ёмкость дня.
+            // Норма выбирается по фольге И самой узкой полосе дескриптора, поэтому после его сборки.
+            descriptor.duration = plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, descriptor);
             var slitterId = chooseSlitterBySetup(descriptor, self.slitters, setupGroupsByDay[day], loadBySlitterId, planOptions, genDayCapacityMin, vacationSetForDay(day, cutMainValue), self.nominalWidthByMaterial);   // #4006: лимит ширины джамбо станка
             if (slitterId != null) {
                 slitterId = String(slitterId);
@@ -6118,8 +6137,8 @@
                 planDate: descriptor.planDate,
                 plannedRuns: plannedRuns,
                 runLength: runLength,
-                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, descriptor.isFoil), // #3606
-                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor.isFoil),
+                duration: plannedCutDurationMinutes(runLength, plannedRuns, self.opTimes, descriptor), // #3606/#4501
+                timing: cutTimingDetails(runLength, plannedRuns, self.opTimes, descriptor),
                 slitterId: slitterId,
                 cutMainValue: cutMainValue,
                 sequence: '',
@@ -6278,7 +6297,7 @@
                 var plans = bySlitter[s].slice().sort(function(a, b) { return (Number(a.sequence) || 0) - (Number(b.sequence) || 0); });
                 var perPassByCut = {}, runsByCut = {};
                 plans.forEach(function(p) {
-                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPointsForCut(p.isFoil, windPoints)); // #3606
+                    perPassByCut[String(p.id)] = windingMinutes(p.runLength, windPointsForCut(p, windPoints)); // #3606/#4501
                     runsByCut[String(p.id)] = p.plannedRuns;
                 });
                 var segs = splitMachineQueue(plans, {
@@ -6313,7 +6332,7 @@
                             cutMainValue: ts > 0 ? ts : p.cutMainValue,
                             runLength: p.runLength,
                             duration: round3(perPass * sg.runs),
-                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes, p.isFoil), // #3606
+                            timing: cutTimingDetails(p.runLength, sg.runs, self.opTimes, p), // #3606/#4501
                             batchId: p.batchId,
                             slitterId: p.slitterId,
                             fullPlannedRuns: p.plannedRuns,
@@ -7380,10 +7399,10 @@
                         var fields = {};
                         fields['t' + runsReqId] = String(g.runs);
                         if (durReqId) {
-                            var dur = plannedCutDurationMinutes(runLength, g.runs, self.opTimes, !!head.isFoil);
+                            var dur = plannedCutDurationMinutes(runLength, g.runs, self.opTimes, head);   // #4501
                             fields['t' + durReqId] = dur > 0 ? String(Math.ceil(dur)) : '';
                         }
-                        if (timingReqId) fields['t' + timingReqId] = cutTimingDetails(runLength, g.runs, self.opTimes, !!head.isFoil);
+                        if (timingReqId) fields['t' + timingReqId] = cutTimingDetails(runLength, g.runs, self.opTimes, head);   // #4501
                         // #4488: поля, которые задаёт вызывающий (маркер цепочки на себя, замок).
                         var extra = (opts && opts.headFields) || null;
                         if (extra) Object.keys(extra).forEach(function(k) { fields[k] = extra[k]; });
@@ -7687,9 +7706,10 @@
             var out = {};
             var P = Math.max(0, Math.round(Number(plannedRuns) || 0));
             var head = cutsById[chainHeadById[String(cutId)] || String(cutId)];
-            var isFoil = !!(head && head.isFoil);
             // #3635 п.4: «Длительность, минут» — целой (вверх), как при создании резки.
-            var winding = P > 0 ? Math.ceil(plannedCutDurationMinutes(runLenForCutId(cutId), P, self.opTimes, isFoil)) : 0;
+            // #4501: норма намотки — по голове цепочки (фольга + самая узкая полоса): сегменты
+            // дробления режут один и тот же набор полос.
+            var winding = P > 0 ? Math.ceil(plannedCutDurationMinutes(runLenForCutId(cutId), P, self.opTimes, head)) : 0;
             if (durReqIdSplit) out['t' + durReqIdSplit] = String(winding);
             if (cutTimeReqIdSplit) out['t' + cutTimeReqIdSplit] = String(P > 0 ? Math.round(winding + betweenCutsSplit * P) : 0);
             return out;
@@ -8293,7 +8313,7 @@
             (orderIdsByCut[cid] = orderIdsByCut[cid] || {})[oid] = true;
         });
         cuts.forEach(function(c) {
-            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.positionLengthById), windPointsForCut(c.isFoil, windPoints)); // #3606
+            perPassByCut[String(c.id)] = windingMinutes(cutRunLength(c, self.supplies, self.positionLengthById), windPointsForCut(c, windPoints)); // #3606/#4501
             var off = dayOffsetFromBase(c.planDate, planBaseMidnightMs);
             if (off != null) dayAnchorByCut[String(c.id)] = off;
             var dueKeys = cutDueKeys(c, self.supplies, self.genPositions, honorSupplyDue);   // #4050 / #4195: фолбэк только при ручном переносе

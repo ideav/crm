@@ -2261,7 +2261,10 @@
                 });
                 return;
             }
-            if (!(plannedCutDurationMinutes(runLength, plannedRuns, opTimes) > 0)) {
+            // #4501: норма намотки зависит от полос раскладки (узкие ≤ порога — своя серия),
+            // поэтому диагностика считает длительность тем же контекстом, что и генерация.
+            var layoutCut = { isFoil: !!(layout && layout.isFoil), strips: (layout && layout.strips) || [] };
+            if (!(plannedCutDurationMinutes(runLength, plannedRuns, opTimes, layoutCut) > 0)) {
                 out.push({
                     key: 'duration',
                     label: CUT_REQ.duration,

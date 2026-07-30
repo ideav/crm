@@ -868,21 +868,24 @@
     // вида сырья; 's=0.5'/'s=1' — по диаметру втулки в дюймах (8188 «Дюймы»).
     // Поддержаны операторы = > < >= <=. ⚠️ Жёсткий фильтр (#3372): факт. ширина
     // применяется ТОЛЬКО при выполнении условия, иначе берётся номинал заказа.
+    // #4501: сюда же добавлен ключ 'w' — ШИРИНА ПОЛОСЫ (мм). Им пользуется колонка «Код»
+    // таблицы «Время операции, мин» («w<=30» — норма для узких полос, normalizeOperationTimes).
     function parseActualWidthCode(code) {
         var c = String(code == null ? '' : code).trim().toLowerCase().replace(/\s+/g, '');
         if (!c) return { key: '', op: '', val: 0 };           // безусловно
-        var m = c.match(/^([js])(>=|<=|=|>|<)(\d+(?:\.\d+)?)$/);
+        var m = c.match(/^([jsw])(>=|<=|=|>|<)(\d+(?:\.\d+)?)$/);
         if (!m) return { key: '?', op: '', val: 0 };          // нераспознан → не применяем
         return { key: m[1], op: m[2], val: Number(m[3]) };
     }
 
-    // ctx: { jumbo, inches } (любое поле может быть null/undefined). key 'j' →
-    // сверяем с jumbo (ширина джамбо), 's' → с inches (дюймы втулки).
-    // '' → всегда true; '?' → всегда false (жёсткий фильтр).
+    // ctx: { jumbo, inches, width } (любое поле может быть null/undefined). key 'j' →
+    // сверяем с jumbo (ширина джамбо), 's' → с inches (дюймы втулки), 'w' → с width
+    // (ширина полосы, #4501). '' → всегда true; '?' → всегда false (жёсткий фильтр).
     function actualWidthCodeMatches(parsed, ctx) {
         if (!parsed || parsed.key === '') return true;
         if (parsed.key === '?') return false;
-        var v = parsed.key === 'j' ? (ctx && ctx.jumbo) : (ctx && ctx.inches);
+        var v = parsed.key === 'j' ? (ctx && ctx.jumbo)
+            : (parsed.key === 'w' ? (ctx && ctx.width) : (ctx && ctx.inches));
         if (v == null || v === '' || !isFinite(Number(v))) return false;
         v = Number(v);
         switch (parsed.op) {
@@ -1259,7 +1262,53 @@
         // (в данных только WIND_FOIL_305=4). Прикрепляем её к набору, чтобы выбирать
         // для резок-фольги (cut.isFoil по position_material_type), не меняя сигнатуры.
         pts.foil = foilWindingPointsFromTimes(opTimes);
+        // #4501: ярусы УЗКИХ полос (WIND_W30_<метры>) — тем же приёмом.
+        pts.narrow = narrowWindingTiersFromTimes(opTimes);
         return pts;
+    }
+
+    // #4501: ЯРУСЫ УЗКОЙ НАМОТКИ. Полоса ≤ 30 мм наматывается дольше — на вал насаживается
+    // множество узких втулок, и эта доплата не пропорциональна метражу. Норма задаётся СТРОКАМИ
+    // справочника (можно сделать не «×2», а аддитивной), код строки: `WIND_W<макс.ширина>_<метры>`
+    // — «самая узкая полоса задания не шире <макс.ширина> мм». Для фольги — `WIND_FOIL_W<…>_<…>`
+    // (у неё своя блочная модель, см. foilWindingMinutes). Порог и покрытый диапазон метража
+    // целиком в данных: нет строк — нет и правила (поведение до #4501).
+    // → [{ maxWidth, foil, points:[{m,min,narrow,maxWidth,foil}] }] по возрастанию порога
+    //   (первым идёт самый узкий ярус — он специфичнее).
+    function narrowWindingTiersFromTimes(opTimes){
+        var byKey = {};
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_(FOIL_)?W(\d+(?:[.,]\d+)?)_(\d+)$/.exec(code);
+            if (!m) return;
+            var foil = !!m[1];
+            var maxWidth = Number(String(m[2]).replace(',', '.'));
+            if (!(maxWidth > 0)) return;
+            var key = (foil ? 'F' : 'B') + maxWidth;
+            var tier = byKey[key] || (byKey[key] = { maxWidth: maxWidth, foil: foil, points: [] });
+            tier.points.push({ m: Number(m[3]), min: Number(opTimes[code]) || 0,
+                narrow: true, maxWidth: maxWidth, foil: foil });
+        });
+        var tiers = Object.keys(byKey).map(function(k){ return byKey[k]; });
+        tiers.forEach(function(t){ t.points.sort(function(a, b){ return a.m - b.m; }); });
+        tiers.sort(function(a, b){ return a.maxWidth - b.maxWidth; });
+        return tiers;
+    }
+
+    // #4501: самая узкая полоса резки (мм) — по ней выбирается ярус нормы намотки. Источник, в
+    // порядке достоверности: явный minStripWidth → knifeWidths (развёрнуты по qty из cut_strips)
+    // → strips раскладки ([{width,qty}], резка ещё не создана). Не знаем полос → 0 («не узкая»):
+    // молча ускорять задание из-за пробела в данных нельзя, но и замедлять — тоже.
+    function minStripWidthOfCut(cut){
+        if (!cut || typeof cut !== 'object') return 0;
+        var best = 0;
+        function take(value){
+            var w = Number(value) || 0;
+            if (w > 0 && (best === 0 || w < best)) best = w;
+        }
+        take(cut.minStripWidth);
+        if (!best && Array.isArray(cut.knifeWidths)) cut.knifeWidths.forEach(take);
+        if (!best && Array.isArray(cut.strips)) cut.strips.forEach(function(s){ take(s && s.width); });
+        return best;
     }
 
     // #3606: точки намотки ФОЛЬГИ из кодов WIND_FOIL_<метры>. #3742: норма «4 мин за каждые
@@ -1276,9 +1325,30 @@
         return pts;
     }
 
-    // #3606: точки намотки для конкретной резки — фольговые при cut.isFoil (если серия
-    // WIND_FOIL_ задана), иначе обычные. windPoints.foil прикреплён в windingPointsFromTimes.
-    function windPointsForCut(isFoil, windPoints){
+    // ШЛЮЗ ВЫБОРА НОРМЫ НАМОТКИ. Единственное место, где решается, по какой серии считать резку;
+    // все расчёты длительности («Сгенерировать», «Упорядочить», дробление по дням, тайминг,
+    // расписание очереди и Ганта, модалка) обязаны ходить сюда, иначе правило разъедется по
+    // обработчикам.
+    //   #3606: фольговые точки при isFoil (если серия WIND_FOIL_ задана), иначе обычные.
+    //   #4501: если у резки есть полоса не шире порога яруса — ярус узкой намотки (самый узкий
+    //     подходящий, он специфичнее). У фольги свой ярус (WIND_FOIL_W…): без него узкая фольга
+    //     остаётся на блочной фольговой норме — линейная узкая серия её бы УСКОРИЛА.
+    // Первый аргумент — резка/дескриптор/план целиком (из него берём isFoil и самую узкую полосу)
+    // либо, как раньше, булев isFoil (тогда ширины полос неизвестны и ярус не выбирается).
+    function windPointsForCut(cutOrIsFoil, windPoints){
+        var isFoil, minWidth;
+        if (cutOrIsFoil && typeof cutOrIsFoil === 'object') {
+            isFoil = !!cutOrIsFoil.isFoil;
+            minWidth = minStripWidthOfCut(cutOrIsFoil);
+        } else {
+            isFoil = !!cutOrIsFoil;
+            minWidth = 0;
+        }
+        var tiers = (windPoints && windPoints.narrow) || [];
+        for (var i = 0; minWidth > 0 && i < tiers.length; i++){
+            if (!!tiers[i].foil !== isFoil) continue;
+            if (tiers[i].points.length && minWidth <= tiers[i].maxWidth + 1e-9) return tiers[i].points;
+        }
         if (isFoil && windPoints && windPoints.foil && windPoints.foil.length) return windPoints.foil;
         return windPoints || [];
     }
@@ -1313,16 +1383,23 @@
                 return round3(p[i-1].min + t * (p[i].min - p[i-1].min));
             }
         }
+        // #4501: узкая серия ВЫШЕ последней своей точки не экстраполируется — клампим. Диапазон
+        // задан справочником («×2 до 600 м включительно»): доплата за узкие втулки на длинном
+        // рулоне не исчезает (падать на базовую норму нельзя), но и выдумывать за справочник
+        // наклон не следует. Нужен 900 м — заводится строка WIND_W30_900.
+        if (p[p.length-1].narrow) return round3(p[p.length-1].min);
         if (p.length < 2) return round3(p[p.length-1].min);
         var a = p[p.length-2], b = p[p.length-1];
         var slope = (b.min - a.min) / (b.m - a.m);
         return round3(b.min + slope * (x - b.m));
     }
 
-    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes, isFoil) {
+    // cutRef — резка/дескриптор/план целиком (#4501: из него берётся и фольга, и самая узкая
+    // полоса) либо старый булев isFoil.
+    function plannedCutDurationMinutes(runMeters, plannedRuns, opTimes, cutRef) {
         var runs = Number(plannedRuns) || 0;
         if (runs <= 0) return 0;
-        var pts = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
+        var pts = windPointsForCut(cutRef, windingPointsFromTimes(opTimes || {})); // #3606/#4501: своя норма
         return round3(windingMinutes(runMeters, pts) * runs);
     }
 
@@ -1345,7 +1422,7 @@
     // WIND_600=4 мин; WIND_900=5 мин (интерполяция)» (две). Пусто → ''.
     function formatWindingNorms(norms){
         var items = (norms || []).filter(function(n){ return Number(n.m) > 0; }) // пропускаем нулевые опорные точки
-            .map(function(n){ return (n.foil ? 'WIND_FOIL_' : 'WIND_') + formatTimingNumber(n.m) + '=' + formatTimingNumber(n.min) + ' мин'; });
+            .map(function(n){ return windNormCode(n) + '=' + formatTimingNumber(n.min) + ' мин'; });
         if (!items.length) return '';
         if (items.length === 1) return 'Норма намотки: ' + items[0];
         return 'Нормы намотки: ' + items.join('; ') + ' (интерполяция)';
@@ -1355,11 +1432,49 @@
         return String(round3(Number(value) || 0));
     }
 
-    function cutTimingDetails(runMeters, plannedRuns, opTimes, isFoil) {
+    // Код нормы намотки для подписи оператору: WIND_600 / WIND_FOIL_305 / WIND_W30_600 (#4501 —
+    // по коду видно, что применена узкая серия, и какой у неё порог).
+    function windNormCode(norm){
+        return 'WIND_' + (norm && norm.foil ? 'FOIL_' : '')
+            + (norm && norm.narrow ? 'W' + formatTimingNumber(norm.maxWidth) + '_' : '')
+            + formatTimingNumber(norm && norm.m);
+    }
+
+    // #4501: строки таблицы «Время операции, мин» → плоская карта {КОД: минуты}, которая летает
+    // по всем расчётам (opTimes). Условие «норма для узких полос» можно задать двумя способами:
+    //   • «Код операции» = WIND_W30_600 (канон: порог живёт в ключе и доезжает всюду сам);
+    //   • колонка «Код» = `w<=30` на строке WIND_…_600 (как в справочнике «Фактическая ширина
+    //     резки») — здесь она приводится к тому же каноническому ключу.
+    // Так заполнить можно любое поле, а движок знает ОДНУ форму. rows: [{code, minutes, widthCode}].
+    function normalizeOperationTimes(rows){
+        var out = {};
+        (rows || []).forEach(function(row){
+            var code = String((row && row.code) == null ? '' : row.code).trim();
+            if (!code) return;
+            out[narrowCodeFromWidthCode(code, row && row.widthCode)] = Number(row && row.minutes) || 0;
+        });
+        return out;
+    }
+
+    // Код строки намотки + условие «Код» (`w<=30` / `w<30`) → канонический WIND_[FOIL_]W<порог>_<метры>.
+    // Метраж берём из хвостового числа кода (WIND_NARROW_600 → 600). Не намотка, пустое или чужое
+    // условие (j/s — они не про ширину полосы) → код как есть.
+    function narrowCodeFromWidthCode(code, widthCode){
+        var parsed = parseActualWidthCode(widthCode);
+        if (parsed.key !== 'w' || (parsed.op !== '<=' && parsed.op !== '<')) return code;
+        var m = /^WIND_(FOIL_)?(?:[A-Z0-9]+_)*(\d+)$/i.exec(code);
+        if (!m) return code;
+        // Строгое «<» порогом выразить нельзя — берём ближайшее снизу (w<30 → W29.999).
+        var maxWidth = parsed.op === '<' ? round3(parsed.val - 0.001) : parsed.val;
+        if (!(maxWidth > 0)) return code;
+        return 'WIND_' + (m[1] ? 'FOIL_' : '') + 'W' + formatTimingNumber(maxWidth) + '_' + m[2];
+    }
+
+    function cutTimingDetails(runMeters, plannedRuns, opTimes, cutRef) {
         var length = stripNum(runMeters);
         var runs = stripNum(plannedRuns);
         if (!(length > 0) || !(runs > 0)) return '';
-        var points = windPointsForCut(isFoil, windingPointsFromTimes(opTimes || {})); // #3606: фольга — своя норма
+        var points = windPointsForCut(cutRef, windingPointsFromTimes(opTimes || {})); // #3606/#4501: своя норма
         if (!points.length) return '';
         var oneRun = windingMinutes(length, points);
         if (!(oneRun > 0)) return '';
@@ -1543,7 +1658,7 @@
         var t = times || DEFAULT_OP_TIMES;
         var length = stripNum(runMeters);
         var runs = stripNum(cut && cut.plannedRuns);
-        var pts = windPointsForCut(cut && cut.isFoil, windPoints); // #3606: фольга — своя норма намотки
+        var pts = windPointsForCut(cut, windPoints); // #3606/#4501: фольга и узкие полосы — своя норма
         var oneRun = windingMinutes(length, pts);
         // #3889: сегмент НАСТРОЙКИ (хвост дня N перед намоткой дня N+1) — «Кол-во план» = 0.
         // У него намотки нет (вся намотка переносится на продолжение след. дня), поэтому total = 0,
@@ -1585,7 +1700,7 @@
     }
 
     function scheduleDurationMinutes(cut, runMeters, windPoints) {
-        var oneRun = windingMinutes(runMeters, windPointsForCut(cut && cut.isFoil, windPoints)); // #3606: фольга — своя норма
+        var oneRun = windingMinutes(runMeters, windPointsForCut(cut, windPoints)); // #3606/#4501: своя норма
         var runs = stripNum(cut && cut.plannedRuns);
         var computed = runs > 0 ? round3(oneRun * runs) : oneRun;
         if (computed > 0) return computed;
