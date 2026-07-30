@@ -12242,6 +12242,8 @@
         guardPlanOpsWith: guardPlanOpsWith,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
+        overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
+        overfilledDayPhrase: overfilledDayPhrase,         // #4531: один переполненный день фразой
         cutShortLabel: cutShortLabel,                   // #4531: задание одной строкой (как первая строка карточки)
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
@@ -21784,28 +21786,29 @@
         });
     };
 
-    // #4408/#4473: дни станка (в видимых днях), где работа уходит ЗА конец смены — ЧИСТЫЙ детектор,
-    // без тостов и записей. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня
-    // против потолка резки (cutEndMin + нахлёст резки). Это та же арифметика, что стои́т в бейдже
+    // #4408/#4473/#4531: дни, где работа уходит ЗА конец смены, — ЧИСТАЯ мерка над набором заданий
+    // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня против
+    // потолка резки (`cutEndMin` + нахлёст резки). Это та же арифметика, что стои́т в бейдже
     // «(N мин)», только выраженная в конце дня — обед и «Отпуск» уже сидят в хранимых стартах.
-    // #4531: вместе с днём отдаём ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
+    // #4531: вместе с днём отдаёт ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
     // в дне (`seq` — тот же, что на карточке: позиция по возрастанию planStart) и потолок (`capMin`).
-    // Фразу оператору собирает печать (formatOverfilledDaysMessage), детектор только меряет.
-    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
-    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
-        if (!scopeIds.length) return [];
-        var inScope = {};
-        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
-        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var win = this.workingWindow() || {};
-        var cutEnd = Number(win.cutEndMin);
+    // Фразу собирает печать (overfilledDayPhrase), мерка только меряет.
+    //
+    // ОДНА МЕРКА НА ВСЕХ ПОТРЕБИТЕЛЕЙ. Её зовут предупреждение (`overfilledDaysOf` → тост #4497) и
+    // подсветка шапки дня в очереди (#4531). Наборы заданий у них разные (у предупреждения — scope
+    // пересчёта, у очереди — то, что нарисовано), поэтому набор передаётся параметром; арифметика
+    // при этом одна и разъехаться не может.
+    //   cuts — задания одного станка; opts: { baseMidnightMs, cutEndMin, maxOverworkCutsMin }.
+    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }], по возрастанию дня.
+    function overfilledDaysFromCuts(cuts, opts) {
+        var o = opts || {};
+        var base = Number(o.baseMidnightMs);
+        var cutEnd = Number(o.cutEndMin);
         if (!isFinite(cutEnd) || !isFinite(base)) return [];
-        var over = Number(win.maxOverworkCutsMin) || 0;
+        var over = Number(o.maxOverworkCutsMin) || 0;
         var byDay = {};
-        (this.cuts || []).forEach(function(c) {
-            if (!c || !inScope[String(c.id)]) return;
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
             if (!isFinite(tsSec) || tsSec <= 0) return;
             var ws = Math.round((tsSec * 1000 - base) / 60000);
@@ -21825,6 +21828,23 @@
                          capMin: cutEnd, cutId: worst.cut.id, seq: worstAt + 1, cut: worst.cut };
             })
             .filter(function(r) { return r.endMin > cutEnd + over + 1; });
+    }
+
+    // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
+    // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
+    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
+    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var scopeIds = this.recalcScopeCutIds(sid);
+        if (!scopeIds.length) return [];
+        var inScope = {};
+        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
+        var win = this.workingWindow() || {};
+        return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
+            baseMidnightMs: planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)),
+            cutEndMin: win.cutEndMin,
+            maxOverworkCutsMin: win.maxOverworkCutsMin
+        });
     };
 
     // #4531: ПЕРЕПОЛНЕННЫЙ СТАНКО-ДЕНЬ → ФРАЗА ОПЕРАТОРУ. Прежний текст называл дату и минуты
@@ -21850,16 +21870,27 @@
             var place = [];
             if (e.slitterId != null && String(e.slitterId) !== '') place.push(slitterLabel(e.slitterId));
             place.push(dayLabel(e.dayOffset));
-            var who = e.seq > 0 ? ('№ ' + e.seq + (e.cutLabel ? ' «' + e.cutLabel + '»' : '')) : (e.cutLabel || '');
-            return place.join(', ') + ' — до ' + clock(e.endMin) + ' при потолке ' + clock(e.capMin)
-                + ' (+' + Math.round(e.overMin) + ' мин)'
-                + (who ? ', последнее задание ' + who : '');
+            return overfilledDayPhrase(e, place.join(', '), clock);
         });
         var shown = items.slice(0, limit);
         var rest = items.length - shown.length;
         return { text: 'Не помещается в смену: ' + shown.join('; ') + (rest > 0 ? '; …и ещё ' + rest : '')
                      + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».',
                  shown: shown, rest: rest, items: items };
+    }
+
+    // #4531: ОДИН переполненный станко-день фразой: мерка (до какого часа идёт работа против
+    // потолка резки) и виновник (номер задания в дне + сырьё/размеры). Одна формулировка на два
+    // места — предупреждение (там `place` = «Станок 1, Пт, 31.07.2026») и подсказку бейджа в шапке
+    // дня (там место видно и так, `place` пустое).
+    //   entry — { endMin, capMin, overMin, seq, cutLabel }; clock(min) → ЧЧ:ММ.
+    function overfilledDayPhrase(entry, place, clock) {
+        var e = entry || {};
+        var fmt = typeof clock === 'function' ? clock : function(m) { return String(Math.round(m)) + ' мин'; };
+        var who = e.seq > 0 ? ('№ ' + e.seq + (e.cutLabel ? ' «' + e.cutLabel + '»' : '')) : (e.cutLabel || '');
+        return (place ? place + ' — ' : '') + 'до ' + fmt(e.endMin) + ' при потолке ' + fmt(e.capMin)
+            + ' (+' + Math.round(e.overMin) + ' мин)'
+            + (who ? ', последнее задание ' + who : '');
     }
 
     // #4531: задание одной строкой — сырьё, намотка и размеры, как в первой строке карточки
@@ -23039,6 +23070,17 @@
             dayMinutesBySched[d] = (dayMinutesBySched[d] || 0) + m;
             (dayBreakdownBySched[d] = dayBreakdownBySched[d] || []).push(sc);
         });
+        // #4531: какие из этих дней НЕ ПОМЕЩАЮТСЯ В СМЕНУ — ТОЙ ЖЕ меркой, что и предупреждение
+        // (`overfilledDaysFromCuts`): конец последнего задания дня против потолка резки. Набор
+        // заданий — те, что на экране (activeGroup.cuts), поэтому пометка не может разойтись с
+        // бейджем «(N мин)», рядом с которым стои́т. Замороженный день (#4326) тоже помечаем: он
+        // виден в очереди, и его перебор оператор должен видеть так же, как любой другой.
+        var overByDay = {};
+        overfilledDaysFromCuts(activeGroup.cuts, {
+            baseMidnightMs: planBaseMidnightMs,
+            cutEndMin: dayWindow.cutEndMin,
+            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin
+        }).forEach(function(d) { overByDay[d.dayOffset] = d; });
         // #3914: печать бейджа «(N мин)» по дням активного станка — из чего складывается сумма и
         // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart
         // (то, что реально записала последняя генерация), поэтому число совпадает с бейджем на экране.
@@ -23480,13 +23522,29 @@
                 // (вручную или вытеснены) — помечаем дату красным фоном.
                 var dayHeaderMs = planBaseMidnightMs + cardSchedDay * 86400000;
                 var dayOff = !self.dayIsWorking(dayHeaderMs);
+                // #4531: день НЕ ПОМЕЩАЕТСЯ В СМЕНУ — видно прямо в шапке, а не только в тосте.
+                // Бейдж «(N мин)» показывает сумму минут без мерки: помещается она в смену или нет,
+                // по ней не понять, и виноватый день приходилось искать глазами.
+                var dayOver = overByDay[cardSchedDay];
                 var dayDateEl = el('div', {
-                    class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : ''),
+                    class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : '') + (dayOver ? ' is-over' : ''),
                     title: dayOff ? 'Выходной/праздничный день — заданий быть не должно' : ''
                 }, [
                     formatPlanDayHeading(planBaseMidnightMs, cardSchedDay),
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
                 ]);
+                if (dayOver) {
+                    dayDateEl.appendChild(el('span', {
+                        class: 'atex-pp-day-over',
+                        // Подсказка — та же фраза, что в предупреждении (место здесь и так видно).
+                        title: 'День не помещается в смену: '
+                            + overfilledDayPhrase({ endMin: dayOver.endMin, capMin: dayOver.capMin,
+                                overMin: dayOver.overMin, seq: dayOver.seq, cutLabel: cutShortLabel(dayOver.cut) },
+                                '', formatClock)
+                            + '. Перенесите лишнее вручную (🗓) или «Упорядочить».',
+                        text: '+' + Math.round(dayOver.overMin) + ' мин сверх смены'
+                    }));
+                }
                 // #4326: «замок дня» справа в шапке дня. Есть таблица «Заморозка» → показываем замок:
                 // открыт 🔓 (день можно менять) / закрыт 🔒 (день заморожен — планирование его не трогает).
                 // title закрытого = Примечание фиксации. Клик — заморозить/разморозить (openFreezeDay).
