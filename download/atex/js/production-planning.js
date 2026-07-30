@@ -4699,6 +4699,48 @@
         return best ? String(best.id) : '';
     }
 
+    // #4525: «Зафиксированные (🔒) задания сдвинуты» — ТОЛЬКО о том, что делает ЗАПИСЫВАЕМЫЙ план.
+    //
+    // Движок зовёт `onFixedDayLost` из КАЖДОЙ раскладки, а их за один расчёт много: кроме итоговой,
+    // упаковщик прогоняет пробные — рескью просрочки перебирает станки-кандидаты (#4118/#4203
+    // «дозаклад по станкам»). Если среди кандидатов есть станок, который в «Отпуске» всю неделю
+    // (боевое: Станок 4, отпуск 30.07–06.08), проба честно сообщает «день 🔒 нерабочий» — и оператор
+    // получал красный тост о сдвиге зафиксированного, хотя в записанном плане задание осталось на
+    // своём дне (issue #4525: «как могло так выйти, что генерация пишет такое?»).
+    //
+    // Фильтр: запись о сдвиге остаётся, только если план ДЕЙСТВИТЕЛЬНО переносит это задание в
+    // другой день — то есть в `ops.updates` есть его обновление с ДРУГИМ днём. Нет обновления
+    // (плана эта запись не касается) или день тот же — это была проба, молчим. Дубли по заданию
+    // схлопываем: проб бывает несколько.
+    //   lost — [{ cutId, fixedDay, placedDay }]; dayKeyByCut — карта/функция «id → ГГГГММДД сейчас»;
+    //   dayKeyOfTs — «планируемый ts → ГГГГММДД». Нет чем сравнить — отдаём как есть (не молчим зря).
+    function realFixedDayLost(lost, ops, dayKeyByCut, dayKeyOfTs) {
+        var list = lost || [];
+        if (!list.length) return [];
+        var updates = (ops && ops.updates) || [];
+        if (typeof dayKeyOfTs !== 'function' || !dayKeyByCut) return list;
+        function dayNow(id) {
+            var v = (typeof dayKeyByCut === 'function') ? dayKeyByCut(id) : dayKeyByCut[String(id)];
+            return (v == null || v === Infinity) ? null : v;
+        }
+        var willBe = {};
+        updates.forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            willBe[String(u.cutId)] = dayKeyOfTs(u.planStartTs);
+        });
+        var seen = {}, out = [];
+        list.forEach(function(f) {
+            var id = String(f && f.cutId);
+            if (seen[id]) return;
+            if (!(id in willBe)) return;                 // план эту запись не трогает — сдвига нет
+            var was = dayNow(id), will = willBe[id];
+            if (was == null || will == null || was === will) return;   // день не меняется
+            seen[id] = true;
+            out.push(f);
+        });
+        return out;
+    }
+
     function sleeveMinutes(qty, opTimes) {
         var one = Number(opTimes && opTimes.SLEEVE_CUT) || 0;
         return round3((Number(qty) || 0) * one);
@@ -12337,6 +12379,7 @@
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
         foilWindingMinutes: foilWindingMinutes,   // #3742
+        realFixedDayLost: realFixedDayLost,       // #4525: сдвиг 🔒 — только из ЗАПИСЫВАЕМОГО плана
         narrowWindingTiersFromTimes: narrowWindingTiersFromTimes,   // #4501: ярусы узкой намотки
         minStripWidthOfCut: minStripWidthOfCut,                     // #4501
         normalizeOperationTimes: normalizeOperationTimes,           // #4501: «Код операции» + колонка «Код»
@@ -20629,6 +20672,8 @@
             blockedBySlitter[sid] = mergeBlockedRanges(blockedBySlitter[sid] || [], occupiedByExcluded[sid]);
         });
         var ops;
+        var cutsById0 = {};   // #4525: «день сейчас» для проверки, правда ли план двигает 🔒
+        (cuts || []).forEach(function(c){ if (c && c.id != null) cutsById0[String(c.id)] = c; });
         try {
         self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам этого плана (см. computeCutSetupUpdates)
         ops = planCutOperations(planInput, {
@@ -20687,6 +20732,20 @@
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
         if (fixedDayHeld.length && ops) ops.fixedDayHeld = fixedDayHeld;   // #4512
+        // #4525: у записей о снятом замке ДВА потребителя, и вопросы у них разные.
+        //   • СТРАЖ (#4512, `isFixedReleasedCut`) спрашивает «законно ли упаковщик отпустил этот
+        //     замок» — ему нужен ПОЛНЫЙ список движка, включая пробные раскладки: сузив его, мы
+        //     заставили бы шлюз выбросить законную операцию, а это дороже лишнего тоста.
+        //   • ОПЕРАТОР спрашивает «что сделал мой план» — а `onFixedDayLost` срабатывает и в
+        //     ПРОБНЫХ раскладках (рескью просрочки перебирает станки-кандидаты, #4118/#4203).
+        //     Станок в «Отпуске» на всю неделю давал красный тост о сдвиге 🔒, которая на своём дне
+        //     и осталась (issue #4525: в логе 218 записей и ни одной по этому заданию).
+        // Поэтому список для тоста — ОТДЕЛЬНЫЙ: те записи, у которых план правда меняет день.
+        if (fixedDayLost.length && ops) {
+            ops.fixedDayLostReal = realFixedDayLost(fixedDayLost, ops,
+                function(id){ return planDateDayKey((cutsById0[String(id)] || {}).planDate); },
+                function(ts){ return planDateDayKey(String(ts)); });
+        }
         // #4436: ЗАПИСЬ в замороженный день отсекаем. Планировщик его СЧИТАЕТ (иначе у первой резки
         // следующего дня неверный предшественник и в плане появляется фантомная «дыра в полчаса»,
         // #4438), но НЕ МЕНЯЕТ: обновления «Даты план», удаления и новые сегменты по заданиям
@@ -20911,11 +20970,14 @@
         }
         // #4434 п.1: зафиксированное задание не удержало свой день — единственный допустимый случай
         // (день нерабочий: выходной/праздник/«Отпуск» станка). Не молчим: тост + консоль (уже в движке).
-        if (ops && ops.fixedDayLost && ops.fixedDayLost.length) {
+        // #4525: берём СПИСОК ДЛЯ ОПЕРАТОРА (`fixedDayLostReal`) — только то, что делает
+        // записываемый план. Полный `ops.fixedDayLost` остаётся стражу (#4512).
+        var lostToSay = (ops && ops.fixedDayLostReal) || [];
+        if (lostToSay.length) {
             // #4475: называем сами задания — «детали в консоли» оператору ничего не даёт.
             self.notify('Зафиксированные (🔒) задания сдвинуты: №'
-                + ops.fixedDayLost.slice(0, 3).map(function(f){ return f.cutId; }).join(', №')
-                + (ops.fixedDayLost.length > 3 ? ' и ещё ' + (ops.fixedDayLost.length - 3) : '')
+                + lostToSay.slice(0, 3).map(function(f){ return f.cutId; }).join(', №')
+                + (lostToSay.length > 3 ? ' и ещё ' + (lostToSay.length - 3) : '')
                 + ' — их день нерабочий (выходной/праздник или «Отпуск» станка), замок дня в такой'
                 + ' день удержать нельзя.', 'warning');
         }

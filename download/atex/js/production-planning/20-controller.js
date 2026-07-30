@@ -272,6 +272,7 @@
         windingPointsFromTimes: windingPointsFromTimes,
         foilWindingPointsFromTimes: foilWindingPointsFromTimes,
         foilWindingMinutes: foilWindingMinutes,   // #3742
+        realFixedDayLost: realFixedDayLost,       // #4525: сдвиг 🔒 — только из ЗАПИСЫВАЕМОГО плана
         narrowWindingTiersFromTimes: narrowWindingTiersFromTimes,   // #4501: ярусы узкой намотки
         minStripWidthOfCut: minStripWidthOfCut,                     // #4501
         normalizeOperationTimes: normalizeOperationTimes,           // #4501: «Код операции» + колонка «Код»
@@ -8564,6 +8565,8 @@
             blockedBySlitter[sid] = mergeBlockedRanges(blockedBySlitter[sid] || [], occupiedByExcluded[sid]);
         });
         var ops;
+        var cutsById0 = {};   // #4525: «день сейчас» для проверки, правда ли план двигает 🔒
+        (cuts || []).forEach(function(c){ if (c && c.id != null) cutsById0[String(c.id)] = c; });
         try {
         self.plannedTailSetup = {};   // #4144: решение упаковщика по хвостам этого плана (см. computeCutSetupUpdates)
         ops = planCutOperations(planInput, {
@@ -8622,6 +8625,20 @@
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
         if (fixedDayHeld.length && ops) ops.fixedDayHeld = fixedDayHeld;   // #4512
+        // #4525: у записей о снятом замке ДВА потребителя, и вопросы у них разные.
+        //   • СТРАЖ (#4512, `isFixedReleasedCut`) спрашивает «законно ли упаковщик отпустил этот
+        //     замок» — ему нужен ПОЛНЫЙ список движка, включая пробные раскладки: сузив его, мы
+        //     заставили бы шлюз выбросить законную операцию, а это дороже лишнего тоста.
+        //   • ОПЕРАТОР спрашивает «что сделал мой план» — а `onFixedDayLost` срабатывает и в
+        //     ПРОБНЫХ раскладках (рескью просрочки перебирает станки-кандидаты, #4118/#4203).
+        //     Станок в «Отпуске» на всю неделю давал красный тост о сдвиге 🔒, которая на своём дне
+        //     и осталась (issue #4525: в логе 218 записей и ни одной по этому заданию).
+        // Поэтому список для тоста — ОТДЕЛЬНЫЙ: те записи, у которых план правда меняет день.
+        if (fixedDayLost.length && ops) {
+            ops.fixedDayLostReal = realFixedDayLost(fixedDayLost, ops,
+                function(id){ return planDateDayKey((cutsById0[String(id)] || {}).planDate); },
+                function(ts){ return planDateDayKey(String(ts)); });
+        }
         // #4436: ЗАПИСЬ в замороженный день отсекаем. Планировщик его СЧИТАЕТ (иначе у первой резки
         // следующего дня неверный предшественник и в плане появляется фантомная «дыра в полчаса»,
         // #4438), но НЕ МЕНЯЕТ: обновления «Даты план», удаления и новые сегменты по заданиям
@@ -8846,11 +8863,14 @@
         }
         // #4434 п.1: зафиксированное задание не удержало свой день — единственный допустимый случай
         // (день нерабочий: выходной/праздник/«Отпуск» станка). Не молчим: тост + консоль (уже в движке).
-        if (ops && ops.fixedDayLost && ops.fixedDayLost.length) {
+        // #4525: берём СПИСОК ДЛЯ ОПЕРАТОРА (`fixedDayLostReal`) — только то, что делает
+        // записываемый план. Полный `ops.fixedDayLost` остаётся стражу (#4512).
+        var lostToSay = (ops && ops.fixedDayLostReal) || [];
+        if (lostToSay.length) {
             // #4475: называем сами задания — «детали в консоли» оператору ничего не даёт.
             self.notify('Зафиксированные (🔒) задания сдвинуты: №'
-                + ops.fixedDayLost.slice(0, 3).map(function(f){ return f.cutId; }).join(', №')
-                + (ops.fixedDayLost.length > 3 ? ' и ещё ' + (ops.fixedDayLost.length - 3) : '')
+                + lostToSay.slice(0, 3).map(function(f){ return f.cutId; }).join(', №')
+                + (lostToSay.length > 3 ? ' и ещё ' + (lostToSay.length - 3) : '')
                 + ' — их день нерабочий (выходной/праздник или «Отпуск» станка), замок дня в такой'
                 + ' день удержать нельзя.', 'warning');
         }

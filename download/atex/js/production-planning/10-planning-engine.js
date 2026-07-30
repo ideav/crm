@@ -1243,6 +1243,48 @@
         return best ? String(best.id) : '';
     }
 
+    // #4525: «Зафиксированные (🔒) задания сдвинуты» — ТОЛЬКО о том, что делает ЗАПИСЫВАЕМЫЙ план.
+    //
+    // Движок зовёт `onFixedDayLost` из КАЖДОЙ раскладки, а их за один расчёт много: кроме итоговой,
+    // упаковщик прогоняет пробные — рескью просрочки перебирает станки-кандидаты (#4118/#4203
+    // «дозаклад по станкам»). Если среди кандидатов есть станок, который в «Отпуске» всю неделю
+    // (боевое: Станок 4, отпуск 30.07–06.08), проба честно сообщает «день 🔒 нерабочий» — и оператор
+    // получал красный тост о сдвиге зафиксированного, хотя в записанном плане задание осталось на
+    // своём дне (issue #4525: «как могло так выйти, что генерация пишет такое?»).
+    //
+    // Фильтр: запись о сдвиге остаётся, только если план ДЕЙСТВИТЕЛЬНО переносит это задание в
+    // другой день — то есть в `ops.updates` есть его обновление с ДРУГИМ днём. Нет обновления
+    // (плана эта запись не касается) или день тот же — это была проба, молчим. Дубли по заданию
+    // схлопываем: проб бывает несколько.
+    //   lost — [{ cutId, fixedDay, placedDay }]; dayKeyByCut — карта/функция «id → ГГГГММДД сейчас»;
+    //   dayKeyOfTs — «планируемый ts → ГГГГММДД». Нет чем сравнить — отдаём как есть (не молчим зря).
+    function realFixedDayLost(lost, ops, dayKeyByCut, dayKeyOfTs) {
+        var list = lost || [];
+        if (!list.length) return [];
+        var updates = (ops && ops.updates) || [];
+        if (typeof dayKeyOfTs !== 'function' || !dayKeyByCut) return list;
+        function dayNow(id) {
+            var v = (typeof dayKeyByCut === 'function') ? dayKeyByCut(id) : dayKeyByCut[String(id)];
+            return (v == null || v === Infinity) ? null : v;
+        }
+        var willBe = {};
+        updates.forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            willBe[String(u.cutId)] = dayKeyOfTs(u.planStartTs);
+        });
+        var seen = {}, out = [];
+        list.forEach(function(f) {
+            var id = String(f && f.cutId);
+            if (seen[id]) return;
+            if (!(id in willBe)) return;                 // план эту запись не трогает — сдвига нет
+            var was = dayNow(id), will = willBe[id];
+            if (was == null || will == null || was === will) return;   // день не меняется
+            seen[id] = true;
+            out.push(f);
+        });
+        return out;
+    }
+
     function sleeveMinutes(qty, opTimes) {
         var one = Number(opTimes && opTimes.SLEEVE_CUT) || 0;
         return round3((Number(qty) || 0) * one);
