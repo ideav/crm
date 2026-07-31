@@ -63,6 +63,17 @@ if [[ "${LONG:-0}" == "1" ]]; then
     docker exec "$APP" curl -s -m 180 -o /dev/null -w '   HTTP %{http_code}, %{time_total} c\n' 'http://localhost/my/?TIME=90'
 fi
 
+# #4539: проверочный запрос существования базы отвечает 504 (шаги 2–3), но НЕ добивается
+# на сервере — он короткий, KILL QUERY ему не нужен. В логе от него остаётся строка
+# «SQL прерван [DB check]» и НЕ должно быть «KILL QUERY».
+echo "5. Проверочный запрос не добивается (KILL QUERY по [DB check] нет)"
+if docker exec "$APP" sh -c 'grep -q "KILL QUERY" /var/www/html/logs/*_log.txt 2>/dev/null'; then
+    echo "   FAIL — в логе есть KILL QUERY, хотя добивать проверочный запрос не должны"
+    docker exec "$APP" sh -c 'grep -n "KILL QUERY" /var/www/html/logs/*_log.txt | head -3'
+else
+    echo "   ok — KILL QUERY не звался"
+fi
+
 echo
 echo "Хвост лога PHP:"
 docker exec "$APP" sh -c 'tail -5 /var/www/html/logs/*_log.txt 2>/dev/null || true'

@@ -235,12 +235,14 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
 # Check the DB existence
+# #4539: проверочный запрос НЕ ставится под добивание (Sql_running/KILL QUERY). Он короткий по
+# построению — `LIMIT 1` по только что открытому соединению, — и добивать в нём нечего: серверный
+# предел сессии (max_statement_time, выставлен в include/connection.php строкой выше) остановит
+# его сам, а метка «запрос в работе» нужна долгим запросам, которые переживают смерть PHP.
 $billingSql = "SELECT bal.val FROM $z db LEFT JOIN my ON my.t=".DATABASE." AND my.val='$z'
 				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
 				LIMIT 1";
-Sql_running($billingSql);  # #4322: запрос можно добить, если PHP завершится прямо на нём
 $billing = mysqli_query($connection, $billingSql);
-Sql_running_done();
 if(!$billing && ($z !== "auth.asp")){
 	# Проверочный запрос упал. mysqli_errno()===1146 (нет таблицы $z) означает, что
 	# запрошенной базы не существует: API-клиенту — структурированная ошибка [{error}] + 404,
@@ -252,8 +254,9 @@ if(!$billing && ($z !== "auth.asp")){
 	$errno = mysqli_errno($connection);
 	# Проверочный запрос упёрся в предел времени (#4322) — база на месте, просто БД не ответила
 	# в отведённое время (например, таблица заблокирована). Отвечаем 504, а не «базы нет».
+	# #4539: отвечаем, но НЕ добиваем — запрос короткий, убивать нечего (см. выше).
 	if(Sql_timeout_errno($errno))
-		Die_sql_timeout($billingSql, "DB check");
+		Die_sql_timeout($billingSql, "DB check", FALSE);
 	if($errno === 1146){
 		if(isApi())
 			my_die(t9n("[RU]База «{$z}» не найдена[EN]The «{$z}» database was not found"), "404 Not Found");
@@ -922,9 +925,13 @@ function trace($text){
 	}
 }
 # Запрос прерван по времени (issue #4322): добиваем его на сервере БД и отвечаем 504.
-function Die_sql_timeout($sql, $err_msg){
-	Sql_running($sql);
-	Kill_sql_query();
+# $kill=FALSE — только ответить: так зовёт короткий запрос, которому добивание не нужно
+# (проверка существования базы, #4539). Сообщение и код ответа от этого не меняются.
+function Die_sql_timeout($sql, $err_msg, $kill = TRUE){
+	if($kill){
+		Sql_running($sql);
+		Kill_sql_query();
+	}
 	$limit = isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : TIME_LIMIT_DEFAULT;
 	Time_limit_log("SQL прерван [$err_msg]: ".substr($sql, 0, 500));
 	my_die(t9n("[RU]Запрос прерван: превышен предел времени $limit c."
