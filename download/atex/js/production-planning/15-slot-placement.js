@@ -84,11 +84,53 @@
         return firstSetupCost(slot, ctx.times);
     }
 
+    // #4547 (решение заказчика 31.07.2026): ДЕНЬ СЧИТАЕТ УПАКОВЩИК, А НЕ ОЦЕНКА. Слой размещения
+    // спрашивает у `splitMachineQueue` (через ctx.realStartDayFn) день СТАРТА задания при ТОЙ ЖЕ
+    // очереди станка, что рассматривается. Один вопрос — одна арифметика: якоря 🔒, обед, «Отпуск»,
+    // нерабочие дни календаря, атомарность прохода и разрыв по потолку знает только упаковщик.
+    //
+    // ЗАЧЕМ. Прежде день «прикидывался» сложением работы префикса в ёмкость дня (`capacityMin`).
+    // Такой оценки нет в ТЗ, и она расходилась с раскладкой: в боевом журнале (#4542) §8 выбрал
+    // «день~20260803», а упаковщик положил задание на день 0 — на этом расхождении не сработал
+    // запрет обгона 🔒. «У нас не те объёмы, чтобы гадать» (заказчик): очередь станка — десятки
+    // заданий, точная упаковка по карману.
+    //   ctx.realStartDayFn(ids, slitterId) → { cutId: dayOffset старта }; ids — очередь станка
+    //   ЦЕЛИКОМ в рассматриваемом порядке (не префикс: с gapFill день задания зависит и от того,
+    //   что стои́т после него).
+    // → day-offset старта слота на позиции index.
+    function packedDayOffset(machineSlots, index, ctx){
+        var slot = machineSlots[index];
+        if (slot && slot.kind === 'vacation') return Number(slot.dayOffset) || 0;   // отпуск стои́т на своём дне
+        var ids = [];
+        for (var i = 0; i < machineSlots.length; i++){
+            var s = machineSlots[i];
+            if (s && s.kind === 'cut' && s.id != null) ids.push(String(s.id));
+        }
+        if (!ids.length || !slot || slot.id == null) return 0;
+        // Кэш держит САМА функция (одна на прогон planCutOperations): ctx здесь копируется на каждый
+        // станок (slotExtend), и кэш на нём терялся бы на каждом вызове.
+        var days = ctx.realStartDayFn(ids, ctx.slitterId) || null;
+        var d = days ? days[String(slot.id)] : null;
+        return (d != null && isFinite(Number(d))) ? Number(d) : 0;
+    }
     // Оценка ДНЯ СТАРТА слота на позиции index (порт packMachine): пакуем префикс [0..index] по
     // дням (ёмкость ctx.capacityMin, настройка = переход/с-нуля, пропуск нерабочих ctx.machineDayOff).
     // Отпуск-слот закреплён на своём дне и «занимает» его. Возвращает day-offset старта слота index.
+    //
+    // #4547: ЗАПАСНОЙ путь — только там, где упаковщика не дали (точечные юнит-тесты scorePosition).
+    // На путях плана его даёт planCutOperations; молча гадать нельзя (ТЗ §14), поэтому о переходе на
+    // оценку сообщается в журнал.
+    var warnedNoPacker = false;
     function prefixDayOffset(machineSlots, index, ctx){
         ctx = ctx || {};
+        if (typeof ctx.realStartDayFn === 'function') return packedDayOffset(machineSlots, index, ctx);
+        if (!warnedNoPacker){
+            warnedNoPacker = true;
+            if (typeof console !== 'undefined' && console.warn){
+                console.warn('[pp-slot] ⚠️ #4547: упаковщик размещению не передан (realStartDayFn) — '
+                    + 'день считается ОЦЕНКОЙ по ёмкости. На путях плана так быть не должно.');
+            }
+        }
         var cap = Number(ctx.capacityMin);
         if (!isFinite(cap) || cap <= 0) cap = Infinity;
         // Нерабочие дни — этого станка: ctx.machineDayOff (прямо) либо ctx.machineDayOffFor(sid) при переборе.
@@ -270,13 +312,16 @@
         // этого исключения в дне-стене 🔒 недопустимы почти все точки, и перенесённое «по весу»
         // задание садилось на КРАЙ блока — в голову дня, отрываясь от своей комбинации ножей
         // (issue #4508: 29 из 43 точек отброшены, выбрана поз 0 ценой смены ножей).
-        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed && !isManualMoveSlot(slot)
-            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4497 (ТЗ §15): перед 🔒 её дня ставить нельзя — вставленное сдвинуло бы её (см. выше).
         // #4542 (ТЗ §15): и в любом ДРУГОМ дне тоже — 🔒 не обгоняют (overtakesFixed шире и включает
         // случай одного дня; pushesFixedSameDay оставлен как отдельная проверка того же семейства).
+        // #4547: проверки БЕЗ дней идут первыми — день теперь считает упаковщик, и спрашивать его о
+        // точке, которую и так отбрасывает правило, незачем (на боевом объёме так отсеивается
+        // большинство точек: «рассмотрено вариантов 3 (+ 38 недопустимых пропущено)»).
         if (overtakesFixed(machineSlots, index, slot)) return null;
         if (pushesFixedSameDay(machineSlots, index, slot, ctx)) return null;
+        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed && !isManualMoveSlot(slot)
+            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
         // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и
@@ -956,7 +1001,7 @@
                  meta: { capacityMin: ctx.capacityMin, baseMidnightMs: ctx.baseMidnightMs,
                          slitterIds: (slitterIds || []).slice(), movable: movableN, fixed: fixedN,
                          vacations: (ctx.vacationSlots || []).length,
-                         note: 'capacityMin — лишь ЭВРИСТИКА оценки дня для порядка вставки; АРБИТР срока — РЕАЛЬНЫЕ дни splitMachineQueue (§12).' },
+                         note: 'День варианта — из splitMachineQueue (та же упаковка, что раскладывает план): ёмкость-оценки в решении нет (#4547).' },
                  tasks: [], refine: null };
     }
 
@@ -968,7 +1013,7 @@
         // (#4510) отрицательны, и «+-95» в трассе читалось бы как опечатка.
         Object.keys(f).forEach(function(k){ if (f[k]) parts.push(k + ' ' + (f[k] > 0 ? '+' : '') + f[k]); });
         return 'станок ' + c.machineId + ' поз ' + c.index + ' → вес ' + c.weight
-             + ' (день~' + (c.placementDayKey == null ? '?' : c.placementDayKey)
+             + ' (день ' + (c.placementDayKey == null ? '?' : c.placementDayKey)
              + (parts.length ? ('; ' + parts.join(', ')) : '; без штрафов') + ')';
     }
     // #4462: подписи факторов штрафа ДЛЯ ОПЕРАТОРА (ключи byFactor приходят из transitionCost/
@@ -999,7 +1044,7 @@
         if (!c) return '—';
         var f = formatFactorParts(c.byFactor);
         return 'станок ' + c.machineId + ', позиция ' + c.index
-             + (c.placementDayKey == null ? '' : (', день~' + c.placementDayKey))
+             + (c.placementDayKey == null ? '' : (', день ' + c.placementDayKey))
              + ' — вес ' + c.weight
              + (c.delta == null ? '' : (c.delta === 0 ? ' (тот же вес)' : (' (' + (c.delta > 0 ? '+' : '') + c.delta + ')')))
              + (f ? (': ' + f) : ': без штрафов')
@@ -1060,8 +1105,9 @@
         });
         return out;
     }
-    // #4095: структурный trace размещения → строки лога (ЧИСТАЯ, покрыта тестом). «день~» — ОЦЕНКА
-    // порядка; «РЕАЛЬНЫЙ день» — из splitMachineQueue (арбитр срока, §12).
+    // #4095: структурный trace размещения → строки лога (ЧИСТАЯ, покрыта тестом). #4547: день —
+    // ОДИН, из splitMachineQueue: и в разборе выбора, и в итоге. Прежде разбор печатал «день~»
+    // (ёмкость-оценка) рядом с «РЕАЛЬНЫМ днём» упаковщика, и они расходились.
     function formatSlotPlacementTrace(trace){
         var L = [];
         if (!trace) return L;
@@ -1071,7 +1117,7 @@
             L.push('  ' + (v.source === 'Настройка' ? '⚙' : '▫') + ' ' + v.key + ' = ' + v.value + '  [' + v.source + ']');
         });
         var m = trace.meta || {};
-        L.push('  ёмкость-ОЦЕНКА дня (эвристика порядка): ' + m.capacityMin + ' мин; станков ' + (m.slitterIds || []).length
+        L.push('  день КАЖДОГО варианта считает упаковщик (#4547); станков ' + (m.slitterIds || []).length
              + '; заданий: подвижных ' + m.movable + ', фикс ' + m.fixed + ', отпусков ' + m.vacations);
         L.push('  ⚠ ' + (m.note || ''));
         (trace.tasks || []).forEach(function(t){
@@ -1085,9 +1131,9 @@
                 L.push('   альтернатива ' + (i + 1) + ' (Δ ' + (a.delta > 0 ? '+' : '') + a.delta + '): ' + fmtSlotCand(a));
             });
             if (t.overdue){
-                if (t.bestInDue) L.push('   ⚠️ ОЦЕНКА за срок: день~' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
+                if (t.bestInDue) L.push('   ⚠️ ЗА СРОК: день ' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
                      + '; вариант В СРОК БЫЛ (вес ' + t.bestInDue.weight + ' vs выбран ' + t.chosen.weight + ') — переналадка дороже штрафа опоздания');
-                else L.push('   ⚠️ ОЦЕНКА за срок: день~' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
+                else L.push('   ⚠️ ЗА СРОК: день ' + t.chosen.placementDayKey + ' > срок ' + t.dueKey
                      + '; варианта В СРОК НЕТ — ёмкость дней ≤ срока исчерпана (честный конфликт)');
             }
             if (t.realDay != null) L.push('   РЕАЛЬНЫЙ день (splitMachineQueue, арбитр §12): ' + t.realDay
@@ -1165,6 +1211,7 @@
                          machineDayOffFor: ctx.machineDayOffFor, feasibleMachine: ctx.feasibleMachine,
                          distanceExceededFor: ctx.distanceExceededFor,
                          prevSetupBySlitter: ctx.prevSetupBySlitter,   // #4288: заправка станков — первая резка очереди наследует её как prev
+                         realStartDayFn: ctx.realStartDayFn,   // #4547: день задания считает упаковщик, а не оценка
                          traceTasks: trace ? trace.tasks : null };
         placeAllSlots(occ, movable, placeCtx);
         if (ctx.relocate !== false) relocatePass(occ, ctx.dayByCut || null, slotExtend(placeCtx, { dueDayByCut: ctx.dueDayByCut }));

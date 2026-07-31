@@ -4826,6 +4826,37 @@
             (chainByLogical[String(c && c.id)] || [String(c && c.id)]).forEach(function(id){ orphanDeletes.push(String(id)); });
             return false;
         });
+        // #4118/#4547: cutId → объект резки. Нужен и слою размещения (день ему считает упаковщик,
+        // #4547), и доп. проходам по РЕАЛЬНЫМ дням (#4118), поэтому строим ДО размещения.
+        var cutById = {};
+        merged.cuts.forEach(function(c){ if (c && c.id != null) cutById[String(c.id)] = c; });
+        // #4547 (решение заказчика 31.07.2026): ДЕНЬ СТАРТА задания в очереди станка — от УПАКОВЩИКА,
+        // а не от ёмкость-оценки. Порядок очереди здесь АВТОРИТЕТЕН: слой размещения спрашивает про
+        // КОНКРЕТНУЮ рассматриваемую расстановку, и переигрывать её упаковщик не должен.
+        //   ids — очередь станка целиком; → { cutId: dayOffset первого сегмента }.
+        // Кэш на прогон: слой размещения спрашивает про одну и ту же очередь много раз (соседние
+        // точки вставки, оценка «остаться» в релокации, повторные проходы), а упаковка очереди —
+        // самая дорогая операция размещения.
+        var packStartDayMemo = {};
+        function packStartDayFn(orderIds, machineId){
+            var ids = orderIds || [];
+            if (!ids.length) return {};
+            var key = String(machineId) + '|' + ids.join(',');
+            var hit = packStartDayMemo[key];
+            if (hit !== undefined) return hit;
+            var objs = ids.map(function(id){ return cutById[String(id)]; }).filter(Boolean);
+            var out = {};
+            if (objs.length){
+                (packOrderedMachine(objs, String(machineId), true) || []).forEach(function(s){
+                    var d = Number(s && s.dayOffset);
+                    if (!isFinite(d)) return;
+                    var id = String(s.cutId);
+                    if (out[id] == null || d < out[id]) out[id] = d;
+                });
+            }
+            packStartDayMemo[key] = out;
+            return out;
+        }
         // #4497/#4542: КОГО ОПЕРАТОР ДВИГАЕТ ПРЯМО СЕЙЧАС. ТЗ §15: ручное действие оператора запретами
         // формы плана не связано — ни «перед 🔒 ничего не ставить» (#4497), ни «🔒 не обгонять» (#4542).
         // Признак один на все слои (размещение и упаковщик), иначе исключение разъедется: все ручные
@@ -4854,7 +4885,8 @@
                 baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
                 machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
                 distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut,
-                prevSetupBySlitter: opts.prevSetupBySlitter   // #4288: заправка станков — первая резка очереди наследует её как prev (размещение + релокация)
+                prevSetupBySlitter: opts.prevSetupBySlitter,   // #4288: заправка станков — первая резка очереди наследует её как prev (размещение + релокация)
+                realStartDayFn: packStartDayFn   // #4547: день задания считает упаковщик, а не оценка
             };
             slotPlan = computeSlotPlacement(merged.cuts, slotExtend(slotRefineCtx, {
                 dueKeyByCut: opts.dueKeyByCut, slitterIds: opts.slitterIds, vacationSlots: opts.vacationSlots,
@@ -4917,7 +4949,7 @@
         // #4118: упаковка УЖЕ упорядоченной очереди станка splitMachineQueue (без пере-сортировки).
         // Выделено из planMachineSegs, чтобы доп. проход по РЕАЛЬНЫМ дням (relocateOverdueReal) мог
         // паковать пробные порядки на любом станке теми же параметрами (обед/отпуск/нахлёст/заправка).
-        function packOrderedMachine(ordered, key){
+        function packOrderedMachine(ordered, key, forceOrderAuthoritative){
             var runsByCut = {};
             ordered.forEach(function(c){ runsByCut[String(c.id)] = Number(c.plannedRuns) || 0; });
             var packOpts = {
@@ -4941,7 +4973,10 @@
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
-                orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать
+                // #4085: порядок задан слоем размещения — не переигрывать. #4547: при вопросе ИЗ
+                // размещения (слой ещё считает) порядок авторитетен явно — спрашивают про конкретную
+                // рассматриваемую расстановку.
+                orderAuthoritative: forceOrderAuthoritative || !!slotPlan,
                 pinDayPosByCut: opts.pinDayPosByCut,   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
                 wholeDayByCut: opts.wholeDayByCut,     // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
                 manualMoveByCut: manualMoveByCut       // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
@@ -5034,9 +5069,6 @@
             Object.keys(segsBy).forEach(function(key){ (segsBy[key] || []).forEach(function(s){ all.push(s); }); });
             return windingDaysFromSegs(all);
         }
-        // #4118: cutId → объект резки (для доп. прохода: пакуем пробные порядки по РЕАЛЬНЫМ дням).
-        var cutById = {};
-        merged.cuts.forEach(function(c){ if (c && c.id != null) cutById[String(c.id)] = c; });
         // #4118: реальный день ЗАВЕРШЕНИЯ каждого задания при заданном порядке очереди станка (реальная
         // упаковка splitMachineQueue с параметрами станка). realDayFn(orderIds, machineId) → {id: day}.
         function realPackFn(orderIds, machineId){
@@ -5084,7 +5116,8 @@
             capacityMin: (function(){ var w = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0) - (Number(opts.lunchDurationMin) || 0); return w > 0 ? w : Infinity; })(),
             baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
             machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
-            distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut
+            distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut,
+            realStartDayFn: packStartDayFn   // #4547: и на пути БЕЗ слоя размещения день считает упаковщик
         };
         // #4200: занятость из ТЕКУЩЕГО порядка станков (ручной planStart на preserveOrder) — вход #4118
         // на пути без слоя размещения. slotFromCut даёт полноценный слот (сырьё/ножи/срок) для scorePosition.
