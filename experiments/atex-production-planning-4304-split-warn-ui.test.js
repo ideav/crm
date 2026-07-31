@@ -59,10 +59,12 @@ function tsAt(y, m, d, hh, mm) { return Math.floor(new Date(y, m - 1, d, hh, mm,
 var DUE_2207 = 20260722;   // «Срок изготовления» обеспечиваемой позиции — 22.07
 
 // Сегмент разрезанного задания: одна конфигурация резки + один заказ = соседи по isDaySplitSibling.
+// #3892/31.07.2026: части одного разорванного задания связывает «ID первой части» (по умолчанию —
+// голова 638509 сценариев ниже), а не совпадение конфигурации: значки «←/→» ставятся по нему.
 function seg(id, planTs, over) {
     var c = { id: id, number: id, slitter: { id: '101', label: 'Станок 3' }, status: 'В работе',
         materialName: 'MW308', materialId: '500', winding: 'OUT', knifeWidths: [110], knifeCount: 1,
-        orderId: '4242', planDate: planTs, storedCutAndLeaderMin: 448 };
+        orderId: '4242', planDate: planTs, storedCutAndLeaderMin: 448, firstPartId: '638509' };
     over = over || {};
     for (var k in over) if (Object.prototype.hasOwnProperty.call(over, k)) c[k] = over[k];
     return c;

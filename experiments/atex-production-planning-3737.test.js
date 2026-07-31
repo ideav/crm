@@ -23,22 +23,23 @@ function assert(cond, name) {
 function cut(over) {
     var base = {
         id: 'x', slitter: { id: '7' }, materialId: 'M1', winding: 'IN',
-        knifeWidths: [600, 600, 194], orderId: '3690', planDate: '2026-06-27'
+        knifeWidths: [600, 600, 194], orderId: '3690', planDate: '2026-06-27', firstPartId: 'A0'
     };
     over = over || {};
     for (var k in over) if (Object.prototype.hasOwnProperty.call(over, k)) base[k] = over[k];
     return base;
 }
 
-// Цепочка одного задания, разрезанного по трём календарным дням (та же конфигурация + заказ).
+// Цепочка одного задания, разрезанного по календарным дням. Признак цепочки — общий «ID первой
+// части» (#3892); совпадение конфигурации и заказа больше ни при чём (решение заказчика 31.07.2026).
 var A0 = cut({ id: 'A0', planDate: '2026-06-25' });
 var A1 = cut({ id: 'A1', planDate: '2026-06-26' });
 var A2 = cut({ id: 'A2', planDate: '2026-06-27' });
 var A3 = cut({ id: 'A3', planDate: '2026-06-28' });
-// Чужое задание того же дня, что A2 (другой заказ) — не сосед по заданию.
-var B  = cut({ id: 'B', orderId: '3691', planDate: '2026-06-27' });
-// Тот же раскрой/заказ, но ДРУГОЙ станок — не сосед (станок входит в сигнатуру).
-var F  = cut({ id: 'F', slitter: { id: '8' }, planDate: '2026-06-26' });
+// Чужое задание того же дня, что A2 (свой маркер) — не сосед по заданию.
+var B  = cut({ id: 'B', orderId: '3691', planDate: '2026-06-27', firstPartId: 'B' });
+// Тот же раскрой и заказ, но ДРУГОЕ задание (свой маркер) — тоже не сосед.
+var F  = cut({ id: 'F', slitter: { id: '8' }, planDate: '2026-06-26', firstPartId: 'F' });
 var all = [A0, A1, A2, A3, B, F];
 
 // Сосед через границу дня: ближайший более ранний/поздний день той же цепочки.

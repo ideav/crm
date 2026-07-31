@@ -2416,20 +2416,24 @@ var twoTs = planning.planStartTimestamps(
 assertEqual(twoTs.c1, 1780992000, 'planStartTimestamps: c1 в 08:00');
 assertEqual(twoTs.c2 > twoTs.c1, true, 'planStartTimestamps: c2 стартует позже c1 (последовательно)');
 
-// ── #3280: mergeContinuationChains — слияние записей-продолжений (без маркера) ──
+// ── #3280/#3892: mergeContinuationChains — цепочку задаёт «ID первой части», и только он.
+// Запасное правило «одна конфигурация + смежные дни» убрано (решение заказчика 31.07.2026): оно
+// склеивало РАЗНЫЕ резки одной конфигурации. Части одного задания несут маркер головы.
 var sigBase = { slitter: { id: 'm1' }, materialId: 'x', winding: 'OUT', knifeWidths: [50] };
-function withSig(id, planDate, runs) {
-    return { id: id, slitter: sigBase.slitter, materialId: sigBase.materialId, winding: sigBase.winding, knifeWidths: sigBase.knifeWidths, plannedRuns: runs, planDate: planDate };
+function withSig(id, planDate, runs, fp) {
+    return { id: id, slitter: sigBase.slitter, materialId: sigBase.materialId, winding: sigBase.winding,
+             knifeWidths: sigBase.knifeWidths, plannedRuns: runs, planDate: planDate,
+             firstPartId: fp === undefined ? id : fp };
 }
-// Смежные дни (06-09 и 06-10) + одна сигнатура → одна логическая резка, продолжение в deletes.
-var mc = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781049600', 5)]);
-assertEqual(mc.cuts.length, 1, 'mergeContinuationChains: смежные дни → одна логическая резка');
-assertEqual({ id: mc.cuts[0].id, runs: mc.cuts[0].plannedRuns }, { id: 'c1', runs: 15 }, 'mergeContinuationChains: выживает ранняя, проходы суммируются');
+// Части ОДНОЙ цепочки (общий маркер 'c1') → одна логическая резка, продолжение в deletes.
+var mc = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781049600', 5, 'c1')]);
+assertEqual(mc.cuts.length, 1, 'mergeContinuationChains: общий маркер → одна логическая резка');
+assertEqual({ id: mc.cuts[0].id, runs: mc.cuts[0].plannedRuns }, { id: 'c1', runs: 15 }, 'mergeContinuationChains: выживает голова, проходы суммируются');
 assertEqual(mc.deletes, ['c2'], 'mergeContinuationChains: продолжение → в deletes');
-// Несмежные дни (06-09 и 06-12) → НЕ сливаем.
-var mc2 = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781222400', 5)]);
-assertEqual(mc2.cuts.length, 2, 'mergeContinuationChains: несмежные дни → не сливаем');
-assertEqual(mc2.deletes, [], 'mergeContinuationChains: несмежные → нет удалений');
+// Свои маркеры (пусть даже смежные дни и одна конфигурация) → НЕ сливаем.
+var mc2 = planning.mergeContinuationChains([withSig('c1', '1780963200', 10), withSig('c2', '1781049600', 5)]);
+assertEqual(mc2.cuts.length, 2, 'mergeContinuationChains: разные маркеры → не сливаем (конфигурацию не угадываем)');
+assertEqual(mc2.deletes, [], 'mergeContinuationChains: разные маркеры → нет удалений');
 
 // ── #3280: planCutOperations — overflow-резка → update первого сегмента + create продолжения ──
 var ops = planning.planCutOperations(
@@ -2577,7 +2581,7 @@ assertEqual(ops3427grow.deletes, [], 'planCutOperations #3427 (рост): без
 // #3427: если сегментов стало МЕНЬШЕ записей в цепочке — лишние записи удаляются.
 // Цепочка [A,B,C] на станке, но теперь всё влезает в один сегмент (день вмещает всё).
 var ops3427shrink = planning.planCutOperations(
-    [withSig('A', '1780963200', 3), withSig('B', '1781049600', 3), withSig('C', '1781136000', 3)],
+    [withSig('A', '1780963200', 3), withSig('B', '1781049600', 3, 'A'), withSig('C', '1781136000', 3, 'A')],
     { perPassByCut: { A: 10, B: 10, C: 10 }, dayStartMin: 0, dayEndMin: 10000,
       times: { BETWEEN_CUTS: 0 }, planBaseMidnightMs: 1780963200000 }
 );
