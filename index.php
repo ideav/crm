@@ -5138,6 +5138,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     }
                     $output = substr(str_replace("&ritrn;", "\n",str_replace("&ritrr;", "\r", $output)), 0, -1);
                     fclose($file);
+                    # #4544: отдаём ДАННЫЕ, а не страницу. Без явного типа PHP ставит text/html,
+                    # и браузер разбирает дамп как разметку: значение-тег исчезает из показанного
+                    # текста (иконка меню `<i class="pi pi-upload"></i>` → пусто), а числовая
+                    # сущность молча превращается в символ (`&#128196;` → 📄). Обычные значения
+                    # (имена, ссылки) при этом целы — поэтому после восстановления база выглядит
+                    # рабочей, но все иконки левого меню пустые (issue #4544).
+                    # charset обязателен: значения в UTF-8, без него кириллица читается как cp1251.
+                    header("Content-Type: text/plain; charset=utf-8");
                     die("INSERT INTO `$z` (`id`, `t`, `up`, `ord`, `val`) VALUES $output;");
 					break;
 				case "backup":
