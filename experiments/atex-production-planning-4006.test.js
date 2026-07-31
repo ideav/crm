@@ -62,11 +62,8 @@ var onlyRestricted = [slitter('1', 'j<1000'), slitter('4', 'j<1000')];
 assert(P.chooseSlitterBySetup(cut('MWR500L'), onlyRestricted, {}, {}, {}, 0, {}, nomWidths) === null,
     'chooseSlitterBySetup: широкое сырьё, все станки с лимитом → null (некуда ставить)');
 
-// pickSlitter (тест-экспорт): та же фильтрация по номиналу.
-assert(['2', '3'].indexOf(P.pickSlitter(slitters4, 'MWR500L', {}, 1000)) >= 0,
-    'pickSlitter: MWR500L (1000) → станок 2/3');
-assert(P.pickSlitter(slitters4, 'MWR400L', {}, 900) === '1',
-    'pickSlitter: MWR400L (900) → наименьший id среди допустимых (станок 1)');
+// Дубль-помощник pickSlitter (выбор станка по загрузке) удалён как мёртвый код: станок выбирает
+// слой размещения, а лимит номинала проверяет chooseSlitterBySetup — он и проверяется выше.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Часть 1 — формат тайминга: намотка и лидер РАЗНЫМИ строками (#4421), лидер в «Итого резка»

@@ -41,7 +41,6 @@
         isCoreStripFiller: isCoreStripFiller,            // #3872
         selectCoreStripFillers: selectCoreStripFillers,  // #3872
         coreOnlyStripWidths: coreOnlyStripWidths,        // #3872
-        mapCutRecord: mapCutRecord,
         clonePlanningCut: clonePlanningCut,     // #4402
         projectPlanOnCuts: projectPlanOnCuts,   // #4402: проекция плана «Упорядочить» на очередь (предпросмотр без записи)
         planChangeRows: planChangeRows,         // #4417: что поменялось у каждого задания (модалка «Детали» + пометка карточек)
@@ -66,7 +65,6 @@
         dayDeletionTargets: dayDeletionTargets,
         formatPlanDayLabel: formatPlanDayLabel,
         formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
-        fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         cutFulfillmentIds: cutFulfillmentIds,             // #3691
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
@@ -96,7 +94,6 @@
         splitMachineQueue: splitMachineQueue,
         underfilledLayoutDays: underfilledLayoutDays,   // #4469: недоупакованные станко-дни раскладки (ТЗ §15)
         scheduleStartTimestamp: scheduleStartTimestamp,
-        planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
         downtimeConflictCuts: downtimeConflictCuts,               // #4413: задания, стоящие в окне «Отпуска»
         slitterDownOnDay: slitterDownOnDay,                       // #3876
@@ -160,8 +157,6 @@
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutCreateRequiredKeys: cutCreateRequiredKeys,   // #3851
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
-        supplyCutRelation: supplyCutRelation,
-        buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
         buildFinishedBatchFields: buildFinishedBatchFields,
         finishedBatchRolls: finishedBatchRolls,
@@ -191,16 +186,13 @@
         formatCutNumber: formatCutNumber,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
-        REMAINDER_OK_M: REMAINDER_OK_M,
         FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
         FATIGUE_FACTOR: FATIGUE_FACTOR,
         FATIGUE_START_COST_MIN: FATIGUE_START_COST_MIN,
         PLANNING_STRATEGY_SETUP: PLANNING_STRATEGY_SETUP,
         PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
-        widthSetDistance: widthSetDistance,
         knifeMoves: knifeMoves,
-        awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
         carryOverPrevCut: carryOverPrevCut,       // #3688
@@ -231,16 +223,12 @@
         rebalanceSlitterLoad: rebalanceSlitterLoad,   // #3848: выравнивание загрузки станков
         computeSlitterReassignment: computeSlitterReassignment,   // #4001: пере-выбор станка для существующих резок
         knifeWidthSig: knifeWidthSig,   // #3666
-        byKnifeCountDesc: byKnifeCountDesc,
-        planQueues: planQueues,
         planMoveSequences: planMoveSequences,   // #3602/#3923
         planMoveStarts: planMoveStarts,         // #4477: плейсхолдер-старты переноса — только вставляемому
         planDragReorder: planDragReorder,       // #4306: перестановка задания внутри дня перетаскиванием
-        unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
         uncoveredPositions: uncoveredPositions,
         nextSequenceForCuts: nextSequenceForCuts,
-        pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
         pickBatchFIFOForRun: pickBatchFIFOForRun,
         batchIsActive: batchIsActive,
@@ -262,14 +250,12 @@
         plannedRunsForLayout: plannedRunsForLayout,
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
-        finishedBatchesForLayout: finishedBatchesForLayout,
         producedBatchesForLayout: producedBatchesForLayout,
         supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
         pickSleeveBatchId: pickSleeveBatchId,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
-        requiredRunLengthM: requiredRunLengthM,
         supplyFootage: supplyFootage,
         cutRunLength: cutRunLength,
         reserveFifo: reserveFifo,
@@ -307,15 +293,12 @@
         dayLayoutIsSound: dayLayoutIsSound,               // #4408: день без дыр и нахлёстов
         repackDayWindowStarts: repackDayWindowStarts,     // #4408: честная пересборка стартов ВНУТРИ дня
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
-        lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
         freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
-        formatCutStartTime: formatCutStartTime,
         formatCutStartTitle: formatCutStartTitle,
         cutStartWindowMin: cutStartWindowMin,
-        formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
         formatSetupScheduleLine: formatSetupScheduleLine,   // #4121: окно карточки настройки (0 проходов)
         formatFreeSlot: formatFreeSlot,
@@ -331,7 +314,6 @@
         cutRemainderStatus: cutRemainderStatus,
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
-        formatCutRuns: formatCutRuns,
         cutDisplayLength: cutDisplayLength,
         formatCutDimensions: formatCutDimensions,
         cutStripGroups: cutStripGroups,

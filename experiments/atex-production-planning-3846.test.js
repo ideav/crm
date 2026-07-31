@@ -7,7 +7,7 @@
 //
 // Фикс (#3846): production-planning показывает СОХРАНЁННЫЙ план через scheduleFromStored (тот же
 // источник, что у Ганта → времена/минуты ВСЕГДА совпадают). Единственное, что «считаем» на показе, —
-// обед: lunchBlocksFromSchedule находит обеденный зазор в сохранённом расписании и рисует его блоком.
+// обед: показывается накладкой на несущей карточке (#4075/#4052), а не отдельным блоком.
 //
 // Эти тесты гардируют обе чистые функции.
 //
@@ -54,32 +54,7 @@ var sFallback = planning.scheduleFromStored([cut('B', 9, 0, 0, 0, '')], BASE);
 sFallback = planning.scheduleFromStored([{ id: 'B', planDate: ts(9, 0), storedCutAndLeaderMin: '', duration: 25 }], BASE);
 assertEqual(sFallback[0].durationMin, 25, '#3846: пустой cut_time → fallback на duration');
 
-// ── lunchBlocksFromSchedule: обеденный зазор между резками одного дня ──────────────────────────
-// A: окно 11:00, cut_time 86, без наладки → 11:00..12:26. Обед 40 → B окно 13:06.
-var dayCuts = [cut('A', 11, 0, 0, 0, 86), cut('B', 13, 6, 0, 0, 30)];
-var sched = planning.scheduleFromStored(dayCuts, BASE);
-var lunch = planning.lunchBlocksFromSchedule(sched, { lunchStartMin: 12 * 60 + 20, lunchDurationMin: 40 });
-assertEqual(lunch.length, 1, '#3846: один обед на день');
-assertEqual([lunch[0].day, lunch[0].startMin, lunch[0].finishMin, lunch[0].durationMin],
-    [0, 12 * 60 + 26, 13 * 60 + 6, 40],
-    '#3846: обед 12:26–13:06 (40 мин), привязан к началу послеобеденной резки');
-// Блок обеда прилегает к окну следующей карточки → рендерится ровно один раз перед ней.
-assertEqual(lunch[0].finishMin, sched[1].startMin - sched[1].setupMin,
-    '#3846: finishMin обеда == окно послеобеденной карточки (надёжный матч при рендере)');
+// Обеденный зазор больше не рисуется отдельным блоком: обед и перерывы показываются накладкой на
+// несущей карточке (#4075 в очереди, #4052 на Ганте) — их проверяют atex-production-planning-4075
+// и atex-cut-gantt-4052. Прежний помощник lunchBlocksFromSchedule удалён как мёртвый код.
 
-// Зазор меньше обеда (встык/мелкий простой) — это НЕ обед.
-var packed = planning.scheduleFromStored([cut('A', 11, 0, 0, 0, 60), cut('B', 12, 0, 0, 0, 30)], BASE);
-assertEqual(planning.lunchBlocksFromSchedule(packed, { lunchStartMin: 740, lunchDurationMin: 40 }), [],
-    '#3846: встык (зазор 0) → обеда нет');
-
-// Обед выключен в настройке (lunchDurationMin ≤ 0) → блоков нет.
-assertEqual(planning.lunchBlocksFromSchedule(sched, { lunchStartMin: 740, lunchDurationMin: 0 }), [],
-    '#3846: обед выключен → []');
-
-// Не больше одного обеда на день: три резки с одним обеденным зазором → ровно один блок.
-var threeDay = planning.scheduleFromStored(
-    [cut('A', 10, 0, 0, 0, 60), cut('B', 11, 0, 0, 0, 86), cut('C', 13, 6, 0, 0, 30)], BASE);
-var lunch3 = planning.lunchBlocksFromSchedule(threeDay, { lunchStartMin: 740, lunchDurationMin: 40 });
-assertEqual(lunch3.length, 1, '#3846: при нескольких резках обед на день один (первый подходящий зазор)');
-
-console.log('\n' + passed + ' проверок прошло.');

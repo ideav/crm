@@ -402,36 +402,6 @@
         return null;
     }
 
-    // Как «Обеспечение» связано с «Производственной резкой» в текущей метасхеме:
-    // reference — поле-ссылка. Child-array из временной схемы #3180 не используем:
-    // по #3185 резка снова самостоятельная таблица.
-    function supplyCutRelation(supplyMeta, cutMeta) {
-        var req = reqByName(supplyMeta, SUPPLY_REQ.cut) || reqByName(supplyMeta, 'Производственная резка'); // #3504: старое имя запасным
-        if (!req) return { mode: 'none', reqId: null, arrId: null };
-        var arrId = req.arr_id == null ? null : String(req.arr_id);
-        if (arrId) return { mode: 'none', reqId: null, arrId: arrId };
-        return { mode: 'reference', reqId: req.id == null ? null : String(req.id), arrId: null };
-    }
-
-    // Поля записи «Обеспечение» для привязки/создания резки.
-    function buildSupplyFieldsForCut(supplyMeta, cutMeta, values) {
-        var relation = supplyCutRelation(supplyMeta, cutMeta);
-        var reqIds = {
-            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
-            active: activeReqId(supplyMeta),
-            cut: relation.mode === 'reference' ? relation.reqId : null,
-            rolls: reqIdByName(supplyMeta, SUPPLY_REQ.rolls)
-        };
-        reqIds.status = reqIdByName(supplyMeta, SUPPLY_REQ.status);
-        return buildFields(reqIds, {
-            footage: values && values.footage,
-            rolls: values && values.rolls,
-            active: values && values.active,
-            status: values && values.status,
-            cut: values && values.cutId
-        });
-    }
-
     // #3431/#3433: ПЛАН производства «Партии ГП» = «Кол-во полос» (за проход) × число
     // резок (повторов = «Кол-во резок план»). Пишется в «Кол-во план». Пусто/0 полос →
     // '' (поле не пишем). Без проходов (0) план = полосам (фолбэк, чтобы не записать 0).
@@ -523,31 +493,6 @@
         var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
         var rid = reqIdByName(meta, reqName);
         return rid == null ? -1 : order.indexOf(String(rid));
-    }
-
-    // Преобразование записи «Производственной резки» в плоский объект для UI.
-    // record — { i, r:[...] }, meta — метаданные таблицы.
-    function mapCutRecord(record, meta) {
-        var r = (record && record.r) || [];
-        function ref(reqName) {
-            var idx = columnIndex(meta, reqName);
-            return idx >= 0 ? parseRef(r[idx]) : { id: null, label: '' };
-        }
-        function val(reqName) {
-            var idx = columnIndex(meta, reqName);
-            return idx >= 0 ? (r[idx] == null ? '' : String(r[idx])) : '';
-        }
-        return {
-            id: String(record && record.i),
-            number: r[0] == null ? '' : String(r[0]),
-            slitter: ref(CUT_REQ.slitter),
-            materialBatch: ref(CUT_REQ.materialBatch),
-            planDate: val(CUT_REQ.planDate),
-            status: val(CUT_REQ.status),
-            // #3923: «Очередность» больше не хранится — порядок задаёт planStart (planDate).
-            // Поле оставлено (=null) как in-memory ординал генерации (orderCuts заполняет копии).
-            sequence: null
-        };
     }
 
     // Группировка резок в очереди по слиттерам. Возвращает массив
@@ -894,30 +839,6 @@
             return s && cutIds[String(s.cutId)] === true;
         });
         return { cuts: dayCuts, supplies: daySupplies };
-    }
-
-    // #3486: строки отчёта 81463 (cut → fulfillment, JSON_KV) → массив id «Обеспечений»
-    // удаляемой резки. Отчёт фильтруется серверно (FR_cutID), но если cutId передан —
-    // подстраховываемся и отбрасываем чужие строки. Берём колонку fulfillmentID,
-    // дедуплицируем и пропускаем пустые. Чистая функция — покрывается тестами.
-    function fulfillmentIdsFromRows(rows, cutId) {
-        var want = (cutId == null || cutId === '') ? null : String(cutId);
-        var seen = {};
-        var out = [];
-        (rows || []).forEach(function(row) {
-            if (!row) return;
-            if (want != null) {
-                var rc = row.cutID != null ? row.cutID : (row.cut_id != null ? row.cut_id : row.cutId);
-                if (rc != null && rc !== '' && String(rc) !== want) return;
-            }
-            var fid = row.fulfillmentID != null ? row.fulfillmentID
-                    : (row.fulfillment_id != null ? row.fulfillment_id : row.fulfillmentId);
-            fid = (fid == null) ? '' : String(fid).trim();
-            if (fid === '' || fid === 'null' || seen[fid]) return;
-            seen[fid] = true;
-            out.push(fid);
-        });
-        return out;
     }
 
     // #3691: id «Обеспечений» резки из УЖЕ ЗАГРУЖЕННЫХ supplies (this.supplies из cut_planning,

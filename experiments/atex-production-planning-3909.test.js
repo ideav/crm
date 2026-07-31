@@ -27,24 +27,8 @@ function assertEqual(actual, expected, name) {
 var LUNCH_START = 12 * 60 + 20;   // 740 = 12:20
 var LUNCH_DUR = 40;
 
-// ── ОЧЕРЕДЬ: lunchBlocksFromSchedule ──────────────────────────────────────────────────────────
-// A — несущее задание: окно 11:00–12:30 (содержит 12:20). Зазор-обед 12:30–13:10. B — после обеда.
-var schedule = [
-    { cutId: 'A', startMin: 660, setupMin: 0, finishMin: 750, leaderMin: 0 },   // 11:00–12:30
-    { cutId: 'B', startMin: 790, setupMin: 0, finishMin: 850, leaderMin: 0 }    // 13:10–14:10 (+40 обеда)
-];
-var lbsFixed = planning.lunchBlocksFromSchedule(schedule, { lunchStartMin: LUNCH_START, lunchDurationMin: LUNCH_DUR });
-assertEqual(lbsFixed.length, 1, '#3909 очередь: один обед на день');
-assertEqual([lbsFixed[0].dispStartMin, lbsFixed[0].dispFinishMin], [740, 780],
-    '#3909 очередь: обед показывается в 12:20–13:00 (а не в зазоре 12:30–13:10)');
-assertEqual(lbsFixed[0].carrierCutId, 'A', '#3909 очередь: несущее обед задание — A (его окно содержит 12:20)');
-assertEqual(lbsFixed[0].finishMin, 790, '#3909 очередь: ключ привязки строки — старт послеобеденной B (зазор)');
-
-// LUNCH_START неизвестен → обед показывается в зазоре (прежнее поведение), carrierCutId нет.
-var lbsOld = planning.lunchBlocksFromSchedule(schedule, { lunchDurationMin: LUNCH_DUR });
-assertEqual([lbsOld[0].dispStartMin, lbsOld[0].dispFinishMin], [750, 790],
-    '#3909 очередь: без LUNCH_START — обед в зазоре 12:30–13:10 (прежнее поведение)');
-assertEqual(lbsOld[0].carrierCutId, null, '#3909 очередь: без LUNCH_START несущее не помечается');
+// Блок про lunchBlocksFromSchedule убран вместе с самой функцией (мёртвый код): обед на экране —
+// накладка на несущей карточке, её проверяют atex-production-planning-4075 и atex-cut-gantt-4052.
 
 // ── ГАНТ: ganttLunchMarkers ───────────────────────────────────────────────────────────────────
 function gcut(id, planIso, knife, material, cutTime) {

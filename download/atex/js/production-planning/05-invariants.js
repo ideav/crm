@@ -990,10 +990,17 @@
 
     // Все нарушения, которые операции плана несут для указанного актора.
     //   actor: 'auto' — проверяются правила автоматики и общие; 'human' — только общие ('any').
-    function checkPlanInvariants(ops, ctx, actor) {
+    function checkPlanInvariants(ops, ctx, actor, rules) {
+        return checkRules(rules || PP_INVARIANTS, ops, ctx, actor);
+    }
+    // Проверка ПРОИЗВОЛЬНОГО набора правил — одна реализация на всех: её зовёт и шлюз записи
+    // (guardPlanOpsWith), и checkPlanInvariants. Раньше цикл был написан дважды, и «что считает
+    // страж» могло разойтись с «что показывает проверка».
+    function checkRules(rules, ops, ctx, actor) {
         var who = actor === 'human' ? 'human' : 'auto';
         var out = [];
-        PP_INVARIANTS.forEach(function(inv) {
+        (rules || []).forEach(function(inv) {
+            if (!inv || typeof inv.check !== 'function') return;
             if (inv.actor === 'auto' && who !== 'auto') return;
             out = out.concat(inv.check(ops, ctx) || []);
         });
@@ -1035,15 +1042,12 @@
     function guardPlanOpsWith(rules, ops, ctx, actor) {
         var who = actor === 'human' ? 'human' : 'auto';
         var applies = function(inv) { return !(inv.actor === 'auto' && who !== 'auto'); };
-        var filled = [], violations = [];
+        var filled = [];
         (rules || []).forEach(function(inv) {
             if (!applies(inv) || typeof inv.fill !== 'function') return;
             filled = filled.concat(inv.fill(ops, ctx) || []);
         });
-        (rules || []).forEach(function(inv) {
-            if (!applies(inv)) return;
-            violations = violations.concat(inv.check(ops, ctx) || []);
-        });
+        var violations = checkRules(rules, ops, ctx, who);
 
         // Правила, которые вправе отбрасывать: режим 'drop', актор подходит, предикат есть.
         var droppers = (rules || []).filter(function(inv) {

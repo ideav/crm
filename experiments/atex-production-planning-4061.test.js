@@ -74,29 +74,7 @@ var already = snap([
 ]);
 assertEqual(already, [480, 516, 540], '#4061: целочисленное расписание — снап no-op');
 
-// ── 5. Интеграция через planStartTimestamps (buildSchedule-путь): 3 одинаковые резки с ДРОБНОЙ
-// намоткой (250 м при норме 1 мин/100 м = 2.5 мин/проход, ceil 3) на одном станке. Без снапа
-// накопленное дробное окно давало planStart-дельты [.., 4] (дрейф); со снапом — целая занятость
-// (ceil(2.5)+лидер 2 = 5) для КАЖДОЙ пары стартов.
-var BASE = Date.UTC(2026, 5, 29, 0, 0, 0);   // полночь дня плана (UTC)
-function cut(id) {
-    return { id: id, plannedRuns: 1, runLength: 250, materialId: 'M1', winding: 'OUT',
-             knifeWidths: [100], slitter: { id: 'S1', label: 'Станок 1' } };
-}
-var stamps = planStartTimestamps([cut('a'), cut('b'), cut('c')], {
-    windPoints: [{ m: 100, min: 1 }],           // линейная норма: 1 мин / 100 м → 250 м = 2.5 мин
-    times: { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2 },
-    runLengthByCut: { a: 250, b: 250, c: 250 },
-    dayStartMin: 480, dayEndMin: 1080,
-    planBaseMidnightMs: BASE
-});
-var order = ['a', 'b', 'c'];
-var mins = order.map(function(id){ return Math.round((stamps[id] * 1000 - BASE) / 60000); });
-var dMin = mins.slice(1).map(function(v, i){ return v - mins[i]; });
-// Занятость каждой резки целая: setup 0 (идентичные) + ceil(2.5 намотки)=3. БЕЗ снапа накопленное
-// дробное окно (480, 482.5, 485.0) давало planStart-дельты [3, 2] — 2-я на минуту короче (дрейф);
-// со снапом обе пары ровно по 3 (окно каждой резки — целая минута = сумма её колонок).
-assertEqual(dMin, [3, 3], '#4061: planStartTimestamps — Δ planStart одинаковы (снап убрал дрейф [3,2] → [3,3])');
-assert(dMin[0] === dMin[1], '#4061: старт следующего задания не дрейфует (Δ стабильна)');
+// Пункт 5 (интеграция через planStartTimestamps) убран вместе с самой функцией: тот путь
+// (orderCuts + buildSchedule от дня 0) в плане не участвует, старты пишет planCutOperations —
+// снап целых минут на нём проверяют пункты выше и atex-pp-4061-planstart-snap-пути в очереди.
 
-console.log('\n' + passed + ' assertions passed');

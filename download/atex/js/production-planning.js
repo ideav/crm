@@ -403,36 +403,6 @@
         return null;
     }
 
-    // Как «Обеспечение» связано с «Производственной резкой» в текущей метасхеме:
-    // reference — поле-ссылка. Child-array из временной схемы #3180 не используем:
-    // по #3185 резка снова самостоятельная таблица.
-    function supplyCutRelation(supplyMeta, cutMeta) {
-        var req = reqByName(supplyMeta, SUPPLY_REQ.cut) || reqByName(supplyMeta, 'Производственная резка'); // #3504: старое имя запасным
-        if (!req) return { mode: 'none', reqId: null, arrId: null };
-        var arrId = req.arr_id == null ? null : String(req.arr_id);
-        if (arrId) return { mode: 'none', reqId: null, arrId: arrId };
-        return { mode: 'reference', reqId: req.id == null ? null : String(req.id), arrId: null };
-    }
-
-    // Поля записи «Обеспечение» для привязки/создания резки.
-    function buildSupplyFieldsForCut(supplyMeta, cutMeta, values) {
-        var relation = supplyCutRelation(supplyMeta, cutMeta);
-        var reqIds = {
-            footage: reqIdByName(supplyMeta, SUPPLY_REQ.footage),
-            active: activeReqId(supplyMeta),
-            cut: relation.mode === 'reference' ? relation.reqId : null,
-            rolls: reqIdByName(supplyMeta, SUPPLY_REQ.rolls)
-        };
-        reqIds.status = reqIdByName(supplyMeta, SUPPLY_REQ.status);
-        return buildFields(reqIds, {
-            footage: values && values.footage,
-            rolls: values && values.rolls,
-            active: values && values.active,
-            status: values && values.status,
-            cut: values && values.cutId
-        });
-    }
-
     // #3431/#3433: ПЛАН производства «Партии ГП» = «Кол-во полос» (за проход) × число
     // резок (повторов = «Кол-во резок план»). Пишется в «Кол-во план». Пусто/0 полос →
     // '' (поле не пишем). Без проходов (0) план = полосам (фолбэк, чтобы не записать 0).
@@ -524,31 +494,6 @@
         var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
         var rid = reqIdByName(meta, reqName);
         return rid == null ? -1 : order.indexOf(String(rid));
-    }
-
-    // Преобразование записи «Производственной резки» в плоский объект для UI.
-    // record — { i, r:[...] }, meta — метаданные таблицы.
-    function mapCutRecord(record, meta) {
-        var r = (record && record.r) || [];
-        function ref(reqName) {
-            var idx = columnIndex(meta, reqName);
-            return idx >= 0 ? parseRef(r[idx]) : { id: null, label: '' };
-        }
-        function val(reqName) {
-            var idx = columnIndex(meta, reqName);
-            return idx >= 0 ? (r[idx] == null ? '' : String(r[idx])) : '';
-        }
-        return {
-            id: String(record && record.i),
-            number: r[0] == null ? '' : String(r[0]),
-            slitter: ref(CUT_REQ.slitter),
-            materialBatch: ref(CUT_REQ.materialBatch),
-            planDate: val(CUT_REQ.planDate),
-            status: val(CUT_REQ.status),
-            // #3923: «Очередность» больше не хранится — порядок задаёт planStart (planDate).
-            // Поле оставлено (=null) как in-memory ординал генерации (orderCuts заполняет копии).
-            sequence: null
-        };
     }
 
     // Группировка резок в очереди по слиттерам. Возвращает массив
@@ -895,30 +840,6 @@
             return s && cutIds[String(s.cutId)] === true;
         });
         return { cuts: dayCuts, supplies: daySupplies };
-    }
-
-    // #3486: строки отчёта 81463 (cut → fulfillment, JSON_KV) → массив id «Обеспечений»
-    // удаляемой резки. Отчёт фильтруется серверно (FR_cutID), но если cutId передан —
-    // подстраховываемся и отбрасываем чужие строки. Берём колонку fulfillmentID,
-    // дедуплицируем и пропускаем пустые. Чистая функция — покрывается тестами.
-    function fulfillmentIdsFromRows(rows, cutId) {
-        var want = (cutId == null || cutId === '') ? null : String(cutId);
-        var seen = {};
-        var out = [];
-        (rows || []).forEach(function(row) {
-            if (!row) return;
-            if (want != null) {
-                var rc = row.cutID != null ? row.cutID : (row.cut_id != null ? row.cut_id : row.cutId);
-                if (rc != null && rc !== '' && String(rc) !== want) return;
-            }
-            var fid = row.fulfillmentID != null ? row.fulfillmentID
-                    : (row.fulfillment_id != null ? row.fulfillment_id : row.fulfillmentId);
-            fid = (fid == null) ? '' : String(fid).trim();
-            if (fid === '' || fid === 'null' || seen[fid]) return;
-            seen[fid] = true;
-            out.push(fid);
-        });
-        return out;
     }
 
     // #3691: id «Обеспечений» резки из УЖЕ ЗАГРУЖЕННЫХ supplies (this.supplies из cut_planning,
@@ -3748,10 +3669,17 @@
 
     // Все нарушения, которые операции плана несут для указанного актора.
     //   actor: 'auto' — проверяются правила автоматики и общие; 'human' — только общие ('any').
-    function checkPlanInvariants(ops, ctx, actor) {
+    function checkPlanInvariants(ops, ctx, actor, rules) {
+        return checkRules(rules || PP_INVARIANTS, ops, ctx, actor);
+    }
+    // Проверка ПРОИЗВОЛЬНОГО набора правил — одна реализация на всех: её зовёт и шлюз записи
+    // (guardPlanOpsWith), и checkPlanInvariants. Раньше цикл был написан дважды, и «что считает
+    // страж» могло разойтись с «что показывает проверка».
+    function checkRules(rules, ops, ctx, actor) {
         var who = actor === 'human' ? 'human' : 'auto';
         var out = [];
-        PP_INVARIANTS.forEach(function(inv) {
+        (rules || []).forEach(function(inv) {
+            if (!inv || typeof inv.check !== 'function') return;
             if (inv.actor === 'auto' && who !== 'auto') return;
             out = out.concat(inv.check(ops, ctx) || []);
         });
@@ -3793,15 +3721,12 @@
     function guardPlanOpsWith(rules, ops, ctx, actor) {
         var who = actor === 'human' ? 'human' : 'auto';
         var applies = function(inv) { return !(inv.actor === 'auto' && who !== 'auto'); };
-        var filled = [], violations = [];
+        var filled = [];
         (rules || []).forEach(function(inv) {
             if (!applies(inv) || typeof inv.fill !== 'function') return;
             filled = filled.concat(inv.fill(ops, ctx) || []);
         });
-        (rules || []).forEach(function(inv) {
-            if (!applies(inv)) return;
-            violations = violations.concat(inv.check(ops, ctx) || []);
-        });
+        var violations = checkRules(rules, ops, ctx, who);
 
         // Правила, которые вправе отбрасывать: режим 'drop', актор подходит, предикат есть.
         var droppers = (rules || []).filter(function(inv) {
@@ -3934,7 +3859,6 @@
     // #3472: приоритет — неизменность полос (0), затем меньше перемещений (2×ножи),
     // смена сырья (15); полная смена ~16 ножей ≈ 32 ≈ прежняя «смена ножей» 30.
     var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
-    var REMAINDER_OK_M = 600;
     var FATIGUE_MACHINE_WIDTH_MM = 1600;  // базовая ширина вала для оценки числа ножей (#3270/#3272)
     var FATIGUE_FACTOR = 2.0;             // alpha: штраф последней позиции = 1 + alpha
     var FATIGUE_START_COST_MIN = 45;      // условная стоимость старта маршрута, мин
@@ -3942,16 +3866,6 @@
     var PLANNING_STRATEGY_FATIGUE = 'fatigue';
 
     function normWinding(v){ var s = String(v == null ? '' : v).trim().toUpperCase(); return (s === 'IN' || s === 'OUT') ? s : ''; }
-
-    // Симметрическая разность мультимножеств ширин (сколько ножей переставить). Терпимо к числам/строкам.
-    function widthSetDistance(a, b){
-        function tally(arr){ var m = {}; (arr || []).forEach(function(x){ var k = String(Number(x)); m[k] = (m[k] || 0) + 1; }); return m; }
-        var ma = tally(a), mb = tally(b), keys = {}, d = 0;
-        Object.keys(ma).forEach(function(k){ keys[k] = 1; });
-        Object.keys(mb).forEach(function(k){ keys[k] = 1; });
-        Object.keys(keys).forEach(function(k){ d += Math.abs((ma[k] || 0) - (mb[k] || 0)); });
-        return d;
-    }
 
     // #3472: число НОЖЕЙ для перестановки prev→next. Нож, чья ширина есть в ОБОИХ
     // наборах, сохраняется (не двигается) — это приоритет неизменности полос. Поэтому
@@ -3988,9 +3902,6 @@
         ((cut && cut.knifeWidths) || []).forEach(function(x){ var n = Number(x); if (isFinite(n) && n > 0) set[String(n)] = 1; });
         return Object.keys(set).map(Number).sort(function(a, b){ return a - b; }).join(',');
     }
-
-    // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
-    function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
 
     // Компоненты переналадки prev→next (МИНУТЫ, БЕЗ лидера BETWEEN_CUTS) — те операции,
     // что реально применились, для расшифровки тайминга (#3240):
@@ -5170,20 +5081,6 @@
             if (!(rolls > 0)) return;
             var len = posLength ? (Number(posLength[String(pid)]) || 0) : (Number(p.length) || 0);
             out.push({ positionId: String(pid), width: Number(p.width) || 0, rolls: rolls, footage: len });
-        });
-        return out;
-    }
-
-    function finishedBatchesForLayout(layout, cutId, runLength, plannedRuns) {
-        var runs = Number(plannedRuns) || plannedRunsForLayout(layout, {});
-        var len = Number(runLength) || 0;
-        var out = [];
-        (layout && layout.strips || []).forEach(function(s) {
-            if (!isStockStrip(s)) return;
-            var width = Number(s.width) || 0;
-            var rolls = round3((Number(s.qty) || 0) * runs);
-            if (width <= 0 || rolls <= 0) return;
-            out.push({ cutId: String(cutId), width: width, rolls: rolls, length: len });
         });
         return out;
     }
@@ -6388,57 +6285,6 @@
             });
         });
         return out;
-    }
-
-    // #3846: блоки «Обед» для отображения — выводим обед как видимый разрыв между резками
-    // одного рабочего дня (раньше cut-gantt/очередь его не рисовали → выглядел как пустая
-    // «дыра в планировании»). Обед уже сидит в сохранённых planStart: между концом окна одной
-    // резки и началом окна следующей в ТОМ ЖЕ дне образуется зазор ≈ длительности обеда вокруг
-    // LUNCH_START. Берём такой зазор как обед. schedule — из scheduleFromStored/buildSchedule
-    // (отсортируем сами). opts: { lunchStartMin, lunchDurationMin, shiftStartMin }. Пустой обед
-    // (lunchDurationMin ≤ 0) → []. → [{ day, startMin, finishMin, durationMin }] (минуты от
-    // полуночи дня 0), по одному на день, где обед реально вставлен.
-    function lunchBlocksFromSchedule(schedule, opts) {
-        opts = opts || {};
-        var lunchDur = Number(opts.lunchDurationMin) || 0;
-        if (!(lunchDur > 0)) return [];
-        var lunchStart = Number(opts.lunchStartMin);   // #3909: 12:20 (мин от полуночи); NaN → привязка к зазору
-        var hasFixed = isFinite(lunchStart);
-        var segs = (schedule || []).slice().filter(function(s) {
-            return s && isFinite(Number(s.startMin));
-        }).sort(function(a, b) { return a.startMin - b.startMin; });
-        var byDay = {};
-        var prevCutByDay = {};   // #3909: cutId задания, после которого идёт зазор (несущее обед)
-        var lunchByDay = {};
-        segs.forEach(function(s) {
-            var winStart = Number(s.startMin) - (Number(s.setupMin) || 0);   // начало окна (настройки)
-            var winEnd = Number(s.finishMin) + (Number(s.leaderMin) || 0);
-            var day = Math.floor(winStart / 1440);
-            var prevEnd = byDay[day];
-            // Зазор внутри дня после предыдущей резки = обед (учтён только раз на день).
-            if (prevEnd != null && !lunchByDay[day]) {
-                var gap = winStart - prevEnd;
-                // Зазор сопоставим с обедом (терпимо к округлению; «через обед» режется по
-                // длительности): берём, если он не меньше почти полного обеда. finishMin (= НАЧАЛО
-                // послеобеденной резки) остаётся КЛЮЧОМ привязки строки обеда к карточке.
-                if (gap >= lunchDur - 1) {
-                    // #3909: при известном LUNCH_START ПОКАЗЫВАЕМ обед в 12:20 (внутри несущего его
-                    // задания prevCutByDay), а не в зазоре после него; carrierCutId — это задание.
-                    // LUNCH_START неизвестен → показываем в зазоре (dispStart = startMin), как было.
-                    var dispStart = hasFixed ? round3(day * 1440 + lunchStart) : round3(winStart - lunchDur);
-                    lunchByDay[day] = {
-                        day: day,
-                        startMin: round3(winStart - lunchDur), finishMin: round3(winStart),   // ключ привязки (зазор)
-                        dispStartMin: dispStart, dispFinishMin: round3(dispStart + lunchDur),  // #3909: показываемое время
-                        carrierCutId: hasFixed && prevCutByDay[day] != null ? String(prevCutByDay[day]) : null,
-                        durationMin: lunchDur
-                    };
-                }
-            }
-            if (byDay[day] == null || winEnd > byDay[day]) byDay[day] = winEnd;
-            prevCutByDay[day] = s.cutId;   // #3909: для зазора следующего задания дня
-        });
-        return Object.keys(lunchByDay).map(function(d) { return lunchByDay[d]; });
     }
 
     // #4121: обед УЖЕ учтён в сохранённых стартах, если генерация оставила под него зазор — то же
@@ -8052,51 +7898,6 @@
         return out;
     }
 
-    // #3280: плановое время старта каждой резки как Unix-штамп (для записи в t1078 —
-    // главное значение «Производственной резки»). Группируем по станку, упорядочиваем
-    // очередь (orderCuts), строим расписание (buildSchedule) и берём начало окна
-    // (startMin − setupMin) — то же время, что в .atex-pp-cut-num / .atex-pp-cut-time.
-    //   opts: { weights, windPoints, times, dayStartMin, dayEndMin, runLengthByCut,
-    //           planBaseMidnightMs }. → { cutId: штамп(сек) }. Вход не мутирует.
-    function planStartTimestamps(cuts, opts){
-        opts = opts || {};
-        var base = Number(opts.planBaseMidnightMs);
-        var byMachine = {};
-        var order = [];
-        (cuts || []).forEach(function(c){
-            var sid = c && c.slitter && c.slitter.id;
-            if (sid == null) return;
-            var key = String(sid);
-            if (!byMachine[key]) { byMachine[key] = []; order.push(key); }
-            byMachine[key].push(c);
-        });
-        var out = {};
-        order.forEach(function(key){
-            var ordered = orderCuts(byMachine[key], opts.weights);
-            var sched = buildSchedule(ordered, {
-                windPoints: opts.windPoints || [],
-                times: opts.times || DEFAULT_OP_TIMES,
-                runLengthByCut: opts.runLengthByCut || {},
-                shiftStartMin: opts.dayStartMin,
-                shiftEndMin: opts.dayEndMin,
-                lunchStartMin: opts.lunchStartMin,
-                lunchDurationMin: opts.lunchDurationMin,
-                firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
-                blockedRanges: (opts.blockedRangesBySlitter || {})[key]   // #3764: окна «Отпуска» этого станка
-            });
-            // #4061: старт окна = целое (снап), чтобы planStart следующей резки = planStart текущей
-            // + сумма её колонок (наладка+сырьё+резка/лидер) — без дрейфа на округлениях (см. helper).
-            var snapped = snapWindowStartsWholeMinutes(sched.map(function(sc){
-                return { ws: stripNum(sc.startMin) - stripNum(sc.setupMin), setup: stripNum(sc.setupMin),
-                         cutLeader: stripNum(sc.durationMin) + stripNum(sc.leaderMin) };
-            }));
-            sched.forEach(function(sc, i){
-                out[String(sc.cutId)] = scheduleStartTimestamp(base, snapped[i]);
-            });
-        });
-        return out;
-    }
-
     // #4416: ближайшее свободное окно станка ПО СОХРАНЁННОМУ ПЛАНУ — минута, с которой новое
     // задание встанет в хвост очереди, не наехав на уже запланированное и не оставив дыры.
     // #4416: ближайшее свободное окно станка — ПО СОХРАНЁННОМУ ПЛАНУ. Считаем от того, что
@@ -9411,9 +9212,6 @@
     function cutStartWindowMin(sc) {
         return stripNum(sc && sc.startMin) - stripNum(sc && sc.setupMin);
     }
-    function formatCutStartTime(sc) {
-        return sc ? formatClock(cutStartWindowMin(sc)) : '—';
-    }
     // #3280: title карточки — плановая дата+время старта до минут. baseMidnightMs —
     // полночь дня планирования (день 0 расписания); сегмент сдвинут на windowStartMin.
     function formatCutStartTitle(sc, baseMidnightMs) {
@@ -9425,12 +9223,6 @@
     function formatFreeSlot(slot) {
         if (!slot) return 'нет данных';
         return formatCutNumber(slot.startTs) + ' (' + formatClock(slot.startMin) + '–' + formatClock(slot.finishMin) + ')';
-    }
-
-    function formatCutWindingLabel(cut) {
-        var raw = cut && cut.winding;
-        var winding = normWinding(raw) || String(raw == null ? '' : raw).trim() || '—';
-        return 'Намотка: ' + winding;
     }
 
     function formatScheduleLine(sc, runLength, hasWindingPoints, shiftMin, extendMin) {
@@ -9540,14 +9332,6 @@
         return (isFinite(n) && n > 0) ? ('Полосы (' + n + ')') : 'Полосы';
     }
 
-    function formatCutRuns(plannedRuns, runLength) {
-        var runs = stripNum(plannedRuns);
-        var text = 'Проходов: ' + (runs > 0 ? String(round3(runs)) : '—');
-        var length = stripNum(runLength);
-        if (length > 0) text += ' * ' + round3(length) + 'м';
-        return text;
-    }
-
     // ── #3354: компактная шапка карточки и сводка полос ──────────────────────
     // Метраж прохода для показа: фактический runLength (учёт обеспечения), а при
     // его отсутствии — сохранённый «Метраж, м» резки.
@@ -9605,12 +9389,6 @@
         return line;
     }
 
-    // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
-    function unsuppliedPositions(positions, supplies){
-        var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
-        return (positions || []).filter(function(p){ return !sup[String(p.id)]; });
-    }
-
     function supplyCoverageKind(supply) {
         if (!supply || supply.positionId == null || String(supply.positionId) === '') return '';
         if (supply.cutId != null && String(supply.cutId) !== '') return 'cut';
@@ -9627,23 +9405,6 @@
             if (kind) covered[String(s.positionId)] = true;
         });
         return (positions || []).filter(function(p){ return !covered[String(p.id)]; });
-    }
-
-    // Выбрать станок: исключить запрещённые (стоп-лист), среди допустимых —
-    // с наименьшей загрузкой (loadBySlitterId: {id→count}), тайбрейк — меньший id.
-    // Возвращает String(id) или null если все запрещены.
-    function pickSlitter(slitters, materialId, loadBySlitterId, nominalWidth){
-        var load = loadBySlitterId || {};
-        var allowed = (slitters || []).filter(function(s){
-            return !isMaterialBlocked(s.stopMaterialIds, materialId)
-                && !isSlitterWidthBlocked(s.widthCode, nominalWidth);   // #4006: лимит ширины джамбо станка
-        });
-        if (!allowed.length) return null;
-        allowed.sort(function(a, b){
-            var la = Number(load[String(a.id)]) || 0, lb = Number(load[String(b.id)]) || 0;
-            return la - lb || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
-        });
-        return String(allowed[0].id);
     }
 
     // FIFO-партия: среди активных партий нужного сырья с остатком > 0 выбрать с наименьшим dateKey.
@@ -9760,13 +9521,6 @@
             healed.push({ cutId: id, batchId: batch, source: source });
         });
         return { healed: healed, unresolved: unresolved };
-    }
-
-    // Потребность резки в погонных метрах (#3120 группа C): длина прогона джамбо =
-    // самая длинная обеспечиваемая позиция (параллельный слиттинг — все полосы режутся
-    // за один прогон). supplyFootages — массив «Метраж, м» обеспечений резки.
-    function requiredRunLengthM(supplyFootages){
-        return (supplyFootages || []).reduce(function(m, f){ var n = stripNum(f); return n > m ? n : m; }, 0);
     }
 
     function supplyFootage(supply, footageBySupply){
@@ -9997,16 +9751,6 @@
         }
         return best;
     }
-    // Внутри последовательности станка число ножей должно убывать к концу дня
-    // (ideav/crm#3130): в начале смены ножей много, к вечеру меньше — переналаживать
-    // тяжелее. Стабильная сортировка по knifeCount ↓; равные — в порядке жадной
-    // последовательности (минимизация переналадок остаётся вторичным критерием).
-    function byKnifeCountDesc(seq){
-        return (seq || []).map(function(c, i){ return { c: c, i: i }; })
-            .sort(function(a, b){ return ((Number(b.c.knifeCount) || 0) - (Number(a.c.knifeCount) || 0)) || (a.i - b.i); })
-            .map(function(x){ return x.c; });
-    }
-
     // #3272: второй вариант очереди учитывает усталость к концу дня. Жадная цепочка
     // по переналадкам остаётся стабильной базой, но внутри неё более сложные резки
     // (много ножей / узкая ширина) ставятся раньше, если weighted score не хуже.
@@ -11077,33 +10821,6 @@
         if (a < b) return -1;
         if (a > b) return 1;
         return 0;
-    }
-
-    // Сгруппировать резки по станкам и дням, упорядочить каждую группу через orderCuts,
-    // пронумеровать 1..N внутри каждого станка/дня. Резки без станка (slitter.id == null) пропускаются.
-    // Возвращает плоский массив [{cutId, slitterId, sequence}].
-    function planQueues(cuts, weights) {
-        var groups = {};
-        var slitterOrder = [];
-        (cuts || []).forEach(function(c) {
-            var sid = c && c.slitter && c.slitter.id;
-            if (sid == null) return; // пропускаем «без станка»
-            var key = String(sid);
-            if (!groups[key]) { groups[key] = { days: {}, dayOrder: [] }; slitterOrder.push(key); }
-            var day = cutPlanDayKey(c);
-            if (!groups[key].days[day]) { groups[key].days[day] = []; groups[key].dayOrder.push(day); }
-            groups[key].days[day].push(c);
-        });
-        var result = [];
-        slitterOrder.forEach(function(sid) {
-            groups[sid].dayOrder.slice().sort(comparePlanDayKeys).forEach(function(day) {
-                var ordered = orderCuts(groups[sid].days[day], weights);
-                ordered.forEach(function(c) {
-                    result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
-                });
-            });
-        });
-        return result;
     }
 
     // Прогресс длительной генерации резок (#3148): целое значение процента 0..100.
@@ -12800,7 +12517,6 @@
         isCoreStripFiller: isCoreStripFiller,            // #3872
         selectCoreStripFillers: selectCoreStripFillers,  // #3872
         coreOnlyStripWidths: coreOnlyStripWidths,        // #3872
-        mapCutRecord: mapCutRecord,
         clonePlanningCut: clonePlanningCut,     // #4402
         projectPlanOnCuts: projectPlanOnCuts,   // #4402: проекция плана «Упорядочить» на очередь (предпросмотр без записи)
         planChangeRows: planChangeRows,         // #4417: что поменялось у каждого задания (модалка «Детали» + пометка карточек)
@@ -12825,7 +12541,6 @@
         dayDeletionTargets: dayDeletionTargets,
         formatPlanDayLabel: formatPlanDayLabel,
         formatPlanDayRangeLabel: formatPlanDayRangeLabel,   // #3622
-        fulfillmentIdsFromRows: fulfillmentIdsFromRows,   // #3486
         cutFulfillmentIds: cutFulfillmentIds,             // #3691
         extractApiError: extractApiError,
         planDateDayKey: planDateDayKey,
@@ -12855,7 +12570,6 @@
         splitMachineQueue: splitMachineQueue,
         underfilledLayoutDays: underfilledLayoutDays,   // #4469: недоупакованные станко-дни раскладки (ТЗ §15)
         scheduleStartTimestamp: scheduleStartTimestamp,
-        planStartTimestamps: planStartTimestamps,
         downtimeBlockedRanges: downtimeBlockedRanges,             // #3764
         downtimeConflictCuts: downtimeConflictCuts,               // #4413: задания, стоящие в окне «Отпуска»
         slitterDownOnDay: slitterDownOnDay,                       // #3876
@@ -12919,8 +12633,6 @@
         cutWriteDiagnostics: cutWriteDiagnostics,
         cutCreateRequiredKeys: cutCreateRequiredKeys,   // #3851
         cutGenerationTimingDiagnostics: cutGenerationTimingDiagnostics,
-        supplyCutRelation: supplyCutRelation,
-        buildSupplyFieldsForCut: buildSupplyFieldsForCut,
         buildSupplyFieldsForFinishedBatch: buildSupplyFieldsForFinishedBatch,
         buildFinishedBatchFields: buildFinishedBatchFields,
         finishedBatchRolls: finishedBatchRolls,
@@ -12950,16 +12662,13 @@
         formatCutNumber: formatCutNumber,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
-        REMAINDER_OK_M: REMAINDER_OK_M,
         FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
         FATIGUE_FACTOR: FATIGUE_FACTOR,
         FATIGUE_START_COST_MIN: FATIGUE_START_COST_MIN,
         PLANNING_STRATEGY_SETUP: PLANNING_STRATEGY_SETUP,
         PLANNING_STRATEGY_FATIGUE: PLANNING_STRATEGY_FATIGUE,
         normWinding: normWinding,
-        widthSetDistance: widthSetDistance,
         knifeMoves: knifeMoves,
-        awkwardRemainder: awkwardRemainder,
         changeoverParts: changeoverParts,
         changeoverCost: changeoverCost,
         carryOverPrevCut: carryOverPrevCut,       // #3688
@@ -12990,16 +12699,12 @@
         rebalanceSlitterLoad: rebalanceSlitterLoad,   // #3848: выравнивание загрузки станков
         computeSlitterReassignment: computeSlitterReassignment,   // #4001: пере-выбор станка для существующих резок
         knifeWidthSig: knifeWidthSig,   // #3666
-        byKnifeCountDesc: byKnifeCountDesc,
-        planQueues: planQueues,
         planMoveSequences: planMoveSequences,   // #3602/#3923
         planMoveStarts: planMoveStarts,         // #4477: плейсхолдер-старты переноса — только вставляемому
         planDragReorder: planDragReorder,       // #4306: перестановка задания внутри дня перетаскиванием
-        unsuppliedPositions: unsuppliedPositions,
         supplyCoverageKind: supplyCoverageKind,
         uncoveredPositions: uncoveredPositions,
         nextSequenceForCuts: nextSequenceForCuts,
-        pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
         pickBatchFIFOForRun: pickBatchFIFOForRun,
         batchIsActive: batchIsActive,
@@ -13021,14 +12726,12 @@
         plannedRunsForLayout: plannedRunsForLayout,
         supplyRollsForPosition: supplyRollsForPosition,
         layoutRunLength: layoutRunLength,
-        finishedBatchesForLayout: finishedBatchesForLayout,
         producedBatchesForLayout: producedBatchesForLayout,
         supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
         pickSleeveBatchId: pickSleeveBatchId,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
-        requiredRunLengthM: requiredRunLengthM,
         supplyFootage: supplyFootage,
         cutRunLength: cutRunLength,
         reserveFifo: reserveFifo,
@@ -13066,15 +12769,12 @@
         dayLayoutIsSound: dayLayoutIsSound,               // #4408: день без дыр и нахлёстов
         repackDayWindowStarts: repackDayWindowStarts,     // #4408: честная пересборка стартов ВНУТРИ дня
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
-        lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
         freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
-        formatCutStartTime: formatCutStartTime,
         formatCutStartTitle: formatCutStartTitle,
         cutStartWindowMin: cutStartWindowMin,
-        formatCutWindingLabel: formatCutWindingLabel,
         formatScheduleLine: formatScheduleLine,
         formatSetupScheduleLine: formatSetupScheduleLine,   // #4121: окно карточки настройки (0 проходов)
         formatFreeSlot: formatFreeSlot,
@@ -13090,7 +12790,6 @@
         cutRemainderStatus: cutRemainderStatus,
         progressPercent: progressPercent,
         stripsButtonLabel: stripsButtonLabel,
-        formatCutRuns: formatCutRuns,
         cutDisplayLength: cutDisplayLength,
         formatCutDimensions: formatCutDimensions,
         cutStripGroups: cutStripGroups,
