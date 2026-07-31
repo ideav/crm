@@ -49,37 +49,68 @@ const HOST = arg('host', 'https://ideav.ru');
 const TOKEN = process.env.TOKEN;
 const APPLY = HAS('apply');
 
-/** Разобрать SQL-дамп: вернуть Map<objId, icon> по строкам реквизита t=391. */
+/**
+ * Разобрать SQL-дамп бэкапа → Map<idПунктаМеню, иконка>.
+ *
+ * Формат дампа задаёт сам обработчик `restore` (index.php):
+ *   INSERT INTO `db` (`id`, `t`, `up`, `ord`, `val`) VALUES (id,t,up,ord,'val'),…
+ * То есть тип реквизита стои́т ВТОРЫМ, а не третьим — значение иконки лежит в строке
+ * с t=391, и её `up` указывает на id записи меню. Значения прогнаны через addslashes,
+ * поэтому кавычки приходят экранированными.
+ */
 export function iconsFromDump(sql) {
   const out = new Map();
-  // Формат дампа: INSERT INTO ... VALUES (id, up, t, val) — вытаскиваем кортежи с t=391.
-  const re = /\(\s*(\d+)\s*,\s*(\d+)\s*,\s*391\s*,\s*'((?:[^']|'')*)'\s*\)/g;
+  const re = /\((\d+),(\d+),(\d+),(-?\d+),'((?:[^'\\]|\\.)*)'\)/g;
   let m;
   while ((m = re.exec(sql)) !== null) {
-    const [, , up, val] = m;
-    out.set(Number(up), val.replace(/''/g, "'"));
+    const [, , t, up, , val] = m;
+    if (t !== String(REQ_ICON)) continue;
+    out.set(Number(up), unslash(val));
   }
   return out;
 }
 
+/** Адреса (t153) из дампа — контроль, что под id тот же пункт. */
+export function hrefsFromDump(sql) {
+  const out = new Map();
+  const re = /\((\d+),(\d+),(\d+),(-?\d+),'((?:[^'\\]|\\.)*)'\)/g;
+  let m;
+  while ((m = re.exec(sql)) !== null) if (m[2] === String(REQ_HREF)) out.set(Number(m[3]), unslash(m[5]));
+  return out;
+}
+
+/** Обратное к addslashes: \" → ", \' → ', \\ → \ */
+export function unslash(v) {
+  return v.replace(/\\(.)/g, '$1');
+}
+
 /**
- * Сопоставить пункты живой базы с источником иконок ПО АДРЕСУ.
- * Возвращает план: что менять, что уже в порядке, что не нашлось.
+ * Сопоставить пункты живой базы с иконками из бэкапа ПО id записи.
+ *
+ * Почему по id, а не по адресу: строка иконки в дампе ссылается на запись меню полем `up`,
+ * то есть id и есть естественный ключ. На живых данных ateh это проверено — все 52 пункта
+ * нашлись в бэкапе по id, и адрес (t153) совпал у всех до одного, то есть записи не
+ * пересоздавались. Адрес используем как КОНТРОЛЬ: разошёлся — значит id переиспользован
+ * под другой пункт, и такой случай трогать нельзя.
  */
-export function planRestore(liveItems, iconByHref) {
-  const plan = { toSet: [], alreadyOk: [], noSource: [], conflicting: [] };
+export function planRestore(liveItems, iconById, hrefById = null) {
+  const plan = { toSet: [], alreadyOk: [], noSource: [], conflicting: [], hrefMismatch: [] };
   for (const it of liveItems) {
     const cur = (it.icon ?? '').trim();
-    const href = (it.href ?? '').trim();
-    const want = href ? iconByHref.get(href) : undefined;
+    const want = iconById.get(it.id);
+
+    if (hrefById && hrefById.has(it.id) && hrefById.get(it.id) !== (it.href ?? '')) {
+      plan.hrefMismatch.push({ ...it, dumpHref: hrefById.get(it.id) });
+      continue;
+    }
     if (cur) {
-      // Иконка на месте. Если источник даёт другую — НЕ трогаем: возможно, её осознанно
-      // поменяли уже после бэкапа («база ушла вперёд»), и перезапись была бы откатом.
-      if (want && want !== cur) plan.conflicting.push({ ...it, want });
+      // Иконка на месте. Если бэкап даёт другую — НЕ трогаем: её могли осознанно поменять
+      // уже после бэкапа («база ушла вперёд»), и перезапись была бы откатом чужой работы.
+      if (want !== undefined && want !== cur) plan.conflicting.push({ ...it, want });
       else plan.alreadyOk.push(it);
       continue;
     }
-    if (!want) plan.noSource.push(it);
+    if (want === undefined || !want.trim()) plan.noSource.push(it);
     else plan.toSet.push({ ...it, want });
   }
   return plan;
@@ -103,83 +134,80 @@ async function main() {
   if (!DB) throw new Error('нужен --db (например: --db ateh)');
   if (!TOKEN) throw new Error('нужен TOKEN в окружении');
 
-  // 1. Источник иконок
-  const iconByHref = new Map();
+  // 1. Источник иконок — по id записи меню
+  let iconById = new Map();
+  let hrefById = null;
   const dumpFile = arg('from-dump');
   const iconsFile = arg('icons');
   if (dumpFile) {
-    const byUp = iconsFromDump(readFileSync(dumpFile, 'utf8'));
-    console.log(`Источник: дамп ${dumpFile} — строк t391: ${byUp.size}`);
-    // из дампа иконки приходят по id записи меню, адрес добираем ниже из живой базы
-    iconByHref.__byId = byUp;
+    const sql = readFileSync(dumpFile, 'utf8');
+    iconById = iconsFromDump(sql);
+    hrefById = hrefsFromDump(sql); // контроль: тот ли пункт под этим id
+    console.log(`Источник: дамп ${dumpFile} — иконок ${iconById.size}, адресов ${hrefById.size}`);
   } else if (iconsFile) {
+    // Файл вида docs/atex_menu.json — сопоставление по АДРЕСУ, id там нет.
     const j = JSON.parse(readFileSync(iconsFile, 'utf8'));
-    for (const r of j.roles ?? []) for (const m of r.menus ?? []) if (m.href) iconByHref.set(m.href, m.icon ?? '');
-    console.log(`Источник: ${iconsFile} — уникальных адресов: ${iconByHref.size}`);
+    const byHref = new Map();
+    for (const r of j.roles ?? []) for (const m of r.menus ?? []) if (m.href) byHref.set(m.href, m.icon ?? '');
+    console.log(`Источник: ${iconsFile} — адресов ${byHref.size}`);
+    console.log('⚠️  Файл описывает СВОЮ базу. Сопоставление пойдёт по адресу; пункты, которых');
+    console.log('    в нём нет, будут пропущены, а не угаданы.');
+    iconById = { byHref };
   } else {
-    throw new Error('нужен --icons <file.json> либо --from-dump <file.sql>');
+    throw new Error('нужен --from-dump <file.sql> либо --icons <file.json>');
   }
 
-  // 2. Живые пункты меню
+  // 2. Живые пункты меню — по всем ролям
   const roles = await api(`/object/${ROLE_TABLE}/?JSON_OBJ`);
-  const roleIds = (Array.isArray(roles) ? roles : roles.rows ?? []).map((r) => r.i ?? r.id).filter(Boolean);
-  console.log(`Ролей в базе: ${roleIds.length}`);
-
+  const roleIds = roles.map((r) => r.i).filter(Boolean);
   const live = [];
   for (const rid of roleIds) {
-    const items = await api(`/object/${MENU_TABLE}/?JSON_OBJ&F_U=${rid}`);
-    for (const it of Array.isArray(items) ? items : items.rows ?? []) {
-      const r = it.r ?? {};
-      live.push({
-        id: it.i ?? it.id,
-        role: rid,
-        name: r[REQ_NAME] ?? it.o ?? '',
-        href: r[REQ_HREF] ?? '',
-        icon: r[REQ_ICON] ?? '',
-      });
+    for (const it of await api(`/object/${MENU_TABLE}/?JSON_OBJ&F_U=${rid}`)) {
+      const r = it.r ?? [];
+      live.push({ id: it.i, role: rid, name: r[0] ?? '', href: r[1] ?? '', icon: r[4] ?? '' });
     }
   }
-  console.log(`Пунктов меню: ${live.length}`);
+  console.log(`Ролей: ${roleIds.length} · пунктов меню: ${live.length}`);
 
-  if (iconByHref.__byId) for (const it of live) {
-    const v = iconByHref.__byId.get(it.id);
-    if (v && it.href) iconByHref.set(it.href, v);
+  // Источник по адресу → переводим в источник по id для этой базы
+  if (iconById.byHref) {
+    const m = new Map();
+    for (const it of live) if (iconById.byHref.has(it.href)) m.set(it.id, iconById.byHref.get(it.href));
+    iconById = m;
   }
 
   // 3. План
-  const plan = planRestore(live, iconByHref);
+  const plan = planRestore(live, iconById, hrefById);
   console.log(`\nПЛАН:`);
-  console.log(`  вернуть иконку : ${plan.toSet.length}`);
-  console.log(`  уже на месте   : ${plan.alreadyOk.length}`);
-  console.log(`  нет в источнике: ${plan.noSource.length}`);
+  console.log(`  вернуть иконку        : ${plan.toSet.length}`);
+  console.log(`  уже на месте          : ${plan.alreadyOk.length}`);
+  console.log(`  нет в источнике       : ${plan.noSource.length}`);
   console.log(`  расходится (НЕ трогаем): ${plan.conflicting.length}`);
+  console.log(`  адрес не тот (НЕ трогаем): ${plan.hrefMismatch.length}`);
   for (const it of plan.toSet) console.log(`   + [${it.id}] ${it.name} (${it.href}) → ${it.want}`);
   for (const it of plan.noSource) console.log(`   ? [${it.id}] ${it.name} (${it.href}) — источник молчит`);
-  for (const it of plan.conflicting) console.log(`   ! [${it.id}] ${it.name}: в базе ${it.icon} ≠ ${it.want} в источнике`);
+  for (const it of plan.conflicting) console.log(`   ! [${it.id}] ${it.name}: в базе ${it.icon} ≠ ${it.want}`);
+  for (const it of plan.hrefMismatch) console.log(`   ! [${it.id}] ${it.name}: адрес ${it.href} ≠ ${it.dumpHref} в дампе`);
 
-  // 4. Бэкап + rollback ДО любой записи
-  const stamp = arg('stamp', 'now');
+  // 4. Бэкап и откат — ДО любой записи
+  const stamp = arg('stamp', new Date().toISOString().replace(/[:.]/g, '-'));
   const backupFile = `/tmp/issue-4548-${DB}-menu-before-${stamp}.json`;
   writeFileSync(backupFile, JSON.stringify(live, null, 2));
-  const rollback = plan.toSet
-    .map((it) => `# было пусто: curl -X POST "${HOST}/${DB}/_m_set/${it.id}?JSON=1" -F "token=$TOKEN" -F "_xsrf=$XSRF" --form-string 't${REQ_ICON}='`)
-    .join('\n');
-  writeFileSync(`/tmp/issue-4548-${DB}-rollback-${stamp}.sh`, `#!/bin/bash\n# откат: вернуть пустые иконки\n${rollback}\n`);
-  console.log(`\nбэкап   : ${backupFile}`);
-  console.log(`откат   : /tmp/issue-4548-${DB}-rollback-${stamp}.sh`);
+  const rb = [`#!/bin/bash`, `# Откат #4548: вернуть иконки в то состояние, что было до записи.`, `set -e`,
+    `XSRF=$(curl -sS -H "X-Authorization: $TOKEN" "${HOST}/${DB}/xsrf?JSON" | python3 -c 'import sys,json;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["_xsrf"])')`];
+  for (const it of plan.toSet)
+    rb.push(`curl -sS -X POST "${HOST}/${DB}/_m_set/${it.id}?JSON=1" -F "token=$TOKEN" -F "_xsrf=$XSRF" --form-string 't${REQ_ICON}=${(it.icon ?? '').replace(/'/g, "'\\''")}' >/dev/null && echo "откачен ${it.id}"`);
+  const rbFile = `/tmp/issue-4548-${DB}-rollback-${stamp}.sh`;
+  writeFileSync(rbFile, rb.join('\n') + '\n');
+  console.log(`\nбэкап: ${backupFile}`);
+  console.log(`откат: ${rbFile}`);
 
-  if (!APPLY) {
-    console.log('\nСУХОЙ ПРОГОН — ничего не записано. Для записи добавьте --apply');
-    return;
-  }
-  if (!plan.toSet.length) {
-    console.log('\nНечего применять.');
-    return;
-  }
+  if (!APPLY) return console.log('\nСУХОЙ ПРОГОН — не записано ничего. Для записи: --apply');
+  if (!plan.toSet.length) return console.log('\nНечего применять.');
 
-  // 5. Запись (XSRF обязателен на мутациях)
+  // 5. Запись — только теперь, и только с _xsrf
   const x = await api(`/xsrf?JSON`);
-  const xsrf = x._xsrf ?? x.xsrf;
+  const xsrf = (Array.isArray(x) ? x[0] : x)._xsrf;
   if (!xsrf) throw new Error('не получил _xsrf');
   let ok = 0;
   for (const it of plan.toSet) {
@@ -189,9 +217,8 @@ async function main() {
     fd.append(`t${REQ_ICON}`, it.want);
     await api(`/_m_set/${it.id}?JSON=1`, { method: 'POST', body: fd });
     ok++;
-    console.log(`  записано [${it.id}] ${it.name}`);
   }
-  console.log(`\nГотово: ${ok} из ${plan.toSet.length}.`);
+  console.log(`\nЗаписано: ${ok} из ${plan.toSet.length}.`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
