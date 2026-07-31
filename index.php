@@ -1051,6 +1051,12 @@ function RemoveDir($path)
 	elseif(!unlink($path))
 		my_die(t9n("[RU]Не удалось удалить файл '[EN]Couldn't drop file '").$path."'.");
 }
+# Экранировать значение фильтра, уходящее в SQL внутри кавычек.
+# Плейсхолдеры отчётов вида [VAL] подставляются позже — их не трогаем.
+function Escape_Filter_Val($value)
+{
+	return preg_match("/\[([^\[\]]+)\]/", $value) ? $value : addslashes($value);
+}
 function checkInjection($value){
 	if(preg_match("/(\b(from|select|table)\b)/i", $value, $match))
 		die_info(t9n("[RU]Недопустимое значение для поиска: нельзя использовать служебные слова SQL. Найдено: ".
@@ -1185,6 +1191,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 					}
 		}
 		$value = BuiltIn($value); # Check for a built-in phrases
+		$sql_value = Escape_Filter_Val($value); # Экранированная копия для подстановки в SQL
 		if($value == "%")
 			$search_val = "IS ".($NOT_flag ? "" : "NOT")." NULL";
 		elseif((substr(trim(strtoupper($value)), 0, 3) == "IN(") && substr(trim($value), -1) == ")"
@@ -1315,6 +1322,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 			    # We might get a statement here, thus check if we got no letters and stuff
 			    if((double)str_replace(" ", "", $value) != 0)
     			    $value = str_replace(" ", "", $value);
+				$sql_value = Escape_Filter_Val($value); # значение изменилось — пересчитываем
 				# Check if we got only one range border, and then transform it into an exact match
 				if((!isset($filter["TO"])) || (!isset($filter["FR"])) || ($value === "%")){
 					if($key == $cur_typ)
@@ -1324,9 +1332,9 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 					    elseif(isset($inID))
 							$GLOBALS["where"] .= " AND vals.id $search_val ";
 						elseif(strpos($value, "%") === FALSE)
-							$GLOBALS["where"] .= " AND vals.val$NOT_EQ$EQ'$value' ";
+							$GLOBALS["where"] .= " AND vals.val$NOT_EQ$EQ'$sql_value' ";
 						else
-							$GLOBALS["where"] .= " AND vals.val $NOT LIKE '$value' ";
+							$GLOBALS["where"] .= " AND vals.val $NOT LIKE '$sql_value' ";
 					}
 					else
 					{
@@ -1344,7 +1352,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
         					    elseif(isset($inID))
             						$GLOBALS["where"] .= " AND (a$key.id $search_val OR a$key.id IS NULL)";
 							    else
-    								$GLOBALS["where"] .= " AND (a$key.val!='$value' OR a$key.val IS NULL) ";
+    								$GLOBALS["where"] .= " AND (a$key.val!='$sql_value' OR a$key.val IS NULL) ";
 							}
 							else
 							    if(isset($in))
@@ -1354,18 +1362,18 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 							    elseif(is_numeric($value))
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ$value ";
 							    else
-    								$GLOBALS["where"] .= " AND a$key.val='$value' ";
+    								$GLOBALS["where"] .= " AND a$key.val='$sql_value' ";
 						}
 						elseif($NOT_flag) # No match or empty
-							$GLOBALS["where"] .= " AND (a$key.val NOT LIKE '$value' OR a$key.val IS NULL) ";
+							$GLOBALS["where"] .= " AND (a$key.val NOT LIKE '$sql_value' OR a$key.val IS NULL) ";
 						else
-							$GLOBALS["where"] .= " AND a$key.val LIKE '$value' ";
+							$GLOBALS["where"] .= " AND a$key.val LIKE '$sql_value' ";
 					}
 				}
 				else # Apply range filter
 				{
 					if($is_date)
-						$value = "'$value'"; # Add quotes to the date to use the index
+						$value = "'".Escape_Filter_Val($value)."'"; # Add quotes to the date to use the index
 					elseif((strpos($value, "[") === FALSE) && (strpos($value, "_") === FALSE))	# It's not a Variable
 						$value = (float)str_replace(" ", "", $value); # Remove spaces from numbers
 
