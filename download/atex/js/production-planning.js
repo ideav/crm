@@ -3934,8 +3934,6 @@
     // #3472: приоритет — неизменность полос (0), затем меньше перемещений (2×ножи),
     // смена сырья (15); полная смена ~16 ножей ≈ 32 ≈ прежняя «смена ножей» 30.
     var DEFAULT_OP_TIMES = { MATERIAL_WINDING: 15, KNIFE: 30, KNIFE_MOVE: 2, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
-    var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
-    var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
     var REMAINDER_OK_M = 600;
     var FATIGUE_MACHINE_WIDTH_MM = 1600;  // базовая ширина вала для оценки числа ножей (#3270/#3272)
     var FATIGUE_FACTOR = 2.0;             // alpha: штраф последней позиции = 1 + alpha
@@ -8101,12 +8099,10 @@
 
     // #4416: ближайшее свободное окно станка ПО СОХРАНЁННОМУ ПЛАНУ — минута, с которой новое
     // задание встанет в хвост очереди, не наехав на уже запланированное и не оставив дыры.
-    // Раньше окно считал live-пересчёт всей очереди (freeSlotForQueue → buildSchedule): он
-    // паковал ВСЕ задания станка заново от дня 0, поэтому «конец очереди» приходился не туда, где
-    // очередь реально кончается по сохранённым planStart. Растянутый по дням план (обычное дело:
-    // сроки, фиксация, разрывы) сжимался в первые дни, и созданное вручную задание вставало
-    // ВНУТРИ уже занятого дня — с дырой или нахлёстом (issue #4416: «вижу предложение пересчитать,
-    // хотя тайминги выглядят правильно»). Считаем от того, что записано (#3846/#4144).
+    // #4416: ближайшее свободное окно станка — ПО СОХРАНЁННОМУ ПЛАНУ. Считаем от того, что
+    // записано (#3846/#4144): окна очереди берутся из хранимых planStart и колонок, а не пакуются
+    // заново от дня 0 — иначе растянутый по дням план (сроки, фиксация, разрывы) сжимался в первые
+    // дни и созданное вручную задание вставало ВНУТРИ занятого дня, с дырой или нахлёстом.
     //   items — окна заданий станка [{ windowStartMin, occMin }] (scheduleFromStored + колонки);
     //   opts — { occMin (занятость нового задания = наладка + «Резка и Лидер»), dayStartMin,
     //            dayEndMin (потолок резки, cutEndMin), lunchStartMin, lunchDurationMin,
@@ -8169,47 +8165,6 @@
     //            blockedRanges:[[s,e],…] (#4396: нерабочие дни календаря #3788 + «Отпуск» #3764 —
     //            окно обязано их пропускать, иначе задание встаёт на выходной) }.
     // → { windowStartMin, startMin, finishMin, durationMin, setupMin, day } | null.
-    function freeSlotForQueue(stationCuts, prospect, opts){
-        opts = opts || {};
-        if (!prospect) return null;
-        var runLen = {};
-        var src = opts.runLengthByCut || {};
-        Object.keys(src).forEach(function(k){ runLen[k] = src[k]; });
-        runLen[String(prospect.id)] = Number(prospect.runLength) || Number(runLen[String(prospect.id)]) || 0;
-        var queue = (stationCuts || []).concat([prospect]);
-        var sched = buildSchedule(queue, {
-            windPoints: opts.windPoints || [],
-            times: opts.times,
-            runLengthByCut: runLen,
-            shiftStartMin: opts.shiftStartMin,
-            shiftEndMin: opts.shiftEndMin,
-            lunchStartMin: opts.lunchStartMin,
-            lunchDurationMin: opts.lunchDurationMin,
-            firstCutSetup: opts.firstCutSetup,   // #3669 п.2: настройка ножей первой задачи (от вызывающего)
-            blockedRanges: opts.blockedRanges    // #4396: выходные/праздники + «Отпуск» станка
-        });
-        var sc = sched.length ? sched[sched.length - 1] : null;
-        if (!sc) return null;
-        // #4061: окно последнего сегмента — на целой минуте (снап), как при генерации planStart, чтобы
-        // превью старта новой резки совпало с сохранённой сеткой (старт = сумма колонок предыдущих).
-        var snapped = snapWindowStartsWholeMinutes(sched.map(function(s){
-            return { ws: stripNum(s.startMin) - stripNum(s.setupMin), setup: stripNum(s.setupMin),
-                     cutLeader: stripNum(s.durationMin) + stripNum(s.leaderMin) };
-        }));
-        var setup = stripNum(sc.setupMin);
-        var windowStartMin = snapped[snapped.length - 1];
-        var startMin = round3(windowStartMin + setup);
-        var delta = startMin - stripNum(sc.startMin);   // сдвиг снапа — окно/финиш двигаем на него же
-        return {
-            windowStartMin: round3(windowStartMin),
-            startMin: startMin,
-            finishMin: round3(stripNum(sc.finishMin) + delta),   // сохраняем lunchGap/лидер, сдвинутые снапом
-            durationMin: round3(stripNum(sc.durationMin)),
-            setupMin: round3(setup),
-            day: Math.floor(windowStartMin / 1440)
-        };
-    }
-
     // #3280: номер календарного дня плановой даты (для смежности «продолжений»). null — нет даты.
     function planDayNumber(c){
         var s = String(c && c.planDate != null && c.planDate !== '' ? c.planDate : (c && c.number)).trim();
@@ -9451,13 +9406,6 @@
         return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
     }
 
-    function formatClockHHMM(min){
-        var m = Math.round(Number(min) || 0);
-        var hm = ((m % 1440) + 1440) % 1440;
-        var h = Math.floor(hm / 60), mm = hm % 60;
-        return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
-    }
-
     // #3280: на карточке (.atex-pp-cut-num) показываем то же время, что и начало
     // окна в .atex-pp-cut-time — первый шаг тайминга (startMin − setupMin), ЧЧ:ММ.
     function cutStartWindowMin(sc) {
@@ -9728,12 +9676,6 @@
             if (need > 0) remainingByBatch[pickedId] = Math.max(0, free - need);
         }
         return pickedId;
-    }
-
-    function slitterAffinityKey(materialId, windDir, windLength, batchId) {
-        return String(materialId == null ? '' : materialId).trim() + '|' +
-            normWinding(windDir) + '|' + windLengthKey(windLength) + '|' +
-            String(batchId == null ? '' : batchId);
     }
 
     // #3120 группа C (Фаза 1a, п.4): у резки задан материал, но нет ни одной подходящей
@@ -13008,8 +12950,6 @@
         formatCutNumber: formatCutNumber,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
-        KNIFE_SCALE: KNIFE_SCALE,
-        WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
         FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
         FATIGUE_FACTOR: FATIGUE_FACTOR,
@@ -13062,7 +13002,6 @@
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
         pickBatchFIFOForRun: pickBatchFIFOForRun,
-        slitterAffinityKey: slitterAffinityKey,
         batchIsActive: batchIsActive,
         isStockStrip: isStockStrip,
         maxStockKey: maxStockKey,
@@ -13129,11 +13068,9 @@
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
-        freeSlotForQueue: freeSlotForQueue,
         freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
-        formatClockHHMM: formatClockHHMM,
         formatCutStartTime: formatCutStartTime,
         formatCutStartTitle: formatCutStartTitle,
         cutStartWindowMin: cutStartWindowMin,
@@ -14875,9 +14812,9 @@
     // Ближайшее свободное окно станка для проспект-резки — ПО СОХРАНЁННОМУ ПЛАНУ (#4416).
     // Окно = хвост очереди станка в том виде, в каком её рисует страница и Гант (#3846:
     // planStart + «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»), а НЕ live-пересчёт всей
-    // очереди (прежний freeSlotForQueue → buildSchedule паковал станок заново от дня 0 и в
-    // растянутом по дням плане отдавал окно ВНУТРИ уже занятого дня — созданное вручную задание
-    // вставало с дырой/нахлёстом, и очередь тут же просила «Пересчитать наладку», issue #4416).
+    // очереди: пересчёт всей очереди от дня 0 в растянутом по дням плане отдавал окно ВНУТРИ уже
+    // занятого дня — созданное вручную задание вставало с дырой/нахлёстом, и очередь тут же просила
+    // «Пересчитать наладку» (issue #4416).
     // Наладку и намотку самого нового задания по-прежнему считают канонические формулы
     // (buildSchedule на паре «последнее задание станка + проспект»), только теперь они кладутся
     // на сохранённую сетку. Округляем как хранимые колонки: наладка — round, «Резка и Лидер» —

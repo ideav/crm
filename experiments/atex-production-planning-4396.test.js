@@ -8,7 +8,7 @@
 //
 // Покрываем:
 //   1) insertDayIso — разбор значения date-поля;
-//   2) freeSlotForQueue с blockedRanges — окно уезжает за нерабочие дни;
+//   2) окно, пропускающее нерабочие дни, — на живой freeSlotFromStoredQueue (тест #4416);
 //   3) freeSlotForCut — контроллер эти блокировки действительно передаёт;
 //   4) форму (renderForm на DOM-стабе): поле есть, пишет в draft, превью показывает выбранный
 //      день вместо «Свободного окна», выходной/отпуск гасят «Создать задание»;
@@ -88,29 +88,10 @@ assertEqual(planning.insertDayIso(undefined), '', 'insertDayIso: undefined → �
 assertEqual(planning.insertDayIso('2026-7-7'), '', 'insertDayIso: недописанный ввод не считается днём');
 assertEqual(planning.insertDayIso('завтра'), '', 'insertDayIso: мусор → пусто');
 
-// ── 2) freeSlotForQueue: окно пропускает нерабочие дни ───────────────────────
-(function () {
-    var WIND = [{ m: 100, min: 10 }, { m: 1000, min: 100 }];
-    var base = { windPoints: WIND, shiftStartMin: 480, shiftEndMin: 990, runLengthByCut: {} };
-    var prospect = { id: '__new__', plannedRuns: 2, materialId: 'm1', winding: 'нар', knifeWidths: [100], runLength: 100 };
-    function withBlocks(b) {
-        var o = {}; Object.keys(base).forEach(function(k) { o[k] = base[k]; });
-        o.blockedRanges = b; return o;
-    }
-    var free = planning.freeSlotForQueue([], prospect, base);
-    assertEqual([free.day, free.windowStartMin], [0, 480], 'без блокировок: окно в дне 0 (08:00) — поведение прежнее');
-
-    var offDay0 = planning.freeSlotForQueue([], prospect, withBlocks([[0, 1440]]));
-    assertEqual([offDay0.day, offDay0.windowStartMin], [1, 1920],
-        'день 0 нерабочий → окно уезжает на день 1 (08:00 следующего дня)');
-
-    var offWeekend = planning.freeSlotForQueue([], prospect, withBlocks([[0, 2880]]));
-    assertEqual([offWeekend.day, offWeekend.windowStartMin], [2, 3360],
-        'два нерабочих дня подряд (выходные) → окно на день 2');
-
-    assertEqual(planning.freeSlotForQueue([], prospect, withBlocks([])), free,
-        'пустой blockedRanges эквивалентен его отсутствию');
-})();
+// ── 2) окно, пропускающее нерабочие дни, проверяется на ЖИВОЙ freeSlotFromStoredQueue
+//      (experiments/atex-4416-free-slot-stored.test.js): «день 0 нерабочий → окно на дне 1».
+//      Прежний freeSlotForQueue (пересчёт очереди от дня 0) удалён как мёртвый код — его заменил
+//      расчёт по сохранённому плану (#4416).
 
 // ── Общий стенд формы ────────────────────────────────────────────────────────
 var INSERT_DAY = '2026-07-27';

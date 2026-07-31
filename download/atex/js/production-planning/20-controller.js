@@ -191,8 +191,6 @@
         formatCutNumber: formatCutNumber,
         rowsToBatches: rowsToBatches,
         DEFAULT_OP_TIMES: DEFAULT_OP_TIMES,
-        KNIFE_SCALE: KNIFE_SCALE,
-        WIDTH_SCALE: WIDTH_SCALE,
         REMAINDER_OK_M: REMAINDER_OK_M,
         FATIGUE_MACHINE_WIDTH_MM: FATIGUE_MACHINE_WIDTH_MM,
         FATIGUE_FACTOR: FATIGUE_FACTOR,
@@ -245,7 +243,6 @@
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
         pickBatchFIFOForRun: pickBatchFIFOForRun,
-        slitterAffinityKey: slitterAffinityKey,
         batchIsActive: batchIsActive,
         isStockStrip: isStockStrip,
         maxStockKey: maxStockKey,
@@ -312,11 +309,9 @@
         scheduleFromStored: scheduleFromStored,   // #3846: показ из сохранённого плана (без live-пересчёта)
         lunchBlocksFromSchedule: lunchBlocksFromSchedule,   // #3846: блоки обеда для отображения
         computeQueueBreakMarkers: computeQueueBreakMarkers,   // #4075: значки обеда/перерывов + сдвиг очереди
-        freeSlotForQueue: freeSlotForQueue,
         freeSlotFromStoredQueue: freeSlotFromStoredQueue,   // #4416: окно новой резки по СОХРАНЁННОМУ плану
         dayCleanups: dayCleanups,
         formatClock: formatClock,
-        formatClockHHMM: formatClockHHMM,
         formatCutStartTime: formatCutStartTime,
         formatCutStartTitle: formatCutStartTitle,
         cutStartWindowMin: cutStartWindowMin,
@@ -2058,9 +2053,9 @@
     // Ближайшее свободное окно станка для проспект-резки — ПО СОХРАНЁННОМУ ПЛАНУ (#4416).
     // Окно = хвост очереди станка в том виде, в каком её рисует страница и Гант (#3846:
     // planStart + «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»), а НЕ live-пересчёт всей
-    // очереди (прежний freeSlotForQueue → buildSchedule паковал станок заново от дня 0 и в
-    // растянутом по дням плане отдавал окно ВНУТРИ уже занятого дня — созданное вручную задание
-    // вставало с дырой/нахлёстом, и очередь тут же просила «Пересчитать наладку», issue #4416).
+    // очереди: пересчёт всей очереди от дня 0 в растянутом по дням плане отдавал окно ВНУТРИ уже
+    // занятого дня — созданное вручную задание вставало с дырой/нахлёстом, и очередь тут же просила
+    // «Пересчитать наладку» (issue #4416).
     // Наладку и намотку самого нового задания по-прежнему считают канонические формулы
     // (buildSchedule на паре «последнее задание станка + проспект»), только теперь они кладутся
     // на сохранённую сетку. Округляем как хранимые колонки: наладка — round, «Резка и Лидер» —

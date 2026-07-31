@@ -1,7 +1,5 @@
 // Unit-тесты для режима «Резка под одну позицию» (форма «Новая производственная резка»).
 // Проверяют чистую логику, на которую опирается computeCutPlan/createCutForPosition:
-//   • freeSlotForQueue — ближайшее свободное окно станка (проспект в конец очереди,
-//     рабочее окно дня, перенос на след. день при нехватке);
 //   • связку qty → проходы → состав/склад через существующие хелперы
 //     plannedRunsForLayout / producedBatchesForLayout (как считает computeCutPlan).
 //
@@ -35,35 +33,10 @@ function cut(id, runs, runLength, knives) {
     return { id: id, plannedRuns: runs, materialId: 'm1', winding: 'нар', knifeWidths: knives || [100], runLength: runLength };
 }
 
-// 1) Пустой станок: резка стартует в начале смены (08:00), setup = лидер 2 мин.
-// #3688: лидер (BETWEEN_CUTS) вынесен в КОНЕЦ резки и в стартовую наладку не входит —
-// у первой резки пустого станка переналадки нет вовсе, setupMin = 0.
-assertEqual(
-    planning.freeSlotForQueue([], prospect(), OPTS),
-    { windowStartMin: 480, startMin: 480, finishMin: 500, durationMin: 20, setupMin: 0, day: 0 },
-    'freeSlotForQueue: пустой станок → старт 08:00'
-);
-
-// 2) Одна резка в очереди (10 мин): проспект встаёт сразу после неё (та же сигнатура → переналадка 0).
-var one = [cut('c1', 1, 100)];
-var optsOne = { windPoints: WIND, shiftStartMin: 480, shiftEndMin: 990, runLengthByCut: { c1: 100 } };
-//   c1: setup 2, 482–492. Проспект: setup 2, 494–514, окно с 492.
-assertEqual(
-    planning.freeSlotForQueue(one, prospect(), optsOne),
-    { windowStartMin: 492, startMin: 492, finishMin: 512, durationMin: 20, setupMin: 0, day: 0 },
-    'freeSlotForQueue: после существующей резки в тот же день'
-);
-
-// 3) День занят почти полностью: проспект не влезает до 16:30 → переносится на 08:00 след. дня.
-//   c1: 1000 м × 5 проходов = 500 мин; setup 2 → 482–982. Проспект 20 мин: 984+20=1004 > 990
-//   → день 1, старт 1922 (1440+480+2), окно с 1920.
-var full = [cut('c1', 5, 1000)];
-var optsFull = { windPoints: WIND, shiftStartMin: 480, shiftEndMin: 990, runLengthByCut: { c1: 1000 } };
-assertEqual(
-    planning.freeSlotForQueue(full, prospect(), optsFull),
-    { windowStartMin: 1920, startMin: 1920, finishMin: 1940, durationMin: 20, setupMin: 0, day: 1 },
-    'freeSlotForQueue: нет места сегодня → перенос на след. рабочий день'
-);
+// Пункты 1–3 (ближайшее свободное окно станка) убраны вместе с функцией freeSlotForQueue:
+// пересчёт очереди от дня 0 удалён как мёртвый код, окно считает freeSlotFromStoredQueue по
+// СОХРАНЁННОМУ плану (#4416) — оно покрыто experiments/atex-4416-free-slot-stored.test.js
+// (пустой станок, хвост очереди, перенос на следующий рабочий день, нерабочие дни).
 
 // 4) qty → проходы → состав/склад (как в computeCutPlan): позиция 330 мм, qty 5,
 //    раскладка 3 полосы/проход. Проходов = ceil(5/3)=2; произведём 3×2=6; склад 6−5=1.
