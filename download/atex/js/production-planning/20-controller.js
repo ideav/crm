@@ -8,6 +8,10 @@
         // работает для ЛЮБОГО правила с `mode: 'drop'`, а не только для заморозки.
         guardPlanOpsWith: guardPlanOpsWith,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
+        formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
+        overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
+        overfilledDayPhrase: overfilledDayPhrase,         // #4531: один переполненный день фразой
+        cutShortLabel: cutShortLabel,                   // #4531: задание одной строкой (как первая строка карточки)
         parseDeepLink: parseDeepLink,
         ganttRangeLink: ganttRangeLink,                 // #3713
         ganttBaseFromLocation: ganttBaseFromLocation,   // #3713
@@ -6776,6 +6780,12 @@
         if (reqs.knifeReq) fields['t' + reqs.knifeReq] = String(u.knife);
         if (reqs.matReq) fields['t' + reqs.matReq] = String(u.material);
         if (reqs.cutTimeReq) fields['t' + reqs.cutTimeReq] = String(u.cutTime);   // #3700
+        // #4529: «Длительность, минут» пишется ВМЕСТЕ с «Резкой и Лидером» — это одно и то же
+        // число в двух видах (лидер = BETWEEN_CUTS × проходов). Порознь они расходятся: норма
+        // намотки меняется (#4501 — узкие полосы), план пишет новую «Резку и Лидер», а старая
+        // «Длительность» остаётся — и детектор, который считает «Резку и Лидер» ИЗ НЕЁ, вечно
+        // просит пересчёт (issue #4529: «резка и лидер 20 → 14 мин» сразу после «Сгенерировать»).
+        if (reqs.durationReq && u.duration != null) fields['t' + reqs.durationReq] = String(u.duration);
         return fields;
     }
 
@@ -6883,11 +6893,12 @@
         // (карта пуста), считаем как раньше.
         var planColsBy = (opts && opts.planCols) || {};
         var meta = this.meta.cut;
-        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null };
+        var reqs = { knifeReq: null, matReq: null, cutTimeReq: null, durationReq: null };
         if (!meta) return { reqs: reqs, updates: [] };
         reqs.knifeReq = reqIdByName(meta, CUT_REQ.knifeSetupMin);
         reqs.matReq = reqIdByName(meta, CUT_REQ.materialWindingMin);
         reqs.cutTimeReq = reqIdByName(meta, CUT_REQ.cutAndLeader);   // #3700: «Резка и Лидер»
+        reqs.durationReq = reqIdByName(meta, CUT_REQ.duration);      // #4529: пишется вместе с «Резкой и Лидером»
         if (!reqs.knifeReq && !reqs.matReq && !reqs.cutTimeReq) return { reqs: reqs, updates: [] };   // колонок ещё нет в таблице
         var onlySet = null;
         if (onlyIds) { onlySet = {}; (onlyIds || []).forEach(function(id) { onlySet[String(id)] = true; }); }
@@ -6901,6 +6912,31 @@
         //    резка другого дня — отсюда была бы ложная «смена сырья».
         var times = this.changeTimes || DEFAULT_OP_TIMES;
         var betweenCuts = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
+        // #4529: НАМОТКА СЕГМЕНТА — ЖИВАЯ НОРМА, а не хранимая «Длительность, минут». «Резка и
+        // Лидер» = намотка + BETWEEN_CUTS × проходов, и упаковщик считает её по норме из «Времени
+        // операции» (plannedCutDurationMinutes → windPointsForCut). Хранимая «Длительность»
+        // переписывается только при СМЕНЕ проходов, поэтому после правки нормы (#4501: полоса
+        // ≤ 30 мм наматывается по своей серии) она описывает прежний мир: план пишет «Резку и
+        // Лидер» 20, а детектор, считавший её ИЗ «Длительности», требовал 14 — вечная красная
+        // «↻ Пересчитать наладку», которая, если её нажать, ломает раскладку дня (issue #4529).
+        // Считаем ТЕМ ЖЕ выражением, что и писатель сегментов (splitSegTimingFields) и
+        // предпросмотр (durationForSegment): норма и длина прогона — по ГОЛОВЕ цепочки, у
+        // продолжения своих полос и своей длины нет.
+        //   Нет норм намотки/длины прогона — молча обнулять задание нельзя: держим хранимое
+        //   (общая конвенция «нет данных — нет обвинений»). → минуты намотки либо null.
+        var cutsByIdSetup = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutsByIdSetup[String(c.id)] = c; });
+        var opTimesSetup = this.opTimes, suppliesSetup = this.supplies, posLenSetup = this.positionLengthById;
+        var hasWindNorms = !!(opTimesSetup && Object.keys(opTimesSetup).some(function(k) { return /^WIND_/.test(k); }));
+        function windingMinFor(c, runs) {
+            if (!(runs > 0)) return 0;                       // setup-only хвост (#4021) — намотки нет
+            if (!hasWindNorms) return null;
+            var fp = (c && c.firstPartId != null) ? String(c.firstPartId).trim() : '';
+            var head = cutsByIdSetup[fp !== '' ? fp : String(c && c.id)] || c;
+            var runLen = cutRunLength(head, suppliesSetup, posLenSetup);
+            if (!(runLen > 0)) return null;
+            return Math.ceil(plannedCutDurationMinutes(runLen, runs, opTimesSetup, head));   // #4501: норма по самой узкой полосе
+        }
         // #3876: тот же источник заправки, что и план (splitMachineQueue): станок в отпуске на
         // день базы → заправка обнулена → первая резка после отпуска считает полную настройку.
         var planBaseMidnightMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
@@ -7063,7 +7099,12 @@
                 // и Лидер» = 0 + BETWEEN_CUTS(2) = 2 — бейдж дня с одной наладкой показывал 47 вместо 45
                 // (45 наладки + фантомный лидер). Лидер считаем ТОЛЬКО при реальных проходах.
                 var leaderRuns = runsC > 0 ? cutLeaderRuns(c) : 0;
-                var wantT = Math.round(stripNum(c.duration) + betweenCuts * leaderRuns);
+                // #4529: намотка — по ЖИВОЙ норме (windingMinFor), как у упаковщика; норм/длины
+                // прогона нет — держим хранимую «Длительность».
+                var liveW = windingMinFor(c, runsC);
+                var wantWKnown = liveW != null;
+                var wantW = wantWKnown ? liveW : Math.round(stripNum(c.duration));
+                var wantT = Math.round(wantW + betweenCuts * leaderRuns);
                 // #4499: у этого сегмента есть числа УПАКОВЩИКА — они и есть правда. Сумма трёх
                 // колонок тогда в точности равна занятости сегмента, а значит бейдж дня равен тому,
                 // что напаковано, и потолок меряется по одной арифметике, а не по двум.
@@ -7072,6 +7113,9 @@
                     wantK = Math.round(Number(planCols.knife) || 0);
                     wantM = Math.round(Number(planCols.material) || 0);
                     wantT = Math.round(Number(planCols.cutTime) || 0);
+                    // #4529: «Длительность» — та же величина без лидера, иначе пара колонок разъедется.
+                    wantW = Math.max(0, wantT - Math.round(betweenCuts * leaderRuns));
+                    wantWKnown = true;   // числа упаковщика знают намотку сегмента точно
                 }
                 // Колонку учитываем в diff только если она есть в метаданных (иначе её не пишем
                 // и не считаем «изменившейся» — иначе были бы лишние записи на каждом сохранении).
@@ -7079,15 +7123,24 @@
                 function changed(req, cur, val) {
                     return req && (!(cur != null && cur !== '') || Math.round(stripNum(cur)) !== val);
                 }
+                // #4529: «Длительность, минут» — часть той же записи. Расхождение по ней ОДНО
+                // «Резка и Лидер» не всегда показывает (лидер целочислен, а норма могла измениться
+                // ровно на лидер), поэтому спрашиваем и её; пустую не выдумываем (durationReq нет
+                // в метаданных или живой нормы нет → wantW равен хранимому и diff пуст).
+                var durChanged = wantWKnown && changed(reqs.durationReq, c.duration, wantW);
                 if (changed(reqs.knifeReq, c.storedKnifeSetupMin, wantK)
                     || changed(reqs.matReq, c.storedMaterialWindingMin, wantM)
-                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)) {
+                    || changed(reqs.cutTimeReq, c.storedCutAndLeaderMin, wantT)
+                    || durChanged) {
                     updates.push({ cutId: c.id, knife: wantK, material: wantM, cutTime: wantT,
-                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin, wasCutTime: c.storedCutAndLeaderMin });
+                        duration: (reqs.durationReq && wantWKnown) ? wantW : null,
+                        wasKnife: c.storedKnifeSetupMin, wasMaterial: c.storedMaterialWindingMin,
+                        wasCutTime: c.storedCutAndLeaderMin, wasDuration: c.duration });
                     if (dryRun4401) return;                       // #4401: детектор — состояние не меняем
                     c.storedKnifeSetupMin = String(wantK);        // локально — чтобы не переписывать дважды
                     c.storedMaterialWindingMin = String(wantM);
                     c.storedCutAndLeaderMin = String(wantT);
+                    if (reqs.durationReq && wantWKnown) c.duration = String(wantW);
                 }
             });
         });
@@ -8244,12 +8297,23 @@
             if (!days.length) return;
             hit.push(sid);
             if (typeof console !== 'undefined' && console.error) {
-                console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам', { slitterId: sid, days: days });
+                console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам',
+                    { slitterId: sid, days: overfilledDaysBrief(days) });
             }
-            if (!saidAlready && typeof self.warnOverfilledDays === 'function') self.warnOverfilledDays(sid);
         });
+        // #4531: ОДНО сообщение на все станки. Прежде тост слался в цикле — по станку на каждый, и
+        // оператор получал стопку одинаковых на вид предупреждений без единого имени станка.
+        if (hit.length && !saidAlready && typeof this.warnOverfilledDays === 'function') this.warnOverfilledDays(hit);
         return hit;
     };
+
+    // Переполненные дни в журнал — без объекта задания (#4531 кладёт его рядом для подписи).
+    function overfilledDaysBrief(days) {
+        return (days || []).map(function(d) {
+            return { dayOffset: d.dayOffset, endMin: d.endMin, overMin: d.overMin,
+                     capMin: d.capMin, cutId: d.cutId, seq: d.seq };
+        });
+    }
 
     AtexProductionPlanning.prototype.reportPlanAudit = function(violations) {
         var msg = this.planAuditMessage(violations);
@@ -9489,53 +9553,159 @@
         });
     };
 
-    // #4408/#4473: дни станка (в видимых днях), где работа уходит ЗА конец смены — ЧИСТЫЙ детектор,
-    // без тостов и записей. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня
-    // против потолка резки (cutEndMin + нахлёст резки). Это та же арифметика, что стои́т в бейдже
+    // #4408/#4473/#4531: дни, где работа уходит ЗА конец смены, — ЧИСТАЯ мерка над набором заданий
+    // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня против
+    // потолка резки (`cutEndMin` + нахлёст резки). Это та же арифметика, что стои́т в бейдже
     // «(N мин)», только выраженная в конце дня — обед и «Отпуск» уже сидят в хранимых стартах.
-    // → массив [{ dayOffset, endMin, overMin }].
-    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
-        if (!scopeIds.length) return [];
-        var inScope = {};
-        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
-        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var win = this.workingWindow() || {};
-        var cutEnd = Number(win.cutEndMin);
+    // #4531: вместе с днём отдаёт ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
+    // в дне (`seq` — тот же, что на карточке: позиция по возрастанию planStart) и потолок (`capMin`).
+    // Фразу собирает печать (overfilledDayPhrase), мерка только меряет.
+    //
+    // ОДНА МЕРКА НА ВСЕХ ПОТРЕБИТЕЛЕЙ. Её зовут предупреждение (`overfilledDaysOf` → тост #4497) и
+    // подсветка шапки дня в очереди (#4531). Наборы заданий у них разные (у предупреждения — scope
+    // пересчёта, у очереди — то, что нарисовано), поэтому набор передаётся параметром; арифметика
+    // при этом одна и разъехаться не может.
+    //   cuts — задания одного станка; opts: { baseMidnightMs, cutEndMin, maxOverworkCutsMin }.
+    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }], по возрастанию дня.
+    function overfilledDaysFromCuts(cuts, opts) {
+        var o = opts || {};
+        var base = Number(o.baseMidnightMs);
+        var cutEnd = Number(o.cutEndMin);
         if (!isFinite(cutEnd) || !isFinite(base)) return [];
-        var over = Number(win.maxOverworkCutsMin) || 0;
-        var endByDay = {};
-        (this.cuts || []).forEach(function(c) {
-            if (!c || !inScope[String(c.id)]) return;
+        var over = Number(o.maxOverworkCutsMin) || 0;
+        var byDay = {};
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
             if (!isFinite(tsSec) || tsSec <= 0) return;
             var ws = Math.round((tsSec * 1000 - base) / 60000);
             var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
                     + Math.round(stripNum(c.storedCutAndLeaderMin));
             var day = Math.floor(ws / 1440);
-            var end = ws + occ - day * 1440;
-            if (!(endByDay[day] > end)) endByDay[day] = end;
+            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, end: ws + occ - day * 1440 });
         });
-        return Object.keys(endByDay).map(Number).sort(function(a, b) { return a - b; })
-            .filter(function(d) { return endByDay[d] > cutEnd + over + 1; })
-            .map(function(d) { return { dayOffset: d, endMin: endByDay[d], overMin: Math.round(endByDay[d] - cutEnd) }; });
+        return Object.keys(byDay).map(Number).sort(function(a, b) { return a - b; })
+            .map(function(d) {
+                // Порядок в дне — по сохранённому planStart (тем же, чем нумерует карточки очередь).
+                var items = byDay[d].map(function(it, i) { it._i = i; return it; })
+                    .sort(function(a, b) { return (a.ws - b.ws) || (a._i - b._i); });
+                var worst = items[0], worstAt = 0;
+                items.forEach(function(it, i) { if (it.end >= worst.end) { worst = it; worstAt = i; } });
+                return { dayOffset: d, endMin: worst.end, overMin: Math.round(worst.end - cutEnd),
+                         capMin: cutEnd, cutId: worst.cut.id, seq: worstAt + 1, cut: worst.cut };
+            })
+            .filter(function(r) { return r.endMin > cutEnd + over + 1; });
+    }
+
+    // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
+    // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
+    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
+    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var scopeIds = this.recalcScopeCutIds(sid);
+        if (!scopeIds.length) return [];
+        var inScope = {};
+        scopeIds.forEach(function(id) { inScope[String(id)] = true; });
+        var win = this.workingWindow() || {};
+        return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
+            baseMidnightMs: planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)),
+            cutEndMin: win.cutEndMin,
+            maxOverworkCutsMin: win.maxOverworkCutsMin
+        });
     };
 
+    // #4531: ПЕРЕПОЛНЕННЫЙ СТАНКО-ДЕНЬ → ФРАЗА ОПЕРАТОРУ. Прежний текст называл дату и минуты
+    // перебора — ровно то, что и так стои́т в бейдже «(N мин)» шапки дня, — и уходил ОТДЕЛЬНЫМ
+    // сообщением на каждый станок: три станка давали стопку одинаковых на вид предупреждений, ни в
+    // одном из которых не сказано, ни какой это станок, ни какое задание не влезло (issue #4531).
+    // Собираем ОДНУ фразу на все станко-дни и называем в ней место (станок + день), мерку (конец
+    // дня против потолка смены) и виновника (номер задания в дне + сырьё и размеры — как на карточке).
+    //   entries — [{ slitterId, dayOffset, endMin, overMin, capMin, seq, cutLabel }];
+    //   opts.slitterLabel(id) → подпись станка, opts.dayLabel(dayOffset) → дата дня,
+    //   opts.clock(min) → ЧЧ:ММ, opts.limit — сколько станко-дней называть поимённо
+    //   (остаток не замалчиваем: «…и ещё N»).
+    // → { text, shown, rest } либо null, если называть нечего.
+    function formatOverfilledDaysMessage(entries, opts) {
+        var list = (entries || []).filter(function(e) { return e; });
+        if (!list.length) return null;
+        var o = opts || {};
+        var slitterLabel = typeof o.slitterLabel === 'function' ? o.slitterLabel : function(id) { return 'станок #' + id; };
+        var dayLabel = typeof o.dayLabel === 'function' ? o.dayLabel : function(d) { return 'день ' + d; };
+        var clock = typeof o.clock === 'function' ? o.clock : function(m) { return String(Math.round(m)) + ' мин'; };
+        var limit = Number(o.limit) > 0 ? Number(o.limit) : 3;
+        var items = list.map(function(e) {
+            var place = [];
+            if (e.slitterId != null && String(e.slitterId) !== '') place.push(slitterLabel(e.slitterId));
+            place.push(dayLabel(e.dayOffset));
+            return overfilledDayPhrase(e, place.join(', '), clock);
+        });
+        var shown = items.slice(0, limit);
+        var rest = items.length - shown.length;
+        return { text: 'Не помещается в смену: ' + shown.join('; ') + (rest > 0 ? '; …и ещё ' + rest : '')
+                     + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».',
+                 shown: shown, rest: rest, items: items };
+    }
+
+    // #4531: ОДИН переполненный станко-день фразой: мерка (до какого часа идёт работа против
+    // потолка резки) и виновник (номер задания в дне + сырьё/размеры). Одна формулировка на два
+    // места — предупреждение (там `place` = «Станок 1, Пт, 31.07.2026») и подсказку бейджа в шапке
+    // дня (там место видно и так, `place` пустое).
+    //   entry — { endMin, capMin, overMin, seq, cutLabel }; clock(min) → ЧЧ:ММ.
+    function overfilledDayPhrase(entry, place, clock) {
+        var e = entry || {};
+        var fmt = typeof clock === 'function' ? clock : function(m) { return String(Math.round(m)) + ' мин'; };
+        var who = e.seq > 0 ? ('№ ' + e.seq + (e.cutLabel ? ' «' + e.cutLabel + '»' : '')) : (e.cutLabel || '');
+        return (place ? place + ' — ' : '') + 'до ' + fmt(e.endMin) + ' при потолке ' + fmt(e.capMin)
+            + ' (+' + Math.round(e.overMin) + ' мин)'
+            + (who ? ', последнее задание ' + who : '');
+    }
+
+    // #4531: задание одной строкой — сырьё, намотка и размеры, как в первой строке карточки
+    // («MW308 IN — 450 х 12»). По ней задание находится в очереди глазами.
+    function cutShortLabel(cut) {
+        if (!cut) return '';
+        var head = [];
+        var mat = cut.materialName || (cut.materialId != null && String(cut.materialId) !== '' ? '#' + cut.materialId : '');
+        if (mat) head.push(String(mat));
+        var wind = normWinding(cut.winding);
+        if (wind) head.push(wind);
+        var dims = formatCutDimensions(cut, null);
+        return head.join(' ') + (head.length && dims ? ' — ' : '') + dims;
+    }
+
     // #4408: переполнение дня, которое автоматика убрать не смогла (замороженный день #4436,
-    // единственный проход длиннее смены), — молчать нельзя (ТЗ §14/#4059): показываем день и
-    // минуты перебора. → массив [{ dayOffset, endMin, overMin }] (он же уходит в тост).
-    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterId) {
-        var sid = String(slitterId == null ? '' : slitterId);
-        var days = this.overfilledDaysOf(sid);
+    // единственный проход длиннее смены), — молчать нельзя (ТЗ §14/#4059): показываем станок, день,
+    // минуты перебора и задание, которым день кончается.
+    // #4531: принимает ОДИН станок (ручные пути ↑↓ и «↻ Пересчитать наладку») или СПИСОК станков
+    // (шлюз записи плана) и в обоих случаях говорит ОДНИМ сообщением.
+    // → массив [{ slitterId, dayOffset, endMin, overMin, capMin, cutId, seq }] (он же уходит в тост).
+    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterIds) {
+        var self = this;
+        var ids = (Array.isArray(slitterIds) ? slitterIds : [slitterIds])
+            .map(function(v) { return String(v == null ? '' : v); });
+        var days = [];
+        ids.forEach(function(sid) {
+            (self.overfilledDaysOf(sid) || []).forEach(function(d) {
+                var row = {};
+                Object.keys(d).forEach(function(k) { if (k !== 'cut') row[k] = d[k]; });
+                row.slitterId = sid;
+                row.cutLabel = cutShortLabel(d.cut);
+                days.push(row);
+            });
+        });
         if (!days.length) return days;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        this.notify('Не помещается в смену: ' + days.map(function(d) {
-            return formatPlanDayHeading(base, d.dayOffset) + ' до ' + formatClock(d.endMin)
-                + ' (+' + d.overMin + ' мин)';
-        }).join('; ') + '. Задания оставлены в своих днях — перенесите лишнее вручную (🗓) или «Упорядочить».', 'warning');
+        var byId = {};
+        (this.slitters || []).forEach(function(s) { byId[String(s.id)] = s.label || ('станок #' + s.id); });
+        var msg = formatOverfilledDaysMessage(days, {
+            slitterLabel: function(id) { return byId[String(id)] || ('станок #' + id); },
+            dayLabel: function(dayOffset) { return formatPlanDayHeading(base, dayOffset); },
+            clock: formatClock,
+            limit: 3
+        });
+        if (msg) this.notify(msg.text, 'warning');
         if (typeof console !== 'undefined' && console.warn) {
-            console.warn('[pp] #4408: день не помещается в смену', { slitterId: sid, days: days });
+            console.warn('[pp] #4408: день не помещается в смену', { slitterIds: ids, days: days });
         }
         return days;
     };
@@ -10667,6 +10837,17 @@
             dayMinutesBySched[d] = (dayMinutesBySched[d] || 0) + m;
             (dayBreakdownBySched[d] = dayBreakdownBySched[d] || []).push(sc);
         });
+        // #4531: какие из этих дней НЕ ПОМЕЩАЮТСЯ В СМЕНУ — ТОЙ ЖЕ меркой, что и предупреждение
+        // (`overfilledDaysFromCuts`): конец последнего задания дня против потолка резки. Набор
+        // заданий — те, что на экране (activeGroup.cuts), поэтому пометка не может разойтись с
+        // бейджем «(N мин)», рядом с которым стои́т. Замороженный день (#4326) тоже помечаем: он
+        // виден в очереди, и его перебор оператор должен видеть так же, как любой другой.
+        var overByDay = {};
+        overfilledDaysFromCuts(activeGroup.cuts, {
+            baseMidnightMs: planBaseMidnightMs,
+            cutEndMin: dayWindow.cutEndMin,
+            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin
+        }).forEach(function(d) { overByDay[d.dayOffset] = d; });
         // #3914: печать бейджа «(N мин)» по дням активного станка — из чего складывается сумма и
         // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart
         // (то, что реально записала последняя генерация), поэтому число совпадает с бейджем на экране.
@@ -11108,13 +11289,29 @@
                 // (вручную или вытеснены) — помечаем дату красным фоном.
                 var dayHeaderMs = planBaseMidnightMs + cardSchedDay * 86400000;
                 var dayOff = !self.dayIsWorking(dayHeaderMs);
+                // #4531: день НЕ ПОМЕЩАЕТСЯ В СМЕНУ — видно прямо в шапке, а не только в тосте.
+                // Бейдж «(N мин)» показывает сумму минут без мерки: помещается она в смену или нет,
+                // по ней не понять, и виноватый день приходилось искать глазами.
+                var dayOver = overByDay[cardSchedDay];
                 var dayDateEl = el('div', {
-                    class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : ''),
+                    class: 'atex-pp-day-date' + (dayOff ? ' is-dayoff' : '') + (dayOver ? ' is-over' : ''),
                     title: dayOff ? 'Выходной/праздничный день — заданий быть не должно' : ''
                 }, [
                     formatPlanDayHeading(planBaseMidnightMs, cardSchedDay),
                     el('span', { class: 'atex-pp-day-mins', text: ' (' + dayMins + ' мин)' })
                 ]);
+                if (dayOver) {
+                    dayDateEl.appendChild(el('span', {
+                        class: 'atex-pp-day-over',
+                        // Подсказка — та же фраза, что в предупреждении (место здесь и так видно).
+                        title: 'День не помещается в смену: '
+                            + overfilledDayPhrase({ endMin: dayOver.endMin, capMin: dayOver.capMin,
+                                overMin: dayOver.overMin, seq: dayOver.seq, cutLabel: cutShortLabel(dayOver.cut) },
+                                '', formatClock)
+                            + '. Перенесите лишнее вручную (🗓) или «Упорядочить».',
+                        text: '+' + Math.round(dayOver.overMin) + ' мин сверх смены'
+                    }));
+                }
                 // #4326: «замок дня» справа в шапке дня. Есть таблица «Заморозка» → показываем замок:
                 // открыт 🔓 (день можно менять) / закрыт 🔒 (день заморожен — планирование его не трогает).
                 // title закрытого = Примечание фиксации. Клик — заморозить/разморозить (openFreezeDay).
