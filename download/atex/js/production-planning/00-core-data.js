@@ -252,6 +252,14 @@
     var CUT_FIRST_PART_COLUMNS = ['cut_first_part', 'cut_first_part_id', 'cut_head_id', 'cut_chain_head'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
+    // #4536: «Кол-во рулонов» обеспечения — СКОЛЬКО ЗАКАЗУ ДОСТАНЕТСЯ с этого задания. Отчёт
+    // cut_planning эту колонку не отдаёт (её надо добавить на сервере, как #3698 добавил
+    // cut_knife_setup_min), и модель читала её как 0 — а пути записи разбиения по дням делили
+    // этот «ноль» между сегментами и ПИСАЛИ его в базу: хранимое количество заказа стиралось
+    // само (боевая ateh1: у всех недообеспеченных позиций «Кол-во рулонов» = 0 при живых
+    // числах у здоровых). Нет колонки → `rolls: null` = НЕ ЗНАЕМ: такое значение никуда не
+    // пишется и ни во что не складывается (ТЗ §14: молча подставлять нечего).
+    var SUPPLY_ROLLS_COLUMNS = ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'];
     // #4051: «Срок изготовления» обеспечиваемой позиции прямо из cut_planning — чтобы плашка
     // срока показывалась и для позиции вне активного positions_list (заказ закрыт/выполнен),
     // как #3633 сделал для габаритов. Колонка due_date отчёта = «Заказанное количество →
@@ -1150,6 +1158,30 @@
         });
     }
 
+    // #4536: КОЛИЧЕСТВО ОБЕСПЕЧЕНИЯ, КОТОРОГО ОТЧЁТ НЕ ОТДАЁТ. Отдельно от
+    // `cutPlanningReportDiagnostics` (там — сигналы, без которых очередь вообще не построить, и
+    // это ошибка): здесь план работает, но не знает, сколько заказу достаётся с задания, поэтому
+    // доли «Кол-во рулонов» при разбиении по дням он не пересчитывает и хранимое не трогает.
+    // Молчать нельзя (ТЗ §14) — но и «ошибкой» это называть неверно: чинится добавлением колонки
+    // `supply_rolls` («Обеспечение → Кол-во рулонов») в отчёт cut_planning на сервере.
+    // → { key, label, columns, reason, message } либо null (колонка есть / резок в отчёте нет).
+    function supplyRollsReportDiagnostic(rows) {
+        var list = rows || [];
+        var hasSupplyRows = list.some(function(row) {
+            return row && row.supply_id != null && String(row.supply_id).trim() !== '';
+        });
+        if (!hasSupplyRows) return null;
+        if (rowsHaveAnyColumn(list, SUPPLY_ROLLS_COLUMNS)) return null;
+        return {
+            key: 'supplyRolls',
+            label: SUPPLY_REQ.rolls,
+            columns: SUPPLY_ROLLS_COLUMNS.slice(),
+            reason: 'report-column',
+            message: 'В отчёте cut_planning нет колонки для «' + SUPPLY_REQ.rolls + '» обеспечения ('
+                + SUPPLY_ROLLS_COLUMNS.join(' | ') + ') — количество заказа план не пересчитывает и не переписывает'
+        };
+    }
+
     function cutWriteDiagnostics(reqIds, fields, requiredKeys, labels) {
         var out = [];
         (requiredKeys || []).forEach(function(key) {
@@ -1289,6 +1321,19 @@
         function rowNum(row, names) {
             return stripNum(rowValue(row, names));
         }
+        // #4536: число, которого в отчёте может НЕ БЫТЬ. Колонки нет ни в одной строке → null
+        // («не знаем»), а не 0: ноль — это утверждение «заказу не достанется ничего», и оно
+        // уезжало в базу вместо реального количества.
+        function rowNumOrNull(row, names) {
+            for (var i = 0; i < names.length; i++) {
+                if (row && hasOwn(row, names[i])) {
+                    var raw = row[names[i]];
+                    if (raw == null || String(raw).trim() === '') return null;
+                    return stripNum(raw);
+                }
+            }
+            return null;
+        }
         (rows || []).forEach(function(row) {
             var cutId = str(row.cut_id);
             if (cutId && !cutsById[cutId]) {
@@ -1384,7 +1429,9 @@
                     // Нет колонки/пусто → Infinity.
                     dueKey: batchDateKey(rowValue(row, SUPPLY_DUE_DATE_COLUMNS)),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
-                    rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
+                    // #4536: нет колонки в отчёте → null («не знаем»), а не 0 — иначе разбиение
+                    // по дням делит ноль на сегменты и пишет его вместо количества заказа.
+                    rolls: rowNumOrNull(row, SUPPLY_ROLLS_COLUMNS)
                 });
             }
         });
@@ -1776,26 +1823,67 @@
         });
     }
 
-    function suppliedRollsForPosition(positionId, supplies) {
+    // #4536: СКОЛЬКО ЗАКАЗУ РЕАЛЬНО ДОСТАНЕТСЯ — по РАСКРОЮ, а не по хранимой копии количества:
+    // «Кол-во полос» «Партии ГП» × «Кол-во резок план» задания, просуммированное по обеспечениям
+    // позиции. Это та же мерка, которой правило SUPPLY_CONSERVED сверяет план с заказом.
+    //   supplies — [{ positionId, cutId, finishedBatchId }]; stripsByBatch — { gpId: полос };
+    //   runsByCut — { cutId: проходов }.
+    // Партия, которую обеспечивают НЕСКОЛЬКО позиций, свой выпуск между ними делит поровну —
+    // такой раскрой в atex не встречается, но молча удваивать покрытие нельзя.
+    // → { positionId: штук }. Чистая (тест).
+    function producedRollsByPosition(supplies, stripsByBatch, runsByCut) {
+        var strips = stripsByBatch || {}, runs = runsByCut || {};
+        var sharers = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || s.positionId == null || s.finishedBatchId == null || String(s.finishedBatchId) === '') return;
+            var key = String(s.finishedBatchId);
+            (sharers[key] = sharers[key] || {})[String(s.positionId)] = true;
+        });
+        var out = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || s.positionId == null) return;
+            var per = stripNum(strips[String(s.finishedBatchId)]);
+            var cutRuns = stripNum(runs[String(s.cutId)]);
+            if (!(per > 0) || !(cutRuns > 0)) return;
+            var shared = Object.keys(sharers[String(s.finishedBatchId)] || {}).length || 1;
+            var pid = String(s.positionId);
+            out[pid] = round3((out[pid] || 0) + per * cutRuns / shared);
+        });
+        return out;
+    }
+
+    // Покрытие позиции по её «Обеспечениям». produced (#4536) — выпуск позиции по раскрою
+    // (`producedRollsByPosition`): им считаем покрытие, когда хранимое «Кол-во рулонов»
+    // НЕИЗВЕСТНО (отчёт колонку не отдаёт → rolls === null). Раньше неизвестное читалось нулём,
+    // и позиция выглядела необеспеченной целиком, сколько бы заданий её ни выпускало.
+    function suppliedRollsForPosition(positionId, supplies, produced) {
         var id = String(positionId == null ? '' : positionId);
         var total = 0;
         var hasRolls = false;
         var hasCoverage = false;
+        var unknownRolls = false;
         (supplies || []).forEach(function(s) {
             if (!s || String(s.positionId == null ? '' : s.positionId) !== id) return;
             if (s.rolls !== undefined && s.rolls !== null && String(s.rolls).trim() !== '') {
                 hasRolls = true;
                 total += stripNum(s.rolls);
+            } else if (s.rolls === null) {
+                unknownRolls = true;
             }
             if (supplyCoverageKind(s)) hasCoverage = true;
         });
+        // Часть количества неизвестна, но выпуск посчитать есть чем — берём выпуск целиком:
+        // складывать его с хранимыми долями нельзя, это одно и то же покрытие в двух видах.
+        if (unknownRolls && produced && produced[id] != null) {
+            return { rolls: round3(stripNum(produced[id])), hasRolls: true, hasCoverage: hasCoverage };
+        }
         return { rolls: round3(total), hasRolls: hasRolls, hasCoverage: hasCoverage };
     }
 
-    function remainingRollsForPosition(position, supplies) {
+    function remainingRollsForPosition(position, supplies, produced) {
         var qty = stripNum(position && position.qty);
         if (qty <= 0) return 0;
-        var supplied = suppliedRollsForPosition(position && position.id, supplies);
+        var supplied = suppliedRollsForPosition(position && position.id, supplies, produced);
         if (!supplied.hasRolls && supplied.hasCoverage) return 0;
         var remaining = qty - supplied.rolls;
         return remaining > 0 ? round3(remaining) : 0;

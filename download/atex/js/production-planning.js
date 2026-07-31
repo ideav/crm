@@ -253,6 +253,14 @@
     var CUT_FIRST_PART_COLUMNS = ['cut_first_part', 'cut_first_part_id', 'cut_head_id', 'cut_chain_head'];
     var CUT_RUN_LENGTH_COLUMNS = ['cut_length', 'cut_footage', 'cut_footage_m'];
     var SUPPLY_FOOTAGE_COLUMNS = ['supply_footage', 'supply_length', 'supply_length_m'];
+    // #4536: «Кол-во рулонов» обеспечения — СКОЛЬКО ЗАКАЗУ ДОСТАНЕТСЯ с этого задания. Отчёт
+    // cut_planning эту колонку не отдаёт (её надо добавить на сервере, как #3698 добавил
+    // cut_knife_setup_min), и модель читала её как 0 — а пути записи разбиения по дням делили
+    // этот «ноль» между сегментами и ПИСАЛИ его в базу: хранимое количество заказа стиралось
+    // само (боевая ateh1: у всех недообеспеченных позиций «Кол-во рулонов» = 0 при живых
+    // числах у здоровых). Нет колонки → `rolls: null` = НЕ ЗНАЕМ: такое значение никуда не
+    // пишется и ни во что не складывается (ТЗ §14: молча подставлять нечего).
+    var SUPPLY_ROLLS_COLUMNS = ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'];
     // #4051: «Срок изготовления» обеспечиваемой позиции прямо из cut_planning — чтобы плашка
     // срока показывалась и для позиции вне активного positions_list (заказ закрыт/выполнен),
     // как #3633 сделал для габаритов. Колонка due_date отчёта = «Заказанное количество →
@@ -1151,6 +1159,30 @@
         });
     }
 
+    // #4536: КОЛИЧЕСТВО ОБЕСПЕЧЕНИЯ, КОТОРОГО ОТЧЁТ НЕ ОТДАЁТ. Отдельно от
+    // `cutPlanningReportDiagnostics` (там — сигналы, без которых очередь вообще не построить, и
+    // это ошибка): здесь план работает, но не знает, сколько заказу достаётся с задания, поэтому
+    // доли «Кол-во рулонов» при разбиении по дням он не пересчитывает и хранимое не трогает.
+    // Молчать нельзя (ТЗ §14) — но и «ошибкой» это называть неверно: чинится добавлением колонки
+    // `supply_rolls` («Обеспечение → Кол-во рулонов») в отчёт cut_planning на сервере.
+    // → { key, label, columns, reason, message } либо null (колонка есть / резок в отчёте нет).
+    function supplyRollsReportDiagnostic(rows) {
+        var list = rows || [];
+        var hasSupplyRows = list.some(function(row) {
+            return row && row.supply_id != null && String(row.supply_id).trim() !== '';
+        });
+        if (!hasSupplyRows) return null;
+        if (rowsHaveAnyColumn(list, SUPPLY_ROLLS_COLUMNS)) return null;
+        return {
+            key: 'supplyRolls',
+            label: SUPPLY_REQ.rolls,
+            columns: SUPPLY_ROLLS_COLUMNS.slice(),
+            reason: 'report-column',
+            message: 'В отчёте cut_planning нет колонки для «' + SUPPLY_REQ.rolls + '» обеспечения ('
+                + SUPPLY_ROLLS_COLUMNS.join(' | ') + ') — количество заказа план не пересчитывает и не переписывает'
+        };
+    }
+
     function cutWriteDiagnostics(reqIds, fields, requiredKeys, labels) {
         var out = [];
         (requiredKeys || []).forEach(function(key) {
@@ -1290,6 +1322,19 @@
         function rowNum(row, names) {
             return stripNum(rowValue(row, names));
         }
+        // #4536: число, которого в отчёте может НЕ БЫТЬ. Колонки нет ни в одной строке → null
+        // («не знаем»), а не 0: ноль — это утверждение «заказу не достанется ничего», и оно
+        // уезжало в базу вместо реального количества.
+        function rowNumOrNull(row, names) {
+            for (var i = 0; i < names.length; i++) {
+                if (row && hasOwn(row, names[i])) {
+                    var raw = row[names[i]];
+                    if (raw == null || String(raw).trim() === '') return null;
+                    return stripNum(raw);
+                }
+            }
+            return null;
+        }
         (rows || []).forEach(function(row) {
             var cutId = str(row.cut_id);
             if (cutId && !cutsById[cutId]) {
@@ -1385,7 +1430,9 @@
                     // Нет колонки/пусто → Infinity.
                     dueKey: batchDateKey(rowValue(row, SUPPLY_DUE_DATE_COLUMNS)),
                     footage: rowNum(row, SUPPLY_FOOTAGE_COLUMNS),
-                    rolls: rowNum(row, ['supply_rolls', 'supply_qty', 'supply_quantity', 'supply_roll_count'])
+                    // #4536: нет колонки в отчёте → null («не знаем»), а не 0 — иначе разбиение
+                    // по дням делит ноль на сегменты и пишет его вместо количества заказа.
+                    rolls: rowNumOrNull(row, SUPPLY_ROLLS_COLUMNS)
                 });
             }
         });
@@ -1777,26 +1824,67 @@
         });
     }
 
-    function suppliedRollsForPosition(positionId, supplies) {
+    // #4536: СКОЛЬКО ЗАКАЗУ РЕАЛЬНО ДОСТАНЕТСЯ — по РАСКРОЮ, а не по хранимой копии количества:
+    // «Кол-во полос» «Партии ГП» × «Кол-во резок план» задания, просуммированное по обеспечениям
+    // позиции. Это та же мерка, которой правило SUPPLY_CONSERVED сверяет план с заказом.
+    //   supplies — [{ positionId, cutId, finishedBatchId }]; stripsByBatch — { gpId: полос };
+    //   runsByCut — { cutId: проходов }.
+    // Партия, которую обеспечивают НЕСКОЛЬКО позиций, свой выпуск между ними делит поровну —
+    // такой раскрой в atex не встречается, но молча удваивать покрытие нельзя.
+    // → { positionId: штук }. Чистая (тест).
+    function producedRollsByPosition(supplies, stripsByBatch, runsByCut) {
+        var strips = stripsByBatch || {}, runs = runsByCut || {};
+        var sharers = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || s.positionId == null || s.finishedBatchId == null || String(s.finishedBatchId) === '') return;
+            var key = String(s.finishedBatchId);
+            (sharers[key] = sharers[key] || {})[String(s.positionId)] = true;
+        });
+        var out = {};
+        (supplies || []).forEach(function(s) {
+            if (!s || s.positionId == null) return;
+            var per = stripNum(strips[String(s.finishedBatchId)]);
+            var cutRuns = stripNum(runs[String(s.cutId)]);
+            if (!(per > 0) || !(cutRuns > 0)) return;
+            var shared = Object.keys(sharers[String(s.finishedBatchId)] || {}).length || 1;
+            var pid = String(s.positionId);
+            out[pid] = round3((out[pid] || 0) + per * cutRuns / shared);
+        });
+        return out;
+    }
+
+    // Покрытие позиции по её «Обеспечениям». produced (#4536) — выпуск позиции по раскрою
+    // (`producedRollsByPosition`): им считаем покрытие, когда хранимое «Кол-во рулонов»
+    // НЕИЗВЕСТНО (отчёт колонку не отдаёт → rolls === null). Раньше неизвестное читалось нулём,
+    // и позиция выглядела необеспеченной целиком, сколько бы заданий её ни выпускало.
+    function suppliedRollsForPosition(positionId, supplies, produced) {
         var id = String(positionId == null ? '' : positionId);
         var total = 0;
         var hasRolls = false;
         var hasCoverage = false;
+        var unknownRolls = false;
         (supplies || []).forEach(function(s) {
             if (!s || String(s.positionId == null ? '' : s.positionId) !== id) return;
             if (s.rolls !== undefined && s.rolls !== null && String(s.rolls).trim() !== '') {
                 hasRolls = true;
                 total += stripNum(s.rolls);
+            } else if (s.rolls === null) {
+                unknownRolls = true;
             }
             if (supplyCoverageKind(s)) hasCoverage = true;
         });
+        // Часть количества неизвестна, но выпуск посчитать есть чем — берём выпуск целиком:
+        // складывать его с хранимыми долями нельзя, это одно и то же покрытие в двух видах.
+        if (unknownRolls && produced && produced[id] != null) {
+            return { rolls: round3(stripNum(produced[id])), hasRolls: true, hasCoverage: hasCoverage };
+        }
         return { rolls: round3(total), hasRolls: hasRolls, hasCoverage: hasCoverage };
     }
 
-    function remainingRollsForPosition(position, supplies) {
+    function remainingRollsForPosition(position, supplies, produced) {
         var qty = stripNum(position && position.qty);
         if (qty <= 0) return 0;
-        var supplied = suppliedRollsForPosition(position && position.id, supplies);
+        var supplied = suppliedRollsForPosition(position && position.id, supplies, produced);
         if (!supplied.hasRolls && supplied.hasCoverage) return 0;
         var remaining = qty - supplied.rolls;
         return remaining > 0 ? round3(remaining) : 0;
@@ -3449,8 +3537,122 @@
                 });
                 return out;
             }
+        },
+        {
+            id: 'SUPPLY_CONSERVED',
+            tz: '§15 (#4536)',
+            actor: 'any',       // недообеспеченный заказ — брак независимо от того, кто его создал
+            mode: 'audit',
+            why: 'отбрасывать нечего: недостача — это НЕ операция, а итог всего плана. Выбросив '
+                 + 'операцию, мы не добавим заказу ни одного прохода, зато оставим задание с прежним '
+                 + 'planStart и получим дыру в дне (#4300/#4312). Недостачу чинит план (проходы '
+                 + 'добираются) или оператор; шлюз называет позицию и сколько штук не хватает',
+            title: 'Обеспечение равно заказу: выпуск позиции по всем заданиям не меньше заказанного количества',
+            // ЧТО ПРОВЕРЯЕТСЯ. Позиция заказа обеспечена, когда сумма выпуска ВСЕХ покрывающих её
+            // заданий («Кол-во полос» её «Партии ГП» × «Кол-во резок план» задания) не меньше
+            // «Заказанного количества». Излишек — норма (проходы целые, остаток идёт на склад),
+            // недостача — нет: заказ уедет неполным, и никакая кнопка об этом не скажет.
+            //
+            // ЗАЧЕМ ПРАВИЛО. Количество терялось молча и разными путями (issue #4536, боевая ateh1:
+            // шесть позиций из 136 — заказ 4442 недосчитался 138 штук, 4404 — 108 и 12): шлюз
+            // отбрасывал `create` продолжения, оставляя голове урезанные проходы; удаление звена
+            // цепочки уносило его долю обеспечения; «Кол-во рулонов» обеспечения затиралось нулём.
+            // Каждый путь чинился отдельно и возвращался. Здесь мерка ОДНА и на всех входах записи:
+            // сколько заказу достанется по ИТОГОВОМУ плану.
+            //
+            // КАК СЧИТАЕТСЯ. Проходы после операций: `update` задаёт новое число, `delete` обнуляет
+            // (записи не будет), `create` добавляет продолжение — оно режет ТЕ ЖЕ полосы, что и
+            // голова (applySplitPlan копирует её «Партии ГП»), поэтому его выпуск считается по
+            // полосам родителя. Записи, которых операции не касаются, дают свои ХРАНИМЫЕ проходы:
+            // операции несут только изменившееся (#3427), и без хранимых цифра была бы ложной.
+            //
+            // ctx.coverageLinks() → [{ cutId, positionId, rollsPerRun }] — кто что выпускает
+            //   (rollsPerRun = «Кол-во полос» партии, покрывающей позицию: столько штук этой позиции
+            //   даёт ОДИН проход задания);
+            // ctx.positionDemand() → { positionId: { qty, orderNo, width } } — заказанное количество;
+            // ctx.plannedRunsOfCut(id) → ХРАНИМЫЕ проходы задания (null — не знаем).
+            // Нет предикатов или нет данных — правило молчит (общая конвенция реестра: нет данных —
+            // нет обвинений); недостача на позиции, чьи проходы неизвестны, не выдумывается.
+            check: function(ops, ctx) {
+                var linksFn = (ctx && typeof ctx.coverageLinks === 'function') ? ctx.coverageLinks : null;
+                var demandFn = (ctx && typeof ctx.positionDemand === 'function') ? ctx.positionDemand : null;
+                var runsFn = (ctx && typeof ctx.plannedRunsOfCut === 'function') ? ctx.plannedRunsOfCut : null;
+                if (!linksFn || !demandFn || !runsFn) return [];
+                var links = linksFn() || [];
+                var demand = demandFn() || {};
+                if (!links.length || !Object.keys(demand).length) return [];
+
+                // Проходы задания после операций плана.
+                var runsAfter = {}, removed = {};
+                function storedRuns(cutId) {
+                    var key = String(cutId);
+                    if (!hasKey(runsAfter, key)) {
+                        var v = runsFn(key);
+                        runsAfter[key] = (v == null || !isFinite(Number(v))) ? null : Number(v);
+                    }
+                    return runsAfter[key];
+                }
+                function hasKey(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
+                (ops && ops.updates || []).forEach(function(u) {
+                    if (!u || u.cutId == null) return;
+                    storedRuns(u.cutId);                                   // положим хранимое, затем перекроем
+                    if (u.plannedRuns != null && isFinite(Number(u.plannedRuns))) runsAfter[String(u.cutId)] = Number(u.plannedRuns);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { if (id != null) removed[String(id)] = true; });
+
+                // Выпуск по позициям: хранимые записи + продолжения, которых ещё нет в базе.
+                var produced = {}, unknown = {}, cutsByPos = {};
+                links.forEach(function(l) {
+                    if (!l || l.positionId == null || l.cutId == null) return;
+                    var per = Number(l.rollsPerRun) || 0;
+                    if (!(per > 0)) return;
+                    var pid = String(l.positionId), cid = String(l.cutId);
+                    if (!hasKey(produced, pid)) { produced[pid] = 0; cutsByPos[pid] = []; }
+                    if (cutsByPos[pid].indexOf(cid) === -1) cutsByPos[pid].push(cid);
+                    if (removed[cid]) return;                              // записи не будет — выпуска нет
+                    var runs = storedRuns(cid);
+                    if (runs == null) { unknown[pid] = true; return; }     // не знаем проходов — не обвиняем
+                    produced[pid] = round3ppi(produced[pid] + per * runs);
+                });
+                (ops && ops.creates || []).forEach(function(cr) {
+                    if (!cr || cr.parentCutId == null) return;
+                    var addRuns = Number(cr.plannedRuns) || 0;
+                    if (!(addRuns > 0)) return;
+                    var parent = String(cr.parentCutId);
+                    links.forEach(function(l) {
+                        if (!l || String(l.cutId) !== parent || l.positionId == null) return;
+                        var per = Number(l.rollsPerRun) || 0;
+                        if (!(per > 0)) return;
+                        var pid = String(l.positionId);
+                        if (!hasKey(produced, pid)) { produced[pid] = 0; cutsByPos[pid] = [parent]; }
+                        produced[pid] = round3ppi(produced[pid] + per * addRuns);
+                    });
+                });
+
+                var out = [];
+                Object.keys(produced).forEach(function(pid) {
+                    if (unknown[pid]) return;
+                    var need = demand[pid];
+                    var ordered = Number(need && need.qty);
+                    if (!(ordered > 0)) return;                            // позиции нет в плане/нулевой заказ
+                    var made = produced[pid];
+                    if (made >= ordered - 0.001) return;
+                    var short = round3ppi(ordered - made);
+                    var ids = cutsByPos[pid] || [];
+                    out.push(ppViolation('SUPPLY_CONSERVED', ids[0] || null,
+                        'позиция ' + pid + (need && need.orderNo ? ' (заказ ' + need.orderNo + ')' : '')
+                        + ': заказано ' + ordered + ', выпуск по плану ' + made + ' — не хватает ' + short,
+                        { positionId: pid, orderNo: need && need.orderNo != null ? String(need.orderNo) : '',
+                          width: need && need.width != null ? Number(need.width) : undefined,
+                          ordered: ordered, produced: made, shortRolls: short, cutIds: ids.slice() }));
+                });
+                return out;
+            }
         }
     ];
+
+    // Округление до 3 знаков — тот же приём, что и в остальных модулях (артефакты float).
+    function round3ppi(n) { return Math.round(n * 1000) / 1000; }
 
     // Все нарушения, которые операции плана несут для указанного актора.
     //   actor: 'auto' — проверяются правила автоматики и общие; 'human' — только общие ('any').
@@ -3513,7 +3715,7 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled };
+        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled, restoredChains: [] };
 
         var skipped = 0;
         function keep(op, kind) {
@@ -3522,11 +3724,111 @@
             }
             return true;
         }
+        // #4536: баланс работы ДО отбрасывания — с чем сравнивать целостность задания (ниже).
+        var balanceBefore = planWorkBalanceByChain(ops, ctx);
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
         ops.deletes = (ops.deletes || []).filter(function(id) { return keep({ cutId: id }, 'delete'); });
         ops.creates = (ops.creates || []).filter(function(cr) { return keep(cr || {}, 'create'); });
-        return { ops: ops, violations: violations, skipped: skipped, filled: filled };
+        var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
+        skipped += restoredChains.skipped;
+        return { ops: ops, violations: violations, skipped: skipped, filled: filled,
+                 restoredChains: restoredChains.chains };
+    }
+
+    // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
+    // Задание, не влезшее в смену, живёт цепочкой записей (голова + продолжения). Разбиение по
+    // дням РАСПРЕДЕЛЯЕТ его проходы между записями, но не создаёт и не уничтожает их: сумма по
+    // цепочке до и после операций одна и та же. Баланс цепочки = (что будет) − (что хранится):
+    //   update  — проходы записи меняются на u.plannedRuns;
+    //   delete  — запись исчезает вместе со своими проходами;
+    //   create  — появляется продолжение со своими проходами.
+    // → { chainId: баланс }; цепочка, у которой хранимые проходы хоть одной затронутой записи
+    // неизвестны, в результат не попадает (нет данных — нет выводов).
+    // Нужны ctx.plannedRunsOfCut(id) и ctx.chainIdOfCut(id); без них — пустой результат.
+    function planWorkBalanceByChain(ops, ctx) {
+        var runsFn = (ctx && typeof ctx.plannedRunsOfCut === 'function') ? ctx.plannedRunsOfCut : null;
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !runsFn || !chainFn) return {};
+        var out = {}, blind = {};
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        function add(cutId, delta) {
+            var key = chainOf(cutId);
+            out[key] = round3ppi((out[key] || 0) + delta);
+        }
+        function stored(cutId) {
+            var v = runsFn(cutId);
+            return (v == null || !isFinite(Number(v))) ? null : Number(v);
+        }
+        (ops.updates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var was = stored(u.cutId);
+            if (was == null || u.plannedRuns == null || !isFinite(Number(u.plannedRuns))) { blind[chainOf(u.cutId)] = true; return; }
+            add(u.cutId, Number(u.plannedRuns) - was);
+        });
+        (ops.deletes || []).forEach(function(id) {
+            if (id == null) return;
+            var was = stored(id);
+            if (was == null) { blind[chainOf(id)] = true; return; }
+            add(id, -was);
+        });
+        (ops.creates || []).forEach(function(cr) {
+            if (!cr || cr.parentCutId == null) return;
+            if (cr.plannedRuns == null || !isFinite(Number(cr.plannedRuns))) { blind[chainOf(cr.parentCutId)] = true; return; }
+            add(cr.parentCutId, Number(cr.plannedRuns));
+        });
+        Object.keys(blind).forEach(function(k) { delete out[k]; });
+        return out;
+    }
+
+    // #4536: ОПЕРАЦИИ ОДНОГО ЗАДАНИЯ ЖИВУТ ИЛИ ОТБРАСЫВАЮТСЯ ВМЕСТЕ.
+    // Страж отбрасывает операции ПООДИНОЧКЕ, а разорванное по дням задание — это `update` головы
+    // (сколько проходов осталось в её дне) ПЛЮС `create` продолжения (остаток). Выбросив только
+    // `create` (продолжение попало в замороженный день), шлюз оставлял голове урезанные проходы,
+    // а остаток не создавался никогда: работа исчезала вместе с обеспечением заказа — ровно
+    // симптом issue #4536 («найдено одно задание, и его количество меньше заказа»).
+    // Поэтому после отбрасывания баланс каждой цепочки сверяется с тем, каким он был ДО: цепочка,
+    // которая была сбалансирована (плановое перераспределение проходов), а стала нет, возвращается
+    // ЦЕЛИКОМ — все её оставшиеся операции снимаются, и задание остаётся ровно таким, как хранится.
+    // Это безопасно по той же причине, что и отбрасывание вообще: «задание остаётся там, где
+    // стои́т» (FIXED_CUT_DAY, #4512).
+    // План, который МЕНЯЕТ объём работы намеренно (баланс не сошёлся ещё ДО отбрасывания —
+    // например ручная правка проходов), не трогаем: возвращать нечего, судить не за что.
+    // → { chains: [chainId…], skipped: сколько операций снято }. ops мутируется на месте.
+    function restoreSplitChainIntegrity(ops, ctx, balanceBefore) {
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !chainFn) return { chains: [], skipped: 0 };
+        var after = planWorkBalanceByChain(ops, ctx);
+        var broken = {}, chains = [];
+        Object.keys(after).forEach(function(chainId) {
+            var was = (balanceBefore || {})[chainId];
+            if (was == null) return;                      // до отбрасывания баланса не знали — не судим
+            if (Math.abs(was) > 0.001) return;            // план и так менял объём работы — это не мы
+            if (Math.abs(after[chainId]) <= 0.001) return;
+            broken[chainId] = true; chains.push(chainId);
+        });
+        if (!chains.length) return { chains: [], skipped: 0 };
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        var skipped = 0;
+        ops.updates = (ops.updates || []).filter(function(u) {
+            if (u && u.cutId != null && broken[chainOf(u.cutId)]) { skipped++; return false; }
+            return true;
+        });
+        ops.deletes = (ops.deletes || []).filter(function(id) {
+            if (id != null && broken[chainOf(id)]) { skipped++; return false; }
+            return true;
+        });
+        ops.creates = (ops.creates || []).filter(function(cr) {
+            if (cr && cr.parentCutId != null && broken[chainOf(cr.parentCutId)]) { skipped++; return false; }
+            return true;
+        });
+        return { chains: chains, skipped: skipped };
     }
 
     // Времена переналадок (мин) — по умолчанию (fallback). Реальные берутся из таблицы
@@ -4062,6 +4364,21 @@
     }
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
+
+    // #4536: ПОЛОС ЗА ПРОХОД по «Партии ГП» — из того же отчёта cut_strips (gp_id — id партии).
+    // Столько штук даёт ОДИН проход задания позиции, которую эта партия обеспечивает; на этом
+    // стои́т мерка правила SUPPLY_CONSERVED (выпуск = полосы × проходы). Отдельно от
+    // `aggregateStrips` (там сумма ножей по резке) — контракт того результата не трогаем.
+    // → { gpId: полос }. Вход не мутируется; строки без gp_id пропускаются.
+    function stripsByFinishedBatch(rows) {
+        var out = {};
+        (rows || []).forEach(function(row) {
+            var gpId = String(row && row.gp_id == null ? '' : row.gp_id);
+            if (gpId === '') return;
+            out[gpId] = round3((out[gpId] || 0) + (Number(row.strip_qty) || 0));
+        });
+        return out;
+    }
 
     // Строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} }.
     // cut_id — abn «Производственной резки»; strip_width — «Партия ГП» «Ширина, мм»;
@@ -8899,16 +9216,35 @@
     // (остаток по наибольшей дробной части). Метраж — дробно, последняя доля = остаток.
     //   rolls, footage — исходные; runs — массив проходов по сегментам (сегмент 0 = «сегодня»).
     // → [{ rolls, footage }] длиной runs.length. runs пуст/сумма 0 → всё в сегмент 0.
+    // #4536: rolls === null («не знаем» — отчёт колонку не отдаёт) делится в null у ВСЕХ долей:
+    // делить неизвестное нельзя, а ноль — это утверждение «заказу не достанется ничего», и оно
+    // уезжало в базу поверх реального количества. Метраж при этом делится как прежде.
     function splitSupplyShares(rolls, footage, runs){
         var r = (runs || []).map(function(x){ return Number(x) || 0; });
         var n = r.length;
-        var R = Math.round(Number(rolls) || 0);
+        var unknownRolls = (rolls === null || rolls === undefined || rolls === '');
+        var R = unknownRolls ? null : Math.round(Number(rolls) || 0);
         var F = Number(footage) || 0;
         if (n === 0) return [];
         var total = r.reduce(function(s, x){ return s + x; }, 0);
         var out = [];
         if (!(total > 0)) {
-            for (var z = 0; z < n; z++) out.push({ rolls: z === 0 ? R : 0, footage: z === 0 ? round3(F) : 0 });
+            for (var z = 0; z < n; z++) {
+                out.push({ rolls: unknownRolls ? null : (z === 0 ? R : 0), footage: z === 0 ? round3(F) : 0 });
+            }
+            return out;
+        }
+        if (unknownRolls) {
+            // Количество неизвестно — считаем только метраж, доли рулонов остаются «не знаем».
+            var fAcc0 = 0, lastKnown = -1;
+            for (var q = 0; q < n; q++) if (r[q] > 0) lastKnown = q;
+            for (var w = 0; w < n; w++) {
+                var fw;
+                if (r[w] <= 0) fw = 0;
+                else if (w === lastKnown) fw = round3(F - fAcc0);
+                else { fw = round3(F * r[w] / total); fAcc0 += fw; }
+                out.push({ rolls: null, footage: fw });
+            }
             return out;
         }
         // Рулоны: floor + раздача остатка по наибольшей дробной части.
@@ -12240,6 +12576,9 @@
         // #4515: страж по произвольному набору правил — этим тест проверяет, что отбрасывание
         // работает для ЛЮБОГО правила с `mode: 'drop'`, а не только для заморозки.
         guardPlanOpsWith: guardPlanOpsWith,
+        // #4536: баланс работы задания по операциям плана — по нему страж держит целостность
+        // разорванного по дням задания (проверяется тестом `atex-pp-4536-supply-conservation`).
+        planWorkBalanceByChain: planWorkBalanceByChain,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
@@ -12399,9 +12738,13 @@
         layoutPositionGroups: layoutPositionGroups,
         rowsToPlanning: rowsToPlanning,
         cutPlanningReportDiagnostics: cutPlanningReportDiagnostics,
+        supplyRollsReportDiagnostic: supplyRollsReportDiagnostic,   // #4536: отчёт не отдаёт количество обеспечения
+        stripsByFinishedBatch: stripsByFinishedBatch,               // #4536: полос за проход по «Партии ГП»
         rowsToPositions: rowsToPositions,
         positionDimensionsLabel: positionDimensionsLabel,
         remainingRollsForPosition: remainingRollsForPosition,
+        suppliedRollsForPosition: suppliedRollsForPosition,         // #4536: покрытие позиции (в т.ч. по выпуску)
+        producedRollsByPosition: producedRollsByPosition,           // #4536: выпуск позиции = полосы × проходы
         formatLinkedPositionLabel: formatLinkedPositionLabel,
         stripSupplyRolls: stripSupplyRolls,
         cutPositionFit: cutPositionFit,                 // #4426/#4428: годится ли позиция для добавления в задание
@@ -13549,6 +13892,9 @@
         var self = this;
         return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,5000').then(function(rows) {
             self.stripAgg = aggregateStrips(rows || []);
+            // #4536: полос за проход по «Партии ГП» — мерка выпуска для правила SUPPLY_CONSERVED
+            // (сколько штук позиции даёт один проход задания).
+            self.stripsByBatch = stripsByFinishedBatch(rows || []);
         });
     };
 
@@ -13890,6 +14236,25 @@
         });
     };
 
+    // #4536: отчёт не отдаёт «Кол-во рулонов» обеспечения — план это ПЕРЕЖИВЁТ (доли количества он
+    // просто не пересчитывает и хранимое не трогает), но молчать нельзя: пока колонки нет,
+    // «Обеспечение» не знает, сколько заказу достаётся с задания. Говорим ОДИН раз за загрузку
+    // рабочего места — тост на каждое чтение очереди был бы шумом, а не сообщением.
+    AtexProductionPlanning.prototype.reportSupplyRollsDiagnostic = function(rows) {
+        var d = supplyRollsReportDiagnostic(rows);
+        if (!d) { this._supplyRollsDiagnosticSaid = false; return null; }
+        if (typeof console !== 'undefined' && console.warn) {
+            console.warn('[pp] ⚠️ #4536 ' + d.message + '. Добавьте колонку в отчёт cut_planning: '
+                + '«Обеспечение → ' + d.label + '» с именем supply_rolls.');
+        }
+        if (!this._supplyRollsDiagnosticSaid) {
+            this._supplyRollsDiagnosticSaid = true;
+            this.notify('Отчёт cut_planning не отдаёт «' + d.label + '» обеспечения — количество заказа план '
+                + 'не пересчитывает (добавьте колонку supply_rolls)', 'warning');
+        }
+        return d;
+    };
+
     AtexProductionPlanning.prototype.reportCutPlanningDiagnostics = function(rows) {
         var diagnostics = cutPlanningReportDiagnostics(rows);
         if (!diagnostics.length) {
@@ -13928,6 +14293,7 @@
             var windingByCut = seqResult.winding || {};   // #4128
             var materialBatchByCut = seqResult.materialBatch || {};   // #4155
             self.reportCutPlanningDiagnostics(rows || []);
+            self.reportSupplyRollsDiagnostic(rows || []);   // #4536: количество обеспечения — из отчёта или никак
             var p = rowsToPlanning(rows || []);
             var agg = self.stripAgg || {};
             p.cuts.forEach(function(cut) {
@@ -14180,7 +14546,7 @@
         var posById = positionMap(this.genPositions);
         var position = posById[String(positionId)];
         if (!position) return Promise.resolve({ error: 'Выберите позицию заказа' });
-        var remaining = remainingRollsForPosition(position, this.supplies);
+        var remaining = remainingRollsForPosition(position, this.supplies, this.producedRollsByPosition());
         var qty = Math.floor(Number(qtyRaw) || 0);
         if (!(qty > 0)) return Promise.resolve({ error: 'Укажите количество рулонов больше 0' });
         if (qty > remaining) return Promise.resolve({ error: 'Количество больше необеспеченного остатка (' + remaining + ' рул.)' });
@@ -14760,6 +15126,14 @@
             if (v.rule === 'CUT_BATCH') {
                 return 'задание №' + v.cutId + ' без «Партии сырья» (' + (v.reason || 'источник партии не найден') + ')';
             }
+            // #4536: недостача обеспечения — на языке заказа, а не позиции: оператор ищет её по
+            // номеру заказа и ширине, а «не хватает N шт.» — то, что он скажет производству.
+            if (v.rule === 'SUPPLY_CONSERVED') {
+                var who = v.orderNo ? ('заказ ' + v.orderNo) : ('позиция ' + v.positionId);
+                var dims = (Number(v.width) > 0) ? (' · ' + round3(Number(v.width)) + ' мм') : '';
+                return who + dims + ': не хватает ' + v.shortRolls + ' шт. (заказано ' + v.ordered
+                    + ', выпуск по плану ' + v.produced + ')';
+            }
             return v.msg || v.rule;
         }
         var items = list.map(phrase);
@@ -14768,9 +15142,14 @@
         // «Партия сырья» — ошибка ДАННЫХ, её чинит оператор; остальное — отклонение раскладки,
         // о котором он должен знать, но чинить его — не его работа.
         var dataOnly = list.every(function(v) { return v.rule === 'CUT_BATCH'; });
+        // #4536: недостача обеспечения — не про дни: заказу не хватает проходов, и чинится это
+        // заданием, а не перестановкой. Хвост фразы называет то, что делать.
+        var supplyOnly = list.every(function(v) { return v.rule === 'SUPPLY_CONSERVED'; });
         var tail = dataOnly
             ? ' Плану не из чего вывести партию — он считает этим заданиям лишнюю смену сырья.'
-            : ' План записан как есть — проверьте эти дни.';
+            : (supplyOnly
+                ? ' План записан как есть — заказу не хватает проходов: добавьте их заданию («Полосы» → проходы) или создайте задание.'
+                : ' План записан как есть — проверьте эти дни.');
         return { text: 'В плане есть отклонения: ' + shown.join('; ')
                      + (rest > 0 ? '; …и ещё ' + rest : '') + '.' + tail,
                  kind: dataOnly ? 'error' : 'warning',
@@ -16633,8 +17012,9 @@
 
         var posLabelById = {};
         (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
+        var producedByPos = this.producedRollsByPosition();   // #4536: выпуск позиций — считаем ОДИН раз на список
         var candidates = (this.genPositions || []).map(function(p) {
-            var remaining = remainingRollsForPosition(p, self.supplies);
+            var remaining = remainingRollsForPosition(p, self.supplies, producedByPos);
             return {
                 id: String(p.id), position: p, remaining: remaining,
                 rolls: stripSupplyRolls(stripRolls, remaining),
@@ -16794,8 +17174,9 @@
             // вовсе, их только считаем (иначе список — весь портфель заказов).
             var otherNomenclature = 0;
             var candidates = [];
+            var producedByPos = self.producedRollsByPosition();   // #4536: выпуск позиций — считаем ОДИН раз на список
             (self.genPositions || []).forEach(function(p) {
-                var remaining = remainingRollsForPosition(p, self.supplies);
+                var remaining = remainingRollsForPosition(p, self.supplies, producedByPos);
                 var fit = cutPositionFit(p, cut, free, remaining, fitOpts);
                 var sameMaterial = String(p.materialId == null ? '' : p.materialId).trim() ===
                     String(cut.materialId == null ? '' : cut.materialId).trim();
@@ -17420,6 +17801,19 @@
                 ' Записано до сбоя: партий ' + written.batches + ', обеспечений ' + written.supplies + '.', 'error');
             return self.reload().then(function() { self.render(); self.reopenStripsIfOpen(); }).catch(function() {});
         });
+    };
+
+    // #4536: ВЫПУСК ПОЗИЦИЙ ЗАКАЗА по текущему плану — «Кол-во полос» «Партии ГП» × «Кол-во резок
+    // план» задания. Этим меряется покрытие позиции везде, где раньше складывали хранимое
+    // «Кол-во рулонов» обеспечения: отчёт cut_planning его не отдаёт, и «неизвестно» читалось
+    // нулём — позиция выглядела необеспеченной целиком, сколько бы заданий её ни выпускало.
+    // → { positionId: штук }.
+    AtexProductionPlanning.prototype.producedRollsByPosition = function() {
+        var runsByCut = {};
+        (this.cuts || []).forEach(function(c) {
+            if (c && c.id != null) runsByCut[String(c.id)] = stripNum(c.plannedRuns);
+        });
+        return producedRollsByPosition(this.supplies || [], this.stripsByBatch || {}, runsByCut);
     };
 
     AtexProductionPlanning.prototype.reload = function() {
@@ -20100,8 +20494,12 @@
             var head = chainHeadById[String(s.cutId)];
             if (!head || deleteSet[String(head)]) return;   // голова тоже удаляется/сирота — возвращать некуда
             var byPos = absorbByHeadPos[head] || (absorbByHeadPos[head] = {});
-            var acc = byPos[String(s.positionId)] || (byPos[String(s.positionId)] = { rolls: 0, footage: 0 });
-            acc.rolls = round3(acc.rolls + (Number(s.rolls) || 0));
+            var acc = byPos[String(s.positionId)] || (byPos[String(s.positionId)] = { rolls: 0, footage: 0, rollsKnown: true });
+            // #4536: количество удаляемой доли НЕИЗВЕСТНО (отчёт колонку не отдаёт) — складывать
+            // нечего, и уж точно нельзя записать сумму нулей поверх хранимого количества головы.
+            // Метраж известен всегда, его возвращаем как прежде.
+            if (s.rolls == null) acc.rollsKnown = false;
+            else acc.rolls = round3(acc.rolls + (Number(s.rolls) || 0));
             acc.footage = round3(acc.footage + (Number(s.footage) || 0));
         });
         var headSupplyRestore = {};   // headId → [{ supplyId, finishedBatchId, rolls, footage }] (новые значения головных обеспечений)
@@ -20116,10 +20514,14 @@
                     if (String(headSupplies[i].positionId) === pos) { target = headSupplies[i]; break; }
                 }
                 if (!target) return;   // у головы нет обеспечения этой позиции (не ожидается) — пропускаем
+                // #4536: количество возвращаем, только если известны ОБЕ части (доля удаляемого
+                // продолжения и хранимое головы). Неизвестно хоть одно → поля в запросе нет:
+                // хранимое количество головы остаётся целым, а не превращается в сумму нулей.
+                var rollsKnown = add.rollsKnown !== false && target.rolls != null;
                 (headSupplyRestore[String(head)] = headSupplyRestore[String(head)] || []).push({
                     supplyId: target.id,
                     finishedBatchId: target.finishedBatchId,
-                    rolls: round3((Number(target.rolls) || 0) + add.rolls),
+                    rolls: rollsKnown ? round3((Number(target.rolls) || 0) + add.rolls) : null,
                     footage: round3((Number(target.footage) || 0) + add.footage)
                 });
             });
@@ -20413,9 +20815,15 @@
                                         // к позиции заказа (второй симптом #4155). Нужна лишь позиция.
                                         if (item.s.positionId == null) return;
                                         var fb = stripMap[String(item.s.finishedBatchId)] || item.s.finishedBatchId;
+                                        // #4536: доля количества уходит в запись, ТОЛЬКО если оно
+                                        // известно. Раньше здесь стоял `sh.rolls > 0 ? sh.rolls : 0`
+                                        // — и при неизвестном количестве (отчёт колонку не отдаёт,
+                                        // rolls=null) продолжение рождалось с «Кол-во рулонов» = 0,
+                                        // то есть заявляло, что заказу с него не достанется ничего.
                                         var f = buildSupplyFieldsForFinishedBatch(supMeta, {
                                             finishedBatchId: fb,
-                                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls > 0 ? sh.rolls : 0,
+                                            footage: sh.footage > 0 ? sh.footage : '',
+                                            rolls: sh.rolls == null ? null : sh.rolls,
                                             active: '1', status: SUPPLY_STATUSES[0]
                                         });
                                         return self.post('_m_new/' + supMeta.id + '?JSON&up=' + encodeURIComponent(item.s.positionId), f);
@@ -21066,9 +21474,60 @@
                     if (!c) return null;
                     var fp = String(c.firstPartId == null ? '' : c.firstPartId).trim();
                     return fp !== '' ? fp : String(c.id);
+                },
+                // #4536: ХРАНИМЫЕ проходы задания. По ним шлюз держит целостность разорванного по
+                // дням задания (операции цепочки живут или отбрасываются ВМЕСТЕ), а правило
+                // SUPPLY_CONSERVED считает выпуск записей, которых операции не касаются (#3427:
+                // в операции попадает только изменившееся).
+                plannedRunsOfCut: function(id){
+                    var c = cutsById[String(id)];
+                    if (!c || c.plannedRuns == null || String(c.plannedRuns) === '') return null;
+                    var n = Number(c.plannedRuns);
+                    return isFinite(n) ? n : null;
+                },
+                // #4536: кто что выпускает. «Обеспечение» связывает задание с позицией заказа, а
+                // «Кол-во полос» его «Партии ГП» говорит, сколько штук этой позиции даёт ОДИН
+                // проход. Полосы берём из cut_strips (self.stripsByBatch): «Кол-во рулонов»
+                // обеспечения отчёт не отдаёт, да и выпуск определяется РАСКРОЕМ, а не хранимой
+                // копией количества.
+                coverageLinks: function(){
+                    var strips = self.stripsByBatch || {};
+                    var out = [];
+                    (self.supplies || []).forEach(function(s){
+                        if (!s || s.positionId == null || s.cutId == null || String(s.cutId) === '') return;
+                        var per = Number(strips[String(s.finishedBatchId)]) || 0;
+                        if (!(per > 0)) return;
+                        out.push({ cutId: String(s.cutId), positionId: String(s.positionId), rollsPerRun: per });
+                    });
+                    return out;
+                },
+                // #4536: заказанное количество позиции (positions_list). Номер заказа для фразы
+                // оператору — из обеспечения (cut_planning отдаёт order_no): в genPositions лежит
+                // только id заказа. Позиции не загружены (напр. «Упорядочить» без генерации) →
+                // пусто → правило молчит (нет данных — нет обвинений).
+                positionDemand: function(){
+                    var orderNoByPos = {};
+                    (self.supplies || []).forEach(function(s){
+                        if (s && s.positionId != null && s.orderNo) orderNoByPos[String(s.positionId)] = String(s.orderNo);
+                    });
+                    var out = {};
+                    (self.genPositions || []).forEach(function(p){
+                        if (!p || p.id == null || String(p.id) === '') return;
+                        var qty = Number(p.qty) || 0;
+                        if (!(qty > 0)) return;
+                        out[String(p.id)] = { qty: qty, width: Number(p.width) || 0,
+                                              orderNo: orderNoByPos[String(p.id)] || '' };
+                    });
+                    return out;
                 }
             }, 'auto');
             if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
+            // #4536: страж вернул задание целиком — часть его операций отбросило правило, и остаток
+            // сняли, чтобы работа (а с ней и обеспечение заказа) не потерялась.
+            if ((guard.restoredChains || []).length) {
+                console.log('[pp] 🧷 #4536: операции задания сняты ЦЕЛИКОМ (иначе часть проходов исчезла бы) — цепочки:',
+                    guard.restoredChains.join(', '));
+            }
             // #4452: страж восстановил «Партию сырья» в операциях — она уйдёт в базу вместе с планом.
             if ((guard.filled || []).length) {
                 console.log('[pp] 🧵 #4452: «Партия сырья» проставлена в операции плана: ' + guard.filled.length,
@@ -22583,8 +23042,9 @@
         var posLabelById = {};
         (this.positions || []).forEach(function(p) { posLabelById[String(p.id)] = p.label; });
         var unsup = uncoveredPositions(this.genPositions, this.supplies).filter(function(p) { return p.approved; });
+        var producedByPos = this.producedRollsByPosition();   // #4536: выпуск позиций — считаем ОДИН раз на список
         var options = unsup.map(function(p) {
-            var remaining = remainingRollsForPosition(p, self.supplies);
+            var remaining = remainingRollsForPosition(p, self.supplies, producedByPos);
             var base = posLabelById[String(p.id)] || ('Сырьё#' + (p.materialId || '?') + ' · ' + ((p.orderWidth != null ? p.orderWidth : p.width) || '?') + ' мм');
             return { id: String(p.id), remaining: remaining, width: (p.orderWidth != null ? p.orderWidth : p.width),  // #3372: заказанная ширина
                 label: base + ' · ост. ' + round3(remaining) + ' рул.' };

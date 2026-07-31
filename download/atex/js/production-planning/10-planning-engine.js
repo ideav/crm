@@ -532,6 +532,21 @@
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
 
+    // #4536: ПОЛОС ЗА ПРОХОД по «Партии ГП» — из того же отчёта cut_strips (gp_id — id партии).
+    // Столько штук даёт ОДИН проход задания позиции, которую эта партия обеспечивает; на этом
+    // стои́т мерка правила SUPPLY_CONSERVED (выпуск = полосы × проходы). Отдельно от
+    // `aggregateStrips` (там сумма ножей по резке) — контракт того результата не трогаем.
+    // → { gpId: полос }. Вход не мутируется; строки без gp_id пропускаются.
+    function stripsByFinishedBatch(rows) {
+        var out = {};
+        (rows || []).forEach(function(row) {
+            var gpId = String(row && row.gp_id == null ? '' : row.gp_id);
+            if (gpId === '') return;
+            out[gpId] = round3((out[gpId] || 0) + (Number(row.strip_qty) || 0));
+        });
+        return out;
+    }
+
     // Строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} }.
     // cut_id — abn «Производственной резки»; strip_width — «Партия ГП» «Ширина, мм»;
     // strip_qty — число ПОЛОС за проход. #3431: источник strip_qty в серверном отчёте
@@ -5368,16 +5383,35 @@
     // (остаток по наибольшей дробной части). Метраж — дробно, последняя доля = остаток.
     //   rolls, footage — исходные; runs — массив проходов по сегментам (сегмент 0 = «сегодня»).
     // → [{ rolls, footage }] длиной runs.length. runs пуст/сумма 0 → всё в сегмент 0.
+    // #4536: rolls === null («не знаем» — отчёт колонку не отдаёт) делится в null у ВСЕХ долей:
+    // делить неизвестное нельзя, а ноль — это утверждение «заказу не достанется ничего», и оно
+    // уезжало в базу поверх реального количества. Метраж при этом делится как прежде.
     function splitSupplyShares(rolls, footage, runs){
         var r = (runs || []).map(function(x){ return Number(x) || 0; });
         var n = r.length;
-        var R = Math.round(Number(rolls) || 0);
+        var unknownRolls = (rolls === null || rolls === undefined || rolls === '');
+        var R = unknownRolls ? null : Math.round(Number(rolls) || 0);
         var F = Number(footage) || 0;
         if (n === 0) return [];
         var total = r.reduce(function(s, x){ return s + x; }, 0);
         var out = [];
         if (!(total > 0)) {
-            for (var z = 0; z < n; z++) out.push({ rolls: z === 0 ? R : 0, footage: z === 0 ? round3(F) : 0 });
+            for (var z = 0; z < n; z++) {
+                out.push({ rolls: unknownRolls ? null : (z === 0 ? R : 0), footage: z === 0 ? round3(F) : 0 });
+            }
+            return out;
+        }
+        if (unknownRolls) {
+            // Количество неизвестно — считаем только метраж, доли рулонов остаются «не знаем».
+            var fAcc0 = 0, lastKnown = -1;
+            for (var q = 0; q < n; q++) if (r[q] > 0) lastKnown = q;
+            for (var w = 0; w < n; w++) {
+                var fw;
+                if (r[w] <= 0) fw = 0;
+                else if (w === lastKnown) fw = round3(F - fAcc0);
+                else { fw = round3(F * r[w] / total); fAcc0 += fw; }
+                out.push({ rolls: null, footage: fw });
+            }
             return out;
         }
         // Рулоны: floor + раздача остатка по наибольшей дробной части.

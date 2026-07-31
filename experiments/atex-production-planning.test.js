@@ -224,9 +224,12 @@ var leadPlan = planning.rowsToPlanning([
 assertEqual(leadPlan.cuts.map(function(c){ return c.leaders; }),
     [['Софмикс'], ['Этикетка37','MONOCHROME'], []],
     'rowsToPlanning #3472: leaders[] — различные лидеры резки (легаси-смешение видно)');
+// #4536: колонки количества в отчёте нет → rolls: null («не знаем»). Прежнее ожидание `rolls: 0`
+// было неверным: ноль — это утверждение «заказу не достанется ничего», и он уезжал в базу поверх
+// хранимого «Кол-во рулонов» обеспечения (боевая ateh1: шесть недообеспеченных позиций).
 assertEqual(plan.supplies, [
-    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: 0 },
-    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: 0 }
+    { id: '900', positionId: '700', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: null },
+    { id: '901', positionId: '701', cutId: '10', finishedBatchId: '', orderNo: '', positionWidth: 0, positionLength: 0, dueKey: null, footage: 0, rolls: null }
 ], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
 assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
 // сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning

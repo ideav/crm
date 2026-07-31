@@ -789,8 +789,122 @@
                 });
                 return out;
             }
+        },
+        {
+            id: 'SUPPLY_CONSERVED',
+            tz: '§15 (#4536)',
+            actor: 'any',       // недообеспеченный заказ — брак независимо от того, кто его создал
+            mode: 'audit',
+            why: 'отбрасывать нечего: недостача — это НЕ операция, а итог всего плана. Выбросив '
+                 + 'операцию, мы не добавим заказу ни одного прохода, зато оставим задание с прежним '
+                 + 'planStart и получим дыру в дне (#4300/#4312). Недостачу чинит план (проходы '
+                 + 'добираются) или оператор; шлюз называет позицию и сколько штук не хватает',
+            title: 'Обеспечение равно заказу: выпуск позиции по всем заданиям не меньше заказанного количества',
+            // ЧТО ПРОВЕРЯЕТСЯ. Позиция заказа обеспечена, когда сумма выпуска ВСЕХ покрывающих её
+            // заданий («Кол-во полос» её «Партии ГП» × «Кол-во резок план» задания) не меньше
+            // «Заказанного количества». Излишек — норма (проходы целые, остаток идёт на склад),
+            // недостача — нет: заказ уедет неполным, и никакая кнопка об этом не скажет.
+            //
+            // ЗАЧЕМ ПРАВИЛО. Количество терялось молча и разными путями (issue #4536, боевая ateh1:
+            // шесть позиций из 136 — заказ 4442 недосчитался 138 штук, 4404 — 108 и 12): шлюз
+            // отбрасывал `create` продолжения, оставляя голове урезанные проходы; удаление звена
+            // цепочки уносило его долю обеспечения; «Кол-во рулонов» обеспечения затиралось нулём.
+            // Каждый путь чинился отдельно и возвращался. Здесь мерка ОДНА и на всех входах записи:
+            // сколько заказу достанется по ИТОГОВОМУ плану.
+            //
+            // КАК СЧИТАЕТСЯ. Проходы после операций: `update` задаёт новое число, `delete` обнуляет
+            // (записи не будет), `create` добавляет продолжение — оно режет ТЕ ЖЕ полосы, что и
+            // голова (applySplitPlan копирует её «Партии ГП»), поэтому его выпуск считается по
+            // полосам родителя. Записи, которых операции не касаются, дают свои ХРАНИМЫЕ проходы:
+            // операции несут только изменившееся (#3427), и без хранимых цифра была бы ложной.
+            //
+            // ctx.coverageLinks() → [{ cutId, positionId, rollsPerRun }] — кто что выпускает
+            //   (rollsPerRun = «Кол-во полос» партии, покрывающей позицию: столько штук этой позиции
+            //   даёт ОДИН проход задания);
+            // ctx.positionDemand() → { positionId: { qty, orderNo, width } } — заказанное количество;
+            // ctx.plannedRunsOfCut(id) → ХРАНИМЫЕ проходы задания (null — не знаем).
+            // Нет предикатов или нет данных — правило молчит (общая конвенция реестра: нет данных —
+            // нет обвинений); недостача на позиции, чьи проходы неизвестны, не выдумывается.
+            check: function(ops, ctx) {
+                var linksFn = (ctx && typeof ctx.coverageLinks === 'function') ? ctx.coverageLinks : null;
+                var demandFn = (ctx && typeof ctx.positionDemand === 'function') ? ctx.positionDemand : null;
+                var runsFn = (ctx && typeof ctx.plannedRunsOfCut === 'function') ? ctx.plannedRunsOfCut : null;
+                if (!linksFn || !demandFn || !runsFn) return [];
+                var links = linksFn() || [];
+                var demand = demandFn() || {};
+                if (!links.length || !Object.keys(demand).length) return [];
+
+                // Проходы задания после операций плана.
+                var runsAfter = {}, removed = {};
+                function storedRuns(cutId) {
+                    var key = String(cutId);
+                    if (!hasKey(runsAfter, key)) {
+                        var v = runsFn(key);
+                        runsAfter[key] = (v == null || !isFinite(Number(v))) ? null : Number(v);
+                    }
+                    return runsAfter[key];
+                }
+                function hasKey(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
+                (ops && ops.updates || []).forEach(function(u) {
+                    if (!u || u.cutId == null) return;
+                    storedRuns(u.cutId);                                   // положим хранимое, затем перекроем
+                    if (u.plannedRuns != null && isFinite(Number(u.plannedRuns))) runsAfter[String(u.cutId)] = Number(u.plannedRuns);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { if (id != null) removed[String(id)] = true; });
+
+                // Выпуск по позициям: хранимые записи + продолжения, которых ещё нет в базе.
+                var produced = {}, unknown = {}, cutsByPos = {};
+                links.forEach(function(l) {
+                    if (!l || l.positionId == null || l.cutId == null) return;
+                    var per = Number(l.rollsPerRun) || 0;
+                    if (!(per > 0)) return;
+                    var pid = String(l.positionId), cid = String(l.cutId);
+                    if (!hasKey(produced, pid)) { produced[pid] = 0; cutsByPos[pid] = []; }
+                    if (cutsByPos[pid].indexOf(cid) === -1) cutsByPos[pid].push(cid);
+                    if (removed[cid]) return;                              // записи не будет — выпуска нет
+                    var runs = storedRuns(cid);
+                    if (runs == null) { unknown[pid] = true; return; }     // не знаем проходов — не обвиняем
+                    produced[pid] = round3ppi(produced[pid] + per * runs);
+                });
+                (ops && ops.creates || []).forEach(function(cr) {
+                    if (!cr || cr.parentCutId == null) return;
+                    var addRuns = Number(cr.plannedRuns) || 0;
+                    if (!(addRuns > 0)) return;
+                    var parent = String(cr.parentCutId);
+                    links.forEach(function(l) {
+                        if (!l || String(l.cutId) !== parent || l.positionId == null) return;
+                        var per = Number(l.rollsPerRun) || 0;
+                        if (!(per > 0)) return;
+                        var pid = String(l.positionId);
+                        if (!hasKey(produced, pid)) { produced[pid] = 0; cutsByPos[pid] = [parent]; }
+                        produced[pid] = round3ppi(produced[pid] + per * addRuns);
+                    });
+                });
+
+                var out = [];
+                Object.keys(produced).forEach(function(pid) {
+                    if (unknown[pid]) return;
+                    var need = demand[pid];
+                    var ordered = Number(need && need.qty);
+                    if (!(ordered > 0)) return;                            // позиции нет в плане/нулевой заказ
+                    var made = produced[pid];
+                    if (made >= ordered - 0.001) return;
+                    var short = round3ppi(ordered - made);
+                    var ids = cutsByPos[pid] || [];
+                    out.push(ppViolation('SUPPLY_CONSERVED', ids[0] || null,
+                        'позиция ' + pid + (need && need.orderNo ? ' (заказ ' + need.orderNo + ')' : '')
+                        + ': заказано ' + ordered + ', выпуск по плану ' + made + ' — не хватает ' + short,
+                        { positionId: pid, orderNo: need && need.orderNo != null ? String(need.orderNo) : '',
+                          width: need && need.width != null ? Number(need.width) : undefined,
+                          ordered: ordered, produced: made, shortRolls: short, cutIds: ids.slice() }));
+                });
+                return out;
+            }
         }
     ];
+
+    // Округление до 3 знаков — тот же приём, что и в остальных модулях (артефакты float).
+    function round3ppi(n) { return Math.round(n * 1000) / 1000; }
 
     // Все нарушения, которые операции плана несут для указанного актора.
     //   actor: 'auto' — проверяются правила автоматики и общие; 'human' — только общие ('any').
@@ -853,7 +967,7 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled };
+        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled, restoredChains: [] };
 
         var skipped = 0;
         function keep(op, kind) {
@@ -862,10 +976,110 @@
             }
             return true;
         }
+        // #4536: баланс работы ДО отбрасывания — с чем сравнивать целостность задания (ниже).
+        var balanceBefore = planWorkBalanceByChain(ops, ctx);
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
         ops.deletes = (ops.deletes || []).filter(function(id) { return keep({ cutId: id }, 'delete'); });
         ops.creates = (ops.creates || []).filter(function(cr) { return keep(cr || {}, 'create'); });
-        return { ops: ops, violations: violations, skipped: skipped, filled: filled };
+        var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
+        skipped += restoredChains.skipped;
+        return { ops: ops, violations: violations, skipped: skipped, filled: filled,
+                 restoredChains: restoredChains.chains };
+    }
+
+    // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
+    // Задание, не влезшее в смену, живёт цепочкой записей (голова + продолжения). Разбиение по
+    // дням РАСПРЕДЕЛЯЕТ его проходы между записями, но не создаёт и не уничтожает их: сумма по
+    // цепочке до и после операций одна и та же. Баланс цепочки = (что будет) − (что хранится):
+    //   update  — проходы записи меняются на u.plannedRuns;
+    //   delete  — запись исчезает вместе со своими проходами;
+    //   create  — появляется продолжение со своими проходами.
+    // → { chainId: баланс }; цепочка, у которой хранимые проходы хоть одной затронутой записи
+    // неизвестны, в результат не попадает (нет данных — нет выводов).
+    // Нужны ctx.plannedRunsOfCut(id) и ctx.chainIdOfCut(id); без них — пустой результат.
+    function planWorkBalanceByChain(ops, ctx) {
+        var runsFn = (ctx && typeof ctx.plannedRunsOfCut === 'function') ? ctx.plannedRunsOfCut : null;
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !runsFn || !chainFn) return {};
+        var out = {}, blind = {};
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        function add(cutId, delta) {
+            var key = chainOf(cutId);
+            out[key] = round3ppi((out[key] || 0) + delta);
+        }
+        function stored(cutId) {
+            var v = runsFn(cutId);
+            return (v == null || !isFinite(Number(v))) ? null : Number(v);
+        }
+        (ops.updates || []).forEach(function(u) {
+            if (!u || u.cutId == null) return;
+            var was = stored(u.cutId);
+            if (was == null || u.plannedRuns == null || !isFinite(Number(u.plannedRuns))) { blind[chainOf(u.cutId)] = true; return; }
+            add(u.cutId, Number(u.plannedRuns) - was);
+        });
+        (ops.deletes || []).forEach(function(id) {
+            if (id == null) return;
+            var was = stored(id);
+            if (was == null) { blind[chainOf(id)] = true; return; }
+            add(id, -was);
+        });
+        (ops.creates || []).forEach(function(cr) {
+            if (!cr || cr.parentCutId == null) return;
+            if (cr.plannedRuns == null || !isFinite(Number(cr.plannedRuns))) { blind[chainOf(cr.parentCutId)] = true; return; }
+            add(cr.parentCutId, Number(cr.plannedRuns));
+        });
+        Object.keys(blind).forEach(function(k) { delete out[k]; });
+        return out;
+    }
+
+    // #4536: ОПЕРАЦИИ ОДНОГО ЗАДАНИЯ ЖИВУТ ИЛИ ОТБРАСЫВАЮТСЯ ВМЕСТЕ.
+    // Страж отбрасывает операции ПООДИНОЧКЕ, а разорванное по дням задание — это `update` головы
+    // (сколько проходов осталось в её дне) ПЛЮС `create` продолжения (остаток). Выбросив только
+    // `create` (продолжение попало в замороженный день), шлюз оставлял голове урезанные проходы,
+    // а остаток не создавался никогда: работа исчезала вместе с обеспечением заказа — ровно
+    // симптом issue #4536 («найдено одно задание, и его количество меньше заказа»).
+    // Поэтому после отбрасывания баланс каждой цепочки сверяется с тем, каким он был ДО: цепочка,
+    // которая была сбалансирована (плановое перераспределение проходов), а стала нет, возвращается
+    // ЦЕЛИКОМ — все её оставшиеся операции снимаются, и задание остаётся ровно таким, как хранится.
+    // Это безопасно по той же причине, что и отбрасывание вообще: «задание остаётся там, где
+    // стои́т» (FIXED_CUT_DAY, #4512).
+    // План, который МЕНЯЕТ объём работы намеренно (баланс не сошёлся ещё ДО отбрасывания —
+    // например ручная правка проходов), не трогаем: возвращать нечего, судить не за что.
+    // → { chains: [chainId…], skipped: сколько операций снято }. ops мутируется на месте.
+    function restoreSplitChainIntegrity(ops, ctx, balanceBefore) {
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !chainFn) return { chains: [], skipped: 0 };
+        var after = planWorkBalanceByChain(ops, ctx);
+        var broken = {}, chains = [];
+        Object.keys(after).forEach(function(chainId) {
+            var was = (balanceBefore || {})[chainId];
+            if (was == null) return;                      // до отбрасывания баланса не знали — не судим
+            if (Math.abs(was) > 0.001) return;            // план и так менял объём работы — это не мы
+            if (Math.abs(after[chainId]) <= 0.001) return;
+            broken[chainId] = true; chains.push(chainId);
+        });
+        if (!chains.length) return { chains: [], skipped: 0 };
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        var skipped = 0;
+        ops.updates = (ops.updates || []).filter(function(u) {
+            if (u && u.cutId != null && broken[chainOf(u.cutId)]) { skipped++; return false; }
+            return true;
+        });
+        ops.deletes = (ops.deletes || []).filter(function(id) {
+            if (id != null && broken[chainOf(id)]) { skipped++; return false; }
+            return true;
+        });
+        ops.creates = (ops.creates || []).filter(function(cr) {
+            if (cr && cr.parentCutId != null && broken[chainOf(cr.parentCutId)]) { skipped++; return false; }
+            return true;
+        });
+        return { chains: chains, skipped: skipped };
     }
 
