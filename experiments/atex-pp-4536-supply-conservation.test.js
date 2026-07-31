@@ -247,6 +247,20 @@ function planningRow(over) {
     var known = planning.remainingRollsForPosition({ id: 'p1', qty: 100 },
         [{ id: 's1', positionId: 'p1', cutId: 'c1', finishedBatchId: 'b1', rolls: 40 }], {});
     assert(known === 60, '#4536 известное количество обеспечения считается как прежде', 'остаток=' + known);
+
+    // Хранимое ОБНУЛЕНО прежними записями плана (боевая ateh1: 46 позиций из 136), а задание
+    // позицию режет: покрытием считается выпуск, иначе оператор дообеспечит уже обеспеченное.
+    var zeroed = [{ id: 's2', positionId: 'p2', cutId: 'c2', finishedBatchId: 'b2', rolls: 0 }];
+    var zeroedRem = planning.remainingRollsForPosition({ id: 'p2', qty: 200 }, zeroed,
+        planning.producedRollsByPosition(zeroed, { 'b2': 4 }, { 'c2': 50 }));
+    assert(zeroedRem === 0, '#4536 обнулённое хранимое не делает выпущенную позицию необеспеченной',
+        'остаток=' + zeroedRem);
+
+    // Складская «Партия ГП» (задания нет, выпуск не посчитать) остаётся на хранимом количестве.
+    var stock = [{ id: 's3', positionId: 'p3', cutId: '', finishedBatchId: 'b3', rolls: 30 }];
+    var stockRem = planning.remainingRollsForPosition({ id: 'p3', qty: 100 }, stock,
+        planning.producedRollsByPosition(stock, {}, {}));
+    assert(stockRem === 70, '#4536 складское обеспечение считается по хранимому количеству', 'остаток=' + stockRem);
 })();
 
 // ── 8. Фраза оператору ──────────────────────────────────────────────────────────────────────
