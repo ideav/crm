@@ -1122,6 +1122,15 @@
 .atex-pp-modal-close:hover { color: var(--pp-accent); }
 .atex-pp-modal .atex-pp-form { padding: 0; }
 
+/* #4541: подтверждение модалкой — когда полоске подтверждения (.atex-pp-confirm-bar) негде
+   встать рядом с действием (замок дня живёт в шапке дня, а не в панели кнопок). Разметка та
+   же, что у модалки «Заморозить день», поэтому своего фона/рамки тут не нужно — только
+   расстановка текста и кнопок. */
+.atex-pp-confirm-modal .atex-pp-form-title { margin: 0 0 8px; }
+/* Цвет — обычный текст рабочего места (в полоске он «внимание»-жёлтый, в окне это лишнее);
+   фолбэк обязателен: var() без него к несуществующему токену обнуляет свойство. */
+.atex-pp-confirm-modal .atex-pp-confirm-msg { display: block; color: var(--text-primary, #1f2933); }
+
 /* #3764: модалка «Отпуск» — редактор окон простоя станка. */
 .atex-pp-dt-dialog { max-width: 640px; }
 .atex-pp-dt-title { margin: 0 28px 14px 0; }

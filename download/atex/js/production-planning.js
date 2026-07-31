@@ -13411,11 +13411,14 @@
 
         if (frozenInfo) {
             // Разморозить — удалить запись «Заморозки» этого дня.
+            // #4541: спрашиваем МОДАЛКОЙ, как и «Заморозить» ниже. Замок дня стои́т в шапке дня
+            // очереди, и полоске подтверждения там встать негде — она уезжала в конец рабочего
+            // места, где оператор её не видит («нажимаю — ничего не происходит»).
             var recId = frozenInfo.id;
             if (!recId) { this.notify('Не найден id записи заморозки дня ' + dateStr, 'error'); return; }
             var msg = el('span', { class: 'atex-pp-confirm-msg',
-                text: 'Разморозить день ' + dateStr + '? Планирование снова сможет менять его задания.' });
-            this.confirmAction(msg, this.root, [
+                text: 'Планирование снова сможет менять задания этого дня и ставить в него новые.' });
+            this.confirmModal(msg, [
                 { label: 'Разморозить', onConfirm: function() {
                     self.setBusy(true);
                     self.post('_m_del/' + encodeURIComponent(recId) + '?JSON', {}).then(function() {
@@ -13429,7 +13432,7 @@
                         self.notify('Ошибка разморозки дня: ' + (err && err.message || err), 'error');
                     });
                 } }
-            ]);
+            ], null, { title: 'Разморозить день ' + dateStr + '?' });
             return;
         }
 
@@ -19360,19 +19363,61 @@
         return [{ label: okLabel || 'Да', primary: true, onConfirm: onConfirm }];
     }
 
-    // Подтверждение без native confirm. Single-action flow может использовать
-    // mainAppController.showDeleteConfirmModal; multi-action выбор рендерится inline.
+    // #4541: ПОДТВЕРЖДЕНИЕ МОДАЛКОЙ — когда полоску подтверждения показать негде.
+    // Полоска (`.atex-pp-confirm-bar`) хороша, пока ей есть куда встать РЯДОМ с действием: под
+    // карточкой задания, в панели кнопок. Действию без такого места (замок дня живёт в шапке дня
+    // очереди, а не в панели) полоска доставалась в конец рабочего места — оператор её просто не
+    // видел и решал, что кнопка не работает (issue #4541, «Разморозить день»). Такие подтверждения
+    // показываем модальным окном — тем же, что и «Заморозить день», чтобы пара действий выглядела
+    // одинаково. Ctrl+Enter работает сам: `js/form-submit.js` ловит модалку по классу `*modal*`
+    // и жмёт кнопку `*-btn-primary` (UI/UX-правила).
+    //   message — узел или текст; okLabel/onConfirm — как у confirmAction; opts.title — заголовок.
+    // → функция закрытия окна (null, если действий нет).
+    AtexProductionPlanning.prototype.confirmModal = function(message, okLabel, onConfirm, opts) {
+        var actions = normalizeConfirmActions(okLabel, onConfirm);
+        if (!actions.length) return null;
+        var o = opts || {};
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-confirm-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-confirm-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+        var content = el('div', { class: 'atex-pp-confirm-content' });
+        dialog.appendChild(content);
+        if (o.title) content.appendChild(el('h2', { class: 'atex-pp-form-title', text: o.title }));
+        content.appendChild((message && message.nodeType) ? message : el('span', { class: 'atex-pp-confirm-msg', text: message }));
+        var row = el('div', { class: 'atex-pp-supply-actions' });
+        var cancel = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        cancel.addEventListener('click', close);
+        row.appendChild(cancel);
+        actions.forEach(function(action) {
+            var cls = 'atex-pp-btn' + (action.warning ? ' atex-pp-btn-warning' : (action.primary ? ' atex-pp-btn-primary' : ''));
+            var btn = el('button', { class: cls, type: 'button', text: action.label });
+            btn.addEventListener('click', function() { close(); action.onConfirm(); });
+            row.appendChild(btn);
+        });
+        content.appendChild(row);
+        var host = this.root || (typeof document !== 'undefined' ? document.body : null);
+        if (!host) return null;
+        host.appendChild(overlay);
+        return close;
+    };
+
+    // Подтверждение без native confirm: полоска рядом с действием (`actionsEl`), а если места
+    // для неё нет — модалка (#4541, `confirmModal`).
     AtexProductionPlanning.prototype.confirmAction = function(message, actionsEl, okLabel, onConfirm) {
         var actions = normalizeConfirmActions(okLabel, onConfirm);
         if (!actions.length) return;
-        if (actions.length === 1 && !actions[0].inline && typeof window !== 'undefined' && window.mainAppController &&
-            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
-            window.mainAppController.showDeleteConfirmModal(message).then(function(ok) {
-                if (ok) actions[0].onConfirm();
-            });
-            return;
-        }
-        var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions')) || this.root;
+        // #4541: якорь — это МЕСТО РЯДОМ С ДЕЙСТВИЕМ. Весь экран (this.root) якорем не считается:
+        // полоска, приклеенная к нему, оказывается ниже всей очереди. Раньше на этот случай стоял
+        // вызов `window.mainAppController.showDeleteConfirmModal`, но глобала с таким именем в
+        // приложении нет (`js/main-app.js` держит контроллер локальной переменной) — ветка была
+        // мёртвой, и подтверждение молча уезжало вниз страницы.
+        var host = (actionsEl && actionsEl !== this.root) ? actionsEl : null;
+        if (!host) host = (this.root && this.root.querySelector) ? this.root.querySelector('.atex-pp-panel-actions') : null;
+        if (!host) { this.confirmModal(message, actions); return; }
         if (host && host.querySelector && host.querySelector('.atex-pp-confirm-bar')) return;
         var bar = el('div', { class: 'atex-pp-confirm-bar' });
         bar.appendChild((message && message.nodeType) ? message : el('span', { class: 'atex-pp-confirm-msg', text: message }));
@@ -19386,11 +19431,9 @@
         });
         cancelBtn.addEventListener('click', function() { removeBar(); });
         bar.appendChild(cancelBtn);
-        if (host) {
-            host.appendChild(bar);
-        } else {
-            actions[0].onConfirm();
-        }
+        // #4541: host здесь всегда есть (иначе выше ушли в модалку). Прежняя ветка «места нет →
+        // выполнить действие БЕЗ подтверждения» убрана: молча делать то, о чём спрашивали, нельзя.
+        host.appendChild(bar);
     };
 
     // #3698/#3700: пересчитать и сохранить расчётные минуты каждой резки — «Наладка ножей,
