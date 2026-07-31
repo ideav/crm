@@ -2699,6 +2699,9 @@
             if (frozen(day) || frozen(next)) continue;
             var donor = firstOfDay[next];
             if (donor.fixedDayLock || donor.immovable) continue;               // #4434: 🔒 держит свой день; #4381: начатое не трогаем
+            // #4542 (ТЗ §15): донора нельзя затянуть в этот день, если он ОБОГНАЛ БЫ 🔒 — замок
+            // сильнее набивки. Такой день недоупакован ЗАКОННО, и страж DAY_FILL о нём молчит.
+            if (typeof opts.overtakesFixedAt === 'function' && opts.overtakesFixedAt(String(donor.cutId), day)) continue;
             var runs = Number(donor.runs) || 0, dur = Number(donor.durationMin) || 0;
             if (!(runs > 0) || !(dur > 0)) continue;                           // #3635 п.5: хвост без проходов
             var need = round3((Number(donor.setupMin) || 0) + dur / runs);     // наладка донора + ОДИН проход
@@ -2880,6 +2883,9 @@
         // Резерв снимается, как только задание размещено (remaining = 0), и не действует на другие дни.
         var wholeDayBy = opts.wholeDayByCut || {};
         var wholeDayIds = Object.keys(wholeDayBy);
+        // #4542: задания, которые оператор двигает ПРЯМО СЕЙЧАС (все ручные признаки — см.
+        // planCutOperations). Запрет «🔒 не обгонять» их не связывает (ТЗ §15).
+        var manualMoveBy = opts.manualMoveByCut || {};
         // #4497 (ТЗ §15): ХРАНИМОЕ МЕСТО 🔒 В ДНЕ. Перед зафиксированным заданием автоматика ничего не
         // ставит: замок держит не только ДЕНЬ, но и МЕСТО в дне — иначе новое задание садится в голову
         // дня, а весь паровоз 🔒 уезжает на его длительность (issue #4497). Единственное, чему
@@ -3091,6 +3097,54 @@
                     return (ta - tb) || (state[a].idx - state[b].idx);
                 });
             });
+            // #4542 (ТЗ §15): АВТОМАТИКА НЕ ОБГОНЯЕТ 🔒. Замок держит не только день и место в дне
+            // (#4497), но и ОЧЕРЁДНОСТЬ: подвижное задание не встаёт РАНЬШЕ зафиксированного, за
+            // которым оно стояло. Прежде правило смотрело только ВНУТРЬ дня 🔒, а набивка ранних
+            // дней («тянем будущее вперёд», #3739/#4469) свободно перетаскивала задание с 03.08 в
+            // 30–31.07, обгоняя замки этих дней (issue #4542: «добавил задания на 3.08 — всплыли в
+            // 31.07 перед зафиксированными»; станко-день 20260731 стал 580 мин при потолке 460).
+            //
+            // ЧТО РАЗРЕШЕНО (прежние исключения ТЗ §15): задание, стоявшее перед этой 🔒 в ХРАНИМОМ
+            // плане на том же станке, своё место сохраняет; нефольга обгоняет 🔒-фольгу («фольга в
+            // конец дня», #3717); ручное действие оператора правилом не связано. У задания, которого
+            // в плане ещё нет («Сгенерировать», «по позициям»), хранимого места нет — значит, оно не
+            // стояло перед 🔒 нигде и идёт ПОСЛЕ последнего замка станка.
+            function mayPrecedeFixed(candId, fixedId) {
+                if (wholeDayBy[String(candId)] != null || manualMoveBy[String(candId)]) return true;   // оператор двигает прямо сейчас
+                var fst = state[fixedId], cst = state[candId];
+                if (!fst || fst.anchor == null) return true;           // хранимого дня 🔒 нет — защищать нечего
+                if (storedPlanTs(fixedId) == null) return true;
+                if (fst.cut && cst && cst.cut && fst.cut.isFoil && !cst.cut.isFoil) return true;   // #3717
+                var a = storedPlanTs(candId);
+                if (a == null) return false;                           // места в плане нет — только после 🔒
+                if (storedSidOf(candId) !== storedSidOf(fixedId)) return false;   // на другом станке перед ней не стояло
+                return a < storedPlanTs(fixedId);
+            }
+            // Самый поздний день 🔒, которую задание обгонять не вправе: раньше него его не кладём.
+            var fixedFloorDay = {};
+            poolOrder.forEach(function(id) {
+                var st = state[id];
+                if (!st || (st.cut && st.cut.fixed)) return;   // про саму 🔒 правило не спрашивают
+                var floor = null;
+                poolOrder.forEach(function(fid) {
+                    var fst = state[fid];
+                    if (!fst || !(fst.cut && fst.cut.fixed) || fst.anchor == null) return;
+                    if (mayPrecedeFixed(id, fid)) return;
+                    if (floor == null || fst.anchor > floor) floor = fst.anchor;
+                });
+                if (floor != null) fixedFloorDay[String(id)] = floor;
+            });
+            // ТЗ §14: правило не срабатывает молча — в трассе видно, кого и до какого дня оно
+            // придержало. Без этой строки «день недобит, а задание уехало дальше» выглядело бы
+            // необъяснимым: причина (замок впереди) нигде не названа.
+            Object.keys(fixedFloorDay).forEach(function(id) {
+                ppTrace('#4542 задание ' + id + ' не ставим раньше дня ' + fixedFloorDay[id]
+                    + ' — там стои́т 🔒, которую оно не обгоняет');
+            });
+            function floorAllows(id, d) {
+                var f = fixedFloorDay[String(id)];
+                return f == null || d >= f;
+            }
             // #4491: звено монолита нельзя взять РАНЬШЕ своих предшественников по хранимому дню.
             // Без этого первое звено уехавшего монолита выбирает очередь §8 — и пара, стоявшая
             // подряд, приезжает в новый день в обратном порядке (боевое: Q → P вместо P → Q).
@@ -3331,8 +3385,10 @@
                 // #4497: `deferDay` — задание, которое НЕЛЬЗЯ рвать в этот день (хвост сдвинул бы 🔒
                 // следующего дня) и которое целиком в остаток дня не влезло: на ЭТОМ дне его больше не
                 // предлагаем, оно уезжает целиком. Метка на день, поэтому назавтра оно снова кандидат.
-                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && (state[id].anchor == null || state[id].anchor <= day); });
-                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day; });
+                // #4542 (ТЗ §15): в оба пула не пускаем задание, которое на этом дне ОБОГНАЛО БЫ 🔒
+                // (floorAllows) — ни как «созревшее по сроку», ни как подтянутое из будущего.
+                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day) && (state[id].anchor == null || state[id].anchor <= day); });
+                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day); });
                 var resFoilToday = rem.filter(function(id){ return state[id].resFoilDay === day && state[id].fixedDay == null; });
                 // #4326-seal: ЗАМОРОЗКА — планировщик НЕ кладёт в этот день ничего НОВОГО. Существующие
                 // резки замороженного дня закреплены (#4326: c.fixed → fixedDay===day) и остаются здесь;
@@ -3486,7 +3542,9 @@
                         // (свободных в пуле нет, нахлёст-простой заполнять некем).
                         var nextDay = null;
                         rem.forEach(function(id){
-                            [state[id].fixedDay, state[id].resFoilDay].forEach(function(d){
+                            // #4542: и день, раньше которого свободное задание не встаёт (обгон 🔒),
+                            // — иначе оно провалилось бы в ветку «дня нет» и легло бы ЗДЕСЬ, обогнав замок.
+                            [state[id].fixedDay, state[id].resFoilDay, fixedFloorDay[String(id)]].forEach(function(d){
                                 if (d != null && d > day && (nextDay == null || d < nextDay)) nextDay = d;
                             });
                         });
@@ -3769,7 +3827,8 @@
             // этого ops.dayFill — ровно как ops.dayLoad для DAY_CAPACITY (#4467).
             segments.underfilled = underfilledLayoutDays(segments, {
                 freeMinFor: function(d) { return availFor(d, 'cuts'); },
-                isFrozenDay: opts.frozenDayFor
+                isFrozenDay: opts.frozenDayFor,
+                overtakesFixedAt: function(id, d) { return !floorAllows(id, d); }   // #4542: замок сильнее набивки
             });
             (segments.underfilled || []).forEach(function(u) {
                 ppTraceWarn('#4469 ДЕНЬ НЕДОУПАКОВАН: день ' + u.day + ' — свободно ' + Math.round(u.freeMin) +
@@ -4767,6 +4826,18 @@
             (chainByLogical[String(c && c.id)] || [String(c && c.id)]).forEach(function(id){ orphanDeletes.push(String(id)); });
             return false;
         });
+        // #4497/#4542: КОГО ОПЕРАТОР ДВИГАЕТ ПРЯМО СЕЙЧАС. ТЗ §15: ручное действие оператора запретами
+        // формы плана не связано — ни «перед 🔒 ничего не ставить» (#4497), ни «🔒 не обгонять» (#4542).
+        // Признак один на все слои (размещение и упаковщик), иначе исключение разъедется: все ручные
+        // пути дают wholeDayCutIds (#4488), замок дня (#4221) и явное место в дне (#4464) — на случай
+        // вызова только с ними.
+        var manualMoveByCut = (function(){
+            var m = {};
+            [opts.wholeDayByCut, opts.dayLockByCut, opts.pinDayPosByCut].forEach(function(src){
+                Object.keys(src || {}).forEach(function(id){ m[String(id)] = true; });
+            });
+            return m;
+        })();
         // #4085: слой размещения (модель #3985) решает СТАНОК + порядок перебором ВСЕХ точек вставки
         // по мин. штрафу. Включается ТОЛЬКО при opts.slotPlacement && !preserveOrder (врезка стадий
         // 4-5). По умолчанию выкл → прежний путь (orderCuts + текущий станок) не тронут.
@@ -4791,15 +4862,9 @@
                 orderIdsByCut: opts.orderIdsByCut,   // #4194: множества заказов заданий (штраф/бонус смежности в scorePosition)
                 dayLockByCut: opts.dayLockByCut,   // #4221: замок дня/станка для переноса 🗓 «По весу» (позиция в дне по весу)
                 // #4497: кого оператор двигает ПРЯМО СЕЙЧАС — на них запрет «перед 🔒 не ставить» не
-                // действует (ТЗ §15). Все ручные пути дают wholeDayCutIds (#4488); замок дня и явное
-                // место в дне добавляем на случай вызова только с ними.
-                manualMoveByCut: (function(){
-                    var m = {};
-                    [opts.wholeDayByCut, opts.dayLockByCut, opts.pinDayPosByCut].forEach(function(src){
-                        Object.keys(src || {}).forEach(function(id){ m[String(id)] = true; });
-                    });
-                    return m;
-                })(),
+                // действует (ТЗ §15). Признаки собраны в manualMoveByCut (см. выше) — тот же набор
+                // получает и упаковщик (#4542), чтобы исключение не расходилось между слоями.
+                manualMoveByCut: manualMoveByCut,
                 machineLockByCut: opts.machineLockByCut,   // #4225: замок станка (перенос «В пределах одного станка» — без миграции между станками)
                 // #4462: разбор выбора собираем ВСЕГДА, а не по тумблеру лога. Он теперь не только
                 // печатается в [pp-slot], но и уходит наружу (ops.placement) в подсказку карточки
@@ -4878,7 +4943,8 @@
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
                 orderAuthoritative: !!slotPlan,   // #4085: порядок задан слоем размещения — не переигрывать
                 pinDayPosByCut: opts.pinDayPosByCut,   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
-                wholeDayByCut: opts.wholeDayByCut      // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
+                wholeDayByCut: opts.wholeDayByCut,     // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
+                manualMoveByCut: manualMoveByCut       // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation

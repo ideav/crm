@@ -147,6 +147,31 @@
     //     запретами не связано;
     //   • НЕФОЛЬГУ перед зафиксированной ФОЛЬГОЙ: «фольга всегда в конец дня» (#3717) — правило той же
     //     твёрдости, и место 🔒-фольги от него не страдает (она и остаётся последней в дне).
+    // #4542 (ТЗ §15): встанет ли slot на позицию index ПЕРЕД 🔒, которую он обгонять не вправе, —
+    // в ЛЮБОМ дне, а не только в её собственном. Замок держит и очерёдность: подвижное задание не
+    // уезжает раньше 🔒, за которой оно стояло, а новое (места в плане ещё нет) идёт после
+    // последнего замка станка. Прежняя проверка сравнивала ДНИ приземления (pushesFixedSameDay) и
+    // междневный обгон пропускала — тем более что день там ЭВРИСТИКА (capacityMin), а раскладывает
+    // splitMachineQueue: в боевом случае §8 выбрал «день~20260803», а упаковщик положил на день 0
+    // (issue #4542). Здесь дни не нужны вовсе — сравниваем ПОРЯДОК очереди станка.
+    // Исключения те же: ручной перенос, нефольга перед 🔒-фольгой (#3717), стоявшее перед ней в
+    // ХРАНИМОМ плане на том же станке.
+    function overtakesFixed(machineSlots, index, slot){
+        if (!slot || slot.fixed || isManualMoveSlot(slot)) return false;
+        for (var j = index; j < machineSlots.length; j++){
+            var f = machineSlots[j];
+            if (!f || f.kind !== 'cut' || !f.fixed) continue;
+            if (f.manualMove) continue;
+            if (f.isFoil && !slot.isFoil) continue;   // #3717: фольга обязана остаться последней
+            if (f.storedTs == null) continue;         // хранимого места у 🔒 нет — защищать нечего
+            if (slot.storedTs != null && slot.storedTs < f.storedTs
+                && (slot.storedSid == null ? null : String(slot.storedSid))
+                   === (f.storedSid == null ? null : String(f.storedSid))) continue;   // стояло перед ней
+            return true;
+        }
+        return false;
+    }
+
     function pushesFixedSameDay(machineSlots, index, slot, ctx){
         if (!slot || slot.fixed || isManualMoveSlot(slot)) return false;
         var dayOff = null;
@@ -248,6 +273,9 @@
         if (prevCut && nextCut && prevCut.fixed && nextCut.fixed && !isManualMoveSlot(slot)
             && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4497 (ТЗ §15): перед 🔒 её дня ставить нельзя — вставленное сдвинуло бы её (см. выше).
+        // #4542 (ТЗ §15): и в любом ДРУГОМ дне тоже — 🔒 не обгоняют (overtakesFixed шире и включает
+        // случай одного дня; pushesFixedSameDay оставлен как отдельная проверка того же семейства).
+        if (overtakesFixed(machineSlots, index, slot)) return null;
         if (pushesFixedSameDay(machineSlots, index, slot, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для

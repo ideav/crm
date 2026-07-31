@@ -468,6 +468,88 @@
             }
         },
         {
+            id: 'FIXED_NO_OVERTAKE',
+            tz: '§15 (#4542)',
+            actor: 'auto',
+            mode: 'audit',      // страж СЧИТАЕТ и кричит, но операцию не выбрасывает — причина в why
+            why: 'то же, что у FIXED_NO_PUSH: очерёдность чинится построением плана, а не отказом от '
+                 + 'записи — выброшенная операция оставила бы задание с прежним planStart',
+            title: 'Автоматика не обгоняет зафиксированные (🔒) задания: подвижное не уезжает в день раньше замка, за которым стояло',
+            // ЧТО ЗАПРЕЩЕНО. Поставить подвижное задание РАНЬШЕ (по времени старта) 🔒 того же станка,
+            // если в ХРАНИМОМ плане оно стояло позже неё либо места в плане не имело вовсе. Симптом до
+            // правила: диспетчер добавил задания по позициям на 03.08 — набивка ранних дней («тянем
+            // будущее вперёд», #3739/#4469) перенесла их в 31.07, обогнав замки этого дня, и станко-день
+            // стал 580 мин при потолке 460 (issue #4542). Правило #4497 защищало место 🔒 только ВНУТРИ
+            // её дня и междневный обгон не ловило.
+            //
+            // ЧТО РАЗРЕШЕНО: задание, стоявшее перед этой 🔒 в хранимом плане на ТОМ ЖЕ станке (его
+            // место не переворачиваем); ручное действие оператора (ТЗ §15 — `isManualMoveCut`); 🔒 сама
+            // (её порядок между замками судит FIXED_BLOCK, день — FIXED_CUT_DAY). Соседство с 🔒 в
+            // пределах ОДНОГО дня — дело FIXED_NO_PUSH; здесь речь о том, что задание уехало РАНЬШЕ.
+            //
+            // ПОЧЕМУ mode:'audit'. Как и у FIXED_NO_PUSH: выбросить операцию нельзя — очерёдность этим
+            // не чинится. Запрет обеспечен ПО ПОСТРОЕНИЮ: слой размещения (точка вставки перед такой 🔒
+            // недопустима, `overtakesFixed`) и упаковщик (день раньше замка для такого задания закрыт,
+            // `fixedFloorDay`). Шлюз — АУДИТ: ловит регрессию на всех путях записи разом.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed }] — ХРАНИМЫЙ план.
+            // Нет предиката → правило не срабатывает (общая конвенция реестра).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                if (!snapFn) return [];
+                var snap = snapFn() || [];
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                var isManual = ppCtxFn(ctx, 'isManualMoveCut');
+                var storedById = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    storedById[String(r.id)] = { sid: String(r.slitterId == null ? '' : r.slitterId),
+                                                 ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                });
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                Object.keys(storedById).forEach(function(k) {
+                    byId[k] = { id: k, label: k, sid: storedById[k].sid, ts: storedById[k].ts, fixed: storedById[k].fixed };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId), cur = byId[k];
+                    if (!cur) { byId[k] = { id: k, label: k, sid: String(u.slitterId == null ? '' : u.slitterId),
+                                            ts: Number(u.planStartTs), fixed: !!isFixed(u.cutId) }; return; }
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                (ops && ops.creates || []).forEach(function(cr, i) {
+                    if (!cr || cr.planStartTs == null) return;
+                    var parent = cr.parentCutId == null ? '' : String(cr.parentCutId);
+                    // Хвост разбиения наследует признаки головы: её 🔒 и её хранимое место.
+                    byId['new:' + i] = { id: 'new:' + i, label: parent || ('new:' + i),
+                                         sid: String(cr.slitterId == null ? '' : cr.slitterId),
+                                         ts: Number(cr.planStartTs), fixed: !!isFixed(parent),
+                                         storedAs: parent };
+                });
+                var rows = Object.keys(byId).map(function(k) { return byId[k]; })
+                    .filter(function(r) { return isFinite(r.ts); });
+                var fixedRows = rows.filter(function(r) { return r.fixed; });
+                var out = [];
+                rows.forEach(function(m) {
+                    if (m.fixed || isManual(m.id)) return;   // 🔒 и ручное действие правилом не связаны
+                    var stored = storedById[String(m.storedAs != null ? m.storedAs : m.id)];
+                    fixedRows.forEach(function(f) {
+                        if (f.sid !== m.sid || !(m.ts < f.ts) || isManual(f.id)) return;
+                        var fs = storedById[String(f.id)];
+                        if (!fs || !isFinite(fs.ts)) return;          // хранимого места у 🔒 нет — защищать нечего
+                        // Стояло перед ней в хранимом плане на том же станке — его место не трогаем.
+                        if (stored && isFinite(stored.ts) && stored.sid === fs.sid && stored.ts < fs.ts) return;
+                        out.push(ppViolation('FIXED_NO_OVERTAKE', m.id,
+                            'задание ' + m.label + ' встало раньше зафиксированного ' + f.id,
+                            { slitterId: m.sid, otherCutId: String(f.id), kind: 'overtake' }));
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'DAY_CAPACITY',
             tz: '§15 (потолок дня, #4467)',
             actor: 'auto',

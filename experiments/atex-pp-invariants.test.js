@@ -272,6 +272,65 @@ AUTO_INPUTS.forEach(function(input) {
         'FIXED_NO_PUSH: без хранимого плана правило не срабатывает (конвенция реестра)');
 })();
 
+// ── 5в. FIXED_NO_OVERTAKE (#4542) на всех входах автоматики ─────────────────────────────────
+// Автоматика не обгоняет 🔒 — и в другом дне тоже. Хранимый план: 🔒 «3» стои́т 29.07, свободное
+// «2» — 31.07 (после неё). Любой вход, увезший «2» на 28.07, ловится правилом.
+(function() {
+    var TS_LOCK = Date.UTC(2026, 6, 29, 10, 0, 0);
+    var TS_LATER = Date.UTC(2026, 6, 31, 10, 0, 0);
+    var TS_EARLIER = Date.UTC(2026, 6, 28, 8, 0, 0);
+    var overCtx = {
+        isFixedCut: ctx.isFixedCut,
+        dayKeyOfCut: ctx.dayKeyOfCut,
+        dayKeyOfTs: ctx.dayKeyOfTs,
+        planSnapshot: function() {
+            return [{ id: '3', slitterId: '1', planStartTs: TS_LOCK, fixed: true },
+                    { id: '2', slitterId: '1', planStartTs: TS_LATER, fixed: false }];
+        }
+    };
+    AUTO_INPUTS.forEach(function(input) {
+        var ops = emptyOps();
+        ops.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_EARLIER });
+        var v = planning.checkPlanInvariants(ops, overCtx, 'auto')
+            .filter(function(x) { return x.rule === 'FIXED_NO_OVERTAKE'; });
+        assert(v.length === 1 && v[0].cutId === '2',
+            'FIXED_NO_OVERTAKE × ' + input + ': задание уехало в день раньше 🔒 — нарушение', '(' + v.length + ')');
+    });
+    // Новое задание («Сгенерировать»/«по позициям») раньше замка — то же нарушение.
+    var fresh = emptyOps();
+    fresh.creates.push({ parentCutId: null, slitterId: '1', planStartTs: TS_EARLIER });
+    assert(planning.checkPlanInvariants(fresh, overCtx, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_OVERTAKE'; }).length === 1,
+        'FIXED_NO_OVERTAKE: новое задание раньше 🔒 — нарушение');
+    // Ручное действие оператора правилом не ограничено (ТЗ §15).
+    var manual = emptyOps();
+    manual.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_EARLIER });
+    var mctx = {}; Object.keys(overCtx).forEach(function(k) { mctx[k] = overCtx[k]; });
+    mctx.isManualMoveCut = function(id) { return String(id) === '2'; };
+    assert(planning.checkPlanInvariants(manual, mctx, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_OVERTAKE'; }).length === 0,
+        'FIXED_NO_OVERTAKE: ручной перенос оператора не ограничен');
+    // Стоявшее ПЕРЕД 🔒 в хранимом плане своё место сохраняет.
+    var earlyCtx = {
+        isFixedCut: ctx.isFixedCut, dayKeyOfCut: ctx.dayKeyOfCut, dayKeyOfTs: ctx.dayKeyOfTs,
+        planSnapshot: function() {
+            return [{ id: '3', slitterId: '1', planStartTs: TS_LOCK, fixed: true },
+                    { id: '2', slitterId: '1', planStartTs: TS_EARLIER, fixed: false }];
+        }
+    };
+    var keep = emptyOps();
+    keep.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_EARLIER + 3600000 });
+    assert(planning.checkPlanInvariants(keep, earlyCtx, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_OVERTAKE'; }).length === 0,
+        'FIXED_NO_OVERTAKE: стоявшее перед 🔒 остаётся раньше неё — не нарушение');
+    // КОНВЕНЦИЯ РЕЕСТРА: нет снимка плана — правило молчит.
+    var bare = emptyOps();
+    bare.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_EARLIER });
+    assert(planning.checkPlanInvariants(bare, { isFixedCut: ctx.isFixedCut }, 'auto')
+        .filter(function(x) { return x.rule === 'FIXED_NO_OVERTAKE'; }).length === 0,
+        'FIXED_NO_OVERTAKE: без хранимого плана правило не срабатывает (конвенция реестра)');
+})();
+
 // ── 6. Реестр не пуст и правила описаны ─────────────────────────────────────────────────────
 (function() {
     var inv = planning.invariants || [];
