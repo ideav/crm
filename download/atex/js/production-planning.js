@@ -22349,16 +22349,39 @@
     // #4408/#4473/#4531: дни, где работа уходит ЗА конец смены, — ЧИСТАЯ мерка над набором заданий
     // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня против
     // потолка резки (`cutEndMin` + нахлёст резки). Это та же арифметика, что стои́т в бейдже
-    // «(N мин)», только выраженная в конце дня — обед и «Отпуск» уже сидят в хранимых стартах.
+    // «(N мин)», только выраженная в конце дня — «Отпуск» и обед-ЗАЗОР уже сидят в хранимых стартах.
     // #4531: вместе с днём отдаёт ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
     // в дне (`seq` — тот же, что на карточке: позиция по возрастанию planStart) и потолок (`capMin`).
     // Фразу собирает печать (overfilledDayPhrase), мерка только меряет.
+    //
+    // #4559 (ТЗ §5): ОБЕД ВНУТРИ ЗАДАНИЯ В ХРАНИМЫХ СТАРТАХ НЕ ЛЕЖИТ. Обед попадает в planStart
+    // ЗАЗОРОМ — но только МЕЖДУ заданиями. Задание, которое НАЧАЛОСЬ ДО обеда и идёт СКВОЗЬ него,
+    // станок паузит В ХОДЕ намотки (#3816, `splitMachineQueue.lunchGap`): минуты РАБОТЫ (колонки
+    // «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер») от этого не растут, а КОНЕЦ окна уезжает
+    // на длительность обеда. Мерка складывала старт с минутами работы и такой день видела короче
+    // на весь обед: боевое 01.08.2026 (issue #4559) — Станок 1, Пн 03.08, задание 08:27 + 448 мин
+    // сквозь обед, реальный конец 16:40 при потолке 16:30, а мерка насчитала 15:55 и переполнения
+    // НЕ УВИДЕЛА. Дальше молчали все, кто на неё опирается: бейджа в шапке дня нет (#4531),
+    // предупреждения нет (#4497), а «⏩ Пересчитать отсюда и до конца» (#4555) и «↻ Пересчитать
+    // наладку» (#4473) выходят из `levelDayLoad` первой же строкой — день остаётся за лимитом,
+    // и оператор видит ровно то, на что жалуется: «пересчёт опять вылез за лимит дня».
+    //
+    // ПОЧЕМУ ИМЕННО ОБЕД, А НЕ ВСЕ ПАУЗЫ. Перерывы 10:00/15:00 (`intraDayBreaks`, ТЗ §5) для
+    // планирования ПРОЗРАЧНЫ — упаковщик их не резервирует и из ёмкости не вычитает; они только
+    // рисуются (карточка очереди #4075, Гант #4007). Требовать от плана запас, которого планировщик
+    // не закладывает, — значит объявить переполненным каждый полный день. Обед — наоборот: его
+    // упаковщик РЕЗЕРВИРУЕТ (#3342/#3816), поэтому и мерка обязана его видеть.
+    //
+    // ДВАЖДЫ НЕ СЧИТАЕМ. Если после «сквозного» задания в дне есть ещё одно, пауза уже лежит
+    // ЗАЗОРОМ перед ним — обед «зашит в старты», и добавлять нечего. Отличаем тем же разбором дня,
+    // что #4408 (`dayLayoutGaps` → `kind === 'lunch'`): своей копии правила здесь нет.
     //
     // ОДНА МЕРКА НА ВСЕХ ПОТРЕБИТЕЛЕЙ. Её зовут предупреждение (`overfilledDaysOf` → тост #4497) и
     // подсветка шапки дня в очереди (#4531). Наборы заданий у них разные (у предупреждения — scope
     // пересчёта, у очереди — то, что нарисовано), поэтому набор передаётся параметром; арифметика
     // при этом одна и разъехаться не может.
-    //   cuts — задания одного станка; opts: { baseMidnightMs, cutEndMin, maxOverworkCutsMin }.
+    //   cuts — задания одного станка; opts: { baseMidnightMs, cutEndMin, maxOverworkCutsMin,
+    //   dayStartMin, lunchStartMin, lunchDurationMin } (обед не задан → прежняя арифметика).
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }], по возрастанию дня.
     function overfilledDaysFromCuts(cuts, opts) {
         var o = opts || {};
@@ -22366,6 +22389,10 @@
         var cutEnd = Number(o.cutEndMin);
         if (!isFinite(cutEnd) || !isFinite(base)) return [];
         var over = Number(o.maxOverworkCutsMin) || 0;
+        var lunchDur = Number(o.lunchDurationMin) || 0;
+        var lunchStart = Number(o.lunchStartMin);
+        var hasLunch = lunchDur > 0 && isFinite(lunchStart);
+        var dayStart = Number(o.dayStartMin) || 0;
         var byDay = {};
         (cuts || []).forEach(function(c) {
             if (!c) return;
@@ -22375,13 +22402,32 @@
             var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
                     + Math.round(stripNum(c.storedCutAndLeaderMin));
             var day = Math.floor(ws / 1440);
-            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, end: ws + occ - day * 1440 });
+            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, occ: occ, end: ws + occ - day * 1440 });
         });
         return Object.keys(byDay).map(Number).sort(function(a, b) { return a - b; })
             .map(function(d) {
                 // Порядок в дне — по сохранённому planStart (тем же, чем нумерует карточки очередь).
                 var items = byDay[d].map(function(it, i) { it._i = i; return it; })
                     .sort(function(a, b) { return (a.ws - b.ws) || (a._i - b._i); });
+                // #4559: обед, который станок берёт ВНУТРИ «сквозного» задания, в старты не попал —
+                // добавляем его сами. Зазором обед уже учтён (#4408 dayLayoutGaps) → не добавляем.
+                if (hasLunch) {
+                    var baked = dayLayoutGaps(items.map(function(it) {
+                        return { cutId: it.cut.id, windowStartMin: it.ws, occMin: it.occ };
+                    }), { dayStartMin: dayStart, lunchStartMin: lunchStart, lunchDurationMin: lunchDur })
+                        .some(function(g) { return g.kind === 'lunch'; });
+                    if (!baked) {
+                        var shift = 0;
+                        items.forEach(function(it) {
+                            var s = it.ws - d * 1440 + shift;
+                            it.end = s + it.occ;
+                            if (shift === 0 && s < lunchStart && it.end > lunchStart) {   // #3816: пауза В ХОДЕ намотки
+                                it.end += lunchDur;
+                                shift = lunchDur;
+                            }
+                        });
+                    }
+                }
                 var worst = items[0], worstAt = 0;
                 items.forEach(function(it, i) { if (it.end >= worst.end) { worst = it; worstAt = i; } });
                 return { dayOffset: d, endMin: worst.end, overMin: Math.round(worst.end - cutEnd),
@@ -22403,7 +22449,9 @@
         return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
             baseMidnightMs: planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)),
             cutEndMin: win.cutEndMin,
-            maxOverworkCutsMin: win.maxOverworkCutsMin
+            maxOverworkCutsMin: win.maxOverworkCutsMin,
+            // #4559: обед — часть смены, а не свободные минуты: «сквозное» задание паузит на него (#3816).
+            dayStartMin: win.startMin, lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin
         });
     };
 
@@ -23655,7 +23703,10 @@
         overfilledDaysFromCuts(activeGroup.cuts, {
             baseMidnightMs: planBaseMidnightMs,
             cutEndMin: dayWindow.cutEndMin,
-            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin
+            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,
+            // #4559: обед «сквозного» задания (#3816) в хранимых стартах не лежит — мерка добавляет его сама.
+            dayStartMin: dayWindow.startMin, lunchStartMin: dayWindow.lunchStartMin,
+            lunchDurationMin: dayWindow.lunchDurationMin
         }).forEach(function(d) { overByDay[d.dayOffset] = d; });
         // #3914: печать бейджа «(N мин)» по дням активного станка — из чего складывается сумма и
         // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart

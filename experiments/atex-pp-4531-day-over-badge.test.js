@@ -103,8 +103,12 @@ function makeController(cuts) {
     return c;
 }
 
-// 30.07 — обычный день (08:00, 300 мин → до 13:00); 31.07 — переполненный (08:00 480 мин + хвост
-// 16:00 30 мин → работа до 16:30 при потолке 16:15, перебор +15 мин).
+// 30.07 — обычный день (08:00, 300 мин → работа до 13:00, со «сквозным» обедом конец 13:40);
+// 31.07 — переполненный (08:00 480 мин + хвост 16:00 30 мин).
+// #4559: числа перебора уточнены. Задание 08:00 + 480 мин работы идёт СКВОЗЬ обед 12:20×40 —
+// станок паузит В ХОДЕ намотки (#3816), поэтому кончается оно не в 16:00, а в 16:40, и хвост
+// съезжает на 16:40–17:10. Перебор над потолком 16:15 — +55 мин (прежние «+15» считали обед
+// бесплатным: 480 мин работы от 08:00 в смене с обедом к 16:00 закончиться не могут).
 function twoDays() {
     return [cutOf('ok', 30, 8, 0, 300),
             cutOf('big', 31, 8, 0, 480),
@@ -126,11 +130,11 @@ function twoDays() {
         '#4531-A: шапка переполненного дня помечена', '(' + over.className + ')');
     var badge = over.querySelector('.atex-pp-day-over');
     assert(!!badge, '#4531-A: и несёт бейдж перебора');
-    assert(!!badge && /\+15 мин/.test(badge.textContent) && /смен/.test(badge.textContent),
+    assert(!!badge && /\+55 мин/.test(badge.textContent) && /смен/.test(badge.textContent),
         '#4531-A: бейдж называет перебор словами', '(' + (badge && badge.textContent) + ')');
 
     var tip = (badge && badge.attributes && badge.attributes.title) || '';
-    assert(/16:30/.test(tip) && /16:15/.test(tip),
+    assert(/17:10/.test(tip) && /16:15/.test(tip),
         '#4531-B: в подсказке мерка — до какого часа идёт работа и каков потолок', '(' + tip + ')');
     assert(/№ 2/.test(tip) && /MR194/.test(tip),
         '#4531-B: и виновник — номер задания в дне и его сырьё', '(' + tip + ')');
@@ -153,12 +157,14 @@ function twoDays() {
     var days = planning.overfilledDaysFromCuts(cuts, {
         baseMidnightMs: new Date(2026, 6, 30, 0, 0, 0, 0).getTime(),
         cutEndMin: 16 * 60 + 15,
-        maxOverworkCutsMin: 0
+        maxOverworkCutsMin: 0,
+        // #4559: та же смена, что у контроллера — иначе «одна мерка» проверялась бы разными входами.
+        dayStartMin: 8 * 60, lunchStartMin: 12 * 60 + 20, lunchDurationMin: 40
     });
     assert(days.length === 1, '#4531-D: переполнен ровно один день', '(' + days.length + ')');
     var d = days[0] || {};
-    assert(d.dayOffset === 1 && Math.round(d.overMin) === 15 && Math.round(d.endMin) === 16 * 60 + 30,
-        '#4531-D: это день 31.07, работа до 16:30, перебор +15 мин',
+    assert(d.dayOffset === 1 && Math.round(d.overMin) === 55 && Math.round(d.endMin) === 17 * 60 + 10,
+        '#4531-D: это день 31.07, работа до 17:10 (обед сквозь намотку, #4559), перебор +55 мин',
         '(день ' + d.dayOffset + ', до ' + d.endMin + ', +' + d.overMin + ')');
     assert(String(d.cutId) === 'tail' && d.seq === 2,
         '#4531-D: виновник — второе задание дня', '(' + d.cutId + ', № ' + d.seq + ')');
@@ -167,7 +173,7 @@ function twoDays() {
     var c = makeController(cuts);
     var viaController = c.overfilledDaysOf('101');
     assert(viaController.length === 1 && String(viaController[0].cutId) === 'tail'
-        && Math.round(viaController[0].overMin) === 15,
+        && Math.round(viaController[0].overMin) === 55,
         '#4531-D: overfilledDaysOf отдаёт то же самое', '(' + JSON.stringify(viaController.map(function(x) {
             return { d: x.dayOffset, over: Math.round(x.overMin), cut: x.cutId }; })) + ')');
 })();
