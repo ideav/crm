@@ -22,7 +22,9 @@
 //   C — ДВАЖДЫ НЕ СЧИТАЕМ: обед, стоящий в стартах ЗАЗОРОМ (после «сквозного» задания есть ещё
 //       одно), к концу дня не добавляется;
 //   D — перерывы 10:00/15:00 (ТЗ §5) в мерку НЕ входят: упаковщик их не резервирует;
-//   E — регресс: день, целиком помещающийся в смену, переполненным не становится.
+//   E — регресс: день, целиком помещающийся в смену, переполненным не становится;
+//   F — разгрузка доходит до конца: упаковщик РВЁТ 🔒 по потолку (голова на своём дне, остаток
+//       продолжением) — мерка была единственным, что стояло между боевым днём и этим разрывом.
 //
 // Run with: node experiments/atex-pp-4559-lunch-inside-cut-day-cap.test.js
 
@@ -152,6 +154,40 @@ function prodDay() { return [cut('mw411', 8, 0, 27), cut('mw308', 8, 27, 448)]; 
     assert(res.length === 1 && res[0].dayOffset === 0,
         'E2 переполнен ровно день 03.08, следующий день чист',
         '(' + JSON.stringify(res.map(function (x) { return x.dayOffset; })) + ')');
+})();
+
+// ── F) РАЗГРУЗКА ДОХОДИТ ДО КОНЦА: 🔒 РВЁТСЯ ПО ПОТОЛКУ ────────────────────────────────────────
+// Замок запрещает ВЫТЕСНЕНИЕ задания из его дня (#4512), но не разрыв: голова с влезающими
+// проходами остаётся на зафиксированном дне, остаток уезжает продолжением (#4304/#4467). Мерка
+// была единственным, что стояло между боевым днём и этим разрывом. Гоняем упаковщик на боевых
+// числах: 🔒 27 мин + 🔒 448 мин (106 проходов) в смене 08:00–16:15 с обедом 12:20×45.
+(function () {
+    var ZERO = { KNIFE: 0, KNIFE_MOVE: 0, MATERIAL_WINDING: 0, BETWEEN_CUTS: 0 };
+    function pc(id, runs) {
+        return { id: id, slitter: { id: 'm1' }, materialId: 'M1', winding: 'OUT',
+                 knifeWidths: [50], knifeCount: 1, rollerWidth: 0, plannedRuns: runs, fixed: true };
+    }
+    var segs = planning.splitMachineQueue([pc('mw411', 27), pc('mw308', 106)], {
+        dayStartMin: DAY_START, dayEndMin: CUT_END, times: ZERO,
+        lunchStartMin: LUNCH_START, lunchDurationMin: LUNCH_DUR,
+        perPassByCut: { mw411: 1, mw308: 448 / 106 }, runsByCut: { mw411: 27, mw308: 106 },
+        dayAnchorByCut: { mw411: 0, mw308: 0 }, gapFill: true
+    });
+    var byDay = {};
+    segs.forEach(function (s) {
+        byDay[s.dayOffset] = (byDay[s.dayOffset] || 0) + Number(s.setupMin) + Number(s.durationMin);
+    });
+    var cap = CUT_END - DAY_START - LUNCH_DUR;   // 450 мин — ёмкость смены за вычетом обеда
+    assert(segs.filter(function (s) { return String(s.cutId) === 'mw308'; }).length === 2,
+        'F1 🔒 разорвана по дням — голова на своём дне, остаток продолжением',
+        '(сегментов ' + segs.length + ')');
+    assert(Math.round(byDay[0]) <= cap,
+        'F2 зафиксированный день влезает в смену (' + Math.round(byDay[0]) + ' ≤ ' + cap + ' мин)',
+        '(' + JSON.stringify(Object.keys(byDay).map(function (d) { return d + ':' + Math.round(byDay[d]); })) + ')');
+    var head = segs.filter(function (s) { return String(s.cutId) === 'mw308' && !s.isContinuation; })[0];
+    assert(head && head.dayOffset === 0 && head.fixedDayLock === true,
+        'F3 голова осталась на ЗАФИКСИРОВАННОМ дне — вытеснения нет (#4512)',
+        '(день ' + (head && head.dayOffset) + ')');
 })();
 
 console.log('\n' + passed + '/' + total + ' проверок пройдено');
