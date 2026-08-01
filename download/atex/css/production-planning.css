@@ -873,6 +873,20 @@
 .atex-pp-cut-move:hover { background: var(--pp-surface); }
 .atex-pp.is-busy .atex-pp-cut-move { pointer-events: none; opacity: .4; }
 
+/* #4555: «⏩» — пересчитать отсюда и до конца. Тот же размер, что у «🗓»/«🔒»/«🗑». */
+.atex-pp-cut-recalc-from {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: var(--pp-bg);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1;
+}
+.atex-pp-cut-recalc-from:hover { background: var(--pp-surface); }
+.atex-pp.is-busy .atex-pp-cut-recalc-from { pointer-events: none; opacity: .4; }
+
 /* #3508 п.3: пометка «только просмотр» в панели полос зафиксированного задания. */
 .atex-pp-strip-locked-note {
     margin: 6px 0 4px;

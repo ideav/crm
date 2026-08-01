@@ -8685,6 +8685,29 @@
                 if (c && !c.fixed && self.dayIsFrozen(c.planDate)) { c.fixed = true; pinnedRestore.push(c); }
             });
         }
+        // #4555: «Пересчитать отсюда и до конца» — ПРОШЛОЕ НЕПРИКОСНОВЕННО. Всё, что стои́т на том
+        // же станке РАНЬШЕ выбранного задания (по хранимому planStart: и прежние дни, и соседи
+        // левее в его дне), закрепляем тем же приёмом, что замороженные дни и начатые задания —
+        // временный c.fixed → planCutOperations держит их день по dayAnchorByCut. Упаковщик их
+        // ВИДИТ (иначе первая пересчитываемая резка посчитает переналадку не от того
+        // предшественника — #4438), но не двигает. Другие станки закрывает withinSlitterIds.
+        if (moveScope && moveScope.keepBeforeCutId != null && String(moveScope.keepBeforeCutId) !== '') {
+            var keepAnchor = planInput.filter(function(c) {
+                return c && String(c.id) === String(moveScope.keepBeforeCutId);
+            })[0];
+            var keepTs = keepAnchor ? Number(keepAnchor.planDate) : NaN;
+            var keepSid = keepAnchor ? String(keepAnchor.slitter && keepAnchor.slitter.id != null ? keepAnchor.slitter.id : '') : '';
+            if (isFinite(keepTs) && keepTs > 0) {
+                planInput.forEach(function(c) {
+                    if (!c || c.fixed) return;
+                    var csid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
+                    if (csid !== keepSid) return;
+                    var ts = Number(c.planDate);
+                    if (!isFinite(ts) || ts >= keepTs) return;
+                    c.fixed = true; pinnedRestore.push(c);
+                });
+            }
+        }
         // #4381: НАЧАТЫЕ задания (заполнено «Начато») неприкосновенны и для пересборки — иначе
         // «Упорядочить»/перенос/«Урегулировать» уводили бы с их дня то, что уже идёт на станке.
         // Приём тот же, что у замороженных дней: временный c.fixed (снимается в общем finally) →
@@ -9462,17 +9485,36 @@
     // Возвращает массив id (строк). Порядок и переналадка внутри computeCutSetupUpdates считаются
     // по ВСЕЙ очереди станка — иначе у не-первой резки терялся бы предшественник, — но ЗАПИСЬ
     // ограничена этим набором.
-    AtexProductionPlanning.prototype.recalcScopeCutIds = function(slitterId) {
+    AtexProductionPlanning.prototype.recalcScopeCutIds = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
         var fromStr = String((this.filter && this.filter.date) || '').trim();
         var toStr = String((this.filter && this.filter.dateTo) || '').trim();
         var fromKey = fromStr === '' ? null : planDateDayKey(fromStr);
         var toKey = toStr === '' ? null : planDateDayKey(toStr);
         var self = this;
+        // #4555: «Пересчитать отсюда и до конца». fromCutId — НИЖНЯЯ граница: берём выбранное
+        // задание и всё, что стои́т на этом станке позже (по хранимому planStart, а он монотонен
+        // и внутри дня, и между днями). Прошлое — и более ранние дни, и соседи левее в том же
+        // дне — в scope не попадает и не меняется вовсе. toEnd — снять ПРАВУЮ границу [С;По]:
+        // «до конца» значит до последнего задания станка, даже если хвост очереди за фильтром.
+        var fromTs = null;
+        if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') {
+            var anchor = (this.cuts || []).filter(function(c) {
+                return c && String(c.id) === String(opts.fromCutId);
+            })[0];
+            var anchorTs = anchor ? Number(anchor.planDate) : NaN;
+            if (!isFinite(anchorTs) || anchorTs <= 0) return [];   // без старта границу не провести
+            fromTs = anchorTs;
+        }
+        var toEnd = !!(opts && opts.toEnd);
         return (this.cuts || []).filter(function(c) {
             if (!c) return false;
             var csid = c.slitter && c.slitter.id;
             if (String(csid == null ? '' : csid) !== sid) return false;
+            if (fromTs != null) {
+                var ts = Number(c.planDate);
+                if (!isFinite(ts) || ts < fromTs) return false;
+            }
             // #4436: замороженный день не трогает НИКАКОЙ пересчёт — ни автоматический, ни по кнопке.
             // Кнопка «↻ Пересчитать наладку» тоже переписывает «Дату план» (#4408), а «Заморозка»
             // означает «этот день не меняем». Починить раскладку замороженного дня можно, сняв замок
@@ -9480,7 +9522,7 @@
             if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return false;
             var dayKey = planDateDayKey(c.planDate);
             if (fromKey != null && (dayKey == null || dayKey < fromKey)) return false;
-            if (toKey != null && (dayKey == null || dayKey > toKey)) return false;
+            if (!toEnd && toKey != null && (dayKey == null || dayKey > toKey)) return false;
             return true;
         }).map(function(c) { return String(c.id); });
     };
@@ -9503,10 +9545,32 @@
         if (!this.meta || !this.meta.cut) return [];
         if (!(this.cuts && this.cuts.length)) return [];
         var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
+        var scopeIds = this.recalcScopeCutIds(sid, opts);
         if (!scopeIds.length) return [];
         var inScope = {};
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
+        // #4555: соседи ЛЕВЕЕ выбранного задания в его же дне в scope не входят (их не меняем), но
+        // в раскладку дня попасть обязаны — ЯКОРЯМИ. Иначе repackDayWindowStarts начнёт день с
+        // начала смены и утащит выбранное задание на 08:00 поверх нетронутого прошлого.
+        var anchorIds = {};
+        var fromCutId = (opts && opts.fromCutId != null) ? String(opts.fromCutId) : '';
+        if (fromCutId !== '') {
+            var anchorCut = (this.cuts || []).filter(function(c) { return c && String(c.id) === fromCutId; })[0];
+            var anchorTs = anchorCut ? Number(anchorCut.planDate) : NaN;
+            var anchorDayKey = anchorCut ? planDateDayKey(anchorCut.planDate) : null;
+            if (isFinite(anchorTs) && anchorTs > 0 && anchorDayKey != null) {
+                (this.cuts || []).forEach(function(c) {
+                    if (!c || inScope[String(c.id)]) return;
+                    var csid = c.slitter && c.slitter.id;
+                    if (String(csid == null ? '' : csid) !== sid) return;
+                    if (planDateDayKey(c.planDate) !== anchorDayKey) return;   // только ЕГО день
+                    var ts = Number(c.planDate);
+                    if (!isFinite(ts) || ts >= anchorTs) return;               // только то, что левее
+                    anchorIds[String(c.id)] = true;
+                    inScope[String(c.id)] = true;
+                });
+            }
+        }
         // Новые колонки тайминга (то, что запишет persistCutSetupColumns) — dryRun, состояние не трогаем.
         var wantById = {};
         var precomputed = opts && opts.updates;
@@ -9532,7 +9596,7 @@
             var day = Math.floor(ws / 1440);
             if (!byDay[day]) { byDay[day] = []; dayOrder.push(day); }
             byDay[day].push({ cutId: String(c.id), windowStartMin: ws, occMin: occ,
-                started: cutIsStarted(c), wasTs: tsSec });
+                started: cutIsStarted(c), anchored: !!anchorIds[String(c.id)], wasTs: tsSec });
         });
         var packOpts = {
             dayStartMin: Number(win.startMin) || 0,
@@ -9692,6 +9756,76 @@
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка пересчёта наладки: ' + (err && err.message || err), 'error');
+            return false;
+        });
+    };
+
+    // #4555: «ПЕРЕСЧИТАТЬ ОТСЮДА И ДО КОНЦА» — от ВЫБРАННОГО задания вперёд по его станку.
+    // Зачем: задание правят вручную (проходы, полосы, перенос), и расчёт перестаёт укладываться в
+    // рамки — день уходит за потолок, старты разъезжаются. Пересчитать весь станок кнопкой
+    // «↻ Пересчитать наладку» оператор не всегда может: раннее в этом дне и прошлые дни могут быть
+    // уже согласованы с производством, а трогать их нельзя.
+    // ЧТО ДЕЛАЕМ: наладка + честные старты встык + разрыв по потолку дня с переливом на следующие
+    // дни — ровно как recalcSetupTiming, но с НИЖНЕЙ ГРАНИЦЕЙ (fromCutId) и без правой (toEnd).
+    // ЧТО НЕ ТРОГАЕМ: другие станки (withinSlitterIds), всё, что раньше выбранного задания на его
+    // станке (keepBeforeCutId → временный замок в buildSequenceOps; в дне — якоря в
+    // recalcStartUpdates), замороженные дни (#4436, отсекает recalcScopeCutIds).
+    // ПОРЯДОК НЕ МЕНЯЕТСЯ (решение заказчика 01.08.2026): кто за кем идёт — как было, меняются
+    // только времена и разбиение по дням. Нужна перестановка — это «Упорядочить».
+    AtexProductionPlanning.prototype.recalcFromCut = function(cut) {
+        var self = this;
+        this._ppOp = 'recalcFromCut';   // #4177/#4480: трасса обязана называть автора записи
+        if (this.busy) return Promise.resolve(false);
+        if (!cut) return Promise.resolve(false);
+        // #4402: на экране непринятый план «Упорядочить» — считать и писать по нему нельзя.
+        if (this._pendingPlan) {
+            this.notify('Сперва примите или отмените показанный пересчёт очереди', 'info');
+            return Promise.resolve(false);
+        }
+        var sid = String(cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
+        if (sid === '') { this.notify('У задания не указан станок — пересчитывать нечего', 'error'); return Promise.resolve(false); }
+        if (!(Number(cut.planDate) > 0)) {
+            this.notify('У задания нет «Даты план» — от него не отсчитать «отсюда и до конца»', 'error');
+            return Promise.resolve(false);
+        }
+        // #4436: замороженный день не трогает НИКАКОЙ пересчёт. Начать «отсюда» внутри такого дня
+        // нельзя — задание из scope всё равно выпадет, и кнопка сработала бы вхолостую.
+        if (typeof this.dayIsFrozen === 'function' && this.dayIsFrozen(cut.planDate)) {
+            this.notify('День задания заморожен (🔒) — пересчёт его не меняет. Снимите заморозку дня', 'info');
+            return Promise.resolve(false);
+        }
+        var scopeOpts = { fromCutId: String(cut.id), toEnd: true };
+        var scopeIds = this.recalcScopeCutIds(sid, scopeOpts);
+        if (!scopeIds.length) { this.notify('От этого задания вперёд пересчитывать нечего', 'info'); return Promise.resolve(false); }
+        var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
+        var startOps = this.recalcStartUpdates(sid, {
+            updates: stale, fromCutId: scopeOpts.fromCutId, toEnd: true
+        });
+        var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
+        if (!mainKey) startOps = [];   // некуда писать planStart — тайминг пишем всё равно
+        var overBefore = this.overfilledDaysOf(sid).length;
+        if (!stale.length && !startOps.length && !overBefore) {
+            this.notify('От этого задания и до конца всё уже сходится — пересчитывать нечего', 'info');
+            this.render();
+            return Promise.resolve(false);
+        }
+        this.setBusy(true);
+        this.showProgress('Пересчёт от выбранного задания…', 1);
+        return this.persistCutSetupColumns(scopeIds).then(function() {
+            return postCutStarts(self, startOps);
+        }).then(function() {
+            return self.reload();
+        }).then(function() {
+            self.hideProgress(); self.setBusy(false); self.render();
+            self.notify('Пересчитано от выбранного задания и до конца: наладка — ' + stale.length
+                + ', время старта — ' + startOps.length + ' (порядок и прошлое не менялись)', 'success');
+            // Потолок дня старше «пересчитывать нечего»: лишнее рвём и переливаем на следующий день,
+            // но только от выбранного задания вперёд.
+            return self.levelDayLoad(sid, { fromCutId: scopeOpts.fromCutId }).then(function() { return true; });
+        }).catch(function(err) {
+            self.hideProgress(); self.setBusy(false);
+            self.reload().then(function() { self.render(); }).catch(function() {});
+            self.notify('Ошибка пересчёта от задания: ' + (err && err.message || err), 'error');
             return false;
         });
     };
@@ -9872,7 +10006,7 @@
     // Слияния заданий одного заказа (#4424, `mergeSameOrderTasks`) здесь НЕ делаем: ручное
     // перемещение не повод перекраивать записи оператора — только физика смены.
     // → Promise<boolean> (true, если план пересобран).
-    AtexProductionPlanning.prototype.levelDayLoad = function(slitterId) {
+    AtexProductionPlanning.prototype.levelDayLoad = function(slitterId, opts) {
         var self = this;
         var sid = String(slitterId == null ? '' : slitterId);
         var over = this.overfilledDaysOf(sid);
@@ -9887,7 +10021,11 @@
         }
         // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
         if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
-        return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, { withinSlitterIds: [sid] })
+        // #4555: выравнивание «отсюда и до конца» — прошлое станка закрепляем (keepBeforeCutId),
+        // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
+        var scope = { withinSlitterIds: [sid] };
+        if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
+        return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
                 var left = self.overfilledDaysOf(sid);
                 if (left.length) { self.warnOverfilledDays(sid); return !!changed; }
@@ -11394,6 +11532,20 @@
                 if (self.busy) return;
                 self.openMoveCut(c);
             });
+            // #4555: «⏩» — пересчитать ОТСЮДА И ДО КОНЦА: наладка, старты встык и разрыв по потолку
+            // дня от этого задания вперёд по его станку. Прошлое (прежние дни и соседи левее в этом
+            // дне) и другие станки не трогаются, порядок не меняется. Между «🗓» и «🗑».
+            var recalcFrom = el('button', {
+                class: 'atex-pp-cut-recalc-from',
+                type: 'button',
+                text: '⏩',
+                title: 'Пересчитать отсюда и до конца (наладка, старты, разрыв по дням) — прошлое и другие станки не трогаются'
+            });
+            recalcFrom.addEventListener('click', function(e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                if (self.busy) return;
+                self.recalcFromCut(c);
+            });
             // #3486: «🗑» — удалить задание (резку) с её «Обеспечениями». stopPropagation,
             // чтобы клик по кнопке не выбирал резку (см. #3149: клики по контролам не
             // выбирают карточку). Подтверждение и удаление — в deleteCutTask.
@@ -11415,6 +11567,7 @@
             controls.appendChild(strips);
             if (!cutStarted) controls.appendChild(fix);
             if (!cutStarted) controls.appendChild(move);   // #3602: «🗓» перенос на другой день — между «🔒» и «🗑»
+            if (!cutStarted) controls.appendChild(recalcFrom);   // #4555: «⏩» пересчитать отсюда и до конца
             // #3540: кнопки ◀▶ ручного сдвига планового старта убраны — двигать время вручную
             // не требуется. #3562: пин планового старта тоже убран — автогенерация двигает
             // зафиксированное задание по времени в течение дня и меняет его очередность.
