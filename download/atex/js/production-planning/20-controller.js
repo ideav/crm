@@ -136,6 +136,7 @@
         // #4085: слой размещения (модель #3985) — перебор всех точек вставки по мин. штрафу + релокация
         slotFromCut: slotFromCut, vacationSlot: vacationSlot, seedOccupancy: seedOccupancy,
         prefixDayOffset: prefixDayOffset, canInsertAt: canInsertAt, scorePosition: scorePosition,
+        positionAllowed: positionAllowed,               // #4556: жёсткие правила §15 точки вставки — один предикат на все проходы
         placeSlot: placeSlot, placeAllSlots: placeAllSlots, relocatePass: relocatePass,
         relocateOverdueReal: relocateOverdueReal,                  // #4118: доп. проход по РЕАЛЬНЫМ дням
         slotOrderByMachine: slotOrderByMachine, computeSlotPlacement: computeSlotPlacement,

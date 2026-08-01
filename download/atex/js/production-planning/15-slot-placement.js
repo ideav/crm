@@ -295,33 +295,49 @@
         var matBreaks = carry ? !sameMaterialWinding(before, slot) : materialChangeNeeded(before, slot);
         return { knives: knives, material: matSame && matBreaks };
     }
+    // #4556 (ТЗ §15): ДОПУСТИМА ЛИ ТОЧКА ВСТАВКИ — ОДИН ПРЕДИКАТ НА ВЕСЬ СЛОЙ РАЗМЕЩЕНИЯ. Точки
+    // перебирают ТРИ прохода (§8-размещение/релокация через `scorePosition`, спасение просрочки
+    // `relocateOverdueReal`, жадный проход `greedyRefine`), и каждый обязан отбрасывать одно и то же.
+    // Пока набор запретов был переписан в каждом проходе своим списком, новое правило доезжало не до
+    // всех: #4542 («не обгонять 🔒») и #4464 (🔒-монолит) знал только `scorePosition`, поэтому рескью
+    // и жадный проход спокойно ставили задание перед замком — issue #4556 (боевое 01.08.2026: задание
+    // встало в начало дня перед 🔒, разорвало цепочку дробления и подняло станко-день до 526 мин при
+    // потолке 450). Добавлять правило теперь можно ровно здесь.
+    //
+    // ЧТО ЗАПРЕЩЕНО (все — ЖЁСТКИЕ правила ТЗ §15, они сильнее срока и веса):
+    //   §9    — между двумя частями ОДНОЙ цепочки дробления (`canInsertAt`);
+    //   #4542 — обгон 🔒: подвижное не встаёт раньше замка, за которым стояло (в ЛЮБОМ дне);
+    //   #4497 — перед 🔒 В ЕЁ ДНЕ: вставленное сдвинуло бы её и весь паровоз 🔒 за ней;
+    //   #4464 — внутрь 🔒-МОНОЛИТА: оператор поставил два замка подряд в одном дне, вклиниваться
+    //           между ними нельзя. На СТЫКЕ ДНЕЙ правило не действует (между хвостом дня N и головой
+    //           дня N+1 монолита нет) — потому и сравниваем дни, а не просто соседство.
+    // #4508 (ТЗ §15, исключение): задание, которое оператор переносит ПРЯМО СЕЙЧАС, вправе
+    // встроиться внутрь блока — туда, где §8 насчитал минимальный штраф; порядок остальных звеньев
+    // при этом не меняется (упаковщик держит его по хранимому плану дня, #4491). Без этого исключения
+    // в дне-стене 🔒 недопустимы почти все точки, и перенесённое «по весу» задание садилось на КРАЙ
+    // блока — в голову дня, отрываясь от своей комбинации ножей (issue #4508: 29 из 43 точек
+    // отброшены, выбрана поз 0 ценой смены ножей).
+    // #4547: проверки БЕЗ дней идут первыми — день теперь считает упаковщик, и спрашивать его о
+    // точке, которую и так отбрасывает правило, незачем (на боевом объёме так отсеивается
+    // большинство точек: «рассмотрено вариантов 3 (+ 38 недопустимых пропущено)»).
+    function positionAllowed(machineSlots, index, slot, ctx){
+        if (!canInsertAt(machineSlots, index)) return false;
+        if (overtakesFixed(machineSlots, index, slot)) return false;
+        if (pushesFixedSameDay(machineSlots, index, slot, ctx)) return false;
+        var prev = machineSlots[index - 1] || null, next = machineSlots[index] || null;
+        var prevCut = (prev && prev.kind === 'cut') ? prev : null;
+        var nextCut = (next && next.kind === 'cut') ? next : null;
+        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed && !isManualMoveSlot(slot)
+            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return false;
+        return true;
+    }
     function scorePosition(machineSlots, index, slot, ctx){
         ctx = ctx || {};
-        if (!canInsertAt(machineSlots, index)) return null;
+        if (!positionAllowed(machineSlots, index, slot, ctx)) return null;
         var prev = machineSlots[index - 1] || null;
         var next = machineSlots[index] || null;
         var prevCut = (prev && prev.kind === 'cut') ? prev : null;
         var nextCut = (next && next.kind === 'cut') ? next : null;
-        // #4464 (ТЗ §15): 🔒 одного дня — МОНОЛИТ. Точка между двумя зафиксированными заданиями
-        // ОДНОГО дня недопустима: оператор поставил их подряд, и вклиниваться туда нельзя ни
-        // размещению, ни релокации. На СТЫКЕ ДНЕЙ правило не действует (между хвостом дня N и
-        // головой дня N+1 монолита нет) — потому и сравниваем дни, а не просто соседство.
-        // #4508 (ТЗ §15, исключение): задание, которое оператор переносит ПРЯМО СЕЙЧАС, вправе
-        // встроиться внутрь блока — туда, где §8 насчитал минимальный штраф; порядок остальных
-        // звеньев при этом не меняется (упаковщик держит его по хранимому плану дня, #4491). Без
-        // этого исключения в дне-стене 🔒 недопустимы почти все точки, и перенесённое «по весу»
-        // задание садилось на КРАЙ блока — в голову дня, отрываясь от своей комбинации ножей
-        // (issue #4508: 29 из 43 точек отброшены, выбрана поз 0 ценой смены ножей).
-        // #4497 (ТЗ §15): перед 🔒 её дня ставить нельзя — вставленное сдвинуло бы её (см. выше).
-        // #4542 (ТЗ §15): и в любом ДРУГОМ дне тоже — 🔒 не обгоняют (overtakesFixed шире и включает
-        // случай одного дня; pushesFixedSameDay оставлен как отдельная проверка того же семейства).
-        // #4547: проверки БЕЗ дней идут первыми — день теперь считает упаковщик, и спрашивать его о
-        // точке, которую и так отбрасывает правило, незачем (на боевом объёме так отсеивается
-        // большинство точек: «рассмотрено вариантов 3 (+ 38 недопустимых пропущено)»).
-        if (overtakesFixed(machineSlots, index, slot)) return null;
-        if (pushesFixedSameDay(machineSlots, index, slot, ctx)) return null;
-        if (prevCut && nextCut && prevCut.fixed && nextCut.fixed && !isManualMoveSlot(slot)
-            && prefixDayOffset(machineSlots, index - 1, ctx) === prefixDayOffset(machineSlots, index, ctx)) return null;
         // #4288: ПЕРВАЯ резка очереди станка (index 0, реального prev нет) НАСЛЕДУЕТ ТЕКУЩУЮ
         // ЗАПРАВКУ станка (ctx.prevSetupBySlitter) как ВИРТУАЛЬНЫЙ prev для
         // перехода prev→slot — ровно как упаковщик (splitMachineQueue carryPrevSetup, #3853) и
@@ -798,11 +814,20 @@
                     var fixedOnTid = {};   // #4224: чужие фиксы приёмника — их НЕЛЬЗЯ вытолкнуть на день позже
                     tarr.forEach(function(s){ if (s && s.kind === 'cut' && s.fixed) fixedOnTid[String(s.id)] = 1; });
                     for (var idx = 0; idx <= tarr.length; idx++){
-                        if (!canInsertAt(tarr, idx)) continue;
-                        // #4497 (ТЗ §15): перед 🔒 её дня не встаёт и СПАСЕНИЕ ПРОСРОЧКИ. Замок 🔒 —
-                        // жёсткое правило, просрочка — видимая информация (её называет панель #4161 и
-                        // лог #4200), ровно как с заморозкой дня: правило сильнее срока.
-                        if (pushesFixedSameDay(tarr, idx, slot, slotExtend(ctx, { slitterId: tid }))) continue;
+                        // #4556 (ТЗ §15): ДОПУСТИМОСТЬ И ЦЕНУ ТОЧКИ СПРАШИВАЕМ ОДНИМ ВОПРОСОМ —
+                        // `scorePosition` (внутри общий `positionAllowed`). Спасение просрочки
+                        // перебирало точки само и знало лишь ДВА запрета (`canInsertAt` §9 +
+                        // `pushesFixedSameDay` #4497), а `null` («точка запрещена») трактовало как
+                        // `penalty = 0` — то есть мимо запретов «не обгонять 🔒» (#4542) и «не
+                        // вставать между двумя 🔒 одного дня» (#4464), да ещё и ПРЕДПОЧИТАЯ такую
+                        // точку: 0 — самый дешёвый вес из возможных (issue #4556, боевое 01.08.2026 —
+                        // задание встало в начало дня перед 🔒, разорвало цепочку дробления и подняло
+                        // станко-день до 526 мин при потолке 450). Просрочка — ИНФОРМАЦИЯ (панель
+                        // #4161, лог #4200), замок 🔒 — ЖЁСТКОЕ ПРАВИЛО: правило сильнее срока, ровно
+                        // как с заморозкой дня. Гейт стои́т ПЕРЕД пробной упаковкой (realDayFn) — она
+                        // дороже всего, и спрашивать её о запрещённой точке незачем (#4547).
+                        var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
+                        if (!sc) continue;
                         var before = tarr.slice(0, idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var after = tarr.slice(idx).filter(function(s){ return s && s.kind === 'cut'; }).map(function(s){ return String(s.id); });
                         var trialIds = before.concat([task.id], after);
@@ -831,8 +856,7 @@
                         var savedDays = task.depth - (dueT == null ? 0 : Math.max(0, Number(myReal) - Number(dueT)));   // на сколько дней срочное перестало опаздывать
                         var netGain = savedDays - costDays;   // >0 ⇒ суммарное опоздание плана уменьшилось
                         if (netGain <= 0) continue;
-                        var sc = scorePosition(tarr, idx, slot, slotExtend(ctx, { slitterId: tid, isMove: true }));
-                        var penalty = (sc ? sc.weight : 0) + moveWeight(ctx, sid, tid);
+                        var penalty = sc.weight + moveWeight(ctx, sid, tid);   // #4556: честный вес допустимой точки
                         if (!best || netGain > best.netGain || (netGain === best.netGain && penalty < best.penalty)){
                             best = { tid: tid, idx: idx, real: Number(myReal), netGain: netGain, penalty: penalty };
                         }
@@ -925,9 +949,10 @@
                     var oldCostTid = same ? 0 : machineCost(tid);
                     var tarr = byMachine[tid], mBest = null;
                     for (var idx = 0; idx <= tarr.length; idx++){
-                        if (!canInsertAt(tarr, idx)) continue;
-                        // #4497 (ТЗ §15): жадный проход тоже не ставит задание перед 🔒 её дня.
-                        if (pushesFixedSameDay(tarr, idx, T.slot, slotExtend(ctx, { slitterId: tid }))) continue;
+                        // #4556 (ТЗ §15): жёсткие правила у всех проходов ОДНИ — §9, #4542, #4497,
+                        // #4464 (см. positionAllowed). Свой укороченный список здесь пропускал обгон
+                        // 🔒 и вставку внутрь 🔒-монолита.
+                        if (!positionAllowed(tarr, idx, T.slot, slotExtend(ctx, { slitterId: tid }))) continue;
                         tarr.splice(idx, 0, tagSlot(T.slot, tid));
                         var newCostTid = machineCost(tid);
                         tarr.splice(idx, 1);
