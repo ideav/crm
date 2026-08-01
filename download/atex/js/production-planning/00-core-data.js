@@ -122,9 +122,7 @@
         opts = opts || {};
         var budget = null;
         if (opts.dayEndMin != null && opts.dayStartMin != null) {
-            budget = (Number(opts.dayEndMin) - Number(opts.dayStartMin))
-                - (Number(opts.lunchDurationMin) || 0)
-                + (Number(opts.maxOverworkTuneMin) || 0);
+            budget = dayCapacityMinutes(windowFromOpts(opts), 'tune');   // #4563: один потолок на всех
         }
         var byDay = {};
         (items || []).forEach(function(it) {

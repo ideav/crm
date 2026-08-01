@@ -123,9 +123,7 @@
         opts = opts || {};
         var budget = null;
         if (opts.dayEndMin != null && opts.dayStartMin != null) {
-            budget = (Number(opts.dayEndMin) - Number(opts.dayStartMin))
-                - (Number(opts.lunchDurationMin) || 0)
-                + (Number(opts.maxOverworkTuneMin) || 0);
+            budget = dayCapacityMinutes(windowFromOpts(opts), 'tune');   // #4563: один потолок на всех
         }
         var byDay = {};
         (items || []).forEach(function(it) {
@@ -4199,7 +4197,8 @@
         if (k + m <= 0) return { keepKnife: 0, keepMaterial: 0 };
         var start = Number(tailStartMin), cutEnd = Number(cutEndMin);
         if (!isFinite(start) || !isFinite(cutEnd)) return { keepKnife: k, keepMaterial: m };
-        var ceilingRoom = (cutEnd - start) + (Number(overTuneMin) || 0);   // до потолка нахлёста настройки
+        // #4563: потолок — только через общую функцию (нахлёст НАСТРОЙКИ), своей формулы здесь нет.
+        var ceilingRoom = dayCeilingMin({ cutEndMin: cutEnd, maxOverworkTuneMin: Number(overTuneMin) || 0 }, 'tune') - start;
         var cols = tailSetupColumns(chooseTailSetupSubset(
             [{ code: 'KNIFE', minutes: k }, { code: 'MATERIAL_WINDING', minutes: m }], ceilingRoom));
         return { keepKnife: cols.knifeMin, keepMaterial: cols.materialWindingMin };
@@ -5778,6 +5777,48 @@
         };
     }
 
+    // #4563 (ТЗ §15): ПОТОЛОК ДНЯ — ОДНА ФУНКЦИЯ НА ВСЮ СИСТЕМУ. Решение заказчика 01.08.2026:
+    // потолок = `cutEndMin` + нахлёст ПО ВИДУ ОПЕРАЦИИ (резка → MAX_OVERWORK_CUTS, настройка →
+    // MAX_OVERWORK_TUNE). Другого правила нет ни у кого.
+    //
+    // ЗАЧЕМ ФУНКЦИЯ, А НЕ ФОРМУЛА НА МЕСТЕ. Формула «ёмкость дня» была переписана в коде ДЕВЯТЬ раз
+    // независимо, и копии разошлись: одни прибавляли нахлёст НАСТРОЙКИ (страж DAY_CAPACITY, трасса
+    // бейджа, раскрой), другие — нахлёст РЕЗКИ (planUnderfilledDays), третьи не прибавляли ничего
+    // (слой размещения, генерация, выбор станка). На боевых настройках ateh это давало ТРИ разных
+    // потолка одного дня — 450, 455 и 460, — и оператор видел то одно число, то другое.
+    // Хуже: расхождение читалось как «новый баг» каждый раз, когда две копии встречались в одном
+    // сценарии (#4559 — обед, #4561 — цепочка из прошлого): одна половина системы кричит
+    // «переполнен», вторая отвечает «влезает», и кнопка не помогает.
+    //
+    // win — объект `resolveWorkingWindow` (или любой с теми же полями). kind: 'cuts' (по умолчанию)
+    // | 'tune'. → dayCeilingMin: абсолютная минута от полуночи, позже которой операция идти не
+    // вправе; dayCapacityMinutes: сколько минут РАБОТЫ помещается в день (потолок − начало − обед).
+    // Обед вычитается всегда: станок на него встаёт (#3342/#3816), это не свободные минуты (#4559).
+    // Новое правило потолка добавляется ровно сюда; сторож `atex-pp-4563-one-day-ceiling.test.js`
+    // краснеет, если формулу снова напишут на месте.
+    function dayCeilingMin(win, kind) {
+        var cutEnd = Number(win && win.cutEndMin);
+        if (!isFinite(cutEnd)) return NaN;
+        var over = Number(kind === 'tune' ? (win && win.maxOverworkTuneMin) : (win && win.maxOverworkCutsMin));
+        return round3(cutEnd + (isFinite(over) ? over : 0));
+    }
+    function dayCapacityMinutes(win, kind) {
+        var ceil = dayCeilingMin(win, kind);
+        if (!isFinite(ceil)) return 0;
+        var cap = ceil - (Number(win && win.startMin) || 0) - (Number(win && win.lunchDurationMin) || 0);
+        return cap > 0 ? round3(cap) : 0;
+    }
+    // Окно из опций планировщика (dayStartMin/dayEndMin/…) в вид `resolveWorkingWindow`: у движка
+    // `dayEndMin` — это и есть `cutEndMin` (потолок резки, см. planCutOperations), поля называются
+    // иначе, а правило потолка обязано остаться одним.
+    function windowFromOpts(opts) {
+        return { startMin: Number(opts && opts.dayStartMin) || 0,
+                 cutEndMin: Number(opts && opts.dayEndMin),
+                 lunchDurationMin: Number(opts && opts.lunchDurationMin) || 0,
+                 maxOverworkCutsMin: Number(opts && opts.maxOverworkCutsMin) || 0,
+                 maxOverworkTuneMin: Number(opts && opts.maxOverworkTuneMin) || 0 };
+    }
+
     // #3764: окна «Отпуска» станка → блокированные интервалы в МИНУТАХ от полуночи дня 0
     // (той же оси, что startMin/windowStartMin расписания). downtimes — [{ start, end }]
     // в unix-секундах (start — главное значение записи, end — «Окончание»). baseMidnightMs —
@@ -6529,6 +6570,10 @@
         var maxOverworkTune = (opts.maxOverworkTuneMin != null && isFinite(Number(opts.maxOverworkTuneMin)))
             ? Math.max(0, Number(opts.maxOverworkTuneMin)) : maxOverworkCuts;
         var overworkOn = maxOverworkCuts != null;
+        // #4563: ПОТОЛОК И ВЕЛИЧИНУ НАХЛЁСТА берём у общей функции — своей формулы у упаковщика нет.
+        // Нахлёст выключен (лимит не задан) → потолок равен cutEndMin, как и раньше.
+        var ceilingCuts = dayCeilingMin(windowFromOpts(opts), 'cuts');   // абсолютный потолок РЕЗКИ
+        var overCuts = round3(ceilingCuts - dayEnd);                     // сколько его сверх cutEndMin
         // #3914: заголовок трассировки станко-очереди — параметры окна и ёмкости дня.
         ppTrace('splitMachineQueue: резок=' + (orderedCuts || []).length +
             ' окно=' + ppClock(dayStart) + '..' + ppClock(dayEnd) + ' (cutEnd, ёмкость ' + Math.round(capacity) + ')' +
@@ -6546,7 +6591,7 @@
             // #3909/#3910: потолок привязан к cutEndMin (dayEnd), а не к DAY_END_HOUR (см. availFor).
             // Без него сегмент на целый день, сдвинутый простоем/выходным на старт в середине дня,
             // вылезал за смену (#3907: 108 проходов с 10:35 до 17:26) — теперь переносится на завтра.
-            var fitEnd = overworkOn ? (dayEnd + maxOverworkCuts) : dayEnd;
+            var fitEnd = ceilingCuts;   // #4563: один потолок на всех
             // #3914: трассировка сдвига за «Отпуск»/выходной — до и после (положения окон меняются).
             var traceDown = ppTraceOn() && hasWindow && opts.blockedRanges && opts.blockedRanges.length;
             var before = traceDown ? segs.map(function(s) { return { cut: s.cutId, ws: s.windowStartMin }; }) : null;
@@ -6714,8 +6759,10 @@
             var reserveWhole = reserveAgainst(d, exceptId);   // #4488: место под задание ручного переноса; #4512: не против 🔒
             var base = effCapacity(d) - occWhole - reserveWhole;
             if (!overworkOn || !hasWindow) return base;
-            var lunchRes = (lunch && !lunchDone[d]) ? lunch.durationMin : 0;
-            var margin = (kind === 'tune') ? maxOverworkTune : maxOverworkCuts;
+            // #4563: потолок берём у ОБЩЕЙ функции — та же, что у стража, бейджа, генерации и
+            // раскроя. Она вычитает обед всегда; упаковщику он не нужен, если в этот день уже
+            // вставлен, — возвращаем обратно. Прочее (простой, занятость, резерв) — как было.
+            var lunchBack = (lunch && lunchDone[d]) ? lunch.durationMin : 0;
             // #3909/#3910: нахлёст добавляем к cutEndMin (dayEnd = DAY_END_HOUR−TOTAL_INTERVALS),
             // а НЕ к DAY_END_HOUR. Последнее задание дня обязано кончиться ≤ cutEndMin+margin
             // (резка → +MAX_OVERWORK_CUTS, настройка → +MAX_OVERWORK_TUNE). Раньше базой был
@@ -6725,7 +6772,7 @@
             // #3978: минус простой внутри окна дня (dayLostToBlock) — как в effCapacity.
             // #4149: минус ЦЕЛАЯ занятость дня (occWhole) — потолок держится на хранимой раскладке.
             // #4488: минус место под задание ручного переноса (reserveWhole) — оно ложится целиком.
-            return (dayEnd - dayStart) + margin - lunchRes - dayLostToBlock(d) - occWhole - reserveWhole;
+            return dayCapacityMinutes(windowFromOpts(opts), kind) + lunchBack - dayLostToBlock(d) - occWhole - reserveWhole;
         }
         // #3974: якорь дня несёт ТОЛЬКО «Зафиксировано» (🔒) — фикс-резка держит свой день
         // (fixedDay ниже). Свободные задания якоря не имеют (dayAnchorByCut #3658 отменён): день
@@ -7108,7 +7155,7 @@
                 }
                 if (!blocked) return true;
                 var needWhole = round3(setupCostFor(prevPhysical, st2.cut) + st2.remaining * (st2.perPass + leader));
-                return needWhole > round3(effCapacity(nd) + (overworkOn ? maxOverworkCuts : 0));
+                return needWhole > round3(effCapacity(nd) + overCuts);   // #4563: нахлёст — из общей функции
             }
             function pickFitsReduced(id){
                 var reserve = reserveForDay(day);
@@ -8558,7 +8605,7 @@
             // раньше реального → штраф срока считался против слишком раннего дня → просрочка. Теперь
             // вычитаем обед (ближе к реальным ≈450); а СРОК держат РЕАЛЬНЫЕ дни splitMachineQueue (§12,
             // цикл релокации ниже). slotRefineCtx переиспользуем и для той релокации.
-            var winMin = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0) - (Number(opts.lunchDurationMin) || 0);
+            var winMin = dayCapacityMinutes(windowFromOpts(opts), 'cuts');   // #4563: один потолок на всех
             slotRefineCtx = {
                 settings: opts.weights, times: opts.times, capacityMin: winMin > 0 ? winMin : Infinity,
                 baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
@@ -8792,7 +8839,7 @@
         // порядок задач В СРОК не трогает. ctx нужен и без слоя размещения — собираем refineCtx4200.
         var refineCtx4200 = slotRefineCtx || {
             settings: opts.weights, times: opts.times,
-            capacityMin: (function(){ var w = (Number(opts.dayEndMin) || 0) - (Number(opts.dayStartMin) || 0) - (Number(opts.lunchDurationMin) || 0); return w > 0 ? w : Infinity; })(),
+            capacityMin: (function(){ var w = dayCapacityMinutes(windowFromOpts(opts), 'cuts'); return w > 0 ? w : Infinity; })(),   // #4563: один потолок на всех
             baseMidnightMs: Number(opts.planBaseMidnightMs), perPassByCut: perPass,
             machineDayOffFor: opts.machineDayOffFor, feasibleMachine: opts.feasibleMachineFor,
             distanceExceededFor: opts.distanceExceededFor, dueDayByCut: opts.dueDayByCut,
@@ -12812,6 +12859,8 @@
         setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
+        dayCeilingMin: dayCeilingMin,                   // #4563: ЕДИНСТВЕННЫЙ потолок дня (cutEnd + нахлёст по виду)
+        dayCapacityMinutes: dayCapacityMinutes,         // #4563: и ёмкость дня из него же
         resolveOverworkLimits: resolveOverworkLimits,     // #3992: лимиты захлёста (ключи _MN)
         resolveDayDurationMin: resolveDayDurationMin,     // #3989 Фаза 2: DAY_DURATION_MN
         intraDayBreaks: intraDayBreaks,                   // #3989 Фаза 2: обед + два перерыва (ТЗ §5)
@@ -15427,8 +15476,8 @@
         if (typeof this.workingWindow !== 'function') return [];
         var w = this.workingWindow();
         var dayStartMin = Number(w.startMin) || 0, cutEndMin = Number(w.cutEndMin) || 0;
-        var capacity = cutEndMin - dayStartMin - (Number(w.lunchDurationMin) || 0);
-        var ceiling = capacity + (Number(w.maxOverworkCutsMin) || 0);
+        var capacity = dayCapacityMinutes(w, 'cuts');   // #4563: один потолок на всех
+        var ceiling = capacity;
         if (!(capacity > 0)) return [];
         // #3978: минуты «Отпуска»/выходного внутри окна дня уменьшают его ёмкость.
         // Без метаданных окна простоя не читаются (стаб-self в юнит-тестах) — считаем день целым.
@@ -16049,7 +16098,7 @@
         var empty = { changed: false, slitterByRecordId: {}, slitterReqId: slitterReqId };
         if (!slitterReqId || !(self.slitters && self.slitters.length >= 2) || !(self.cuts && self.cuts.length)) return empty;
         var genWindow = self.workingWindow();
-        var dayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0) - (Number(genWindow.lunchDurationMin) || 0));
+        var dayCapacityMin = dayCapacityMinutes(genWindow, 'cuts');   // #4563: один потолок на всех
         if (!(dayCapacityMin > 0)) return empty;
         var planOptions = makePlanningOptions(PLANNING_STRATEGY_SETUP, self.changeTimes, self.daySettings);   // #4059: веса из «Настройки»
         var planBaseMidnightMs = planBaseMidnightFrom(self.filter && self.filter.date, controllerNowMs(self));
@@ -18710,8 +18759,7 @@
         // #3830: рабочая ёмкость дня станка (мин) — чтобы не сваливать резку на переполненный
         // станок, когда есть свободный. Окно резки минус обед (как в splitMachineQueue).
         var genWindow = self.workingWindow();
-        var genDayCapacityMin = Math.max(0, (Number(genWindow.cutEndMin) || 0) - (Number(genWindow.startMin) || 0)
-            - (Number(genWindow.lunchDurationMin) || 0));
+        var genDayCapacityMin = dayCapacityMinutes(genWindow, 'cuts');   // #4563: один потолок на всех
         // #3876: станки в отпуске на день резки не выбираем (мемо по дню — vacations единичны).
         var genVacationByDay = {};
         function vacationSetForDay(dayKey, planDateSec) {
@@ -21430,8 +21478,7 @@
                     return out;
                 },
                 dayCapacityMin: function(){
-                    var cap = (Number(dayWindow.cutEndMin) || 0) - (Number(dayWindow.startMin) || 0)
-                            - (Number(dayWindow.lunchDurationMin) || 0) + (Number(dayWindow.maxOverworkTuneMin) || 0);
+                    var cap = dayCapacityMinutes(dayWindow, 'cuts');   // #4563: один потолок на всех
                     return cap > 0 ? cap : 0;
                 },
                 // #4469: недоупакованные станко-дни раскладки (ops.dayFill: остаток дня и цена одного
@@ -22359,52 +22406,45 @@
     };
 
     // #4408/#4473/#4531: дни, где работа уходит ЗА конец смены, — ЧИСТАЯ мерка над набором заданий
-    // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране): конец последнего задания дня против
-    // потолка резки (`cutEndMin` + нахлёст резки). Это та же арифметика, что стои́т в бейдже
-    // «(N мин)», только выраженная в конце дня — «Отпуск» и обед-ЗАЗОР уже сидят в хранимых стартах.
+    // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране).
+    //
+    // #4563 (ТЗ §15): МЕРЯЕМ ТУ ЖЕ ВЕЛИЧИНУ, ЧТО И ВСЕ ОСТАЛЬНЫЕ, — СУММУ МИНУТ ДНЯ против ёмкости
+    // `dayCapacityMinutes(win, 'cuts')`. Раньше эта мерка была единственной, кто считал ДРУГОЕ:
+    // время ОКОНЧАНИЯ последнего задания против часового потолка. Величину «сумма минут» ей
+    // приходилось подменять сохранённым `planStart`, а тот не знает про паузы, которых в нём нет, —
+    // и мерку можно было обмануть чем угодно, что стои́т в дне, но в старты не попало: обедом внутри
+    // «сквозного» задания (#4559) или цепочкой, начавшейся раньше окна (#4561). Каждый раз это
+    // читалось как новый дефект, а причина была одна — мерка не та. Сумма минут таких дыр не имеет:
+    // обед уже вычтен из ёмкости, а занятость складывается по ВСЕМ записям дня.
+    //
+    // ЗАНЯТОСТЬ — ХРАНИМЫЕ КОЛОНКИ («Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер»), ровно та
+    // сумма, что стои́т в бейдже «(N мин)» у даты и в страже DAY_CAPACITY (#4467). Запись, которую
+    // планировщик не раскладывает, со станка никуда не девается и в сумму входит (#4561).
+    //
     // #4531: вместе с днём отдаёт ВИНОВНИКА — задание, которым день кончается (`cutId`), его номер
     // в дне (`seq` — тот же, что на карточке: позиция по возрастанию planStart) и потолок (`capMin`).
-    // Фразу собирает печать (overfilledDayPhrase), мерка только меряет.
-    //
-    // #4559 (ТЗ §5): ОБЕД ВНУТРИ ЗАДАНИЯ В ХРАНИМЫХ СТАРТАХ НЕ ЛЕЖИТ. Обед попадает в planStart
-    // ЗАЗОРОМ — но только МЕЖДУ заданиями. Задание, которое НАЧАЛОСЬ ДО обеда и идёт СКВОЗЬ него,
-    // станок паузит В ХОДЕ намотки (#3816, `splitMachineQueue.lunchGap`): минуты РАБОТЫ (колонки
-    // «Наладка ножей» + «Сырьё/намотка» + «Резка и Лидер») от этого не растут, а КОНЕЦ окна уезжает
-    // на длительность обеда. Мерка складывала старт с минутами работы и такой день видела короче
-    // на весь обед: боевое 01.08.2026 (issue #4559) — Станок 1, Пн 03.08, задание 08:27 + 448 мин
-    // сквозь обед, реальный конец 16:40 при потолке 16:30, а мерка насчитала 15:55 и переполнения
-    // НЕ УВИДЕЛА. Дальше молчали все, кто на неё опирается: бейджа в шапке дня нет (#4531),
-    // предупреждения нет (#4497), а «⏩ Пересчитать отсюда и до конца» (#4555) и «↻ Пересчитать
-    // наладку» (#4473) выходят из `levelDayLoad` первой же строкой — день остаётся за лимитом,
-    // и оператор видит ровно то, на что жалуется: «пересчёт опять вылез за лимит дня».
-    //
-    // ПОЧЕМУ ИМЕННО ОБЕД, А НЕ ВСЕ ПАУЗЫ. Перерывы 10:00/15:00 (`intraDayBreaks`, ТЗ §5) для
-    // планирования ПРОЗРАЧНЫ — упаковщик их не резервирует и из ёмкости не вычитает; они только
-    // рисуются (карточка очереди #4075, Гант #4007). Требовать от плана запас, которого планировщик
-    // не закладывает, — значит объявить переполненным каждый полный день. Обед — наоборот: его
-    // упаковщик РЕЗЕРВИРУЕТ (#3342/#3816), поэтому и мерка обязана его видеть.
-    //
-    // ДВАЖДЫ НЕ СЧИТАЕМ. Если после «сквозного» задания в дне есть ещё одно, пауза уже лежит
-    // ЗАЗОРОМ перед ним — обед «зашит в старты», и добавлять нечего. Отличаем тем же разбором дня,
-    // что #4408 (`dayLayoutGaps` → `kind === 'lunch'`): своей копии правила здесь нет.
+    // Фразу собирает печать (overfilledDayPhrase), мерка только меряет. `endMin` — во сколько день
+    // кончится, если сложить его встык от начала смены (начало + работа + обед); по построению
+    // `endMin − capMin === overMin`, поэтому фраза «до 16:39 при потолке 16:15 (+24 мин)» сходится.
     //
     // ОДНА МЕРКА НА ВСЕХ ПОТРЕБИТЕЛЕЙ. Её зовут предупреждение (`overfilledDaysOf` → тост #4497) и
     // подсветка шапки дня в очереди (#4531). Наборы заданий у них разные (у предупреждения — scope
     // пересчёта, у очереди — то, что нарисовано), поэтому набор передаётся параметром; арифметика
     // при этом одна и разъехаться не может.
-    //   cuts — задания одного станка; opts: { baseMidnightMs, cutEndMin, maxOverworkCutsMin,
-    //   dayStartMin, lunchStartMin, lunchDurationMin } (обед не задан → прежняя арифметика).
-    // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }], по возрастанию дня.
+    //   cuts — задания одного станка; opts: { baseMidnightMs, dayStartMin, cutEndMin,
+    //   lunchDurationMin, maxOverworkCutsMin }.
+    // → массив [{ dayOffset, endMin, overMin, capMin, loadMin, cutId, seq, cut }], по возрастанию дня.
     function overfilledDaysFromCuts(cuts, opts) {
         var o = opts || {};
         var base = Number(o.baseMidnightMs);
-        var cutEnd = Number(o.cutEndMin);
-        if (!isFinite(cutEnd) || !isFinite(base)) return [];
-        var over = Number(o.maxOverworkCutsMin) || 0;
-        var lunchDur = Number(o.lunchDurationMin) || 0;
-        var lunchStart = Number(o.lunchStartMin);
-        var hasLunch = lunchDur > 0 && isFinite(lunchStart);
-        var dayStart = Number(o.dayStartMin) || 0;
+        var win = { startMin: Number(o.dayStartMin) || 0, cutEndMin: Number(o.cutEndMin),
+                    lunchDurationMin: Number(o.lunchDurationMin) || 0,
+                    maxOverworkCutsMin: Number(o.maxOverworkCutsMin) || 0,
+                    maxOverworkTuneMin: Number(o.maxOverworkTuneMin) || 0 };
+        if (!isFinite(win.cutEndMin) || !isFinite(base)) return [];
+        var cap = dayCapacityMinutes(win, 'cuts');          // #4563: одна функция потолка на всю систему
+        var ceil = dayCeilingMin(win, 'cuts');
+        if (!(cap > 0)) return [];
         var byDay = {};
         (cuts || []).forEach(function(c) {
             if (!c) return;
@@ -22414,38 +22454,22 @@
             var occ = Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
                     + Math.round(stripNum(c.storedCutAndLeaderMin));
             var day = Math.floor(ws / 1440);
-            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, occ: occ, end: ws + occ - day * 1440 });
+            (byDay[day] = byDay[day] || []).push({ cut: c, ws: ws, occ: occ });
         });
         return Object.keys(byDay).map(Number).sort(function(a, b) { return a - b; })
             .map(function(d) {
                 // Порядок в дне — по сохранённому planStart (тем же, чем нумерует карточки очередь).
                 var items = byDay[d].map(function(it, i) { it._i = i; return it; })
                     .sort(function(a, b) { return (a.ws - b.ws) || (a._i - b._i); });
-                // #4559: обед, который станок берёт ВНУТРИ «сквозного» задания, в старты не попал —
-                // добавляем его сами. Зазором обед уже учтён (#4408 dayLayoutGaps) → не добавляем.
-                if (hasLunch) {
-                    var baked = dayLayoutGaps(items.map(function(it) {
-                        return { cutId: it.cut.id, windowStartMin: it.ws, occMin: it.occ };
-                    }), { dayStartMin: dayStart, lunchStartMin: lunchStart, lunchDurationMin: lunchDur })
-                        .some(function(g) { return g.kind === 'lunch'; });
-                    if (!baked) {
-                        var shift = 0;
-                        items.forEach(function(it) {
-                            var s = it.ws - d * 1440 + shift;
-                            it.end = s + it.occ;
-                            if (shift === 0 && s < lunchStart && it.end > lunchStart) {   // #3816: пауза В ХОДЕ намотки
-                                it.end += lunchDur;
-                                shift = lunchDur;
-                            }
-                        });
-                    }
-                }
-                var worst = items[0], worstAt = 0;
-                items.forEach(function(it, i) { if (it.end >= worst.end) { worst = it; worstAt = i; } });
-                return { dayOffset: d, endMin: worst.end, overMin: Math.round(worst.end - cutEnd),
-                         capMin: cutEnd, cutId: worst.cut.id, seq: worstAt + 1, cut: worst.cut };
+                var load = 0;
+                items.forEach(function(it) { load += it.occ; });
+                var last = items[items.length - 1];
+                return { dayOffset: d, loadMin: load,
+                         endMin: round3(win.startMin + load + win.lunchDurationMin),
+                         overMin: Math.round(load - cap), capMin: ceil,
+                         cutId: last.cut.id, seq: items.length, cut: last.cut };
             })
-            .filter(function(r) { return r.endMin > cutEnd + over + 1; });
+            .filter(function(r) { return r.loadMin > cap + 1; });
     }
 
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
@@ -23724,8 +23748,7 @@
         // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart
         // (то, что реально записала последняя генерация), поэтому число совпадает с бейджем на экране.
         if (ppTraceOn()) {
-            var _budget = (Number(dayWindow.cutEndMin) - Number(dayWindow.startMin))
-                - (Number(dayWindow.lunchDurationMin) || 0) + (Number(dayWindow.maxOverworkTuneMin) || 0);
+            var _budget = dayCapacityMinutes(dayWindow, 'cuts');   // #4563: один потолок на всех
             ppTrace('БЕЙДЖ «(N мин)» станка «' + (activeGroup && activeGroup.slitter && activeGroup.slitter.name) + '» (бюджет ≈ ' + Math.round(_budget) + '):');
             Object.keys(dayMinutesBySched).map(Number).sort(function(a, b) { return a - b; }).forEach(function(d) {
                 var total = Math.round(dayMinutesBySched[d]);
