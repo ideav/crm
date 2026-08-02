@@ -6608,6 +6608,17 @@ function Get_block_data($block, $exe=TRUE)
 				$add_path = "";
 			$blocks[$block]["path"][] = $path;
 			$blocks[$block]["add_path"][] = $add_path;
+			# Снять сессию MySQL (issue #4590). Право то же, что на изменение файлов.
+			if(isset($_REQUEST["kill"]))
+			{
+			    if($grant != "WRITE")
+                	die(t9n("[RU]Недостаточно прав для снятия сессий[EN]Insufficient permissions to kill sessions"));
+				check();
+				$killed = Kill_processlist($_REQUEST["kill"]);
+				header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path&warning=".urlencode($killed));
+				myexit();
+			}
+			$blocks[$block]["sessions"][] = count(Get_processlist());
 			$fname = isset($_REQUEST["dir_name"])?strtolower(trim($_REQUEST["dir_name"])):"";
 			if(isset($_REQUEST["mkdir"]))
 			{
@@ -6728,6 +6739,24 @@ function Get_block_data($block, $exe=TRUE)
 #print_r($GLOBALS);
 			break;
 
+		# Сессии MySQL, занятые запросом (issue #4590)
+		case "&processlist":
+			if(RepoGrant() == "BARRED")
+				break;
+			$own = Processlist_own_id();
+			foreach(Get_processlist() as $row)
+			{
+				$blocks[$block]["pid"][] = $row["id"];
+				$blocks[$block]["time"][] = $row["time"];
+				$blocks[$block]["state"][] = htmlspecialchars(trim($row["command"]." ".$row["state"]), ENT_QUOTES, "UTF-8");
+				$blocks[$block]["sql"][] = htmlspecialchars(Processlist_sql_text($row["info"]), ENT_QUOTES, "UTF-8");
+				# Сессию этой самой страницы снимать нечего: кнопка есть, но нажать нельзя.
+				$blocks[$block]["disabled"][] = ($row["id"] === $own) ? "disabled" : "";
+				$blocks[$block]["own"][] = ($row["id"] === $own)
+					? t9n("[RU]эта страница[EN]this page") : "";
+			}
+			break;
+
 		case "&settings":
 			$sql = "SELECT sets.id, typ.val type, val.val settings, val.id tails FROM $z sets JOIN $z typ ON typ.up=sets.id AND typ.t=".SETTINGS_TYPE
                     ." LEFT JOIN $z val ON val.up=sets.id AND val.t=".SETTINGS_VAL
@@ -6787,6 +6816,118 @@ function getRefObjID($refType, $ref){
 	return Insert(1, 1, $refType, $ref, "Import plain ref Object");
 }
 # Check grant to the repository
+# <processlist-4590>
+# Список сессий MySQL в рабочем месте dir_admin (issue #4590): что выполняется прямо сейчас,
+# сколько времени и чем занято, с возможностью снять зависшую сессию.
+#
+# Показываем только сессии, занятые запросом: спящее соединение — не «текущий запрос»,
+# а список из сотни Sleep нечитаем.
+#
+# Все базы Интеграма лежат в одной схеме MySQL и работают под одним пользователем, поэтому
+# SHOW FULL PROCESSLIST отдаёт и чужие сессии — вместе с текстом запросов, где видны чужие
+# данные. Владельцу базы оставляем только его собственные: ядро адресует таблицу инстанса
+# по имени базы, так что имя стоит в тексте запроса отдельным словом. admin видит всё.
+
+define("PROCESSLIST_SQL_CHARS", 127);  # сколько символов запроса показываем
+
+function Processlist_sees_all()
+{
+    return isset($GLOBALS["GLOBAL_VARS"]["user"]) && ($GLOBALS["GLOBAL_VARS"]["user"] == "admin");
+}
+
+# Сессия работает с таблицей текущей базы? Имя базы ищем как отдельное слово, иначе база
+# ups совпала бы с любым upsound.
+function Processlist_is_own($info, $db)
+{
+    if(!strlen($db))
+        return FALSE;
+    return (bool)preg_match("/(?:^|[^A-Za-z0-9_])".preg_quote($db, "/")."(?:[^A-Za-z0-9_]|\$)/", (string)$info);
+}
+
+# Текст запроса одной строкой и не длиннее $chars СИМВОЛОВ (не байт: запросы в utf8mb4,
+# обрезка по байтам разрубила бы кириллицу пополам).
+function Processlist_sql_text($info, $chars = PROCESSLIST_SQL_CHARS)
+{
+    $info = trim(preg_replace("/\s+/u", " ", (string)$info));
+    return function_exists("mb_substr") ? mb_substr($info, 0, $chars, "UTF-8") : substr($info, 0, $chars);
+}
+
+# Отобрать и упорядочить строки SHOW FULL PROCESSLIST: спящие сессии выбрасываем, чужие
+# оставляем только админу, долгие поднимаем наверх.
+function Processlist_rows($rows, $all, $db)
+{
+    $list = array();
+    foreach($rows as $row)
+    {
+        $info = isset($row["Info"]) ? trim((string)$row["Info"]) : "";
+        if(!strlen($info))          # сессия ничем не занята
+            continue;
+        if(!$all && !Processlist_is_own($info, $db))
+            continue;
+        $list[] = array("id"      => isset($row["Id"]) ? (int)$row["Id"] : 0,
+                        "user"    => isset($row["User"]) ? (string)$row["User"] : "",
+                        "db"      => isset($row["db"]) ? (string)$row["db"] : "",
+                        "command" => isset($row["Command"]) ? (string)$row["Command"] : "",
+                        "time"    => isset($row["Time"]) ? (int)$row["Time"] : 0,
+                        "state"   => isset($row["State"]) ? (string)$row["State"] : "",
+                        "info"    => $info);
+    }
+    usort($list, function($a, $b){ return $b["time"] - $a["time"]; });
+    return $list;
+}
+
+# Сессии, которые вправе видеть текущий пользователь.
+# Список за запрос не меняется, а нужен дважды (счётчик и таблица), поэтому запоминаем.
+function Get_processlist($reload = FALSE)
+{
+    global $connection, $z;
+    if(!$reload && isset($GLOBALS["PROCESSLIST"]))
+        return $GLOBALS["PROCESSLIST"];
+    $rows = array();
+    $data_set = @mysqli_query($connection, "SHOW FULL PROCESSLIST");
+    if($data_set)
+        while($row = mysqli_fetch_assoc($data_set))
+            $rows[] = $row;
+    $GLOBALS["PROCESSLIST"] = Processlist_rows($rows, Processlist_sees_all(), $z);
+    return $GLOBALS["PROCESSLIST"];
+}
+
+# Номер сессии, которая обслуживает саму эту страницу: её снимать бессмысленно.
+function Processlist_own_id()
+{
+    global $connection;
+    if($connection instanceof mysqli)
+        return (int)@mysqli_thread_id($connection);
+    return isset($GLOBALS["SQL_THREAD_ID"]) ? (int)$GLOBALS["SQL_THREAD_ID"] : 0;
+}
+
+# Снять сессию. Возвращает текст для {WARNING}: ядро подставляет его в страницу как есть,
+# поэтому в сообщение попадают только наши слова и число.
+function Kill_processlist($pid)
+{
+    global $connection;
+    $pid = (int)$pid;
+    if($pid <= 0)
+        return t9n("[RU]Неверный номер сессии[EN]Invalid session id");
+    if($pid === Processlist_own_id())
+        return t9n("[RU]Сессия $pid обслуживает эту страницу[EN]Session $pid serves this very page");
+    # Снять можно только то, что видно в списке: иначе владелец базы дотянулся бы до чужой сессии.
+    $found = FALSE;
+    foreach(Get_processlist() as $row)
+        if($row["id"] === $pid)
+        {
+            $found = TRUE;
+            break;
+        }
+    if(!$found)
+        return t9n("[RU]Сессия $pid уже завершилась или принадлежит другой базе"
+                  ."[EN]Session $pid has already finished or belongs to another database");
+    if(@mysqli_query($connection, "KILL $pid"))
+        return t9n("[RU]Сессия $pid снята[EN]Session $pid killed");
+    return t9n("[RU]Не удалось снять сессию $pid[EN]Couldn't kill session $pid");
+}
+# </processlist-4590>
+
 function RepoGrant()
 {
 	global $z;
