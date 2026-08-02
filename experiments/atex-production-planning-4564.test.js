@@ -1,7 +1,9 @@
 // #4564 — «Урегулировать» РАЗДЕЛЯЕТ частично выполненное задание.
 //
-// Правило (issue #4564): выполненная часть уезжает отдельным заданием в конец дня, в котором её
-// фактически делали; остаток остаётся в плане, и всё последующее двигает общий механизм.
+// Правило (issue #4564 + уточнение заказчика 02.08.2026): выполненная часть остаётся отдельным
+// заданием, её первая колонка = МОМЕНТ ФАКТИЧЕСКОГО НАЧАЛА («Начато»), а длительность считается по
+// настройке и ФАКТИЧЕСКОМУ числу резок. Остаток остаётся в плане, и всё последующее двигает общий
+// механизм.
 // Сколько сделано — «Кол-во резок факт» задания (реквизит 657315, #4564); журнал событий смены
 // на этот вопрос не отвечает, погонаж — тем более (#4351: у не начатой резки он равен остатку партии).
 //
@@ -33,7 +35,7 @@ var TODAY = 20260803;
 
 // ── 1) чистое решение: кого двигаем, кого делим ───────────────────────────────
 // Станок 1, 31.07: задание на 45 проходов начато и сделано 8 — оно и есть «частично выполненное».
-// В том же дне стоит соседнее задание (10:00) — выполненная часть должна встать ПОСЛЕ него.
+// Выполненная часть остаётся на своём фактическом начале (08:05), соседи по дню на это не влияют.
 var cuts = [
     { id: 'part', slitter: { id: '1' }, plannedRuns: 45, actualRuns: 8,
       planDate: String(tsAt(2026, 7, 31, 8, 0)), startDate: String(tsAt(2026, 7, 31, 8, 5)), endDate: '' },
@@ -54,8 +56,8 @@ assertEqual(settle.splits.length, 1, 'разделяем ровно одно з�
 var sp = settle.splits[0];
 assertEqual([sp.id, sp.doneRuns, sp.restRuns], ['part', 8, 37],
     'сделано 8 из 45 → выполненная часть 8, остаток 37 (работа сохранена)');
-assertEqual(sp.donePlanStart, tsAt(2026, 7, 31, 10, 0) + 60,
-    'выполненная часть встаёт в КОНЕЦ своего фактического дня — после последнего задания того дня');
+assertEqual(sp.donePlanStart, tsAt(2026, 7, 31, 8, 5),
+    '#4572 первая колонка выполненной части = МОМЕНТ ФАКТИЧЕСКОГО НАЧАЛА («Начато»)');
 
 // Остаток занимает место просроченного — перед следующим заданием станка; порядок с 'plain' прежний.
 assertEqual(settle.moves.map(function(m) { return m.id; }), ['plain'],
@@ -91,16 +93,52 @@ assertEqual([unknown.splits.length, unknown.moves.length], [0, 0],
 var setupOnly = settleOne(overdueCut({ plannedRuns: 0, actualRuns: 0, startDate: '' }));
 assertEqual(setupOnly.splits.length, 0, 'сегмент-настройка (0 проходов) не разделяется');
 
-// Задание в своём фактическом дне ОДНО: становиться «в конец» не за кем → начало смены того дня,
-// а не момент «Начато» (пульт пишет его по нажатию ✓ Готово, оно бывает и после смены).
+// Первая колонка — сам момент «Начато», без оглядки на соседей по дню и окно смены: это запись
+// о том, ЧТО БЫЛО. Пульт пишет «Начато» по нажатию ✓ Готово, и оно бывает и после смены.
 var alone = settleOne(overdueCut({ actualRuns: 4,
     startDate: String(tsAt(2026, 7, 30, 20, 34)) }));
-assertEqual(alone.splits[0].donePlanStart, tsAt(2026, 7, 30, 8, 0),
-    'в дне никого больше нет → выполненная часть встаёт на начало смены СВОЕГО фактического дня');
+assertEqual(alone.splits[0].donePlanStart, tsAt(2026, 7, 30, 20, 34),
+    '#4572 фактическое начало как есть — 20:34, а не начало смены и не хвост дня');
 
 assertEqual(planning.cutDoneRuns({ actualRuns: 8 }), 8, 'cutDoneRuns: «Кол-во резок факт» = 8');
 assertEqual(planning.cutDoneRuns({ actualRuns: 0 }), 0, 'cutDoneRuns: известный ноль');
 assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет → null («не знаем»), а не 0');
+
+// ── 4) #4572: окончание выполненной части не налезает на следующее задание ────
+// Начало у неё фактическое, значит и окончание — факт того же ряда: не позже, чем НАЧАЛОСЬ
+// следующее задание станка. Иначе выполненные куски накладываются друг на друга.
+(function() {
+    function withNeighbours(neigh) {
+        var part = { id: 'p', slitter: { id: '1' }, plannedRuns: 20, actualRuns: 5,
+            planDate: String(tsAt(2026, 7, 30, 8, 0)), startDate: String(tsAt(2026, 7, 30, 8, 0)), endDate: '' };
+        var all = [part].concat(neigh || []);
+        return planning.deviationSettlePlan(all, { overdue: [part], early: [] },
+            { todayKey: TODAY, shiftStartMin: 480, shiftEndMin: 970,
+              freeDayMsFor: function() { return Date.UTC(2026, 7, 4); } }).splits[0];
+    }
+    // Следующее задание станка началось по факту в 11:00 — закрываемся им, а не концом смены.
+    var withNext = withNeighbours([{ id: 'n', slitter: { id: '1' }, plannedRuns: 3,
+        planDate: String(tsAt(2026, 7, 30, 11, 0)), startDate: String(tsAt(2026, 7, 30, 11, 0)), endDate: '' }]);
+    assertEqual(withNext.doneCloseTs, tsAt(2026, 7, 30, 11, 0),
+        '#4572 закрываем моментом фактического начала СЛЕДУЮЩЕГО задания — наложения нет');
+    // Следующего нет — конец смены того дня (16:10).
+    assertEqual(withNeighbours([]).doneCloseTs, tsAt(2026, 7, 30, 16, 10),
+        'следующего задания нет → конец смены того дня');
+    // Чужой станок «следующим» не считается.
+    assertEqual(withNeighbours([{ id: 'other', slitter: { id: '2' }, plannedRuns: 3,
+        planDate: String(tsAt(2026, 7, 30, 9, 0)), startDate: String(tsAt(2026, 7, 30, 9, 0)), endDate: '' }]).doneCloseTs,
+        tsAt(2026, 7, 30, 16, 10), 'задание ДРУГОГО станка на окончание не влияет');
+    // «Начато» позже конца смены (пульт пишет его по нажатию ✓ Готово) — закрытие не уходит назад.
+    var late = planning.deviationSettlePlan(
+        [{ id: 'late', slitter: { id: '1' }, plannedRuns: 20, actualRuns: 5,
+           planDate: String(tsAt(2026, 7, 30, 8, 0)), startDate: String(tsAt(2026, 7, 30, 20, 34)), endDate: '' }],
+        { overdue: [{ id: 'late', slitter: { id: '1' }, plannedRuns: 20, actualRuns: 5,
+           planDate: String(tsAt(2026, 7, 30, 8, 0)), startDate: String(tsAt(2026, 7, 30, 20, 34)), endDate: '' }], early: [] },
+        { todayKey: TODAY, shiftStartMin: 480, shiftEndMin: 970,
+          freeDayMsFor: function() { return Date.UTC(2026, 7, 4); } }).splits[0];
+    assertEqual(late.doneCloseTs, tsAt(2026, 7, 30, 20, 34),
+        '#4572 закрытие НЕ раньше собственного начала (начало 20:34 при смене до 16:10)');
+})();
 
 // ── 3) применение: какие операции уходят в общий путь записи ──────────────────
 (function() {
@@ -127,12 +165,12 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
     inst.post = function(path, fields) { posts.push({ path: path, fields: fields }); return Promise.resolve({}); };
 
     inst.splitPartiallyDoneCuts([{ id: 'part', doneRuns: 8, restRuns: 37,
-        donePlanStart: tsAt(2026, 7, 31, 16, 0), restPlanStart: tsAt(2026, 8, 5, 8, 0) - 60 }],
-        { endMin: 970 });   // смена до 16:10
+        donePlanStart: tsAt(2026, 7, 31, 8, 5), doneCloseTs: tsAt(2026, 7, 31, 16, 10),
+        restPlanStart: tsAt(2026, 8, 5, 8, 0) - 60 }]);
 
-    assertEqual(applied.updates, [{ cutId: 'part', planStartTs: tsAt(2026, 7, 31, 16, 0),
+    assertEqual(applied.updates, [{ cutId: 'part', planStartTs: tsAt(2026, 7, 31, 8, 5),
         plannedRuns: 8, firstPartId: 'part' }],
-        'исходная запись остаётся ВЫПОЛНЕННОЙ частью: 8 проходов, конец своего дня, из цепочки вышла');
+        'исходная запись остаётся ВЫПОЛНЕННОЙ частью: 8 проходов, фактическое начало, из цепочки вышла');
     assertEqual(applied.creates.length, 1, 'остаток — одна новая запись');
     assertEqual([applied.creates[0].parentCutId, applied.creates[0].plannedRuns,
                  applied.creates[0].planStartTs, applied.creates[0].firstPartSelf],
@@ -145,7 +183,7 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
         var closed = posts.filter(function(p) { return p.path.indexOf('_m_set/part') === 0; });
         assertEqual(closed.length, 1, 'выполненную часть закрываем ОДНОЙ записью');
         assertEqual(closed[0].fields['t16411'], '2026-07-31 16:10:00',
-            '«Закончено» = конец смены того дня, в котором её фактически делали');
+            '#4572 «Закончено» = момент, посчитанный правилом (не позже начала следующего задания)');
         var repointed = posts.filter(function(p) { return p.path.indexOf('_m_set/tail') === 0; });
         assertEqual(repointed.length, 1, 'продолжение цепочки перецеплено');
         assertEqual(repointed[0].fields['t196458'], 'rest1',
@@ -154,3 +192,5 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
         if (passed !== total) process.exitCode = 1;
     });
 })();
+
+

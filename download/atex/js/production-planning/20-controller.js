@@ -4168,6 +4168,7 @@
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
+            shiftEndMin: Number(win && win.cutEndMin) || 0,   // #4572: чем закрывать выполненную часть
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
         var plan = settle.moves || [];
@@ -4206,7 +4207,7 @@
             return { cutId: p.id, ts: p.planStart, wasTs: planTsSeconds((byId[String(p.id)] || {}).planDate) };
         }), { onWrite: function(done) { self.updateProgress(done); } }).then(function() {
             // #4564: разделение частично выполненных — ПОСЛЕ переносов и до пересборки очереди.
-            return self.splitPartiallyDoneCuts(splits, win);
+            return self.splitPartiallyDoneCuts(splits);
         }).then(function(splitRes) {
             createdRestIds = ((splitRes && splitRes.createdIds) || []).map(String);
             return self.reload();
@@ -4273,7 +4274,7 @@
     // место занимает остаток — он либо становится новой головой (тогда прежние продолжения
     // перецепляются на него), либо остаётся продолжением той же головы.
     // → Promise<{ count: разделённых заданий, createdIds: [id созданных остатков] }>
-    AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits, win) {
+    AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits) {
         var self = this;
         var list = (splits || []).filter(function(sp) { return sp && sp.id != null; });
         if (!list.length) return Promise.resolve({ count: 0, createdIds: [] });
@@ -4281,8 +4282,6 @@
         if (!cutMeta) return Promise.resolve({ count: 0, createdIds: [] });
         var finishedReqId = reqIdByName(cutMeta, CUT_REQ.finishedAt);
         var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
-        var endMin = Number(win && win.endMin);
-        if (!isFinite(endMin)) endMin = 0;
         var byId = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
 
@@ -4321,7 +4320,9 @@
                 // Закрыть выполненную часть концом смены её фактического дня.
                 if (finishedReqId) {
                     var f = {};
-                    f['t' + finishedReqId] = dayCloseStamp(sp.donePlanStart, endMin);
+                    // #4572: момент закрытия посчитан чистым правилом (не позже фактического начала
+                    // следующего задания станка) — здесь только формат DATETIME.
+                    f['t' + finishedReqId] = formatDateTimeStamp(sp.doneCloseTs != null ? sp.doneCloseTs : sp.donePlanStart);
                     tasks.push(function() { return self.post('_m_set/' + id + '?JSON', f); });
                 }
                 // Прежние продолжения цепочки — на новую голову (остаток).
@@ -4383,15 +4384,13 @@
         return Object.keys(keys);
     }
 
-    // #4564: момент закрытия выполненной части — конец смены того дня, в котором её делали.
-    // День берём из её нового планового времени (оно уже в фактическом дне), время — из окна
-    // смены: точнее минуты не знает никто, а день — знает («Начато»).
-    function dayCloseStamp(tsSec, endMin) {
+    // #4572: unix-секунды → DATETIME 'ГГГГ-ММ-ДД ЧЧ:ММ:СС' для записи «Закончено». Само значение
+    // выбирает чистое правило `doneCloseMoment`; здесь только формат.
+    function formatDateTimeStamp(tsSec) {
         var d = new Date(Number(tsSec) * 1000);
-        var h = Math.floor(endMin / 60), m = Math.round(endMin % 60);
         function p(n) { return (n < 10 ? '0' : '') + n; }
         return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
-            + ' ' + p(h) + ':' + p(m) + ':00';
+            + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
     }
 
     // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение

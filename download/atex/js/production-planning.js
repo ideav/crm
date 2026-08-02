@@ -2563,34 +2563,31 @@
         return Math.floor(n);
     }
 
-    // #4564: «конец дня» для задания, которое ФАКТИЧЕСКИ выполнялось в этом дне — плановое время
-    // ПОСЛЕ последнего задания станка в том дне. Больше в дне никого нет (задание единственное) →
-    // начало смены того дня: становиться «в конец» не за кем, а сам момент «Начато» уводил бы
-    // задание за окно смены (пульт пишет его тогда, когда оператор нажал ✓ Готово).
-    // Это плейсхолдер порядка, как и всё остальное в этой функции: минуты расставит пересборка.
-    function dayTailPlanStart(cuts, slitterKey, dayKey, exceptId, factTs, shiftStartMin) {
-        var maxTs = null;
+    // #4572: КОГДА ЗАКРЫТЬ выполненную часть. Начало у неё фактическое, значит и окончание должно
+    // быть фактом того же ряда: не позже, чем НАЧАЛОСЬ СЛЕДУЮЩЕЕ задание этого станка (решение
+    // заказчика 02.08.2026) — иначе выполненные куски налезают друг на друга. «Следующее» ищем по
+    // фактическому началу («Начато»), а не по плану: сравниваем факт с фактом. Нет следующего →
+    // конец смены того дня. И никогда не раньше собственного начала: пульт пишет «Начато» в момент
+    // нажатия ✓ Готово, оно бывает и позже конца смены (боевое: начало 20:34 при смене до 16:10).
+    function doneCloseMoment(cuts, cut, factTs, shiftEndMin) {
+        var sid = cutSlitterKey(cut);
+        var nextFact = null;
         (cuts || []).forEach(function(c) {
-            if (!c || c.id == null || String(c.id) === String(exceptId)) return;
-            if (cutSlitterKey(c) !== slitterKey) return;
-            if (planDateDayKey(c.planDate) !== dayKey) return;
-            var ts = planTsSeconds(c.planDate);
-            if (ts == null) return;
-            if (maxTs == null || ts > maxTs) maxTs = ts;
+            if (!c || c.id == null || String(c.id) === String(cut && cut.id)) return;
+            if (cutSlitterKey(c) !== sid) return;
+            var ts = planTsSeconds(c.startDate);
+            if (ts == null || ts <= factTs) return;
+            if (nextFact == null || ts < nextFact) nextFact = ts;
         });
-        if (maxTs != null) return maxTs + 60;
-        var midnight = dayMidnightMsOf(factTs);
-        if (midnight == null) return factTs;
-        return Math.floor(midnight / 1000) + (Number(shiftStartMin) || 0) * 60;
-    }
-
-    // #4566: полночь дня, в котором лежит момент (unix-секунды) → мс. Предикаты дня контроллера
-    // (dayIsWorking / dayIsFrozen / slitterOnVacationDay) спрашивают именно полночь.
-    function dayMidnightMsOf(tsSeconds) {
-        var ts = Number(tsSeconds);
-        if (!isFinite(ts) || ts <= 0) return null;
-        var d = new Date(ts * 1000);
-        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+        var close = nextFact;
+        if (isFinite(shiftEndMin) && shiftEndMin > 0) {
+            var d = new Date(factTs * 1000);
+            var shiftEnd = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+                Math.floor(shiftEndMin / 60), Math.round(shiftEndMin % 60), 0, 0).getTime() / 1000);
+            if (close == null || shiftEnd < close) close = shiftEnd;
+        }
+        if (close == null || close < factTs) close = factTs;
+        return close;
     }
 
     // #4346/#4564: «Урегулировать» — ОДНО решение на каждое отклонившееся задание. Правила ТЗ:
@@ -2598,8 +2595,10 @@
     //     ставит задание на правильное место внутри того дня;
     //   • ЧАСТИЧНО ВЫПОЛНЕННОЕ просроченное (сделано 0 < D < план) — РАЗДЕЛЯЕТСЯ (#4564):
     //     выполненная часть (D проходов) остаётся ИСХОДНОЙ записью — при ней «Начато», погонаж,
-    //     счётчики и события смены — и встаёт в конец дня, в котором её фактически делали (день
-    //     «Начато»); остаток (план − D) уезжает НОВОЙ записью на место просроченного (ниже).
+    //     счётчики и события смены. Её первая колонка = МОМЕНТ ФАКТИЧЕСКОГО НАЧАЛА («Начато»), а
+    //     длительность — по настройке и ФАКТИЧЕСКОМУ числу резок D (решение заказчика 02.08.2026):
+    //     это запись о том, ЧТО БЫЛО, а не место в плане, поэтому ни «конец дня», ни начало смены
+    //     тут ни при чём. Остаток (план − D) уезжает НОВОЙ записью на место просроченного (ниже).
     //     Выполненная часть закрывается («Закончено»), иначе назавтра она снова отклонение;
     //   • сделаны ВСЕ проходы, но задание не закрыто (D ≥ план) — разделять нечего: работа
     //     переезжает в свой фактический день целиком и закрывается там же;
@@ -2624,7 +2623,7 @@
     // страж не отбрасывает и планировщик не пришпиливает (`ctx.isManualMoveCut`).
     // → {
     //     moves:  [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }],
-    //     splits: [{ id, doneRuns, restRuns, donePlanStart, restPlanStart, restReason }]
+    //     splits: [{ id, doneRuns, restRuns, donePlanStart, doneCloseTs, restPlanStart, restReason }]
     //   }
     // splits[i].restRuns = 0 — остатка нет: задание целиком уезжает в свой фактический день и там
     // закрывается (новая запись не создаётся).
@@ -2657,7 +2656,8 @@
             if (factTs == null) return;   // не знаем, в каком дне это делали — не выдумываем
             var sp = {
                 id: String(c.id), doneRuns: doneRuns, restRuns: Math.max(0, planned - doneRuns),
-                donePlanStart: dayTailPlanStart(cuts, cutSlitterKey(c), planDateDayKey(factTs), c.id, factTs, shiftStartMin),
+                donePlanStart: factTs,
+                doneCloseTs: doneCloseMoment(cuts, c, factTs, Number(o.shiftEndMin)),
                 restPlanStart: null, restReason: null
             };
             splits.push(sp);
@@ -16868,6 +16868,7 @@
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
+            shiftEndMin: Number(win && win.cutEndMin) || 0,   // #4572: чем закрывать выполненную часть
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
         var plan = settle.moves || [];
@@ -16906,7 +16907,7 @@
             return { cutId: p.id, ts: p.planStart, wasTs: planTsSeconds((byId[String(p.id)] || {}).planDate) };
         }), { onWrite: function(done) { self.updateProgress(done); } }).then(function() {
             // #4564: разделение частично выполненных — ПОСЛЕ переносов и до пересборки очереди.
-            return self.splitPartiallyDoneCuts(splits, win);
+            return self.splitPartiallyDoneCuts(splits);
         }).then(function(splitRes) {
             createdRestIds = ((splitRes && splitRes.createdIds) || []).map(String);
             return self.reload();
@@ -16973,7 +16974,7 @@
     // место занимает остаток — он либо становится новой головой (тогда прежние продолжения
     // перецепляются на него), либо остаётся продолжением той же головы.
     // → Promise<{ count: разделённых заданий, createdIds: [id созданных остатков] }>
-    AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits, win) {
+    AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits) {
         var self = this;
         var list = (splits || []).filter(function(sp) { return sp && sp.id != null; });
         if (!list.length) return Promise.resolve({ count: 0, createdIds: [] });
@@ -16981,8 +16982,6 @@
         if (!cutMeta) return Promise.resolve({ count: 0, createdIds: [] });
         var finishedReqId = reqIdByName(cutMeta, CUT_REQ.finishedAt);
         var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
-        var endMin = Number(win && win.endMin);
-        if (!isFinite(endMin)) endMin = 0;
         var byId = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
 
@@ -17021,7 +17020,9 @@
                 // Закрыть выполненную часть концом смены её фактического дня.
                 if (finishedReqId) {
                     var f = {};
-                    f['t' + finishedReqId] = dayCloseStamp(sp.donePlanStart, endMin);
+                    // #4572: момент закрытия посчитан чистым правилом (не позже фактического начала
+                    // следующего задания станка) — здесь только формат DATETIME.
+                    f['t' + finishedReqId] = formatDateTimeStamp(sp.doneCloseTs != null ? sp.doneCloseTs : sp.donePlanStart);
                     tasks.push(function() { return self.post('_m_set/' + id + '?JSON', f); });
                 }
                 // Прежние продолжения цепочки — на новую голову (остаток).
@@ -17083,15 +17084,13 @@
         return Object.keys(keys);
     }
 
-    // #4564: момент закрытия выполненной части — конец смены того дня, в котором её делали.
-    // День берём из её нового планового времени (оно уже в фактическом дне), время — из окна
-    // смены: точнее минуты не знает никто, а день — знает («Начато»).
-    function dayCloseStamp(tsSec, endMin) {
+    // #4572: unix-секунды → DATETIME 'ГГГГ-ММ-ДД ЧЧ:ММ:СС' для записи «Закончено». Само значение
+    // выбирает чистое правило `doneCloseMoment`; здесь только формат.
+    function formatDateTimeStamp(tsSec) {
         var d = new Date(Number(tsSec) * 1000);
-        var h = Math.floor(endMin / 60), m = Math.round(endMin % 60);
         function p(n) { return (n < 10 ? '0' : '') + n; }
         return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
-            + ' ' + p(h) + ':' + p(m) + ':00';
+            + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
     }
 
     // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение
