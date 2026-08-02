@@ -178,6 +178,26 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
     assertEqual(s.moves.length, 0, 'ничего не переносим целиком: место остатка не меняется');
 })();
 
+// ── 6) #4588: у записи, созданной «Урегулировать», колонки наладки ЗАПОЛНЕНЫ ──
+// Боевое: остаток 657478 (25 проходов, 03.08 — день заморожен) остался с ПУСТЫМИ «Наладка
+// ножей»/«Сырьё-намотка». Детектор считал им 0 и вечно показывал «— → 0 мин» и кнопку
+// «↻ Пересчитать наладку», которая ничего не меняла: колонки пишет persistCutSetupColumns, а он
+// замороженный день пропускал. Ручное действие помечает свои операции — и колонки пишутся.
+(function() {
+    var inst = Object.create(Controller.prototype);
+    inst.cuts = [{ id: 'part', slitter: { id: '1' }, plannedRuns: 45, actualRuns: 8, firstPartId: 'part',
+        planDate: String(tsAt(2026, 7, 31, 8, 0)), startDate: String(tsAt(2026, 7, 31, 8, 5)), endDate: '' }];
+    inst.meta = { cut: { id: '1078', reqs: [{ id: '16411', val: 'Закончено' }] } };
+    var seen = null;
+    inst.applySplitPlan = function(ops) { seen = ops; return Promise.resolve(true); };
+    inst.post = function() { return Promise.resolve({}); };
+    inst.splitPartiallyDoneCuts([{ id: 'part', doneRuns: 8, restRuns: 37,
+        donePlanStart: tsAt(2026, 7, 31, 8, 5), doneCloseTs: tsAt(2026, 7, 31, 16, 10),
+        restPlanStart: tsAt(2026, 8, 3, 8, 0) }]);
+    assertEqual(seen && seen.manual, true,
+        '#4588 операции разделения помечены как РУЧНЫЕ — колонки наладки пишутся и в замороженном дне');
+})();
+
 // ── 3) применение: какие операции уходят в общий путь записи ──────────────────
 (function() {
     var inst = Object.create(Controller.prototype);

@@ -17068,6 +17068,7 @@
                 });
             }
         });
+        ops.manual = true;   // #4588: это ручное действие — колонки пишем и в замороженном дне
         if (!ops.updates.length) return Promise.resolve({ count: 0, createdIds: [] });
         ops.onCreated = function(cr, newId) {
             if (cr && cr.splitOf) createdBySplit[String(cr.splitOf)] = String(newId);
@@ -20282,9 +20283,13 @@
     // ограничивает набор своим станком и видимыми днями). null — как раньше, вся очередь.
     // #4499: planCols — колонки, посчитанные УПАКОВЩИКОМ (cutId → {knife, material, cutTime}).
     // Их даёт applySplitPlan из `ops`; для остальных заданий колонки считаются как раньше.
-    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds, planCols) {
+    AtexProductionPlanning.prototype.persistCutSetupColumns = function(onlyIds, planCols, opts) {
         var self = this;
-        var res = this.computeCutSetupUpdates(onlyIds || null, planCols ? { planCols: planCols } : null);
+        // #4588: у РУЧНОГО действия колонки наладки пишутся и в замороженном дне — иначе созданная
+        // им запись остаётся с ПУСТЫМИ «Наладка ножей»/«Сырьё-намотка», а детектор вечно показывает
+        // «— → 0 мин» и кнопку «↻ Пересчитать наладку», которая ничего не меняет (боевое #4588).
+        var res = this.computeCutSetupUpdates(onlyIds || null,
+            { planCols: planCols || null, manual: !!(opts && opts.manual) });
         var reqs = res.reqs, updates = res.updates;
         if (!updates.length) return Promise.resolve();
         // «Время старта» (planStart) на пути ПЛАНИРОВАНИЯ пишет splitMachineQueue/applySplitPlan —
@@ -21349,7 +21354,8 @@
         }).then(function() { return self.reload(); }).then(function() {
             return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
-            return self.persistCutSetupColumns(null, planColsByCut);   // #3698 + #4499: колонки — от упаковщика
+            return self.persistCutSetupColumns(null, planColsByCut,
+                (ops && ops.manual) ? { manual: true } : null);   // #3698 + #4499: колонки — от упаковщика
         }).then(function() {
             return self.reconcilePlanStarts();   // #4438: план и хранимые колонки обязаны сойтись СРАЗУ
         }).then(function() {
