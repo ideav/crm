@@ -127,5 +127,32 @@ assertEqual(sp.restReason, 'before-next', 'причина места — «пе�
         'незамороженный рабочий день — открыт');
 })();
 
+// ── 5) #4572: ВЫПОЛНЕННОЕ задание — факт, а не план ─────────────────────────
+// Выполненная часть встаёт в свой ФАКТИЧЕСКИЙ день, а он бывает выходным: работу делали в
+// субботу 01.08. Планировщик такой день удержать не может («не удержало свой день — день
+// нерабочий», #4434) и уносил задание вперёд — план оказывался в будущем при факте в прошлом,
+// и задание тут же становилось «выполнено досрочно» (issue #4572).
+// Правило: у выполненного («Закончено» заполнено) планировщику решать нечего — его во входе нет.
+(function() {
+    var c = Object.create(Controller.prototype);
+    var done = { id: 'done', slitter: { id: '1' }, plannedRuns: 25, status: '',
+        planDate: String(tsAt(2026, 8, 1, 8, 0)), startDate: String(tsAt(2026, 8, 1, 20, 30)),
+        endDate: String(tsAt(2026, 8, 1, 16, 30)) };
+    var open1 = { id: 'open', slitter: { id: '1' }, plannedRuns: 18, status: '',
+        planDate: String(tsAt(2026, 8, 3, 8, 0)), startDate: '', endDate: '' };
+    var started = { id: 'run', slitter: { id: '1' }, plannedRuns: 40, status: '',
+        planDate: String(tsAt(2026, 8, 3, 9, 0)), startDate: String(tsAt(2026, 8, 3, 9, 0)), endDate: '' };
+    c.cuts = [done, open1, started];
+    // Тот же отбор, что делает buildSequenceOps.
+    var planInput = c.cuts.filter(function(x) {
+        if (String(x && x.status || '').trim() === 'Завершён') return false;
+        return planning.planTsSeconds(x && x.endDate) == null;
+    });
+    assertEqual(planInput.map(function(x) { return x.id; }), ['open', 'run'],
+        '#4572 выполненное задание («Закончено» заполнено) в планировщик не попадает');
+    assertEqual(planInput.indexOf(done), -1,
+        'его фактический день — суббота — больше не «решение планировщика», которое можно отменить');
+})();
+
 console.log('\n' + passed + '/' + total + ' passed');
 if (passed !== total) process.exitCode = 1;
