@@ -114,6 +114,6 @@ assertEqual(Object.keys(byId).sort(), ['e1', 'e2', 'o1', 'o2', 'o3'], 'план 
 
 // Пустые группы → пустой план (повторное «Урегулировать» ничего не пишет).
 assertEqual(planning.deviationSettlePlan(cuts, { overdue: [], early: [] }, { todayKey: TODAY, shiftStartMin: 480 }),
-    { moves: [], splits: [], skipped: [] }, 'нет отклонений — переносить нечего');
+    { moves: [], splits: [] }, 'нет отклонений — переносить нечего');
 
 console.log('\n' + passed + '/' + total + ' passed');

@@ -4044,9 +4044,12 @@
         return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     };
 
-    // #4566: МОЖНО ЛИ ставить станку работу в этот день — ОДИН предикат на все пути «Урегулировать».
-    // День закрыт, если он нерабочий по «Календарю» (#3788), ЗАМОРОЖЕН (#4326: для автоматики
-    // замороженный день закрыт полностью) или у станка в этот день «Отпуск» (#3876).
+    // #4566: МОЖНО ЛИ ставить станку работу в этот день — ОДИН предикат вместо трёх проверок по
+    // месту. День закрыт, если он нерабочий по «Календарю» (#3788), ЗАМОРОЖЕН (#4326) или у станка
+    // в этот день «Отпуск» (#3876). Им живёт `nearestFreeDayMs` — «куда положить, когда сдвигать
+    // НЕ ОТ ЧЕГО» (у станка нет следующего задания). Выбор места ПЕРЕД следующим заданием этим
+    // предикатом не ограничен: там очередь сдвигается подряд, и пропуск дня оставил бы разрыв
+    // (#4569, решение заказчика 02.08.2026).
     AtexProductionPlanning.prototype.dayOpenForWork = function(slitterId, dayMidnightMs) {
         if (!this.dayIsWorking(dayMidnightMs)) return false;
         if (this.dayIsFrozen(dayMidnightMs)) return false;
@@ -4165,22 +4168,10 @@
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
-            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); },
-            // #4566: заморожен ли день момента ts. Поставленное в замороженный день там и
-            // останется — планировщик такие задания пришпиливает и все операции по ним отбрасывает.
-            dayFrozenAt: function(ts) { return self.dayIsFrozen(dayMidnightMsOf(ts)); }
+            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
         var plan = settle.moves || [];
         var splits = settle.splits || [];
-        // #4566: разделение не сделано, потому что фактический день заморожен — говорим прямо,
-        // иначе отклонение просто молча останется в списке.
-        (settle.skipped || []).forEach(function(s) {
-            console.error('[pp] 🔒 #4566: задание ' + s.id + ' не разделено — его фактический день заморожен');
-        });
-        if ((settle.skipped || []).length) {
-            this.notify('Не разделено (фактический день заморожен): ' + settle.skipped.length
-                + ' — снимите заморозку того дня и повторите', 'warning');
-        }
         // #4564: факт проходов не приходит из отчёта — начатые задания остаются на месте, и об
         // этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со дня
         // работу, которая идёт на станке.
