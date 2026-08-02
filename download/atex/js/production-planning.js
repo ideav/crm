@@ -18018,9 +18018,8 @@
         if (runs === was) { back(); return Promise.resolve(false); }
         if (cutIsStarted(cut)) { this.notify('Задание начато — число проходов не меняем', 'info'); back(); return Promise.resolve(false); }
         if (cut.fixed) { this.notify('Задание зафиксировано (🔒) — снимите фиксацию, чтобы менять проходы', 'info'); back(); return Promise.resolve(false); }
-        if (typeof this.dayIsFrozen === 'function' && this.dayIsFrozen(cut.planDate)) {
-            this.notify('День задания заморожен — проходы не меняем', 'info'); back(); return Promise.resolve(false);
-        }
+        // #4588: заморозка дня РУЧНУЮ правку не запрещает — она ограничивает автоматику. Замок 🔒
+        // и «начато» проверены выше: это другие правила, они остаются.
         // #3635 п.5/#4209: хвост настройки (0 проходов) резки не несёт — проходы задаёт голова цепочки.
         if (!(was > 0)) {
             this.notify('Это хвост настройки (0 проходов) — проходы задаются в головном сегменте задания', 'info');
@@ -22905,16 +22904,12 @@
             this.notify('У задания нет «Даты план» — от него не отсчитать «отсюда и до конца»', 'error');
             return Promise.resolve(false);
         }
-        // #4436: замороженный день не трогает НИКАКОЙ пересчёт. Начать «отсюда» внутри такого дня
-        // нельзя — задание из scope всё равно выпадет, и кнопка сработала бы вхолостую.
-        if (typeof this.dayIsFrozen === 'function' && this.dayIsFrozen(cut.planDate)) {
-            this.notify('День задания заморожен (🔒) — пересчёт его не меняет. Снимите заморозку дня', 'info');
-            return Promise.resolve(false);
-        }
-        var scopeOpts = { fromCutId: String(cut.id), toEnd: true };
+        // #4588: «⏩ Пересчитать отсюда» — кнопка ОПЕРАТОРА, и заморозка её не ограничивает
+        // (правило «ручное действие не получает отказа»). Прежде она отказывала прямо здесь.
+        var scopeOpts = { fromCutId: String(cut.id), toEnd: true, manual: true };
         var scopeIds = this.recalcScopeCutIds(sid, scopeOpts);
         if (!scopeIds.length) { this.notify('От этого задания вперёд пересчитывать нечего', 'info'); return Promise.resolve(false); }
-        var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
+        var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true, manual: true }).updates || [];
         var startOps = this.recalcStartUpdates(sid, {
             updates: stale, fromCutId: scopeOpts.fromCutId, toEnd: true
         });

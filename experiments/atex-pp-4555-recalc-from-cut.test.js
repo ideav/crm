@@ -109,7 +109,10 @@ function fixture() {
     assert(all.indexOf('X') < 0, '#4555 регресс: чужой станок по-прежнему вне scope');
 })();
 
-// ── 4. Замороженный день выбранного задания — пересчёт отказывается ─────────────────────────
+// ── 4. Замороженный день выбранного задания — пересчёт РАБОТАЕТ (#4588) ─────────────────────
+// Прежде кнопка отказывала: «День задания заморожен — снимите заморозку». Заморозка ограничивает
+// АВТОМАТИКУ, а «⏩ Пересчитать отсюда» жмёт оператор — ручное действие отказа не получает
+// (правило заказчика 02.08.2026). Иначе явно кривой замороженный день починить нечем.
 (function() {
     var msgs = [];
     var c = makeController(fixture(), {
@@ -119,10 +122,12 @@ function fixture() {
     });
     c.dayIsFrozen = function() { return true; };
     var target = c.cuts.filter(function(x) { return x.id === 'B'; })[0];
-    return c.recalcFromCut(target).then(function(res) {
-        assert(res === false, '#4555 замороженный день: пересчёт не выполняется (#4436)');
-        assert(msgs.some(function(x) { return /заморожен/i.test(x.m); }),
-            '#4555 замороженный день: оператору сказано почему', msgs.map(function(x) { return x.m; }).join(' | '));
+    return c.recalcFromCut(target).then(function() {
+        assert(!msgs.some(function(x) { return /снимите заморозку/i.test(x.m); }),
+            '#4588 кнопка оператора НЕ отказывает из-за заморозки дня',
+            msgs.map(function(x) { return x.m; }).join(' | '));
+        assert(c.recalcScopeCutIds('101', { fromCutId: 'B', toEnd: true, manual: true }).length > 0,
+            '#4588 задания замороженного дня попадают в набор ручного пересчёта');
     });
 })();
 
