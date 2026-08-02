@@ -922,6 +922,14 @@
         // берём сохранённый старт (поведение не меняется для корректных данных).
         var startMs = (startMsOverride != null && isFinite(Number(startMsOverride))) ? Number(startMsOverride) : tr.startMs;
         var endMs = startMs + (cutBarMinutes(cut) + (Number(setupMin) || 0)) * 60000;
+        // #4572: у ВЫПОЛНЕННОГО задания правый край — «Закончено». Для него бар это уже не план, а
+        // запись о том, что было: начало = фактическое начало, конец = фактическое окончание (оно
+        // и так не позже, чем НАЧАЛОСЬ следующее задание станка — так его пишет «Урегулировать»).
+        // Иначе расчётная длина (наладка + резки) вылезала за это окно и бары налезали друг на
+        // друга. Только УКОРАЧИВАЕМ: удлинять бар фактом нельзя — это вернуло бы наложения,
+        // от которых ушли (#4334 — факт не двигает и не растягивает ПЛАНОВЫЙ бар).
+        var factEndMs = parseDateTimeMs(cut && cut.endDate);
+        if (factEndMs != null && factEndMs > startMs && factEndMs < endMs) endMs = factEndMs;
         // #3708: не заходить за старт следующего задания того же станка. Длительности хранятся
         // округлёнными вверх (#3635 п.4), а cut_plan_date — по дробному времени, поэтому бар бывает
         // на доли минуты длиннее реального окна и налезал на следующий бар.
@@ -943,6 +951,18 @@
         return w ? w.mins : 0;
     }
 
+    // #4572: сколько минут РЕЗКИ показывать у выполненного задания, чтобы бар уложился в его
+    // фактическое окно («Начато» → «Закончено»). Не выполнено или окно шире расчёта → как считали.
+    // Наладка внутри окна остаётся, режется хвост резки; ноль не отдаём — бар должен быть виден.
+    function clampDoneCutMinutes(cut, cutMin, setupMin) {
+        var startMs = parseDateTimeMs(cut && cut.planDate);
+        var endMs = parseDateTimeMs(cut && cut.endDate);
+        if (startMs == null || endMs == null || endMs <= startMs) return cutMin;
+        var windowMin = (endMs - startMs) / 60000 - (Number(setupMin) || 0);
+        if (!(windowMin > 0) || windowMin >= cutMin) return cutMin;
+        return round3(windowMin);
+    }
+
     // #3675 п.3: ширины сегментов бара (px) при масштабе pxPerMin: [наладка ножей][смена сырья][резка].
     // Наладка слева (раньше по времени), резка справа (главный цвет статуса). Резка — floor до minPx
     // (виден бар и текст). Сегменты наладки с минутами > 0 — floor до 3px, чтобы тонкие были заметны.
@@ -951,6 +971,10 @@
         var ppm = pxPerMin > 0 ? pxPerMin : GANTT_PX_PER_MIN;
         var floor = minPx > 0 ? minPx : GANTT_MIN_BAR_PX;
         var cutMin = cutBarMinutes(cut);   // #3700: намотка+лидер (cut_time) или окно cutTimeRange (фолбэк)
+        // #4572: у выполненного задания ширина бара — по фактическому окну (см. cutBarWindow), иначе
+        // нарисованный бар шире подписи и налезает на соседа. Наладку из окна не выбрасываем: она
+        // тоже была, поэтому урезаем именно резку — остаток окна после наладки.
+        cutMin = clampDoneCutMinutes(cut, cutMin, cutSetupMin(cut).total);
         var cutPx = Math.max(round3(cutMin * ppm), floor);
         var setup = cutSetupMin(cut);
         function segPx(min) { return min > 0 ? Math.max(round3(min * ppm), 3) : 0; }

@@ -2444,9 +2444,14 @@
             if (!c) return;
             var tsSec = Number(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
             if (!isFinite(tsSec) || tsSec <= 0 || !isFinite(base)) return;   // нет planStart — нечего ставить на ось
+            // #4572: у ВЫПОЛНЕННОГО задания окно заканчивается «Закончено» — это уже не план, а
+            // запись о том, что было. Иначе расчётная длина (наладка + резки) вылезала за фактическое
+            // окно и карточки налезали друг на друга.
+            var factEndSec = planTsSeconds(c.endDate);
             items.push({
                 cutId: String(c.id),
                 windowStartMin: round3((tsSec * 1000 - base) / 60000),   // окно = начало настройки
+                factEndMin: factEndSec == null ? null : round3((factEndSec * 1000 - base) / 60000),
                 setupMin: round3(num(c.storedKnifeSetupMin) + num(c.storedMaterialWindingMin)),
                 durationMin: round3(num(c.storedCutAndLeaderMin) || num(c.duration))   // намотка + лидер
             });
@@ -2464,12 +2469,20 @@
             var windowStartMin = it.windowStartMin;
             var startMin = round3(windowStartMin + it.setupMin);            // старт намотки (после настройки)
             var finishMin = round3(startMin + it.durationMin);
+            var durationMin = it.durationMin;
+            // #4572: выполненное — только УКОРАЧИВАЕМ до «Закончено». Удлинять фактом нельзя: это
+            // вернуло бы наложения, от которых ушли (#4334 — факт не растягивает плановое окно).
+            // Наладка внутри окна остаётся: она тоже была, режется хвост намотки.
+            if (it.factEndMin != null && it.factEndMin > startMin && it.factEndMin < finishMin) {
+                finishMin = it.factEndMin;
+                durationMin = round3(finishMin - startMin);
+            }
             out.push({
                 cutId: it.cutId,
                 startMin: startMin,
                 finishMin: finishMin,
                 setupMin: it.setupMin,
-                durationMin: it.durationMin,
+                durationMin: durationMin,
                 // Лидер уже включён в durationMin (storedCutAndLeaderMin = намотка + лидер, #3700) —
                 // отдельной величины в сохранённом нет. null (а не 0): окно/минуты считают его 0
                 // (не двойной счёт), а модалка тайминга (buildCutTimingCtx) оценивает лидер для
