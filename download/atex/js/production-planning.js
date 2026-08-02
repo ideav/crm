@@ -2579,9 +2579,18 @@
             if (maxTs == null || ts > maxTs) maxTs = ts;
         });
         if (maxTs != null) return maxTs + 60;
-        var d = new Date(Number(factTs) * 1000);
-        var midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+        var midnight = dayMidnightMsOf(factTs);
+        if (midnight == null) return factTs;
         return Math.floor(midnight / 1000) + (Number(shiftStartMin) || 0) * 60;
+    }
+
+    // #4566: полночь дня, в котором лежит момент (unix-секунды) → мс. Предикаты дня контроллера
+    // (dayIsWorking / dayIsFrozen / slitterOnVacationDay) спрашивают именно полночь.
+    function dayMidnightMsOf(tsSeconds) {
+        var ts = Number(tsSeconds);
+        if (!isFinite(ts) || ts <= 0) return null;
+        var d = new Date(ts * 1000);
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
     }
 
     // #4346/#4564: «Урегулировать» — ОДНО решение на каждое отклонившееся задание. Правила ТЗ:
@@ -2606,9 +2615,18 @@
     // Шаг плейсхолдера — минута назад от «следующего» (смена начинается в 08:00, так что запаса
     // до полуночи хватает на любое реальное число просроченных заданий станка).
     // Чистая (DOM/сеть не трогает; календарь приходит колбэком freeDayMsFor) — покрыта тестом.
+    // **ЗАМОРОЖЕННЫЙ ДЕНЬ ЗАКРЫТ И ДЛЯ «Урегулировать» (#4566).** Задание, чья «Дата план» попала в
+    // замороженный день, планировщик пришпиливает (временный `c.fixed`) и все операции по нему
+    // отбрасывает — значит поставленное туда там и останется. Поэтому: место просроченному ищем
+    // ТОЛЬКО в незамороженных днях (следующее задание станка, стоящее в замороженном дне, якорем не
+    // берём — за ним последует ближайший свободный день), а разделение, чей ФАКТИЧЕСКИЙ день
+    // заморожен, не делаем вовсе и называем такие задания вызывающему. Боевое #4566: остаток
+    // разделения встал на 03.08 07:59 — в замороженный день, поверх двух 🔒-заданий 08:00–16:32, и
+    // пересборка сдвинуть его уже не могла: день показал 521 мин при потолке 455.
     // → {
     //     moves:  [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }],
-    //     splits: [{ id, doneRuns, restRuns, donePlanStart, restPlanStart, restReason }]
+    //     splits: [{ id, doneRuns, restRuns, donePlanStart, restPlanStart, restReason }],
+    //     skipped:[{ id, reason: 'frozen-fact-day' }]
     //   }
     // splits[i].restRuns = 0 — остатка нет: задание целиком уезжает в свой фактический день и там
     // закрывается (новая запись не создаётся).
@@ -2617,8 +2635,13 @@
         var today = Number(o.todayKey);
         var shiftStartMin = Number(o.shiftStartMin) || 0;
         var g = groups || {};
+        // #4566: заморожен ли день, в котором лежит момент ts. Предикат приходит колбэком (как
+        // календарь freeDayMsFor) — функция остаётся чистой. Не передан → считаем день открытым:
+        // «Заморозки» может не быть в сборке вовсе.
+        var dayFrozen = typeof o.dayFrozenAt === 'function' ? o.dayFrozenAt : function() { return false; };
         var plan = [];
         var splits = [];
+        var skipped = [];
         (g.early || []).forEach(function(c) {
             var ts = planTsSeconds(c && c.endDate);
             if (ts == null || !c || c.id == null) return;
@@ -2629,7 +2652,7 @@
         // #4564: частично выполненные — отдельным решением. Их выполненная часть уходит в СВОЙ
         // фактический день, поэтому в очередь просроченных («перед следующим заданием станка»)
         // встаёт только ОСТАТОК; заданию без остатка в этой очереди места не нужно вовсе.
-        var splitById = {};
+        var splitById = {}, skippedById = {};
         (g.overdue || []).forEach(function(c) {
             if (!c || c.id == null) return;
             var planned = Math.floor(Number(c.plannedRuns) || 0);
@@ -2639,6 +2662,14 @@
             var startTs = planTsSeconds(c.startDate);
             var factTs = startTs != null ? startTs : planTsSeconds(c.planDate);
             if (factTs == null) return;   // не знаем, в каком дне это делали — не выдумываем
+            // #4566: фактический день ЗАМОРОЖЕН — выполненную часть туда не переносим (в замороженный
+            // день автоматика не кладёт ничего) и задание не трогаем вовсе: половинчатое разделение
+            // оставило бы остаток без выполненной части. Диспетчер снимет заморозку и повторит.
+            if (dayFrozen(factTs)) {
+                skipped.push({ id: String(c.id), reason: 'frozen-fact-day' });
+                skippedById[String(c.id)] = true;
+                return;
+            }
             var sp = {
                 id: String(c.id), doneRuns: doneRuns, restRuns: Math.max(0, planned - doneRuns),
                 donePlanStart: dayTailPlanStart(cuts, cutSlitterKey(c), planDateDayKey(factTs), c.id, factTs, shiftStartMin),
@@ -2653,6 +2684,9 @@
             var sp = splitById[String(c.id)];
             // #4564: у задания без остатка (сделаны все проходы) двигать в очереди нечего.
             if (sp && sp.restRuns <= 0) return;
+            // #4566: разделение отменено (фактический день заморожен) — задание не двигаем и как
+            // обычное просроченное: его выполненная часть осталась бы без своего дня.
+            if (skippedById[String(c.id)]) return;
             // #4564: НАЧАТОЕ задание с НЕИЗВЕСТНЫМ фактом проходов остаётся неприкосновенным
             // (#4381). Известный ноль — другое дело: сделано ничего, двигать нечему мешать.
             // Факт неизвестен, когда отчёт не отдаёт колонку «Кол-во резок факт»; двигать
@@ -2675,6 +2709,9 @@
                 if (!isFinite(pk) || !isFinite(today) || pk < today) return;
                 var ts = planTsSeconds(c.planDate);
                 if (ts == null) return;
+                // #4566: задание, стоящее в ЗАМОРОЖЕННОМ дне, якорем не берём — встав перед ним, мы
+                // положили бы работу в закрытый для автоматики день, откуда её уже не сдвинуть.
+                if (dayFrozen(ts)) return;
                 if (anchorTs == null || ts < anchorTs) anchorTs = ts;
             });
             // #4564: место в очереди достаётся ОСТАТКУ разделяемого задания, а не самому заданию —
@@ -2701,7 +2738,7 @@
         // freeDayMsFor молчит) не создаём: лучше оставить задание целым, чем разрезать его и
         // потерять остаток. Такое разделение выбрасываем целиком.
         splits = splits.filter(function(sp) { return sp.restRuns <= 0 || sp.restPlanStart != null; });
-        return { moves: plan, splits: splits };
+        return { moves: plan, splits: splits, skipped: skipped };
     }
 
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
@@ -16710,12 +16747,19 @@
         var sid = String(slitterId == null ? '' : slitterId);
         for (var i = 0; i < CALENDAR_HORIZON_DAYS; i++) {
             var ms = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, 0, 0, 0, 0).getTime();
-            if (!this.dayIsWorking(ms)) continue;
-            if (this.dayIsFrozen(ms)) continue;
-            if (sid !== '' && this.slitterOnVacationDay(sid, ms)) continue;
-            return ms;
+            if (this.dayOpenForWork(sid, ms)) return ms;
         }
         return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    };
+
+    // #4566: МОЖНО ЛИ ставить станку работу в этот день — ОДИН предикат на все пути «Урегулировать».
+    // День закрыт, если он нерабочий по «Календарю» (#3788), ЗАМОРОЖЕН (#4326: для автоматики
+    // замороженный день закрыт полностью) или у станка в этот день «Отпуск» (#3876).
+    AtexProductionPlanning.prototype.dayOpenForWork = function(slitterId, dayMidnightMs) {
+        if (!this.dayIsWorking(dayMidnightMs)) return false;
+        if (this.dayIsFrozen(dayMidnightMs)) return false;
+        var sid = String(slitterId == null ? '' : slitterId);
+        return !(sid !== '' && this.slitterOnVacationDay(sid, dayMidnightMs));
     };
 
     // #4346: одна группа списка отклонений. Подпись задания — его «номер» (с #3242 это плановые
@@ -16829,10 +16873,22 @@
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
-            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
+            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); },
+            // #4566: заморожен ли день момента ts. Поставленное в замороженный день там и
+            // останется — планировщик такие задания пришпиливает и все операции по ним отбрасывает.
+            dayFrozenAt: function(ts) { return self.dayIsFrozen(dayMidnightMsOf(ts)); }
         });
         var plan = settle.moves || [];
         var splits = settle.splits || [];
+        // #4566: разделение не сделано, потому что фактический день заморожен — говорим прямо,
+        // иначе отклонение просто молча останется в списке.
+        (settle.skipped || []).forEach(function(s) {
+            console.error('[pp] 🔒 #4566: задание ' + s.id + ' не разделено — его фактический день заморожен');
+        });
+        if ((settle.skipped || []).length) {
+            this.notify('Не разделено (фактический день заморожен): ' + settle.skipped.length
+                + ' — снимите заморозку того дня и повторите', 'warning');
+        }
         // #4564: факт проходов не приходит из отчёта — начатые задания остаются на месте, и об
         // этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со дня
         // работу, которая идёт на станке.

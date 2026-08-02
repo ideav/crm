@@ -4039,12 +4039,19 @@
         var sid = String(slitterId == null ? '' : slitterId);
         for (var i = 0; i < CALENDAR_HORIZON_DAYS; i++) {
             var ms = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, 0, 0, 0, 0).getTime();
-            if (!this.dayIsWorking(ms)) continue;
-            if (this.dayIsFrozen(ms)) continue;
-            if (sid !== '' && this.slitterOnVacationDay(sid, ms)) continue;
-            return ms;
+            if (this.dayOpenForWork(sid, ms)) return ms;
         }
         return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    };
+
+    // #4566: МОЖНО ЛИ ставить станку работу в этот день — ОДИН предикат на все пути «Урегулировать».
+    // День закрыт, если он нерабочий по «Календарю» (#3788), ЗАМОРОЖЕН (#4326: для автоматики
+    // замороженный день закрыт полностью) или у станка в этот день «Отпуск» (#3876).
+    AtexProductionPlanning.prototype.dayOpenForWork = function(slitterId, dayMidnightMs) {
+        if (!this.dayIsWorking(dayMidnightMs)) return false;
+        if (this.dayIsFrozen(dayMidnightMs)) return false;
+        var sid = String(slitterId == null ? '' : slitterId);
+        return !(sid !== '' && this.slitterOnVacationDay(sid, dayMidnightMs));
     };
 
     // #4346: одна группа списка отклонений. Подпись задания — его «номер» (с #3242 это плановые
@@ -4158,10 +4165,22 @@
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
-            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
+            freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); },
+            // #4566: заморожен ли день момента ts. Поставленное в замороженный день там и
+            // останется — планировщик такие задания пришпиливает и все операции по ним отбрасывает.
+            dayFrozenAt: function(ts) { return self.dayIsFrozen(dayMidnightMsOf(ts)); }
         });
         var plan = settle.moves || [];
         var splits = settle.splits || [];
+        // #4566: разделение не сделано, потому что фактический день заморожен — говорим прямо,
+        // иначе отклонение просто молча останется в списке.
+        (settle.skipped || []).forEach(function(s) {
+            console.error('[pp] 🔒 #4566: задание ' + s.id + ' не разделено — его фактический день заморожен');
+        });
+        if ((settle.skipped || []).length) {
+            this.notify('Не разделено (фактический день заморожен): ' + settle.skipped.length
+                + ' — снимите заморозку того дня и повторите', 'warning');
+        }
         // #4564: факт проходов не приходит из отчёта — начатые задания остаются на месте, и об
         // этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со дня
         // работу, которая идёт на станке.
