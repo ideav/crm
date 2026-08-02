@@ -4077,7 +4077,10 @@
             // (видно, сколько проходов сделано), остальное переедет целиком.
             var done = cutDoneRuns(c), planned = Math.floor(Number(c.plannedRuns) || 0);
             var partial = kind !== 'early' && planned > 0 && done != null && done > 0 && done < planned;
-            parts.push(kind === 'early'
+            parts.push(kind === 'early-run'
+                ? ('сделано ' + (cutDoneRuns(c) || 0) + ' из ' + (Math.floor(Number(c.plannedRuns) || 0) || '?')
+                   + ' — отрежем в день выполнения ' + (formatDayKey(planDateDayKey(c.startDate)) || '—'))
+                : kind === 'early'
                 ? ('выполнено ' + (formatDayKey(planDateDayKey(c.endDate)) || '—'))
                 : (partial ? ('сделано ' + done + ' из ' + planned + ' — разделим')
                     : (done != null && planned > 0 && done >= planned ? 'проходы сделаны — закроем'
@@ -4133,7 +4136,9 @@
             var msg = el('span', { class: 'atex-pp-confirm-msg', text:
                 'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + (st.n - splitN)
                 + (splitN ? ', разделено частично выполненных — ' + splitN : '')
-                + ', выполненных досрочно — ' + st.m + '. План после них пересобирается.' });
+                + ', выполненных досрочно — ' + st.m
+                + (st.k ? (', делается раньше плана — ' + st.k) : '')
+                + '. План после них пересобирается.' });
             self.confirmAction(msg, actions, [
                 { label: 'Урегулировать', warning: true, inline: true, onConfirm: function() {
                     close();

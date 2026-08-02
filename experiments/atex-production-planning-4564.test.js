@@ -143,6 +143,41 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
         '#4572 закрытие НЕ раньше собственного начала (начало 20:34 при смене до 16:10)');
 })();
 
+// ── 5) #4584: «делается раньше плана» — третий вид отклонения ─────────────────
+// Задание не просрочено (его день ещё не настал) и не завершено, но проходы уже отмечены:
+// оператор делает его сегодня, а план говорит «позже». До #4584 такое задание не попадало ни
+// в одну группу и в форме отклонений его не было вовсе (боевое: 5 из 45 сделано, план 03.08,
+// сегодня 02.08 — «почему его нет в отклонениях?»).
+(function() {
+    var TODAY_2 = 20260802;
+    var cuts2 = [
+        { id: 'running', slitter: { id: '1' }, plannedRuns: 45, actualRuns: 5,
+          planDate: String(tsAt(2026, 8, 3, 8, 0)), startDate: String(tsAt(2026, 8, 2, 18, 33)), endDate: '' },
+        { id: 'untouched', slitter: { id: '1' }, plannedRuns: 10, actualRuns: 0,
+          planDate: String(tsAt(2026, 8, 3, 12, 0)), startDate: '', endDate: '' }
+    ];
+    var g = planning.deviationGroups(cuts2, TODAY_2);
+    assertEqual(g.earlyRun.map(function(c) { return c.id; }), ['running'],
+        '#4584 частично выполненное с планом в БУДУЩЕМ — отклонение «делается раньше плана»');
+    assertEqual([g.overdue.length, g.early.length], [0, 0],
+        'в «просрочено»/«выполнено досрочно» оно не попадает — там другие условия');
+    assertEqual(g.earlyRun.indexOf(cuts2[1]), -1,
+        'нетронутое задание того же будущего дня отклонением не считается');
+
+    // Разделяется ТАК ЖЕ, как частично выполненное просроченное, только в обратную сторону:
+    // выполненное отрезается в день выполнения, остаток стои́т на своём плановом времени.
+    var s = planning.deviationSettlePlan(cuts2, g, { todayKey: TODAY_2, shiftStartMin: 480 });
+    assertEqual(s.splits.length, 1, '#4584 разделяем — как недоделанное, только зеркально');
+    var sp2 = s.splits[0];
+    assertEqual([sp2.id, sp2.doneRuns, sp2.restRuns], ['running', 5, 40],
+        'сделано 5 из 45 → выполненная часть 5, остаток 40');
+    assertEqual(sp2.donePlanStart, tsAt(2026, 8, 2, 18, 33),
+        '#4584 выполненная часть кладётся в ДЕНЬ ВЫПОЛНЕНИЯ («Начато» 02.08)');
+    assertEqual([sp2.restPlanStart, sp2.restReason], [tsAt(2026, 8, 3, 8, 0), 'stay'],
+        '#4584 остаток остаётся на СВОЁМ плановом времени (03.08) — освободившееся закроет сдвиг влево');
+    assertEqual(s.moves.length, 0, 'ничего не переносим целиком: место остатка не меняется');
+})();
+
 // ── 3) применение: какие операции уходят в общий путь записи ──────────────────
 (function() {
     var inst = Object.create(Controller.prototype);
@@ -195,5 +230,4 @@ assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет 
         if (passed !== total) process.exitCode = 1;
     });
 })();
-
 

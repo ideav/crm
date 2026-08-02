@@ -2526,14 +2526,21 @@
     // Чистая (DOM не трогает) — покрыта тестом. → { overdue: [cut], early: [cut] }.
     function deviationGroups(cuts, todayKey) {
         var today = Number(todayKey);
-        var res = { overdue: [], early: [] };
+        var res = { overdue: [], early: [], earlyRun: [] };
         if (!isFinite(today)) return res;
         (cuts || []).forEach(function(c) {
             var pk = planDateDayKey(c && c.planDate);
             if (!isFinite(pk)) return;
             var ek = planDateDayKey(c && c.endDate);
             if (!isFinite(ek)) {          // не выполнено
-                if (pk < today) res.overdue.push(c);
+                if (pk < today) { res.overdue.push(c); return; }
+                // #4584: РАБОТА ИДЁТ РАНЬШЕ ПЛАНА. Задание не просрочено (его день ещё не настал) и
+                // не завершено — но проходы по нему УЖЕ отмечены: оператор делает его сегодня, а план
+                // говорит «позже». Это расхождение факта с планом, значит отклонение: до #4584 такое
+                // задание не попадало ни в одну группу и в форме его не было вовсе (боевое: 5 из 45
+                // сделано, план 03.08, сегодня 02.08).
+                var done = cutDoneRuns(c);
+                if (done != null && done > 0) res.earlyRun.push(c);
                 return;
             }
             if (pk >= today && ek < today) res.early.push(c);
@@ -2544,6 +2551,7 @@
         }
         res.overdue.sort(byPlan);
         res.early.sort(byPlan);
+        res.earlyRun.sort(byPlan);
         return res;
     }
 
@@ -2623,7 +2631,8 @@
     // задания замороженного дня она по-прежнему не двигает и не удаляет; задания этого действия
     // страж не отбрасывает и планировщик не пришпиливает (`ctx.isManualMoveCut`).
     // → {
-    //     moves:  [{ id, planStart (unix-сек), reason: 'early'|'before-next'|'free-day'|'shift-next' }],
+    //     moves:  [{ id, planStart (unix-сек),
+    //                 reason: 'early'|'early-run'|'before-next'|'free-day'|'shift-next' }],
     //     splits: [{ id, doneRuns, restRuns, donePlanStart, doneCloseTs, restPlanStart, restReason }]
     //   }
     // splits[i].restRuns = 0 — остатка нет: задание целиком уезжает в свой фактический день и там
@@ -2640,13 +2649,19 @@
             if (ts == null || !c || c.id == null) return;
             plan.push({ id: String(c.id), planStart: ts, reason: 'early' });
         });
-        var overdueSet = {};
+        var overdueSet = {}, earlyRunSet = {};
         (g.overdue || []).forEach(function(c) { if (c && c.id != null) overdueSet[String(c.id)] = true; });
+        (g.earlyRun || []).forEach(function(c) { if (c && c.id != null) earlyRunSet[String(c.id)] = true; });
         // #4564: частично выполненные — отдельным решением. Их выполненная часть уходит в СВОЙ
         // фактический день, поэтому в очередь просроченных («перед следующим заданием станка»)
         // встаёт только ОСТАТОК; заданию без остатка в этой очереди места не нужно вовсе.
         var splitById = {};
-        (g.overdue || []).forEach(function(c) {
+        // #4584: «делается раньше плана» разделяется ТОЧНО ТАК ЖЕ, как частично выполненное
+        // просроченное, только в обратную сторону (решение заказчика 02.08.2026): выполненная часть
+        // отрезается и кладётся в ДЕНЬ ВЫПОЛНЕНИЯ, а ОСТАТОК остаётся на своём плановом времени —
+        // и всё, что стои́т после него, сдвигается ВЛЕВО на освободившееся время (это делает
+        // пересборка). Отсюда общий цикл: правило одно, отличается только место остатка.
+        [].concat(g.overdue || [], g.earlyRun || []).forEach(function(c) {
             if (!c || c.id == null) return;
             var planned = Math.floor(Number(c.plannedRuns) || 0);
             var done = cutDoneRuns(c);
@@ -2661,6 +2676,12 @@
                 doneCloseTs: doneCloseMoment(cuts, c, factTs, Number(o.shiftEndMin)),
                 restPlanStart: null, restReason: null
             };
+            // #4584: у «делается раньше плана» остаток НИКУДА НЕ ЕДЕТ — он остаётся на плановом
+            // времени задания; освободившееся место в дне закрывает пересборка сдвигом влево.
+            if (earlyRunSet[String(c.id)]) {
+                sp.restPlanStart = planTsSeconds(c.planDate);
+                sp.restReason = 'stay';
+            }
             splits.push(sp);
             splitById[String(c.id)] = sp;
         });
