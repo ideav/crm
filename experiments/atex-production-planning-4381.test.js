@@ -193,10 +193,10 @@ function controlsOf(queueEl, cutId) {
         'начатое просроченное из списка НЕ исчезает — диспетчер его видит');
 
     var plan = planning.deviationSettlePlan(cuts, groups, { todayKey: TODAY, shiftStartMin: 480 }).moves;
-    assertEqual(plan.map(function(p) { return p.id; }), ['late'],
-        '#4381: факт проходов неизвестен → начатое просроченное не двигаем');
-    assertEqual(plan[0].planStart, tsAt(2026, 7, 25, 8, 0) - 60,
-        'место — перед первым НЕ начатым заданием станка (начатое «nowrun» якорем не берём)');
+    assertEqual(plan.map(function(p) { return p.id; }), ['late', 'next'],
+        '#4381: факт проходов неизвестен → начатое просроченное не двигаем (едет только «late», «next» — подвинутое им)');
+    assertEqual(plan[0].planStart, tsAt(2026, 7, 25, 8, 0),
+        '#4574 место = ВРЕМЯ первого НЕ начатого задания станка (начатое «nowrun» якорем не берём)');
 
     // #4564: тот же начатый, но факт ИЗВЕСТЕН и равен нулю — сделано ничего, двигаем как обычное
     // просроченное (взаимный порядок с 'late' сохраняется: 'run' стоял раньше).
@@ -205,7 +205,7 @@ function controlsOf(queueEl, cutId) {
     });
     var kGroups = planning.deviationGroups(known, TODAY);
     var kPlan = planning.deviationSettlePlan(known, kGroups, { todayKey: TODAY, shiftStartMin: 480 }).moves;
-    assertEqual(kPlan.map(function(p) { return p.id; }), ['run', 'late'],
+    assertEqual(kPlan.map(function(p) { return p.id; }), ['run', 'late', 'next'],
         '#4564: начато, но проходов НОЛЬ (факт известен) → двигаем как обычное просроченное');
     assertEqual(kPlan[0].planStart < kPlan[1].planStart, true, 'взаимный порядок просроченных прежний');
 })();

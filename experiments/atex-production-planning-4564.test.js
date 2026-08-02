@@ -60,11 +60,14 @@ assertEqual(sp.donePlanStart, tsAt(2026, 7, 31, 8, 5),
     '#4572 первая колонка выполненной части = МОМЕНТ ФАКТИЧЕСКОГО НАЧАЛА («Начато»)');
 
 // Остаток занимает место просроченного — перед следующим заданием станка; порядок с 'plain' прежний.
-assertEqual(settle.moves.map(function(m) { return m.id; }), ['plain'],
-    'сама разделяемая запись в переносах не участвует — вместо неё едет остаток');
-assertEqual(sp.restPlanStart, tsAt(2026, 8, 5, 8, 0) - 120, 'остаток — перед следующим заданием станка');
-assertEqual(settle.moves[0].planStart, tsAt(2026, 8, 5, 8, 0) - 60,
+assertEqual(settle.moves.map(function(m) { return m.id; }), ['plain', 'next'],
+    'сама разделяемая запись в переносах не участвует — вместо неё едет остаток; «next» подвинут');
+assertEqual(sp.restPlanStart, tsAt(2026, 8, 5, 8, 0),
+    '#4574 остаток занимает ВРЕМЯ следующего задания станка');
+assertEqual(settle.moves[0].planStart, tsAt(2026, 8, 5, 8, 0) + 60,
     'нетронутое просроченное встаёт следом (взаимный порядок сохранён)');
+assertEqual(settle.moves[1].planStart, tsAt(2026, 8, 5, 8, 0) + 120,
+    '#4574 само «следующее» отходит за ними');
 assertEqual([sp.restReason, settle.moves[0].reason], ['before-next', 'before-next'], 'причина места — «перед следующим»');
 
 // ── 2) краевые случаи факта ───────────────────────────────────────────────────

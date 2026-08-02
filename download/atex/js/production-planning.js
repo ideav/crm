@@ -2603,16 +2603,18 @@
     //   • сделаны ВСЕ проходы, но задание не закрыто (D ≥ план) — разделять нечего: работа
     //     переезжает в свой фактический день целиком и закрывается там же;
     //   • ПРОСРОЧЕННЫЕ (в т.ч. НАЧАТЫЕ без единого прохода — #4564 снял для них неприкосновенность
-    //     #4381: сделано ничего, двигать нечему мешать) — перед СЛЕДУЮЩИМ заданием своего станка
-    //     («вместо него»), в какой бы день оно ни стояло; взаимный порядок просроченных сохраняется.
+    //     #4381: сделано ничего, двигать нечему мешать) — НА МЕСТО СЛЕДУЮЩЕГО задания своего станка,
+    //     в какой бы день оно ни стояло: приезжие встают на его время (08:00, 08:01, …), а оно само
+    //     отходит на минуту дальше (#4574 — «старое 8:01, новое 8:00»). Взаимный порядок
+    //     просроченных сохраняется.
     //     «Следующее» = самое раннее НЕвыполненное задание этого станка, не из группы просроченных
     //     (такое всегда стоит сегодня или позже: незавершённое задание прошлого дня по определению
     //     само просрочено);
     //   • следующего задания у станка НЕТ → ближайший рабочий незамороженный день (freeDayMsFor).
     // Пишем ПЛЕЙСХОЛДЕР: важны не сами значения, а ПОРЯДОК — сдвиг всех последующих делает пересборка
     // очереди (autoSequenceQueue preserveOrder, «общие правила»), как и на пути ручного переноса.
-    // Шаг плейсхолдера — минута назад от «следующего» (смена начинается в 08:00, так что запаса
-    // до полуночи хватает на любое реальное число просроченных заданий станка).
+    // Шаг плейсхолдера — минута ВПЕРЁД от времени «следующего» (#4574): назад отсчитывать нельзя,
+    // при смене с 00:00 задание уехало бы во вчерашний день.
     // Чистая (DOM/сеть не трогает; календарь приходит колбэком freeDayMsFor) — покрыта тестом.
     // **ЗАМОРОЗКА МЕСТО НЕ ВЫБИРАЕТ (#4569, решение заказчика 02.08.2026).** «Урегулировать» —
     // ручное действие и однозначная команда «сдвинуть всё»: остаток встаёт перед следующим заданием
@@ -2622,7 +2624,7 @@
     // задания замороженного дня она по-прежнему не двигает и не удаляет; задания этого действия
     // страж не отбрасывает и планировщик не пришпиливает (`ctx.isManualMoveCut`).
     // → {
-    //     moves:  [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }],
+    //     moves:  [{ id, planStart (unix-сек), reason: 'early'|'before-next'|'free-day'|'shift-next' }],
     //     splits: [{ id, doneRuns, restRuns, donePlanStart, doneCloseTs, restPlanStart, restReason }]
     //   }
     // splits[i].restRuns = 0 — остатка нет: задание целиком уезжает в свой фактический день и там
@@ -2681,7 +2683,7 @@
         });
         sids.forEach(function(sid) {
             var queue = bySlitter[sid];
-            var anchorTs = null;
+            var anchorTs = null, anchorCut = null;
             (cuts || []).forEach(function(c) {
                 if (!c || c.id == null || overdueSet[String(c.id)]) return;
                 if (cutSlitterKey(c) !== sid) return;
@@ -2691,7 +2693,7 @@
                 if (!isFinite(pk) || !isFinite(today) || pk < today) return;
                 var ts = planTsSeconds(c.planDate);
                 if (ts == null) return;
-                if (anchorTs == null || ts < anchorTs) anchorTs = ts;
+                if (anchorTs == null || ts < anchorTs) { anchorTs = ts; anchorCut = c; }
             });
             // #4564: место в очереди достаётся ОСТАТКУ разделяемого задания, а не самому заданию —
             // исходная запись уезжает в свой фактический день выполненной частью.
@@ -2701,9 +2703,19 @@
                 plan.push({ id: String(c.id), planStart: ts, reason: reason });
             };
             if (anchorTs != null) {
+                // #4574: ВПЕРЁД, А НЕ НАЗАД. Приезжие занимают время следующего задания (08:00,
+                // 08:01, …), а оно само отходит на минуту дальше — «старое 8:01, новое 8:00»
+                // (решение заказчика 02.08.2026). Прежде плейсхолдер отсчитывался НАЗАД от якоря
+                // (08:00 − 1 мин = 07:59): оператор видел время ДО начала смены, а при смене с
+                // 00:00 такой отсчёт уводил бы задание во вчера. Это метки ПОРЯДКА; реальные
+                // минуты расставит пересборка и сведение честных стартов.
                 queue.forEach(function(c, i) {
-                    place(c, anchorTs - (queue.length - i) * 60, 'before-next');
+                    place(c, anchorTs + i * 60, 'before-next');
                 });
+                if (anchorCut && anchorCut.id != null) {
+                    plan.push({ id: String(anchorCut.id), planStart: anchorTs + queue.length * 60,
+                                reason: 'shift-next' });
+                }
                 return;
             }
             var dayMs = typeof o.freeDayMsFor === 'function' ? o.freeDayMsFor(sid) : null;
@@ -16958,7 +16970,8 @@
                 // Дни называем явно: они лежат ЗА видимым диапазоном [С;По], которым этот пересчёт
                 // ограничен, — «Урегулировать» ставит остаток перед следующим заданием станка, а
                 // оно может стоять в любом дне.
-                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits) })
+                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits),
+                                                  manualCutIds: settleScope.wholeDayCutIds })
                     .then(function() { return res; });
             });
         }).catch(function(err) {
@@ -22430,7 +22443,10 @@
         var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
         // #4569: дни сверх видимого диапазона — вызывающий называет те, куда САМ унёс работу.
-        var scopeOpts = (opts && opts.dayKeys && opts.dayKeys.length) ? { dayKeys: opts.dayKeys } : null;
+        var scopeOpts = null;
+        if (opts && ((opts.dayKeys && opts.dayKeys.length) || (opts.manualCutIds && opts.manualCutIds.length))) {
+            scopeOpts = { dayKeys: opts.dayKeys || [], manualCutIds: opts.manualCutIds || [] };
+        }
         var fixes = [];
         (this.slitters || []).forEach(function(s) {
             var sid = String(s && s.id == null ? '' : s.id);
@@ -22481,6 +22497,12 @@
             if (k == null || k === '') return;
             (extraDays = extraDays || {})[String(k)] = true;
         });
+        // #4574: задания ручного действия — их пересчёт не ограничен ни диапазоном, ни заморозкой.
+        var manualIds = null;
+        ((opts && opts.manualCutIds) || []).forEach(function(id) {
+            if (id == null || id === '') return;
+            (manualIds = manualIds || {})[String(id)] = true;
+        });
         // #4555: «Пересчитать отсюда и до конца». fromCutId — НИЖНЯЯ граница: берём выбранное
         // задание и всё, что стои́т на этом станке позже (по хранимому planStart, а он монотонен
         // и внутри дня, и между днями). Прошлое — и более ранние дни, и соседи левее в том же
@@ -22508,7 +22530,11 @@
             // Кнопка «↻ Пересчитать наладку» тоже переписывает «Дату план» (#4408), а «Заморозка»
             // означает «этот день не меняем». Починить раскладку замороженного дня можно, сняв замок
             // (🔓), пересчитав и заморозив снова — это осознанное действие оператора, а не побочный эффект.
-            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return false;
+            // #4574: ИСКЛЮЧЕНИЕ — задания САМОГО ручного действия (оно их и поставило в этот день):
+            // ручное сильнее заморозки, и без этого их время осталось бы плейсхолдерным
+            // («⏱ 07:59 – 08:51» в замороженном дне). Чужие задания дня по-прежнему не трогаем.
+            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)
+                && !(manualIds && manualIds[String(c.id)])) return false;
             var dayKey = planDateDayKey(c.planDate);
             // #4569: день, названный вызывающим, входит в набор независимо от фильтра.
             if (extraDays && dayKey != null && extraDays[String(dayKey)]) return true;

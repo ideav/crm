@@ -4245,7 +4245,8 @@
                 // Дни называем явно: они лежат ЗА видимым диапазоном [С;По], которым этот пересчёт
                 // ограничен, — «Урегулировать» ставит остаток перед следующим заданием станка, а
                 // оно может стоять в любом дне.
-                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits) })
+                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits),
+                                                  manualCutIds: settleScope.wholeDayCutIds })
                     .then(function() { return res; });
             });
         }).catch(function(err) {
@@ -9717,7 +9718,10 @@
         var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
         // #4569: дни сверх видимого диапазона — вызывающий называет те, куда САМ унёс работу.
-        var scopeOpts = (opts && opts.dayKeys && opts.dayKeys.length) ? { dayKeys: opts.dayKeys } : null;
+        var scopeOpts = null;
+        if (opts && ((opts.dayKeys && opts.dayKeys.length) || (opts.manualCutIds && opts.manualCutIds.length))) {
+            scopeOpts = { dayKeys: opts.dayKeys || [], manualCutIds: opts.manualCutIds || [] };
+        }
         var fixes = [];
         (this.slitters || []).forEach(function(s) {
             var sid = String(s && s.id == null ? '' : s.id);
@@ -9768,6 +9772,12 @@
             if (k == null || k === '') return;
             (extraDays = extraDays || {})[String(k)] = true;
         });
+        // #4574: задания ручного действия — их пересчёт не ограничен ни диапазоном, ни заморозкой.
+        var manualIds = null;
+        ((opts && opts.manualCutIds) || []).forEach(function(id) {
+            if (id == null || id === '') return;
+            (manualIds = manualIds || {})[String(id)] = true;
+        });
         // #4555: «Пересчитать отсюда и до конца». fromCutId — НИЖНЯЯ граница: берём выбранное
         // задание и всё, что стои́т на этом станке позже (по хранимому planStart, а он монотонен
         // и внутри дня, и между днями). Прошлое — и более ранние дни, и соседи левее в том же
@@ -9795,7 +9805,11 @@
             // Кнопка «↻ Пересчитать наладку» тоже переписывает «Дату план» (#4408), а «Заморозка»
             // означает «этот день не меняем». Починить раскладку замороженного дня можно, сняв замок
             // (🔓), пересчитав и заморозив снова — это осознанное действие оператора, а не побочный эффект.
-            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return false;
+            // #4574: ИСКЛЮЧЕНИЕ — задания САМОГО ручного действия (оно их и поставило в этот день):
+            // ручное сильнее заморозки, и без этого их время осталось бы плейсхолдерным
+            // («⏱ 07:59 – 08:51» в замороженном дне). Чужие задания дня по-прежнему не трогаем.
+            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)
+                && !(manualIds && manualIds[String(c.id)])) return false;
             var dayKey = planDateDayKey(c.planDate);
             // #4569: день, названный вызывающим, входит в набор независимо от фильтра.
             if (extraDays && dayKey != null && extraDays[String(dayKey)]) return true;

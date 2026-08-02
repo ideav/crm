@@ -97,10 +97,13 @@ assertEqual(byId.e1, { id: 'e1', planStart: ts(23, 14), reason: 'early' }, 'до
 assertEqual(byId.e2, { id: 'e2', planStart: ts(23, 9), reason: 'early' }, 'досрочное (план сегодня) → момент «Закончено»');
 
 // Просроченные станка 1 — вплотную ПЕРЕД следующим заданием (25.07 08:00), порядок сохранён.
-assertEqual(byId.o1, { id: 'o1', planStart: ts(25, 8) - 120, reason: 'before-next' }, 'просроченное → перед следующим заданием станка');
-assertEqual(byId.o2, { id: 'o2', planStart: ts(25, 8) - 60, reason: 'before-next' }, 'второе просроченное — сразу за первым (порядок прежний)');
+assertEqual(byId.o1, { id: 'o1', planStart: ts(25, 8), reason: 'before-next' },
+    '#4574 просроченное занимает ВРЕМЯ следующего задания станка (08:00), а не минуту до него');
+assertEqual(byId.o2, { id: 'o2', planStart: ts(25, 8) + 60, reason: 'before-next' }, 'второе просроченное — сразу за первым (порядок прежний)');
+assertEqual(byId.next1, { id: 'next1', planStart: ts(25, 8) + 120, reason: 'shift-next' },
+    '#4574 «старое 8:01, новое 8:00»: само следующее задание отходит на минуту дальше');
 assertEqual(byId.o1.planStart < byId.o2.planStart, true, 'взаимный порядок просроченных не меняется');
-assertEqual(byId.o2.planStart < ts(25, 8), true, 'оба встают раньше «следующего» задания');
+assertEqual(byId.o2.planStart < byId.next1.planStart, true, 'оба встают РАНЬШЕ отодвинутого «следующего»');
 
 // Станок 2: следующего задания нет → ближайший рабочий незамороженный день, старт смены.
 assertEqual(byId.o3, { id: 'o3', planStart: Math.floor(FREE_DAY_MS / 1000) + 480 * 60, reason: 'free-day' },
@@ -110,7 +113,8 @@ assertEqual(freeAsked, ['2'], 'ближайший день спрашиваем 
 // Выполненное СЕГОДНЯ задание «следующим» не считается: якорь станка 1 — 25.07, а не 24.07.
 assertEqual(byId.o2.planStart > ts(24, 12), true, 'выполненное задание не может быть «следующим»');
 // Задания, которые никуда не двигаются, в план не попадают.
-assertEqual(Object.keys(byId).sort(), ['e1', 'e2', 'o1', 'o2', 'o3'], 'план переносов — только отклонившиеся задания');
+assertEqual(Object.keys(byId).sort(), ['e1', 'e2', 'next1', 'o1', 'o2', 'o3'],
+    '#4574 в плане переносов — отклонившиеся плюс подвинутое ими «следующее»');
 
 // Пустые группы → пустой план (повторное «Урегулировать» ничего не пишет).
 assertEqual(planning.deviationSettlePlan(cuts, { overdue: [], early: [] }, { todayKey: TODAY, shiftStartMin: 480 }),

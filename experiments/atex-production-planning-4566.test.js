@@ -67,8 +67,8 @@ var settle = planning.deviationSettlePlan(cuts, groups, {
 assertEqual(settle.splits.length, 1, 'разделение делаем — заморозка ему не помеха');
 var sp = settle.splits[0];
 assertEqual([sp.doneRuns, sp.restRuns], [25, 18], 'сделано 25 из 43 → выполненная часть 25, остаток 18');
-assertEqual(sp.restPlanStart, tsAt(2026, 8, 3, 8, 0) - 60,
-    '#4569 остаток встаёт ПЕРЕД следующим заданием станка — в замороженном дне, без разрыва');
+assertEqual(sp.restPlanStart, tsAt(2026, 8, 3, 8, 0),
+    '#4569/#4574 остаток занимает ВРЕМЯ следующего задания — в замороженном дне, без разрыва');
 assertEqual(planning.planDateDayKey(sp.restPlanStart), dayKey(2026, 8, 3),
     'и это именно тот день, а не следующий за ним');
 assertEqual(sp.restReason, 'before-next', 'причина места — «перед следующим заданием станка»');
@@ -104,11 +104,11 @@ assertEqual(sp.restReason, 'before-next', 'причина места — «пе�
         todayKey: TODAY, shiftStartMin: SHIFT_START,
         freeDayMsFor: function() { return new Date(2026, 7, 4, 0, 0, 0, 0).getTime(); }
     });
-    assertEqual(s.moves.map(function(m) { return m.id; }), ['late1', 'late2'],
-        'оба просроченных получают место (взаимный порядок прежний)');
-    assertEqual([s.moves[0].planStart, s.moves[1].planStart],
-        [tsAt(2026, 8, 3, 8, 0) - 120, tsAt(2026, 8, 3, 8, 0) - 60],
-        '#4569 встают вплотную друг за другом перед следующим заданием — без разрывов');
+    assertEqual(s.moves.map(function(m) { return m.id; }), ['late1', 'late2', 'frozenday'],
+        'оба просроченных получают место, «следующее» подвинуто ими');
+    assertEqual([s.moves[0].planStart, s.moves[1].planStart, s.moves[2].planStart],
+        [tsAt(2026, 8, 3, 8, 0), tsAt(2026, 8, 3, 8, 0) + 60, tsAt(2026, 8, 3, 8, 0) + 120],
+        '#4574 встают вплотную друг за другом с ВРЕМЕНИ следующего задания — без разрывов');
 })();
 
 // ── 4) «когда сдвигать НЕ ОТ ЧЕГО» — свободный день по-прежнему НЕ замороженный ──
