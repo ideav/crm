@@ -146,5 +146,26 @@ function makeController() {
     assertEqual(r2.skipped > 0, true, 'и это по-прежнему считается отброшенным');
 })();
 
+// ── 7. #4574: задания «Урегулировать» ЗАКРЕПЛЯЮТСЯ на выбранном дне ──────────
+// Иначе упаковщик считает их свободными, а свободные он из замороженного дня выбрасывает
+// (#4326-seal) — остаток, поставленный на 03.08, уезжал на 04.08. Ручной перенос 🗓 давно
+// передаёт `pinCutIds` (временный c.fixed → planCutOperations держит день); «Урегулировать» —
+// такое же ручное действие и обязано делать то же самое.
+(function() {
+    var planning = require('../download/atex/js/production-planning.js').planning;
+    var cuts = [
+        { id: 'rest', slitter: { id: '1' }, planDate: String(tsAt(2026, 8, 3, 8, 0)) },
+        { id: 'late', slitter: { id: '2' }, planDate: String(tsAt(2026, 8, 4, 8, 0)) },
+        { id: 'alien', slitter: { id: '3' }, planDate: String(tsAt(2026, 8, 4, 8, 0)) }
+    ];
+    var scope = planning.settleMoveScope([{ id: 'late' }], ['rest'], cuts);
+    assertEqual(scope.wholeDayCutIds.sort(), ['late', 'rest'],
+        '#4574 в набор входят и перенесённые, и СОЗДАННЫЕ остатки');
+    assertEqual(scope.pinCutIds.sort(), ['late', 'rest'],
+        '#4574 они же ЗАКРЕПЛЕНЫ — упаковщик держит их день, включая замороженный');
+    assertEqual(scope.withinSlitterIds.sort(), ['1', '2'],
+        'пересборка заперта на станках этих заданий — чужой станок не затронут');
+})();
+
 console.log('\n' + passed + '/' + total + ' passed');
 if (passed !== total) process.exitCode = 1;

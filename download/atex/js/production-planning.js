@@ -12806,6 +12806,7 @@
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
         cutDoneRuns: cutDoneRuns,               // #4564: сделано проходов («Кол-во резок факт»); null = не знаем
+        settleMoveScope: settleMoveScope,       // #4574: рамки пересборки после «Урегулировать»
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
@@ -17069,7 +17070,7 @@
     };
 
     // #4569: рамки пересборки после «Урегулировать» — ручное действие, однозначный сдвиг.
-    //   wholeDayCutIds — всё, что это действие ПЕРЕНЕСЛО и СОЗДАЛО: страж не отбрасывает
+    //   wholeDayCutIds + pinCutIds — всё, что это действие ПЕРЕНЕСЛО и СОЗДАЛО: страж не отбрасывает
     //     операции по ним (ручное сильнее заморозки), поэтому команда выполняется целиком;
     //   withinSlitterIds — станки этих заданий: пересборка не выходит за них и не перекидывает
     //     задания между станками (в scope с >1 станком каждое задание заперто на своём).
@@ -17087,6 +17088,12 @@
             if (sid !== '') sids[sid] = true;
         });
         var scope = { wholeDayCutIds: Object.keys(ids) };
+        // #4574: ЗАКРЕПИТЬ их на выбранном дне — тем же полем, что ручной перенос 🗓 (`pinCutIds`
+        // → временный c.fixed → planCutOperations держит день по «Дате план»). Без этого задания
+        // команды идут в упаковщик СВОБОДНЫМИ, а свободные он из замороженного дня выбрасывает
+        // (#4326-seal): остаток, поставленный «Урегулировать» на 03.08, уезжал на 04.08 (#4574).
+        // Заморозка тут ни при чём — день выбрал ОПЕРАТОР, и ручное её игнорирует.
+        scope.pinCutIds = scope.wholeDayCutIds.slice();
         var sidList = Object.keys(sids);
         if (sidList.length) scope.withinSlitterIds = sidList;
         return scope;
