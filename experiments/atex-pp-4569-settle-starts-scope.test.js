@@ -14,9 +14,13 @@
 // «Урегулировать» ставит остаток перед следующим заданием станка, и оно может стоять в любом дне:
 // день, куда уехала работа, за фильтр не попадал и оставался несведённым.
 //
-// ПРАВИЛО: вызывающий, который САМ унёс работу за фильтр, называет эти дни (`opts.dayKeys`) — они
-// входят в набор пересчёта помимо диапазона. Замороженный день не входит НИКОГДА: это правило
-// (#4436) старше любого «плюс этот день».
+// ПРАВИЛА (решения заказчика 02.08.2026):
+//   • вызывающий, который САМ унёс работу за фильтр, называет эти дни (`opts.dayKeys`) — они входят
+//     в набор пересчёта помимо диапазона. Замороженный день в ПЕРЕСЧЁТ СТАРТОВ не входит: тот идёт
+//     по всей очереди станка и чужих заданий замороженного дня касаться не вправе;
+//   • РУЧНОЕ ДЕЙСТВИЕ СИЛЬНЕЕ ЗАМОРОЗКИ: операции по заданиям, которые оператор несёт сам, страж не
+//     отбрасывает. «Урегулировать» — однозначная команда «сдвинуть всё», и половинчатый результат
+//     («тут сдвинули, а там не смогли») недопустим.
 //
 // Run with: node experiments/atex-pp-4569-settle-starts-scope.test.js
 
@@ -109,6 +113,37 @@ function makeController() {
     var ids = c.recalcScopeCutIds('1', { dayKeys: keys });
     assertEqual(ids.sort(), ['factday', 'faraway', 'visible'],
         '#4569 в пересчёт входят и день выполненной части, и день остатка — обе половины разделения');
+})();
+
+// ── 6. #4569: ручное действие сильнее заморозки — операции «Урегулировать» не отбрасываются ──
+// Решение заказчика 02.08.2026. «Урегулировать» — однозначная команда «сдвинуть всё»; отказ
+// означал бы половинчатый результат, а страж снимает операции цепочки ЦЕЛИКОМ (#4536).
+(function() {
+    var planning = require('../download/atex/js/production-planning.js').planning;
+    var TS_FROZEN = Math.floor(new Date(2026, 7, 3, 8, 0, 0, 0).getTime() / 1000);   // 03.08 — заморожен
+    function ctx(manualIds) {
+        var manual = {};
+        (manualIds || []).forEach(function(id) { manual[String(id)] = true; });
+        return {
+            isFrozenCut: function(id) { return String(id) === 'INFROZEN'; },
+            isFrozenTs: function(ts) { return Number(ts) === TS_FROZEN; },
+            isFixedCut: function() { return false; },
+            isManualMoveCut: function(id) { return !!manual[String(id)]; },
+            dayKeyOfCut: function() { return null; },
+            dayKeyOfTs: function() { return null; }
+        };
+    }
+    // Остаток, созданный «Урегулировать», едет В замороженный день — команда оператора проходит.
+    var mine = { updates: [{ cutId: 'REST', planStartTs: TS_FROZEN, plannedRuns: 18 }], creates: [], deletes: [] };
+    var r = planning.guardPlanOps(mine, ctx(['REST']), 'auto');
+    assertEqual(mine.updates.length, 1, '#4569 операция ручного действия НЕ отброшена (ручное сильнее заморозки)');
+    assertEqual(r.skipped, 0, '#4569 отказов нет — команда выполняется целиком');
+
+    // Та же операция БЕЗ пометки «ручное» — отброшена, как и раньше: автоматика в заморозку не лезет.
+    var auto = { updates: [{ cutId: 'REST', planStartTs: TS_FROZEN, plannedRuns: 18 }], creates: [], deletes: [] };
+    var r2 = planning.guardPlanOps(auto, ctx([]), 'auto');
+    assertEqual(auto.updates.length, 0, 'автоматика в замороженный день по-прежнему не кладёт');
+    assertEqual(r2.skipped > 0, true, 'и это по-прежнему считается отброшенным');
 })();
 
 console.log('\n' + passed + '/' + total + ' passed');

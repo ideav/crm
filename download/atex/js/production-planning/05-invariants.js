@@ -102,7 +102,7 @@
             tz: '§15',
             actor: 'auto',
             mode: 'drop',       // страж отбрасывает нарушающие операции (так было и до реестра, #4436)
-            title: 'Автоматика не изменяет замороженный день: не двигает и не удаляет его задания и не ставит в него новые',
+            title: 'Автоматика не изменяет замороженный день: не двигает и не удаляет его задания и не ставит в него новые (ручное действие оператора — вправе)',
             // Проверяется в обе стороны: нельзя увезти ИЗ замороженного дня и нельзя положить В него.
             // Просрочка, возникшая из-за отказа, — это информация (задание уезжает на ближайший
             // доступный день и подсвечивается), а не повод нарушить заморозку (решение 27.07.2026,
@@ -119,10 +119,20 @@
             //   • разрешён только create ЕГО продолжения ВНЕ замороженного дня — остаток обязан уехать;
             //   • чужие задания дня, удаления и новые задания в этот день — запрет, как раньше.
             // Нет предиката (старый вызывающий) — исключения нет, поведение прежнее.
+            // #4569: РУЧНОЕ ДЕЙСТВИЕ СИЛЬНЕЕ ЗАМОРОЗКИ (решение заказчика 02.08.2026). Правило
+            // ограничивает АВТОМАТИКУ — это сказано в его заголовке. Задание, которое оператор несёт
+            // ПРЯМО СЕЙЧАС (`ctx.isManualMoveCut`), им не ограничено: то же исключение уже стои́т у
+            // FIXED_CUT_DAY. Иначе ручная команда получает отказ и выполняется наполовину — «тут
+            // сдвинули, а там не смогли», — а половинчатый результат недопустим: страж снимает
+            // операции цепочки целиком (#4536), и задание остаётся с плейсхолдерным временем
+            // (боевое #4569: «⏱ 07:59 – 09:53»). Заморозка при этом защищает ОСТАЛЬНЫЕ задания дня —
+            // автоматика их по-прежнему не двигает и не удаляет.
             check: function(ops, ctx) {
                 var frozenCut = ppCtxFn(ctx, 'isFrozenCut'), frozenTs = ppCtxFn(ctx, 'isFrozenTs');
+                var manual = ppCtxFn(ctx, 'isManualMoveCut');
                 var out = [];
                 (ops && ops.updates || []).forEach(function(u) {
+                    if (manual(u.cutId)) return;   // #4569: оператор несёт ЭТО задание сам
                     if (frozenCut(u.cutId)) {
                         if (isFrozenDayTrim(u, ctx)) return;   // #4494: разрыв по потолку в своём дне
                         out.push(ppViolation('FROZEN_DAY', u.cutId, 'сдвиг задания из замороженного дня'));
@@ -130,10 +140,12 @@
                     else if (frozenTs(u.planStartTs)) out.push(ppViolation('FROZEN_DAY', u.cutId, 'перенос задания В замороженный день'));
                 });
                 (ops && ops.deletes || []).forEach(function(id) {
+                    if (manual(id)) return;
                     if (frozenCut(id)) out.push(ppViolation('FROZEN_DAY', id, 'удаление задания замороженного дня'));
                 });
                 (ops && ops.creates || []).forEach(function(cr) {
                     var parent = cr && cr.parentCutId;
+                    if (manual(parent)) return;   // продолжение задания, которое несёт оператор
                     if (frozenCut(parent)) {
                         if (isFrozenDayTrim(cr, ctx)) return;   // #4494: остаток уезжает из замороженного дня
                         out.push(ppViolation('FROZEN_DAY', parent, 'новый сегмент по заданию замороженного дня'));
@@ -149,10 +161,11 @@
             //   kind: 'update' | 'delete' | 'create'; для 'delete' операция нормализована в {cutId}.
             drop: function(op, ctx, kind) {
                 var frozenCut = ppCtxFn(ctx, 'isFrozenCut'), frozenTs = ppCtxFn(ctx, 'isFrozenTs');
-                if (kind === 'delete') return frozenCut(op.cutId);
+                var manual = ppCtxFn(ctx, 'isManualMoveCut');   // #4569: те же предикаты, что в check
+                if (kind === 'delete') return !manual(op.cutId) && frozenCut(op.cutId);
                 if (isFrozenDayTrim(op, ctx)) return false;   // #4494: разрыв по потолку — не нарушение
-                if (kind === 'create') return frozenCut(op.parentCutId) || frozenTs(op.planStartTs);
-                return frozenCut(op.cutId) || frozenTs(op.planStartTs);
+                if (kind === 'create') return !manual(op.parentCutId) && (frozenCut(op.parentCutId) || frozenTs(op.planStartTs));
+                return !manual(op.cutId) && (frozenCut(op.cutId) || frozenTs(op.planStartTs));
             }
         },
         {

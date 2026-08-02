@@ -4206,6 +4206,7 @@
             return Promise.resolve(false);
         }
 
+        var createdRestIds = [];   // #4569: id остатков, созданных этим действием
         this.setBusy(true);
         this.showProgress('Урегулирование отклонений…', writes.length);
         // #4477: пулом до 5 потоков через шлюз (было — цепочкой в один поток); совпавшее с
@@ -4215,7 +4216,8 @@
         }), { onWrite: function(done) { self.updateProgress(done); } }).then(function() {
             // #4564: разделение частично выполненных — ПОСЛЕ переносов и до пересборки очереди.
             return self.splitPartiallyDoneCuts(splits, win);
-        }).then(function() {
+        }).then(function(splitRes) {
+            createdRestIds = ((splitRes && splitRes.createdIds) || []).map(String);
             return self.reload();
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
@@ -4227,7 +4229,19 @@
                 + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
                 + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
                 + ' · досрочных — ' + byReason('early'), 'success');
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function(res) {
+            // #4569: «Урегулировать» — РУЧНОЕ ДЕЙСТВИЕ, и оно ОДНОЗНАЧНО: сдвинуть всё. Отсюда две
+            // рамки для пересборки (решение заказчика 02.08.2026).
+            //   1. Задания этого действия объявлены ручными (`wholeDayCutIds`) — тем же полем, что и
+            //      ручной перенос 🗓. Страж не отбрасывает их операции: ручное сильнее заморозки
+            //      (FROZEN_DAY щадит manual, как давно щадит FIXED_CUT_DAY). Иначе команда
+            //      выполняется наполовину — «тут сдвинули, а там не смогли», — и задание остаётся с
+            //      плейсхолдерным временем (боевое #4569: «⏱ 07:59 – 09:53» внахлёст).
+            //   2. Пересборка заперта на СВОИХ станках (`withinSlitterIds`): «Урегулировать» двигает
+            //      очередь, а не перекидывает задания между станками и не оптимизирует раскладку.
+            //      В scope с несколькими станками каждое задание к тому же замкнуто на свой станок
+            //      (machineLockByCut) — миграции нет по построению.
+            var settleScope = settleMoveScope(plan, splits, createdRestIds, self.cuts || []);
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true, settleScope).then(function(res) {
                 // #4569: СВЕСТИ СТАРТЫ В ДНЯХ, КУДА МЫ САМИ УНЕСЛИ РАБОТУ. Пересборка может не
                 // переписать задание вовсе: страж снимает операции цепочки целиком, если часть их
                 // отбросило правило (#4536 после #4436 «замороженные дни не трогаем»). Тогда запись
@@ -4267,13 +4281,13 @@
     // ЦЕПОЧКА ДРОБЛЕНИЯ: выполненная часть из цепочки ВЫХОДИТ (сама себе «ID первой части»), а её
     // место занимает остаток — он либо становится новой головой (тогда прежние продолжения
     // перецепляются на него), либо остаётся продолжением той же головы.
-    // → Promise<число разделённых заданий>
+    // → Promise<{ count: разделённых заданий, createdIds: [id созданных остатков] }>
     AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits, win) {
         var self = this;
         var list = (splits || []).filter(function(sp) { return sp && sp.id != null; });
-        if (!list.length) return Promise.resolve(0);
+        if (!list.length) return Promise.resolve({ count: 0, createdIds: [] });
         var cutMeta = this.meta && this.meta.cut;
-        if (!cutMeta) return Promise.resolve(0);
+        if (!cutMeta) return Promise.resolve({ count: 0, createdIds: [] });
         var finishedReqId = reqIdByName(cutMeta, CUT_REQ.finishedAt);
         var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
         var endMin = Number(win && win.endMin);
@@ -4304,7 +4318,7 @@
                 });
             }
         });
-        if (!ops.updates.length) return Promise.resolve(0);
+        if (!ops.updates.length) return Promise.resolve({ count: 0, createdIds: [] });
         ops.onCreated = function(cr, newId) {
             if (cr && cr.splitOf) createdBySplit[String(cr.splitOf)] = String(newId);
         };
@@ -4327,10 +4341,36 @@
                     tasks.push(function() { return self.post('_m_set/' + sib + '?JSON', sf); });
                 });
             });
-            if (!tasks.length) return list.length;
-            return runWithConcurrency(tasks, MAX_PARALLEL_WRITES).then(function() { return list.length; });
+            // #4569: id созданных остатков нужны вызывающему — он объявит их ручными, чтобы
+            // пересборка их точно переложила (страж не отбрасывает операции ручного действия).
+            var createdIds = Object.keys(createdBySplit).map(function(k) { return createdBySplit[k]; });
+            if (!tasks.length) return { count: list.length, createdIds: createdIds };
+            return runWithConcurrency(tasks, MAX_PARALLEL_WRITES)
+                .then(function() { return { count: list.length, createdIds: createdIds }; });
         });
     };
+
+    // #4569: рамки пересборки после «Урегулировать» — ручное действие, однозначный сдвиг.
+    //   wholeDayCutIds — всё, что это действие перенесло, разделило и создало: страж не отбрасывает
+    //     операции по ним (ручное сильнее заморозки), поэтому команда выполняется целиком;
+    //   withinSlitterIds — станки этих заданий: пересборка не выходит за них и не перекидывает
+    //     задания между станками (в scope с >1 станком каждое задание заперто на своём).
+    // Чистая: cuts нужны только чтобы узнать станок задания. → moveScope
+    function settleMoveScope(moves, splits, createdIds, cuts) {
+        var ids = {}, sids = {};
+        (moves || []).forEach(function(m) { if (m && m.id != null) ids[String(m.id)] = true; });
+        (splits || []).forEach(function(sp) { if (sp && sp.id != null) ids[String(sp.id)] = true; });
+        (createdIds || []).forEach(function(id) { if (id != null && id !== '') ids[String(id)] = true; });
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !ids[String(c.id)]) return;
+            var sid = String(c.slitter && c.slitter.id != null ? c.slitter.id : '');
+            if (sid !== '') sids[sid] = true;
+        });
+        var scope = { wholeDayCutIds: Object.keys(ids) };
+        var sidList = Object.keys(sids);
+        if (sidList.length) scope.withinSlitterIds = sidList;
+        return scope;
+    }
 
     // #4569: дни (ключи YYYYMMDD), которых коснулось «Урегулировать»: куда переехали просроченные и
     // досрочные, где встала выполненная часть и куда уехал остаток. Именно их старты надо свести
@@ -8888,8 +8928,22 @@
         // Работает на всех путях (генерация/«Упорядочить»/↑↓/удаление/перенос).
         // Пустая «Дата план» → dayIsFrozen=false.
         if (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
+            // #4569: задание, которое оператор несёт ПРЯМО СЕЙЧАС, замороженный день не пришпиливает —
+            // ручное действие сильнее заморозки (решение заказчика 02.08.2026), и правило обязано
+            // действовать в ОБОИХ механизмах. Страж такие операции уже не отбрасывает (FROZEN_DAY);
+            // если бы пиннинг остался, команда всё равно выполнялась бы наполовину: операций нет —
+            // значит время задания осталось прежним (у только что созданного — плейсхолдерным).
+            // Чужие задания замороженного дня пришпилены, как и были.
+            var manualPin = {};
+            [(moveScope && moveScope.wholeDayCutIds) || [],
+             (moveScope && moveScope.pinCutIds) || [],
+             (moveScope && moveScope.weightPositionCutIds) || []].forEach(function(list){
+                list.forEach(function(id){ manualPin[String(id)] = true; });
+            });
             planInput.forEach(function(c){
-                if (c && !c.fixed && self.dayIsFrozen(c.planDate)) { c.fixed = true; pinnedRestore.push(c); }
+                if (c && !c.fixed && !manualPin[String(c.id)] && self.dayIsFrozen(c.planDate)) {
+                    c.fixed = true; pinnedRestore.push(c);
+                }
             });
         }
         // #4555: «Пересчитать отсюда и до конца» — ПРОШЛОЕ НЕПРИКОСНОВЕННО. Всё, что стои́т на том

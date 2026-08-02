@@ -98,33 +98,37 @@ function opsOf() {
         'и нарушением это не считается — потолок дня сильнее заморозки (#4467 для 🔒, #4494 для заморозки)');
 })();
 
-// ── 2) Заморозка цела: всё остальное по замороженному дню отбрасывается ─────
+// ── 2) Заморозка защищает ЧУЖИЕ задания дня; задание оператора ею не ограничено ──
+// #4569 (решение заказчика 02.08.2026): РУЧНОЕ ДЕЙСТВИЕ СИЛЬНЕЕ ЗАМОРОЗКИ. Правило ограничивает
+// АВТОМАТИКУ — это его заголовок. Отказ ручной команде означал бы половинчатый результат («тут
+// сдвинули, а там не смогли»): страж снимает операции цепочки целиком (#4536), и задание остаётся
+// с плейсхолдерным временем — боевое #4569 («⏱ 07:59 – 09:53» внахлёст).
 (function () {
-    // (а) перенос перенесённого задания В ДРУГОЙ день — это уже не разрыв, а переезд.
+    // (а) задание, которое оператор несёт сам, вправе уехать и ИЗ замороженного дня.
     var moveOut = { updates: [{ cutId: 'MOVED', planStartTs: TS_FREE, plannedRuns: 100 }], creates: [], deletes: [] };
     var r1 = planning.guardPlanOps(moveOut, ctxOf({ manual: ['MOVED'] }), 'auto');
-    assertEqual(moveOut.updates.length, 0, 'переезд задания ИЗ замороженного дня по-прежнему отброшен');
-    assert(r1.skipped > 0, 'и посчитан отброшенным');
+    assertEqual(moveOut.updates.length, 1, '#4569 переезд задания ОПЕРАТОРА из замороженного дня проходит');
+    assertEqual(r1.skipped, 0, 'и отказа нет — ручное действие выполняется целиком');
 
     // (б) чужое задание того же дня не трогаем даже при ручном переносе соседа.
     var other = { updates: [{ cutId: 'OTHER', planStartTs: TS_FROZEN_LATE, plannedRuns: 5 }], creates: [], deletes: [] };
     planning.guardPlanOps(other, ctxOf({ manual: ['MOVED'] }), 'auto');
     assertEqual(other.updates.length, 0, 'ЧУЖОЕ задание замороженного дня не трогаем');
 
-    // (в) удаление задания замороженного дня запрещено и оператору.
-    var del = { updates: [], creates: [], deletes: ['MOVED'] };
-    planning.guardPlanOps(del, ctxOf({ manual: ['MOVED'] }), 'auto');
-    assertEqual(del.deletes.length, 0, 'удаление задания замороженного дня по-прежнему отброшено');
+    // (в) чужое задание замороженного дня не удаляем.
+    var delOther = { updates: [], creates: [], deletes: ['OTHER'] };
+    planning.guardPlanOps(delOther, ctxOf({ manual: ['MOVED'] }), 'auto');
+    assertEqual(delOther.deletes.length, 0, 'удаление ЧУЖОГО задания замороженного дня отброшено');
 
-    // (г) новое задание В замороженный день — нельзя (это не разрыв, а набивка дня).
+    // (г) новое задание В замороженный день от АВТОМАТИКИ — нельзя (набивка дня).
     var newInFrozen = { updates: [], creates: [{ parentCutId: 'FREECUT', planStartTs: TS_FROZEN, plannedRuns: 10 }], deletes: [] };
     planning.guardPlanOps(newInFrozen, ctxOf({ manual: ['MOVED'] }), 'auto');
     assertEqual(newInFrozen.creates.length, 0, 'новое задание в замороженный день по-прежнему отброшено');
 
-    // (д) продолжение самого перенесённого, но В замороженный день — тоже нет: остаток обязан уехать.
+    // (д) продолжение задания ОПЕРАТОРА вправе встать и в замороженный день — это его команда.
     var contInFrozen = { updates: [], creates: [{ parentCutId: 'MOVED', planStartTs: TS_FROZEN_LATE, plannedRuns: 70 }], deletes: [] };
     planning.guardPlanOps(contInFrozen, ctxOf({ manual: ['MOVED'] }), 'auto');
-    assertEqual(contInFrozen.creates.length, 0, 'остаток не остаётся в замороженном дне');
+    assertEqual(contInFrozen.creates.length, 1, '#4569 продолжение задания оператора не отброшено');
 })();
 
 // ── 3) Без ручного переноса — поведение прежнее ─────────────────────────────
