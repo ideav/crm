@@ -90,13 +90,15 @@ assertEqual(clean.devBtn.style.display, 'none', 'нет отклонений —
 c.openDeviations();
 var modal = c.root.querySelector('.atex-pp-dev-modal');
 assert(!!modal, 'форма отклонений добавлена в корень РМ');
-assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 2, 'две группы: просрочено и выполнено досрочно');
+assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 3,
+    '#4584: три группы — просрочено, выполнено досрочно, делается раньше плана');
 assert(!!c.root.querySelector('.atex-pp-dev-overdue') && !!c.root.querySelector('.atex-pp-dev-early'),
     'группы различимы по классу (просроченная подсвечивается красным)');
 assertEqual(c.root.querySelectorAll('.atex-pp-dev-item').length, 3, 'в списке все отклонившиеся задания (2 + 1)');
 
 var titles = c.root.querySelectorAll('.atex-pp-dev-group-title').map(function(n) { return n.textContent; });
-assertEqual(titles, ['Просрочено — 2', 'Выполнено досрочно — 1'], 'заголовки групп несут количество');
+assertEqual(titles, ['Просрочено — 2', 'Выполнено досрочно — 1', 'Делается раньше плана — 0'],
+    'заголовки групп несут количество');
 
 var items = c.root.querySelectorAll('.atex-pp-dev-item').map(function(n) { return n.textContent; });
 assert(items[0].indexOf('Станок 1') >= 0 && items[0].indexOf('БОПП 30') >= 0, 'строка задания несёт станок и сырьё');

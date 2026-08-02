@@ -16758,7 +16758,8 @@
             groups: groups,
             n: groups.overdue.length,
             m: groups.early.length,
-            total: groups.overdue.length + groups.early.length
+            k: (groups.earlyRun || []).length,   // #4584: делается раньше плана
+            total: groups.overdue.length + groups.early.length + (groups.earlyRun || []).length
         };
     };
 
@@ -16768,12 +16769,14 @@
         if (!this.devBtn) return;
         var st = this.deviationState();
         this.devBtn.style.display = st.total ? '' : 'none';
-        this.devBtn.textContent = 'Отклонения ' + st.n + '/' + st.m;
+        this.devBtn.textContent = 'Отклонения ' + st.n + '/' + st.m + (st.k ? ('/' + st.k) : '');
         // #4412: подсказку держим КОРОТКИМИ СТРОКАМИ (перевод строки в title браузер уважает).
         // Одной строкой она была шире полутора сотен символов, а кнопка стоит у ПРАВОГО края
         // панели — всплывающая подсказка уезжала за край окна и читалась обрезанной.
         this.devBtn.title = 'Просрочено — ' + st.n + ': плановый день прошёл, не выполнено.\n'
             + 'Выполнено досрочно — ' + st.m + ': раньше планового дня.\n'
+            + (st.k ? ('Делается раньше плана — ' + st.k
+                + ': проходы идут, день не настал.\n') : '')
             + 'Открыть список и урегулировать.';
     };
 
@@ -16862,12 +16865,16 @@
         content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Отклонения от плана' }));
         content.appendChild(this.renderDeviationGroup('Просрочено', st.groups.overdue, 'overdue'));
         content.appendChild(this.renderDeviationGroup('Выполнено досрочно', st.groups.early, 'early'));
+        // #4584: третий вид расхождения — проходы уже идут, а плановый день ещё не настал.
+        content.appendChild(this.renderDeviationGroup('Делается раньше плана', st.groups.earlyRun || [], 'early-run'));
         content.appendChild(el('p', { class: 'atex-pp-hint', text:
             'Урегулировать: выполненные досрочно уйдут в день фактического выполнения; просроченные '
             + 'встанут перед следующим заданием своего станка (нет следующего — на ближайший рабочий '
             + 'незамороженный день), всё последующее сдвинется. Частично выполненное разделится: '
             + 'сделанные проходы останутся отдельным заданием в конце своего фактического дня, '
-            + 'остаток уедет в план. Порядок заданий сохраняется.' }));
+            + 'остаток уедет в план. Делающееся раньше плана режется так же, только в обратную '
+            + 'сторону: выполненное уйдёт в день выполнения, остаток останется на своём времени, '
+            + 'а следующие за ним сдвинутся влево. Порядок заданий сохраняется.' }));
 
         var actions = el('div', { class: 'atex-pp-supply-actions' });
         var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger', type: 'button', text: 'Урегулировать' });
