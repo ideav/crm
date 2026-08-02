@@ -173,11 +173,13 @@ function controlsOf(queueEl, cutId) {
     assert(okPlan.assignments.length > 0, 'без начатых перестановка выдаёт назначения времён');
 })();
 
-// ── 5) #4346 «Урегулировать» начатые не двигает ──────────────────────────────
+// ── 5) #4346/#4564 «Урегулировать» и начатые задания ─────────────────────────
+// #4564 сузил неприкосновенность #4381 до случая, когда НЕИЗВЕСТНО, сколько проходов сделано:
+// факт проходов живёт в «Кол-во резок факт» (actualRuns), и отчёт может его не отдать.
 (function () {
     var TODAY = 20260724;
     var cuts = [
-        // просрочено и НАЧАТО — идёт на станке прямо сейчас, трогать нельзя
+        // просрочено и НАЧАТО, факт проходов НЕИЗВЕСТЕН (нет колонки) — трогать нельзя
         { id: 'run', slitter: { id: '1' }, planDate: String(tsAt(2026, 7, 22, 8, 0)), startDate: String(tsAt(2026, 7, 22, 8, 10)), endDate: '' },
         // просрочено и НЕ начато — переносим
         { id: 'late', slitter: { id: '1' }, planDate: String(tsAt(2026, 7, 23, 8, 0)), startDate: '', endDate: '' },
@@ -190,10 +192,22 @@ function controlsOf(queueEl, cutId) {
     assertEqual(groups.overdue.map(function(c) { return c.id; }), ['run', 'late'],
         'начатое просроченное из списка НЕ исчезает — диспетчер его видит');
 
-    var plan = planning.deviationSettlePlan(cuts, groups, { todayKey: TODAY, shiftStartMin: 480 });
-    assertEqual(plan.map(function(p) { return p.id; }), ['late'], 'переносим только НЕ начатое просроченное');
+    var plan = planning.deviationSettlePlan(cuts, groups, { todayKey: TODAY, shiftStartMin: 480 }).moves;
+    assertEqual(plan.map(function(p) { return p.id; }), ['late'],
+        '#4381: факт проходов неизвестен → начатое просроченное не двигаем');
     assertEqual(plan[0].planStart, tsAt(2026, 7, 25, 8, 0) - 60,
         'место — перед первым НЕ начатым заданием станка (начатое «nowrun» якорем не берём)');
+
+    // #4564: тот же начатый, но факт ИЗВЕСТЕН и равен нулю — сделано ничего, двигаем как обычное
+    // просроченное (взаимный порядок с 'late' сохраняется: 'run' стоял раньше).
+    var known = cuts.map(function(c) {
+        return c.id === 'run' ? Object.assign({}, c, { plannedRuns: 20, actualRuns: 0 }) : c;
+    });
+    var kGroups = planning.deviationGroups(known, TODAY);
+    var kPlan = planning.deviationSettlePlan(known, kGroups, { todayKey: TODAY, shiftStartMin: 480 }).moves;
+    assertEqual(kPlan.map(function(p) { return p.id; }), ['run', 'late'],
+        '#4564: начато, но проходов НОЛЬ (факт известен) → двигаем как обычное просроченное');
+    assertEqual(kPlan[0].planStart < kPlan[1].planStart, true, 'взаимный порядок просроченных прежний');
 })();
 
 console.log('\n' + passed + '/' + total + ' passed');

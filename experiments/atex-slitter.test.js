@@ -61,12 +61,15 @@ assertEqual(core.meterageFromCounters('1 850,5', '1 000'), 850.5, 'meterage pars
 assertEqual(core.meterageFromCounters(1000, 1850), 0, '#4321 обратный ввод (кон. > нач.) → 0');
 assertEqual(core.meterageFromCounters('', ''), 0, 'meterage of empty counters → 0');
 
-// ── #3433: факт. проходы из погонажа и факт. рулоны полосы ──
-assertEqual(core.actualRunsFromMeterage(1200, 400, 5), 3, 'actualRunsFromMeterage: 1200 ÷ 400 = 3 прохода');
-assertEqual(core.actualRunsFromMeterage(1250, 400, 5), 3, 'actualRunsFromMeterage: округление до целого прохода (1250/400≈3)');
-assertEqual(core.actualRunsFromMeterage(0, 400, 5), 5, 'actualRunsFromMeterage: нет погонажа → фолбэк на план (5)');
-assertEqual(core.actualRunsFromMeterage(1200, 0, 5), 5, 'actualRunsFromMeterage: нет метража прогона → фолбэк на план');
-assertEqual(core.actualRunsFromMeterage(0, 0, 0), 0, 'actualRunsFromMeterage: нет данных → 0');
+// ── #4564: сделано проходов = «Кол-во резок факт» задания ──
+assertEqual(core.actualRunsForCut({ actualRuns: '8' }), 8, 'actualRunsForCut: «Кол-во резок факт» = 8 проходов');
+assertEqual(core.actualRunsForCut({ actualRuns: '' }), 0, 'actualRunsForCut: пусто → 0 (задание не начинали)');
+assertEqual(core.actualRunsForCut({}), 0, 'actualRunsForCut: нет реквизита → 0');
+// Погонаж на этот вопрос больше не отвечает: у не начатой резки он равен остатку партии (#4351).
+assertEqual(core.actualRunsForCut({ actualRuns: '', meterage: '49429.952', runLength: '300' }), 0,
+    '#4351/#4564: загрязнённый погонаж не превращается в проходы');
+
+// ── #3433: факт. рулоны полосы ──
 assertEqual(core.actualRollsForStrip(2, 3), 6, 'actualRollsForStrip: 2 полосы × 3 прохода = 6 рулонов факт');
 assertEqual(core.actualRollsForStrip(0, 3), '', 'actualRollsForStrip: нет полос → пусто (поле не пишем)');
 assertEqual(core.actualRollsForStrip(2, 0), '', 'actualRollsForStrip: нет проходов → пусто');
@@ -379,30 +382,26 @@ assertEqual(core.formatDuration(NaN), '', 'formatDuration: NaN → пусто');
         '#3560 createEvent: цель — таблица «Событие смены» (1082)');
 })();
 
-// ── #3621: donePassCount — число выполненных проходов = число событий «Резка» этой резки ──
+// ── #4564: donePassCount — число выполненных проходов = «Кол-во резок факт» задания ──
 // Заголовок «Резка N из M»: N = donePassCount + 1 (текущий проход), в пределах [1, M].
+// Число живёт в самом задании, поэтому не зависит ни от загруженных событий, ни от смены,
+// в которой отмечали проходы (переходящее задание помнит их и назавтра).
 (function() {
     var Controller = require('../download/atex/js/slitter.js').Controller;
     var inst = Object.create(Controller.prototype);
+    // события смены есть и они про ЭТУ резку — на счёт проходов они больше не влияют
     inst.shiftEvents = [
-        { type: 'Начало смены', cutId: null },
-        { type: 'Начало резки', cutId: '81663' },
         { type: 'Резка', cutId: '81663', value: '1' },
-        { type: 'Резка', cutId: '81663', value: '2' },
-        { type: 'Резка', cutId: '99999', value: '1' }, // другая резка — не считаем
-        { type: 'Наладка', cutId: '81663' }
+        { type: 'Резка', cutId: '81663', value: '2' }
     ];
-    assertEqual(inst.donePassCount({ id: '81663' }), 2,
-        '#3621 donePassCount: считает только события «Резка» этой резки');
-    assertEqual(inst.donePassCount({ id: '99999' }), 1,
-        '#3621 donePassCount: фильтр по cutId');
+    assertEqual(inst.donePassCount({ id: '81663', actualRuns: '2' }), 2,
+        '#4564 donePassCount: «Кол-во резок факт» = 2');
+    assertEqual(inst.donePassCount({ id: '81663', actualRuns: '' }), 0,
+        '#4564 donePassCount: пусто → 0, события смены не подменяют факт');
     assertEqual(inst.donePassCount({ id: '00000' }), 0,
-        '#3621 donePassCount: нет событий «Резка» → 0');
+        '#4564 donePassCount: нет реквизита → 0');
     assertEqual(inst.donePassCount(null), 0,
-        '#3621 donePassCount: без резки → 0');
-    var empty = Object.create(Controller.prototype);
-    assertEqual(empty.donePassCount({ id: '81663' }), 0,
-        '#3621 donePassCount: shiftEvents не загружены → 0');
+        '#4564 donePassCount: без резки → 0');
 })();
 
 // ── #3609: бесшовное продолжение смены ──
@@ -558,6 +557,7 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     inst.isCutLocked = function() { return false; };
     inst.eventDateTime = function() { return '2026-06-29 10:00:00'; };
     inst.meta = { cut: { id: '110', reqs: [
+        { id: '1105', val: 'Кол-во резок факт' },   // #4564
         { id: '1104', val: 'Погонаж факт, м' },
         { id: '1102', val: 'Счётчик кон.' },
         { id: '1110', val: 'Расход сырья' },
@@ -577,6 +577,7 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     inst.markPassDone(false); // один проход: target=1, meterage=1×600
     assertEqual(posts[0].params['t1104'], 600, '#3861 markPassDone: Погонаж факт = 1×600');
     assertEqual(posts[0].params['t1110'], 600, '#3861 markPassDone: «Расход сырья» (погонные метры) = погонаж');
+    assertEqual(posts[0].params['t1105'], 1, '#4564 markPassDone: «Кол-во резок факт» = 1');
 })();
 
 console.log('\n' + passed + ' assertions passed');

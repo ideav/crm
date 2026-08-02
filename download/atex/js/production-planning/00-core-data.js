@@ -212,12 +212,20 @@
         plannedRuns: 'Кол-во план',
         duration: 'Длительность, минут',
         timing: 'Тайминг',
-        actualRuns: 'Кол-во факт',
+        // #4564: СКОЛЬКО ПРОХОДОВ ЗАДАНИЯ УЖЕ СДЕЛАНО (657315). Пишет пульт слиттера при каждой
+        // отметке ✓ Готово, читают пульт («Резка N из M») и «Урегулировать» (разделение частично
+        // выполненного задания). Единственный источник этого числа: журнал событий смены на него
+        // больше не отвечает, погонаж — тем более (у не начатой резки он равен остатку партии, #4351).
+        actualRuns: 'Кол-во резок факт',
+        // «Кол-во факт» (16422) — ДРУГОЙ реквизит задания (рулоны), планированием не используется.
         length: 'Метраж, м',
         winding: 'Тип намотки',
         leader: 'Лидер',         // #3569: ссылка на «Лидер» (82519); при планировании копируется из позиции
         material: 'Вид сырья',   // #3688: ссылка на «Вид сырья» (95358→1069); пишется при планировании — по ней сверяется заправка станка
         fixed: 'Зафиксировано',  // #3508: булев флаг (id 81530, type 11) — задание нельзя менять/удалять
+        // #4564: DATETIME (16411) — «Урегулировать» закрывает им выполненную часть разделённого
+        // задания; иначе она назавтра снова просрочена, а делить в ней уже нечего.
+        finishedAt: 'Закончено',
         knifeSetupMin: 'Наладка ножей, мин',      // #3698: расчётная наладка ножей (KNIFE), мин (id 96067)
         materialWindingMin: 'Сырье/намотка, мин', // #3698: расчётная смена сырья/намотки (MATERIAL_WINDING), мин (id 96069)
         cutAndLeader: 'Резка и Лидер',            // #3700: намотка («Длительность, минут») + лидер (BETWEEN_CUTS × резок), мин (id 96778)
@@ -240,6 +248,11 @@
         'cut_plan_count',
         'cut_qty_plan'
     ];
+    // #4564: сделанные проходы из отчёта cut_planning (колонку добавить на сервере, как #3698
+    // добавил cut_knife_setup_min: t28 = реквизит «Кол-во резок факт» таблицы 1078). Нет колонки
+    // → задание выглядит НЕ начатым по проходам, и «Урегулировать» его не разделит; об этом
+    // говорит проверка в контроллере, а не молчаливый ноль.
+    var CUT_ACTUAL_RUN_COLUMNS = ['cut_actual_runs', 'cut_fact_runs', 'cut_runs_fact'];
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
     var CUT_TIMING_COLUMNS = ['cut_timing'];
     // #3698: хранимые активности переналадки (отчёт cut_planning — добавить колонки на сервере).
@@ -1290,6 +1303,10 @@
                     rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
                     length: rowNum(row, CUT_RUN_LENGTH_COLUMNS),
                     plannedRuns: rowNum(row, CUT_PLANNED_RUN_COLUMNS),
+                    // #4564: сделано проходов — «Кол-во резок факт». null = колонки нет в отчёте
+                    // («не знаем»), 0 = знаем, что не сделано ничего: разделять по факту можно
+                    // только когда знаем (иначе «Урегулировать» урезал бы задание вслепую).
+                    actualRuns: rowNumOrNull(row, CUT_ACTUAL_RUN_COLUMNS),
                     duration: rowNum(row, CUT_DURATION_COLUMNS),
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     // #3698: уже сохранённые активности переналадки ('' — колонки ещё нет/пусто),
@@ -2538,26 +2555,67 @@
         return String(cut && cut.slitter && cut.slitter.id != null ? cut.slitter.id : '');
     }
 
-    // #4346: «Урегулировать» — что записать в «Дату план» каждому отклонившемуся заданию. Правила ТЗ:
+    // #4564: сколько проходов задания уже сделано — «Кол-во резок факт» (657315), см. CUT_REQ.
+    // null («колонки нет в отчёте») отличаем от 0 («знаем, что ничего не сделано»): разделить
+    // задание по факту можно только когда факт ИЗВЕСТЕН.
+    function cutDoneRuns(cut) {
+        if (!cut || cut.actualRuns == null) return null;
+        var n = Number(cut.actualRuns);
+        if (!isFinite(n) || n <= 0) return 0;
+        return Math.floor(n);
+    }
+
+    // #4564: «конец дня» для задания, которое ФАКТИЧЕСКИ выполнялось в этом дне — плановое время
+    // ПОСЛЕ последнего задания станка в том дне. Пусто (задание в дне одно) → момент его старта.
+    // Это плейсхолдер порядка, как и всё остальное в этой функции: минуты расставит пересборка.
+    function dayTailPlanStart(cuts, slitterKey, dayKey, exceptId, fallbackTs) {
+        var maxTs = null;
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || String(c.id) === String(exceptId)) return;
+            if (cutSlitterKey(c) !== slitterKey) return;
+            if (planDateDayKey(c.planDate) !== dayKey) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null) return;
+            if (maxTs == null || ts > maxTs) maxTs = ts;
+        });
+        return maxTs == null ? fallbackTs : maxTs + 60;
+    }
+
+    // #4346/#4564: «Урегулировать» — ОДНО решение на каждое отклонившееся задание. Правила ТЗ:
     //   • выполненные ДОСРОЧНО — в день фактического выполнения: пишем сам момент «Закончено», он же
     //     ставит задание на правильное место внутри того дня;
-    //   • ПРОСРОЧЕННЫЕ — перед СЛЕДУЮЩИМ заданием своего станка («вместо него»), в какой бы день оно
-    //     ни стояло; взаимный порядок просроченных сохраняется. «Следующее» = самое раннее
-    //     НЕвыполненное задание этого станка, не из группы просроченных (такое всегда стоит сегодня
-    //     или позже: незавершённое задание прошлого дня по определению само просрочено);
+    //   • ЧАСТИЧНО ВЫПОЛНЕННОЕ просроченное (сделано 0 < D < план) — РАЗДЕЛЯЕТСЯ (#4564):
+    //     выполненная часть (D проходов) остаётся ИСХОДНОЙ записью — при ней «Начато», погонаж,
+    //     счётчики и события смены — и встаёт в конец дня, в котором её фактически делали (день
+    //     «Начато»); остаток (план − D) уезжает НОВОЙ записью на место просроченного (ниже).
+    //     Выполненная часть закрывается («Закончено»), иначе назавтра она снова отклонение;
+    //   • сделаны ВСЕ проходы, но задание не закрыто (D ≥ план) — разделять нечего: работа
+    //     переезжает в свой фактический день целиком и закрывается там же;
+    //   • ПРОСРОЧЕННЫЕ (в т.ч. НАЧАТЫЕ без единого прохода — #4564 снял для них неприкосновенность
+    //     #4381: сделано ничего, двигать нечему мешать) — перед СЛЕДУЮЩИМ заданием своего станка
+    //     («вместо него»), в какой бы день оно ни стояло; взаимный порядок просроченных сохраняется.
+    //     «Следующее» = самое раннее НЕвыполненное задание этого станка, не из группы просроченных
+    //     (такое всегда стоит сегодня или позже: незавершённое задание прошлого дня по определению
+    //     само просрочено);
     //   • следующего задания у станка НЕТ → ближайший рабочий незамороженный день (freeDayMsFor).
     // Пишем ПЛЕЙСХОЛДЕР: важны не сами значения, а ПОРЯДОК — сдвиг всех последующих делает пересборка
     // очереди (autoSequenceQueue preserveOrder, «общие правила»), как и на пути ручного переноса.
     // Шаг плейсхолдера — минута назад от «следующего» (смена начинается в 08:00, так что запаса
     // до полуночи хватает на любое реальное число просроченных заданий станка).
     // Чистая (DOM/сеть не трогает; календарь приходит колбэком freeDayMsFor) — покрыта тестом.
-    // → [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }]
+    // → {
+    //     moves:  [{ id, planStart (unix-секунды), reason: 'early' | 'before-next' | 'free-day' }],
+    //     splits: [{ id, doneRuns, restRuns, donePlanStart, restPlanStart, restReason }]
+    //   }
+    // splits[i].restRuns = 0 — остатка нет: задание целиком уезжает в свой фактический день и там
+    // закрывается (новая запись не создаётся).
     function deviationSettlePlan(cuts, groups, opts) {
         var o = opts || {};
         var today = Number(o.todayKey);
         var shiftStartMin = Number(o.shiftStartMin) || 0;
         var g = groups || {};
         var plan = [];
+        var splits = [];
         (g.early || []).forEach(function(c) {
             var ts = planTsSeconds(c && c.endDate);
             if (ts == null || !c || c.id == null) return;
@@ -2565,15 +2623,39 @@
         });
         var overdueSet = {};
         (g.overdue || []).forEach(function(c) { if (c && c.id != null) overdueSet[String(c.id)] = true; });
+        // #4564: частично выполненные — отдельным решением. Их выполненная часть уходит в СВОЙ
+        // фактический день, поэтому в очередь просроченных («перед следующим заданием станка»)
+        // встаёт только ОСТАТОК; заданию без остатка в этой очереди места не нужно вовсе.
+        var splitById = {};
+        (g.overdue || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var planned = Math.floor(Number(c.plannedRuns) || 0);
+            var done = cutDoneRuns(c);
+            if (planned <= 0 || done == null || done <= 0) return;   // делить нечего / факт неизвестен
+            var doneRuns = Math.min(done, planned);
+            var startTs = planTsSeconds(c.startDate);
+            var factTs = startTs != null ? startTs : planTsSeconds(c.planDate);
+            if (factTs == null) return;   // не знаем, в каком дне это делали — не выдумываем
+            var sp = {
+                id: String(c.id), doneRuns: doneRuns, restRuns: Math.max(0, planned - doneRuns),
+                donePlanStart: dayTailPlanStart(cuts, cutSlitterKey(c), planDateDayKey(factTs), c.id, factTs),
+                restPlanStart: null, restReason: null
+            };
+            splits.push(sp);
+            splitById[String(c.id)] = sp;
+        });
         var bySlitter = {}, sids = [];
         (g.overdue || []).forEach(function(c) {
             if (!c || c.id == null) return;
-            // #4381: НАЧАТОЕ задание неприкосновенно — «Урегулировать» его не двигает. В группе
-            // «просрочено» «Закончено» пусто по построению, поэтому здесь cutIsStarted = «в работе
-            // прямо сейчас». В списке формы оно остаётся (диспетчер должен его видеть), но переноса
-            // не получает. Досрочных это НЕ касается: они завершены, и перенос в день фактического
-            // выполнения — как раз фиксация факта (#4346), а не вмешательство в работу.
-            if (cutIsStarted(c)) return;
+            var sp = splitById[String(c.id)];
+            // #4564: у задания без остатка (сделаны все проходы) двигать в очереди нечего.
+            if (sp && sp.restRuns <= 0) return;
+            // #4564: НАЧАТОЕ задание с НЕИЗВЕСТНЫМ фактом проходов остаётся неприкосновенным
+            // (#4381). Известный ноль — другое дело: сделано ничего, двигать нечему мешать.
+            // Факт неизвестен, когда отчёт не отдаёт колонку «Кол-во резок факт»; двигать
+            // задание вслепую нельзя — на станке может идти работа (см. settleDeviations,
+            // которое об этом ГОВОРИТ, а не молчит).
+            if (!sp && cutIsStarted(c) && cutDoneRuns(c) == null) return;
             var sid = cutSlitterKey(c);
             if (!bySlitter[sid]) { bySlitter[sid] = []; sids.push(sid); }
             bySlitter[sid].push(c);
@@ -2592,9 +2674,16 @@
                 if (ts == null) return;
                 if (anchorTs == null || ts < anchorTs) anchorTs = ts;
             });
+            // #4564: место в очереди достаётся ОСТАТКУ разделяемого задания, а не самому заданию —
+            // исходная запись уезжает в свой фактический день выполненной частью.
+            var place = function(c, ts, reason) {
+                var sp = splitById[String(c.id)];
+                if (sp) { sp.restPlanStart = ts; sp.restReason = reason; return; }
+                plan.push({ id: String(c.id), planStart: ts, reason: reason });
+            };
             if (anchorTs != null) {
                 queue.forEach(function(c, i) {
-                    plan.push({ id: String(c.id), planStart: anchorTs - (queue.length - i) * 60, reason: 'before-next' });
+                    place(c, anchorTs - (queue.length - i) * 60, 'before-next');
                 });
                 return;
             }
@@ -2602,10 +2691,14 @@
             if (dayMs == null || !isFinite(Number(dayMs))) return;
             var base = Math.floor(Number(dayMs) / 1000) + shiftStartMin * 60;
             queue.forEach(function(c, i) {
-                plan.push({ id: String(c.id), planStart: base + i * 60, reason: 'free-day' });
+                place(c, base + i * 60, 'free-day');
             });
         });
-        return plan;
+        // #4564: остаток без места (станку не нашлось ни следующего задания, ни свободного дня —
+        // freeDayMsFor молчит) не создаём: лучше оставить задание целым, чем разрезать его и
+        // потерять остаток. Такое разделение выбрасываем целиком.
+        splits = splits.filter(function(sp) { return sp.restRuns <= 0 || sp.restPlanStart != null; });
+        return { moves: plan, splits: splits };
     }
 
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),

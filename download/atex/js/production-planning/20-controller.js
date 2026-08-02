@@ -79,7 +79,8 @@
         planTsSeconds: planTsSeconds,           // #4346: «Дата план»/«Закончено» → unix-секунды
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
-        deviationSettlePlan: deviationSettlePlan, // #4346: «Урегулировать» — новые «Даты план» отклонившихся
+        deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
+        cutDoneRuns: cutDoneRuns,               // #4564: сделано проходов («Кол-во резок факт»); null = не знаем
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
@@ -4059,11 +4060,17 @@
             var label = c.slitter && c.slitter.label;
             if (label) parts.push(label);
             if (c.materialName) parts.push(c.materialName);
-            // #4381: начатое задание в списке остаётся (диспетчер должен его видеть), но
-            // «Урегулировать» его не двигает — говорим об этом прямо в строке.
+            // #4564: у просроченного говорим, ЧТО с ним будет: частично выполненное разделится
+            // (видно, сколько проходов сделано), остальное переедет целиком.
+            var done = cutDoneRuns(c), planned = Math.floor(Number(c.plannedRuns) || 0);
+            var partial = kind !== 'early' && planned > 0 && done != null && done > 0 && done < planned;
             parts.push(kind === 'early'
                 ? ('выполнено ' + (formatDayKey(planDateDayKey(c.endDate)) || '—'))
-                : (cutIsStarted(c) ? 'начато — не двигаем' : 'не выполнено'));
+                : (partial ? ('сделано ' + done + ' из ' + planned + ' — разделим')
+                    : (done != null && planned > 0 && done >= planned ? 'проходы сделаны — закроем'
+                        : (cutIsStarted(c)
+                            ? (done == null ? 'начато, факт проходов неизвестен — не двигаем' : 'начато, проходов нет')
+                            : 'не выполнено'))));
             listEl.appendChild(el('li', {
                 class: 'atex-pp-dev-item' + (kind !== 'early' && cutIsStarted(c) ? ' is-started' : ''),
                 title: 'id ' + c.id, text: parts.join(' · ')
@@ -4096,17 +4103,23 @@
         content.appendChild(el('p', { class: 'atex-pp-hint', text:
             'Урегулировать: выполненные досрочно уйдут в день фактического выполнения; просроченные '
             + 'встанут перед следующим заданием своего станка (нет следующего — на ближайший рабочий '
-            + 'незамороженный день), всё последующее сдвинется. Порядок заданий сохраняется.' }));
+            + 'незамороженный день), всё последующее сдвинется. Частично выполненное разделится: '
+            + 'сделанные проходы останутся отдельным заданием в конце своего фактического дня, '
+            + 'остаток уедет в план. Порядок заданий сохраняется.' }));
 
         var actions = el('div', { class: 'atex-pp-supply-actions' });
         var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger', type: 'button', text: 'Урегулировать' });
         okBtn.addEventListener('click', function() {
             if (self.busy) return;
-            // #4381: начатые не двигаем — в подтверждении считаем только то, что реально поедет.
-            var startedN = st.groups.overdue.filter(function(x) { return cutIsStarted(x); }).length;
+            // #4564: частично выполненные не «переносятся», а РАЗДЕЛЯЮТСЯ — считаем их отдельно,
+            // иначе диспетчер не поймёт, сколько записей появится.
+            var splitN = st.groups.overdue.filter(function(x) {
+                var d = cutDoneRuns(x), p = Math.floor(Number(x.plannedRuns) || 0);
+                return p > 0 && d != null && d > 0 && d < p;
+            }).length;
             var msg = el('span', { class: 'atex-pp-confirm-msg', text:
-                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + (st.n - startedN)
-                + (startedN ? ' (ещё ' + startedN + ' начато — остаются на месте)' : '')
+                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + (st.n - splitN)
+                + (splitN ? ', разделено частично выполненных — ' + splitN : '')
                 + ', выполненных досрочно — ' + st.m + '. План после них пересобирается.' });
             self.confirmAction(msg, actions, [
                 { label: 'Урегулировать', warning: true, inline: true, onConfirm: function() {
@@ -4140,11 +4153,26 @@
             return Promise.resolve(false);
         }
         var win = this.workingWindow();
-        var plan = deviationSettlePlan(this.cuts || [], groups, {
+        var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
+        var plan = settle.moves || [];
+        var splits = settle.splits || [];
+        // #4564: факт проходов не приходит из отчёта — начатые задания остаются на месте, и об
+        // этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со дня
+        // работу, которая идёт на станке.
+        var blind = (groups && groups.overdue || []).filter(function(c) {
+            return cutIsStarted(c) && cutDoneRuns(c) == null;
+        });
+        if (blind.length) {
+            console.error('[pp] ⛔ #4564: отчёт cut_planning не отдаёт «Кол-во резок факт» ('
+                + CUT_ACTUAL_RUN_COLUMNS.join('/') + ') — начатые просроченные не разделяются и не двигаются: '
+                + blind.map(function(c) { return c.id; }).join(', '));
+            this.notify('Не знаю, сколько проходов сделано (нет колонки в отчёте) — начатые задания '
+                + 'оставляю на месте: ' + blind.length, 'error');
+        }
         var byId = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
         // Пишем только изменившиеся (#3427): повторное «Урегулировать» без новых отклонений — no-op.
@@ -4152,7 +4180,7 @@
             var c = byId[String(p.id)];
             return c && planTsSeconds(c.planDate) !== p.planStart;
         });
-        if (!writes.length) {
+        if (!writes.length && !splits.length) {
             this.notify('Отклонения уже урегулированы — переносить нечего', 'info');
             return Promise.resolve(false);
         }
@@ -4164,14 +4192,19 @@
         return postCutStarts(self, writes.map(function(p) {
             return { cutId: p.id, ts: p.planStart, wasTs: planTsSeconds((byId[String(p.id)] || {}).planDate) };
         }), { onWrite: function(done) { self.updateProgress(done); } }).then(function() {
+            // #4564: разделение частично выполненных — ПОСЛЕ переносов и до пересборки очереди.
+            return self.splitPartiallyDoneCuts(splits, win);
+        }).then(function() {
             return self.reload();
         }).then(function() {
             self.hideProgress(); self.setBusy(false); self.render();
             var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
             var freeDay = byReason('free-day');
-            self.notify('Урегулировано заданий: ' + writes.length
+            var splitN = splits.filter(function(sp) { return sp.restRuns > 0; }).length;
+            self.notify('Урегулировано заданий: ' + (writes.length + splits.length)
                 + ' · просроченных — ' + (byReason('before-next') + freeDay)
                 + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
+                + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
                 + ' · досрочных — ' + byReason('early'), 'success');
             return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
         }).catch(function(err) {
@@ -4181,6 +4214,99 @@
             return false;
         });
     };
+
+    // #4564: РАЗДЕЛИТЬ ЧАСТИЧНО ВЫПОЛНЕННЫЕ задания — вторая половина «Урегулировать».
+    // Задание, у которого сделана ЧАСТЬ проходов («Кол-во резок факт» между 1 и планом), после
+    // «Урегулировать» превращается в две записи:
+    //   • ВЫПОЛНЕННАЯ ЧАСТЬ — это ИСХОДНАЯ запись: при ней «Начато», погонаж, счётчики и события
+    //     смены, а они привязаны к её id (пульт показывает «Резка D из D»). Ей остаются сделанные
+    //     проходы, она встаёт в конец дня, в котором её фактически делали, и ЗАКРЫВАЕТСЯ
+    //     («Закончено» = конец смены того дня) — иначе назавтра она снова отклонение, а делить в
+    //     ней уже нечего;
+    //   • ОСТАТОК — НОВАЯ запись (план − сделано проходов), чистая: без «Начато» и погонажа. Она
+    //     встаёт на место просроченного задания (перед следующим заданием станка), и всё
+    //     последующее двигает ОБЩИЙ механизм — пересборка очереди в settleDeviations.
+    // Работа при этом сохраняется: сделано + остаток = прежний план, поэтому правило реестра
+    // SUPPLY_CONSERVED (ТЗ §15) выполняется по построению, а доли «Партий ГП»/«Обеспечений» делит
+    // тот же applySplitPlan, что и разбиение по дням (#3280) — второй арифметики разделения нет.
+    // ЦЕПОЧКА ДРОБЛЕНИЯ: выполненная часть из цепочки ВЫХОДИТ (сама себе «ID первой части»), а её
+    // место занимает остаток — он либо становится новой головой (тогда прежние продолжения
+    // перецепляются на него), либо остаётся продолжением той же головы.
+    // → Promise<число разделённых заданий>
+    AtexProductionPlanning.prototype.splitPartiallyDoneCuts = function(splits, win) {
+        var self = this;
+        var list = (splits || []).filter(function(sp) { return sp && sp.id != null; });
+        if (!list.length) return Promise.resolve(0);
+        var cutMeta = this.meta && this.meta.cut;
+        if (!cutMeta) return Promise.resolve(0);
+        var finishedReqId = reqIdByName(cutMeta, CUT_REQ.finishedAt);
+        var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
+        var endMin = Number(win && win.endMin);
+        if (!isFinite(endMin)) endMin = 0;
+        var byId = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+
+        var createdBySplit = {}, headSplits = {}, siblingsBySplit = {};
+        var ops = { updates: [], creates: [], deletes: [] };
+        list.forEach(function(sp) {
+            var cut = byId[String(sp.id)];
+            if (!cut) return;
+            var storedHead = String(cut.firstPartId == null ? '' : cut.firstPartId).trim();
+            var wasHead = storedHead === '' || storedHead === String(sp.id);
+            headSplits[String(sp.id)] = wasHead;
+            siblingsBySplit[String(sp.id)] = splitChainPartsOf(self.cuts || [], String(sp.id))
+                .map(function(c) { return String(c.id); })
+                .filter(function(id) { return id !== String(sp.id); });
+            ops.updates.push({
+                cutId: String(sp.id), planStartTs: sp.donePlanStart,
+                plannedRuns: sp.doneRuns, firstPartId: String(sp.id)
+            });
+            if (sp.restRuns > 0) {
+                ops.creates.push({
+                    parentCutId: String(sp.id), planStartTs: sp.restPlanStart, plannedRuns: sp.restRuns,
+                    firstPartSelf: wasHead, firstPartId: wasHead ? '' : storedHead,
+                    splitOf: String(sp.id)
+                });
+            }
+        });
+        if (!ops.updates.length) return Promise.resolve(0);
+        ops.onCreated = function(cr, newId) {
+            if (cr && cr.splitOf) createdBySplit[String(cr.splitOf)] = String(newId);
+        };
+
+        return this.applySplitPlan(ops).then(function() {
+            var tasks = [];
+            list.forEach(function(sp) {
+                var id = String(sp.id);
+                // Закрыть выполненную часть концом смены её фактического дня.
+                if (finishedReqId) {
+                    var f = {};
+                    f['t' + finishedReqId] = dayCloseStamp(sp.donePlanStart, endMin);
+                    tasks.push(function() { return self.post('_m_set/' + id + '?JSON', f); });
+                }
+                // Прежние продолжения цепочки — на новую голову (остаток).
+                var newId = createdBySplit[id];
+                if (!newId || !headSplits[id] || !firstPartReqId) return;
+                (siblingsBySplit[id] || []).forEach(function(sib) {
+                    var sf = {}; sf['t' + firstPartReqId] = newId;
+                    tasks.push(function() { return self.post('_m_set/' + sib + '?JSON', sf); });
+                });
+            });
+            if (!tasks.length) return list.length;
+            return runWithConcurrency(tasks, MAX_PARALLEL_WRITES).then(function() { return list.length; });
+        });
+    };
+
+    // #4564: момент закрытия выполненной части — конец смены того дня, в котором её делали.
+    // День берём из её нового планового времени (оно уже в фактическом дне), время — из окна
+    // смены: точнее минуты не знает никто, а день — знает («Начато»).
+    function dayCloseStamp(tsSec, endMin) {
+        var d = new Date(Number(tsSec) * 1000);
+        var h = Math.floor(endMin / 60), m = Math.round(endMin % 60);
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+            + ' ' + p(h) + ':' + p(m) + ':00';
+    }
 
     // #3475: «Удалить» — снести все задания выбранного дня. Показывает подтверждение
     // (сколько резок/обеспечений будет удалено), затем зовёт runDeleteDayTasks. День —
@@ -8208,7 +8334,11 @@
                             length: parentRunLen > 0 ? round3(parentRunLen) : '',
                             // #3892: «ID первой части» = id головы (parentId) — связывает продолжение
                             // с первой частью явно, без эвристики continuationSignature.
-                            firstPart: (cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId)
+                            // #4564: cr.firstPartSelf — запись рождается САМОСТОЯТЕЛЬНЫМ заданием
+                            // (сама себе голова). Её id известен только после `_m_new`, поэтому
+                            // маркер дописывается ниже; здесь поле не пишем вовсе.
+                            firstPart: cr.firstPartSelf ? ''
+                                : ((cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId))
                         });
                         // #3916: продолжение дробления — «Длительность»/«Резка и Лидер» по его
                         // проходам (cr.plannedRuns), длина прогона/фольга — головы (parentId).
@@ -8228,8 +8358,16 @@
                                     + ' headInCuts=' + !!cutsById[trHead] + ' проходы=' + cr.plannedRuns);
                             }
                             var stripMap = {};
+                            if (typeof ops.onCreated === 'function') ops.onCreated(cr, String(bId));
                             // Главное значение B (плановое время старта) — _m_save с t{tableId}.
                             var bChain = Promise.resolve().then(function() {
+                                // #4564: запись, рождённая САМОСТОЯТЕЛЬНЫМ заданием, ссылается «ID
+                                // первой части» на саму себя — как голова цепочки (#3892). Пишем
+                                // здесь, потому что до `_m_new` этого id не существовало.
+                                if (!(cr && cr.firstPartSelf && firstPartReqId)) return;
+                                var selfFp = {}; selfFp['t' + firstPartReqId] = String(bId);
+                                return self.post('_m_set/' + bId + '?JSON', selfFp);
+                            }).then(function() {
                                 var ts2 = Number(cr.planStartTs);
                                 if (!mainKey || !(isFinite(ts2) && ts2 > 0)) return;
                                 var mf = {}; mf[mainKey] = String(ts2);

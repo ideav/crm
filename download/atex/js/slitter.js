@@ -70,6 +70,12 @@
         defectM: 'Брак, м',
         defectPhoto: 'Фото брака',
         plannedRuns: 'Кол-во план',
+        // #4564: СКОЛЬКО ПРОХОДОВ УЖЕ СДЕЛАНО — хранится в самом задании (657315, таблица 1078).
+        // Единственный источник этого числа: заголовок «Резка N из M», отметка прохода и
+        // планирование читают его. Журнал событий смены остаётся историей нажатий, но на
+        // вопрос «сколько сделано» больше не отвечает — он давал разные ответы разным
+        // потребителям (#4351: заголовок из событий, markPassDone из погонажа).
+        actualRuns: 'Кол-во резок факт',
         runLength: 'Метраж, м',
         startedAt: 'Начато',
         inWork: 'В работе',      // #3557: булев реквизит (1162) — резка открыта/занимает станок
@@ -79,6 +85,10 @@
         leader: 'Лидер'          // #3566 #2: лидер (82519, ссылка) — реквизит задания
     };
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
+    // #4564: имена реквизита «сделано проходов» для object/-фолбэка (colIndexAny).
+    var CUT_ACTUAL_RUNS_NAMES = ['Кол-во резок факт'];
+    // #4564: колонки отчётов, отдающих то же число (slitter_cuts / cut_planning).
+    var CUT_ACTUAL_RUNS_COLUMNS = ['cut_actual_runs', 'cut_fact_runs', 'cut_runs_fact'];
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
     var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
     // #3504: реквизит «Событие смены» переименован вслед за таблицей.
@@ -160,17 +170,6 @@
     // даёт 0, и завершение резки его не пропустит. Записи с прежней формулой заказчик чистит.
     function meterageFromCounters(start, end) {
         return round3(Math.max(0, toNumber(start) - toNumber(end)));
-    }
-
-    // #3433: фактическое число проходов резки из погонажа факт ÷ метраж прогона
-    // (округление до целого прохода). Нет данных по погонажу/метражу → фолбэк на план
-    // (чтобы факт хотя бы не был нулём при завершении без замеров). Пусто → 0.
-    function actualRunsFromMeterage(meterageFact, runLength, plannedRuns) {
-        var m = toNumber(meterageFact);
-        var rl = toNumber(runLength);
-        if (m > 0 && rl > 0) return Math.round(m / rl);
-        var pr = toNumber(plannedRuns);
-        return pr > 0 ? pr : 0;
     }
 
     // #3433: фактически произведённые рулоны полосы = полос за проход × факт. проходов.
@@ -574,6 +573,14 @@
         return runs > 0 ? Math.ceil(runs) : 1;
     }
 
+    // #4564: СКОЛЬКО ПРОХОДОВ СДЕЛАНО — из «Кол-во резок факт» самого задания. Пусто = 0
+    // (задание не начинали): пустой реквизит и «ноль проходов» здесь одно и то же, потому
+    // что число проходов растёт только отметкой ✓ Готово, которая его и пишет.
+    function actualRunsForCut(cut) {
+        var runs = coreToNumber(cut && cut.actualRuns);
+        return runs > 0 ? Math.floor(runs) : 0;
+    }
+
     // #3635 п.5: задание-«настройка» — хвост дня N перед намоткой дня N+1. Это запись с
     // «Кол-во резок план» ЯВНО «0» (день-разрыв оставил настройку ножей/сырья в конце дня).
     // Намотки у неё нет; в пульте показываем «Настройка ножей и сырья», оператор отмечает
@@ -882,6 +889,7 @@
                 batch: firstField(row, ['cut_batch']),
                 planDate: planDate,
                 plannedRuns: firstField(row, ['cut_planned_runs']),
+                actualRuns: firstField(row, CUT_ACTUAL_RUNS_COLUMNS),   // #4564: сделано проходов
                 runLength: firstField(row, ['cut_run_length']),
                 startedAt: firstField(row, ['cut_started']),
                 winding: firstField(row, ['cut_winding']),
@@ -972,7 +980,6 @@
         nextStatus: nextStatus,
         isDone: isDone,
         meterageFromCounters: meterageFromCounters,
-        actualRunsFromMeterage: actualRunsFromMeterage,
         actualRollsForStrip: actualRollsForStrip,
         sumConsumption: sumConsumption,
         sortFifo: sortFifo,
@@ -1002,6 +1009,7 @@
         shiftEventMatchesSlitter: shiftEventMatchesSlitter,
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
+        actualRunsForCut: actualRunsForCut,   // #4564: сделано проходов = «Кол-во резок факт»
         isSetupTask: isSetupTask,   // #3635 п.5
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
@@ -1419,6 +1427,7 @@
             var batchIdx = colIndex(meta, CUT_REQ.batch);
             var planDateIdx = colIndex(meta, CUT_REQ.planDate);
             var plannedRunsIdx = colIndexAny(meta, CUT_PLANNED_RUNS_NAMES);
+            var actualRunsIdx = colIndexAny(meta, CUT_ACTUAL_RUNS_NAMES);   // #4564: сделано проходов
             var runLengthIdx = colIndexAny(meta, CUT_RUN_LENGTH_NAMES);
             var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
             var inWorkIdx = colIndex(meta, CUT_REQ.inWork);      // #3557
@@ -1447,6 +1456,7 @@
                     // prepareCutQueue отфильтрует все резки по пустой дате.
                     planDate: (planDateIdx >= 0 ? row[planDateIdx] : null) || row[0] || '',
                     plannedRuns: plannedRunsIdx >= 0 ? row[plannedRunsIdx] : '',
+                    actualRuns: actualRunsIdx >= 0 ? (row[actualRunsIdx] || '') : '',   // #4564
                     runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
                     startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : '',
                     winding: windingIdx >= 0 ? (row[windingIdx] || '') : '' // #3646
@@ -2106,15 +2116,14 @@
             + 'Установленные ножи и заправленное сырьё со станка не снимайте.' });
     };
 
-    // #3621: число выполненных проходов текущей резки = число событий «Резка»
-    // (EV.pass) среди событий смены этой резки. Источник номера прохода в шапке —
-    // надёжнее метража: каждое «Готово» пишет одно событие «Резка».
+    // #4564: число выполненных проходов = «Кол-во резок факт» самого задания (657315).
+    // Реквизит переживает смену: задание, начатое вчера и продолженное сегодня, помнит свои
+    // проходы, тогда как события смены видны только внутри своей смены — на этом заголовок
+    // «Резка N из M» сбрасывался в начало у переходящего задания. Пишет это число отметка
+    // прохода (markPassDone), и оно же уходит в планирование (разделение частично
+    // выполненного задания при «Урегулировать»).
     AtexSlitter.prototype.donePassCount = function(cut) {
-        var cutId = cut ? String(cut.id) : '';
-        if (!cutId) return 0;
-        return (this.shiftEvents || []).filter(function(ev) {
-            return ev.type === EV.pass && String(ev.cutId || '') === cutId;
-        }).length;
+        return core.actualRunsForCut(cut);
     };
 
     // #3583: кнопки отметки проходов правее .atex-sl-head-title. «Готово» — один
@@ -2533,9 +2542,12 @@
     };
 
     // #3433: при завершении резки зафиксировать фактически произведённые рулоны в её
-    // «Партиях ГП»: «Кол-во факт» = «Кол-во полос» (за проход) × факт. проходов (погонаж
-    // факт ÷ метраж прогона, фолбэк план). Без метаданных/реквизита «Партии ГП» —
-    // тихо пропускаем; ошибка чтения/записи не валит смену статуса (факт уточнит склад).
+    // «Партиях ГП»: «Кол-во факт» = «Кол-во полос» (за проход) × факт. проходов. Без
+    // метаданных/реквизита «Партии ГП» — тихо пропускаем; ошибка чтения/записи не валит
+    // смену статуса (факт уточнит склад).
+    // #4564: факт. проходы берём из «Кол-во резок факт» задания — одна арифметика на все
+    // вопросы «сколько сделано». Ноль (задание завершено без отметок проходов — легаси или
+    // «Завершить» без ✓ Готово) → план: рулоны выпущены, и записать их нулём нельзя.
     AtexSlitter.prototype.recordActualRolls = function(cut) {
         var self = this;
         var fb = this.meta.finishedBatch;
@@ -2543,7 +2555,7 @@
         var actualReq = reqIdByName(fb, FINISHED_BATCH_REQ.actual);
         if (!actualReq) return Promise.resolve();
         var stripsIdx = colIndex(fb, FINISHED_BATCH_REQ.strips);
-        var actualRuns = core.actualRunsFromMeterage(cut.meterage, cut.runLength, cut.plannedRuns);
+        var actualRuns = core.actualRunsForCut(cut) || core.plannedRunsForCut(cut);
         return this.getJson('object/' + fb.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cut.id) + '&LIMIT=0,500').then(function(rows) {
             var chain = Promise.resolve();
             (rows || []).forEach(function(rec) {
@@ -2754,10 +2766,10 @@
         var runLength = core.runLengthForCut(cut);
         if (!(runLength > 0)) { this.notify('У задания не задан «Метраж, м» — не могу пересчитать проходы', 'error'); return; }
         var total = core.plannedRunsForCut(cut);
-        // #4351: число уже отмеченных проходов — из событий «Резка» (#3621, тот же источник,
-        // что у заголовка «Резка N из M»), а НЕ из «Погонаж факт»: у не начатой резки погонаж
-        // равен «Счётчик нач.» = остаток партии (пред-заполнение, #4321 счётчик мотает назад),
-        // и floor(остаток / метраж) ложно давал «все проходы уже отмечены».
+        // #4564: число уже отмеченных проходов — «Кол-во резок факт» задания (тот же источник,
+        // что у заголовка «Резка N из M»), а НЕ «Погонаж факт»: у не начатой резки погонаж равен
+        // «Счётчик нач.» = остаток партии (пред-заполнение, #4321 счётчик мотает назад), и
+        // floor(остаток / метраж) ложно давал «все проходы уже отмечены» (#4351).
         var done = this.donePassCount(cut);
         var target = markAll ? total : Math.min(done + 1, total);
         if (target <= done) { this.notify('Все проходы уже отмечены', 'info'); return; }
@@ -2779,13 +2791,22 @@
             var counterEnd = core.round3(core.toNumber(cut.counterStart) - meterage);
             cut.meterage = String(meterage);
             cut.counterEnd = String(counterEnd);
+            cut.actualRuns = String(target);   // #4564
             var meta = self.meta.cut;
             var fields = {};
+            var actualRunsRid = reqIdByAnyName(meta, CUT_ACTUAL_RUNS_NAMES);   // #4564
             var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
             var counterEndRid = reqIdByName(meta, CUT_REQ.counterEnd);
             var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
             var startedRid = reqIdByAnyName(meta, CUT_STARTED_NAMES);
             var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
+            // #4564: сделанные проходы пишем ПЕРВЫМ делом — это теперь единственный источник
+            // числа выполненных проходов. Нет реквизита в базе — молчать нельзя: пульт
+            // потеряет счёт проходов, а планирование не сможет разделить частично выполненное
+            // задание (правило «нет данных → орать», #4564).
+            if (actualRunsRid) fields['t' + actualRunsRid] = target;
+            else console.error('[slitter] #4564: в таблице «' + TABLE.cut + '» нет реквизита «'
+                + CUT_ACTUAL_RUNS_NAMES[0] + '» — проходы не сохраняются');
             if (meterageRid) fields['t' + meterageRid] = meterage;
             if (counterEndRid) fields['t' + counterEndRid] = counterEnd;
             if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры (накопл. по резке)

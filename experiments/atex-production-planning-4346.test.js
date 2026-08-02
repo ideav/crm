@@ -81,11 +81,14 @@ assertEqual(planning.planTsSeconds('—'), null, 'мусор → null');
 // ── deviationSettlePlan ───────────────────────────────────────────────────────
 var FREE_DAY_MS = Date.UTC(2026, 6, 27);   // 27.07 — «ближайший рабочий незамороженный» для станка 2
 var freeAsked = [];
-var plan = planning.deviationSettlePlan(cuts, groups, {
+var settle = planning.deviationSettlePlan(cuts, groups, {
     todayKey: TODAY,
     shiftStartMin: 480,   // смена с 08:00
     freeDayMsFor: function(sid) { freeAsked.push(sid); return FREE_DAY_MS; }
 });
+// #4564: функция отдаёт ДВА решения — переносы (moves) и разделения частично выполненных (splits).
+var plan = settle.moves;
+assertEqual(settle.splits, [], 'ни у кого из них нет сделанных проходов — разделять нечего');
 var byId = {};
 plan.forEach(function(p) { byId[p.id] = p; });
 
@@ -110,7 +113,7 @@ assertEqual(byId.o2.planStart > ts(24, 12), true, 'выполненное зад
 assertEqual(Object.keys(byId).sort(), ['e1', 'e2', 'o1', 'o2', 'o3'], 'план переносов — только отклонившиеся задания');
 
 // Пустые группы → пустой план (повторное «Урегулировать» ничего не пишет).
-assertEqual(planning.deviationSettlePlan(cuts, { overdue: [], early: [] }, { todayKey: TODAY, shiftStartMin: 480 }), [],
-    'нет отклонений — переносить нечего');
+assertEqual(planning.deviationSettlePlan(cuts, { overdue: [], early: [] }, { todayKey: TODAY, shiftStartMin: 480 }),
+    { moves: [], splits: [] }, 'нет отклонений — переносить нечего');
 
 console.log('\n' + passed + '/' + total + ' passed');
