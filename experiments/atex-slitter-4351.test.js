@@ -103,6 +103,15 @@ assert(inst2.posts.length === 0, '#4351: при законном блоке за
 // пустое начало нулём не подменяем, а просим заполнить. Заполненный НОЛЬ при этом законен —
 // рулон домотали в ноль (#4321).
 (function() {
+    // Партии сырья нет вовсе — это ПЕРВИЧНАЯ причина: из её остатка берётся «Счётчик нач.».
+    var noBatch = makeInst('');
+    noBatch.currentCut.batchId = '';
+    noBatch.currentCut.counterStart = '';
+    noBatch.markPassDone(false);
+    assert(noBatch.posts.length === 0, '#4580 без «Партии сырья» отметка прохода НЕ идёт');
+    assert(noBatch.notes.some(function(m) { return m.indexOf('Партии сырья') >= 0; }),
+        '#4580 сказано про партию, а не про счётчик — это причина, а не следствие');
+
     var noStart = makeInst('');
     noStart.currentCut.counterStart = '';
     noStart.markPassDone(false);

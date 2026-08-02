@@ -2658,7 +2658,19 @@
     AtexSlitter.prototype.applyBatchConsumption = function(cut, consumedM, finishMode) {
         var batch = cut && cut.batchId ? this.findBatch(cut.batchId) : null;
         var batchMeta = this.meta.batch;
-        if (!batch || !batchMeta) return Promise.resolve(null);
+        // #4580: списывать НЕКУДА — это не «нечего делать», а потерянный расход. Молча выходить
+        // нельзя (ТЗ §14): отметка прохода к этому моменту уже не пускает задание без партии,
+        // поэтому сюда попадаем только при рассинхроне справочника — о нём и говорим.
+        if (!batch || !batchMeta) {
+            if (cut && cut.batchId) {
+                console.error('[slitter] #4580: партия ' + cut.batchId + ' не найдена в справочнике — '
+                    + 'расход ' + consumedM + ' м НЕ списан');
+                if (typeof this.notify === 'function') {
+                    this.notify('Партия сырья задания не найдена — расход не списан (' + consumedM + ' м)', 'error');
+                }
+            }
+            return Promise.resolve(null);
+        }
         var remMReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
         var remAreaReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
         var width = core.toNumber(batch.widthMm) || core.toNumber((this.materialWidths || {})[String(batch.materialId)]);
@@ -2778,6 +2790,18 @@
         if (target <= done) { this.notify('Все проходы уже отмечены', 'info'); return; }
 
         var run = function() {
+            // #4580: БЕЗ «Партии сырья» ПРОХОД НЕ ОТМЕЧАЕТСЯ. Партия — не формальность: из её
+            // остатка пульт подставляет «Счётчик нач.» (без него «Счётчик кон.» уходит в минус),
+            // и в неё же списывается расход (applyBatchConsumption). Задание без партии оператор
+            // отработал, а система молча не записала ни счётчик, ни расход — боевое #4580
+            // (Станок 3, «Резка 5 из 45»: счётчик пуст, «Счётчик кон.» −1800). Правило
+            // «у задания есть Партия сырья» есть в планировании (#4452, ТЗ §15) — здесь та же мерка
+            // на входе работы. Партию выбирают тут же, в блоке «Партии сырья».
+            if (!(cut.batchId && String(cut.batchId).trim() !== '')) {
+                self.notify('У задания нет «Партии сырья» — выберите партию: из её остатка берётся '
+                    + '«Счётчик нач.», в неё же списывается расход', 'error');
+                return;
+            }
             // #4580: «Счётчик нач.» нужен УЖЕ НА ПЕРВОМ проходе, а не только при завершении.
             // «Счётчик кон.» считается от него назад (#4321), и при пустом начале запись уходила в
             // минус: боевое — «Счётчик нач.» пуст, 4 прохода × 450 → «Счётчик кон.» −1800. Отрицательный
