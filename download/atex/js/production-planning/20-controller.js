@@ -6968,7 +6968,23 @@
         var bar = el('div', { class: 'atex-pp-confirm-bar' });
         bar.appendChild((message && message.nodeType) ? message : el('span', { class: 'atex-pp-confirm-msg', text: message }));
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
-        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
+        // #4568: пока висит подтверждение, кнопки, его ВЫЗВАВШИЕ, не показываем. Полоска встаёт
+        // в тот же ряд, что и они, и делила с ними ширину: «Урегулировать» и «Закрыть» сжимались
+        // в узкие высокие столбцы (скриншот тикета). Заодно уходит второй вопрос — по какой из
+        // двух одинаково подписанных кнопок жать. Прячем только ПРЯМЫХ детей-кнопок хоста:
+        // вложенные кнопки (карточка задания как хост) к этому подтверждению не относятся.
+        var hiddenBtns = [];
+        (host.childNodes ? Array.prototype.slice.call(host.childNodes) : []).forEach(function(node) {
+            if (!node || node === bar || node.tagName !== 'BUTTON') return;
+            hiddenBtns.push({ node: node, display: node.style ? node.style.display : '' });
+            if (node.style) node.style.display = 'none';
+        });
+        function removeBar() {
+            if (bar.parentNode) bar.parentNode.removeChild(bar);
+            // Вернуть кнопки на место обязаны ОБА выхода — и «Отмена», и подтверждение: форма
+            // остаётся открытой (например «Отклонения»), и без них в ней нечего нажать.
+            hiddenBtns.forEach(function(h) { if (h.node.style) h.node.style.display = h.display; });
+        }
         actions.forEach(function(action) {
             var cls = 'atex-pp-btn' + (action.warning ? ' atex-pp-btn-warning' : (action.primary ? ' atex-pp-btn-primary' : ''));
             var btn = el('button', { class: cls, type: 'button', text: action.label });
