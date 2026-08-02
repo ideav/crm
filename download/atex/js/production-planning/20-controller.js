@@ -4233,7 +4233,8 @@
             //      очередь, а не перекидывает задания между станками и не оптимизирует раскладку.
             //      В scope с несколькими станками каждое задание к тому же замкнуто на свой станок
             //      (machineLockByCut) — миграции нет по построению.
-            var settleScope = settleMoveScope(plan, createdRestIds, self.cuts || []);
+            var settleTouched = settleTouchedDayKeys(plan, splits);
+            var settleScope = settleMoveScope(plan, createdRestIds, self.cuts || [], settleTouched);
             return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true, settleScope).then(function(res) {
                 // #4569: СВЕСТИ СТАРТЫ В ДНЯХ, КУДА МЫ САМИ УНЕСЛИ РАБОТУ. Пересборка может не
                 // переписать задание вовсе: страж снимает операции цепочки целиком, если часть их
@@ -4246,8 +4247,7 @@
                 // Дни называем явно: они лежат ЗА видимым диапазоном [С;По], которым этот пересчёт
                 // ограничен, — «Урегулировать» ставит остаток перед следующим заданием станка, а
                 // оно может стоять в любом дне.
-                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits),
-                                                  manualCutIds: settleScope.wholeDayCutIds })
+                return self.reconcilePlanStarts({ dayKeys: settleTouched, manual: true })
                     .then(function() { return res; });
             });
         }).catch(function(err) {
@@ -4350,7 +4350,7 @@
     //   withinSlitterIds — станки этих заданий: пересборка не выходит за них и не перекидывает
     //     задания между станками (в scope с >1 станком каждое задание заперто на своём).
     // Чистая: cuts нужны только чтобы узнать станок задания. → moveScope
-    function settleMoveScope(moves, createdIds, cuts) {
+    function settleMoveScope(moves, createdIds, cuts, dayKeys) {
         var ids = {}, sids = {};
         (moves || []).forEach(function(m) { if (m && m.id != null) ids[String(m.id)] = true; });
         // #4572: ВЫПОЛНЕННЫХ частей здесь нет. Они факт, а не то, что оператор несёт: их день —
@@ -4369,6 +4369,9 @@
         // (#4326-seal): остаток, поставленный «Урегулировать» на 03.08, уезжал на 04.08 (#4574).
         // Заморозка тут ни при чём — день выбрал ОПЕРАТОР, и ручное её игнорирует.
         scope.pinCutIds = scope.wholeDayCutIds.slice();
+        // #4577: дни, которых касается действие, для него РАЗМОРОЖЕНЫ — иначе работу в замороженный
+        // день положить можно, а вынести лишнее оттуда некому, и день уходит за потолок.
+        scope.unfrozenDayKeys = dayKeys || [];
         var sidList = Object.keys(sids);
         if (sidList.length) scope.withinSlitterIds = sidList;
         return scope;
@@ -8937,6 +8940,22 @@
         // computeCutSetupUpdates. Итог: планировщик замороженный день СЧИТАЕТ, но НЕ МЕНЯЕТ.
         // Работает на всех путях (генерация/«Упорядочить»/↑↓/удаление/перенос).
         // Пустая «Дата план» → dayIsFrozen=false.
+        // #4577: ДНИ, КОТОРЫХ КАСАЕТСЯ ТЕКУЩЕЕ РУЧНОЕ ДЕЙСТВИЕ, для него РАЗМОРОЖЕНЫ. Ровно правило
+        // заказчика: «ручная перестановка игнорирует замороженность дня». Заморозка живёт в четырёх
+        // механизмах (пиннинг входа, предикат упаковщика, страж записи, выравнивание дня) — и
+        // отключать её надо во всех сразу, иначе получается полумера: работу в день положили, а
+        // вынести лишнее оттуда некому (боевое #4577: 95 мин остатка + 425 мин 🔒 = 520 при 455).
+        // Замок 🔒 при этом НЕ снимается: день выравнивается разрывом последнего задания по потолку
+        // (#4467/#4512), а не вытеснением зафиксированного.
+        var unfrozenDays = {};
+        ((moveScope && moveScope.unfrozenDayKeys) || []).forEach(function(k){
+            if (k != null && k !== '') unfrozenDays[String(k)] = true;
+        });
+        function manualUnfrozen(planDateOrTs) {
+            if (!Object.keys(unfrozenDays).length) return false;
+            var k = planDateDayKey(planDateOrTs);
+            return k != null && k !== Infinity && !!unfrozenDays[String(k)];
+        }
         if (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
             // #4569: задание, которое оператор несёт ПРЯМО СЕЙЧАС, замороженный день не пришпиливает —
             // ручное действие сильнее заморозки (решение заказчика 02.08.2026), и правило обязано
@@ -8944,14 +8963,8 @@
             // если бы пиннинг остался, команда всё равно выполнялась бы наполовину: операций нет —
             // значит время задания осталось прежним (у только что созданного — плейсхолдерным).
             // Чужие задания замороженного дня пришпилены, как и были.
-            var manualPin = {};
-            [(moveScope && moveScope.wholeDayCutIds) || [],
-             (moveScope && moveScope.pinCutIds) || [],
-             (moveScope && moveScope.weightPositionCutIds) || []].forEach(function(list){
-                list.forEach(function(id){ manualPin[String(id)] = true; });
-            });
             planInput.forEach(function(c){
-                if (c && !c.fixed && !manualPin[String(c.id)] && self.dayIsFrozen(c.planDate)) {
+                if (c && !c.fixed && !manualUnfrozen(c.planDate) && self.dayIsFrozen(c.planDate)) {
                     c.fixed = true; pinnedRestore.push(c);
                 }
             });
@@ -8993,7 +9006,11 @@
         // (в отличие от прежнего Варианта A, где срочные всё равно вставали). Активен только при
         // наличии таблицы «Заморозка» и хотя бы одного дня; иначе null → упаковщик работает как прежде.
         var frozenDayFor = (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length)
-            ? function(dayOffset){ return self.dayIsFrozen(planBaseMidnightMs + Number(dayOffset) * 86400000); }
+            ? function(dayOffset){
+                var ms = planBaseMidnightMs + Number(dayOffset) * 86400000;
+                if (manualUnfrozen(Math.floor(ms / 1000))) return false;   // #4577: день ручного действия
+                return self.dayIsFrozen(ms);
+              }
             : null;
         var fixedDayLost = [];   // #4434 п.1: 🔒, которым не удалось удержать свой день (день нерабочий)
         var fixedDayHeld = [];   // #4512: 🔒, УДЕРЖАННЫЕ в своём дне — их день вправе уйти за потолок
@@ -9103,7 +9120,7 @@
             (cuts || []).forEach(function(c){
                 if (!c || c.id == null) return;
                 var key = String(c.id);
-                if (freezeOn && self.dayIsFrozen(c.planDate)) frozenNow[key] = true;
+                if (freezeOn && !manualUnfrozen(c.planDate) && self.dayIsFrozen(c.planDate)) frozenNow[key] = true;
                 if (c.fixed) fixedNow[key] = true;
                 dayKeyNow[key] = planDateDayKey(c.planDate);
                 cutsById[key] = c;   // #4524: корень цепочки дробления для правила CHAIN_SETUP_ONCE
@@ -9126,7 +9143,7 @@
             });
             var guard = guardPlanOps(ops, {
                 isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
-                isFrozenTs: function(ts){ return freezeOn && self.dayIsFrozen(String(ts)); },
+                isFrozenTs: function(ts){ return freezeOn && !manualUnfrozen(String(ts)) && self.dayIsFrozen(String(ts)); },
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 isManualMoveCut: function(id){ return !!manualMoveNow[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
@@ -9440,6 +9457,14 @@
     // второй круг не запускается, и «разгрузить нечем» (в дне одни 🔒 по одному проходу, проход
     // неделим) заканчивается честным предупреждением `warnOverfilledDays`, а не циклом.
     // → Promise<результат исходной операции> (значение не подменяем: вызывающие смотрят на него).
+    // #4577: у РУЧНОГО действия выравнивание дня обязано видеть переполнение и в замороженных днях,
+    // которых это действие коснулось, и уметь их переложить — иначе работу туда положили, а вынести
+    // лишнее некому (боевое: 95 мин остатка + 425 мин 🔒 = 520 при потолке 455).
+    function manualScopeDays(moveScope) {
+        return (moveScope && moveScope.unfrozenDayKeys && moveScope.unfrozenDayKeys.length)
+            ? moveScope.unfrozenDayKeys.slice() : null;
+    }
+
     AtexProductionPlanning.prototype.levelOverfilledAfterWrite = function(moveScope, result) {
         var self = this;
         if (this._levelingDays) return Promise.resolve(result);
@@ -9449,11 +9474,13 @@
         var ids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
             ? moveScope.withinSlitterIds.map(String)
             : (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
-        var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid).length > 0; });
+        var manualDays = manualScopeDays(moveScope);
+        var levelOpts = manualDays ? { manual: true, unfrozenDayKeys: manualDays } : null;
+        var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
         if (!over.length) return Promise.resolve(result);
         this._levelingDays = true;
         return over.reduce(function(chain, sid) {
-            return chain.then(function() { return self.levelDayLoad(sid); });
+            return chain.then(function() { return self.levelDayLoad(sid, levelOpts); });
         }, Promise.resolve()).then(function() {
             self._levelingDays = false;
             return result;
@@ -9726,8 +9753,8 @@
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
         // #4569: дни сверх видимого диапазона — вызывающий называет те, куда САМ унёс работу.
         var scopeOpts = null;
-        if (opts && ((opts.dayKeys && opts.dayKeys.length) || (opts.manualCutIds && opts.manualCutIds.length))) {
-            scopeOpts = { dayKeys: opts.dayKeys || [], manualCutIds: opts.manualCutIds || [] };
+        if (opts && ((opts.dayKeys && opts.dayKeys.length) || opts.manual)) {
+            scopeOpts = { dayKeys: opts.dayKeys || [], manual: !!opts.manual };
         }
         var fixes = [];
         (this.slitters || []).forEach(function(s) {
@@ -9779,12 +9806,8 @@
             if (k == null || k === '') return;
             (extraDays = extraDays || {})[String(k)] = true;
         });
-        // #4574: задания ручного действия — их пересчёт не ограничен ни диапазоном, ни заморозкой.
-        var manualIds = null;
-        ((opts && opts.manualCutIds) || []).forEach(function(id) {
-            if (id == null || id === '') return;
-            (manualIds = manualIds || {})[String(id)] = true;
-        });
+        // #4574: вызов сделан РУЧНЫМ действием оператора — заморозка его не ограничивает.
+        var manualCall = !!(opts && opts.manual);
         // #4555: «Пересчитать отсюда и до конца». fromCutId — НИЖНЯЯ граница: берём выбранное
         // задание и всё, что стои́т на этом станке позже (по хранимому planStart, а он монотонен
         // и внутри дня, и между днями). Прошлое — и более ранние дни, и соседи левее в том же
@@ -9812,11 +9835,10 @@
             // Кнопка «↻ Пересчитать наладку» тоже переписывает «Дату план» (#4408), а «Заморозка»
             // означает «этот день не меняем». Починить раскладку замороженного дня можно, сняв замок
             // (🔓), пересчитав и заморозив снова — это осознанное действие оператора, а не побочный эффект.
-            // #4574: ИСКЛЮЧЕНИЕ — задания САМОГО ручного действия (оно их и поставило в этот день):
-            // ручное сильнее заморозки, и без этого их время осталось бы плейсхолдерным
-            // («⏱ 07:59 – 08:51» в замороженном дне). Чужие задания дня по-прежнему не трогаем.
-            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)
-                && !(manualIds && manualIds[String(c.id)])) return false;
+            // #4574: РУЧНОЕ ДЕЙСТВИЕ ЗАМОРОЗКУ ИГНОРИРУЕТ. Пропускаем замороженный день только у
+            // АВТОМАТИЧЕСКОГО пересчёта; у оператора его задание иначе осталось бы с плейсхолдерным
+            // временем, а переполнение такого дня было бы не видно выравниванию (#4577).
+            if (!manualCall && typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return false;
             var dayKey = planDateDayKey(c.planDate);
             // #4569: день, названный вызывающим, входит в набор независимо от фильтра.
             if (extraDays && dayKey != null && extraDays[String(dayKey)]) return true;
@@ -10199,9 +10221,9 @@
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
     // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
-    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId) {
+    AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
+        var scopeIds = this.recalcScopeCutIds(sid, (opts && opts.manual) ? { manual: true } : null);
         if (!scopeIds.length) return [];
         var inScope = {};
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
@@ -10333,7 +10355,7 @@
     AtexProductionPlanning.prototype.levelDayLoad = function(slitterId, opts) {
         var self = this;
         var sid = String(slitterId == null ? '' : slitterId);
-        var over = this.overfilledDaysOf(sid);
+        var over = this.overfilledDaysOf(sid, opts);
         if (!over.length) return Promise.resolve(false);
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var label = over.map(function(d) {
@@ -10349,6 +10371,10 @@
         // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
         var scope = { withinSlitterIds: [sid] };
         if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
+        // #4577: те же дни, что разморозило вызвавшее ручное действие — иначе переложить переполненный
+        // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
+        // задания по потолку (#4467/#4512), а не вытеснением зафиксированного.
+        if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
                 var left = self.overfilledDaysOf(sid);
