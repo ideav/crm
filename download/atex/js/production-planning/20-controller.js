@@ -4227,7 +4227,21 @@
                 + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
                 + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
                 + ' · досрочных — ' + byReason('early'), 'success');
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true).then(function(res) {
+                // #4569: СВЕСТИ СТАРТЫ В ДНЯХ, КУДА МЫ САМИ УНЕСЛИ РАБОТУ. Пересборка может не
+                // переписать задание вовсе: страж снимает операции цепочки целиком, если часть их
+                // отбросило правило (#4536 после #4436 «замороженные дни не трогаем»). Тогда запись
+                // остаётся с тем временем, что стояло до неё, — а у созданного «Урегулировать»
+                // остатка это ПЛЕЙСХОЛДЕР порядка («минута назад от следующего задания»), и
+                // оператор видел «⏱ 07:59 – 09:53» внахлёст с соседями (issue #4569).
+                // Своди́м честные старты по ХРАНИМЫМ минутам (recalcStartUpdates: встык от начала
+                // смены, день задания не меняется) — то же, что делает «↻ Пересчитать наладку».
+                // Дни называем явно: они лежат ЗА видимым диапазоном [С;По], которым этот пересчёт
+                // ограничен, — «Урегулировать» ставит остаток перед следующим заданием станка, а
+                // оно может стоять в любом дне.
+                return self.reconcilePlanStarts({ dayKeys: settleTouchedDayKeys(plan, splits) })
+                    .then(function() { return res; });
+            });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -4317,6 +4331,24 @@
             return runWithConcurrency(tasks, MAX_PARALLEL_WRITES).then(function() { return list.length; });
         });
     };
+
+    // #4569: дни (ключи YYYYMMDD), которых коснулось «Урегулировать»: куда переехали просроченные и
+    // досрочные, где встала выполненная часть и куда уехал остаток. Именно их старты надо свести
+    // после пересборки — фильтр [С;По] их не покрывает. Чистая.
+    function settleTouchedDayKeys(moves, splits) {
+        var keys = {};
+        function add(ts) {
+            var k = planDateDayKey(ts);
+            if (k != null && isFinite(k)) keys[String(k)] = true;
+        }
+        (moves || []).forEach(function(m) { if (m) add(m.planStart); });
+        (splits || []).forEach(function(sp) {
+            if (!sp) return;
+            add(sp.donePlanStart);
+            if (sp.restPlanStart != null) add(sp.restPlanStart);
+        });
+        return Object.keys(keys);
+    }
 
     // #4564: момент закрытия выполненной части — конец смены того дня, в котором её делали.
     // День берём из её нового планового времени (оно уже в фактическом дне), время — из окна
@@ -9623,16 +9655,18 @@
     // по-разному, и это надо чинить в корне. Пишем в консоль ЧТО именно разъехалось (задание, было →
     // стало, сколько минут), чтобы причина была видна в логе, а не только в глазах оператора.
     // → Promise<число исправленных заданий>.
-    AtexProductionPlanning.prototype.reconcilePlanStarts = function() {
+    AtexProductionPlanning.prototype.reconcilePlanStarts = function(opts) {
         var self = this;
         this._ppOp = 'reconcilePlanStarts';   // #4177/#4480
         var mainKey = (this.meta && this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey || !(this.cuts && this.cuts.length)) return Promise.resolve(0);
+        // #4569: дни сверх видимого диапазона — вызывающий называет те, куда САМ унёс работу.
+        var scopeOpts = (opts && opts.dayKeys && opts.dayKeys.length) ? { dayKeys: opts.dayKeys } : null;
         var fixes = [];
         (this.slitters || []).forEach(function(s) {
             var sid = String(s && s.id == null ? '' : s.id);
             if (sid === '') return;
-            var ups = self.recalcStartUpdates(sid);
+            var ups = self.recalcStartUpdates(sid, scopeOpts);
             ups.forEach(function(u) { fixes.push({ slitterId: sid, up: u }); });
         });
         if (!fixes.length) return Promise.resolve(0);
@@ -9659,6 +9693,11 @@
     // Возвращает массив id (строк). Порядок и переналадка внутри computeCutSetupUpdates считаются
     // по ВСЕЙ очереди станка — иначе у не-первой резки терялся бы предшественник, — но ЗАПИСЬ
     // ограничена этим набором.
+    // #4569: `opts.dayKeys` — дни, которые в набор входят ПОМИМО видимого диапазона. Нужны там, где
+    // операция сама уносит задание за пределы фильтра: «Урегулировать» ставит остаток перед
+    // следующим заданием станка, а оно может стоять в любом дне. Запись плана диапазоном не
+    // ограничена (#3974), а сведе́ние честных стартов было — и день, куда уехала работа, оставался
+    // с прежними/плейсхолдерными стартами (issue #4569: «⏱ 07:59 – 09:53 — почему 07:59?»).
     AtexProductionPlanning.prototype.recalcScopeCutIds = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
         var fromStr = String((this.filter && this.filter.date) || '').trim();
@@ -9666,6 +9705,13 @@
         var fromKey = fromStr === '' ? null : planDateDayKey(fromStr);
         var toKey = toStr === '' ? null : planDateDayKey(toStr);
         var self = this;
+        // #4569: дни сверх видимого диапазона (см. комментарий выше). Замороженные сюда не
+        // попадают — их отсеивает проверка ниже, и это правило старше любого «плюс этот день».
+        var extraDays = null;
+        ((opts && opts.dayKeys) || []).forEach(function(k) {
+            if (k == null || k === '') return;
+            (extraDays = extraDays || {})[String(k)] = true;
+        });
         // #4555: «Пересчитать отсюда и до конца». fromCutId — НИЖНЯЯ граница: берём выбранное
         // задание и всё, что стои́т на этом станке позже (по хранимому planStart, а он монотонен
         // и внутри дня, и между днями). Прошлое — и более ранние дни, и соседи левее в том же
@@ -9695,6 +9741,8 @@
             // (🔓), пересчитав и заморозив снова — это осознанное действие оператора, а не побочный эффект.
             if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return false;
             var dayKey = planDateDayKey(c.planDate);
+            // #4569: день, названный вызывающим, входит в набор независимо от фильтра.
+            if (extraDays && dayKey != null && extraDays[String(dayKey)]) return true;
             if (fromKey != null && (dayKey == null || dayKey < fromKey)) return false;
             if (!toEnd && toKey != null && (dayKey == null || dayKey > toKey)) return false;
             return true;
