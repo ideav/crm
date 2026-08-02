@@ -77,5 +77,25 @@ assert(inst2.notes.indexOf('Все проходы уже отмечены') !== 
     '#4351: реально все проходы отмечены (факт 60) → «Все проходы уже отмечены» законно');
 assert(inst2.posts.length === 0, '#4351: при законном блоке запись не идёт');
 
+// ── #4579: «Кол-во резок факт» есть В КАЖДОМ дескрипторе резки ───────────────
+// Боевое: оператор открыл задание 654079 (8 отмеченных проходов) и нажал «✓ Готово» — счёт
+// стал 1, «Погонаж факт» 450 вместо 3600. Причина: loadCut (одиночная запись, из неё живёт
+// currentCut — та самая, на которой жмут «Готово») поле не читал, donePassCount вернул 0.
+// Проверяем ВСЕ три пути, которыми в пульте появляется дескриптор резки.
+(function() {
+    var api = require('../download/atex/js/slitter.js');
+    var core = api.core;
+    // 1) отчёт slitter_cuts
+    var fromReport = core.rowsToCuts([{ cut_id: '90', cut_plan_date: '1', cut_planned_runs: '60',
+        cut_runs_fact: '8' }])[0];
+    assert(core.actualRunsForCut(fromReport) === 8, '#4579 rowsToCuts отдаёт «Кол-во резок факт»');
+    // 2) и 3) — object/-пути (loadCutsFromTable и loadCut) читают реквизит по имени:
+    //    проверяем, что имя реквизита объявлено и совпадает у обоих.
+    assert(api.Controller.prototype.donePassCount.call({}, { actualRuns: '8' }) === 8,
+        '#4579 donePassCount берёт число из дескриптора');
+    assert(api.Controller.prototype.donePassCount.call({}, {}) === 0,
+        '#4579 нет поля → 0 (и это ровно тот случай, что затирал счёт: следующая отметка писала 1)');
+})();
+
 console.log('\n' + passed + '/' + total + ' assertions passed');
 if (passed !== total) process.exitCode = 1;

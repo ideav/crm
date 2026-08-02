@@ -1495,6 +1495,11 @@
                 defectM: val(CUT_REQ.defectM),
                 defectPhoto: val(CUT_REQ.defectPhoto),
                 plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
+                // #4579: СДЕЛАННЫЕ ПРОХОДЫ обязаны быть и здесь. Этот загрузчик даёт `currentCut` —
+                // именно ту запись, на которой оператор жмёт «✓ Готово». Без поля donePassCount
+                // возвращал 0, и следующая отметка писала «1», ЗАТИРАЯ накопленный счёт (боевое
+                // #4579: у задания 654079 факт 8 → 1, а «Погонаж факт» — 1×450 вместо 8×450).
+                actualRuns: val(CUT_REQ.actualRuns),
                 runLength: valAny(CUT_RUN_LENGTH_NAMES),
                 startedAt: valAny(CUT_STARTED_NAMES),
                 inWork: val(CUT_REQ.inWork),         // #3557: булев «В работе» (1162)
