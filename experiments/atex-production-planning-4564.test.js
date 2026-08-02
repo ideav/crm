@@ -91,6 +91,13 @@ assertEqual([unknown.splits.length, unknown.moves.length], [0, 0],
 var setupOnly = settleOne(overdueCut({ plannedRuns: 0, actualRuns: 0, startDate: '' }));
 assertEqual(setupOnly.splits.length, 0, 'сегмент-настройка (0 проходов) не разделяется');
 
+// Задание в своём фактическом дне ОДНО: становиться «в конец» не за кем → начало смены того дня,
+// а не момент «Начато» (пульт пишет его по нажатию ✓ Готово, оно бывает и после смены).
+var alone = settleOne(overdueCut({ actualRuns: 4,
+    startDate: String(tsAt(2026, 7, 30, 20, 34)) }));
+assertEqual(alone.splits[0].donePlanStart, tsAt(2026, 7, 30, 8, 0),
+    'в дне никого больше нет → выполненная часть встаёт на начало смены СВОЕГО фактического дня');
+
 assertEqual(planning.cutDoneRuns({ actualRuns: 8 }), 8, 'cutDoneRuns: «Кол-во резок факт» = 8');
 assertEqual(planning.cutDoneRuns({ actualRuns: 0 }), 0, 'cutDoneRuns: известный ноль');
 assertEqual(planning.cutDoneRuns({}), null, 'cutDoneRuns: колонки нет → null («не знаем»), а не 0');

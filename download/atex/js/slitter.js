@@ -85,10 +85,8 @@
         leader: 'Лидер'          // #3566 #2: лидер (82519, ссылка) — реквизит задания
     };
     var CUT_PLANNED_RUNS_NAMES = ['Кол-во резок план', 'Кол-во план'];
-    // #4564: имена реквизита «сделано проходов» для object/-фолбэка (colIndexAny).
-    var CUT_ACTUAL_RUNS_NAMES = ['Кол-во резок факт'];
-    // #4564: колонки отчётов, отдающих то же число (slitter_cuts / cut_planning).
-    var CUT_ACTUAL_RUNS_COLUMNS = ['cut_actual_runs', 'cut_fact_runs', 'cut_runs_fact'];
+    // #4564: колонка отчёта slitter_cuts, отдающая «Кол-во резок факт» (та же в cut_planning).
+    var CUT_ACTUAL_RUNS_COLUMN = 'cut_runs_fact';
     var CUT_RUN_LENGTH_NAMES = ['Метраж, м', 'Погонаж план, м', 'Длина, м'];
     var CUT_STARTED_NAMES = ['Начато', 'Дата начала', 'Старт', 'Время начала'];
     // #3504: реквизит «Событие смены» переименован вслед за таблицей.
@@ -889,7 +887,7 @@
                 batch: firstField(row, ['cut_batch']),
                 planDate: planDate,
                 plannedRuns: firstField(row, ['cut_planned_runs']),
-                actualRuns: firstField(row, CUT_ACTUAL_RUNS_COLUMNS),   // #4564: сделано проходов
+                actualRuns: firstField(row, [CUT_ACTUAL_RUNS_COLUMN]),   // #4564: сделано проходов
                 runLength: firstField(row, ['cut_run_length']),
                 startedAt: firstField(row, ['cut_started']),
                 winding: firstField(row, ['cut_winding']),
@@ -1427,7 +1425,7 @@
             var batchIdx = colIndex(meta, CUT_REQ.batch);
             var planDateIdx = colIndex(meta, CUT_REQ.planDate);
             var plannedRunsIdx = colIndexAny(meta, CUT_PLANNED_RUNS_NAMES);
-            var actualRunsIdx = colIndexAny(meta, CUT_ACTUAL_RUNS_NAMES);   // #4564: сделано проходов
+            var actualRunsIdx = colIndex(meta, CUT_REQ.actualRuns);   // #4564: сделано проходов
             var runLengthIdx = colIndexAny(meta, CUT_RUN_LENGTH_NAMES);
             var startedIdx = colIndexAny(meta, CUT_STARTED_NAMES);
             var inWorkIdx = colIndex(meta, CUT_REQ.inWork);      // #3557
@@ -2794,7 +2792,7 @@
             cut.actualRuns = String(target);   // #4564
             var meta = self.meta.cut;
             var fields = {};
-            var actualRunsRid = reqIdByAnyName(meta, CUT_ACTUAL_RUNS_NAMES);   // #4564
+            var actualRunsRid = reqIdByName(meta, CUT_REQ.actualRuns);   // #4564
             var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
             var counterEndRid = reqIdByName(meta, CUT_REQ.counterEnd);
             var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
@@ -2806,7 +2804,7 @@
             // задание (правило «нет данных → орать», #4564).
             if (actualRunsRid) fields['t' + actualRunsRid] = target;
             else console.error('[slitter] #4564: в таблице «' + TABLE.cut + '» нет реквизита «'
-                + CUT_ACTUAL_RUNS_NAMES[0] + '» — проходы не сохраняются');
+                + CUT_REQ.actualRuns + '» — проходы не сохраняются');
             if (meterageRid) fields['t' + meterageRid] = meterage;
             if (counterEndRid) fields['t' + counterEndRid] = counterEnd;
             if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры (накопл. по резке)

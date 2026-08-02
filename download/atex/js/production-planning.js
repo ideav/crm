@@ -249,11 +249,10 @@
         'cut_plan_count',
         'cut_qty_plan'
     ];
-    // #4564: сделанные проходы из отчёта cut_planning (колонку добавить на сервере, как #3698
-    // добавил cut_knife_setup_min: t28 = реквизит «Кол-во резок факт» таблицы 1078). Нет колонки
-    // → задание выглядит НЕ начатым по проходам, и «Урегулировать» его не разделит; об этом
-    // говорит проверка в контроллере, а не молчаливый ноль.
-    var CUT_ACTUAL_RUN_COLUMNS = ['cut_actual_runs', 'cut_fact_runs', 'cut_runs_fact'];
+    // #4564: сделанные проходы из отчёта cut_planning — колонка `cut_runs_fact` (t28 = реквизит
+    // «Кол-во резок факт», 657315, таблицы 1078). Нет колонки → факт НЕИЗВЕСТЕН, и «Урегулировать»
+    // начатое задание не трогает; об этом говорит проверка в контроллере, а не молчаливый ноль.
+    var CUT_ACTUAL_RUNS_COLUMN = 'cut_runs_fact';
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
     var CUT_TIMING_COLUMNS = ['cut_timing'];
     // #3698: хранимые активности переналадки (отчёт cut_planning — добавить колонки на сервере).
@@ -1307,7 +1306,7 @@
                     // #4564: сделано проходов — «Кол-во резок факт». null = колонки нет в отчёте
                     // («не знаем»), 0 = знаем, что не сделано ничего: разделять по факту можно
                     // только когда знаем (иначе «Урегулировать» урезал бы задание вслепую).
-                    actualRuns: rowNumOrNull(row, CUT_ACTUAL_RUN_COLUMNS),
+                    actualRuns: rowNumOrNull(row, [CUT_ACTUAL_RUNS_COLUMN]),
                     duration: rowNum(row, CUT_DURATION_COLUMNS),
                     timing: str(rowValue(row, CUT_TIMING_COLUMNS)),
                     // #3698: уже сохранённые активности переналадки ('' — колонки ещё нет/пусто),
@@ -2567,9 +2566,11 @@
     }
 
     // #4564: «конец дня» для задания, которое ФАКТИЧЕСКИ выполнялось в этом дне — плановое время
-    // ПОСЛЕ последнего задания станка в том дне. Пусто (задание в дне одно) → момент его старта.
+    // ПОСЛЕ последнего задания станка в том дне. Больше в дне никого нет (задание единственное) →
+    // начало смены того дня: становиться «в конец» не за кем, а сам момент «Начато» уводил бы
+    // задание за окно смены (пульт пишет его тогда, когда оператор нажал ✓ Готово).
     // Это плейсхолдер порядка, как и всё остальное в этой функции: минуты расставит пересборка.
-    function dayTailPlanStart(cuts, slitterKey, dayKey, exceptId, fallbackTs) {
+    function dayTailPlanStart(cuts, slitterKey, dayKey, exceptId, factTs, shiftStartMin) {
         var maxTs = null;
         (cuts || []).forEach(function(c) {
             if (!c || c.id == null || String(c.id) === String(exceptId)) return;
@@ -2579,7 +2580,10 @@
             if (ts == null) return;
             if (maxTs == null || ts > maxTs) maxTs = ts;
         });
-        return maxTs == null ? fallbackTs : maxTs + 60;
+        if (maxTs != null) return maxTs + 60;
+        var d = new Date(Number(factTs) * 1000);
+        var midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+        return Math.floor(midnight / 1000) + (Number(shiftStartMin) || 0) * 60;
     }
 
     // #4346/#4564: «Урегулировать» — ОДНО решение на каждое отклонившееся задание. Правила ТЗ:
@@ -2639,7 +2643,7 @@
             if (factTs == null) return;   // не знаем, в каком дне это делали — не выдумываем
             var sp = {
                 id: String(c.id), doneRuns: doneRuns, restRuns: Math.max(0, planned - doneRuns),
-                donePlanStart: dayTailPlanStart(cuts, cutSlitterKey(c), planDateDayKey(factTs), c.id, factTs),
+                donePlanStart: dayTailPlanStart(cuts, cutSlitterKey(c), planDateDayKey(factTs), c.id, factTs, shiftStartMin),
                 restPlanStart: null, restReason: null
             };
             splits.push(sp);
@@ -16788,7 +16792,7 @@
         });
         if (blind.length) {
             console.error('[pp] ⛔ #4564: отчёт cut_planning не отдаёт «Кол-во резок факт» ('
-                + CUT_ACTUAL_RUN_COLUMNS.join('/') + ') — начатые просроченные не разделяются и не двигаются: '
+                + CUT_ACTUAL_RUNS_COLUMN + ') — начатые просроченные не разделяются и не двигаются: '
                 + blind.map(function(c) { return c.id; }).join(', '));
             this.notify('Не знаю, сколько проходов сделано (нет колонки в отчёте) — начатые задания '
                 + 'оставляю на месте: ' + blind.length, 'error');

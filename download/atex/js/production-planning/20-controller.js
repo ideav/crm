@@ -4168,7 +4168,7 @@
         });
         if (blind.length) {
             console.error('[pp] ⛔ #4564: отчёт cut_planning не отдаёт «Кол-во резок факт» ('
-                + CUT_ACTUAL_RUN_COLUMNS.join('/') + ') — начатые просроченные не разделяются и не двигаются: '
+                + CUT_ACTUAL_RUNS_COLUMN + ') — начатые просроченные не разделяются и не двигаются: '
                 + blind.map(function(c) { return c.id; }).join(', '));
             this.notify('Не знаю, сколько проходов сделано (нет колонки в отчёте) — начатые задания '
                 + 'оставляю на месте: ' + blind.length, 'error');
