@@ -7200,6 +7200,7 @@
     // «↻ Пересчитать наладку»: он бежит на каждой отрисовке очереди и не имеет права делать вид,
     // что тайминг уже записан, — иначе кнопка исчезала бы сама, ничего не сохранив.
     AtexProductionPlanning.prototype.computeCutSetupUpdates = function(onlyIds, opts) {
+        var manualSetupCall = !!(opts && opts.manual);   // #4582: ручной пересчёт заморозку игнорирует
         var dryRun4401 = !!(opts && opts.dryRun);
         // #4499: КОЛОНКИ БЕРЁМ У УПАКОВЩИКА, если он их посчитал (`ops.*.planCols` → applySplitPlan).
         // Раньше эта функция считала переналадку ЗАНОВО, по своей развёртке очереди — и на разбитых
@@ -7404,9 +7405,11 @@
                 var runsC = stripNum(c.plannedRuns);
                 if (!inScope) return;
                 // #4436: задание стои́т в ЗАМОРОЖЕННОМ дне — его хранимый тайминг НЕ ПЕРЕПИСЫВАЕМ.
-                // «Заморозка» значит «планирование этот день не трогает»: расчёт по очереди станка идёт
+                // «Заморозка» значит «ПЛАНИРОВАНИЕ этот день не трогает»: расчёт по очереди станка идёт
                 // сквозь такое задание (соседям нужен предшественник), но в набор ЗАПИСИ оно не входит.
-                if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return;
+                // #4582: у РУЧНОГО вызова (кнопка «↻ Пересчитать наладку») этого ограничения нет —
+                // иначе оператор не может починить даже явно кривой замороженный день.
+                if (!manualSetupCall && typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) return;
                 // #3700: «Резка и Лидер» = «Длительность, минут» + лидер (BETWEEN_CUTS × число резок
                 // цуга, cutLeaderRuns). Зависит только от самой резки.
                 // #4021: setup-only сегмент (0 проходов — «только настройка станка», хвост дня #3635 п.5)
@@ -9475,7 +9478,12 @@
             ? moveScope.withinSlitterIds.map(String)
             : (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
         var manualDays = manualScopeDays(moveScope);
-        var levelOpts = manualDays ? { manual: true, unfrozenDayKeys: manualDays } : null;
+        // #4582: дни действия надо не только РАЗМОРОЗИТЬ, но и внести в область видимости: состав дня
+        // берётся через recalcScopeCutIds, а он ограничен окном фильтра [С;По]. Оператор жмёт кнопку
+        // на одном дне, а работа уезжает в другой — и переполнение там оставалось НЕВИДИМЫМ
+        // (боевое #4582: 621 мин при потолке 455, и ни одной строки о выравнивании в логе).
+        var levelOpts = manualDays
+            ? { manual: true, dayKeys: manualDays, unfrozenDayKeys: manualDays } : null;
         var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
         if (!over.length) return Promise.resolve(result);
         this._levelingDays = true;
@@ -9965,12 +9973,29 @@
     // старту) — из него карточки очереди рисуют бейджи. Счётчик кнопки и бейджи считаются из одного
     // результата, поэтому разойтись не могут: сколько названо, столько и помечено.
     // → { rows, byId, ids } (setupMismatchRows).
+    // #4582: дни заданий, которыми занят РУЧНОЙ пересчёт — их заморозка для него снята.
+    // Чужие дни в набор не попадают: заморозка защищает всё, чего оператор сейчас не касается.
+    function scopeDayKeys(self, scopeIds) {
+        var want = {}, out = {};
+        (scopeIds || []).forEach(function(id) { want[String(id)] = true; });
+        (self.cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !want[String(c.id)]) return;
+            var k = planDateDayKey(c.planDate);
+            if (k != null && k !== Infinity) out[String(k)] = true;
+        });
+        return Object.keys(out);
+    }
+
+    // #4582: детектор и кнопка «↻ Пересчитать наладку» — РУЧНЫЕ пути: заморозка их не ограничивает
+    // (правило заказчика «ручная перестановка игнорирует замороженность дня»). Иначе переполненный
+    // замороженный день нечем починить: автоматика туда не лезет по правилу, а оператор — не мог
+    // (боевое #4582: Станок 3, 03.08 — 621 мин при потолке 455, все задания 🔒, день заморожен).
     AtexProductionPlanning.prototype.recalcMismatchRows = function(slitterId) {
         var none = { rows: [], byId: {}, ids: [] };
         if (!this.meta || !this.meta.cut) return none;
         if (!(this.cuts && this.cuts.length)) return none;
         var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
+        var scopeIds = this.recalcScopeCutIds(sid, { manual: true });   // #4582: ручной путь
         if (!scopeIds.length) return none;
         // Полный расчёт идёт по ВСЕЙ очереди станка (у не-первой резки иначе нет предшественника) и
         // стоит десятки миллисекунд, а renderQueue зовут на каждый ввод в поиске. Кэшируем по подписи:
@@ -9981,8 +10006,8 @@
             + '|' + slitterQueueSignature(this.cuts, sid);
         var cache = this._setupMismatchCache;
         if (cache && cache.key === key) return cache.res;
-        var res = this.computeCutSetupUpdates(scopeIds, { dryRun: true });
-        var startOps = this.recalcStartUpdates(sid, { updates: res.updates || [] });   // #4408: разъехавшиеся старты
+        var res = this.computeCutSetupUpdates(scopeIds, { dryRun: true, manual: true });
+        var startOps = this.recalcStartUpdates(sid, { updates: res.updates || [], manual: true });   // #4408: разъехавшиеся старты
         var out = setupMismatchRows(res.updates || [], startOps);
         this._setupMismatchCache = { key: key, res: out };
         return out;
@@ -10020,20 +10045,25 @@
             return Promise.resolve(false);
         }
         var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid);
+        var manualRecalc = !(opts && opts.auto);   // #4582: кнопку жмёт оператор — заморозка её не ограничивает
+        var scopeIds = this.recalcScopeCutIds(sid, { manual: manualRecalc });
         if (!scopeIds.length) {
             if (!auto) this.notify('В видимых днях у этого станка нет заданий', 'info');
             return Promise.resolve(false);
         }
-        var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true }).updates || [];
-        var startOps = this.recalcStartUpdates(sid, { updates: stale });   // #4408: старты — ДО записи колонок
+        var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true, manual: manualRecalc }).updates || [];
+        var startOps = this.recalcStartUpdates(sid, { updates: stale, manual: manualRecalc });   // #4408: старты — ДО записи колонок
         if (!stale.length && !startOps.length) {
             // #4473: в колонках и стартах пересчитывать нечего — но день мог остаться ДЛИННЕЕ смены
             // (перестановка соседей одинаковой конфигурации расхождений не даёт, а минуты дня растут
             // от смены переналадки). Потолок дня старше ответа «пересчитывать нечего»: выравниваем.
-            if (this.overfilledDaysOf(sid).length) {
+            if (this.overfilledDaysOf(sid, { manual: manualRecalc }).length) {
                 this.render();
-                return this.levelDayLoad(sid);
+                // #4582: дни, которые оператор пересчитывает, для этого действия разморожены — иначе
+                // переполненный замороженный день выровнять нечем. У АВТОМАТИЧЕСКОГО вызова
+                // (opts.auto) заморозка в силе, как и была (#4436).
+                return this.levelDayLoad(sid, manualRecalc
+                    ? { manual: true, unfrozenDayKeys: scopeDayKeys(this, scopeIds) } : null);
             }
             // #4416: кнопку показывает тот же детектор — если он насчитал расхождения, а писать
             // нечего, это ПРОТИВОРЕЧИЕ, а не «всё хорошо»: кнопка висит, нажатие не даёт эффекта
@@ -10072,7 +10102,9 @@
                     + startOps.length + ' (порядок не менялся)'), 'success');
             // #4473: день длиннее смены — ВЫРАВНИВАЕМ (разрыв по потолку + продолжение назавтра),
             // а не предупреждаем «перенесите лишнее вручную» (#4408).
-            return self.levelDayLoad(sid).then(function() { return true; });
+            return self.levelDayLoad(sid, manualRecalc
+                ? { manual: true, unfrozenDayKeys: scopeDayKeys(self, scopeIds) } : null)
+                .then(function() { return true; });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -10223,7 +10255,8 @@
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
-        var scopeIds = this.recalcScopeCutIds(sid, (opts && opts.manual) ? { manual: true } : null);
+        var scopeIds = this.recalcScopeCutIds(sid, (opts && (opts.manual || opts.dayKeys))
+            ? { manual: !!(opts && opts.manual), dayKeys: (opts && opts.dayKeys) || [] } : null);
         if (!scopeIds.length) return [];
         var inScope = {};
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
