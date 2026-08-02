@@ -97,5 +97,24 @@ assert(inst2.posts.length === 0, '#4351: при законном блоке за
         '#4579 нет поля → 0 (и это ровно тот случай, что затирал счёт: следующая отметка писала 1)');
 })();
 
+// ── #4580: «Счётчик нач.» нужен УЖЕ на первом проходе ────────────────────────
+// Боевое (Станок 3, задание 654079): «Счётчик нач.» пуст, оператор отмечает проходы — пульт
+// считает «Счётчик кон.» = 0 − 4×450 = −1800. Отрицательный остаток рулона показанием не бывает:
+// пустое начало нулём не подменяем, а просим заполнить. Заполненный НОЛЬ при этом законен —
+// рулон домотали в ноль (#4321).
+(function() {
+    var noStart = makeInst('');
+    noStart.currentCut.counterStart = '';
+    noStart.markPassDone(false);
+    assert(noStart.posts.length === 0, '#4580 при пустом «Счётчик нач.» запись НЕ идёт');
+    assert(noStart.notes.some(function(m) { return m.indexOf('Счётчик нач.') >= 0; }),
+        '#4580 оператору сказано, что заполнить');
+
+    var zeroStart = makeInst('');
+    zeroStart.currentCut.counterStart = '0';
+    zeroStart.markPassDone(false);
+    assert(zeroStart.posts.length > 0, '#4321 заполненный НОЛЬ — законное показание, отметка идёт');
+})();
+
 console.log('\n' + passed + '/' + total + ' assertions passed');
 if (passed !== total) process.exitCode = 1;
