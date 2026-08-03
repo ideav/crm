@@ -1234,6 +1234,11 @@
 .atex-pp-dev-content { display: flex; flex-direction: column; gap: 12px; }
 .atex-pp-dev-group-title { margin: 0 0 6px; font-size: 14px; }
 .atex-pp-dev-overdue .atex-pp-dev-group-title { color: var(--pp-warn); }
+/* #4596: «Смена закрыта, не выполнено» — тот же случай, что просрочка (день станка кончился),
+   поэтому и заголовок того же цвета. */
+.atex-pp-dev-shift-closed .atex-pp-dev-group-title { color: var(--pp-warn); }
+/* #4596: события смен не прочитались — предупреждение, а не обычная подсказка. */
+.atex-pp-dev-warn { color: var(--pp-danger, #c0392b); }
 .atex-pp-dev-list {
     margin: 0;
     padding: 0 0 0 18px;

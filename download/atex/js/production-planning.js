@@ -178,6 +178,10 @@
     // #3788: горизонт расчёта нерабочих дней расписания (дней вперёд от базы). Покрывает
     // годовой набор праздников; дальше плановой очереди не бывает.
     var CALENDAR_HORIZON_DAYS = 366;
+    // #4596: сколько строк журнала событий смены запрашиваем (`report/slitter_shift_events`,
+    // столько же берёт пульт слиттера). Ответ РОВНО такой длины считаем усечённым и говорим об
+    // этом вслух (#4371: лимит самого отчёта режет запрос клиента молча).
+    var SHIFT_EVENTS_LIMIT = 5000;
     // #3898: отпуск станка длиной НЕ БОЛЕЕ этого числа КАЛЕНДАРНЫХ дней НЕ сбрасывает заправку
     // (сырьё/ножи) — первая резка после такого короткого простоя наследует прежнюю настройку,
     // а не пересчитывает её с нуля (#3876). Длиннее порога → заправка обнуляется (полная
@@ -2516,11 +2520,111 @@
         return planTsSeconds(cut && cut.startDate) != null;
     }
 
+    // #4596: СОБЫТИЯ СМЕНЫ — ТЕ ЖЕ, ЧТО У ПУЛЬТА. Пульт слиттера пишет «Начало смены»/«Конец
+    // смены» в журнал событий (отчёт `slitter_shift_events`), каждое событие несёт ссылку на свой
+    // станок (#4359); у событий, записанных до появления ссылки, станок опознаётся меткой в
+    // «Примечаниях» вида «{станок} · {дата}» (#3522). Названия типов повторяют пульт
+    // (`slitter.js` isShiftStartType/isShiftEndType) — это одни и те же записи, читать их надо
+    // одинаково.
+    function shiftEventTypeIsStart(type) {
+        var s = String(type == null ? '' : type).trim().toLowerCase();
+        return s === 'начало смены' || s === 'открытие смены';
+    }
+
+    function shiftEventTypeIsEnd(type) {
+        var s = String(type == null ? '' : type).trim().toLowerCase();
+        return s === 'конец смены' || s === 'закрытие смены' || s === 'завершение смены';
+    }
+
+    // #4596: строки `report/slitter_shift_events?JSON_KV` → события ОТКРЫТИЯ/ЗАКРЫТИЯ смены
+    // { id, ts (unix-сек), type, slitterId, slitterLabel }. Прочие события журнала («Резка»,
+    // «Наладка», «Перерыв» …) отбрасываем сразу: планированию нужен ровно один вопрос — закрыл ли
+    // станок смену. Колонки берём по ИМЕНИ (правило отчётов), метка станка — первый сегмент
+    // «Примечаний» (#3522, запасной путь к ссылке `slitter_id`). Чистая — покрыта тестом.
+    function rowsToShiftEvents(rows) {
+        function pick(row, names) {
+            for (var i = 0; i < names.length; i++) {
+                if (row && row[names[i]] != null && row[names[i]] !== '') return row[names[i]];
+            }
+            return '';
+        }
+        return (rows || []).map(function(row) {
+            var notes = String(pick(row, ['event_notes', 'notes']) || '').trim();
+            return {
+                id: String(pick(row, ['event_id', 'id']) || ''),
+                ts: planTsSeconds(pick(row, ['event_when', 'when'])),
+                type: String(pick(row, ['event_type', 'type']) || ''),
+                slitterId: String(pick(row, ['slitter_id', 'event_slitter_id']) || '').trim(),
+                slitterLabel: notes ? notes.split('·')[0].trim() : ''
+            };
+        }).filter(function(ev) {
+            return shiftEventTypeIsStart(ev.type) || shiftEventTypeIsEnd(ev.type);
+        });
+    }
+
+    // #4596: СТАНКИ, ЗАКРЫВШИЕ СМЕНУ В ДНЕ dayKey → { slitterId: unix-штамп закрытия }. Смотрим
+    // только события ЭТОГО дня и только ПОСЛЕДНЕЕ из них у каждого станка: смена, закрытая в 14:40
+    // и снова открытая в 15:00 (доработка), закрытой не считается. Событий у станка в этом дне нет
+    // — он в карту не попадает: это «мы про его смену ничего не знаем», а не «смена закрыта».
+    // Станок события — ссылка «Слиттер» (#4359); её нет → метка «Примечаний» через карту
+    // «подпись → id» (`opts.slitterIdByLabel`). Событие, чей станок опознать нечем, приписать
+    // некому — пропускаем (см. `loadShiftEvents`: их число печатается в лог).
+    // Чистая — покрыта тестом. → { slitterId: ts }
+    function shiftClosedSlitters(events, dayKey, opts) {
+        var o = opts || {};
+        var byLabel = o.slitterIdByLabel || {};
+        var day = Number(dayKey);
+        if (!isFinite(day)) return {};
+        var last = {};
+        (events || []).forEach(function(ev, i) {
+            if (!ev) return;
+            var isStart = shiftEventTypeIsStart(ev.type), isEnd = shiftEventTypeIsEnd(ev.type);
+            if (!isStart && !isEnd) return;
+            var ts = ev.ts != null ? Number(ev.ts) : planTsSeconds(ev.when);
+            if (ts == null || !isFinite(ts)) return;
+            if (planDateDayKey(ts) !== day) return;
+            var sid = String(ev.slitterId == null ? '' : ev.slitterId).trim();
+            if (sid === '') sid = String(byLabel[String(ev.slitterLabel || '').trim()] || '').trim();
+            if (sid === '') return;
+            var prev = last[sid];
+            // Порядок внутри дня — по времени, тай-брейк по порядку строк (у двух событий одной
+            // минуты последним считаем то, что записано позже).
+            if (!prev || ts > prev.ts || (ts === prev.ts && i > prev.idx)) {
+                last[sid] = { ts: ts, idx: i, end: isEnd };
+            }
+        });
+        var out = {};
+        Object.keys(last).forEach(function(sid) { if (last[sid].end) out[sid] = last[sid].ts; });
+        return out;
+    }
+
+    // #4596: КОНЧИЛСЯ ЛИ ДЕНЬ dayKey ДЛЯ ЭТОГО СТАНКА — один предикат на все вопросы вида «работать
+    // в этом дне станок уже не будет». Прошедший день кончился для всех; СЕГОДНЯШНИЙ кончился для
+    // того станка, который ЗАКРЫЛ СМЕНУ (`shiftClosedSlitters`): смены закрываются в разное время,
+    // и ждать конца суток, чтобы разобрать недоделанное, незачем — в этом и есть задача #4596
+    // («спланировать следующий день, не дожидаясь окончания предыдущего»). Им живут: отнесение
+    // задания к отклонениям (`deviationGroups`), выбор якоря очереди (`deviationSettlePlan`) и
+    // «куда положить, когда сдвигать не от чего» (`dayOpenForWork` в контроллере).
+    // Чистая — покрыта тестом.
+    function dayIsOverForSlitter(dayKey, slitterKey, todayKey, closedSlitters) {
+        var day = Number(dayKey), today = Number(todayKey);
+        if (!isFinite(day) || !isFinite(today)) return false;
+        if (day !== today) return day < today;
+        return !!(closedSlitters || {})[String(slitterKey == null ? '' : slitterKey)];
+    }
+
     // #4346: отклонения ФАКТА от плана — вход кнопки «Отклонения N/M/K». Три группы (ТЗ issue #4346):
     //   overdue («просрочено», N)          — плановый день РАНЬШЕ текущего, а «Закончено» пусто;
     //   early («выполнено досрочно», M)    — «Закончено» РАНЬШЕ планового дня;
     //   earlyRun («делается раньше плана», K) — «Начато» РАНЬШЕ планового дня, проходы уже есть,
-    //                                        «Закончено» пусто.
+    //                                        «Закончено» пусто;
+    //   shiftClosed («смена закрыта», #4596) — план на СЕГОДНЯ, «Закончено» пусто, а станок УЖЕ
+    //                                        закрыл смену (`opts.shiftClosedSlitters`).
+    // **ЗАКРЫТАЯ СМЕНА = ТОТ ЖЕ СЛУЧАЙ, ЧТО ПРОСРОЧКА (#4596).** Работать в этом дне станок больше
+    // не будет, значит недоделанное надо перенести — не дожидаясь конца суток и не трогая станки,
+    // чьи смены ещё идут. Группа отдельная только ради ЧЕСТНОГО РАЗГОВОРА с оператором: «плановый
+    // день прошёл» и «смена закрыта в 14:40» — разные фразы; решение «Урегулировать» по ним ОДНО
+    // (`deviationSettlePlan` ведёт оба списка вместе).
     // **ДОСРОЧНОСТЬ МЕРЯЕТСЯ ПЛАНОВЫМ ДНЁМ ЗАДАНИЯ, А НЕ СЕГОДНЯШНИМ (#4593).** «Раньше плана» —
     // это отношение ФАКТА к ПЛАНУ этого задания; сегодняшний день говорит лишь о том, стоит ли ещё
     // показывать расхождение (прошлое урегулировано или уже неинтересно). Пока обе группы сверялись
@@ -2533,10 +2637,11 @@
     // плановый день — тоже (все группы требуют расхождения). Внутри групп — по плановому времени по
     // возрастанию, чтобы порядок заданий («Порядок заданий остается прежним») и список в форме были
     // детерминированы. Чистая (DOM не трогает) — покрыта тестом.
-    // → { overdue: [cut], early: [cut], earlyRun: [cut] }.
-    function deviationGroups(cuts, todayKey) {
+    // → { overdue: [cut], early: [cut], earlyRun: [cut], shiftClosed: [cut] }.
+    function deviationGroups(cuts, todayKey, opts) {
         var today = Number(todayKey);
-        var res = { overdue: [], early: [], earlyRun: [] };
+        var closed = (opts || {}).shiftClosedSlitters || {};
+        var res = { overdue: [], early: [], earlyRun: [], shiftClosed: [] };
         if (!isFinite(today)) return res;
         (cuts || []).forEach(function(c) {
             var pk = planDateDayKey(c && c.planDate);
@@ -2544,6 +2649,12 @@
             var ek = planDateDayKey(c && c.endDate);
             if (!isFinite(ek)) {          // не выполнено
                 if (pk < today) { res.overdue.push(c); return; }
+                // #4596: план на сегодня, а смена станка уже закрыта — день для него кончился, и
+                // недоделанное разбираем сейчас, не дожидаясь конца суток.
+                if (dayIsOverForSlitter(pk, cutSlitterKey(c), today, closed)) {
+                    res.shiftClosed.push(c);
+                    return;
+                }
                 // #4584: РАБОТА ИДЁТ РАНЬШЕ ПЛАНА. Задание не просрочено (его день ещё не настал) и
                 // не завершено — но проходы по нему УЖЕ отмечены: оператор делает его раньше, чем
                 // говорит план. Это расхождение факта с планом, значит отклонение: до #4584 такое
@@ -2570,6 +2681,7 @@
         res.overdue.sort(byPlan);
         res.early.sort(byPlan);
         res.earlyRun.sort(byPlan);
+        res.shiftClosed.sort(byPlan);
         return res;
     }
 
@@ -2627,14 +2739,19 @@
     //     Выполненная часть закрывается («Закончено»), иначе назавтра она снова отклонение;
     //   • сделаны ВСЕ проходы, но задание не закрыто (D ≥ план) — разделять нечего: работа
     //     переезжает в свой фактический день целиком и закрывается там же;
+    //   • НЕДОДЕЛАННОЕ В ДНЕ С ЗАКРЫТОЙ СМЕНОЙ (#4596) — то же, что просроченное: станок закрыл
+    //     смену, работать в этом дне он больше не будет, поэтому задание (целиком или остатком
+    //     разделения) уезжает перед следующим заданием своего станка — в норме это следующий день.
+    //     Станков, чьи смены ещё идут, действие не касается вовсе, поэтому «Урегулировать» можно
+    //     нажимать по мере закрытия смен, а в конце дня — один раз на все станки;
     //   • ПРОСРОЧЕННЫЕ (в т.ч. НАЧАТЫЕ без единого прохода — #4564 снял для них неприкосновенность
     //     #4381: сделано ничего, двигать нечему мешать) — НА МЕСТО СЛЕДУЮЩЕГО задания своего станка,
     //     в какой бы день оно ни стояло: приезжие встают на его время (08:00, 08:01, …), а оно само
     //     отходит на минуту дальше (#4574 — «старое 8:01, новое 8:00»). Взаимный порядок
     //     просроченных сохраняется.
-    //     «Следующее» = самое раннее НЕвыполненное задание этого станка, не из группы просроченных
-    //     (такое всегда стоит сегодня или позже: незавершённое задание прошлого дня по определению
-    //     само просрочено);
+    //     «Следующее» = самое раннее НЕвыполненное задание этого станка, не из переносимых и
+    //     стоящее в дне, который для станка ещё НЕ КОНЧИЛСЯ (#4596: у станка с закрытой сменой
+    //     сегодняшний день кончился, как и любой прошедший);
     //   • следующего задания у станка НЕТ → ближайший рабочий незамороженный день (freeDayMsFor).
     // Пишем ПЛЕЙСХОЛДЕР: важны не сами значения, а ПОРЯДОК — сдвиг всех последующих делает пересборка
     // очереди (autoSequenceQueue preserveOrder, «общие правила»), как и на пути ручного переноса.
@@ -2667,8 +2784,12 @@
             if (ts == null || !c || c.id == null) return;
             plan.push({ id: String(c.id), planStart: ts, reason: 'early' });
         });
-        var overdueSet = {}, earlyRunSet = {};
-        (g.overdue || []).forEach(function(c) { if (c && c.id != null) overdueSet[String(c.id)] = true; });
+        // #4596: «просрочено» и «смена закрыта» — ОДИН случай: день кончился, работа не доделана.
+        // Дальше они идут единым списком, поэтому и решение по ним одно, и порядок общий.
+        var pending = [].concat(g.overdue || [], g.shiftClosed || []);
+        var closedSlitters = o.shiftClosedSlitters || {};
+        var pendingSet = {}, earlyRunSet = {};
+        pending.forEach(function(c) { if (c && c.id != null) pendingSet[String(c.id)] = true; });
         (g.earlyRun || []).forEach(function(c) { if (c && c.id != null) earlyRunSet[String(c.id)] = true; });
         // #4564: частично выполненные — отдельным решением. Их выполненная часть уходит в СВОЙ
         // фактический день, поэтому в очередь просроченных («перед следующим заданием станка»)
@@ -2679,7 +2800,7 @@
         // отрезается и кладётся в ДЕНЬ ВЫПОЛНЕНИЯ, а ОСТАТОК остаётся на своём плановом времени —
         // и всё, что стои́т после него, сдвигается ВЛЕВО на освободившееся время (это делает
         // пересборка). Отсюда общий цикл: правило одно, отличается только место остатка.
-        [].concat(g.overdue || [], g.earlyRun || []).forEach(function(c) {
+        [].concat(pending, g.earlyRun || []).forEach(function(c) {
             if (!c || c.id == null) return;
             var planned = Math.floor(Number(c.plannedRuns) || 0);
             var done = cutDoneRuns(c);
@@ -2704,7 +2825,7 @@
             splitById[String(c.id)] = sp;
         });
         var bySlitter = {}, sids = [];
-        (g.overdue || []).forEach(function(c) {
+        pending.forEach(function(c) {
             if (!c || c.id == null) return;
             var sp = splitById[String(c.id)];
             // #4564: у задания без остатка (сделаны все проходы) двигать в очереди нечего.
@@ -2723,12 +2844,16 @@
             var queue = bySlitter[sid];
             var anchorTs = null, anchorCut = null;
             (cuts || []).forEach(function(c) {
-                if (!c || c.id == null || overdueSet[String(c.id)]) return;
+                if (!c || c.id == null || pendingSet[String(c.id)]) return;
                 if (cutSlitterKey(c) !== sid) return;
                 if (planTsSeconds(c.endDate) != null) return;   // уже выполненное «следующим» не считаем
                 if (cutIsStarted(c)) return;   // #4381: перед начатым не встаём — это сдвинуло бы его
                 var pk = planDateDayKey(c.planDate);
-                if (!isFinite(pk) || !isFinite(today) || pk < today) return;
+                if (!isFinite(pk) || !isFinite(today)) return;
+                // #4596: якорем не может быть задание дня, который для станка УЖЕ КОНЧИЛСЯ, —
+                // прошедшего или сегодняшнего с закрытой сменой: приезжие встали бы в день, в
+                // котором станок больше не работает.
+                if (dayIsOverForSlitter(pk, sid, today, closedSlitters)) return;
                 var ts = planTsSeconds(c.planDate);
                 if (ts == null) return;
                 if (anchorTs == null || ts < anchorTs) { anchorTs = ts; anchorCut = c; }
@@ -12843,6 +12968,9 @@
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
+        rowsToShiftEvents: rowsToShiftEvents,     // #4596: строки slitter_shift_events → события открытия/закрытия смены
+        shiftClosedSlitters: shiftClosedSlitters, // #4596: станки, закрывшие смену в дне → { id: штамп закрытия }
+        dayIsOverForSlitter: dayIsOverForSlitter, // #4596: день для станка кончился (прошёл или смена закрыта)
         cutDoneRuns: cutDoneRuns,               // #4564: сделано проходов («Кол-во резок факт»); null = не знаем
         settleMoveScope: settleMoveScope,       // #4574: рамки пересборки после «Урегулировать»
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
@@ -13563,6 +13691,71 @@
             console.warn('[pp] 🔒 loadFreeze: не удалось прочитать «' + TABLE.freeze + '»:', err && err.message);
             self.freezeByDay = {};
         });
+    };
+
+    // #4596: СОБЫТИЯ СМЕНЫ СТАНКОВ — из того же защищённого отчёта, что читает пульт слиттера
+    // (`report/slitter_shift_events`, #3674). Планированию из всего журнала нужен ровно один факт:
+    // закрыл ли станок смену в текущем дне (`shiftClosedSlittersToday`) — тогда его недоделанные
+    // задания переносит «Урегулировать», не дожидаясь конца суток (issue #4596).
+    // Отчёт недоступен (роль «Диспетчер» без гранта на него, ошибка сервера) — фича молчать не
+    // должна: ЗАКРЫТИЕ СМЕН ПРОСТО НЕ БУДЕТ ВИДНО, и оператор об этом узнаёт (console.error + тост
+    // + строка в форме «Отклонения»), а не гадает, почему сегодняшние задания не переносятся.
+    AtexProductionPlanning.prototype.loadShiftEvents = function() {
+        var self = this;
+        this.shiftEvents = [];
+        this.shiftEventsError = '';
+        this._shiftClosedCache = null;
+        return this.getJson('report/slitter_shift_events?JSON_KV&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
+            var raw = (rows || []).length;
+            self.shiftEvents = rowsToShiftEvents(rows || []);
+            self._shiftClosedCache = null;
+            var noSlitter = self.shiftEvents.filter(function(ev) {
+                return !ev.slitterId && !ev.slitterLabel;
+            }).length;
+            // #4371: журнал пришёл РОВНО ПО ЛИМИТУ — значит он усечён, и свежих событий в нём может
+            // не быть вовсе (лимит самого отчёта режет запрос клиента молча). Нам нужен ЭКСТРЕМУМ
+            // (последнее событие смены станка за сегодня), поэтому усечение обязано быть ВИДНЫМ:
+            // иначе «никто смену не закрывал» прозвучит как факт. Лечится фильтром по дате в
+            // запросе отчёта — его добавлять только с проверкой на живой базе.
+            if (raw >= SHIFT_EVENTS_LIMIT) {
+                console.error('[pp] 🕗 loadShiftEvents: отчёт отдал ровно лимит строк (' + raw
+                    + ') — журнал усечён, закрытые смены могли не приехать (#4371)');
+                self.shiftEventsError = 'журнал событий пришёл усечённым (' + raw + ' строк = лимит запроса)';
+                self.notify('Журнал событий смен пришёл усечённым — закрытые смены могли не попасть '
+                    + 'в «Отклонения»', 'warning');
+            }
+            console.log('[pp] 🕗 loadShiftEvents: событий открытия/закрытия смены:', self.shiftEvents.length,
+                'из', raw, ', станков с закрытой сегодня сменой:',
+                Object.keys(self.shiftClosedSlittersToday()).length,
+                noSlitter ? (', событий без станка (пропущены): ' + noSlitter) : '');
+        }).catch(function(err) {
+            var msg = (err && err.message) || 'ошибка чтения';
+            console.error('[pp] 🕗 loadShiftEvents: не удалось прочитать «report/slitter_shift_events» — '
+                + 'закрытие смен учитываться НЕ БУДЕТ (нужен грант роли на отчёт):', msg);
+            self.shiftEvents = [];
+            self.shiftEventsError = msg;
+            self._shiftClosedCache = null;
+            self.notify('Не удалось прочитать события смен — закрытые смены в «Отклонениях» учтены не будут', 'warning');
+        });
+    };
+
+    // #4596: станки, закрывшие смену СЕГОДНЯ → { slitterId: unix-штамп закрытия }. Считаем по
+    // событиям пульта чистой `shiftClosedSlitters`; станок события задан ссылкой (#4359), у старых
+    // событий — меткой в «Примечаниях» (#3522), поэтому передаём карту «подпись станка → id».
+    // Кэш на текущий день: карту спрашивают и рендер кнопки «Отклонения», и `dayOpenForWork` в
+    // цикле по горизонту календаря — пересчитывать её на каждый день незачем.
+    AtexProductionPlanning.prototype.shiftClosedSlittersToday = function() {
+        var todayKey = planDateDayKey(controllerNowMs(this));
+        var cache = this._shiftClosedCache;
+        if (cache && cache.key === todayKey) return cache.map;
+        var byLabel = {};
+        (this.slitters || []).forEach(function(s) {
+            var label = String(s && s.label != null ? s.label : '').trim();
+            if (label !== '' && s.id != null) byLabel[label] = String(s.id);
+        });
+        var map = shiftClosedSlitters(this.shiftEvents || [], todayKey, { slitterIdByLabel: byLabel });
+        this._shiftClosedCache = { key: todayKey, map: map };
+        return map;
     };
 
     // #4326: клик по «замку дня». Открыт (frozenInfo == null) → спросить Примечание и заморозить:
@@ -16770,13 +16963,19 @@
     // попадают, а знать о них он должен. this.cuts — весь отчёт cut_planning (loadPlanning),
     // фильтр дат клиентский, так что дополнительного запроса не нужно.
     AtexProductionPlanning.prototype.deviationState = function() {
-        var groups = deviationGroups(this.cuts || [], planDateDayKey(controllerNowMs(this)));
+        var groups = deviationGroups(this.cuts || [], planDateDayKey(controllerNowMs(this)),
+            { shiftClosedSlitters: this.shiftClosedSlittersToday() });   // #4596
+        var closed = groups.shiftClosed || [];
         return {
             groups: groups,
-            n: groups.overdue.length,
+            // #4596: «не выполнено, а день кончился» — одно число: просроченные и те, чей станок
+            // уже закрыл смену. Решение по ним одно, поэтому и счётчик кнопки один; из чего он
+            // сложился, говорят подсказка кнопки и отдельные группы формы.
+            n: groups.overdue.length + closed.length,
+            s: closed.length,                    // #4596: из них со станков с закрытой сменой
             m: groups.early.length,
             k: (groups.earlyRun || []).length,   // #4584: делается раньше плана
-            total: groups.overdue.length + groups.early.length + (groups.earlyRun || []).length
+            total: groups.overdue.length + closed.length + groups.early.length + (groups.earlyRun || []).length
         };
     };
 
@@ -16790,7 +16989,11 @@
         // #4412: подсказку держим КОРОТКИМИ СТРОКАМИ (перевод строки в title браузер уважает).
         // Одной строкой она была шире полутора сотен символов, а кнопка стоит у ПРАВОГО края
         // панели — всплывающая подсказка уезжала за край окна и читалась обрезанной.
-        this.devBtn.title = 'Просрочено — ' + st.n + ': плановый день прошёл, не выполнено.\n'
+        // #4596: первое число кнопки — «не выполнено, а день кончился»; из чего оно сложилось,
+        // говорят две строки подсказки: прошедший плановый день и закрытая сегодня смена станка.
+        this.devBtn.title = 'Просрочено — ' + st.groups.overdue.length
+            + ': плановый день прошёл, не выполнено.\n'
+            + (st.s ? ('Смена закрыта — ' + st.s + ': план на сегодня, станок закончил смену.\n') : '')
             + 'Выполнено досрочно — ' + st.m + ': раньше планового дня.\n'
             + (st.k ? ('Делается раньше плана — ' + st.k
                 + ': проходы отмечены раньше планового дня.\n') : '')
@@ -16817,18 +17020,26 @@
     // НЕ ОТ ЧЕГО» (у станка нет следующего задания). Выбор места ПЕРЕД следующим заданием этим
     // предикатом не ограничен: там очередь сдвигается подряд, и пропуск дня оставил бы разрыв
     // (#4569, решение заказчика 02.08.2026).
+    // #4596: сюда же вошло «станок закрыл смену»: работать в этом дне он больше не будет, и класть
+    // в него работу нельзя — иначе перенос со дня закрытой смены вернулся бы в тот же день.
     AtexProductionPlanning.prototype.dayOpenForWork = function(slitterId, dayMidnightMs) {
         if (!this.dayIsWorking(dayMidnightMs)) return false;
         if (this.dayIsFrozen(dayMidnightMs)) return false;
         var sid = String(slitterId == null ? '' : slitterId);
+        var closed = typeof this.shiftClosedSlittersToday === 'function' ? this.shiftClosedSlittersToday() : {};
+        if (dayIsOverForSlitter(planDateDayKey(dayMidnightMs), sid,
+                planDateDayKey(controllerNowMs(this)), closed)) return false;   // #4596
         return !(sid !== '' && this.slitterOnVacationDay(sid, dayMidnightMs));
     };
 
     // #4346: одна группа списка отклонений. Подпись задания — его «номер» (с #3242 это плановые
     // дата-время старта, formatCutNumber), дальше станок, сырьё и состояние факта.
-    AtexProductionPlanning.prototype.renderDeviationGroup = function(title, list, kind) {
+    // #4596: note — строка под заголовком группы (для «Смена закрыта»: какие станки и когда её
+    // закрыли). Показываем и у пустой группы: «смена закрыта, всё доделано» — тоже ответ.
+    AtexProductionPlanning.prototype.renderDeviationGroup = function(title, list, kind, note) {
         var box = el('div', { class: 'atex-pp-dev-group atex-pp-dev-' + kind });
         box.appendChild(el('h3', { class: 'atex-pp-dev-group-title', text: title + ' — ' + list.length }));
+        if (note) box.appendChild(el('p', { class: 'atex-pp-hint', text: note }));
         if (!list.length) {
             box.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
             return box;
@@ -16864,6 +17075,22 @@
         return box;
     };
 
+    // #4596: «Смена закрыта: Станок 2 · 14:40, Станок 3 · 15:20» — чем подтверждается, что день у
+    // этих станков кончился. Ни один станок смену сегодня не закрывал → пустая строка (в форме
+    // ничего не появляется).
+    AtexProductionPlanning.prototype.shiftClosedNote = function() {
+        var self = this;
+        var closed = this.shiftClosedSlittersToday();
+        var parts = Object.keys(closed).map(function(sid) {
+            var slitter = (self.slitters || []).filter(function(s) { return String(s.id) === String(sid); })[0];
+            var d = new Date(Number(closed[sid]) * 1000);
+            var p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+            return (slitter && slitter.label ? slitter.label : ('#' + sid))
+                + ' · ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+        });
+        return parts.length ? ('Смена закрыта: ' + parts.join(', ')) : '';
+    };
+
     // #4346: форма «Отклонения» — список в две группы + «Урегулировать» / «Закрыть». Диспетчеру,
     // которому нужно иначе, форма не мешает: закрыл — и раскидал вручную (перенос 🗓 / ↑↓).
     AtexProductionPlanning.prototype.openDeviations = function() {
@@ -16883,6 +17110,11 @@
         dialog.appendChild(content);
         content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Отклонения от плана' }));
         content.appendChild(this.renderDeviationGroup('Просрочено', st.groups.overdue, 'overdue'));
+        // #4596: план на сегодня, но станок уже закрыл смену — отдельная группа, потому что фраза
+        // «плановый день прошёл» про сегодняшний день была бы неправдой. Под заголовком называем
+        // станки и время закрытия: оператор должен видеть, на каком основании поедет работа.
+        content.appendChild(this.renderDeviationGroup('Смена закрыта, не выполнено',
+            st.groups.shiftClosed || [], 'shift-closed', this.shiftClosedNote()));
         content.appendChild(this.renderDeviationGroup('Выполнено досрочно', st.groups.early, 'early'));
         // #4584: третий вид расхождения — проходы уже идут, а плановый день ещё не настал.
         content.appendChild(this.renderDeviationGroup('Делается раньше плана', st.groups.earlyRun || [], 'early-run'));
@@ -16894,6 +17126,19 @@
             + 'остаток уедет в план. Делающееся раньше плана режется так же, только в обратную '
             + 'сторону: выполненное уйдёт в день выполнения, остаток останется на своём времени, '
             + 'а следующие за ним сдвинутся влево. Порядок заданий сохраняется.' }));
+        // #4596: почему сегодняшние задания попали в список (и почему попали не все).
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Сегодняшние задания попадают в список только у станков, закрывших смену: для них день '
+            + 'кончился, и недоделанное едет в следующий день. Станки, чьи смены ещё идут, действие '
+            + 'не трогает — «Урегулировать» можно нажимать по мере закрытия смен, а в конце дня '
+            + 'закрыть всё одним разом.' }));
+        // #4596: событий смены нет — молчать об этом нельзя: список сегодняшних заданий пуст не
+        // потому, что смены открыты, а потому, что мы про них ничего не знаем.
+        if (this.shiftEventsError) {
+            content.appendChild(el('p', { class: 'atex-pp-hint atex-pp-dev-warn', text:
+                'События смен прочитать не удалось (' + this.shiftEventsError + ') — закрытые смены '
+                + 'в этом списке не учтены. Проверьте доступ роли к отчёту slitter_shift_events.' }));
+        }
 
         var actions = el('div', { class: 'atex-pp-supply-actions' });
         var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-danger', type: 'button', text: 'Урегулировать' });
@@ -16901,12 +17146,17 @@
             if (self.busy) return;
             // #4564: частично выполненные не «переносятся», а РАЗДЕЛЯЮТСЯ — считаем их отдельно,
             // иначе диспетчер не поймёт, сколько записей появится.
-            var splitN = st.groups.overdue.filter(function(x) {
+            // #4596: считаем по ОБЕИМ группам переноса — просроченным и со станков с закрытой сменой.
+            var isPartial = function(x) {
                 var d = cutDoneRuns(x), p = Math.floor(Number(x.plannedRuns) || 0);
                 return p > 0 && d != null && d > 0 && d < p;
-            }).length;
+            };
+            var closedList = st.groups.shiftClosed || [];
+            var splitN = [].concat(st.groups.overdue, closedList).filter(isPartial).length;
+            var closedMoves = closedList.length - closedList.filter(isPartial).length;
             var msg = el('span', { class: 'atex-pp-confirm-msg', text:
-                'Урегулировать отклонения? Будет перенесено заданий: просроченных — ' + (st.n - splitN)
+                'Урегулировать отклонения? Будет перенесено заданий: не выполненных в свой день — ' + (st.n - splitN)
+                + (closedMoves ? ' (из них со станков с закрытой сменой — ' + closedMoves + ')' : '')
                 + (splitN ? ', разделено частично выполненных — ' + splitN : '')
                 + ', выполненных досрочно — ' + st.m
                 + (st.k ? (', делается раньше плана — ' + st.k) : '')
@@ -16947,6 +17197,9 @@
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
             shiftEndMin: Number(win && win.cutEndMin) || 0,   // #4572: чем закрывать выполненную часть
+            // #4596: у станка с закрытой сменой сегодняшний день кончился — ни якорем, ни
+            // «ближайшим свободным днём» он больше быть не может.
+            shiftClosedSlitters: this.shiftClosedSlittersToday(),
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
         var plan = settle.moves || [];
@@ -16954,9 +17207,11 @@
         // #4564: факт проходов не приходит из отчёта — начатые задания остаются на месте, и об
         // этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со дня
         // работу, которая идёт на станке.
-        var blind = (groups && groups.overdue || []).filter(function(c) {
-            return cutIsStarted(c) && cutDoneRuns(c) == null;
-        });
+        // #4596: спрашиваем ОБЕ группы переноса — просроченные и те, чей станок закрыл смену.
+        var blind = [].concat((groups && groups.overdue) || [], (groups && groups.shiftClosed) || [])
+            .filter(function(c) {
+                return cutIsStarted(c) && cutDoneRuns(c) == null;
+            });
         if (blind.length) {
             console.error('[pp] ⛔ #4564: отчёт cut_planning не отдаёт «Кол-во резок факт» ('
                 + CUT_ACTUAL_RUNS_COLUMN + ') — начатые просроченные не разделяются и не двигаются: '
@@ -16994,8 +17249,10 @@
             var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
             var freeDay = byReason('free-day');
             var splitN = splits.filter(function(sp) { return sp.restRuns > 0; }).length;
+            // #4596: «просроченных» здесь читается как «не выполненных в свой день» — в этом же
+            // числе едут задания станков, закрывших смену сегодня (решение по ним одно).
             self.notify('Урегулировано заданий: ' + (writes.length + splits.length)
-                + ' · просроченных — ' + (byReason('before-next') + freeDay)
+                + ' · не выполненных в свой день — ' + (byReason('before-next') + freeDay)
                 + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
                 + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
                 + ' · досрочных — ' + byReason('early'), 'success');
@@ -18233,6 +18490,9 @@
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
         return this.loadCutStrips().then(function() { return self.loadPlanning(); })
             .then(function() { return self.loadSleeveBatches(); }) // #3340: обновляем партии втулок (FIFO)
+            // #4596: смены закрываются В ТЕЧЕНИЕ дня — событие могло появиться уже после загрузки
+            // страницы, поэтому карту закрытых смен обновляем вместе с очередью (⟳ и после записи).
+            .then(function() { return self.loadShiftEvents(); })
             .then(function() { self.resolveCutMaterials(); });
     };
 
@@ -25375,6 +25635,10 @@
                     self.loadSlittersWithStop().then(function(items) {
                         self.slitters = items;
                         return self.loadDowntimes();   // #3764: окна простоя — после списка станков
+                    }).then(function() {
+                        // #4596: события смены — после списка станков: у старых событий станок
+                        // задан только подписью, и опознать его можно лишь по справочнику.
+                        return self.loadShiftEvents();
                     }),
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)

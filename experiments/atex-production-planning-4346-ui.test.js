@@ -90,14 +90,15 @@ assertEqual(clean.devBtn.style.display, 'none', 'нет отклонений —
 c.openDeviations();
 var modal = c.root.querySelector('.atex-pp-dev-modal');
 assert(!!modal, 'форма отклонений добавлена в корень РМ');
-assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 3,
-    '#4584: три группы — просрочено, выполнено досрочно, делается раньше плана');
+assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 4,
+    '#4584/#4596: четыре группы — просрочено, смена закрыта, выполнено досрочно, делается раньше плана');
 assert(!!c.root.querySelector('.atex-pp-dev-overdue') && !!c.root.querySelector('.atex-pp-dev-early'),
     'группы различимы по классу (просроченная подсвечивается красным)');
 assertEqual(c.root.querySelectorAll('.atex-pp-dev-item').length, 3, 'в списке все отклонившиеся задания (2 + 1)');
 
 var titles = c.root.querySelectorAll('.atex-pp-dev-group-title').map(function(n) { return n.textContent; });
-assertEqual(titles, ['Просрочено — 2', 'Выполнено досрочно — 1', 'Делается раньше плана — 0'],
+assertEqual(titles, ['Просрочено — 2', 'Смена закрыта, не выполнено — 0',
+                     'Выполнено досрочно — 1', 'Делается раньше плана — 0'],
     'заголовки групп несут количество');
 
 var items = c.root.querySelectorAll('.atex-pp-dev-item').map(function(n) { return n.textContent; });
@@ -107,6 +108,30 @@ assert(items.filter(function(t) { return /выполнено 23\.07\.2026/.test(
 
 var btnLabels = c.root.querySelectorAll('.atex-pp-btn').map(function(n) { return n.textContent; });
 assert(btnLabels.indexOf('Урегулировать') >= 0 && btnLabels.indexOf('Закрыть') >= 0, 'в форме есть «Урегулировать» и «Закрыть»');
+
+// ── #4596: станок закрыл смену — сегодняшнее недоделанное показано отдельной группой ──
+(function() {
+    var todayCut = { id: '21', slitter: { id: '1', label: 'Станок 1' }, materialName: 'БОПП 30',
+        number: String(now), planDate: String(now), plannedRuns: 10, actualRuns: 0, endDate: '' };
+    var shift = makeController([todayCut]);
+    shift.slitters = [{ id: '1', label: 'Станок 1' }];
+    shift.shiftEvents = [
+        { id: 'e1', ts: Math.floor(Date.UTC(2026, 6, 24, 8, 0) / 1000), type: 'Начало смены', slitterId: '1' },
+        { id: 'e2', ts: Math.floor(Date.UTC(2026, 6, 24, 10, 40) / 1000), type: 'Конец смены', slitterId: '1' }
+    ];
+    shift.updateDeviationsButton();
+    assertEqual(shift.devBtn.textContent, 'Отклонения 1/0',
+        '#4596 задание закрытой смены считается вместе с просроченными');
+    assert(/Смена закрыта — 1/.test(shift.devBtn.title), 'подсказка называет закрытую смену отдельно');
+    shift.openDeviations();
+    var closedTitles = shift.root.querySelectorAll('.atex-pp-dev-group-title')
+        .map(function(n) { return n.textContent; });
+    assertEqual(closedTitles[1], 'Смена закрыта, не выполнено — 1',
+        '#4596 сегодняшнее недоделанное попало в группу закрытой смены');
+    var hints = shift.root.querySelectorAll('.atex-pp-hint').map(function(n) { return n.textContent; });
+    assert(hints.indexOf('Смена закрыта: Станок 1 · 10:40') >= 0,
+        '#4596 форма называет станок и время закрытия смены');
+})();
 
 // Без отклонений форму не открываем — сообщаем и выходим.
 clean.openDeviations();

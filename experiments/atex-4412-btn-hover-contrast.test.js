@@ -96,11 +96,12 @@ function decl(sel, prop) {
     var m = /this\.devBtn\.title\s*=\s*([\s\S]*?);\n/.exec(ctrl);
     assert(!!m, 'подсказка кнопки «Отклонения» задаётся в updateDeviationsButton');
     var literal = (m ? m[1] : '');
-    // Собираем текст подсказки из строковых литералов (подстановки чисел заменяем на «NN»).
-    var text = literal.replace(/'\s*\+\s*st\.[nm]\s*\+\s*'/g, 'NN')
-        .split(/'\s*\+\s*'/).join('')
-        .replace(/^'|'$/g, '')
-        .replace(/\\n/g, '\n');
+    // Текст подсказки собираем из САМИХ строковых литералов выражения: числа и условные куски
+    // («+ (st.k ? … : '')», с #4596 таких два) на длину фраз не влияют, а разбор кода —
+    // на структуру подсказки. Иначе тест мерил бы длину строк ИСХОДНИКА, а не подсказки.
+    var text = (literal.match(/'(?:[^'\\]|\\.)*'/g) || []).map(function(s) {
+        return s.slice(1, -1);
+    }).join('').replace(/\\n/g, '\n');
     var lines = text.split('\n');
     assert(lines.length >= 3, 'подсказка разбита на строки (перевод строки в title браузер уважает)');
     var longLines = lines.filter(function(s) { return s.length > 70; });
