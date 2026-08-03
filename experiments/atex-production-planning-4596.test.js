@@ -186,8 +186,9 @@ function loaderCase(getJson) {
     c.slitters = [{ id: '2', label: 'Станок 2' }];
     c.nowMs = function() { return NOW_MS; };
     c.notified = [];
+    c.paths = [];
     c.notify = function(msg, kind) { c.notified.push(kind); };
-    c.getJson = getJson;
+    c.getJson = function(path) { c.paths.push(path); return getJson(path); };
     var log = console.log, err = console.error;
     console.log = function() {}; console.error = function() {};
     return c.loadShiftEvents().then(function() {
@@ -215,6 +216,23 @@ loaderCase(function() { return Promise.reject(new Error('403 Forbidden')); }).th
     assertEqual([c.shiftEventsError, c.notified, Object.keys(c.shiftClosedSlittersToday())],
         ['', [], ['2']],
         'нормальный ответ — ни ошибок, ни тостов, станок 2 закрыл смену');
+    assertEqual(c.paths.length === 1 && /FR_event_when=%3E03\.08\.2026/.test(c.paths[0]), true,
+        '#4596 журнал запрашивается ЗА СЕГОДНЯ (FR_event_when=>ДД.ММ.ГГГГ), одним запросом');
+    // Фильтр отдал пусто, а в журнале сегодняшние события ЕСТЬ — фильтр сломан, об этом орём
+    // и работаем на полном списке (молчаливое «никто смену не закрывал» недопустимо).
+    return loaderCase(function(path) {
+        return Promise.resolve(/FR_event_when/.test(path) ? [] : [closedRow]);
+    });
+}).then(function(c) {
+    assertEqual([/фильтр по дате/.test(c.shiftEventsError), c.notified,
+                 Object.keys(c.shiftClosedSlittersToday()), c.paths.length],
+        [true, ['warning'], ['2'], 2],
+        '#4596 фильтр отдал пусто при живых событиях — сказано вслух, взят полный журнал');
+    // Пусто и по фильтру, и целиком — это норма: смен сегодня ещё не открывали.
+    return loaderCase(function() { return Promise.resolve([]); });
+}).then(function(c) {
+    assertEqual([c.shiftEventsError, c.notified, c.paths.length], ['', [], 2],
+        'событий сегодня нет — молчим (перепроверили журналом целиком и успокоились)');
     console.log('\n' + passed + '/' + total + ' passed');
 }).catch(function(e) {
     process.exitCode = 1;

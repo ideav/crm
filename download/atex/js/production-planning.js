@@ -13697,46 +13697,76 @@
     // (`report/slitter_shift_events`, #3674). Планированию из всего журнала нужен ровно один факт:
     // закрыл ли станок смену в текущем дне (`shiftClosedSlittersToday`) — тогда его недоделанные
     // задания переносит «Урегулировать», не дожидаясь конца суток (issue #4596).
-    // Отчёт недоступен (роль «Диспетчер» без гранта на него, ошибка сервера) — фича молчать не
-    // должна: ЗАКРЫТИЕ СМЕН ПРОСТО НЕ БУДЕТ ВИДНО, и оператор об этом узнаёт (console.error + тост
-    // + строка в форме «Отклонения»), а не гадает, почему сегодняшние задания не переносятся.
+    // БЕРЁМ ТОЛЬКО СЕГОДНЯШНИЙ ДЕНЬ — фильтром отчёта `FR_event_when=>ДД.ММ.ГГГГ` (открытый
+    // интервал: без оператора `>` фильтр по DATETIME понимается как точное совпадение и даёт 0
+    // строк). Иначе журнал качается целиком, а он растёт на сотню событий в день: у отчёта своего
+    // лимита нет и строки приходят СТАРЫМИ ВПЕРЁД, поэтому за лимитом запроса первым пропадёт
+    // именно сегодняшний день (#4371 — «нужен ЭКСТРЕМУМ, фильтруй до нужного среза»). Проверено на
+    // живой ateh 04.08.2026: `>03.08.2026` → 124 события того дня из 283 в журнале.
+    // Отчёт недоступен (ошибка сервера, у роли нет READ на объект «Запрос» — им авторизуется чтение
+    // report/, грант на саму таблицу событий не нужен) — фича молчать не должна:
+    // ЗАКРЫТИЕ СМЕН ПРОСТО НЕ БУДЕТ ВИДНО, и оператор об этом узнаёт (console.error + тост +
+    // строка в форме «Отклонения»), а не гадает, почему сегодняшние задания не переносятся.
     AtexProductionPlanning.prototype.loadShiftEvents = function() {
         var self = this;
+        var todayKey = planDateDayKey(controllerNowMs(this));
+        var today = formatDayKey(todayKey);   // ДД.ММ.ГГГГ — граница фильтра (сегодня 00:00)
+        var base = 'report/slitter_shift_events?JSON_KV&LIMIT=0,' + SHIFT_EVENTS_LIMIT;
+        var path = today ? (base + '&FR_event_when=' + encodeURIComponent('>' + today)) : base;
         this.shiftEvents = [];
         this.shiftEventsError = '';
         this._shiftClosedCache = null;
-        return this.getJson('report/slitter_shift_events?JSON_KV&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
-            var raw = (rows || []).length;
-            self.shiftEvents = rowsToShiftEvents(rows || []);
-            self._shiftClosedCache = null;
-            var noSlitter = self.shiftEvents.filter(function(ev) {
-                return !ev.slitterId && !ev.slitterLabel;
-            }).length;
-            // #4371: журнал пришёл РОВНО ПО ЛИМИТУ — значит он усечён, и свежих событий в нём может
-            // не быть вовсе (лимит самого отчёта режет запрос клиента молча). Нам нужен ЭКСТРЕМУМ
-            // (последнее событие смены станка за сегодня), поэтому усечение обязано быть ВИДНЫМ:
-            // иначе «никто смену не закрывал» прозвучит как факт. Лечится фильтром по дате в
-            // запросе отчёта — его добавлять только с проверкой на живой базе.
-            if (raw >= SHIFT_EVENTS_LIMIT) {
-                console.error('[pp] 🕗 loadShiftEvents: отчёт отдал ровно лимит строк (' + raw
-                    + ') — журнал усечён, закрытые смены могли не приехать (#4371)');
-                self.shiftEventsError = 'журнал событий пришёл усечённым (' + raw + ' строк = лимит запроса)';
-                self.notify('Журнал событий смен пришёл усечённым — закрытые смены могли не попасть '
-                    + 'в «Отклонения»', 'warning');
-            }
-            console.log('[pp] 🕗 loadShiftEvents: событий открытия/закрытия смены:', self.shiftEvents.length,
-                'из', raw, ', станков с закрытой сегодня сменой:',
-                Object.keys(self.shiftClosedSlittersToday()).length,
-                noSlitter ? (', событий без станка (пропущены): ' + noSlitter) : '');
+        return this.getJson(path).then(function(rows) {
+            self.applyShiftEventRows(rows, 'за сегодня');
+            // ФИЛЬТР НЕ ДОЛЖЕН МОЛЧА СЪЕДАТЬ ЖУРНАЛ. Пусто бывает по делу (утром смен ещё не
+            // открывали), но пусто бывает и от сломавшегося фильтра — а это уже «никто смену не
+            // закрывал» сказанное как факт. Поэтому пустой ответ перепроверяем journalом целиком:
+            // сегодняшние события в нём есть → фильтр врёт, ОРЁМ и работаем на полном списке.
+            if (self.shiftEvents.length || path === base) return;
+            return self.getJson(base).then(function(all) {
+                var list = rowsToShiftEvents(all || []).filter(function(ev) {
+                    return planDateDayKey(ev.ts) === todayKey;
+                });
+                if (!list.length) return;   // норма: сегодня смен ещё не открывали
+                console.error('[pp] 🕗 loadShiftEvents: фильтр FR_event_when отдал пусто, а за сегодня '
+                    + 'в журнале событий ' + list.length + ' — фильтр отчёта сломан');
+                self.shiftEventsError = 'фильтр по дате не сработал — журнал прочитан целиком';
+                self.notify('Фильтр журнала смен не сработал — события прочитаны целиком', 'warning');
+                self.applyShiftEventRows(all, 'целиком');
+            });
         }).catch(function(err) {
             var msg = (err && err.message) || 'ошибка чтения';
             console.error('[pp] 🕗 loadShiftEvents: не удалось прочитать «report/slitter_shift_events» — '
-                + 'закрытие смен учитываться НЕ БУДЕТ (нужен грант роли на отчёт):', msg);
+                + 'закрытие смен учитываться НЕ БУДЕТ (нужен READ-грант роли на «Запрос»):', msg);
             self.shiftEvents = [];
             self.shiftEventsError = msg;
             self._shiftClosedCache = null;
             self.notify('Не удалось прочитать события смен — закрытые смены в «Отклонениях» учтены не будут', 'warning');
         });
+    };
+
+    // #4596: разобрать ответ журнала и рассказать, что в нём приехало. Отдельно от `loadShiftEvents`,
+    // потому что зовётся с двух путей (по фильтру и целиком при его отказе).
+    AtexProductionPlanning.prototype.applyShiftEventRows = function(rows, how) {
+        var raw = (rows || []).length;
+        this.shiftEvents = rowsToShiftEvents(rows || []);
+        this._shiftClosedCache = null;
+        // #4371: ответ РОВНО в лимит — журнал усечён, и свежих событий в нём может не быть вовсе.
+        // Усечение обязано быть ВИДНЫМ, иначе «никто смену не закрывал» прозвучит как факт.
+        if (raw >= SHIFT_EVENTS_LIMIT) {
+            console.error('[pp] 🕗 loadShiftEvents: отчёт отдал ровно лимит строк (' + raw
+                + ') — журнал усечён, закрытые смены могли не приехать (#4371)');
+            this.shiftEventsError = 'журнал событий пришёл усечённым (' + raw + ' строк = лимит запроса)';
+            this.notify('Журнал событий смен пришёл усечённым — закрытые смены могли не попасть '
+                + 'в «Отклонения»', 'warning');
+        }
+        var noSlitter = this.shiftEvents.filter(function(ev) {
+            return !ev.slitterId && !ev.slitterLabel;
+        }).length;
+        console.log('[pp] 🕗 loadShiftEvents (' + how + '): событий открытия/закрытия смены:',
+            this.shiftEvents.length, 'из', raw, ', станков с закрытой сегодня сменой:',
+            Object.keys(this.shiftClosedSlittersToday()).length,
+            noSlitter ? (', событий без станка (пропущены): ' + noSlitter) : '');
     };
 
     // #4596: станки, закрывшие смену СЕГОДНЯ → { slitterId: unix-штамп закрытия }. Считаем по
