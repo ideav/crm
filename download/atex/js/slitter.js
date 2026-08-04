@@ -939,6 +939,36 @@
         });
     }
 
+    // #4606: номера заказов заданий — из отчёта report/cut_planning (цепочка
+    // Задание → Обеспечение → Позиция → Заказ; колонки cut_id + order_no, тот же
+    // источник, что у подписи бара в Ганте). В slitter_cuts заказа нет: он не
+    // реквизит задания, а результат джойна через обеспечение.
+    // На одно задание приходится столько строк, сколько у него обеспечений, и
+    // заказов может быть несколько — собираем уникальные в порядке появления.
+    function rowsToCutOrders(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            var no = firstField(row, ['order_no', 'order_number']);
+            if (!cutId || !no) return;
+            if (!map[cutId]) map[cutId] = [];
+            if (map[cutId].indexOf(no) < 0) map[cutId].push(no);
+        });
+        return map;
+    }
+
+    // #4606: подпись заказа в карточке задания. Один заказ — «3738», несколько —
+    // «3738, 3742»; сверх лимита (по умолчанию 2 — карточка узкая) остаток уходит
+    // в счётчик: «3738, 3742 +3». Пусто → подпись не рисуется вовсе.
+    function cutOrderLabel(list, limit) {
+        var arr = (list || []).map(function(v) { return String(v == null ? '' : v).trim(); })
+            .filter(function(v) { return v !== ''; });
+        if (!arr.length) return '';
+        var max = toNumber(limit) > 0 ? toNumber(limit) : 2;
+        if (arr.length <= max) return arr.join(', ');
+        return arr.slice(0, max).join(', ') + ' +' + (arr.length - max);
+    }
+
     // #3557: статус резки выводится из последнего её события смены (приоритет) и
     // подкрепляется атрибутами «Начато»/«В работе»(bool)/«Закончено». Возвращает
     // один из: Ожидает | В работе | Наладка | Перерыв | Завершена.
@@ -1045,6 +1075,8 @@
         rowsToSlitters: rowsToSlitters,     // #3674
         rowsToCuts: rowsToCuts,             // #3674
         rowsToShiftEvents: rowsToShiftEvents, // #3674
+        rowsToCutOrders: rowsToCutOrders,   // #4606
+        cutOrderLabel: cutOrderLabel,       // #4606
         isForeignWarehouse: isForeignWarehouse,
         // #3460: раскладка ножей (визуализация)
         totalKnives: totalKnives,
@@ -1129,6 +1161,8 @@
         this.materialWidths = {}; // { materialId: widthMm }
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
+        this.cutOrders = {};      // #4606: { cutId: [номера заказов] } из report/cut_planning
+        this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
         this.selectedSlitterId = this.loadStoredSlitter();
         this.selectedDate = core.todayISO();
@@ -1430,12 +1464,55 @@
     AtexSlitter.prototype.loadCuts = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cuts = []; return Promise.resolve(); }
+        if (!sid) { this.cuts = []; this.cutOrders = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         return this.getJson('report/slitter_cuts?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,2000')
             .then(function(rows) {
                 self.cuts = core.rowsToCuts(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
             })
-            .catch(function() { return self.loadCutsFromTable(); });
+            .catch(function() { return self.loadCutsFromTable(); })
+            .then(function() { return self.loadCutOrders(); }); // #4606
+    };
+
+    // #4606: номера заказов заданий станка — отдельным запросом к report/cut_planning
+    // (в slitter_cuts заказа нет, см. rowsToCutOrders). Кэшируем на станок: loadCuts
+    // вызывается после каждой отметки прохода/статуса, а состав заказов за смену не
+    // меняется. Отчёт недоступен (нет прав у роли / нет колонки order_no) — карточки
+    // просто остаются без номера заказа, остальной пульт работает как раньше.
+    AtexSlitter.prototype.loadCutOrders = function() {
+        var self = this;
+        var sid = this.selectedSlitterId;
+        if (!sid) { this.cutOrders = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
+        return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
+            .then(function(rows) {
+                self.cutOrders = core.rowsToCutOrders(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+                self.cutOrdersSlitterId = String(sid);
+                // Отчёт ответил, но номера заказов не отдал (в сборке нет колонки
+                // order_no) — добираем из order_pipeline: там колонка задокументирована
+                // (docs/integram-reports.md §4), но фильтра по станку нет, поэтому это
+                // запасной путь, а не основной.
+                if (!Object.keys(self.cutOrders).length) return self.loadCutOrdersFromPipeline();
+            })
+            .catch(function() { self.cutOrders = {}; self.cutOrdersSlitterId = null; });
+    };
+
+    // #4606: запасной источник номеров заказов — report/order_pipeline (цепочка
+    // Заказ → Позиция → Обеспечение → Резка → Партия ГП). Берём только колонки
+    // cut_id/order_no; строки чужих станков просто не совпадут ни с одним заданием.
+    AtexSlitter.prototype.loadCutOrdersFromPipeline = function() {
+        var self = this;
+        return this.getJson('report/order_pipeline?JSON_KV&LIMIT=0,20000')
+            .then(function(rows) {
+                self.cutOrders = core.rowsToCutOrders(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+            })
+            .catch(function() { self.cutOrders = {}; });
+    };
+
+    // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
+    // заказ неизвестен (задание в запас или отчёт не отдал строк).
+    AtexSlitter.prototype.cutOrderText = function(cut) {
+        if (!cut) return '';
+        return core.cutOrderLabel((this.cutOrders || {})[String(cut.id)]);
     };
 
     AtexSlitter.prototype.loadCutsFromTable = function() {
@@ -1962,12 +2039,21 @@
             var runsN = core.toNumber(cut.plannedRuns);
             var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
             var spec = [material, cut.winding || '—', dims].join(' / ');
-            var cutMain = [
-                el('div', { class: 'atex-sl-cut-line1' }, [
-                    el('span', { class: 'atex-sl-cut-num', text: String(idx + 1) }),
-                    el('span', { class: 'atex-sl-cut-spec', text: spec })
-                ])
-            ];
+            var cutMain = [];
+            // #4606: номер заказа — первой строкой и крупно: оператор ищет задание
+            // по заказу, а не по позиции в очереди. Нет заказа (задание в запас или
+            // отчёт недоступен) — строку не рисуем, карточка выглядит как раньше.
+            var orderText = self.cutOrderText(cut);
+            if (orderText) {
+                cutMain.push(el('div', { class: 'atex-sl-cut-order' }, [
+                    el('span', { class: 'atex-sl-cut-order-cap', text: 'Заказ' }),
+                    el('span', { class: 'atex-sl-cut-order-no', text: orderText })
+                ]));
+            }
+            cutMain.push(el('div', { class: 'atex-sl-cut-line1' }, [
+                el('span', { class: 'atex-sl-cut-num', text: String(idx + 1) }),
+                el('span', { class: 'atex-sl-cut-spec', text: spec })
+            ]));
             var timeTxt = core.cutQueueTime(cut);
             if (timeTxt) cutMain.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
             if (locked) cutMain.push(el('span', { class: 'atex-sl-cut-sub', text: 'ожидает предыдущую' }));
@@ -2120,6 +2206,15 @@
             this.renderCutControls(cut)
         ]);
         var wrap = el('div');
+        // #4606: номер заказа текущего задания — над заголовком и самым крупным
+        // кеглем на пульте: его оператор сверяет с бумагой у станка.
+        var orderText = this.cutOrderText(cut);
+        if (orderText) {
+            wrap.appendChild(el('div', { class: 'atex-sl-head-order' }, [
+                el('span', { class: 'atex-sl-head-order-cap', text: 'Заказ' }),
+                el('span', { class: 'atex-sl-head-order-no', text: orderText })
+            ]));
+        }
         wrap.appendChild(head);
         // #3889: задание-«настройка» (последняя резка смены, не успевшая начаться) — поясняем
         // оператору последовательность: сейчас только ПОЛНАЯ настройка (ножи + сырьё), без

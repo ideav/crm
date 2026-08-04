@@ -462,6 +462,33 @@ assertEqual(cuts3674[0].material, 'MWR116L', 'rowsToCuts: material ← cut_mater
 assertEqual(cuts3674[0].materialWidthMm, 891, 'rowsToCuts: materialWidthMm ← cut_material_width (число)');
 assertEqual(core.rowsToCuts([{ cut_plan_date: '1', cut_slitter_id: '1' }]), [], 'rowsToCuts: без cut_id → отброшено');
 
+// #4606: rowsToCutOrders — report/cut_planning → { cutId: [номера заказов] }.
+// Строк на задание столько, сколько у него обеспечений: дубли схлопываются,
+// разные заказы одного задания копятся в порядке появления.
+var orders4606 = core.rowsToCutOrders([
+    { cut_id: '90158', order_no: '3738', order_id: '11' },
+    { cut_id: '90158', order_no: '3738', order_id: '11' },
+    { cut_id: '90158', order_no: '3742', order_id: '12' },
+    { cut_id: '90159', order_no: '3750', order_id: '13' },
+    { cut_id: '90160', order_no: '', order_id: '' },
+    { cut_id: '', order_no: '3799', order_id: '14' }
+]);
+assertEqual(orders4606['90158'], ['3738', '3742'], 'rowsToCutOrders: дубли схлопнуты, порядок появления сохранён');
+assertEqual(orders4606['90159'], ['3750'], 'rowsToCutOrders: одно обеспечение → один заказ');
+assertEqual(orders4606['90160'], undefined, 'rowsToCutOrders: пустой order_no не создаёт записи (задание в запас)');
+assertEqual(orders4606[''], undefined, 'rowsToCutOrders: строка без cut_id отброшена');
+assertEqual(core.rowsToCutOrders([]), {}, 'rowsToCutOrders: пусто → {}');
+assertEqual(core.rowsToCutOrders(null), {}, 'rowsToCutOrders: null → {}');
+
+// #4606: cutOrderLabel — подпись заказа в карточке (лимит по умолчанию 2).
+assertEqual(core.cutOrderLabel(['3738']), '3738', 'cutOrderLabel: один заказ');
+assertEqual(core.cutOrderLabel(['3738', '3742']), '3738, 3742', 'cutOrderLabel: два заказа через запятую');
+assertEqual(core.cutOrderLabel(['3738', '3742', '3750', '3751']), '3738, 3742 +2', 'cutOrderLabel: сверх лимита — счётчиком');
+assertEqual(core.cutOrderLabel(['3738', '3742', '3750'], 3), '3738, 3742, 3750', 'cutOrderLabel: лимит задаётся параметром');
+assertEqual(core.cutOrderLabel([' ', '', '3738']), '3738', 'cutOrderLabel: пустые номера отброшены');
+assertEqual(core.cutOrderLabel([]), '', 'cutOrderLabel: пусто → пустая строка (подпись не рисуется)');
+assertEqual(core.cutOrderLabel(undefined), '', 'cutOrderLabel: нет заказов у задания → пустая строка');
+
 // rowsToShiftEvents: report/slitter_shift_events → события (новые сверху), cutId ← event_cut_id
 var ev3674 = core.rowsToShiftEvents([
     { event_id: '1', event_when: '1780057598', event_type: 'Начало смены', event_cut_id: '', event_user_id: '456', event_user: 'ateh', event_value: '', event_notes: 'Станок 1' },

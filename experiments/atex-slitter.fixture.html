@@ -173,6 +173,22 @@ window.fetch = function(url, opts) {
             { task_id: '350', task_start: planTomorrowAt('08:00'), width: '250', material_id: '5', batch_ord: '1' }
         ]);
     }
+    // #4606: отчёт cut_planning отдаёт номера заказов заданий (цепочка Задание →
+    // Обеспечение → Позиция → Заказ): строк на задание столько, сколько обеспечений.
+    // У 302 два заказа (карточка показывает «3738, 3742»), у 306 заказа нет — задание
+    // в запас, номер не рисуется.
+    if (/\/report\/cut_planning/.test(u)) {
+        return json([
+            { cut_id: '301', order_no: '3737' },
+            { cut_id: '302', order_no: '3738' },
+            { cut_id: '302', order_no: '3738' },
+            { cut_id: '302', order_no: '3742' },
+            { cut_id: '303', order_no: '3730' },
+            { cut_id: '304', order_no: '3741' },
+            { cut_id: '305', order_no: '3745' },
+            { cut_id: '307', order_no: '3748' }
+        ]);
+    }
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj) {
         var tid = mObj[1];
