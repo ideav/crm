@@ -1487,25 +1487,8 @@
             .then(function(rows) {
                 self.cutOrders = core.rowsToCutOrders(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
                 self.cutOrdersSlitterId = String(sid);
-                // Отчёт ответил, но номера заказов не отдал (в сборке нет колонки
-                // order_no) — добираем из order_pipeline: там колонка задокументирована
-                // (docs/integram-reports.md §4), но фильтра по станку нет, поэтому это
-                // запасной путь, а не основной.
-                if (!Object.keys(self.cutOrders).length) return self.loadCutOrdersFromPipeline();
             })
             .catch(function() { self.cutOrders = {}; self.cutOrdersSlitterId = null; });
-    };
-
-    // #4606: запасной источник номеров заказов — report/order_pipeline (цепочка
-    // Заказ → Позиция → Обеспечение → Резка → Партия ГП). Берём только колонки
-    // cut_id/order_no; строки чужих станков просто не совпадут ни с одним заданием.
-    AtexSlitter.prototype.loadCutOrdersFromPipeline = function() {
-        var self = this;
-        return this.getJson('report/order_pipeline?JSON_KV&LIMIT=0,20000')
-            .then(function(rows) {
-                self.cutOrders = core.rowsToCutOrders(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
-            })
-            .catch(function() { self.cutOrders = {}; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
