@@ -128,17 +128,39 @@
 .atex-sc-metric-label { font-size: 12px; color: var(--sc-muted); text-transform: uppercase; letter-spacing: .03em; }
 .atex-sc-metric-value { font-size: 22px; font-weight: 700; }
 
-/* Карточки заданий */
-.atex-sc-tasks { display: flex; flex-direction: column; gap: 12px; }
+/* #4612: переключатель «показать выполненные» — правый край сводки. */
+.atex-sc-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    align-self: center;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--sc-muted);
+    white-space: nowrap;
+}
+.atex-sc-toggle input[type="checkbox"] { width: 18px; height: 18px; margin: 0; flex: none; }
+
+/* Карточки заданий: одна строка — № и старт/план/факт слева, кнопки в средней
+   колонке, бейдж статуса в правой (#4612). У закрытого задания кнопок нет —
+   средняя колонка схлопывается, бейдж остаётся у правого края карточки. */
+.atex-sc-tasks { display: flex; flex-direction: column; gap: 8px; }
 .atex-sc-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 14px;
     border: 1px solid var(--sc-border);
     border-radius: 8px;
-    padding: 14px;
+    padding: 10px 14px;
     background: var(--sc-bg);
 }
 .atex-sc-card.is-done { background: var(--sc-success-bg); border-color: var(--sc-success-border); }
-.atex-sc-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.atex-sc-card-num { font-weight: 600; color: var(--sc-muted); }
+.atex-sc-card.is-skipped { background: var(--sc-surface); border-color: var(--sc-border); }
+.atex-sc-card-main { grid-column: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.atex-sc-card-num { font-weight: 700; flex: none; }
+.atex-sc-card > .atex-sc-badge { grid-column: 3; justify-self: end; }
 
 .atex-sc-card-grid {
     display: grid;
@@ -162,7 +184,7 @@
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 
-.atex-sc-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.atex-sc-card-actions { grid-column: 2; display: flex; gap: 8px; margin: 0; justify-self: center; }
 
 .atex-sc-btn {
     border: 1px solid var(--sc-border);
@@ -232,7 +254,27 @@
 .atex-sc-toolbar .atex-sc-field-date { min-width: 170px; }
 .atex-sc-toolbar-all { margin-left: auto; align-self: center; }
 .atex-sc-caption { font-size: 15px; font-weight: 600; color: var(--text-primary, #374151); margin: 2px 0 12px; }
-.atex-sc-card-info { color: var(--sc-muted); font-size: 14px; margin: 6px 0 0; }
+.atex-sc-card-info {
+    color: var(--sc-muted);
+    font-size: 14px;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Кнопки в плашке задания — компактнее кнопок тулбара: карточка в одну строку. */
+.atex-sc-card .atex-sc-btn { padding: 7px 14px; }
+
+/* Узкий экран: статус остаётся в строке с № и цифрами, кнопки уходят под них
+   во всю ширину — крупные цели для пальца. */
+@media (max-width: 640px) {
+    .atex-sc-card { grid-template-columns: minmax(0, 1fr) auto; }
+    .atex-sc-card > .atex-sc-badge { grid-area: 1 / 2; }
+    .atex-sc-card-actions { grid-area: 2 / 1 / 3 / -1; justify-self: stretch; }
+    .atex-sc-card-actions .atex-sc-btn { flex: 1; }
+    .atex-sc-card-main { flex-wrap: wrap; }
+    .atex-sc-card-info { white-space: normal; overflow: visible; }
+}
 
 /* Модалка подтверждения «Закрыть все». */
 .atex-sc-confirm-overlay {

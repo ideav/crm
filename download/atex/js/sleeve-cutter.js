@@ -3,6 +3,9 @@
 // Оператор выбирает втулкорез и ДАТУ, на которую смотрит задания на втулки, и
 // ведёт их выполнение: ✓ Готово / Пропустить / ✓✓ Закрыть все. Задания
 // планируются на конкретную дату (плановый старт) и подчинены позиции заказа.
+// В списке остаются только незакрытые задания; выполненные и пропущенные показывает
+// переключатель «показать выполненные» в сводке. № задания — его место в ПЛАНЕ дня:
+// оно не меняется ни от закрытия соседей, ни от скрытия выполненных (#4612).
 // Решение ideav/crm#2916 (часть #2903); перестройка по образцу пульта слиттера
 // (#3869); выравнивание под БОЕВУЮ схему ateh + выбор даты. Правила разработки —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.6.
@@ -190,9 +193,23 @@
         });
     }
 
-    // Задания выбранного втулкореза на выбранную дату (защитный клиентский фильтр —
-    // отчёт уже отфильтрован серверно). Пустой cutterId → []. Активные выше завершённых.
-    function visibleTasks(tasks, cutterId, iso) {
+    // № задания — его место в ПЛАНЕ дня (по времени планового старта), а не позиция
+    // в текущем списке: номер проставляется полем `seq` один раз на весь день и не
+    // меняется ни от выполнения соседей, ни от скрытия выполненных (#4612). Поле
+    // пишется в само задание, чтобы номер пережил перерисовку (карточки держат те же
+    // объекты, что и `tasks`).
+    function numberTasks(tasks) {
+        var byPlan = (tasks || []).slice().sort(function(a, b) {
+            return toNumber(a.dateUnix) - toNumber(b.dateUnix);
+        });
+        byPlan.forEach(function(t, i) { t.seq = i + 1; });
+        return byPlan;
+    }
+
+    // Все задания выбранного втулкореза на выбранную дату (защитный клиентский фильтр —
+    // отчёт уже отфильтрован серверно). Пустой cutterId → []. Каждому проставлен
+    // постоянный № по плану дня; порядок показа — активные выше завершённых.
+    function dayTasks(tasks, cutterId, iso) {
         var cid = str(cutterId);
         if (!cid) return [];
         var dayIso = str(iso);
@@ -201,12 +218,25 @@
             if (dayIso && str(t.dateIso) !== dayIso) return false;
             return true;
         });
-        return sortTasks(list);
+        return sortTasks(numberTasks(list));
+    }
+
+    // Что показываем в списке: выполненные и пропущенные задания скрыты, пока не
+    // включён переключатель «показать выполненные» (#4612). Номера оставшихся при
+    // этом не меняются — они проставлены по плану дня в dayTasks.
+    function visibleTasks(tasks, cutterId, iso, showDone) {
+        var list = dayTasks(tasks, cutterId, iso);
+        return showDone ? list : list.filter(function(t) { return !isTerminal(t.status); });
+    }
+
+    // Сколько заданий дня уже завершено или пропущено (столько прячет переключатель).
+    function terminalCount(tasks) {
+        return (tasks || []).filter(function(t) { return isTerminal(t.status); }).length;
     }
 
     // Есть ли незавершённые задания (для кнопки «Закрыть все»).
     function hasActiveTasks(tasks, cutterId, iso) {
-        return visibleTasks(tasks, cutterId, iso).some(function(t) { return !isTerminal(t.status); });
+        return dayTasks(tasks, cutterId, iso).some(function(t) { return !isTerminal(t.status); });
     }
 
     // Сводка по заданиям: план/факт суммарно, сколько готово, % выполнения по факту.
@@ -292,7 +322,10 @@
         formatRuDate: formatRuDate,
         taskFromReportRow: taskFromReportRow,
         sortTasks: sortTasks,
+        numberTasks: numberTasks,
+        dayTasks: dayTasks,
         visibleTasks: visibleTasks,
+        terminalCount: terminalCount,
         hasActiveTasks: hasActiveTasks,
         summarize: summarize,
         formatRange: formatRange,
@@ -330,6 +363,7 @@
         this.tasks = [];               // задания выбранного втулкореза на выбранную дату
         this.selectedCutterId = null;  // выбранный втулкорез (localStorage)
         this.selectedDate = core.todayLocalIso(); // выбранная дата (localStorage), по умолчанию сегодня
+        this.showDone = false;         // показывать выполненные/пропущенные (localStorage)
         this.busy = false;
     }
 
@@ -428,11 +462,17 @@
         });
     };
 
-    AtexSleeveCutter.prototype.visibleTasks = function() {
-        return core.visibleTasks(this.tasks, this.selectedCutterId, this.selectedDate);
+    // Все задания дня (с постоянными номерами) — для сводки, «Закрыть все» и счётчика
+    // скрытых; список на экране — visibleTasks (без выполненных, пока не включён показ).
+    AtexSleeveCutter.prototype.dayTasks = function() {
+        return core.dayTasks(this.tasks, this.selectedCutterId, this.selectedDate);
     };
 
-    // ── Запоминание выбора втулкореза и даты (localStorage) ──
+    AtexSleeveCutter.prototype.visibleTasks = function() {
+        return core.visibleTasks(this.tasks, this.selectedCutterId, this.selectedDate, this.showDone);
+    };
+
+    // ── Запоминание выбора втулкореза, даты и показа выполненных (localStorage) ──
 
     AtexSleeveCutter.prototype.storeCutter = function() {
         try { if (window.localStorage) window.localStorage.setItem('atex-sc-cutter', this.selectedCutterId || ''); } catch (e) {}
@@ -450,6 +490,15 @@
         try {
             var d = window.localStorage && window.localStorage.getItem('atex-sc-date');
             if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) this.selectedDate = d;
+        } catch (e) {}
+    };
+    AtexSleeveCutter.prototype.storeShowDone = function() {
+        try { if (window.localStorage) window.localStorage.setItem('atex-sc-show-done', this.showDone ? '1' : '0'); } catch (e) {}
+    };
+    AtexSleeveCutter.prototype.restoreShowDone = function() {
+        try {
+            var v = window.localStorage && window.localStorage.getItem('atex-sc-show-done');
+            if (v != null) this.showDone = v === '1';
         } catch (e) {}
     };
 
@@ -532,21 +581,30 @@
 
         host.appendChild(el('div', { class: 'atex-sc-caption', text: 'Задания на ' + core.formatRuDate(this.selectedDate) }));
 
-        var tasks = this.visibleTasks();
+        // Сводка и номера — по ВСЕМ заданиям дня, независимо от того, что скрыто.
+        var tasks = this.dayTasks();
         if (!tasks.length) {
             host.appendChild(el('div', { class: 'atex-sc-empty', text: 'На эту дату заданий для этого втулкореза нет.' }));
             return;
         }
 
         var s = core.summarize(tasks);
+        var hidden = core.terminalCount(tasks);
         host.appendChild(el('div', { class: 'atex-sc-summary' }, [
             metric('Заданий', s.total),
             metric('Готово', s.done + ' / ' + s.total),
-            metric('План, шт', s.planQty)
+            metric('План, шт', s.planQty),
+            this.showDoneToggle(hidden)
         ]));
 
+        var shown = this.visibleTasks();
+        if (!shown.length) {
+            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'Все задания на эту дату закрыты — включите «Показать выполненные», чтобы их увидеть.' }));
+            return;
+        }
+
         var listWrap = el('div', { class: 'atex-sc-tasks' });
-        tasks.forEach(function(task, idx) { listWrap.appendChild(self.renderTaskRow(task, idx)); });
+        shown.forEach(function(task) { listWrap.appendChild(self.renderTaskRow(task)); });
         host.appendChild(listWrap);
 
         function metric(label, value) {
@@ -557,18 +615,32 @@
         }
     };
 
-    // Карточка задания: старт / план / факт / статус + кнопки ✓ Готово / Пропустить.
-    // У завершённого (Готово) или пропущенного — только бейдж статуса, без кнопок.
-    AtexSleeveCutter.prototype.renderTaskRow = function(task, idx) {
+    // Переключатель «показать выполненные» в сводке: со счётчиком того, сколько
+    // заданий дня он прячет (#4612). Выбор запоминается в localStorage.
+    AtexSleeveCutter.prototype.showDoneToggle = function(hidden) {
+        var self = this;
+        var box = el('input', { type: 'checkbox' });
+        box.checked = !!this.showDone;
+        box.addEventListener('change', function() {
+            self.showDone = !!box.checked;
+            self.storeShowDone();
+            self.renderTasks();
+        });
+        return el('label', { class: 'atex-sc-toggle' }, [
+            box,
+            el('span', { text: 'Показать выполненные' + (hidden ? ' (' + hidden + ')' : '') })
+        ]);
+    };
+
+    // Карточка задания одной строкой: слева № (постоянный, по плану дня) и
+    // старт / план / факт, посередине — кнопки ✓ Готово / Пропустить, справа — бейдж
+    // статуса. У завершённого или пропущенного кнопок нет, середина пустует (#4612).
+    AtexSleeveCutter.prototype.renderTaskRow = function(task) {
         var self = this;
         var terminal = core.isTerminal(task.status);
-        var badgeMod = core.isDone(task.status) ? ' atex-sc-badge-done' : (core.isSkipped(task.status) ? '' : ' atex-sc-badge-wip');
-        var card = el('div', { class: 'atex-sc-card' + (terminal ? ' is-done' : '') });
-
-        card.appendChild(el('div', { class: 'atex-sc-card-head' }, [
-            el('span', { class: 'atex-sc-card-num', text: '№ ' + (idx + 1) }),
-            el('span', { class: 'atex-sc-badge' + badgeMod, text: task.status })
-        ]));
+        var skipped = core.isSkipped(task.status);
+        var badgeMod = core.isDone(task.status) ? ' atex-sc-badge-done' : (skipped ? '' : ' atex-sc-badge-wip');
+        var card = el('div', { class: 'atex-sc-card' + (terminal ? ' is-done' : '') + (skipped ? ' is-skipped' : '') });
 
         var startTime = core.unixToLocalTime(task.dateUnix);
         var fact = core.toNumber(task.factQty);
@@ -576,15 +648,23 @@
         if (startTime) parts.push('старт ' + startTime);
         parts.push('план ' + core.toNumber(task.planQty) + ' шт');
         if (fact) parts.push('факт ' + fact + ' шт');
-        card.appendChild(el('div', { class: 'atex-sc-card-info', text: parts.join(' · ') }));
 
+        card.appendChild(el('div', { class: 'atex-sc-card-main' }, [
+            el('span', { class: 'atex-sc-card-num', text: '№ ' + task.seq }),
+            el('span', { class: 'atex-sc-card-info', text: parts.join(' · ') })
+        ]));
+
+        var actions = el('div', { class: 'atex-sc-card-actions' });
         if (!terminal) {
             var doneBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance', type: 'button', text: '✓ Готово' });
             doneBtn.addEventListener('click', function() { self.markTaskDone(task); });
             var skipBtn = el('button', { class: 'atex-sc-btn', type: 'button', text: 'Пропустить' });
             skipBtn.addEventListener('click', function() { self.skipTask(task); });
-            card.appendChild(el('div', { class: 'atex-sc-card-actions' }, [doneBtn, skipBtn]));
+            actions.appendChild(doneBtn);
+            actions.appendChild(skipBtn);
         }
+        card.appendChild(actions);
+        card.appendChild(el('span', { class: 'atex-sc-badge' + badgeMod, text: task.status }));
         return card;
     };
 
@@ -645,7 +725,8 @@
     AtexSleeveCutter.prototype.closeAll = function() {
         var self = this;
         if (this.busy) return;
-        var pending = this.visibleTasks().filter(function(t) { return !core.isTerminal(t.status) && t.id; });
+        // Закрываем все незавершённые задания дня — независимо от того, что сейчас показано.
+        var pending = this.dayTasks().filter(function(t) { return !core.isTerminal(t.status) && t.id; });
         if (!pending.length) { this.notify('Нет незавершённых заданий', 'info'); return; }
         this.confirmModal('Отметить все ' + pending.length + ' заданий «Готово»?', function() {
             self.setBusy(true);
@@ -725,6 +806,7 @@
             .then(function() {
                 self.restoreCutter();
                 self.restoreDate();
+                self.restoreShowDone();
                 return self.loadTasks();
             })
             .then(function() { self.render(); })

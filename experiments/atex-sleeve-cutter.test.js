@@ -103,19 +103,50 @@ assertEqual(core.taskFromReportRow({
     qty: '6', fact: '6', started: String(unixMorning), finished: String(unixMorning + 600)
 }).status, 'Готово', 'taskFromReportRow: распознаёт {val,id}, статус Готово при Закончено+факт');
 
-// ── visibleTasks: фильтр по втулкорезу + дате, активные выше завершённых, по времени ──
+// ── dayTasks: фильтр по втулкорезу + дате, активные выше завершённых, по времени ──
 var t1 = core.taskFromReportRow({ task_id: '1', task_date: String(unixMorning + 7200), cutter_id: '10', qty: '5' }); // 10:30 Ожидает
 var t2 = core.taskFromReportRow({ task_id: '2', task_date: String(unixMorning), cutter_id: '10', qty: '5', finished: String(unixMorning + 100), fact: '5' }); // 08:30 Готово
 var t3 = core.taskFromReportRow({ task_id: '3', task_date: String(unixMorning), cutter_id: '10', qty: '5' }); // 08:30 Ожидает
 var t4 = core.taskFromReportRow({ task_id: '4', task_date: String(unixMorning), cutter_id: '20', qty: '5' }); // другой втулкорез
 var allTasks = [t1, t2, t3, t4];
-assertEqual(core.visibleTasks(allTasks, '10', '2026-06-01').map(function(t){ return t.id; }), ['3', '1', '2'],
-    'visibleTasks: втулкорез 10, активные (по времени) выше завершённых');
-assertEqual(core.visibleTasks(allTasks, '', '2026-06-01').length, 0, 'visibleTasks: без втулкореза → []');
-assertEqual(core.visibleTasks(allTasks, '10', '2026-06-02').length, 0, 'visibleTasks: другой день → []');
-assertEqual(core.visibleTasks(allTasks, '99', '2026-06-01').length, 0, 'visibleTasks: нет заданий втулкореза → []');
+assertEqual(core.dayTasks(allTasks, '10', '2026-06-01').map(function(t){ return t.id; }), ['3', '1', '2'],
+    'dayTasks: втулкорез 10, активные (по времени) выше завершённых');
+assertEqual(core.dayTasks(allTasks, '', '2026-06-01').length, 0, 'dayTasks: без втулкореза → []');
+assertEqual(core.dayTasks(allTasks, '10', '2026-06-02').length, 0, 'dayTasks: другой день → []');
+assertEqual(core.dayTasks(allTasks, '99', '2026-06-01').length, 0, 'dayTasks: нет заданий втулкореза → []');
 assertEqual(core.hasActiveTasks(allTasks, '10', '2026-06-01'), true, 'hasActiveTasks: есть активные → true');
 assertEqual(core.hasActiveTasks([t2], '10', '2026-06-01'), false, 'hasActiveTasks: все терминальные → false');
+
+// ── № задания постоянен: место в ПЛАНЕ дня, а не позиция в списке (#4612) ──
+// План дня: 08:30 t2 (Готово) → 08:30 t3 → 10:30 t1, значит № 1, № 2 и № 3.
+assertEqual(core.dayTasks(allTasks, '10', '2026-06-01').map(function(t){ return t.id + ':' + t.seq; }),
+    ['3:2', '1:3', '2:1'], 'dayTasks: № по плановому старту, показ — активные выше завершённых');
+assertEqual(core.visibleTasks(allTasks, '10', '2026-06-01').map(function(t){ return t.id + ':' + t.seq; }),
+    ['3:2', '1:3'], 'visibleTasks: выполненные скрыты, оставшиеся НЕ перенумерованы (2 и 3)');
+assertEqual(core.visibleTasks(allTasks, '10', '2026-06-01', true).map(function(t){ return t.id; }), ['3', '1', '2'],
+    'visibleTasks: «показать выполненные» → в списке все задания дня');
+assertEqual(core.terminalCount(core.dayTasks(allTasks, '10', '2026-06-01')), 1,
+    'terminalCount: сколько заданий дня прячет переключатель');
+
+// Закрыли задание — номера остальных не поехали.
+(function() {
+    var a = core.taskFromReportRow({ task_id: 'a', task_date: String(unixMorning), cutter_id: '10', qty: '5' });
+    var b = core.taskFromReportRow({ task_id: 'b', task_date: String(unixMorning + 3600), cutter_id: '10', qty: '5' });
+    var c = core.taskFromReportRow({ task_id: 'c', task_date: String(unixMorning + 7200), cutter_id: '10', qty: '5' });
+    var list = [a, b, c];
+    assertEqual(core.visibleTasks(list, '10', '2026-06-01').map(function(t){ return t.seq; }), [1, 2, 3],
+        'нумерация до закрытия: 1, 2, 3');
+    a.finished = String(unixMorning + 100); a.factQty = '5'; a.status = core.statusFromFields(a);
+    assertEqual(core.visibleTasks(list, '10', '2026-06-01').map(function(t){ return t.id + ':' + t.seq; }),
+        ['b:2', 'c:3'], 'после ✓ Готово у № 1 оставшиеся остаются № 2 и № 3');
+    b.finished = String(unixMorning + 200); b.status = core.statusFromFields(b); // Пропущена
+    assertEqual(core.visibleTasks(list, '10', '2026-06-01').map(function(t){ return t.id + ':' + t.seq; }),
+        ['c:3'], 'после «Пропустить» у № 2 последнее остаётся № 3');
+    assertEqual(core.visibleTasks(list, '10', '2026-06-01', true).map(function(t){ return t.id + ':' + t.seq; }),
+        ['c:3', 'a:1', 'b:2'], 'с показом выполненных: закрытые внизу, но со своими номерами');
+    assertEqual(core.summarize(core.dayTasks(list, '10', '2026-06-01')).total, 3,
+        'сводка считает ВСЕ задания дня, а не только показанные');
+})();
 
 // ── summarize: агрегаты ──
 var sm = core.summarize([
@@ -198,17 +229,55 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     assertEqual(inst2.tasks.length, 0, 'loadTasks: без втулкореза очищает список');
 })();
 
-// ── Controller: visibleTasks / отбор closeAll ──
+// ── Controller: dayTasks / visibleTasks / отбор closeAll ──
 (function() {
     var Controller = mod.Controller;
     var inst = Object.create(Controller.prototype);
     inst.selectedCutterId = '10';
     inst.selectedDate = '2026-06-01';
+    inst.showDone = false;
     inst.tasks = [t1, t2, t3];
+    assertEqual(inst.dayTasks().map(function(t){ return t.id; }), ['3', '1', '2'],
+        'dayTasks (controller): все задания дня, активные выше завершённых');
+    assertEqual(inst.visibleTasks().map(function(t){ return t.id; }), ['3', '1'],
+        'visibleTasks (controller): по умолчанию выполненные скрыты');
+    inst.showDone = true;
     assertEqual(inst.visibleTasks().map(function(t){ return t.id; }), ['3', '1', '2'],
-        'visibleTasks (controller): активные выше завершённых');
-    var pending = inst.visibleTasks().filter(function(t){ return !core.isTerminal(t.status) && t.id; }).map(function(t){ return t.id; });
-    assertEqual(pending, ['3', '1'], 'closeAll-отбор: только активные');
+        'visibleTasks (controller): с переключателем видны все');
+    var pending = inst.dayTasks().filter(function(t){ return !core.isTerminal(t.status) && t.id; }).map(function(t){ return t.id; });
+    assertEqual(pending, ['3', '1'], 'closeAll-отбор: только активные (независимо от переключателя)');
+})();
+
+// ── Controller: переключатель «показать выполненные» переживает перезагрузку ──
+(function() {
+    var Controller = mod.Controller;
+    var store = {};
+    var savedWindow = global.window;
+    global.window = { localStorage: {
+        getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+        setItem: function(k, v) { store[k] = String(v); }
+    } };
+    var inst = Object.create(Controller.prototype);
+    inst.showDone = true;
+    inst.storeShowDone();
+    assertEqual(store['atex-sc-show-done'], '1', 'storeShowDone: пишет флаг в localStorage');
+
+    var fresh = Object.create(Controller.prototype);
+    fresh.showDone = false;
+    fresh.restoreShowDone();
+    assertEqual(fresh.showDone, true, 'restoreShowDone: поднимает сохранённый показ выполненных');
+
+    inst.showDone = false;
+    inst.storeShowDone();
+    fresh.restoreShowDone();
+    assertEqual(fresh.showDone, false, 'restoreShowDone: снятый переключатель тоже запоминается');
+
+    var virgin = Object.create(Controller.prototype);
+    virgin.showDone = false;
+    delete store['atex-sc-show-done'];
+    virgin.restoreShowDone();
+    assertEqual(virgin.showDone, false, 'restoreShowDone: без записи — выполненные скрыты');
+    global.window = savedWindow;
 })();
 
 console.log('\n' + passed + ' assertions passed');
