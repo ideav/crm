@@ -183,21 +183,11 @@
         return task;
     }
 
-    // Сортировка для показа: активные (не терминальные) выше завершённых, внутри
-    // групп — по плановому времени старта (раньше — выше). Сорт стабилен (V8).
-    function sortTasks(tasks) {
-        return (tasks || []).slice().sort(function(a, b) {
-            var ta = isTerminal(a.status) ? 1 : 0, tb = isTerminal(b.status) ? 1 : 0;
-            if (ta !== tb) return ta - tb;
-            return toNumber(a.dateUnix) - toNumber(b.dateUnix);
-        });
-    }
-
-    // № задания — его место в ПЛАНЕ дня (по времени планового старта), а не позиция
-    // в текущем списке: номер проставляется полем `seq` один раз на весь день и не
-    // меняется ни от выполнения соседей, ни от скрытия выполненных (#4612). Поле
-    // пишется в само задание, чтобы номер пережил перерисовку (карточки держат те же
-    // объекты, что и `tasks`).
+    // Порядок дня — ПЛАНОВЫЙ: по времени планового старта, раньше — выше. Он же даёт
+    // № задания: `seq` проставляется один раз на весь день, поэтому номер не меняется
+    // ни от выполнения соседей, ни от скрытия выполненных (#4612). Поле пишется в само
+    // задание, чтобы номер пережил перерисовку (карточки держат те же объекты, что и
+    // `tasks`). Сорт стабилен (V8): задания с одинаковым стартом сохраняют порядок отчёта.
     function numberTasks(tasks) {
         var byPlan = (tasks || []).slice().sort(function(a, b) {
             return toNumber(a.dateUnix) - toNumber(b.dateUnix);
@@ -207,8 +197,8 @@
     }
 
     // Все задания выбранного втулкореза на выбранную дату (защитный клиентский фильтр —
-    // отчёт уже отфильтрован серверно). Пустой cutterId → []. Каждому проставлен
-    // постоянный № по плану дня; порядок показа — активные выше завершённых.
+    // отчёт уже отфильтрован серверно). Пустой cutterId → []. Порядок — плановый,
+    // с постоянными номерами.
     function dayTasks(tasks, cutterId, iso) {
         var cid = str(cutterId);
         if (!cid) return [];
@@ -218,12 +208,13 @@
             if (dayIso && str(t.dateIso) !== dayIso) return false;
             return true;
         });
-        return sortTasks(numberTasks(list));
+        return numberTasks(list);
     }
 
     // Что показываем в списке: выполненные и пропущенные задания скрыты, пока не
-    // включён переключатель «показать выполненные» (#4612). Номера оставшихся при
-    // этом не меняются — они проставлены по плану дня в dayTasks.
+    // включён переключатель «показать выполненные» (#4612). Включили — они встают НА
+    // СВОИ МЕСТА в плановом порядке, между соседями, а не сваливаются в конец списка:
+    // оператор ищет задание там, где оно стояло. Номера у всех прежние.
     function visibleTasks(tasks, cutterId, iso, showDone) {
         var list = dayTasks(tasks, cutterId, iso);
         return showDone ? list : list.filter(function(t) { return !isTerminal(t.status); });
@@ -321,7 +312,6 @@
         dayBoundsUnix: dayBoundsUnix,
         formatRuDate: formatRuDate,
         taskFromReportRow: taskFromReportRow,
-        sortTasks: sortTasks,
         numberTasks: numberTasks,
         dayTasks: dayTasks,
         visibleTasks: visibleTasks,
