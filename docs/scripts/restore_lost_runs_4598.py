@@ -143,6 +143,56 @@ def main():
                              % (rolls, per, math.ceil(float(rolls) / per)))
             print('    задание %-8s заказ %-6s план %s, «Тайминг» %s, по недостаче нужно %s%s'
                   % (cid, order, now, told, need, ('; ' + '; '.join(share)) if share else ''))
+    # ── ЦЕПОЧКИ: потеря сразу на нескольких звеньях одного задания ────────────────────────────
+    # У разорванного по дням задания «Тайминг» головы описывает ЦЕЛУЮ резку, а проходы каждой
+    # записи — её сегмент. Когда проходы срезаны, а обеспечение уже поделено, цель КАЖДОЙ записи
+    # говорит её собственная доля: «Кол-во рулонов» ÷ «Кол-во полос». Пишем только если сошлись
+    # ТРИ свидетеля: Σ долей == «Тайминг» головы, и добавка закрывает недостачу §15 ровно.
+    chains = collections.defaultdict(list)
+    for cid, c in by_cut.items():
+        head = (c.get('cut_first_part') or '').strip() or cid
+        chains[head].append(cid)
+    chain_plan = []
+    for head, members in sorted(chains.items()):
+        if len(members) < 2 or head not in by_cut:
+            continue
+        if any((by_cut[m].get('cut_start_date') or '').strip() or (by_cut[m].get('cut_runs_fact') or '').strip()
+               or (by_cut[m].get('cut_end_date') or '').strip() for m in members):
+            continue
+        m = re.search(r'Плановых проходов:\s*(\d+)', by_cut[head].get('cut_timing') or '')
+        if not m:
+            continue
+        told = int(m.group(1))
+        now_sum = sum(int(float(by_cut[x].get('cut_planned_runs') or 0)) for x in members)
+        if now_sum >= told:
+            continue
+        targets, ok = {}, True
+        for x in members:
+            c = by_cut[x]
+            per = sq.get((x, c.get('supply_finished_batch_id')))
+            rolls = c.get('supply_rolls')
+            if not per or rolls in (None, '') or len(links[x]) != 1:
+                ok = False; break
+            targets[x] = math.ceil(float(rolls) / per)
+        if not ok or sum(targets.values()) != told:
+            continue
+        short = 0
+        for pid, per in links[head]:
+            short = max(short, demand.get(pid, 0) - produced.get(pid, 0))
+        if abs(short - (told - now_sum) * (links[head][0][1])) > 0.001:
+            continue                      # добавка не совпала с недостачей §15 — не наш случай
+        chain_plan.append((head, members, told, now_sum, targets))
+
+    if chain_plan:
+        print('\n=== ЦЕПОЧКИ: проходы срезаны на нескольких звеньях ===')
+        for head, members, told, now_sum, targets in chain_plan:
+            print('  цепочка %s (заказ %s): было %s проходов, должно %s'
+                  % (head, by_cut[head].get('order_no'), now_sum, told))
+            for x in members:
+                print('     звено %-8s %s → %s   (его доля обеспечения %s рул. ÷ %s полос)'
+                      % (x, by_cut[x].get('cut_planned_runs'), targets[x],
+                         by_cut[x].get('supply_rolls'), sq.get((x, by_cut[x].get('supply_finished_batch_id')))))
+
     if not APPLY:
         print('\nDRY-RUN. Записать: добавьте --apply')
         return
@@ -156,6 +206,15 @@ def main():
         if err:
             raise SystemExit('задание %s НЕ записано: %s' % (cid, err))
         print('  записано: %s → %s проходов' % (cid, told))
+    for head, members, told, now_sum, targets in chain_plan:
+        for x in members:
+            if targets[x] == int(float(by_cut[x].get('cut_planned_runs') or 0)):
+                continue
+            resp = post('_m_set/%s?JSON' % x, {'t%d' % REQ_PLANNED_RUNS: str(targets[x])})
+            err = resp[0].get('error') if isinstance(resp, list) and resp and isinstance(resp[0], dict) else None
+            if err:
+                raise SystemExit('звено %s НЕ записано: %s' % (x, err))
+            print('  записано: звено %s цепочки %s → %s проходов' % (x, head, targets[x]))
     print('\nГотово. В РМ «Планирование производства» нажмите «Упорядочить» — план разложит '
           'возвращённые проходы по дням и пересчитает колонки.')
 
