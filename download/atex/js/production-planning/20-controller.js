@@ -8600,10 +8600,25 @@
                 return inner;
             }).then(splitBump).catch(softSkip); };
         });
-        // #4014: три фазы пулом по MAX_PARALLEL_SPLIT, с БАРЬЕРАМИ между ними (updates → creates →
-        // deletes), затем reload + persistCutSetupColumns, как в прежней цепочке.
-        return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT).then(function() {
-            return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT);
+        // #4014: три фазы пулом по MAX_PARALLEL_SPLIT, с БАРЬЕРАМИ между ними, затем reload +
+        // persistCutSetupColumns, как в прежней цепочке.
+        //
+        // #4598: ПРОДОЛЖЕНИЯ РОЖДАЮТСЯ РАНЬШЕ, ЧЕМ УРЕЗАЮТСЯ ГОЛОВЫ (creates → updates → deletes).
+        // Запись не атомарна: реальная ошибка реджектит пул ПЕРВОЙ ошибкой, и то, что успела
+        // применить предыдущая фаза, остаётся в базе. Пока головы урезались ПЕРВЫМИ, сбой на
+        // creates оставлял задание с проходами сегмента, а остаток не появлялся НИКОГДА — работа
+        // исчезала молча (боевая ateh 04.08.2026: 5 заданий, 581 шт. недобора по §15; у 658253
+        // «Кол-во резок план» 1 при 6 в хранимом «Тайминге», обеспечение целое — 210 = 35×6).
+        // Порядок фаз и есть лекарство: create-задача сама приводит голову в порядок (её
+        // «Обеспечения» и «Партии ГП» — `aFixTasks` выше), поэтому голова остаётся нетронутой,
+        // пока её продолжение не создано. Теперь сбой оставляет ЛИШНЮЮ работу — задание целое, а
+        // созданное продолжение видно оператору и на Ганте, — а не потерянную: то же
+        // предпочтение, что у deviationSettlePlan («лучше оставить задание целым, чем разрезать
+        // его и потерять остаток», 00-core-data.js). Данные creates от updates не зависят: голову,
+        // её партии, сырьё и намотку create-путь читает из ПАМЯТИ (cutsById/self.supplies) и из
+        // БД до правок, а не из результата updates.
+        return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT).then(function() {
+            return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
             return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
         }).then(function() { return self.reload(); }).then(function() {

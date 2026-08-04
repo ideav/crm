@@ -2,12 +2,16 @@
 //
 // Раньше update/create/delete применялись ОДНОЙ последовательной цепочкой (chain.then) — сотни
 // зависимых запросов в один поток, сохранение плана тянулось минутами (сеть-лесенка на скрине
-// #4014). Теперь три фазы гоняются пулом runWithConcurrency(…, 5) с БАРЬЕРАМИ между фазами
-// (updates → creates → deletes), как генерация (#3998/#4004) и удаление (#4005/#4009).
+// #4014). Теперь три фазы гоняются пулом runWithConcurrency(…, 5) с БАРЬЕРАМИ между фазами,
+// как генерация (#3998/#4004) и удаление (#4005/#4009).
+//
+// #4598: порядок фаз — creates → updates → deletes. Предмет этого теста — САМИ БАРЬЕРЫ (фазы не
+// перемешиваются) и пул внутри фазы; какая фаза идёт первой, решает #4598: запись не атомарна,
+// поэтому голову нельзя урезать раньше, чем создано её продолжение.
 //
 // Проверяем на реальном applySplitPlan (mock post/loadStripsForCut с задержкой):
-//   • БАРЬЕРЫ: все запросы фазы updates завершаются ДО первого запроса creates, все creates — ДО
-//     первого delete (порядок фаз сохранён, как в прежней цепочке);
+//   • БАРЬЕРЫ: все запросы фазы creates завершаются ДО первого запроса updates, все updates — ДО
+//     первого delete (фазы не перемешиваются);
 //   • ПАРАЛЛЕЛИЗМ внутри фазы ограничен пулом (5) и реально > 1;
 //   • прогресс splitBump вызван по разу на задачу (updates + родители + deletes);
 //   • applySplitPlan возвращает true (успех).
@@ -99,10 +103,10 @@ c.applySplitPlan(ops).then(function(ok) {
     assertEqual(ok, true, '#4014: applySplitPlan вернул true (успех)');
 
     // Барьеры между фазами: последний END фазы раньше первого START следующей.
-    assertEqual(st.lastEnd.update < st.firstStart.create, true,
-        '#4014 БАРЬЕР: все updates завершились ДО первого create');
-    assertEqual(st.lastEnd.create < st.firstStart.delete, true,
-        '#4014 БАРЬЕР: все creates завершились ДО первого delete');
+    assertEqual(st.lastEnd.create < st.firstStart.update, true,
+        '#4014 БАРЬЕР: все creates завершились ДО первого update (#4598: продолжения раньше голов)');
+    assertEqual(st.lastEnd.update < st.firstStart.delete, true,
+        '#4014 БАРЬЕР: все updates завершились ДО первого delete');
 
     // Параллелизм внутри фазы — ровно пул (5) при N=8 задачах.
     assertEqual(st.maxInflight.update, 5, '#4014: updates идут пулом до 5 одновременно');
