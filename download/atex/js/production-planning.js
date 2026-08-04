@@ -23174,7 +23174,16 @@
         if (!mainKey) startOps = [];   // некуда писать planStart — тайминг пишем всё равно
         this.setBusy(true);
         this.showProgress('Пересчёт наладки…', 1);
-        return this.persistCutSetupColumns(scopeIds).then(function() {
+        // #4601/#4602: ПИСАТЕЛЬ МЕРЯЕТ ТЕМ ЖЕ, ЧЕМ ДЕТЕКТОР. Расхождения считаются с `manual`
+        // (ручной путь заморозку не соблюдает — #4582), а колонки писались БЕЗ него, то есть по
+        // правилам автоматики: задания замороженного дня писатель молча пропускал. Кнопка
+        // показывала «(заданий: 3)», нажатие проходило без ошибки и без единой записи, счётчик не
+        // менялся (боевое ateh 04.08.2026: день заморожен, четыре задания — 658253/658402/658388
+        // на Ст.1 и 658161 на Ст.3 — остались с «Длительностью» и «Резкой и Лидером» от прежнего
+        // числа проходов). Противоречие «детектор видит, писать нечего» ловит #4416, но здесь оно
+        // не срабатывало: `stale` считался ручной меркой и был НЕ пуст — расходились не счёт с
+        // записью, а две мерки между собой.
+        return this.persistCutSetupColumns(scopeIds, null, manualRecalc ? { manual: true } : null).then(function() {
             // #4408/#4477: planStart — через шлюз saveCutStarts (пул до 5 потоков, совпавшее с
             // хранимым не пишем; recalcStartUpdates и сам отдаёт только разъехавшиеся).
             return postCutStarts(self, startOps);
@@ -23247,7 +23256,10 @@
         }
         this.setBusy(true);
         this.showProgress('Пересчёт от выбранного задания…', 1);
-        return this.persistCutSetupColumns(scopeIds).then(function() {
+        // #4601/#4602: та же мерка, что у детектора выше (`manual: true`) — «⏩ Пересчитать отсюда»
+        // тоже кнопка ОПЕРАТОРА, и заморозка её не ограничивает (#4588). Без флага писатель молча
+        // пропускал задания замороженного дня, а счётчик расхождений их считал.
+        return this.persistCutSetupColumns(scopeIds, null, { manual: true }).then(function() {
             return postCutStarts(self, startOps);
         }).then(function() {
             return self.reload();
