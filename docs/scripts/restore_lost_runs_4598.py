@@ -58,6 +58,18 @@ def get(path):
     return _req('GET', path)
 
 
+# `_xsrf` обязателен для POST `_m_*` даже при токене в заголовке (docs/kb/00-start.md):
+# без него сервер отвечает 400 [{"error":"Неверный или устаревший токен CSRF"}].
+XSRF = ''
+
+
+def post(path, fields):
+    f = dict(fields)
+    f['token'] = TOKEN
+    f['_xsrf'] = XSRF
+    return _req('POST', path, f)
+
+
 def main():
     if not TOKEN:
         raise SystemExit('нужен TOKEN=<сессионный X-Authorization>')
@@ -119,14 +131,30 @@ def main():
     if disputed:
         print('\n  НЕ ТРОГАЮ — свидетели разошлись (нужен глаз человека):')
         for cid, order, now, told, need in disputed:
-            print('    задание %-8s заказ %-6s план %s, «Тайминг» %s, по недостаче нужно %s'
-                  % (cid, order, now, told, need))
+            # Третий свидетель, полезный именно у ЦЕПОЧЕК: доля обеспечения САМОЙ записи.
+            # «Кол-во рулонов» её «Обеспечения» ÷ «Кол-во полос» партии = сколько проходов эта
+            # запись обязана нести по уже поделённому обеспечению.
+            share = []
+            c = by_cut[cid]
+            per = sq.get((cid, c.get('supply_finished_batch_id')))
+            rolls = c.get('supply_rolls')
+            if per and rolls not in (None, ''):
+                share.append('по своей доле обеспечения %s рул. ÷ %s полос = %s'
+                             % (rolls, per, math.ceil(float(rolls) / per)))
+            print('    задание %-8s заказ %-6s план %s, «Тайминг» %s, по недостаче нужно %s%s'
+                  % (cid, order, now, told, need, ('; ' + '; '.join(share)) if share else ''))
     if not APPLY:
         print('\nDRY-RUN. Записать: добавьте --apply')
         return
+    global XSRF
+    XSRF = get('xsrf?JSON').get('_xsrf', '')
+    if not XSRF:
+        raise SystemExit('не получен _xsrf (GET xsrf?JSON) — POST будет отвергнут')
     for cid, order, now, told, need in plan:
-        _req('POST', '_m_set/%s?JSON' % cid, {'t%d' % REQ_PLANNED_RUNS: str(told),
-                                              'token': TOKEN, '_xsrf': ''})
+        resp = post('_m_set/%s?JSON' % cid, {'t%d' % REQ_PLANNED_RUNS: str(told)})
+        err = resp[0].get('error') if isinstance(resp, list) and resp and isinstance(resp[0], dict) else None
+        if err:
+            raise SystemExit('задание %s НЕ записано: %s' % (cid, err))
         print('  записано: %s → %s проходов' % (cid, told))
     print('\nГотово. В РМ «Планирование производства» нажмите «Упорядочить» — план разложит '
           'возвращённые проходы по дням и пересчитает колонки.')
