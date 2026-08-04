@@ -579,6 +579,26 @@
         return runs > 0 ? Math.floor(runs) : 0;
     }
 
+    // #4604: СКОЛЬКО ПРОХОДОВ ОТМЕТИТЬ ЗА ОДИН РАЗ. Оператор не тычет ✓ Готово по разу за
+    // каждый проход: он отработал задание и отмечает разом (в плане 100, сделал 99).
+    // Вводит он ЧИСЛО ВЫПОЛНЕННЫХ проходов — ту же мерку, что в заголовке «Резка N из M» и в
+    // «Кол-во резок факт» (#4564), а не приращение: у оператора перед глазами счёт из плана.
+    // Единственный предикат правила — им проверяет и модалка, и сама отметка (markPassDone).
+    function passTargetFromInput(raw, done, total) {
+        var s = String(raw == null ? '' : raw).trim().replace(',', '.');
+        if (s === '') return { ok: false, error: 'Введите, сколько проходов выполнено' };
+        var n = Number(s);
+        if (!isFinite(n)) return { ok: false, error: '«' + String(raw).trim() + '» — не число' };
+        if (Math.floor(n) !== n) return { ok: false, error: 'Проход целый — введите целое число' };
+        if (n > total) return { ok: false, error: 'В плане ' + total + ' проходов — больше отметить нельзя' };
+        if (n <= done) {
+            return { ok: false, error: done > 0
+                ? ('Уже отмечено ' + done + ' — введите больше ' + done)
+                : 'Введите число больше нуля' };
+        }
+        return { ok: true, target: n, added: n - done };
+    }
+
     // #3635 п.5: задание-«настройка» — хвост дня N перед намоткой дня N+1. Это запись с
     // «Кол-во резок план» ЯВНО «0» (день-разрыв оставил настройку ножей/сырья в конце дня).
     // Намотки у неё нет; в пульте показываем «Настройка ножей и сырья», оператор отмечает
@@ -1008,6 +1028,7 @@
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
         actualRunsForCut: actualRunsForCut,   // #4564: сделано проходов = «Кол-во резок факт»
+        passTargetFromInput: passTargetFromInput,   // #4604: отметить несколько проходов разом
         isSetupTask: isSetupTask,   // #3635 п.5
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
@@ -2145,13 +2166,80 @@
         var canMark = !core.isDone(cut.status);
         var one = el('button', { class: 'atex-sl-btn atex-sl-btn-pass', type: 'button', text: '✓ Готово',
             title: 'Отметить один проход выполненным: номер прохода +1, пересчитать «Счётчик кон.» и «Погонаж факт»' });
+        // #4604: середина между «один» и «все» — сделал 99 из 100, а не 99 нажатий кнопки.
+        // Кнопка нужна, только когда есть что отмечать пачкой: осталось ≥ 2 прохода.
+        var done = this.donePassCount(cut);
+        var total = core.plannedRunsForCut(cut);
+        var some = (total - done >= 2)
+            ? el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-some', type: 'button', text: '✓N Готовы несколько',
+                title: 'Отметить сразу несколько выполненных проходов — ввести, сколько сделано (например 99 из 100)' })
+            : null;
         var all = el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-all', type: 'button', text: '✓✓ Готовы все',
             title: 'Отметить все проходы выполненными и завершить задание (с подтверждением)' });
         if (canMark) {
             one.addEventListener('click', function() { self.markPassDone(false); });
+            if (some) some.addEventListener('click', function() { self.askPassCount(cut); });
             all.addEventListener('click', function() { self.markPassDone(true); });
-        } else { one.disabled = true; all.disabled = true; }
-        return el('div', { class: 'atex-sl-head-pass' }, [one, all]);
+        } else { one.disabled = true; all.disabled = true; if (some) some.disabled = true; }
+        return el('div', { class: 'atex-sl-head-pass' }, [one, some, all]);
+    };
+
+    // #4604: спросить, сколько проходов выполнено, и отметить их одним действием.
+    // Ввод — ЧИСЛО ВЫПОЛНЕННЫХ проходов (мерка заголовка «Резка N из M»), проверяет его
+    // core.passTargetFromInput — тот же предикат, что и сама отметка. prompt() запрещён
+    // (гайд, раздел 8), поэтому своя модалка — как confirmModal (#3583).
+    AtexSlitter.prototype.askPassCount = function(cut) {
+        var self = this;
+        var done = this.donePassCount(cut);
+        var total = core.plannedRunsForCut(cut);
+        var runLength = core.runLengthForCut(cut);
+
+        var overlay = el('div', { class: 'atex-sl-confirm-overlay' });
+        var input = el('input', { class: 'atex-sl-input atex-sl-confirm-input', type: 'number',
+            min: String(done + 1), max: String(total), step: '1', inputmode: 'numeric' });
+        input.value = String(total);   // по умолчанию — весь план: чаще всего сделано всё
+        var hint = el('div', { class: 'atex-sl-confirm-hint' });
+        var err = el('div', { class: 'atex-sl-confirm-error' });
+        var ok = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Отметить' });
+        var cancel = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отмена' });
+
+        function refresh() {
+            var res = core.passTargetFromInput(input.value, done, total);
+            err.textContent = res.ok ? '' : res.error;
+            if (!res.ok) { hint.textContent = ''; return; }
+            var meters = runLength > 0 ? (' (' + core.round3(res.added * runLength) + ' м)') : '';
+            hint.textContent = 'Будет отмечено ещё ' + res.added + ' ' + passWord(res.added) + meters + '. '
+                + (res.target >= total
+                    ? 'Отмечены все проходы — задание завершится.'
+                    : ('Останется ' + (total - res.target) + ' ' + passWord(total - res.target)
+                        + ' — задание останется в работе.'));
+        }
+        function submit() {
+            var res = core.passTargetFromInput(input.value, done, total);
+            if (!res.ok) { err.textContent = res.error; return; }
+            close();
+            self.markPassDone(false, res.target);
+        }
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+
+        input.addEventListener('input', refresh);
+        input.addEventListener('keydown', function(e) { if (e && e.key === 'Enter') submit(); });
+        ok.addEventListener('click', submit);
+        cancel.addEventListener('click', close);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        refresh();
+
+        overlay.appendChild(el('div', { class: 'atex-sl-confirm' }, [
+            el('div', { class: 'atex-sl-confirm-msg', text: 'Сколько проходов выполнено?' }),
+            el('div', { class: 'atex-sl-confirm-sub', text: 'План: ' + total + ' ' + passWord(total) + '. Уже отмечено: ' + done + '.' }),
+            input,
+            hint,
+            err,
+            el('div', { class: 'atex-sl-confirm-actions' }, [cancel, ok])
+        ]));
+        (this.root || document.body).appendChild(overlay);
+        if (typeof input.focus === 'function') input.focus();
+        if (typeof input.select === 'function') input.select();
     };
 
     // #3557 #4: кнопки управления статусом — в шапке (вместо секции «Статус резки»).
@@ -2772,7 +2860,10 @@
     // пересчитывает «Счётчик кон.» = «Счётчик нач.» − проходы×метраж (#4321: счётчик мотает назад) и «Погонаж факт»,
     // пишет событие «Резка» (значение = номер прохода). Когда отмечены все проходы —
     // завершает задание (finishCut) и переключает на следующее.
-    AtexSlitter.prototype.markPassDone = function(markAll) {
+    // #4604: requestedTarget — сколько проходов выполнено ВСЕГО (кнопка «✓N Готовы несколько»,
+    // askPassCount). Одна отметка на любое число проходов: та же арифметика (погонаж, счётчик,
+    // расход партии), только шаг не единичный — 99 проходов это одна запись, а не 99 нажатий.
+    AtexSlitter.prototype.markPassDone = function(markAll, requestedTarget) {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
@@ -2787,6 +2878,13 @@
         // floor(остаток / метраж) ложно давал «все проходы уже отмечены» (#4351).
         var done = this.donePassCount(cut);
         var target = markAll ? total : Math.min(done + 1, total);
+        // #4604: запрошенное число проходов проверяем ТЕМ ЖЕ предикатом, что и модалка —
+        // правило «сколько можно отметить» живёт в одном месте (core.passTargetFromInput).
+        if (!markAll && requestedTarget != null) {
+            var req = core.passTargetFromInput(requestedTarget, done, total);
+            if (!req.ok) { this.notify(req.error, 'error'); return; }
+            target = req.target;
+        }
         if (target <= done) { this.notify('Все проходы уже отмечены', 'info'); return; }
 
         var run = function() {
@@ -2861,7 +2959,11 @@
                         .then(function() {
                             self.applyEventStatuses();
                             self.setBusy(false);
-                            self.notify('Отмечен проход ' + target + ' из ' + total, 'success');
+                            // #4604: пачкой отмечено несколько — говорим сколько именно
+                            var added = target - done;
+                            self.notify(added > 1
+                                ? ('Отмечено проходов: +' + added + ' → ' + target + ' из ' + total)
+                                : ('Отмечен проход ' + target + ' из ' + total), 'success');
                             self.render();
                         });
                 }).catch(function(err) {
@@ -3135,6 +3237,18 @@
         var inp = el('input', { class: 'atex-sl-input', type: 'number', min: '0', step: 'any', placeholder: placeholder || '0' });
         inp.value = value == null ? '' : value;
         return inp;
+    }
+    // #4604: «1 проход / 2 прохода / 5 проходов» — подсказка модалки называет число словами
+    // оператора, а не «проход(ов)».
+    function passWord(n) {
+        var abs = Math.abs(Math.floor(n));
+        var tail = abs % 100;
+        if (tail >= 11 && tail <= 14) return 'проходов';
+        switch (abs % 10) {
+            case 1: return 'проход';
+            case 2: case 3: case 4: return 'прохода';
+            default: return 'проходов';
+        }
     }
     function field(label, control) {
         return el('label', { class: 'atex-sl-field' }, [

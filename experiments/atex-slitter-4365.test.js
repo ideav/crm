@@ -197,8 +197,8 @@ assert(closed.cards.length === 2,
     assert(inst.allCutsDone() === false,
         '#4362: ждёт задание будущего дня → работа смены не окончена');
     var slot = inst.renderPassButtons(inst.currentCut);
-    assert(slot.childNodes.filter(function(n) { return n.classList.contains('atex-sl-btn-pass'); }).length === 2,
-        '#4362: у следующего задания кнопки «✓ Готово» / «✓✓ Готовы все» на месте');
+    assert(slot.childNodes.filter(function(n) { return n.classList.contains('atex-sl-btn-pass'); }).length === 3,
+        '#4362/#4604: у следующего задания кнопки «✓ Готово» / «✓N Готовы несколько» / «✓✓ Готовы все» на месте');
     var doneInst = makeInst({ cuts: [cut('1', DAY, '08:00', 'Завершена'), cut('9', D24, '08:00', 'Завершена')] });
     doneInst.currentCut = doneInst.cuts[1];
     doneInst.currentCutId = '9';
