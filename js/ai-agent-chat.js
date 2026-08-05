@@ -26,7 +26,7 @@
     // а не только владельцу (#3716). Имена в нижнем регистре. Зеркало серверного
     // aiAgentOpenDbs() в index.php — списки обязаны совпадать, иначе кнопка будет видна,
     // а сервер ответит 403. Выключить исключение = убрать имя базы из ОБОИХ списков.
-    var AI_AGENT_OPEN_DBS = ['ateh'];
+    var AI_AGENT_OPEN_DBS = ['ateh', 'ateh1'];
 
     var IntegramAiAgentChat = {
         attachments: [],

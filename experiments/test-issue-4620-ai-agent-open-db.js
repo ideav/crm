@@ -1,14 +1,15 @@
 /*
- * Issue #4620: для БД `ateh` ИИ-агент показывается ЛЮБОМУ пользователю (временно).
+ * Issue #4620: для БД `ateh` и `ateh1` ИИ-агент показывается ЛЮБОМУ пользователю (временно).
  * https://github.com/ideav/crm/issues/4620
  *
  * Исключение обязано быть УЗКИМ и СИММЕТРИЧНЫМ:
- *   1) чужой пользователь в `ateh` — агент разрешён, кнопка видна, resume идёт к ai/agent;
+ *   1) чужой пользователь в `ateh`/`ateh1` — агент разрешён, кнопка видна, resume идёт к ai/agent;
  *   2) чужой пользователь в ЛЮБОЙ другой базе — по-прежнему запрещён (#3716 не отменён);
  *   3) владелец — работает как раньше и в открытой базе, и в обычной;
- *   4) регистр имени базы значения не имеет (`ATEH` = `ateh`) — как и на сервере;
+ *   4) регистр имени базы значения не имеет (`ATEH1` = `ateh1`) — как и на сервере;
  *   5) пустой пользователь (не аутентифицирован) запрещён ДАЖЕ в открытой базе —
- *      исключение снимает проверку «владелец», а не проверку «вошёл».
+ *      исключение снимает проверку «владелец», а не проверку «вошёл»;
+ *   6) совпадение ТОЧНОЕ, а не по префиксу: `ateh` в списке не открывает `ateh2`/`atex`.
  *
  * Списки баз обязаны совпадать: AI_AGENT_OPEN_DBS (js/ai-agent-chat.js) и
  * aiAgentOpenDbs() (index.php). Пункт 6 проверяет это чтением обоих файлов —
@@ -72,12 +73,16 @@ var A = require(path);
 function allowed(u, d){ A.getCurrentUserName = function(){ return u; }; A.getCurrentDbName = function(){ return d; }; return A.isAgentAllowed(); }
 
 expect(allowed('bob', 'ateh') === true,  '#4620: чужой пользователь в ateh → разрешён');
-expect(allowed('bob', 'ATEH') === true,  '#4620: имя базы в другом регистре (ATEH) → разрешён');
+expect(allowed('bob', 'ateh1') === true, '#4620: чужой пользователь в ateh1 → разрешён');
+expect(allowed('bob', 'ATEH1') === true, '#4620: имя базы в другом регистре (ATEH1) → разрешён');
 expect(allowed('ateh', 'ateh') === true, '#4620: владелец ateh → разрешён (как и был)');
 expect(allowed('', 'ateh') === false,    '#4620: НЕ аутентифицирован → запрещён даже в открытой базе');
+expect(allowed('', 'ateh1') === false,   '#4620: НЕ аутентифицирован → запрещён и в ateh1');
 expect(allowed('bob', 'acme') === false, '#3716 не отменён: чужой в обычной базе → запрещён');
 expect(allowed('acme', 'acme') === true, '#3716 не отменён: владелец обычной базы → разрешён');
-expect(allowed('bob', 'ateh1') === false, '#4620: исключение УЗКОЕ — ateh1 не открыт');
+// Совпадение ТОЧНОЕ, не по префиксу: иначе «ateh» открыл бы заодно ateh2/atehX.
+expect(allowed('bob', 'ateh2') === false, '#4620: исключение УЗКОЕ — ateh2 не открыт (не префикс)');
+expect(allowed('bob', 'atex') === false,  '#4620: исключение УЗКОЕ — atex не открыт');
 
 // ===================== 2) Чужой в ateh: кнопка видна, resume идёт =====================
 function scStrangerOpenDb(){
@@ -120,7 +125,18 @@ function scListsMatch(){
     return Promise.resolve();
 }
 
-scStrangerOpenDb().then(scStrangerOtherDb).then(scListsMatch).then(function(){
+// ===================== 2b) Чужой в ateh1: список читается на init, не только в логике ==========
+function scStrangerOpenDb1(){
+    var ctx = fresh('bob', 'ateh1');
+    return flush().then(flush).then(function(){
+        var calls = global.__calls || [];
+        expect(ctx.els['ai-chat-toggle'].style.display !== 'none', '#4620: чужой в ateh1 → кнопка ИИ-агента ВИДНА');
+        expect(calls.length >= 1 && /\/ateh1\/ai\/agent\?JSON=1/.test(calls[0].url),
+            '#4620: чужой в ateh1 → resume обращается к ai/agent текущей базы');
+    });
+}
+
+scStrangerOpenDb().then(scStrangerOpenDb1).then(scStrangerOtherDb).then(scListsMatch).then(function(){
     console.log('');
     if(failures){ console.log('FAILED: ' + failures + ' check(s) failed'); process.exit(1); }
     console.log('ALL TESTS PASSED');

@@ -9083,7 +9083,7 @@ function handleAiAgentRequest($com){
 # ВНИМАНИЕ при снятии исключения: история задач агента лежит ПО ИМЕНИ БАЗЫ
 # (aiAgentJobsFile), поэтому в открытой базе её видят все её пользователи, а не каждый свою.
 function aiAgentOpenDbs(){
-    return array("ateh");
+    return array("ateh", "ateh1");
 }
 function aiAgentIsOpenDb($db){
     return in_array(strtolower((string)$db), array_map("strtolower", aiAgentOpenDbs()), true);
