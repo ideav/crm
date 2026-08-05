@@ -2728,6 +2728,23 @@
     //     result:  { before, after },   // computeQualityStats до/после проекции
     //     stop:    { code, text }
     //   }
+    // #4622: ШТРАФ КАНДИДАТА ЗА НАРУШЕНИЯ §15 — без унаследованного перебора дней.
+    // Правила делятся надвое:
+    //   • DAY_CAPACITY — «в дне не хватило места». Это не порок кандидата, а состояние плана:
+    //     лишнее обязано ехать в следующий день. Кандидат отвечает лишь за то, что ДОБАВИЛ сверх
+    //     уже переполненных станко-дней (capBefore);
+    //   • все прочие (🔒-монолит FIXED_BLOCK, FIXED_NO_PUSH, CHAIN_CONTIGUOUS, SUPPLY_CONSERVED…)
+    //     — пороки самого кандидата, вето по ним АБСОЛЮТНОЕ и осталось прежним (#4471/#4464).
+    //   list — нарушения кандидата, capBefore — переполненных станко-дней в записанном плане.
+    // → число, которое идёт в объектив с весом RULE_BREAK_WEIGHT.
+    function effectiveRuleBreaks(list, capBefore) {
+        var cap = 0, other = 0;
+        (list || []).forEach(function(v) {
+            if (v && v.rule === 'DAY_CAPACITY') cap++; else other++;
+        });
+        return other + Math.max(0, cap - (Number(capBefore) || 0));
+    }
+
     function formatOptimizeTrace(trace) {
         var t = trace || {};
         var out = [];
@@ -2739,7 +2756,7 @@
         // срок §14 старше упаковки дня #4469, упаковка старше переналадки — см. веса
         // DOWNTIME_CONFLICT_WEIGHT/LATE_DAY_WEIGHT/UNDERFILL_DAY_WEIGHT): сперва задания в окне
         // «Отпуска», затем дни опоздания, затем недоупакованные дни, при равных — минуты переналадки.
-        function verdict(late, co, s, downtime, underfilled, underfilledRuleBreaks) {
+        function verdict(late, co, s, downtime, underfilled, underfilledRuleBreaks, byRule) {
             var dLate = round3(Number(late) - Number(s.lateBefore));
             var dCo = round3(Number(co) - Number(s.coBefore));
             var dtNow = Number(downtime), dtWas = Number(s.downtimeBefore);
@@ -2751,9 +2768,10 @@
             // РУЧНОЕ действие, а ручное действие отказа не получает (решение заказчика 02.08 и
             // 05.08.2026): «если ручное действие говорит, что надо что-то подвинуть в будущее —
             // двигаем безусловно». Сравниваем с числом нарушений ХРАНИМОГО плана (s.ruleBreaksBefore).
-            var rbNow = Number(underfilledRuleBreaks) || 0, rbWas = Number(s.ruleBreaksBefore) || 0;
-            if (rbNow > rbWas) {
-                return 'ХУЖЕ: кандидат ДОБАВЛЯЕТ нарушение ТЗ §15 (' + rbWas + ' → ' + rbNow + ') — применять нельзя';
+            // Та же мерка, что в объективе: унаследованный перебор дней отказом не является,
+            // остальные жёсткие правила ветируют абсолютно.
+            if (effectiveRuleBreaks(byRule, s.capacityBreaksBefore) > 0) {
+                return 'ХУЖЕ: кандидат ДОБАВЛЯЕТ нарушение ТЗ §15 — применять нельзя';
             }
             if (dLate < 0) return 'ЛУЧШЕ: опозданий ' + num(dLate) + ' дн';
             if (dLate > 0) return 'ХУЖЕ: опозданий +' + num(dLate) + ' дн (срок старше переналадки)';
@@ -2782,8 +2800,7 @@
                     + ((s.underfilledDays || []).length ? ' (' + s.underfilledDays.join(', ') + ')' : '') : '')
                 // #4622: нарушения §15 УЖЕ ЗАПИСАННОГО плана — база, с которой сравнивается кандидат.
                 // Без неё в логе не видно, за СВОЁ ли нарушение отвергли кандидата или за чужое.
-                + (s.ruleBreaksBefore ? ', НАРУШЕНИЙ ТЗ §15 в текущем плане: ' + s.ruleBreaksBefore
-                    + ((s.ruleBreakMsgsBefore || []).length ? ' (' + s.ruleBreakMsgsBefore.join('; ') + ')' : '') : ''));
+                + (s.capacityBreaksBefore ? ', переполненных станко-дней в текущем плане: ' + s.capacityBreaksBefore : ''));
         }
         (t.candidates || []).forEach(function(c) {
             var head = 'КАНДИДАТ ' + c.key + ' (' + c.title + ')';
@@ -2798,7 +2815,7 @@
                     + ((c.downtimeIds || []).length ? ' (' + c.downtimeIds.join(', ') + ')' : '') : '')
                 + ((c.underfilled || s.underfilledBefore) ? ', недоупаковано дней ' + (c.underfilled || 0)
                     + ((c.underfilledDays || []).length ? ' (' + c.underfilledDays.join(', ') + ')' : '') : '')
-                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled, c.ruleBreaks));
+                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled, c.ruleBreaks, c.ruleBreakList));
         });
         var ch = t.choice || {};
         out.push(ch.action === 'none' || !ch.action
@@ -3109,7 +3126,8 @@
         // план, ломающий правило, нельзя, даже если текущий не идеален.
         var rbB = [], rbA = [];
         // #4622: нарушения ХРАНИМОГО плана — база, с которой сравнивается кандидат.
-        var builtBefore = null, rbBefore = [];
+        // #4622: сколько станко-дней ЗАПИСАННОГО плана уже за потолком — база для DAY_CAPACITY.
+        var capBefore = 0;
         // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
         // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
         // считались бы по хвостам непринятого плана).
@@ -3130,18 +3148,17 @@
             lateBefore = self.planLatenessDays(self.cuts, null);
             dtBefore = self.planDowntimeConflicts(self.cuts, null);
             ufBefore = self.planUnderfilledDays(self.cuts, null);
-            // #4622: НАРУШЕНИЯ ХРАНИМОГО ПЛАНА — БАЗА СРАВНЕНИЯ. Прежде здесь стоял ноль «по
-            // допущению» (операций у хранимого плана нет — мерить нечем), и кандидат платил
-            // RULE_BREAK_WEIGHT за нарушения, которые НЕ вносил: они уже лежали в плане. План,
-            // однажды попавший за потолок, запирался навсегда — боевая ateh 05.08.2026: 9 станко-дней
-            // сверх потолка, 1642 дня опозданий, «Упорядочить» не делает НИЧЕГО, хотя кандидат был
-            // лучше по всем меркам и чинил главный перебор (620 → 537 мин).
-            // Мерить ЕСТЬ чем: пересобираем текущий порядок как есть (preserveOrder) — это тот же
-            // buildSequenceOps, что считает кандидатов, поэтому нарушения обеих сторон в одной
-            // валюте и второй арифметики не заводится (#4499).
-            builtBefore = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, true);
-            rbBefore = (builtBefore && builtBefore.ops && builtBefore.ops.ruleBreaks) || [];
-            before = combined(dtBefore.length, rbBefore.length, lateBefore, ufBefore.length, coBefore);
+            // #4622: ПЕРЕПОЛНЕННЫЕ ДНИ, КОТОРЫЕ УЖЕ ЕСТЬ В ЗАПИСАННОМ ПЛАНЕ. Кандидат не обязан
+            // их чинить и не должен за них отвечать: «если ручное действие говорит, что надо
+            // что-то подвинуть в будущее — двигаем безусловно» (решение заказчика 02.08 и
+            // 05.08.2026). Прежде DAY_CAPACITY кандидата ветировался абсолютно, и план, однажды
+            // попавший за потолок, запирался НАВСЕГДА: боевая ateh 05.08.2026 — 9 станко-дней сверх
+            // потолка, 1642 дня опозданий, «Упорядочить» не делает ничего, хотя кандидат был лучше
+            // по всем меркам и чинил главный перебор (Станок 2, 10.08: 620 → 537 мин).
+            // Меряем ХРАНИМЫЙ план той же меркой, что и подсветка дня (#4531 overfilledDaysFromCuts),
+            // а не пересборкой — второй арифметики не заводим (#4499).
+            capBefore = self.capacityBreaksStored();
+            before = combined(dtBefore.length, 0, lateBefore, ufBefore.length, coBefore);
             trace.start = {
                 cutCount: (self.cuts || []).length,
                 fixedCount: (self.cuts || []).filter(function(c) { return c && c.fixed; }).length,
@@ -3152,8 +3169,7 @@
                 underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10),
                 // #4622: сколько жёстких правил §15 нарушает УЖЕ ЗАПИСАННЫЙ план — по этому числу
                 // судится кандидат: отказ только за НОВОЕ нарушение.
-                ruleBreaksBefore: rbBefore.length,
-                ruleBreakMsgsBefore: rbBefore.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; })
+                capacityBreaksBefore: capBefore
             };
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
@@ -3165,11 +3181,12 @@
             dtB = self.planDowntimeConflicts(self.cuts, builtB.ops);
             ufB = self.planUnderfilledDays(self.cuts, builtB.ops);
             rbB = (builtB.ops && builtB.ops.ruleBreaks) || [];
-            objB = combined(dtB.length, rbB.length, lateB, ufB.length, coB);
+            objB = combined(dtB.length, effectiveRuleBreaks(rbB, capBefore), lateB, ufB.length, coB);
             trace.candidates.push({ key: 'B', title: 'порядок/дни на текущих станках',
                 late: round3(lateB), changeover: round3(coB), downtime: dtB.length, underfilled: ufB.length,
                 downtimeIds: dtB.slice(0, 10), underfilledDays: ufB.slice(0, 10),   // #4471: поимённо
-                ruleBreaks: rbB.length, ruleBreakMsgs: rbB.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
+                ruleBreaks: rbB.length, ruleBreakList: rbB,
+                ruleBreakMsgs: rbB.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
@@ -3193,12 +3210,13 @@
                 dtA = self.planDowntimeConflicts(self.cuts, builtA.ops);
                 ufA = self.planUnderfilledDays(self.cuts, builtA.ops);
                 rbA = (builtA.ops && builtA.ops.ruleBreaks) || [];
-                objA = combined(dtA.length, rbA.length, lateA, ufA.length, coA);
+                objA = combined(dtA.length, effectiveRuleBreaks(rbA, capBefore), lateA, ufA.length, coA);
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
                     reassignCount: Object.keys(plan.slitterByRecordId || {}).length,
                     late: round3(lateA), changeover: round3(coA), downtime: dtA.length, underfilled: ufA.length,
                     downtimeIds: dtA.slice(0, 10), underfilledDays: ufA.slice(0, 10),   // #4471: поимённо
-                    ruleBreaks: rbA.length, ruleBreakMsgs: rbA.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
+                    ruleBreaks: rbA.length, ruleBreakList: rbA,
+                    ruleBreakMsgs: rbA.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             } else {
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
@@ -10492,6 +10510,34 @@
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
     // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
+    // #4622: СКОЛЬКО СТАНКО-ДНЕЙ ЗАПИСАННОГО ПЛАНА УЖЕ ЗА ПОТОЛКОМ. База, с которой сравнивается
+    // DAY_CAPACITY кандидата в «Упорядочить»: за унаследованный перебор кандидат не отвечает
+    // (ручное действие отказа не получает), за добавленный — отвечает.
+    // Мерка — общая `overfilledDaysFromCuts` (#4531), та же, что красит шапку дня и печатает тост,
+    // поэтому число здесь и число на экране не могут разойтись (#4499).
+    // Стаб-self в юнит-тестах окна не читает — тогда 0, и вето остаётся абсолютным, как было.
+    // → число переполненных станко-дней.
+    AtexProductionPlanning.prototype.capacityBreaksStored = function() {
+        if (typeof this.workingWindow !== 'function') return 0;
+        var win = this.workingWindow() || {};
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        if (!isFinite(base)) return 0;
+        var bySlitter = {};
+        (this.cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            (bySlitter[sid] = bySlitter[sid] || []).push(c);
+        });
+        var n = 0;
+        Object.keys(bySlitter).forEach(function(sid) {
+            n += overfilledDaysFromCuts(bySlitter[sid], {
+                baseMidnightMs: base, cutEndMin: win.cutEndMin, maxOverworkCutsMin: win.maxOverworkCutsMin,
+                dayStartMin: win.startMin, lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin
+            }).length;
+        });
+        return n;
+    };
+
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid, (opts && (opts.manual || opts.dayKeys))
