@@ -121,6 +121,10 @@ assertEqual(sp.restReason, 'before-next', 'причина места — «пе�
     c.downtimesBySlitter = {};
     c.daySettings = {};
     c.dayIsWorking = function() { return true; };
+    // #4620: ПИНИМ «СЕГОДНЯ». dayOpenForWork спрашивает dayIsOverForSlitter (#4596), а тот меряет
+    // день относительно текущей даты — без пина тест протухал: 04.08.2026 переставал быть будущим,
+    // и «незамороженный рабочий день — открыт» падал у всех, кто запускал сеть после 04.08.2026.
+    c.nowMs = function() { return new Date(2026, 7, 2, 9, 0, 0, 0).getTime(); };
     assertEqual(c.dayOpenForWork('1', new Date(2026, 7, 3, 0, 0, 0, 0).getTime()), false,
         'замороженный день закрыт для выбора «ближайшего свободного»');
     assertEqual(c.dayOpenForWork('1', new Date(2026, 7, 4, 0, 0, 0, 0).getTime()), true,
