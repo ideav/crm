@@ -15635,8 +15635,13 @@
                 return (dtNow < dtWas ? 'ЛУЧШЕ' : 'ХУЖЕ') + ': в окне «Отпуска» ' + dtWas + ' → ' + dtNow
                     + ' заданий (станок в это время не работает — старше срока)';
             }
-            if (Number(underfilledRuleBreaks) > 0) {
-                return 'ХУЖЕ: план нарушает жёсткое правило ТЗ §15 — применять нельзя';
+            // #4622: ОТКАЗ — ТОЛЬКО ЗА НОВОЕ НАРУШЕНИЕ, а не за унаследованное. «Упорядочить» —
+            // РУЧНОЕ действие, а ручное действие отказа не получает (решение заказчика 02.08 и
+            // 05.08.2026): «если ручное действие говорит, что надо что-то подвинуть в будущее —
+            // двигаем безусловно». Сравниваем с числом нарушений ХРАНИМОГО плана (s.ruleBreaksBefore).
+            var rbNow = Number(underfilledRuleBreaks) || 0, rbWas = Number(s.ruleBreaksBefore) || 0;
+            if (rbNow > rbWas) {
+                return 'ХУЖЕ: кандидат ДОБАВЛЯЕТ нарушение ТЗ §15 (' + rbWas + ' → ' + rbNow + ') — применять нельзя';
             }
             if (dLate < 0) return 'ЛУЧШЕ: опозданий ' + num(dLate) + ' дн';
             if (dLate > 0) return 'ХУЖЕ: опозданий +' + num(dLate) + ' дн (срок старше переналадки)';
@@ -15662,7 +15667,11 @@
                     + ((s.downtimeIds || []).length ? ' (' + s.downtimeIds.join(', ') + ')' : '') : '')
                 // #4469: то же для дней, не набитых до потолка смены.
                 + (s.underfilledBefore ? ', недоупакованных дней ' + s.underfilledBefore
-                    + ((s.underfilledDays || []).length ? ' (' + s.underfilledDays.join(', ') + ')' : '') : ''));
+                    + ((s.underfilledDays || []).length ? ' (' + s.underfilledDays.join(', ') + ')' : '') : '')
+                // #4622: нарушения §15 УЖЕ ЗАПИСАННОГО плана — база, с которой сравнивается кандидат.
+                // Без неё в логе не видно, за СВОЁ ли нарушение отвергли кандидата или за чужое.
+                + (s.ruleBreaksBefore ? ', НАРУШЕНИЙ ТЗ §15 в текущем плане: ' + s.ruleBreaksBefore
+                    + ((s.ruleBreakMsgsBefore || []).length ? ' (' + s.ruleBreakMsgsBefore.join('; ') + ')' : '') : ''));
         }
         (t.candidates || []).forEach(function(c) {
             var head = 'КАНДИДАТ ' + c.key + ' (' + c.title + ')';
@@ -15987,6 +15996,8 @@
         // У ХРАНИМОГО плана их не меряем — операций нет; вето односторонне и намеренно: применять
         // план, ломающий правило, нельзя, даже если текущий не идеален.
         var rbB = [], rbA = [];
+        // #4622: нарушения ХРАНИМОГО плана — база, с которой сравнивается кандидат.
+        var builtBefore = null, rbBefore = [];
         // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
         // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
         // считались бы по хвостам непринятого плана).
@@ -16007,7 +16018,18 @@
             lateBefore = self.planLatenessDays(self.cuts, null);
             dtBefore = self.planDowntimeConflicts(self.cuts, null);
             ufBefore = self.planUnderfilledDays(self.cuts, null);
-            before = combined(dtBefore.length, 0, lateBefore, ufBefore.length, coBefore);
+            // #4622: НАРУШЕНИЯ ХРАНИМОГО ПЛАНА — БАЗА СРАВНЕНИЯ. Прежде здесь стоял ноль «по
+            // допущению» (операций у хранимого плана нет — мерить нечем), и кандидат платил
+            // RULE_BREAK_WEIGHT за нарушения, которые НЕ вносил: они уже лежали в плане. План,
+            // однажды попавший за потолок, запирался навсегда — боевая ateh 05.08.2026: 9 станко-дней
+            // сверх потолка, 1642 дня опозданий, «Упорядочить» не делает НИЧЕГО, хотя кандидат был
+            // лучше по всем меркам и чинил главный перебор (620 → 537 мин).
+            // Мерить ЕСТЬ чем: пересобираем текущий порядок как есть (preserveOrder) — это тот же
+            // buildSequenceOps, что считает кандидатов, поэтому нарушения обеих сторон в одной
+            // валюте и второй арифметики не заводится (#4499).
+            builtBefore = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, true);
+            rbBefore = (builtBefore && builtBefore.ops && builtBefore.ops.ruleBreaks) || [];
+            before = combined(dtBefore.length, rbBefore.length, lateBefore, ufBefore.length, coBefore);
             trace.start = {
                 cutCount: (self.cuts || []).length,
                 fixedCount: (self.cuts || []).filter(function(c) { return c && c.fixed; }).length,
@@ -16015,7 +16037,11 @@
                 windowLabel: self.optimizeWindowLabel(),
                 lateBefore: round3(lateBefore), coBefore: round3(coBefore),
                 downtimeBefore: dtBefore.length, downtimeIds: dtBefore.slice(0, 10),
-                underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10)
+                underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10),
+                // #4622: сколько жёстких правил §15 нарушает УЖЕ ЗАПИСАННЫЙ план — по этому числу
+                // судится кандидат: отказ только за НОВОЕ нарушение.
+                ruleBreaksBefore: rbBefore.length,
+                ruleBreakMsgsBefore: rbBefore.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; })
             };
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
@@ -23342,7 +23368,13 @@
                          overMin: Math.round(load - cap), capMin: ceil,
                          cutId: last.cut.id, seq: items.length, cut: last.cut };
             })
-            .filter(function(r) { return r.loadMin > cap + 1; });
+            // #4622: ПОРОГ ПОМЕТКИ — ТОТ ЖЕ, ЧТО У СООБЩЕНИЯ. Здесь стоял допуск `loadMin > cap + 1`:
+            // день на 456 мин при потолке 455 в шапке НЕ краснел (456 не больше 456), а тост про тот
+            // же день ругался — оператор видел «жалуется, а день чистый» и решал, что пометка сломана
+            // (боевая ateh 05.08.2026, Станок 1, Чт 06.08: тост «458 при потолке 455», шапка «(456 мин)»
+            // спокойным цветом). Меряем ровно тем числом, которое показываем: перебор ≥ 1 минуты —
+            // день переполнен, и пометка обязана гореть.
+            .filter(function(r) { return r.overMin >= 1; });
     }
 
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
