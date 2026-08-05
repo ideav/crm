@@ -9076,10 +9076,24 @@ function handleAiAgentRequest($com){
         aiAgentError(t9n("[RU]ИИ-агент принимает GET (статус) или POST (запрос)[EN]The AI agent accepts GET (status) or POST (request)"), 405);
     return aiAgentSubmitRequest($com);
 }
+# Issue #4620: БАЗЫ, ГДЕ ИИ-АГЕНТ ОТКРЫТ ЛЮБОМУ ПОЛЬЗОВАТЕЛЮ. ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ —
+# отключается удалением имени базы из этого списка (и такого же списка в js/ai-agent-chat.js,
+# см. AI_AGENT_OPEN_DBS там же: клиент прячет кнопку, сервер отвечает 403, и разойтись им
+# нельзя). Пустой список = прежнее поведение #3716 «только владельцу».
+# ВНИМАНИЕ при снятии исключения: история задач агента лежит ПО ИМЕНИ БАЗЫ
+# (aiAgentJobsFile), поэтому в открытой базе её видят все её пользователи, а не каждый свою.
+function aiAgentOpenDbs(){
+    return array("ateh");
+}
+function aiAgentIsOpenDb($db){
+    return in_array(strtolower((string)$db), array_map("strtolower", aiAgentOpenDbs()), true);
+}
 # Доступ к ИИ-агенту — только владельцу базы (имя пользователя совпадает с именем
 # базы). При нарушении завершает запрос ответом 403.
+# Issue #4620: базы из aiAgentOpenDbs() пропускаем ЛЮБОГО аутентифицированного пользователя.
 function aiAgentRequireOwner($db){
     $user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? strtolower((string)$GLOBALS["GLOBAL_VARS"]["user"]) : "";
+    if($user !== "" && aiAgentIsOpenDb($db)) return;
     if($user === "" || $user !== strtolower((string)$db))
         aiAgentError(t9n("[RU]ИИ-агент доступен только владельцу базы — пользователю, имя которого совпадает с именем базы данных.[EN]The AI agent is available only to the database owner — the user whose name matches the database name."), 403);
 }

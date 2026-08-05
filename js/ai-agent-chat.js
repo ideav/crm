@@ -22,6 +22,12 @@
 (function () {
     'use strict';
 
+    // Issue #4620: ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ — базы, где ИИ-агент открыт ЛЮБОМУ пользователю,
+    // а не только владельцу (#3716). Имена в нижнем регистре. Зеркало серверного
+    // aiAgentOpenDbs() в index.php — списки обязаны совпадать, иначе кнопка будет видна,
+    // а сервер ответит 403. Выключить исключение = убрать имя базы из ОБОИХ списков.
+    var AI_AGENT_OPEN_DBS = ['ateh'];
+
     var IntegramAiAgentChat = {
         attachments: [],
         sending: false,
@@ -146,10 +152,17 @@
         // чьё имя совпадает с именем базы. Для остальных не делаем НИ ОДНОГО запроса
         // /{db}/ai/agent?JSON — сервер их всё равно отклоняет (403), а лишние вызовы шумят.
         // Сравнение зеркалит серверное aiAgentRequireOwner (index.php): strtolower обоих.
+        //
+        // Issue #4620: ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ — базы из AI_AGENT_OPEN_DBS открыты любому
+        // пользователю. Список обязан совпадать с серверным aiAgentOpenDbs() (index.php):
+        // разойдутся — клиент покажет кнопку, а сервер ответит 403. Отключается удалением
+        // имени базы отсюда И оттуда.
         isAgentAllowed: function () {
             var u = this.getCurrentUserName().toLowerCase();
             var d = this.getCurrentDbName().toLowerCase();
-            return u !== '' && u === d;
+            if (u === '') return false;
+            if (AI_AGENT_OPEN_DBS.indexOf(d) !== -1) return true;
+            return u === d;
         },
 
         getXsrfToken: function () {
