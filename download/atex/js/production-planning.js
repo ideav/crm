@@ -21738,6 +21738,119 @@
             }).then(splitBump).catch(softSkip); };
         });
 
+        // #4628: ДОЛЯ ОБЕСПЕЧЕНИЯ ИДЁТ ЗА ПРОХОДАМИ И ТАМ, ГДЕ ПРОДОЛЖЕНИЙ НЕ РОЖДАЕТСЯ.
+        //
+        // Доли сегментов раскладывает `splitSupplyShares` — но зовёт её ТОЛЬКО create-путь (ниже,
+        // шаг 2a). Когда упаковщик перераспределяет проходы между УЖЕ существующими звеньями
+        // цепочки (creates нет, одни updates), проходы переписываются, а «Кол-во рулонов»
+        // обеспечения остаётся от ПРЕЖНЕГО разбиения.
+        //
+        // Боевое (ateh, 06.08.2026, после «Упорядочить»): 8 звеньев в 4 цепочках. Заказ 4455 —
+        // проходы 13/142/45, а доли 195/2055/750 (под 13/137/50, прежнее разбиение); заказ 4567 —
+        // проходы 2/3, доли 29/116 (под 1/4). Σ по цепочке при этом верна, поэтому §15
+        // (SUPPLY_CONSERVED) молчит и недобора нет — расходится ПОЗВЕННОЕ распределение, а именно
+        // его читает разбиение по дням (#4536: доля звена — это его доля работы).
+        //
+        // Инвариант: доля звена = его проходам. Считаем ТОЙ ЖЕ `splitSupplyShares` и по тем же
+        // ключам, что create-путь, — второй арифметики распределения не заводим (#4499).
+        // Область: только цепочки, у которых проходы менялись и продолжений не рождается (у
+        // остальных доли уже пишет create-путь — иначе одну запись писали бы дважды).
+        var shareFixTasks = (function() {
+            if (!supMeta) return [];
+            var runsAfter = {}, changedChains = {}, chainMembers = {};
+            (self.cuts || []).forEach(function(c) {
+                if (!c || c.id == null) return;
+                var id = String(c.id);
+                runsAfter[id] = Number(c.plannedRuns) || 0;
+                var ch = chainHeadById[id] || id;
+                (chainMembers[ch] = chainMembers[ch] || []).push(id);
+            });
+            (ops.updates || []).forEach(function(u) {
+                var id = String(u.cutId);
+                if (u.plannedRuns == null) return;
+                var was = runsAfter[id];
+                runsAfter[id] = Number(u.plannedRuns) || 0;
+                var ch = chainHeadById[id] || id;
+                if (Number(was) !== runsAfter[id]) changedChains[ch] = true;
+            });
+            // Цепочки, где рождаются продолжения, пропускаем — их доли пишет create-путь.
+            Object.keys(createsByParent).forEach(function(parentId) {
+                delete changedChains[chainHeadById[String(parentId)] || String(parentId)];
+            });
+            // #4158: цепочки, где звенья СНИМАЮТСЯ, тоже не наши. При схлопывании действует своё
+            // правило консервации — долю удаляемого сегмента поглощает голова, а реюзнутое
+            // продолжение хранит свою долю; пропорциональная раскладка это правило ломает
+            // (поймано `atex-production-planning-4158`). Наш случай — чистое ПЕРЕраспределение
+            // проходов между существующими звеньями, без рождения и снятия записей.
+            var deleted = {};
+            (ops.deletes || []).forEach(function(id) {
+                deleted[String(id)] = true;
+                delete changedChains[chainHeadById[String(id)] || String(id)];
+            });
+
+            var tasks = [];
+            Object.keys(changedChains).forEach(function(ch) {
+                var seg = (chainMembers[ch] || []).filter(function(id) { return !deleted[id]; });
+                if (seg.length < 1) return;
+                // Порядок звеньев — по плановому старту ПОСЛЕ операций: доли раскладываются по
+                // сегментам в том же порядке, в каком они идут в плане.
+                var startAfter = {};
+                seg.forEach(function(id) {
+                    var c = cutsById[id];
+                    startAfter[id] = Number(c && c.planDate) || 0;
+                });
+                (ops.updates || []).forEach(function(u) {
+                    var ts = Number(u.planStartTs);
+                    if (isFinite(ts) && ts > 0 && startAfter[String(u.cutId)] != null) startAfter[String(u.cutId)] = ts;
+                });
+                seg.sort(function(a, b) { return (startAfter[a] - startAfter[b]) || (Number(a) - Number(b)); });
+                var segRuns = seg.map(function(id) { return runsAfter[id] || 0; });
+
+                // Обеспечения цепочки группируем по ПОЗИЦИИ: одно задание может покрывать
+                // несколько позиций, и доля каждой делится независимо.
+                var byPosition = {};
+                seg.forEach(function(id) {
+                    (self.supplies || []).forEach(function(s) {
+                        if (!s || String(s.cutId) !== id) return;
+                        var pid = String(s.positionId == null ? '' : s.positionId);
+                        (byPosition[pid] = byPosition[pid] || []).push({ seg: id, s: s });
+                    });
+                });
+                Object.keys(byPosition).forEach(function(pid) {
+                    var rows = byPosition[pid];
+                    var totalRolls = 0, totalFootage = 0, known = false;
+                    rows.forEach(function(r) {
+                        if (r.s.rolls != null && r.s.rolls !== '') { known = true; totalRolls += Number(r.s.rolls) || 0; }
+                        totalFootage += Number(r.s.footage) || 0;
+                    });
+                    if (!known) return;   // количество неизвестно — не выдумываем (#4536)
+                    var shares = splitSupplyShares(totalRolls, totalFootage, segRuns);
+                    rows.forEach(function(r) {
+                        var i = seg.indexOf(r.seg);
+                        var sh = shares[i] || { rolls: 0, footage: 0 };
+                        var wasRolls = Number(r.s.rolls) || 0, wasFootage = Number(r.s.footage) || 0;
+                        if (Math.round(wasRolls) === Math.round(sh.rolls || 0)
+                            && round3(wasFootage) === round3(sh.footage || 0)) return;   // уже верно — не пишем
+                        tasks.push(function() {
+                            var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                                finishedBatchId: r.s.finishedBatchId,
+                                footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                                active: '1', status: SUPPLY_STATUSES[0]
+                            });
+                            return self.post('_m_set/' + r.s.id + '?JSON', f).then(function() {
+                                return planJournal(self, {
+                                    event: 'SHARE_FIX', cut: r.seg, before: wasRolls, after: sh.rolls,
+                                    details: '#4628: доля обеспечения приведена к проходам звена (' +
+                                        wasRolls + ' → ' + sh.rolls + ' рулонов при ' + (runsAfter[r.seg] || 0) + ' проходах)'
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+            return tasks;
+        })();
+
         // 2) Создать записи-продолжения с копией Полос и долей Обеспечения. Каждая родительская
         // цепочка (parentId) — независимая задача; ВНУТРИ (loadStrips → уменьшить A → Партии ГП →
         // сегменты B с детьми/обеспечениями) запросы связаны и остаются последовательными.
@@ -21999,6 +22112,13 @@
             return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
             return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
+        }).then(function() {
+            // #4628: доли обеспечения — ПОСЛЕ проходов: они считаются по итоговым числам звеньев.
+            // Отдельной фазой, а не внутри update-задачи, потому что доля звена зависит от ВСЕЙ
+            // цепочки (Σ рулонов позиции делится между сегментами), а update видит одну запись.
+            if (!shareFixTasks.length) return null;
+            console.log('[pp] 🧮 #4628: доля обеспечения приводится к проходам звена — записей:', shareFixTasks.length);
+            return runWithConcurrency(shareFixTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
             return journalApplyDetails(self, jSnapshot, ops);
         }).then(function() { return self.reload(); }).then(function() {
