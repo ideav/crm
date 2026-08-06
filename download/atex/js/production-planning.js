@@ -2963,6 +2963,251 @@
         });
     }
 
+
+    // ── #4618: ЖУРНАЛ РАССЛЕДОВАНИЯ ПЛАНА ──────────────────────────────────────────────
+    //
+    // Зачем. Потерянные проходы (#4552, #4598, #4616) и разорванные 🔒-задания (#4617)
+    // расследуются ПОСЛЕ факта, по остаткам в базе: «Тайминг» помнит одно число, «Кол-во
+    // резок план» стои́т другое, продолжения нет — и кто его снял, восстановить нечем.
+    // Консоль браузера не годится: она живёт до перезагрузки страницы и до диспетчера не
+    // доезжает. Поэтому каждое изменение плана пишется В БАЗУ, в таблицу «Журнал».
+    //
+    // Что пишем — ровно то, чем доказывается пропажа работы:
+    //   SESSION       — начало действия (кнопка, пользователь, сколько операций несёт)
+    //   RUNS_CHANGE   — у задания меняется «Кол-во резок план»: было → стало
+    //   CHAIN_CREATE  — рождение продолжения (родитель, сколько проходов уносит)
+    //   CHAIN_DELETE  — снятие сегмента (сколько проходов на нём стояло)
+    //   OP_DROPPED    — операцию снял страж (правило реестра §15, режим `drop`)
+    //   CHAIN_BALANCE — Σ проходов цепочки ДО и ПОСЛЕ операций; расхождение = потеря
+    //   SETTLE_SPLIT  — «Урегулировать» делит частично выполненное: сделано + остаток
+    //   DAY_OVER      — станко-день выше потолка смены по ХРАНИМЫМ минутам
+    //
+    // Правила поведения (нарушение любого хуже, чем отсутствие журнала):
+    //   • нет таблицы «Журнал» в базе — журнал молчит и НИЧЕГО не ломает (в ateh1 её нет);
+    //   • ни одна ошибка записи не доходит до действия — журнал не вправе сорвать план;
+    //   • записи идут ПОСЛЕ основной работы и по одной, чтобы не занимать пул записи
+    //     (#4477/#4480: семафор в post(), пул 5);
+    //   • потолок JOURNAL_MAX_ROWS на действие — генерация на 200 заданий не должна
+    //     превращаться в тысячи строк журнала.
+    //
+    // Таблица заводится в базе руками (ateh: «Журнал», id 665850) — код находит её ПО ИМЕНИ
+    // и по именам колонок, поэтому пересборка базы его не ломает и id никуда не зашиты.
+    var JOURNAL_TABLE = 'Журнал';
+    var JOURNAL_REQ = {
+        session: 'Сессия', action: 'Действие', event: 'Событие', cut: 'Задание',
+        order: 'Заказ', slitter: 'Станок', day: 'День', before: 'Было', after: 'Стало',
+        details: 'Детали', user: 'Пользователь'
+    };
+    var JOURNAL_MAX_ROWS = 400;      // строк на одно действие
+    var JOURNAL_DETAILS_MAX = 900;   // символов в «Детали»
+
+    // Метаданные журнала: таблица и id колонок ПО ИМЕНАМ. Нет таблицы → null (журнал молчит).
+    // Результат кэшируем на контроллере: metadata читается один раз за загрузку.
+    function journalMeta(ctx) {
+        if (!ctx) return null;
+        if (ctx._journalMeta !== undefined) return ctx._journalMeta;
+        var meta = tableByName(ctx._metaAll || [], JOURNAL_TABLE);
+        if (!meta || meta.id == null) { ctx._journalMeta = null; return null; }
+        var reqs = {};
+        Object.keys(JOURNAL_REQ).forEach(function(k) { reqs[k] = reqIdByName(meta, JOURNAL_REQ[k]); });
+        ctx._journalMeta = { meta: meta, reqs: reqs };
+        return ctx._journalMeta;
+    }
+
+    // Одно нажатие кнопки = одна «Сессия». Метка человекочитаемая: действие + время старта,
+    // чтобы в таблице строки одного действия отбирались фильтром по колонке.
+    function journalSession(ctx, action) {
+        if (!ctx) return '';
+        var op = String(action || (ctx._ppOp || 'plan'));
+        if (!ctx._journalSession || ctx._journalSessionOp !== op) {
+            ctx._journalSessionOp = op;
+            ctx._journalSession = op + '-' + Math.floor(Date.now() / 1000);
+            ctx._journalRows = 0;
+        }
+        return ctx._journalSession;
+    }
+    // Новое действие — новая сессия (зовём в начале действия, до первых записей).
+    function journalBegin(ctx, action) {
+        if (!ctx) return '';
+        ctx._journalSessionOp = null;
+        ctx._journalSession = null;
+        return journalSession(ctx, action);
+    }
+
+    function journalText(v) {
+        if (v == null) return '';
+        var s = typeof v === 'string' ? v : (function() { try { return JSON.stringify(v); } catch (e) { return String(v); } })();
+        return s.length > JOURNAL_DETAILS_MAX ? s.slice(0, JOURNAL_DETAILS_MAX) + '…' : s;
+    }
+    function journalNum(v) {
+        if (v == null || v === '') return null;
+        var n = Number(v);
+        return isFinite(n) ? String(Math.round(n)) : null;
+    }
+
+    // Одна строка журнала. rec: { event, cut, order, slitter, day, before, after, details }.
+    // Возвращает Promise, который НИКОГДА не реджектится (журнал не вправе сорвать действие).
+    function planJournal(ctx, rec) {
+        var jm = journalMeta(ctx);
+        if (!jm || !rec) return Promise.resolve(false);
+        if ((ctx._journalRows || 0) >= JOURNAL_MAX_ROWS) return Promise.resolve(false);
+        ctx._journalRows = (ctx._journalRows || 0) + 1;
+        var r = jm.reqs, f = {};
+        function put(id, val) { if (id && val != null && val !== '') f['t' + id] = val; }
+        put(r.session, journalSession(ctx));
+        put(r.action, String(ctx._ppOp || ''));
+        put(r.event, String(rec.event || ''));
+        put(r.cut, journalNum(rec.cut));
+        put(r.order, rec.order == null ? '' : String(rec.order));
+        put(r.slitter, rec.slitter == null ? '' : String(rec.slitter));
+        put(r.day, rec.day == null ? '' : String(rec.day));
+        put(r.before, journalNum(rec.before));
+        put(r.after, journalNum(rec.after));
+        put(r.details, journalText(rec.details));
+        put(r.user, String((ctx.user && (ctx.user.name || ctx.user.login)) || ctx.userName || ''));
+        f = addMainValueField(jm.meta, f, Math.floor(Date.now() / 1000));
+        return ctx.post('_m_new/' + jm.meta.id + '?JSON&up=1', f)
+            .then(function() { return true; })
+            .catch(function(err) {
+                if (typeof console !== 'undefined' && console.warn) {
+                    console.warn('[pp] #4618 журнал не записан: ' + (err && err.message));
+                }
+                return false;   // журнал молчит, но действие продолжается
+            });
+    }
+
+    // Пачка строк — последовательно, чтобы не занимать пул записи плана.
+    function planJournalRows(ctx, rows) {
+        if (!journalMeta(ctx) || !rows || !rows.length) return Promise.resolve(0);
+        var n = 0;
+        return rows.reduce(function(p, rec) {
+            return p.then(function() { return planJournal(ctx, rec); }).then(function(ok) { if (ok) n++; });
+        }, Promise.resolve()).then(function() { return n; });
+    }
+
+    // Σ проходов по цепочкам ДО и ПОСЛЕ набора операций — та же арифметика, которой страж
+    // держит целостность разорванного задания (`planWorkBalanceByChain`, #4536), но здесь она
+    // нужна как СВИДЕТЕЛЬ: расхождение = работа исчезла, и в журнале видно, на каком звене.
+    //   cuts — снимок заданий ДО (self.cuts), ops — операции плана.
+    // → [{ chainId, before, after, delta }] только по цепочкам, которых операции касались.
+    function journalChainBalance(cuts, ops) {
+        var byId = {}, chainOf = {};
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var id = String(c.id);
+            byId[id] = c;
+            var fp = String(c.firstPartId == null ? '' : c.firstPartId).trim();
+            chainOf[id] = fp !== '' ? fp : id;
+        });
+        var touched = {};
+        var before = {}, after = {};
+        function runsOf(c) { var n = Number(c && c.plannedRuns); return isFinite(n) ? n : 0; }
+        Object.keys(byId).forEach(function(id) {
+            var ch = chainOf[id];
+            before[ch] = (before[ch] || 0) + runsOf(byId[id]);
+            after[ch] = (after[ch] || 0) + runsOf(byId[id]);
+        });
+        ((ops && ops.updates) || []).forEach(function(u) {
+            var id = String(u.cutId), ch = chainOf[id];
+            if (ch == null) return;
+            touched[ch] = true;
+            after[ch] = (after[ch] || 0) - runsOf(byId[id]) + (Number(u.plannedRuns) || 0);
+        });
+        ((ops && ops.creates) || []).forEach(function(cr) {
+            var ch = chainOf[String(cr.parentCutId)];
+            if (ch == null) return;
+            touched[ch] = true;
+            after[ch] = (after[ch] || 0) + (Number(cr.plannedRuns) || 0);
+        });
+        ((ops && ops.deletes) || []).forEach(function(id) {
+            var ch = chainOf[String(id)];
+            if (ch == null) return;
+            touched[ch] = true;
+            after[ch] = (after[ch] || 0) - runsOf(byId[String(id)]);
+        });
+        return Object.keys(touched).map(function(ch) {
+            return { chainId: ch, before: before[ch] || 0, after: after[ch] || 0,
+                     delta: (after[ch] || 0) - (before[ch] || 0) };
+        });
+    }
+
+    // Что снял страж: разница исходных операций и прошедших. Отдельно помечаем снятый `create` —
+    // именно он оставляет урезанную голову без продолжения (корень #4536/#4598).
+    //   before — операции ДО стража, guard — результат guardPlanOps.
+    function journalGuardDrops(ctx, before, guard) {
+        if (!journalMeta(ctx) || !before || !guard) return Promise.resolve(0);
+        var after = guard.ops || {};
+        var keptU = {}, keptC = {}, keptD = {};
+        ((after.updates) || []).forEach(function(u) { keptU[String(u.cutId)] = true; });
+        ((after.creates) || []).forEach(function(c) { keptC[String(c.parentCutId) + '|' + c.plannedRuns] = true; });
+        ((after.deletes) || []).forEach(function(id) { keptD[String(id)] = true; });
+        var rules = (guard.violations || []).map(function(v) { return v && v.rule; }).filter(Boolean);
+        var why = rules.length ? ' правила: ' + rules.slice(0, 6).join(', ') : '';
+        var rows = [];
+        ((before.updates) || []).forEach(function(u) {
+            if (keptU[String(u.cutId)]) return;
+            rows.push({ event: 'OP_DROPPED', cut: u.cutId, after: u.plannedRuns,
+                        details: 'снят update (проходов должно было стать ' + u.plannedRuns + ')' + why });
+        });
+        ((before.creates) || []).forEach(function(c) {
+            if (keptC[String(c.parentCutId) + '|' + c.plannedRuns]) return;
+            rows.push({ event: 'OP_DROPPED', cut: c.parentCutId, after: c.plannedRuns,
+                        details: '⛔ снят CREATE продолжения на ' + c.plannedRuns +
+                                 ' проходов — голова останется без остатка' + why });
+        });
+        ((before.deletes) || []).forEach(function(id) {
+            if (keptD[String(id)]) return;
+            rows.push({ event: 'OP_DROPPED', cut: id, details: 'снят delete' + why });
+        });
+        if ((guard.restoredChains || []).length) {
+            rows.push({ event: 'OP_DROPPED', before: (guard.restoredChains || []).length,
+                        details: '#4536: операции сняты ЦЕЛИКОМ по цепочкам ' + (guard.restoredChains || []).join(', ') });
+        }
+        return planJournalRows(ctx, rows);
+    }
+
+    // Подробности одного применения плана. snapshot — задания ДО (id, plannedRuns, firstPartId),
+    // ops — что применяли. Пишем ТОЛЬКО значимое: изменение проходов, рождение и снятие
+    // сегментов, и баланс цепочки. Ровный баланс сводим в одну строку — сотни строк «сошлось»
+    // прячут ту единственную, где не сошлось.
+    function journalApplyDetails(ctx, snapshot, ops) {
+        if (!journalMeta(ctx)) return Promise.resolve(0);
+        var byId = {};
+        (snapshot || []).forEach(function(c) { byId[String(c.id)] = c; });
+        var runsOf = function(id) {
+            var c = byId[String(id)];
+            var n = Number(c && c.plannedRuns);
+            return isFinite(n) ? n : null;
+        };
+        var rows = [];
+        ((ops && ops.updates) || []).forEach(function(u) {
+            var was = runsOf(u.cutId), now = Number(u.plannedRuns);
+            if (u.plannedRuns == null || was == null || was === now) return;
+            rows.push({ event: 'RUNS_CHANGE', cut: u.cutId, before: was, after: now,
+                        details: 'проходов ' + was + ' → ' + now + (now < was ? ' (урезано на ' + (was - now) + ')' : '') });
+        });
+        ((ops && ops.creates) || []).forEach(function(cr) {
+            rows.push({ event: 'CHAIN_CREATE', cut: cr.parentCutId, after: cr.plannedRuns,
+                        details: 'продолжение от ' + cr.parentCutId + ' на ' + cr.plannedRuns + ' проходов' });
+        });
+        ((ops && ops.deletes) || []).forEach(function(id) {
+            rows.push({ event: 'CHAIN_DELETE', cut: id, before: runsOf(id),
+                        details: 'снят сегмент, на нём стояло проходов: ' + (runsOf(id) == null ? '?' : runsOf(id)) });
+        });
+        var bal = journalChainBalance(snapshot, ops);
+        var broken = bal.filter(function(b) { return b.delta !== 0; });
+        broken.forEach(function(b) {
+            rows.push({ event: 'CHAIN_BALANCE', cut: b.chainId, before: b.before, after: b.after,
+                        details: '⛔ РАБОТА НЕ СОХРАНЕНА: цепочка ' + b.chainId + ' — было ' + b.before +
+                                 ' проходов, стало ' + b.after + ' (' + (b.delta > 0 ? '+' : '') + b.delta + ')' });
+        });
+        if (bal.length) {
+            rows.push({ event: 'CHAIN_BALANCE', before: bal.length, after: broken.length,
+                        details: 'цепочек затронуто ' + bal.length + ', баланс сошёлся у ' +
+                                 (bal.length - broken.length) + ', сломан у ' + broken.length });
+        }
+        return planJournalRows(ctx, rows);
+    }
     // ── Реестр жёстких правил планирования (ТЗ §15) ──────────────────────────────────────────
     //
     // ЗАЧЕМ ОТДЕЛЬНЫМ МОДУЛЕМ. Правило «автоматика не лезет в замороженный день» возвращалось
@@ -12898,6 +13143,9 @@
         // #4536: баланс работы задания по операциям плана — по нему страж держит целостность
         // разорванного по дням задания (проверяется тестом `atex-pp-4536-supply-conservation`).
         planWorkBalanceByChain: planWorkBalanceByChain,
+        // #4618: свидетель журнала — Σ проходов цепочки ДО и ПОСЛЕ операций. Чистая, поэтому
+        // проверяется тестом `atex-pp-4618-journal-balance.test.js` без сети и без базы.
+        journalChainBalance: journalChainBalance,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
@@ -13239,6 +13487,9 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
+        // #4618: имя диспетчера — в журнал расследования плана. Шаблон отдаёт его в data-user
+        // (`{_global_.user}`) с самого начала, читать его до сих пор было некому.
+        this.userName = root.getAttribute('data-user') || '';
         this.meta = {
             cut: null,
             supply: null,
@@ -15616,6 +15867,23 @@
     //     result:  { before, after },   // computeQualityStats до/после проекции
     //     stop:    { code, text }
     //   }
+    // #4622: ШТРАФ КАНДИДАТА ЗА НАРУШЕНИЯ §15 — без унаследованного перебора дней.
+    // Правила делятся надвое:
+    //   • DAY_CAPACITY — «в дне не хватило места». Это не порок кандидата, а состояние плана:
+    //     лишнее обязано ехать в следующий день. Кандидат отвечает лишь за то, что ДОБАВИЛ сверх
+    //     уже переполненных станко-дней (capBefore);
+    //   • все прочие (🔒-монолит FIXED_BLOCK, FIXED_NO_PUSH, CHAIN_CONTIGUOUS, SUPPLY_CONSERVED…)
+    //     — пороки самого кандидата, вето по ним АБСОЛЮТНОЕ и осталось прежним (#4471/#4464).
+    //   list — нарушения кандидата, capBefore — переполненных станко-дней в записанном плане.
+    // → число, которое идёт в объектив с весом RULE_BREAK_WEIGHT.
+    function effectiveRuleBreaks(list, capBefore) {
+        var cap = 0, other = 0;
+        (list || []).forEach(function(v) {
+            if (v && v.rule === 'DAY_CAPACITY') cap++; else other++;
+        });
+        return other + Math.max(0, cap - (Number(capBefore) || 0));
+    }
+
     function formatOptimizeTrace(trace) {
         var t = trace || {};
         var out = [];
@@ -15627,7 +15895,7 @@
         // срок §14 старше упаковки дня #4469, упаковка старше переналадки — см. веса
         // DOWNTIME_CONFLICT_WEIGHT/LATE_DAY_WEIGHT/UNDERFILL_DAY_WEIGHT): сперва задания в окне
         // «Отпуска», затем дни опоздания, затем недоупакованные дни, при равных — минуты переналадки.
-        function verdict(late, co, s, downtime, underfilled, underfilledRuleBreaks) {
+        function verdict(late, co, s, downtime, underfilled, underfilledRuleBreaks, byRule) {
             var dLate = round3(Number(late) - Number(s.lateBefore));
             var dCo = round3(Number(co) - Number(s.coBefore));
             var dtNow = Number(downtime), dtWas = Number(s.downtimeBefore);
@@ -15635,8 +15903,14 @@
                 return (dtNow < dtWas ? 'ЛУЧШЕ' : 'ХУЖЕ') + ': в окне «Отпуска» ' + dtWas + ' → ' + dtNow
                     + ' заданий (станок в это время не работает — старше срока)';
             }
-            if (Number(underfilledRuleBreaks) > 0) {
-                return 'ХУЖЕ: план нарушает жёсткое правило ТЗ §15 — применять нельзя';
+            // #4622: ОТКАЗ — ТОЛЬКО ЗА НОВОЕ НАРУШЕНИЕ, а не за унаследованное. «Упорядочить» —
+            // РУЧНОЕ действие, а ручное действие отказа не получает (решение заказчика 02.08 и
+            // 05.08.2026): «если ручное действие говорит, что надо что-то подвинуть в будущее —
+            // двигаем безусловно». Сравниваем с числом нарушений ХРАНИМОГО плана (s.ruleBreaksBefore).
+            // Та же мерка, что в объективе: унаследованный перебор дней отказом не является,
+            // остальные жёсткие правила ветируют абсолютно.
+            if (effectiveRuleBreaks(byRule, s.capacityBreaksBefore) > 0) {
+                return 'ХУЖЕ: кандидат ДОБАВЛЯЕТ нарушение ТЗ §15 — применять нельзя';
             }
             if (dLate < 0) return 'ЛУЧШЕ: опозданий ' + num(dLate) + ' дн';
             if (dLate > 0) return 'ХУЖЕ: опозданий +' + num(dLate) + ' дн (срок старше переналадки)';
@@ -15662,7 +15936,10 @@
                     + ((s.downtimeIds || []).length ? ' (' + s.downtimeIds.join(', ') + ')' : '') : '')
                 // #4469: то же для дней, не набитых до потолка смены.
                 + (s.underfilledBefore ? ', недоупакованных дней ' + s.underfilledBefore
-                    + ((s.underfilledDays || []).length ? ' (' + s.underfilledDays.join(', ') + ')' : '') : ''));
+                    + ((s.underfilledDays || []).length ? ' (' + s.underfilledDays.join(', ') + ')' : '') : '')
+                // #4622: нарушения §15 УЖЕ ЗАПИСАННОГО плана — база, с которой сравнивается кандидат.
+                // Без неё в логе не видно, за СВОЁ ли нарушение отвергли кандидата или за чужое.
+                + (s.capacityBreaksBefore ? ', переполненных станко-дней в текущем плане: ' + s.capacityBreaksBefore : ''));
         }
         (t.candidates || []).forEach(function(c) {
             var head = 'КАНДИДАТ ' + c.key + ' (' + c.title + ')';
@@ -15677,7 +15954,7 @@
                     + ((c.downtimeIds || []).length ? ' (' + c.downtimeIds.join(', ') + ')' : '') : '')
                 + ((c.underfilled || s.underfilledBefore) ? ', недоупаковано дней ' + (c.underfilled || 0)
                     + ((c.underfilledDays || []).length ? ' (' + c.underfilledDays.join(', ') + ')' : '') : '')
-                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled, c.ruleBreaks));
+                + ' → ' + verdict(c.late, c.changeover, s, c.downtime, c.underfilled, c.ruleBreaks, c.ruleBreakList));
         });
         var ch = t.choice || {};
         out.push(ch.action === 'none' || !ch.action
@@ -15987,6 +16264,9 @@
         // У ХРАНИМОГО плана их не меряем — операций нет; вето односторонне и намеренно: применять
         // план, ломающий правило, нельзя, даже если текущий не идеален.
         var rbB = [], rbA = [];
+        // #4622: нарушения ХРАНИМОГО плана — база, с которой сравнивается кандидат.
+        // #4622: сколько станко-дней ЗАПИСАННОГО плана уже за потолком — база для DAY_CAPACITY.
+        var capBefore = 0;
         // #4402: решение упаковщика по хвостам ТЕКУЩЕГО плана — buildSequenceOps ниже его перепишет
         // под кандидата; по «Отменить» возвращаем вместе со снимком очереди (иначе колонки наладки
         // считались бы по хвостам непринятого плана).
@@ -16007,6 +16287,16 @@
             lateBefore = self.planLatenessDays(self.cuts, null);
             dtBefore = self.planDowntimeConflicts(self.cuts, null);
             ufBefore = self.planUnderfilledDays(self.cuts, null);
+            // #4622: ПЕРЕПОЛНЕННЫЕ ДНИ, КОТОРЫЕ УЖЕ ЕСТЬ В ЗАПИСАННОМ ПЛАНЕ. Кандидат не обязан
+            // их чинить и не должен за них отвечать: «если ручное действие говорит, что надо
+            // что-то подвинуть в будущее — двигаем безусловно» (решение заказчика 02.08 и
+            // 05.08.2026). Прежде DAY_CAPACITY кандидата ветировался абсолютно, и план, однажды
+            // попавший за потолок, запирался НАВСЕГДА: боевая ateh 05.08.2026 — 9 станко-дней сверх
+            // потолка, 1642 дня опозданий, «Упорядочить» не делает ничего, хотя кандидат был лучше
+            // по всем меркам и чинил главный перебор (Станок 2, 10.08: 620 → 537 мин).
+            // Меряем ХРАНИМЫЙ план той же меркой, что и подсветка дня (#4531 overfilledDaysFromCuts),
+            // а не пересборкой — второй арифметики не заводим (#4499).
+            capBefore = self.capacityBreaksStored();
             before = combined(dtBefore.length, 0, lateBefore, ufBefore.length, coBefore);
             trace.start = {
                 cutCount: (self.cuts || []).length,
@@ -16015,7 +16305,10 @@
                 windowLabel: self.optimizeWindowLabel(),
                 lateBefore: round3(lateBefore), coBefore: round3(coBefore),
                 downtimeBefore: dtBefore.length, downtimeIds: dtBefore.slice(0, 10),
-                underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10)
+                underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10),
+                // #4622: сколько жёстких правил §15 нарушает УЖЕ ЗАПИСАННЫЙ план — по этому числу
+                // судится кандидат: отказ только за НОВОЕ нарушение.
+                capacityBreaksBefore: capBefore
             };
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
@@ -16027,11 +16320,12 @@
             dtB = self.planDowntimeConflicts(self.cuts, builtB.ops);
             ufB = self.planUnderfilledDays(self.cuts, builtB.ops);
             rbB = (builtB.ops && builtB.ops.ruleBreaks) || [];
-            objB = combined(dtB.length, rbB.length, lateB, ufB.length, coB);
+            objB = combined(dtB.length, effectiveRuleBreaks(rbB, capBefore), lateB, ufB.length, coB);
             trace.candidates.push({ key: 'B', title: 'порядок/дни на текущих станках',
                 late: round3(lateB), changeover: round3(coB), downtime: dtB.length, underfilled: ufB.length,
                 downtimeIds: dtB.slice(0, 10), underfilledDays: ufB.slice(0, 10),   // #4471: поимённо
-                ruleBreaks: rbB.length, ruleBreakMsgs: rbB.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
+                ruleBreaks: rbB.length, ruleBreakList: rbB,
+                ruleBreakMsgs: rbB.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
@@ -16055,12 +16349,13 @@
                 dtA = self.planDowntimeConflicts(self.cuts, builtA.ops);
                 ufA = self.planUnderfilledDays(self.cuts, builtA.ops);
                 rbA = (builtA.ops && builtA.ops.ruleBreaks) || [];
-                objA = combined(dtA.length, rbA.length, lateA, ufA.length, coA);
+                objA = combined(dtA.length, effectiveRuleBreaks(rbA, capBefore), lateA, ufA.length, coA);
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
                     reassignCount: Object.keys(plan.slitterByRecordId || {}).length,
                     late: round3(lateA), changeover: round3(coA), downtime: dtA.length, underfilled: ufA.length,
                     downtimeIds: dtA.slice(0, 10), underfilledDays: ufA.slice(0, 10),   // #4471: поимённо
-                    ruleBreaks: rbA.length, ruleBreakMsgs: rbA.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
+                    ruleBreaks: rbA.length, ruleBreakList: rbA,
+                    ruleBreakMsgs: rbA.slice(0, 5).map(function(v){ return v.rule + ': ' + v.msg; }) });
                 Object.keys(saved).forEach(function(mid) { var c = cutsById[mid]; if (c) c.slitter = saved[mid]; });   // вернуть станки
             } else {
                 trace.candidates.push({ key: 'A', title: 'со сменой станка',
@@ -17375,6 +17670,19 @@
             }
         });
         ops.manual = true;   // #4588: это ручное действие — колонки пишем и в замороженном дне
+        // #4618: РАЗДЕЛЕНИЕ ЧАСТИЧНО ВЫПОЛНЕННОГО — в журнал ДО записи. Урезание головы попадает
+        // в `ops.updates` безусловно, а рождение остатка — только при `restRuns > 0`; если остаток
+        // не родится (снят стражем, умерла запись), в базе останется «план = факту», и по ней уже
+        // не сказать, сколько проходов задание несло. Эта строка и есть свидетель.
+        journalBegin(self, 'splitPartiallyDoneCuts');
+        planJournalRows(self, list.map(function(sp) {
+            var cut = byId[String(sp.id)];
+            var was = cut && cut.plannedRuns != null ? Number(cut.plannedRuns) : null;
+            return { event: 'SETTLE_SPLIT', cut: sp.id, before: was, after: sp.doneRuns,
+                     details: 'было проходов ' + (was == null ? '?' : was) + ' → сделано ' + sp.doneRuns +
+                              ', остаток ' + sp.restRuns +
+                              (sp.restRuns > 0 ? ' (создаём продолжение)' : ' (продолжение НЕ создаётся)') };
+        }));
         if (!ops.updates.length) return Promise.resolve({ count: 0, createdIds: [] });
         ops.onCreated = function(cr, newId) {
             if (cr && cr.splitOf) createdBySplit[String(cr.splitOf)] = String(newId);
@@ -21670,10 +21978,29 @@
         // его и потерять остаток», 00-core-data.js). Данные creates от updates не зависят: голову,
         // её партии, сырьё и намотку create-путь читает из ПАМЯТИ (cutsById/self.supplies) и из
         // БД до правок, а не из результата updates.
-        return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT).then(function() {
+        // #4618: НАМЕРЕНИЕ — в журнал ДО записи. Если действие умрёт на полпути (сеть, шлюз,
+        // отброшенная операция), по остаткам в базе уже не восстановить, что оно собиралось
+        // сделать; эта строка — единственный свидетель. Подробности пишем ПОСЛЕ фаз, чтобы не
+        // занимать пул записи плана (#4477/#4480).
+        var jSnapshot = (self.cuts || []).map(function(c) {
+            return { id: String(c.id), plannedRuns: c.plannedRuns, firstPartId: c.firstPartId };
+        });
+        journalBegin(self, 'applySplitPlan');
+        var jBegin = planJournal(self, {
+            event: 'SESSION', before: null, after: null,
+            details: 'операций: updates ' + ((ops.updates || []).length) +
+                ', creates ' + ((ops.creates || []).length) +
+                ', deletes ' + ((ops.deletes || []).length) +
+                (ops.manual ? ', ручное действие' : '')
+        });
+        return jBegin.then(function() {
+            return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT);
+        }).then(function() {
             return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
             return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
+        }).then(function() {
+            return journalApplyDetails(self, jSnapshot, ops);
         }).then(function() { return self.reload(); }).then(function() {
             return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
@@ -21732,6 +22059,15 @@
                 console.error('[pp] ⛔ #4497 станко-день ДЛИННЕЕ смены по ХРАНИМЫМ минутам',
                     { slitterId: sid, days: overfilledDaysBrief(days) });
             }
+            // #4618: переполненный день — в журнал. По нему видно, ради чего упаковщик рвал
+            // задания: если день ВСЁ РАВНО выше потолка, дробление цели не достигло (#4617).
+            planJournalRows(self, days.slice(0, 12).map(function(d) {
+                return { event: 'DAY_OVER', cut: d.cutId, slitter: self.slitterLabel ? self.slitterLabel(sid) : sid,
+                         day: d.dayOffset == null ? '' : String(d.dayOffset),
+                         before: d.capMin, after: d.endMin,
+                         details: 'день выше потолка на ' + d.overMin + ' мин (' + d.endMin +
+                                  ' при ' + d.capMin + '), последнее задание ' + d.cutId };
+            }));
         });
         // #4531: ОДНО сообщение на все станки. Прежде тост слался в цикле — по станку на каждый, и
         // оператор получал стопку одинаковых на вид предупреждений без единого имени станка.
@@ -22373,6 +22709,11 @@
                 }
             }, 'auto');
             if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
+            // #4618: ЧТО ИМЕННО СНЯЛ СТРАЖ — в журнал. Счётчика `skipped` для расследования мало:
+            // потеря проходов выглядит как «голова урезана, продолжения нет», и вопрос всегда один
+            // — сняли ли `create` продолжения. Состав считаем разницей исходных операций и
+            // прошедших, чтобы не менять реестр правил (#4515: страж работает для любого правила).
+            journalGuardDrops(self, ops, guard);
             // #4536: страж вернул задание целиком — часть его операций отбросило правило, и остаток
             // сняли, чтобы работа (а с ней и обеспечение заказа) не потерялась.
             if ((guard.restoredChains || []).length) {
@@ -23342,12 +23683,46 @@
                          overMin: Math.round(load - cap), capMin: ceil,
                          cutId: last.cut.id, seq: items.length, cut: last.cut };
             })
-            .filter(function(r) { return r.loadMin > cap + 1; });
+            // #4622: ПОРОГ ПОМЕТКИ — ТОТ ЖЕ, ЧТО У СООБЩЕНИЯ. Здесь стоял допуск `loadMin > cap + 1`:
+            // день на 456 мин при потолке 455 в шапке НЕ краснел (456 не больше 456), а тост про тот
+            // же день ругался — оператор видел «жалуется, а день чистый» и решал, что пометка сломана
+            // (боевая ateh 05.08.2026, Станок 1, Чт 06.08: тост «458 при потолке 455», шапка «(456 мин)»
+            // спокойным цветом). Меряем ровно тем числом, которое показываем: перебор ≥ 1 минуты —
+            // день переполнен, и пометка обязана гореть.
+            .filter(function(r) { return r.overMin >= 1; });
     }
 
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
     // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
+    // #4622: СКОЛЬКО СТАНКО-ДНЕЙ ЗАПИСАННОГО ПЛАНА УЖЕ ЗА ПОТОЛКОМ. База, с которой сравнивается
+    // DAY_CAPACITY кандидата в «Упорядочить»: за унаследованный перебор кандидат не отвечает
+    // (ручное действие отказа не получает), за добавленный — отвечает.
+    // Мерка — общая `overfilledDaysFromCuts` (#4531), та же, что красит шапку дня и печатает тост,
+    // поэтому число здесь и число на экране не могут разойтись (#4499).
+    // Стаб-self в юнит-тестах окна не читает — тогда 0, и вето остаётся абсолютным, как было.
+    // → число переполненных станко-дней.
+    AtexProductionPlanning.prototype.capacityBreaksStored = function() {
+        if (typeof this.workingWindow !== 'function') return 0;
+        var win = this.workingWindow() || {};
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        if (!isFinite(base)) return 0;
+        var bySlitter = {};
+        (this.cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            (bySlitter[sid] = bySlitter[sid] || []).push(c);
+        });
+        var n = 0;
+        Object.keys(bySlitter).forEach(function(sid) {
+            n += overfilledDaysFromCuts(bySlitter[sid], {
+                baseMidnightMs: base, cutEndMin: win.cutEndMin, maxOverworkCutsMin: win.maxOverworkCutsMin,
+                dayStartMin: win.startMin, lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin
+            }).length;
+        });
+        return n;
+    };
+
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
         var sid = String(slitterId == null ? '' : slitterId);
         var scopeIds = this.recalcScopeCutIds(sid, (opts && (opts.manual || opts.dayKeys))
