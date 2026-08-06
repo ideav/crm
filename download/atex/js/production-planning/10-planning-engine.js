@@ -4311,6 +4311,38 @@
         };
     }
 
+    // #4617: АРИФМЕТИКА ЦЕПОЧКИ на карточке — «проходов 1 из 5 · остальные 4 → 07.08».
+    // Разорванное по дням задание живёт НЕСКОЛЬКИМИ записями, и карточка показывала только свою:
+    // боевая ateh, Станок 2, 06.08.2026 — у заказов 4580/4567/4564/4561 в дне остался ОДИН проход,
+    // остальные 4–5 стояли отдельной записью на 07.08. Проходы целы, но по очереди это читалось как
+    // «потерянные резки»: значок «→» в углу не называет ни числа проходов, ни дня, куда уехал остаток.
+    // parts — записи цепочки (splitChainPartsOf), dateLabel(planDate) → подпись дня или ''.
+    // → { text, title } либо null (не разорвано / считать нечего). Чистая (без DOM) → покрыта тестом.
+    function daySplitChainNote(parts, cutId, dateLabel) {
+        var id = String(cutId == null ? '' : cutId);
+        var list = (parts || []).filter(function(p){ return p && p.id != null; });
+        if (id === '' || list.length < 2) return null;
+        function runsOf(p){ var n = Number(p && p.plannedRuns); return isFinite(n) && n > 0 ? n : 0; }
+        var mine = null, others = [];
+        list.forEach(function(p){ if (String(p.id) === id) mine = p; else others.push(p); });
+        if (!mine) return null;
+        var total = list.reduce(function(s, p){ return s + runsOf(p); }, 0);
+        if (!(total > 0)) return null;                       // наладочный хвост без проходов — считать нечего
+        var here = runsOf(mine), rest = total - here;
+        var labels = [];
+        others.forEach(function(p){
+            var lab = (typeof dateLabel === 'function') ? String(dateLabel(p.planDate) || '') : '';
+            if (lab && labels.indexOf(lab) === -1) labels.push(lab);
+        });
+        var where = labels.length ? ' → ' + labels.join(', ') : '';
+        return {
+            text: 'проходов ' + here + ' из ' + total + ' · остальные ' + rest + where,
+            title: 'Задание разорвано по дням на ' + list.length + ' части: здесь ' + here + ' из ' + total +
+                   ' проходов, остальные ' + rest + (labels.length ? ' — ' + labels.join(', ') : '') +
+                   '. Проходы не потеряны: части одного задания связаны, при переносе собираются в одно.'
+        };
+    }
+
     // #3737: недостающий сосед карточки через ВНЕШНЮЮ границу выбранного диапазона дат.
     // Сегмент-продолжение задания за границей диапазона лежит в дне ВНЕ фильтра — в очередь
     // он не попадает, но присутствует в полном наборе резок (cut_planning грузится целиком).

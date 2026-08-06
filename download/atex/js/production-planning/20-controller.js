@@ -124,6 +124,7 @@
         mergeableOrderGroups: mergeableOrderGroups,   // #4424: задания одного заказа+конфигурации → объединить по первому
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
+        daySplitChainNote: daySplitChainNote,   // #4617: «проходов 1 из 5 · остальные 4 → 07.08»
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
@@ -12575,6 +12576,18 @@
             if (splitWarn) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-fixed-split-warn',
                     title: splitWarn.title, text: splitWarn.text }));
+            }
+            // #4617: карточка куска называет арифметику цепочки — «проходов 1 из 5 · остальные 4 → 07.08».
+            // Значка «→» в углу мало: в боевой ateh (Станок 2, 06.08.2026) у четырёх заказов в дне
+            // остался ОДИН проход, остальные стояли отдельной записью на 07.08, и очередь читалась
+            // как «потерянные резки». Числа берём из САМИХ записей цепочки (splitChainPartsOf), а не
+            // из расписания: разрыв виден и когда вторая часть лежит вне выбранного диапазона дат.
+            var chainNote = daySplitChainNote(splitChainPartsOf(self.cuts || [], c.id), c.id, function(planDate) {
+                return formatPlanDayLabel(planDateIso(planDate));
+            });
+            if (chainNote) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note',
+                    title: chainNote.title, text: 'ℹ ' + chainNote.text }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
