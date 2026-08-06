@@ -9449,9 +9449,14 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
         );
     }
     validateAiProviderEndpoint($endpoint);
+    # "user" — тот, кто пишет в чат, и он НЕ обязан быть владельцем базы: с issue #4620
+    # базы из aiAgentOpenDbs() открыты любому аутентифицированному пользователю. Чтобы
+    # сервису агента не приходилось знать наш список, посылаем ему готовый ответ на его
+    # единственный вопрос — вправе ли здесь работать не-владелец (issue #4627).
     $request = array(
         "db" => $db,
         "user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "",
+        "open_db" => aiAgentIsOpenDb($db),
         "message" => $message,
         "attachments" => $attachments
     );
@@ -9969,12 +9974,34 @@ function aiChatPostJson($endpoint, $request, $headers, $timeout=60){
     curl_close($ch);
     if($errno)
         throw new Exception(t9n("[RU]Ошибка подключения к ИИ-сервису[EN]AI service connection error").": ".$error, 502);
-    if($httpCode >= 400){
-        $providerError = extractAiProviderError($raw);
-        throw new Exception(t9n("[RU]ИИ-сервис вернул ошибку[EN]AI service returned an error")." HTTP ".$httpCode.($providerError !== "" ? ": ".$providerError : ""), 502);
-    }
+    if($httpCode >= 400)
+        throw new Exception(aiProviderErrorMessage($httpCode, $raw, $endpoint), 502);
     return $raw;
 }
+# <ai-provider-error-4627>
+# Отказ внешнего ИИ-сервиса пользователь видит в чате как «чат не работает» и по тексту
+# принимает за проверку CRM. Поэтому называем хозяина отказа — хост endpoint'а, — а на 403
+# добавляем главное: доступ к базе CRM уже проверила и разрешила, значит правило живёт на
+# стороне сервиса (issue #4627: в открытой базе ateh сервис отвечал «Доступ только владельцу
+# базы», и поиск причины начинался с ядра, которое тут ни при чём).
+function aiProviderErrorMessage($httpCode, $raw, $endpoint = ""){
+    $httpCode = (int)$httpCode;
+    $providerError = extractAiProviderError($raw);
+    $host = "";
+    if((string)$endpoint !== ""){
+        $parts = parse_url((string)$endpoint);
+        $host = (is_array($parts) && isset($parts["host"])) ? $parts["host"] : "";
+    }
+    $msg = t9n("[RU]ИИ-сервис вернул ошибку[EN]AI service returned an error")
+         . ($host !== "" ? " (".$host.")" : "")
+         . " HTTP ".$httpCode
+         . ($providerError !== "" ? ": ".$providerError : "");
+    if($httpCode === 403)
+        $msg .= " — ".t9n("[RU]отказ вынес сам ИИ-сервис: доступ к базе CRM уже проверила и разрешила, правило доступа правится на его стороне"
+                         ."[EN]the refusal comes from the AI service itself: CRM has already checked and allowed the access, so the rule must be fixed on the service side");
+    return $msg;
+}
+# </ai-provider-error-4627>
 function extractAiProviderError($raw){
     $decoded = json_decode((string)$raw, true);
     if(is_array($decoded)){
