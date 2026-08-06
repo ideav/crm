@@ -329,7 +329,11 @@
     var SLEEVE_TASK_REQ = {
         cutter: 'Втулкорез',     // ref → «Втулкорез»; по диаметру подходит только TC-20
         qty: 'Кол-во',           // плановое кол-во втулок (= кол-во рулонов позиции)
-        batch: 'Партия сырья'    // FIFO-партия втулок (ref → «Партия сырья»)
+        batch: 'Партия сырья',   // FIFO-партия втулок (ref → «Партия сырья»)
+        // #4631: по этим трём видно, что задачу УЖЕ делали — такую не удаляют никогда.
+        started: 'Начато',
+        finished: 'Закончено',
+        fact: 'Кол-во факт'
     };
     var SLEEVE_CUTTER_NAME = 'TC-20'; // #3340: единственный подходящий втулкорез
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
@@ -5633,6 +5637,83 @@
     // #3340: задание на втулки нужно позициям, у которых есть тип втулки (sleeveId)
     // и он НЕ «готов» (sleeveReady пуст). qty = кол-во рулонов покрытия позиции.
     // → [{ positionId, sleeveId, qty }].
+    // #4631: КАКИМ ОБЯЗАН БЫТЬ НАБОР «ЗАДАЧ НА ВТУЛКИ» ПОЗИЦИИ. Одно правило на всех
+    // потребителей (генерация, создание задания вручную, удаление задания), чистая функция —
+    // поэтому проверяется тестом без сети и без базы.
+    //
+    // ЗАЧЕМ. Таблица «Задача на втулки» подчинена ПОЗИЦИИ, а запись создаётся при создании
+    // ЗАДАНИЯ, и связи «задача ↔ задание» в схеме нет. Пока никто не сверял набор с текущим
+    // планом, каждая перегенерация клала НОВЫЙ полный комплект поверх старого, а старый убрать
+    // было некому: в боевой ateh 06.08.2026 — 574 задачи при 212 позициях, 67 086 лишних втулок
+    // (заказ 4285: 18 задач на 11 376 втулок при заказе 1264).
+    //
+    // ПРАВИЛО. Втулка нужна КАЖДОМУ рулону, поэтому Σ «Кол-во» задач позиции == её заказанному
+    // количеству, а сами задачи повторяют ЗВЕНЬЯ резки (по задаче на звено, «Кол-во» = доле
+    // обеспечения звена). Работа, которую уже делали, неприкосновенна: задача с «Начато»,
+    // «Закончено» или «Кол-во факт» не удаляется НИКОГДА и вычитается из цели.
+    //
+    //   demand — «Заказанное количество» позиции;
+    //   tasks  — [{ id, qty, plannedTs, touched }] — что лежит в базе;
+    //   links  — [{ qty, plannedTs }] — звенья резки позиции (доли обеспечения), как надо.
+    // → { keep: [id], drop: [id], create: [{ qty, plannedTs }], reason }
+    //   drop — только НЕТРОНУТЫЕ лишние; create — чего не хватает до набора звеньев.
+    function planSleeveTaskReconcile(demand, tasks, links) {
+        var dem = Math.round(Number(demand) || 0);
+        var all = (tasks || []).map(function(t) {
+            return { id: t.id, qty: Math.round(Number(t.qty) || 0),
+                     plannedTs: Number(t.plannedTs) || 0, touched: !!t.touched };
+        });
+        var want = (links || []).map(function(l) {
+            return { qty: Math.round(Number(l.qty) || 0), plannedTs: Number(l.plannedTs) || 0 };
+        }).filter(function(l) { return l.qty > 0; });
+
+        var done = all.filter(function(t) { return t.touched; });
+        var free = all.filter(function(t) { return !t.touched; });
+        var keep = done.map(function(t) { return t.id; });
+        var fixed = done.reduce(function(s, t) { return s + t.qty; }, 0);
+
+        // Сколько ещё нужно закрыть задачами. Всё сделано (или переделано) — новых не заводим.
+        var target = dem - fixed;
+        if (!(target > 0)) {
+            return { keep: keep, drop: free.map(function(t) { return t.id; }), create: [], reason: 'всё покрыто выполненными' };
+        }
+        // Чего ждём от плана: звенья, ещё не закрытые выполненными задачами.
+        var need = want.slice();
+        done.forEach(function(t) {
+            for (var i = 0; i < need.length; i++) {
+                if (need[i].qty === t.qty) { need.splice(i, 1); return; }
+            }
+        });
+        // Совпадающие звенья закрываем СУЩЕСТВУЮЩИМИ задачами — сначала теми, что ближе по
+        // плановому старту: набор задач должен читаться как план резки, а не как случайный
+        // остаток. Свежесть (id) — тай-брейк: старые комплекты уходят первыми.
+        var used = {}, create = [];
+        need.forEach(function(n) {
+            var cand = free.filter(function(t) { return !used[t.id] && t.qty === n.qty; });
+            if (!cand.length) { create.push({ qty: n.qty, plannedTs: n.plannedTs }); return; }
+            cand.sort(function(a, b) {
+                return Math.abs(a.plannedTs - n.plannedTs) - Math.abs(b.plannedTs - n.plannedTs)
+                    || (Number(b.id) - Number(a.id));
+            });
+            used[cand[0].id] = true; keep.push(cand[0].id);
+        });
+        var drop = free.filter(function(t) { return !used[t.id]; }).map(function(t) { return t.id; });
+
+        // СТРАХОВКА. Звеньев может не быть вовсе (позиция ещё без заданий) или их сумма может
+        // расходиться с заказом (исторические данные). Удалять «лишнее» вслепую в этом случае
+        // нельзя — оставляем набор как есть и говорим об этом.
+        var plannedSum = keep.reduce(function(s, id) {
+            for (var i = 0; i < all.length; i++) if (all[i].id === id) return s + all[i].qty;
+            return s;
+        }, 0) + create.reduce(function(s, c) { return s + c.qty; }, 0);
+        if (!want.length || plannedSum !== dem) {
+            return { keep: all.map(function(t) { return t.id; }), drop: [], create: [],
+                     reason: !want.length ? 'у позиции нет звеньев резки — набор не трогаем'
+                                          : 'набор звеньев (' + plannedSum + ') не сходится с заказом (' + dem + ') — не трогаем' };
+        }
+        return { keep: keep, drop: drop, create: create, reason: '' };
+    }
+
     function positionSleeveTasksForLayout(layout, positions, plannedRuns) {
         var byId = positionMap(positions);
         var out = [];
@@ -8702,6 +8783,38 @@
             title: subj + ' не помещается в смену и разорвано по дням' + (overdue
                 ? ' — часть работы выходит за «Срок изготовления»'
                 : ' — продолжение перенесено на следующие рабочие дни')
+        };
+    }
+
+    // #4617: АРИФМЕТИКА ЦЕПОЧКИ на карточке — «проходов 1 из 5 · остальные 4 → 07.08».
+    // Разорванное по дням задание живёт НЕСКОЛЬКИМИ записями, и карточка показывала только свою:
+    // боевая ateh, Станок 2, 06.08.2026 — у заказов 4580/4567/4564/4561 в дне остался ОДИН проход,
+    // остальные 4–5 стояли отдельной записью на 07.08. Проходы целы, но по очереди это читалось как
+    // «потерянные резки»: значок «→» в углу не называет ни числа проходов, ни дня, куда уехал остаток.
+    // parts — записи цепочки (splitChainPartsOf), dateLabel(planDate) → подпись дня или ''.
+    // → { text, title } либо null (не разорвано / считать нечего). Чистая (без DOM) → покрыта тестом.
+    function daySplitChainNote(parts, cutId, dateLabel) {
+        var id = String(cutId == null ? '' : cutId);
+        var list = (parts || []).filter(function(p){ return p && p.id != null; });
+        if (id === '' || list.length < 2) return null;
+        function runsOf(p){ var n = Number(p && p.plannedRuns); return isFinite(n) && n > 0 ? n : 0; }
+        var mine = null, others = [];
+        list.forEach(function(p){ if (String(p.id) === id) mine = p; else others.push(p); });
+        if (!mine) return null;
+        var total = list.reduce(function(s, p){ return s + runsOf(p); }, 0);
+        if (!(total > 0)) return null;                       // наладочный хвост без проходов — считать нечего
+        var here = runsOf(mine), rest = total - here;
+        var labels = [];
+        others.forEach(function(p){
+            var lab = (typeof dateLabel === 'function') ? String(dateLabel(p.planDate) || '') : '';
+            if (lab && labels.indexOf(lab) === -1) labels.push(lab);
+        });
+        var where = labels.length ? ' → ' + labels.join(', ') : '';
+        return {
+            text: 'проходов ' + here + ' из ' + total + ' · остальные ' + rest + where,
+            title: 'Задание разорвано по дням на ' + list.length + ' части: здесь ' + here + ' из ' + total +
+                   ' проходов, остальные ' + rest + (labels.length ? ' — ' + labels.join(', ') : '') +
+                   '. Проходы не потеряны: части одного задания связаны, при переносе собираются в одно.'
         };
     }
 
@@ -13257,6 +13370,7 @@
         mergeableOrderGroups: mergeableOrderGroups,   // #4424: задания одного заказа+конфигурации → объединить по первому
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
+        daySplitChainNote: daySplitChainNote,   // #4617: «проходов 1 из 5 · остальные 4 → 07.08»
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
@@ -13395,6 +13509,9 @@
         producedBatchesForLayout: producedBatchesForLayout,
         supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
+        // #4631: каким обязан быть набор «Задач на втулки» позиции — чистое правило,
+        // проверяется `experiments/atex-pp-4631-sleeve-dedup.test.js` без сети и базы.
+        planSleeveTaskReconcile: planSleeveTaskReconcile,
         pickSleeveBatchId: pickSleeveBatchId,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
@@ -14794,6 +14911,111 @@
         var batchId = pickSleeveBatchId(this.sleeveBatches, task.sleeveId);
         if (reqIds.batch && batchId) fields['t' + reqIds.batch] = batchId;
         return addMainValueField(meta, fields, plannedStart);  // t1080 = запланированный старт
+    };
+
+    // #4631: ПРИВЕСТИ «Задачи на втулки» ПОЗИЦИЙ К ПЛАНУ. Набор задач позиции обязан повторять
+    // её звенья резки (по задаче на звено, «Кол-во» = доле обеспечения), а Σ — равняться
+    // заказанному количеству: втулка нужна каждому рулону. Что именно оставить, что снять и чего
+    // не хватает, решает ЧИСТОЕ правило `planSleeveTaskReconcile` — здесь только чтение и запись.
+    //
+    // Зовут это генерация (после создания заданий) и удаление задания. До #4631 набор не сверял
+    // никто: задачи создавались при создании задания и не удалялись нигде, поэтому каждая
+    // перегенерация клала новый комплект поверх старого (боевая ateh: 574 задачи при 212
+    // позициях, 67 086 лишних втулок).
+    //
+    // Ошибка чтения/записи НЕ валит вызвавшее действие: план уже записан, а втулки — следствие.
+    //   positionIds — какие позиции сверить (пусто → ничего не делаем).
+    // → Promise<{ dropped, created, skipped }>
+    AtexProductionPlanning.prototype.reconcileSleeveTasks = function(positionIds) {
+        var self = this;
+        var meta = this.meta.sleeveTask;
+        var reqIds = this.sleeveTaskReqIds();
+        var ids = [];
+        (positionIds || []).forEach(function(p) {
+            var id = String(p == null ? '' : p).trim();
+            if (id && ids.indexOf(id) === -1) ids.push(id);
+        });
+        if (!meta || !reqIds || !ids.length) return Promise.resolve({ dropped: 0, created: 0, skipped: 0 });
+        var qtyIdx = columnIndex(meta, SLEEVE_TASK_REQ.qty);
+        var startedIdx = columnIndex(meta, SLEEVE_TASK_REQ.started);
+        var finishedIdx = columnIndex(meta, SLEEVE_TASK_REQ.finished);
+        var factIdx = columnIndex(meta, SLEEVE_TASK_REQ.fact);
+        if (qtyIdx < 0) {
+            console.warn('[pp] #4631: у «' + TABLE.sleeveTask + '» не найдена колонка «' + SLEEVE_TASK_REQ.qty + '» — набор не сверяем');
+            return Promise.resolve({ dropped: 0, created: 0, skipped: ids.length });
+        }
+        var stat = { dropped: 0, created: 0, skipped: 0 };
+        var tasks = ids.map(function(positionId) {
+            return function() {
+                return self.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(positionId) + '&LIMIT=0,200')
+                    .then(function(rows) {
+                        var have = (rows || []).map(function(rec) {
+                            var r = rec.r || [];
+                            var val = function(i) { return i >= 0 ? String(r[i] == null ? '' : r[i]).trim() : ''; };
+                            return { id: rec.i, qty: stripNum(r[qtyIdx]), plannedTs: Number(r[0]) || 0,
+                                     // «Начато»/«Закончено»/«Кол-во факт» — работа, которую уже делали.
+                                     touched: !!(val(startedIdx) || val(finishedIdx) || val(factIdx)) };
+                        });
+                        // Звенья позиции — её «Обеспечения» с плановым стартом своей резки.
+                        var cutTs = {};
+                        (self.cuts || []).forEach(function(c) { if (c && c.id != null) cutTs[String(c.id)] = Number(c.planDate) || 0; });
+                        var links = (self.supplies || []).filter(function(s) {
+                            return s && String(s.positionId) === String(positionId) && s.cutId != null && String(s.cutId) !== '';
+                        }).map(function(s) {
+                            return { qty: stripNum(s.rolls), plannedTs: cutTs[String(s.cutId)] || 0 };
+                        });
+                        // Заказанное количество и тип втулки — из уже загруженных позиций
+                        // (`genPositions`, rowsToGenPositions). Позиции нет → не знаем спроса и
+                        // ничего не трогаем: догадка тут дороже дубля.
+                        var pRec = null;
+                        (self.genPositions || []).forEach(function(gp) { if (String(gp.id) === String(positionId)) pRec = gp; });
+                        var demand = pRec ? stripNum(pRec.qty) : null;
+                        if (!(demand > 0)) { stat.skipped++; return null; }
+                        var plan = planSleeveTaskReconcile(demand, have, links);
+                        if (plan.reason) {
+                            console.warn('[pp] #4631: позиция ' + positionId + ' — ' + plan.reason);
+                            stat.skipped++;
+                            return null;
+                        }
+                        var chain = Promise.resolve();
+                        (plan.drop || []).forEach(function(taskId) {
+                            chain = chain.then(function() {
+                                return self.post('_m_del/' + encodeURIComponent(taskId) + '?JSON', {}).then(function() {
+                                    stat.dropped++;
+                                    return planJournal(self, { event: 'SLEEVE_DROP', order: '', cut: null,
+                                        details: '#4631: снята лишняя «Задача на втулки» ' + taskId + ' (позиция ' + positionId + ')' });
+                                }).catch(function(err) {
+                                    var m = String((err && err.message) || err);
+                                    if (!/no such record/i.test(m)) throw err;   // уже удалена — не ошибка
+                                });
+                            });
+                        });
+                        (plan.create || []).forEach(function(add) {
+                            chain = chain.then(function() {
+                                var f = self.buildSleeveTaskFields(reqIds,
+                                    { qty: add.qty, sleeveId: (pRec && pRec.sleeveId) || '' }, add.plannedTs || '');
+                                return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(positionId), f).then(function() {
+                                    stat.created++;
+                                    return planJournal(self, { event: 'SLEEVE_ADD', order: '', cut: null, after: add.qty,
+                                        details: '#4631: создана недостающая «Задача на втулки» на ' + add.qty + ' втулок (позиция ' + positionId + ')' });
+                                });
+                            });
+                        });
+                        return chain;
+                    });
+            };
+        });
+        return runWithConcurrency(tasks, MAX_PARALLEL_WRITES).then(function() {
+            if (stat.dropped || stat.created) {
+                console.log('[pp] 🧵 #4631: «Задачи на втулки» приведены к плану — снято ' + stat.dropped +
+                    ', создано ' + stat.created + (stat.skipped ? ', пропущено позиций ' + stat.skipped : ''));
+            }
+            return stat;
+        }).catch(function(err) {
+            // Втулки — следствие плана: их сверка не вправе уронить уже выполненное действие.
+            console.error('[pp] #4631: сверка «Задач на втулки» не удалась:', err && err.message);
+            return stat;
+        });
     };
 
     // #3340: id реквизитов задания на втулки (по именам реальной схемы). Нет таблицы → null.
@@ -17833,6 +18055,14 @@
         // параллельно сносим резки (backend каскадит подчинённые Партии ГП/Полосы/Расход,
         // поддеревья разных резок не пересекаются). Порядок _m_del в базе неважен.
         var MAX_PARALLEL_DELETES = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
+        // #4631: позиции удаляемых звеньев запоминаем ДО удаления — после него связь потеряна, и
+        // сверить набор «Задач на втулки» будет уже не с чем.
+        var sleevePositionIds = [];
+        (self.supplies || []).forEach(function(sup) {
+            if (!sup || sup.cutId == null || cutList.indexOf(String(sup.cutId)) < 0) return;
+            var pid = String(sup.positionId == null ? '' : sup.positionId);
+            if (pid && sleevePositionIds.indexOf(pid) === -1) sleevePositionIds.push(pid);
+        });
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
@@ -17969,6 +18199,12 @@
             }, Promise.resolve());
         }).then(function() {
             return self.reload();
+        }).then(function() {
+            // #4631: задание ушло — «Задачи на втулки» его позиций приводим к оставшемуся плану.
+            // Раньше их не убирал никто (задача подчинена ПОЗИЦИИ, а не заданию), и они копились.
+            // typeof-гард: в юнит-тестах `self` — стаб без прототипа (`atex-production-planning-4005`).
+            if (typeof self.reconcileSleeveTasks !== 'function') return null;
+            return self.reconcileSleeveTasks(sleevePositionIds);
         }).then(function() {
             self.hideProgress();
             self.setBusy(false);
@@ -20245,6 +20481,20 @@
             console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
             self.updateProgress(nRecords, 'Обновление очереди…');
             return self.reload();
+        }).then(function() {
+            // #4631: набор «Задач на втулки» затронутых позиций приводим к плану — по задаче на
+            // звено резки. Именно здесь копились дубли: генерация создавала НОВЫЙ комплект, а
+            // старый убрать было некому (задача подчинена ПОЗИЦИИ, связи с заданием нет).
+            // Сверяем ПОСЛЕ reload: нужны свежие «Обеспечения» — по ним и видны звенья.
+            var genPositionIds = [];
+            (layouts || []).forEach(function(lay) {
+                ((lay && lay.positionsCovered) || []).forEach(function(pid) {
+                    var id = String(pid == null ? '' : pid);
+                    if (id && genPositionIds.indexOf(id) === -1) genPositionIds.push(id);
+                });
+            });
+            if (typeof self.reconcileSleeveTasks !== 'function') return null;   // стаб-self в юнит-тестах
+            return self.reconcileSleeveTasks(genPositionIds);
         }).then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             console.log('[pp] 🔧 runGenerateCuts: данные загружены за ' + elapsed + 'с. рендерим...');
@@ -25708,6 +25958,18 @@
             if (splitWarn) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-fixed-split-warn',
                     title: splitWarn.title, text: splitWarn.text }));
+            }
+            // #4617: карточка куска называет арифметику цепочки — «проходов 1 из 5 · остальные 4 → 07.08».
+            // Значка «→» в углу мало: в боевой ateh (Станок 2, 06.08.2026) у четырёх заказов в дне
+            // остался ОДИН проход, остальные стояли отдельной записью на 07.08, и очередь читалась
+            // как «потерянные резки». Числа берём из САМИХ записей цепочки (splitChainPartsOf), а не
+            // из расписания: разрыв виден и когда вторая часть лежит вне выбранного диапазона дат.
+            var chainNote = daySplitChainNote(splitChainPartsOf(self.cuts || [], c.id), c.id, function(planDate) {
+                return formatPlanDayLabel(planDateIso(planDate));
+            });
+            if (chainNote) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note',
+                    title: chainNote.title, text: 'ℹ ' + chainNote.text }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
