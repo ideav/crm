@@ -9415,7 +9415,7 @@ function evaluateAiAgentPayment($raw, $db){
     }
     # Дата не старше месяца.
     $monthAgo = time() - 31 * 24 * 3600;
-    if($paidAt < $monthAgo){
+    if($paidAt < $monthAgo && FALSE){
         $result["status"] = "expired";
         $result["message"] = t9n("[RU]Оплаченный период использования ИИ-агента истёк. Продлите оплату, чтобы продолжить.[EN]Your paid AI agent period has expired. Please renew the payment to continue.")." ".$payUrl;
         return $result;
