@@ -1239,6 +1239,83 @@
     // #3340: задание на втулки нужно позициям, у которых есть тип втулки (sleeveId)
     // и он НЕ «готов» (sleeveReady пуст). qty = кол-во рулонов покрытия позиции.
     // → [{ positionId, sleeveId, qty }].
+    // #4631: КАКИМ ОБЯЗАН БЫТЬ НАБОР «ЗАДАЧ НА ВТУЛКИ» ПОЗИЦИИ. Одно правило на всех
+    // потребителей (генерация, создание задания вручную, удаление задания), чистая функция —
+    // поэтому проверяется тестом без сети и без базы.
+    //
+    // ЗАЧЕМ. Таблица «Задача на втулки» подчинена ПОЗИЦИИ, а запись создаётся при создании
+    // ЗАДАНИЯ, и связи «задача ↔ задание» в схеме нет. Пока никто не сверял набор с текущим
+    // планом, каждая перегенерация клала НОВЫЙ полный комплект поверх старого, а старый убрать
+    // было некому: в боевой ateh 06.08.2026 — 574 задачи при 212 позициях, 67 086 лишних втулок
+    // (заказ 4285: 18 задач на 11 376 втулок при заказе 1264).
+    //
+    // ПРАВИЛО. Втулка нужна КАЖДОМУ рулону, поэтому Σ «Кол-во» задач позиции == её заказанному
+    // количеству, а сами задачи повторяют ЗВЕНЬЯ резки (по задаче на звено, «Кол-во» = доле
+    // обеспечения звена). Работа, которую уже делали, неприкосновенна: задача с «Начато»,
+    // «Закончено» или «Кол-во факт» не удаляется НИКОГДА и вычитается из цели.
+    //
+    //   demand — «Заказанное количество» позиции;
+    //   tasks  — [{ id, qty, plannedTs, touched }] — что лежит в базе;
+    //   links  — [{ qty, plannedTs }] — звенья резки позиции (доли обеспечения), как надо.
+    // → { keep: [id], drop: [id], create: [{ qty, plannedTs }], reason }
+    //   drop — только НЕТРОНУТЫЕ лишние; create — чего не хватает до набора звеньев.
+    function planSleeveTaskReconcile(demand, tasks, links) {
+        var dem = Math.round(Number(demand) || 0);
+        var all = (tasks || []).map(function(t) {
+            return { id: t.id, qty: Math.round(Number(t.qty) || 0),
+                     plannedTs: Number(t.plannedTs) || 0, touched: !!t.touched };
+        });
+        var want = (links || []).map(function(l) {
+            return { qty: Math.round(Number(l.qty) || 0), plannedTs: Number(l.plannedTs) || 0 };
+        }).filter(function(l) { return l.qty > 0; });
+
+        var done = all.filter(function(t) { return t.touched; });
+        var free = all.filter(function(t) { return !t.touched; });
+        var keep = done.map(function(t) { return t.id; });
+        var fixed = done.reduce(function(s, t) { return s + t.qty; }, 0);
+
+        // Сколько ещё нужно закрыть задачами. Всё сделано (или переделано) — новых не заводим.
+        var target = dem - fixed;
+        if (!(target > 0)) {
+            return { keep: keep, drop: free.map(function(t) { return t.id; }), create: [], reason: 'всё покрыто выполненными' };
+        }
+        // Чего ждём от плана: звенья, ещё не закрытые выполненными задачами.
+        var need = want.slice();
+        done.forEach(function(t) {
+            for (var i = 0; i < need.length; i++) {
+                if (need[i].qty === t.qty) { need.splice(i, 1); return; }
+            }
+        });
+        // Совпадающие звенья закрываем СУЩЕСТВУЮЩИМИ задачами — сначала теми, что ближе по
+        // плановому старту: набор задач должен читаться как план резки, а не как случайный
+        // остаток. Свежесть (id) — тай-брейк: старые комплекты уходят первыми.
+        var used = {}, create = [];
+        need.forEach(function(n) {
+            var cand = free.filter(function(t) { return !used[t.id] && t.qty === n.qty; });
+            if (!cand.length) { create.push({ qty: n.qty, plannedTs: n.plannedTs }); return; }
+            cand.sort(function(a, b) {
+                return Math.abs(a.plannedTs - n.plannedTs) - Math.abs(b.plannedTs - n.plannedTs)
+                    || (Number(b.id) - Number(a.id));
+            });
+            used[cand[0].id] = true; keep.push(cand[0].id);
+        });
+        var drop = free.filter(function(t) { return !used[t.id]; }).map(function(t) { return t.id; });
+
+        // СТРАХОВКА. Звеньев может не быть вовсе (позиция ещё без заданий) или их сумма может
+        // расходиться с заказом (исторические данные). Удалять «лишнее» вслепую в этом случае
+        // нельзя — оставляем набор как есть и говорим об этом.
+        var plannedSum = keep.reduce(function(s, id) {
+            for (var i = 0; i < all.length; i++) if (all[i].id === id) return s + all[i].qty;
+            return s;
+        }, 0) + create.reduce(function(s, c) { return s + c.qty; }, 0);
+        if (!want.length || plannedSum !== dem) {
+            return { keep: all.map(function(t) { return t.id; }), drop: [], create: [],
+                     reason: !want.length ? 'у позиции нет звеньев резки — набор не трогаем'
+                                          : 'набор звеньев (' + plannedSum + ') не сходится с заказом (' + dem + ') — не трогаем' };
+        }
+        return { keep: keep, drop: drop, create: create, reason: '' };
+    }
+
     function positionSleeveTasksForLayout(layout, positions, plannedRuns) {
         var byId = positionMap(positions);
         var out = [];

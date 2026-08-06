@@ -262,6 +262,9 @@
         producedBatchesForLayout: producedBatchesForLayout,
         supplyPlanForLayout: supplyPlanForLayout,
         positionSleeveTasksForLayout: positionSleeveTasksForLayout,
+        // #4631: каким обязан быть набор «Задач на втулки» позиции — чистое правило,
+        // проверяется `experiments/atex-pp-4631-sleeve-dedup.test.js` без сети и базы.
+        planSleeveTaskReconcile: planSleeveTaskReconcile,
         pickSleeveBatchId: pickSleeveBatchId,
         sleeveMinutes: sleeveMinutes,
         cutMissingBatch: cutMissingBatch,
@@ -1661,6 +1664,111 @@
         var batchId = pickSleeveBatchId(this.sleeveBatches, task.sleeveId);
         if (reqIds.batch && batchId) fields['t' + reqIds.batch] = batchId;
         return addMainValueField(meta, fields, plannedStart);  // t1080 = запланированный старт
+    };
+
+    // #4631: ПРИВЕСТИ «Задачи на втулки» ПОЗИЦИЙ К ПЛАНУ. Набор задач позиции обязан повторять
+    // её звенья резки (по задаче на звено, «Кол-во» = доле обеспечения), а Σ — равняться
+    // заказанному количеству: втулка нужна каждому рулону. Что именно оставить, что снять и чего
+    // не хватает, решает ЧИСТОЕ правило `planSleeveTaskReconcile` — здесь только чтение и запись.
+    //
+    // Зовут это генерация (после создания заданий) и удаление задания. До #4631 набор не сверял
+    // никто: задачи создавались при создании задания и не удалялись нигде, поэтому каждая
+    // перегенерация клала новый комплект поверх старого (боевая ateh: 574 задачи при 212
+    // позициях, 67 086 лишних втулок).
+    //
+    // Ошибка чтения/записи НЕ валит вызвавшее действие: план уже записан, а втулки — следствие.
+    //   positionIds — какие позиции сверить (пусто → ничего не делаем).
+    // → Promise<{ dropped, created, skipped }>
+    AtexProductionPlanning.prototype.reconcileSleeveTasks = function(positionIds) {
+        var self = this;
+        var meta = this.meta.sleeveTask;
+        var reqIds = this.sleeveTaskReqIds();
+        var ids = [];
+        (positionIds || []).forEach(function(p) {
+            var id = String(p == null ? '' : p).trim();
+            if (id && ids.indexOf(id) === -1) ids.push(id);
+        });
+        if (!meta || !reqIds || !ids.length) return Promise.resolve({ dropped: 0, created: 0, skipped: 0 });
+        var qtyIdx = columnIndex(meta, SLEEVE_TASK_REQ.qty);
+        var startedIdx = columnIndex(meta, SLEEVE_TASK_REQ.started);
+        var finishedIdx = columnIndex(meta, SLEEVE_TASK_REQ.finished);
+        var factIdx = columnIndex(meta, SLEEVE_TASK_REQ.fact);
+        if (qtyIdx < 0) {
+            console.warn('[pp] #4631: у «' + TABLE.sleeveTask + '» не найдена колонка «' + SLEEVE_TASK_REQ.qty + '» — набор не сверяем');
+            return Promise.resolve({ dropped: 0, created: 0, skipped: ids.length });
+        }
+        var stat = { dropped: 0, created: 0, skipped: 0 };
+        var tasks = ids.map(function(positionId) {
+            return function() {
+                return self.getJson('object/' + meta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(positionId) + '&LIMIT=0,200')
+                    .then(function(rows) {
+                        var have = (rows || []).map(function(rec) {
+                            var r = rec.r || [];
+                            var val = function(i) { return i >= 0 ? String(r[i] == null ? '' : r[i]).trim() : ''; };
+                            return { id: rec.i, qty: stripNum(r[qtyIdx]), plannedTs: Number(r[0]) || 0,
+                                     // «Начато»/«Закончено»/«Кол-во факт» — работа, которую уже делали.
+                                     touched: !!(val(startedIdx) || val(finishedIdx) || val(factIdx)) };
+                        });
+                        // Звенья позиции — её «Обеспечения» с плановым стартом своей резки.
+                        var cutTs = {};
+                        (self.cuts || []).forEach(function(c) { if (c && c.id != null) cutTs[String(c.id)] = Number(c.planDate) || 0; });
+                        var links = (self.supplies || []).filter(function(s) {
+                            return s && String(s.positionId) === String(positionId) && s.cutId != null && String(s.cutId) !== '';
+                        }).map(function(s) {
+                            return { qty: stripNum(s.rolls), plannedTs: cutTs[String(s.cutId)] || 0 };
+                        });
+                        // Заказанное количество и тип втулки — из уже загруженных позиций
+                        // (`genPositions`, rowsToGenPositions). Позиции нет → не знаем спроса и
+                        // ничего не трогаем: догадка тут дороже дубля.
+                        var pRec = null;
+                        (self.genPositions || []).forEach(function(gp) { if (String(gp.id) === String(positionId)) pRec = gp; });
+                        var demand = pRec ? stripNum(pRec.qty) : null;
+                        if (!(demand > 0)) { stat.skipped++; return null; }
+                        var plan = planSleeveTaskReconcile(demand, have, links);
+                        if (plan.reason) {
+                            console.warn('[pp] #4631: позиция ' + positionId + ' — ' + plan.reason);
+                            stat.skipped++;
+                            return null;
+                        }
+                        var chain = Promise.resolve();
+                        (plan.drop || []).forEach(function(taskId) {
+                            chain = chain.then(function() {
+                                return self.post('_m_del/' + encodeURIComponent(taskId) + '?JSON', {}).then(function() {
+                                    stat.dropped++;
+                                    return planJournal(self, { event: 'SLEEVE_DROP', order: '', cut: null,
+                                        details: '#4631: снята лишняя «Задача на втулки» ' + taskId + ' (позиция ' + positionId + ')' });
+                                }).catch(function(err) {
+                                    var m = String((err && err.message) || err);
+                                    if (!/no such record/i.test(m)) throw err;   // уже удалена — не ошибка
+                                });
+                            });
+                        });
+                        (plan.create || []).forEach(function(add) {
+                            chain = chain.then(function() {
+                                var f = self.buildSleeveTaskFields(reqIds,
+                                    { qty: add.qty, sleeveId: (pRec && pRec.sleeveId) || '' }, add.plannedTs || '');
+                                return self.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(positionId), f).then(function() {
+                                    stat.created++;
+                                    return planJournal(self, { event: 'SLEEVE_ADD', order: '', cut: null, after: add.qty,
+                                        details: '#4631: создана недостающая «Задача на втулки» на ' + add.qty + ' втулок (позиция ' + positionId + ')' });
+                                });
+                            });
+                        });
+                        return chain;
+                    });
+            };
+        });
+        return runWithConcurrency(tasks, MAX_PARALLEL_WRITES).then(function() {
+            if (stat.dropped || stat.created) {
+                console.log('[pp] 🧵 #4631: «Задачи на втулки» приведены к плану — снято ' + stat.dropped +
+                    ', создано ' + stat.created + (stat.skipped ? ', пропущено позиций ' + stat.skipped : ''));
+            }
+            return stat;
+        }).catch(function(err) {
+            // Втулки — следствие плана: их сверка не вправе уронить уже выполненное действие.
+            console.error('[pp] #4631: сверка «Задач на втулки» не удалась:', err && err.message);
+            return stat;
+        });
     };
 
     // #3340: id реквизитов задания на втулки (по именам реальной схемы). Нет таблицы → null.
@@ -4700,6 +4808,14 @@
         // параллельно сносим резки (backend каскадит подчинённые Партии ГП/Полосы/Расход,
         // поддеревья разных резок не пересекаются). Порядок _m_del в базе неважен.
         var MAX_PARALLEL_DELETES = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
+        // #4631: позиции удаляемых звеньев запоминаем ДО удаления — после него связь потеряна, и
+        // сверить набор «Задач на втулки» будет уже не с чем.
+        var sleevePositionIds = [];
+        (self.supplies || []).forEach(function(sup) {
+            if (!sup || sup.cutId == null || cutList.indexOf(String(sup.cutId)) < 0) return;
+            var pid = String(sup.positionId == null ? '' : sup.positionId);
+            if (pid && sleevePositionIds.indexOf(pid) === -1) sleevePositionIds.push(pid);
+        });
         function del(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).then(function() {
                 self.updateProgress(++done);
@@ -4836,6 +4952,12 @@
             }, Promise.resolve());
         }).then(function() {
             return self.reload();
+        }).then(function() {
+            // #4631: задание ушло — «Задачи на втулки» его позиций приводим к оставшемуся плану.
+            // Раньше их не убирал никто (задача подчинена ПОЗИЦИИ, а не заданию), и они копились.
+            // typeof-гард: в юнит-тестах `self` — стаб без прототипа (`atex-production-planning-4005`).
+            if (typeof self.reconcileSleeveTasks !== 'function') return null;
+            return self.reconcileSleeveTasks(sleevePositionIds);
         }).then(function() {
             self.hideProgress();
             self.setBusy(false);
@@ -7112,6 +7234,20 @@
             console.log('[pp] 🔧 runGenerateCuts: все записи созданы за ' + elapsed + 'с. загружаем свежие данные...');
             self.updateProgress(nRecords, 'Обновление очереди…');
             return self.reload();
+        }).then(function() {
+            // #4631: набор «Задач на втулки» затронутых позиций приводим к плану — по задаче на
+            // звено резки. Именно здесь копились дубли: генерация создавала НОВЫЙ комплект, а
+            // старый убрать было некому (задача подчинена ПОЗИЦИИ, связи с заданием нет).
+            // Сверяем ПОСЛЕ reload: нужны свежие «Обеспечения» — по ним и видны звенья.
+            var genPositionIds = [];
+            (layouts || []).forEach(function(lay) {
+                ((lay && lay.positionsCovered) || []).forEach(function(pid) {
+                    var id = String(pid == null ? '' : pid);
+                    if (id && genPositionIds.indexOf(id) === -1) genPositionIds.push(id);
+                });
+            });
+            if (typeof self.reconcileSleeveTasks !== 'function') return null;   // стаб-self в юнит-тестах
+            return self.reconcileSleeveTasks(genPositionIds);
         }).then(function() {
             var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
             console.log('[pp] 🔧 runGenerateCuts: данные загружены за ' + elapsed + 'с. рендерим...');
