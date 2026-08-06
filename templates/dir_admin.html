@@ -183,12 +183,20 @@
         </td>
     </tr>
 </table>
+<!-- Секция целиком живёт в подблоке Sessions, а счётчик берётся у родителя через
+     _parent_. Шаблоны деплоятся сами (update.php), index.php — вручную, поэтому
+     шаблон обязан пережить ядро, которое про сессии ещё не знает: подблок отдаст
+     пустоту, остальная страница останется цела. Точка вставки SESSIONS прямо в
+     блоке Dir_Admin так не умеет — разбор обрывается на первой недостающей
+     переменной, и вместе с ней пропадают списки файлов и каталогов (issue #4624).
+     В комментариях фигурные скобки не ставим: движок читает их как точки вставки. -->
+<!-- Begin:&Sessions -->
 <br />
 <h4>Запросы к базе данных</h4>
 <p>Сессии MySQL, занятые запросом прямо сейчас: дольше всех работающие — сверху, от запроса показаны первые 127 символов.
    Зависшую сессию можно снять — выполняемый ею запрос прервётся.</p>
-<form action="/{_global_.z}/dir_admin/?{FOLDER}=1" method="POST">
-    <input name="add_path" type="hidden" value="{ADD_PATH}">
+<form action="/{_global_.z}/dir_admin/?{_parent_.FOLDER}=1" method="POST">
+    <input name="add_path" type="hidden" value="{_parent_.ADD_PATH}">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <table class="table table-striped table-condensed table-bordered">
       <tr>
@@ -211,8 +219,9 @@
       </tr>
     <!-- End:&Processlist -->
     </table>
-    <p>Запросов выполняется: {SESSIONS}. &nbsp;<a href="/{_global_.z}/dir_admin/?{FOLDER}=1&add_path={ADD_PATH}">Обновить</a></p>
+    <p>Запросов выполняется: {_parent_.SESSIONS}. &nbsp;<a href="/{_global_.z}/dir_admin/?{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}">Обновить</a></p>
 </form>
+<!-- End:&Sessions -->
 <!-- End:&Dir_Admin -->
 </div>
 </div>

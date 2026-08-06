@@ -53,6 +53,7 @@
 | тяжёлый SELECT грузит CPU сервера часами | запрос переживал ушедший PHP — теперь его рубит `max_statement_time` + `KILL QUERY` | [00-start.md](00-start.md) |
 | `InvalidToken` в dir_admin | нет cookie `idb_{db}` | [files.md](files.md) |
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
+| страница пустая, при `?debug` в тексте сырые `{_block_..&имя}` | шаблон уехал вперёд ядра: разбор блока рвётся на первой точке вставки без значения — новую переменную ядра держать в отдельном подблоке через `{_parent_.ИМЯ}` | [deploy.md](deploy.md) |
 | правки в `integram-table.js` пропадают | это сгенерированный бандл — править модули + `build.sh` | [table-component.md](table-component.md) |
 | таблица не фильтрует по родителю | прокинуть `F_U`/`up`/`F_I` в URL | [table-component.md](table-component.md) |
 | импорт «склеивает» строки в одно поле | нет завершающего `;` в строке данных | [import.md](import.md) |
