@@ -209,6 +209,14 @@
         if (!journalMeta(ctx)) return Promise.resolve(0);
         var byId = {};
         (snapshot || []).forEach(function(c) { byId[String(c.id)] = c; });
+        // #4636: день по плановому старту — «в какой день это стояло и куда уехало».
+        var dayOf = function(ts) {
+            var n = Number(ts);
+            if (!isFinite(n) || n <= 0) return '';
+            var d = new Date(n * 1000);
+            var p = function(x) { return (x < 10 ? '0' : '') + x; };
+            return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear();
+        };
         var runsOf = function(id) {
             var c = byId[String(id)];
             var n = Number(c && c.plannedRuns);
@@ -217,9 +225,23 @@
         var rows = [];
         ((ops && ops.updates) || []).forEach(function(u) {
             var was = runsOf(u.cutId), now = Number(u.plannedRuns);
-            if (u.plannedRuns == null || was == null || was === now) return;
-            rows.push({ event: 'RUNS_CHANGE', cut: u.cutId, before: was, after: now,
-                        details: 'проходов ' + was + ' → ' + now + (now < was ? ' (урезано на ' + (was - now) + ')' : '') });
+            if (u.plannedRuns != null && was != null && was !== now) {
+                rows.push({ event: 'RUNS_CHANGE', cut: u.cutId, day: dayOf(u.planStartTs), before: was, after: now,
+                            details: 'проходов ' + was + ' → ' + now + (now < was ? ' (урезано на ' + (was - now) + ')' : '') });
+            }
+            // #4636: ПЕРЕНОС ДНЯ — тоже событие. Раньше в журнал попадала только смена проходов, и
+            // «перетащил задание на день раньше» не оставляло следа: в сессии было «updates 7», а
+            // какие именно записи переехали и куда — не сказано (боевое #4636).
+            var c = byId[String(u.cutId)];
+            var wasTs = c ? Number(c.planStartTs) : NaN;
+            var nowTs = Number(u.planStartTs);
+            if (isFinite(wasTs) && isFinite(nowTs) && nowTs > 0 && wasTs !== nowTs) {
+                var wasDay = dayOf(wasTs), nowDay = dayOf(nowTs);
+                rows.push({ event: 'PLAN_MOVE', cut: u.cutId, day: nowDay,
+                            details: wasDay === nowDay
+                                ? ('время старта в дне ' + nowDay + ' изменилось')
+                                : ('день ' + wasDay + ' → ' + nowDay) });
+            }
         });
         ((ops && ops.creates) || []).forEach(function(cr) {
             rows.push({ event: 'CHAIN_CREATE', cut: cr.parentCutId, after: cr.plannedRuns,

@@ -13,6 +13,9 @@
         // #4618: свидетель журнала — Σ проходов цепочки ДО и ПОСЛЕ операций. Чистая, поэтому
         // проверяется тестом `atex-pp-4618-journal-balance.test.js` без сети и без базы.
         journalChainBalance: journalChainBalance,
+        // #4636: что журнал пишет по набору операций (RUNS_CHANGE / PLAN_MOVE / CHAIN_*) —
+        // проверяется `experiments/atex-pp-4636-journal-blindspots.test.js` на стаб-контроллере.
+        journalApplyDetails: journalApplyDetails,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
@@ -5746,6 +5749,16 @@
         if (timingReq) fields['t' + timingReq] = cutTimingDetails(runLength, runs, this.opTimes, cut);   // #4501
         var slitterId = (cut.slitter && cut.slitter.id) || '';
         var written = { batches: 0, supplies: 0 };
+        // #4636: РУЧНАЯ ПРАВКА ПРОХОДОВ — В ЖУРНАЛ. Этот путь пишет «Кол-во резок план» напрямую
+        // (`_m_set`), минуя applySplitPlan, поэтому до #4636 не оставлял в журнале НИ СЛЕДА: при
+        // разборе потерянных проходов ручную правку приходилось отличать от разбиения по косвенному
+        // признаку (здесь переписывается «Тайминг», а в applySplitPlan — нет).
+        var wasRuns = Number(cut.plannedRuns);
+        journalBegin(this, 'applyCutPasses');
+        planJournal(this, { event: 'RUNS_MANUAL', cut: cut.id,
+            before: isFinite(wasRuns) ? wasRuns : null, after: runs,
+            details: 'ручная правка проходов: ' + (isFinite(wasRuns) ? wasRuns : '?') + ' → ' + runs +
+                ' (партий ' + ((plan.batches || []).length) + ', обеспечений ' + ((plan.supplies || []).length) + ')' });
         this.setBusy(true);
         return this.post('_m_set/' + encodeURIComponent(cut.id) + '?JSON', fields).then(function() {
             return (plan.batches || []).reduce(function(chain, b) {
@@ -7216,6 +7229,24 @@
                 return self.post('_m_new/' + cutMeta.id + '?JSON&up=1', cutFields).then(function(res) {
                     var cutId = res && (res.obj || res.id || res.i);
                     if (!cutId) throw new Error('Сервер не вернул id нового задания');
+                    // #4636: РОЖДЕНИЕ ЗАДАНИЯ — В ЖУРНАЛ. Генерация создаёт записи напрямую
+                    // (`_m_new`), минуя applySplitPlan, и до #4636 не оставляла в журнале ни следа:
+                    // четыре 🔒-задания с ОДНИМ проходом (заказы 4616/4618/4619/4620, боевое #4636)
+                    // родились именно здесь, а по журналу их появление было не отследить.
+                    planJournal(self, { event: 'CUT_CREATE', cut: cutId,
+                        slitter: (slitterId != null ? String(slitterId) : ''),
+                        day: (function() {
+                            var ts = Number(cutMainValue);
+                            if (!isFinite(ts) || ts <= 0) return '';
+                            var dt = new Date(ts * 1000), pz = function(x) { return (x < 10 ? '0' : '') + x; };
+                            return pz(dt.getDate()) + '.' + pz(dt.getMonth() + 1) + '.' + dt.getFullYear();
+                        })(),
+                        after: plannedRuns,
+                        details: 'создано задание на ' + plannedRuns + ' проходов' +
+                            (unit.segIndex != null && unit.segRunsAll && unit.segRunsAll.length > 1
+                                ? ' (сегмент ' + (unit.segIndex + 1) + ' из ' + unit.segRunsAll.length +
+                                  ', вся резка ' + unit.segRunsAll.join('+') + ')'
+                                : '') });
                     return createFinishedBatches(cutId)
                         .then(function() { return createSleeveTasks(); })
                         .then(function() { return createSupplies(); });
@@ -9100,7 +9131,9 @@
         // сделать; эта строка — единственный свидетель. Подробности пишем ПОСЛЕ фаз, чтобы не
         // занимать пул записи плана (#4477/#4480).
         var jSnapshot = (self.cuts || []).map(function(c) {
-            return { id: String(c.id), plannedRuns: c.plannedRuns, firstPartId: c.firstPartId };
+            // #4636: planStartTs — чтобы журнал показывал ПЕРЕНОС ДНЯ, а не только смену проходов.
+            return { id: String(c.id), plannedRuns: c.plannedRuns, firstPartId: c.firstPartId,
+                     planStartTs: Number(c.planDate) || 0 };
         });
         journalBegin(self, 'applySplitPlan');
         var jBegin = planJournal(self, {
