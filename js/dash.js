@@ -53,7 +53,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
     , dashIsAdmin = (typeof role !== 'undefined' && role === 'admin')
     , sheetTpl    = '<div id="ds:id:" class="f-sheet" style="display:none"><div class="dash-filter-bar">'
         + '<input type="date" class="dash-fr-input"><span class="dash-filter-sep">—</span><input type="date" class="dash-to-input">'
-        + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
+        + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Квартал">Квартал</option><option value="Год">Год</option></select>'
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
@@ -2436,6 +2436,10 @@ function dashGetModel(json) {
     if (dashPeriods['Месяц']) {
         dashAjaxes++;
         newApi('GET', 'object/Месяц?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Месяц');
+    }
+    if (dashPeriods['Неделя']) {
+        dashAjaxes++;
+        newApi('GET', 'object/Неделя?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Неделя');
     }
 
     var model = document.getElementById('dash-model');
