@@ -64,6 +64,16 @@ def post(path, fields):
     return res
 
 
+def table_meta(table_id):
+    # Схему читаем ТЕМ ЖЕ источником, что и рабочее место: `metadata?JSON=1` — список таблиц,
+    # у каждой `reqs: [{id, val, type, …}]`. `object/{id}/?JSON_META` отдаёт другое (данные записей
+    # и служебные ключи), реквизитов по имени там не найти.
+    for t in (get('metadata?JSON=1') or []):
+        if str(t.get('id')) == str(table_id):
+            return t
+    raise SystemExit('в базе нет таблицы %s' % table_id)
+
+
 def req_id_by_name(meta, name):
     for r in (meta.get('reqs') or []):
         if str(r.get('val') or '').strip() == name:
@@ -86,9 +96,8 @@ def main():
     global XSRF
     print('=== #4651: «%s» в таблице %s (база %s) ===' % (REQ_NAME, CUT_TABLE, DB))
 
-    meta = get('object/%s/?JSON_META' % CUT_TABLE)
-    if isinstance(meta, list):
-        meta = meta[0] if meta else {}
+    meta = table_meta(CUT_TABLE)
+    print('  таблица: «%s» (%s), реквизитов %d' % (meta.get('val'), CUT_TABLE, len(meta.get('reqs') or [])))
     existing = req_id_by_name(meta, REQ_NAME)
     if existing:
         print('  реквизит уже есть: t%s — схему не трогаю' % existing)
