@@ -3066,8 +3066,11 @@
     // объектив врал, и «Упорядочить» выбрасывал план, снимавший две трети просрочки (issue #4471).
     // Хранимых `occMin`/`setupMin` в операции нет (ручные ops в тестах) → фолбэк на колонки записи,
     // масштабированные проходами кандидата.
-    //   → [{ id, cut, slitterId, ts, dayOffset, windowStartMin, runs, setupMin, workMin, occMin,
-    //        fixed, immovable, frozen, isCreate }]; порядок — очередь cuts, затем creates.
+    //   → [{ id, cut, chainId, slitterId, ts, dayOffset, windowStartMin, runs, setupMin, workMin,
+    //        occMin, fixed, immovable, frozen, isCreate }]; порядок — очередь cuts, затем creates.
+    // #4638: `chainId` — «ID первой части» (маркер цепочки дробления, #3892); у новых сегментов
+    // (`creates`) это цепочка ГОЛОВЫ, от которой их родил упаковщик. По нему DAY_FILL отличает
+    // продолжение СВОЕЙ цепочки от чужого 🔒-задания.
     AtexProductionPlanning.prototype.planLayoutItems = function(cutsArray, ops) {
         var self = this;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
@@ -3088,6 +3091,9 @@
             if (setup > occ) setup = occ;
             return {
                 id: String(cut.id), cut: cut,
+                // #4638: маркер цепочки дробления («ID первой части», #3892); пусто → сам себе цепочка.
+                chainId: (cut.firstPartId != null && String(cut.firstPartId).trim() !== '')
+                    ? String(cut.firstPartId).trim() : String(cut.id),
                 slitterId: String(((op && op.slitterId != null) ? op.slitterId
                     : (cut.slitter && cut.slitter.id)) == null ? '' : ((op && op.slitterId != null) ? op.slitterId : cut.slitter.id)),
                 ts: ts, dayOffset: dayOffsetFromBase(String(ts), base),
@@ -3137,8 +3143,9 @@
     // минуты кандидата даёт упаковщик, удалённые записи выброшены, новые сегменты добавлены.
     // Потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст РЕЗКИ, минус «Отпуск»/
     // выходной этого дня (blockedRangesBySlitter — как ёмкость считает сам упаковщик, #3978).
-    // Правило и исключения — общие с движком: underfilledLayoutDays (🔒 не донор, замороженный
-    // день не трогаем, проход атомарен). → массив ключей «станок|ГГГГММДД».
+    // Правило и исключения — общие с движком: underfilledLayoutDays (чужая 🔒 не донор, замороженный
+    // день не трогаем, проход атомарен; #4638: продолжение СВОЕЙ цепочки донор и под 🔒 — день
+    // каждого звена сохраняется, двигается лишь точка разбиения). → массив ключей «станок|ГГГГММДД».
     AtexProductionPlanning.prototype.planUnderfilledDays = function(cutsArray, ops) {
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         if (!isFinite(base)) return [];
@@ -3170,6 +3177,8 @@
             byMachine[key].push({
                 cutId: it.id, dayOffset: it.dayOffset, windowStartMin: it.windowStartMin,
                 runs: it.runs, setupMin: it.setupMin, durationMin: it.workMin,
+                // #4638: цепочка дробления — 🔒 на ЕЁ ЖЕ продолжении дыру не оправдывает.
+                chainId: it.chainId,
                 // #4434: 🔒 держит свой день — вчерашнему дню проходов не отдаёт; #4381: начатое не трогаем.
                 fixedDayLock: it.fixed, immovable: it.immovable, frozen: it.frozen
             });
@@ -4532,6 +4541,10 @@
         });
         if (!writes.length && !splits.length) {
             this.notify('Отклонения уже урегулированы — переносить нечего', 'info');
+            // #4638: «переносить нечего» — не то же самое, что «с планом всё хорошо». Пересборки в
+            // этой ветке нет вовсе, поэтому дыра, оставшаяся от прежнего действия, живёт дальше — и
+            // молчать о ней нельзя (ТЗ §14): оператор нажал кнопку и вправе узнать состояние плана.
+            this.warnUnderfilledAfterSettle();
             return Promise.resolve(false);
         }
 
@@ -4586,7 +4599,7 @@
                 // ограничен, — «Урегулировать» ставит остаток перед следующим заданием станка, а
                 // оно может стоять в любом дне.
                 return self.reconcilePlanStarts({ dayKeys: settleTouched, manual: true })
-                    .then(function() { return res; });
+                    .then(function() { self.warnUnderfilledAfterSettle(); return res; });
             });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -4594,6 +4607,28 @@
             self.notify('Ошибка урегулирования отклонений: ' + (err && err.message || err), 'error');
             return false;
         });
+    };
+
+    // #4638 (ТЗ §15/§14): «Урегулировать» не заканчивает МОЛЧА на недоупакованном дне. Дыра в конце
+    // смены — простой станка и лишний день в хвосте плана (правило DAY_FILL, #4469), но правило это
+    // АУДИТ: оно кричит в консоль на путях записи, а у «Урегулировать» есть ветка без единой записи
+    // («переносить нечего») — там о плане не говорил никто. Боевая ateh, Пт 07.08.2026: Станок 1 —
+    // 425 мин при потолке 455, Станок 4 — 404; в обоих случаях недостающая работа лежит первым
+    // заданием понедельника, продолжением той же цепочки (issue #4638).
+    // Закрывает дыру «Упорядочить» (недоупакованные дни — член его объектива выше переналадки,
+    // #4469), поэтому его и называем. Пусто → молчим (говорить не о чем).
+    // → число станко-дней, о которых сказали (для тестов).
+    AtexProductionPlanning.prototype.warnUnderfilledAfterSettle = function() {
+        if (typeof this.planUnderfilledDays !== 'function') return 0;
+        var days = [];
+        try { days = this.planUnderfilledDays(this.cuts || [], null) || []; }
+        catch (err) { console.warn('[pp] #4638: недоупакованные дни не посчитаны:', err && err.message); return 0; }
+        if (!days.length) return 0;
+        console.warn('[pp] ⚠️ #4638 DAY_FILL: после «Урегулировать» станко-дни не набиты до потолка смены: '
+            + days.join(', '));
+        this.notify('День не набит до конца: смен, не набитых до потолка, — ' + days.length
+            + '. Недостающая работа стои́т в следующем дне — нажмите «Упорядочить», чтобы затянуть её сюда', 'warning');
+        return days.length;
     };
 
     // #4564: РАЗДЕЛИТЬ ЧАСТИЧНО ВЫПОЛНЕННЫЕ задания — вторая половина «Урегулировать».

@@ -2721,7 +2721,7 @@
     // обязан был забрать часть завтрашней работы — задание рвётся по проходам (#3280), а всё, что
     // стои́т после него, съезжает. Боевой случай: 424 мин при потолке 455, назавтра продолжение на
     // 24 прохода по 2.33 мин (issue #4469).
-    //   segs — сегменты ОДНОГО станка [{ cutId, dayOffset, windowStartMin, runs, setupMin,
+    //   segs — сегменты ОДНОГО станка [{ cutId, chainId, dayOffset, windowStartMin, runs, setupMin,
     //          durationMin, setupOnly, fixedDayLock, immovable }];
     //   opts.freeMinFor(day) → минуты от занятости дня до потолка резки (availFor(day,'cuts'));
     //   opts.isFrozenDay(day) → день заморожен (автоматика в него не лезет, #4436).
@@ -2729,19 +2729,41 @@
     // (`immovable` — начатое #4381 / завершённое), день-приёмник или день-донор заморожен, у донора
     // нет проходов (наладочный хвост #3635 п.5), в остаток не влезает даже один проход ВМЕСТЕ с
     // наладкой донора, приёмник — день РАНЬШЕ «С» (туда не ставят, ТЗ §15), следующего дня нет.
+    //
+    // #4638 (ТЗ §15): 🔒 ДЕРЖИТ ДЕНЬ ЗВЕНА, А НЕ ТОЧКУ РАЗБИЕНИЯ ЦЕПОЧКИ. Исключение «донор
+    // зафиксирован» защищает ЧУЖОЕ задание: затянуть его во вчерашний день значило бы сменить его
+    // «Дату план», а замок ровно это и запрещает. Но когда донор — ПРОДОЛЖЕНИЕ ТОЙ ЖЕ цепочки, чьё
+    // звено закрывает недоупакованный день, переносить между днями нечего: голова остаётся в своём
+    // дне, продолжение — в своём, меняется ЛИШЬ сколько проходов кому досталось. Потолок дня уже
+    // сегодня режет 🔒 по проходам (#4304/#4467), так что число проходов замком и не защищено.
+    // Пока исключение не различало эти случаи, дыра была НЕВИДИМА: боевая ateh, Пт 07.08.2026 —
+    // Станок 1 держит 425 мин при потолке 455, а в понедельник первым стои́т 🔒-продолжение той же
+    // резки 4608 на 31 проход по 3.2 мин (влезло бы девять); Станок 2 — 448 при доноре-продолжении
+    // 4576. Оба дня страж считал набитыми законно, объектив «Упорядочить» дыры не видел, и закрыть
+    // её было нечем (issue #4638). Неприкосновенность (`immovable`) послаблению НЕ подлежит: там
+    // работа уже идёт, и её проходы не наши (#4381).
     // → [{ day, freeMin, needMin, donorCutId }] по возрастанию дня. Чистая, вход не мутирует.
     function underfilledLayoutDays(segs, opts) {
         opts = opts || {};
         var freeFn = typeof opts.freeMinFor === 'function' ? opts.freeMinFor : null;
         if (!freeFn) return [];
         var frozen = typeof opts.isFrozenDay === 'function' ? opts.isFrozenDay : function() { return false; };
-        var firstOfDay = {}, days = [];
+        // #4638: цепочка дробления — «ID первой части» (chainId); нет его → звено само себе цепочка
+        // (упаковщик держит все сегменты одной резки под ОДНИМ cutId, и там маркер не нужен).
+        function chainOf(s) {
+            var ch = (s && s.chainId != null) ? String(s.chainId).trim() : '';
+            return ch !== '' ? ch : String(s && s.cutId);
+        }
+        var firstOfDay = {}, lastOfDay = {}, days = [];
         (segs || []).forEach(function(s) {
             if (!s) return;
             var d = Number(s.dayOffset);
             if (!isFinite(d)) return;
-            if (!(d in firstOfDay)) { firstOfDay[d] = s; days.push(d); }
-            else if (Number(s.windowStartMin) < Number(firstOfDay[d].windowStartMin)) firstOfDay[d] = s;
+            if (!(d in firstOfDay)) { firstOfDay[d] = s; lastOfDay[d] = s; days.push(d); }
+            else {
+                if (Number(s.windowStartMin) < Number(firstOfDay[d].windowStartMin)) firstOfDay[d] = s;
+                if (Number(s.windowStartMin) >= Number(lastOfDay[d].windowStartMin)) lastOfDay[d] = s;
+            }
         });
         days.sort(function(a, b) { return a - b; });
         var out = [];
@@ -2750,7 +2772,10 @@
             if (day < 0) continue;                                             // раньше «С» ничего не ставим (ТЗ §15)
             if (frozen(day) || frozen(next)) continue;
             var donor = firstOfDay[next];
-            if (donor.fixedDayLock || donor.immovable) continue;               // #4434: 🔒 держит свой день; #4381: начатое не трогаем
+            // #4638: донор — продолжение ТОЙ ЖЕ цепочки, что закрывает этот день → замок дня ни при
+            // чём (обе записи остаются на своих датах, двигается лишь точка разбиения).
+            var ownTail = chainOf(donor) === chainOf(lastOfDay[day]);
+            if ((donor.fixedDayLock && !ownTail) || donor.immovable) continue; // #4434: 🔒 держит свой день; #4381: начатое не трогаем
             // #4542 (ТЗ §15): донора нельзя затянуть в этот день, если он ОБОГНАЛ БЫ 🔒 — замок
             // сильнее набивки. Такой день недоупакован ЗАКОННО, и страж DAY_FILL о нём молчит.
             if (typeof opts.overtakesFixedAt === 'function' && opts.overtakesFixedAt(String(donor.cutId), day)) continue;
