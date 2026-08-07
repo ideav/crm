@@ -10,6 +10,9 @@
         // #4536: баланс работы задания по операциям плана — по нему страж держит целостность
         // разорванного по дням задания (проверяется тестом `atex-pp-4536-supply-conservation`).
         planWorkBalanceByChain: planWorkBalanceByChain,
+        // #4645: план, ОТНИМАЮЩИЙ проходы у цепочки, до базы не доходит — операции такой цепочки
+        // снимаются целиком (проверяется `atex-pp-4645-work-conserved.test.js`).
+        refuseWorkLosingChains: refuseWorkLosingChains,
         // #4618: свидетель журнала — Σ проходов цепочки ДО и ПОСЛЕ операций. Чистая, поэтому
         // проверяется тестом `atex-pp-4618-journal-balance.test.js` без сети и без базы.
         journalChainBalance: journalChainBalance,
@@ -9263,6 +9266,7 @@
             self.hideProgress(); self.setBusy(false); self.render();
             self.reportPlanAudit(ops && ops.audit);          // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
             self.reportOverfilledDays(ops && ops.audit);     // #4497: день длиннее смены — по ХРАНИМЫМ минутам
+            self.reportLostWorkChains(ops && ops.lostWorkChains);   // #4645: план терял проходы — задания не тронуты
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -9342,6 +9346,22 @@
         if (msg.kind === 'error') this.notify(msg.text, 'error');
         else this.notify(msg.text, 'warning');
         return msg.items;
+    };
+
+    // #4645: страж снял операции цепочек, у которых план ОТНИМАЛ проходы. Оператору это надо
+    // сказать словами: он нажал кнопку, а эти задания остались прежними — без объяснения это
+    // читается как «кнопка не работает» (та же болезнь, что #4475). Называем задания и то, что с
+    // ними стало, а не правило: «остались как были, работа не потеряна».
+    // → число цепочек, о которых сказали (0 — говорить было не о чем).
+    AtexProductionPlanning.prototype.reportLostWorkChains = function(chains) {
+        var list = (chains || []).map(String).filter(function(x) { return x !== ''; });
+        if (!list.length || typeof this.notify !== 'function') return 0;
+        var head = list.slice(0, 3).map(function(id) { return '№' + id; }).join(', ');
+        var tail = list.length > 3 ? (' и ещё ' + (list.length - 3)) : '';
+        this.notify('План отнимал проходы у заданий ' + head + tail + ' — эти задания НЕ тронуты '
+            + '(работа не потеряна). Разбейте их вручную или освободите день: детали в консоли (#4645).',
+            'warning');
+        return list.length;
     };
 
     // #4475: нарушения стража → фраза на языке ЭТОГО экрана (подписи станков и дни — из состояния
@@ -9971,6 +9991,30 @@
                 console.log('[pp] 🧷 #4536: операции задания сняты ЦЕЛИКОМ (иначе часть проходов исчезла бы) — цепочки:',
                     guard.restoredChains.join(', '));
             }
+            // #4645: набор ОТНИМАЛ проходы у цепочки — её операции сняты целиком, записи остаются
+            // как хранятся. Это НЕ штатная ветка: план в таком виде терял работу заказа, и молчать
+            // о нём нельзя (ТЗ §14). Оператору скажет тот, кто ПИШЕТ план (applySplitPlan →
+            // reportPlanAudit, ниже по `ops.lostWorkChains`); здесь — разбор разработчику и журнал.
+            if ((guard.lostWorkChains || []).length) {
+                console.error('[pp] ⛔ #4645: план ОТНИМАЛ проходы у цепочек ' + guard.lostWorkChains.join(', ')
+                    + ' — их операции сняты ЦЕЛИКОМ, задания остаются как в базе. Причина выше: '
+                    + '«упаковщик не разместил проходы» (#4645) либо ветка плана, потерявшая продолжение.');
+                planJournalRows(self, guard.lostWorkChains.map(function(ch) {
+                    return { event: 'WORK_REFUSED', cut: ch,
+                             details: '#4645: набор операций отнимал проходы у цепочки ' + ch +
+                                      ' — операции сняты целиком, запись оставлена как хранится' };
+                }));
+            }
+            // #4645: упаковщик сам сообщил, что часть проходов не разместилась нигде. До стража это
+            // доходит как отрицательный баланс цепочки (выше), но назвать причину числом умеет только он.
+            if ((ops.unplaced || []).length) {
+                console.error('[pp] ⛔ #4645: упаковщик не разместил проходы — '
+                    + ops.unplaced.map(function(u){ return '#' + u.cutId + ': ' + u.runs; }).join('; '));
+                planJournalRows(self, (ops.unplaced || []).slice(0, 20).map(function(u) {
+                    return { event: 'RUNS_UNPLACED', cut: u.cutId, slitter: u.slitterId, after: u.runs,
+                             details: '#4645: упаковщик не нашёл места ' + u.runs + ' проходам — план их терял' };
+                }));
+            }
             // #4452: страж восстановил «Партию сырья» в операциях — она уйдёт в базу вместе с планом.
             if ((guard.filled || []).length) {
                 console.log('[pp] 🧵 #4452: «Партия сырья» проставлена в операции плана: ' + guard.filled.length,
@@ -10040,6 +10084,10 @@
             // applySplitPlan вместе с операциями (`ops.audit`) — фразу собирает formatPlanAuditMessage.
             // FROZEN_DAY сюда не идёт: нарушающие операции страж уже отбросил (enforce), записи не будет.
             ops.ruleAudit = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
+            // #4645: цепочки, чьи операции сняты как ОТНИМАЮЩИЕ проходы. Отдаём с операциями: тот,
+            // кто пишет план, обязан сказать оператору, что эти задания остались как были, — иначе
+            // «нажал, ничего не изменилось» снова без объяснения (ТЗ §14).
+            ops.lostWorkChains = (guard.lostWorkChains || []).slice();
         }
 
         var cutsById = {};

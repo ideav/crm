@@ -3902,6 +3902,31 @@
                     leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 }
             }
+            // #4645 (ТЗ §15): УПАКОВЩИК НЕ ВПРАВЕ МОЛЧА ПОТЕРЯТЬ ПРОХОДЫ. Цикл размещения выходит не
+            // только «пусто в пуле»: есть `break` по ветке stranded (нечего размещать, а незакрытые
+            // остатки ещё есть) и предохранитель `guardMax`. Оба оставляли резку с ЧАСТЬЮ проходов
+            // (голова легла, остаток `st.remaining` не лёг никуда), и наружу уходил план, где работа
+            // просто исчезла: боевая ateh 07.08.2026 — 🔒-задания 666131 (15 проходов → 1) и 667803
+            // (5 → 1) записались БЕЗ продолжений, заказы 4607 и 4615 недосчитались 14 и 4 проходов
+            // (issue #4645). Раскладку не чиним и не досочиняем — но НАЗЫВАЕМ остаток: свойство
+            // `unplaced` доезжает до planCutOperations, а оттуда до стража записи, который такой план
+            // не пропустит. Контракт возврата (список сегментов) не меняется — как у `underfilled`.
+            var unplacedRuns = [];
+            poolOrder.forEach(function(uid) {
+                var ust = state[uid];
+                if (ust && ust.remaining > 0) unplacedRuns.push({ cutId: String(uid), runs: Math.round(ust.remaining) });
+            });
+            segments.unplaced = unplacedRuns;
+            if (unplacedRuns.length) {
+                var unplacedTxt = unplacedRuns.map(function(u) { return u.cutId + ' (' + u.runs + ')'; }).join(', ');
+                ppTraceWarn('#4645 ⛔ ПРОХОДЫ НЕ РАЗМЕЩЕНЫ: раскладка кончилась, а у заданий остался' +
+                    ' неразложенный остаток — ' + unplacedTxt + '. План в этом виде записывать нельзя:' +
+                    ' голова осталась бы урезанной, а остаток не родился бы никогда.');
+                if (typeof console !== 'undefined' && console.error) {
+                    console.error('[pp] ⛔ #4645: упаковщик не разместил проходы: ' + unplacedTxt +
+                        ' — план потерял бы работу; страж записи такой план отклонит.');
+                }
+            }
             // #4469 (ТЗ §15): недоупакованные дни этой раскладки — для стража DAY_FILL. Считаем ЗДЕСЬ,
             // потому что мерка остатка — тот же гейт потолка, которым паковали (availFor(day,'cuts') по
             // ЦЕЛОЙ занятости #4149); снаружи её не воспроизвести. applyDowntime ниже двигает окна, но
@@ -5417,6 +5442,10 @@
         // #4469: недоупакованные станко-дни этой раскладки (для стража DAY_FILL) — считает сам
         // упаковщик своим гейтом потолка (underfilledLayoutDays в splitMachineQueue).
         var dayFill = [];
+        // #4645: проходы, которые упаковщик НЕ разместил (см. splitMachineQueue). Собираем по всем
+        // станкам и отдаём с операциями: страж записи обязан отказать такому плану, иначе голова
+        // запишется урезанной, а остаток не родится никогда (заказы 4607/4615, 07.08.2026).
+        var unplaced = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
@@ -5424,6 +5453,9 @@
             segs.forEach(function(seg){
                 var dk = String(key) + '|' + Number(seg.dayOffset);
                 dayLoad[dk] = round3((dayLoad[dk] || 0) + (Number(seg.setupMin) || 0) + (Number(seg.durationMin) || 0));
+            });
+            (segs.unplaced || []).forEach(function(u){
+                unplaced.push({ cutId: String(u.cutId), runs: Number(u.runs) || 0, slitterId: String(key) });
             });
             (segs.underfilled || []).forEach(function(u){
                 dayFill.push({ key: String(key) + '|' + Number(u.day), slitterId: String(key), day: Number(u.day),
@@ -5498,8 +5530,10 @@
         // только строками в консоли, и «почему этот слот победил» приходилось искать в трейсе.
         // #4467: dayLoad — занятость станко-дня из самой раскладки (для стража DAY_CAPACITY).
         // #4469: dayFill — станко-дни, которые раскладка оставила недоупакованными (страж DAY_FILL).
+        // #4645: unplaced — проходы, которых раскладка не разместила НИГДЕ (работа исчезла бы молча).
         return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
-                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill };
+                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill,
+                 unplaced: unplaced };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки

@@ -4302,7 +4302,8 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled, restoredChains: [] };
+        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled,
+                           restoredChains: [], lostWorkChains: [] };
 
         var skipped = 0;
         function keep(op, kind) {
@@ -4313,6 +4314,16 @@
         }
         // #4536: баланс работы ДО отбрасывания — с чем сравнивать целостность задания (ниже).
         var balanceBefore = planWorkBalanceByChain(ops, ctx);
+        // #4645: СОХРАННОСТЬ РАБОТЫ ПРОВЕРЯЕТСЯ ВСЕГДА, а не «когда есть кому отбрасывать». Прежде
+        // шлюз выходил здесь же (`!droppers.length`), и на наборах, где ни одно правило не вправе
+        // отбрасывать (актор `human`, реестр без `mode: 'drop'`), баланс не смотрел НИКТО. Отказ
+        // теряющему работу набору — свойство самого шлюза, а не чьего-то правила.
+        var lostWork = refuseWorkLosingChains(ops, ctx, balanceBefore);
+        skipped += lostWork.skipped;
+        if (!droppers.length) {
+            return { ops: ops, violations: violations, skipped: skipped, filled: filled,
+                     restoredChains: [], lostWorkChains: lostWork.chains };
+        }
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
         ops.deletes = (ops.deletes || []).filter(function(id) { return keep({ cutId: id }, 'delete'); });
@@ -4320,7 +4331,59 @@
         var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
         skipped += restoredChains.skipped;
         return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                 restoredChains: restoredChains.chains };
+                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains };
+    }
+
+    // #4645 (ТЗ §15): ПЛАН НЕ ВПРАВЕ УНИЧТОЖИТЬ РАБОТУ. `restoreSplitChainIntegrity` (#4536) лечит
+    // ТОЛЬКО тот разрыв, который устроил сам страж: цепочка была сбалансирована ДО отбрасывания и
+    // перестала быть после. Набор операций, пришедший к стражу УЖЕ несбалансированным, он пропускал
+    // намеренно — «план менял объём работы, судить не за что».
+    //
+    // Боевая цена этой оговорки — issue #4645 (ateh, 07.08.2026, 12:01): «Упорядочить» принесло
+    // ровно две операции — 666131 «проходов 15 → 1» и 667803 «5 → 1» — БЕЗ единого `create`.
+    // Продолжений не родилось, и заказы 4607/4615 недосчитались 14 и 4 проходов. Журнал #4618 это
+    // увидел (`CHAIN_BALANCE ⛔ РАБОТА НЕ СОХРАНЕНА`), но увидел ПОСЛЕ записи — свидетель, а не
+    // сторож. Причина в упаковщике (остаток не разместился и пропал, #4645 в splitMachineQueue),
+    // но полагаться на то, что упаковщик впредь всегда прав, нельзя: терять работу молча план не
+    // должен НИКОГДА, из какой бы ветки такой набор ни пришёл.
+    //
+    // Поэтому цепочка, у которой операции ОТНИМАЮТ проходы (баланс < 0), теряет их ЦЕЛИКОМ — все
+    // её операции снимаются, и записи остаются ровно такими, как хранятся. Это та же безопасная
+    // семантика, что у #4536 («задание остаётся там, где стои́т», FIXED_CUT_DAY #4512): день может
+    // остаться неоптимальным, но работа никуда не девается, а вызывающий получает список цепочек и
+    // обязан сказать о нём оператору (молчания нет — ТЗ §14).
+    //
+    // ПРИБАВКА проходов (баланс > 0) под правило НЕ подпадает: она работу не теряет, и именно так
+    // выглядит обратная правка — возврат урезанной головы к полному числу проходов.
+    // `ops.manual === true` — осознанная ручная правка объёма (проходы правит человек): не трогаем.
+    //   balanceBefore — баланс НАБОРА, каким он пришёл (до отбрасывания правилами).
+    // → { chains: [chainId…], skipped: сколько операций снято }. ops мутируется на месте.
+    function refuseWorkLosingChains(ops, ctx, balanceBefore) {
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !chainFn || ops.manual === true) return { chains: [], skipped: 0 };
+        var broken = {}, chains = [];
+        Object.keys(balanceBefore || {}).forEach(function(chainId) {
+            if (Number(balanceBefore[chainId]) < -0.001) { broken[chainId] = true; chains.push(chainId); }
+        });
+        if (!chains.length) return { chains: [], skipped: 0 };
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        var skipped = 0;
+        ops.updates = (ops.updates || []).filter(function(u) {
+            if (u && u.cutId != null && broken[chainOf(u.cutId)]) { skipped++; return false; }
+            return true;
+        });
+        ops.deletes = (ops.deletes || []).filter(function(id) {
+            if (id != null && broken[chainOf(id)]) { skipped++; return false; }
+            return true;
+        });
+        ops.creates = (ops.creates || []).filter(function(cr) {
+            if (cr && cr.parentCutId != null && broken[chainOf(cr.parentCutId)]) { skipped++; return false; }
+            return true;
+        });
+        return { chains: chains, skipped: skipped };
     }
 
     // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
@@ -8322,6 +8385,31 @@
                     leaveDay();   // #4434 п.1: с дня не уходим, пока на нём есть 🔒
                 }
             }
+            // #4645 (ТЗ §15): УПАКОВЩИК НЕ ВПРАВЕ МОЛЧА ПОТЕРЯТЬ ПРОХОДЫ. Цикл размещения выходит не
+            // только «пусто в пуле»: есть `break` по ветке stranded (нечего размещать, а незакрытые
+            // остатки ещё есть) и предохранитель `guardMax`. Оба оставляли резку с ЧАСТЬЮ проходов
+            // (голова легла, остаток `st.remaining` не лёг никуда), и наружу уходил план, где работа
+            // просто исчезла: боевая ateh 07.08.2026 — 🔒-задания 666131 (15 проходов → 1) и 667803
+            // (5 → 1) записались БЕЗ продолжений, заказы 4607 и 4615 недосчитались 14 и 4 проходов
+            // (issue #4645). Раскладку не чиним и не досочиняем — но НАЗЫВАЕМ остаток: свойство
+            // `unplaced` доезжает до planCutOperations, а оттуда до стража записи, который такой план
+            // не пропустит. Контракт возврата (список сегментов) не меняется — как у `underfilled`.
+            var unplacedRuns = [];
+            poolOrder.forEach(function(uid) {
+                var ust = state[uid];
+                if (ust && ust.remaining > 0) unplacedRuns.push({ cutId: String(uid), runs: Math.round(ust.remaining) });
+            });
+            segments.unplaced = unplacedRuns;
+            if (unplacedRuns.length) {
+                var unplacedTxt = unplacedRuns.map(function(u) { return u.cutId + ' (' + u.runs + ')'; }).join(', ');
+                ppTraceWarn('#4645 ⛔ ПРОХОДЫ НЕ РАЗМЕЩЕНЫ: раскладка кончилась, а у заданий остался' +
+                    ' неразложенный остаток — ' + unplacedTxt + '. План в этом виде записывать нельзя:' +
+                    ' голова осталась бы урезанной, а остаток не родился бы никогда.');
+                if (typeof console !== 'undefined' && console.error) {
+                    console.error('[pp] ⛔ #4645: упаковщик не разместил проходы: ' + unplacedTxt +
+                        ' — план потерял бы работу; страж записи такой план отклонит.');
+                }
+            }
             // #4469 (ТЗ §15): недоупакованные дни этой раскладки — для стража DAY_FILL. Считаем ЗДЕСЬ,
             // потому что мерка остатка — тот же гейт потолка, которым паковали (availFor(day,'cuts') по
             // ЦЕЛОЙ занятости #4149); снаружи её не воспроизвести. applyDowntime ниже двигает окна, но
@@ -9837,6 +9925,10 @@
         // #4469: недоупакованные станко-дни этой раскладки (для стража DAY_FILL) — считает сам
         // упаковщик своим гейтом потолка (underfilledLayoutDays в splitMachineQueue).
         var dayFill = [];
+        // #4645: проходы, которые упаковщик НЕ разместил (см. splitMachineQueue). Собираем по всем
+        // станкам и отдаём с операциями: страж записи обязан отказать такому плану, иначе голова
+        // запишется урезанной, а остаток не родится никогда (заказы 4607/4615, 07.08.2026).
+        var unplaced = [];
         // headId → число использованных записей цепочки (голова + переиспользованные продолжения).
         var usedByHead = {};
         mOrder.forEach(function(key){
@@ -9844,6 +9936,9 @@
             segs.forEach(function(seg){
                 var dk = String(key) + '|' + Number(seg.dayOffset);
                 dayLoad[dk] = round3((dayLoad[dk] || 0) + (Number(seg.setupMin) || 0) + (Number(seg.durationMin) || 0));
+            });
+            (segs.unplaced || []).forEach(function(u){
+                unplaced.push({ cutId: String(u.cutId), runs: Number(u.runs) || 0, slitterId: String(key) });
             });
             (segs.underfilled || []).forEach(function(u){
                 dayFill.push({ key: String(key) + '|' + Number(u.day), slitterId: String(key), day: Number(u.day),
@@ -9918,8 +10013,10 @@
         // только строками в консоли, и «почему этот слот победил» приходилось искать в трейсе.
         // #4467: dayLoad — занятость станко-дня из самой раскладки (для стража DAY_CAPACITY).
         // #4469: dayFill — станко-дни, которые раскладка оставила недоупакованными (страж DAY_FILL).
+        // #4645: unplaced — проходы, которых раскладка не разместила НИГДЕ (работа исчезла бы молча).
         return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
-                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill };
+                 placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill,
+                 unplaced: unplaced };
     }
 
     // #3280: разделить рулоны/метраж одной строки Обеспечения между сегментами резки
@@ -13303,6 +13400,9 @@
         // #4536: баланс работы задания по операциям плана — по нему страж держит целостность
         // разорванного по дням задания (проверяется тестом `atex-pp-4536-supply-conservation`).
         planWorkBalanceByChain: planWorkBalanceByChain,
+        // #4645: план, ОТНИМАЮЩИЙ проходы у цепочки, до базы не доходит — операции такой цепочки
+        // снимаются целиком (проверяется `atex-pp-4645-work-conserved.test.js`).
+        refuseWorkLosingChains: refuseWorkLosingChains,
         // #4618: свидетель журнала — Σ проходов цепочки ДО и ПОСЛЕ операций. Чистая, поэтому
         // проверяется тестом `atex-pp-4618-journal-balance.test.js` без сети и без базы.
         journalChainBalance: journalChainBalance,
@@ -22556,6 +22656,7 @@
             self.hideProgress(); self.setBusy(false); self.render();
             self.reportPlanAudit(ops && ops.audit);          // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
             self.reportOverfilledDays(ops && ops.audit);     // #4497: день длиннее смены — по ХРАНИМЫМ минутам
+            self.reportLostWorkChains(ops && ops.lostWorkChains);   // #4645: план терял проходы — задания не тронуты
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
@@ -22635,6 +22736,22 @@
         if (msg.kind === 'error') this.notify(msg.text, 'error');
         else this.notify(msg.text, 'warning');
         return msg.items;
+    };
+
+    // #4645: страж снял операции цепочек, у которых план ОТНИМАЛ проходы. Оператору это надо
+    // сказать словами: он нажал кнопку, а эти задания остались прежними — без объяснения это
+    // читается как «кнопка не работает» (та же болезнь, что #4475). Называем задания и то, что с
+    // ними стало, а не правило: «остались как были, работа не потеряна».
+    // → число цепочек, о которых сказали (0 — говорить было не о чем).
+    AtexProductionPlanning.prototype.reportLostWorkChains = function(chains) {
+        var list = (chains || []).map(String).filter(function(x) { return x !== ''; });
+        if (!list.length || typeof this.notify !== 'function') return 0;
+        var head = list.slice(0, 3).map(function(id) { return '№' + id; }).join(', ');
+        var tail = list.length > 3 ? (' и ещё ' + (list.length - 3)) : '';
+        this.notify('План отнимал проходы у заданий ' + head + tail + ' — эти задания НЕ тронуты '
+            + '(работа не потеряна). Разбейте их вручную или освободите день: детали в консоли (#4645).',
+            'warning');
+        return list.length;
     };
 
     // #4475: нарушения стража → фраза на языке ЭТОГО экрана (подписи станков и дни — из состояния
@@ -23264,6 +23381,30 @@
                 console.log('[pp] 🧷 #4536: операции задания сняты ЦЕЛИКОМ (иначе часть проходов исчезла бы) — цепочки:',
                     guard.restoredChains.join(', '));
             }
+            // #4645: набор ОТНИМАЛ проходы у цепочки — её операции сняты целиком, записи остаются
+            // как хранятся. Это НЕ штатная ветка: план в таком виде терял работу заказа, и молчать
+            // о нём нельзя (ТЗ §14). Оператору скажет тот, кто ПИШЕТ план (applySplitPlan →
+            // reportPlanAudit, ниже по `ops.lostWorkChains`); здесь — разбор разработчику и журнал.
+            if ((guard.lostWorkChains || []).length) {
+                console.error('[pp] ⛔ #4645: план ОТНИМАЛ проходы у цепочек ' + guard.lostWorkChains.join(', ')
+                    + ' — их операции сняты ЦЕЛИКОМ, задания остаются как в базе. Причина выше: '
+                    + '«упаковщик не разместил проходы» (#4645) либо ветка плана, потерявшая продолжение.');
+                planJournalRows(self, guard.lostWorkChains.map(function(ch) {
+                    return { event: 'WORK_REFUSED', cut: ch,
+                             details: '#4645: набор операций отнимал проходы у цепочки ' + ch +
+                                      ' — операции сняты целиком, запись оставлена как хранится' };
+                }));
+            }
+            // #4645: упаковщик сам сообщил, что часть проходов не разместилась нигде. До стража это
+            // доходит как отрицательный баланс цепочки (выше), но назвать причину числом умеет только он.
+            if ((ops.unplaced || []).length) {
+                console.error('[pp] ⛔ #4645: упаковщик не разместил проходы — '
+                    + ops.unplaced.map(function(u){ return '#' + u.cutId + ': ' + u.runs; }).join('; '));
+                planJournalRows(self, (ops.unplaced || []).slice(0, 20).map(function(u) {
+                    return { event: 'RUNS_UNPLACED', cut: u.cutId, slitter: u.slitterId, after: u.runs,
+                             details: '#4645: упаковщик не нашёл места ' + u.runs + ' проходам — план их терял' };
+                }));
+            }
             // #4452: страж восстановил «Партию сырья» в операциях — она уйдёт в базу вместе с планом.
             if ((guard.filled || []).length) {
                 console.log('[pp] 🧵 #4452: «Партия сырья» проставлена в операции плана: ' + guard.filled.length,
@@ -23333,6 +23474,10 @@
             // applySplitPlan вместе с операциями (`ops.audit`) — фразу собирает formatPlanAuditMessage.
             // FROZEN_DAY сюда не идёт: нарушающие операции страж уже отбросил (enforce), записи не будет.
             ops.ruleAudit = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
+            // #4645: цепочки, чьи операции сняты как ОТНИМАЮЩИЕ проходы. Отдаём с операциями: тот,
+            // кто пишет план, обязан сказать оператору, что эти задания остались как были, — иначе
+            // «нажал, ничего не изменилось» снова без объяснения (ТЗ §14).
+            ops.lostWorkChains = (guard.lostWorkChains || []).slice();
         }
 
         var cutsById = {};

@@ -1066,7 +1066,8 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops || !droppers.length) return { ops: ops, violations: violations, skipped: 0, filled: filled, restoredChains: [] };
+        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled,
+                           restoredChains: [], lostWorkChains: [] };
 
         var skipped = 0;
         function keep(op, kind) {
@@ -1077,6 +1078,16 @@
         }
         // #4536: баланс работы ДО отбрасывания — с чем сравнивать целостность задания (ниже).
         var balanceBefore = planWorkBalanceByChain(ops, ctx);
+        // #4645: СОХРАННОСТЬ РАБОТЫ ПРОВЕРЯЕТСЯ ВСЕГДА, а не «когда есть кому отбрасывать». Прежде
+        // шлюз выходил здесь же (`!droppers.length`), и на наборах, где ни одно правило не вправе
+        // отбрасывать (актор `human`, реестр без `mode: 'drop'`), баланс не смотрел НИКТО. Отказ
+        // теряющему работу набору — свойство самого шлюза, а не чьего-то правила.
+        var lostWork = refuseWorkLosingChains(ops, ctx, balanceBefore);
+        skipped += lostWork.skipped;
+        if (!droppers.length) {
+            return { ops: ops, violations: violations, skipped: skipped, filled: filled,
+                     restoredChains: [], lostWorkChains: lostWork.chains };
+        }
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
         ops.deletes = (ops.deletes || []).filter(function(id) { return keep({ cutId: id }, 'delete'); });
@@ -1084,7 +1095,59 @@
         var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
         skipped += restoredChains.skipped;
         return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                 restoredChains: restoredChains.chains };
+                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains };
+    }
+
+    // #4645 (ТЗ §15): ПЛАН НЕ ВПРАВЕ УНИЧТОЖИТЬ РАБОТУ. `restoreSplitChainIntegrity` (#4536) лечит
+    // ТОЛЬКО тот разрыв, который устроил сам страж: цепочка была сбалансирована ДО отбрасывания и
+    // перестала быть после. Набор операций, пришедший к стражу УЖЕ несбалансированным, он пропускал
+    // намеренно — «план менял объём работы, судить не за что».
+    //
+    // Боевая цена этой оговорки — issue #4645 (ateh, 07.08.2026, 12:01): «Упорядочить» принесло
+    // ровно две операции — 666131 «проходов 15 → 1» и 667803 «5 → 1» — БЕЗ единого `create`.
+    // Продолжений не родилось, и заказы 4607/4615 недосчитались 14 и 4 проходов. Журнал #4618 это
+    // увидел (`CHAIN_BALANCE ⛔ РАБОТА НЕ СОХРАНЕНА`), но увидел ПОСЛЕ записи — свидетель, а не
+    // сторож. Причина в упаковщике (остаток не разместился и пропал, #4645 в splitMachineQueue),
+    // но полагаться на то, что упаковщик впредь всегда прав, нельзя: терять работу молча план не
+    // должен НИКОГДА, из какой бы ветки такой набор ни пришёл.
+    //
+    // Поэтому цепочка, у которой операции ОТНИМАЮТ проходы (баланс < 0), теряет их ЦЕЛИКОМ — все
+    // её операции снимаются, и записи остаются ровно такими, как хранятся. Это та же безопасная
+    // семантика, что у #4536 («задание остаётся там, где стои́т», FIXED_CUT_DAY #4512): день может
+    // остаться неоптимальным, но работа никуда не девается, а вызывающий получает список цепочек и
+    // обязан сказать о нём оператору (молчания нет — ТЗ §14).
+    //
+    // ПРИБАВКА проходов (баланс > 0) под правило НЕ подпадает: она работу не теряет, и именно так
+    // выглядит обратная правка — возврат урезанной головы к полному числу проходов.
+    // `ops.manual === true` — осознанная ручная правка объёма (проходы правит человек): не трогаем.
+    //   balanceBefore — баланс НАБОРА, каким он пришёл (до отбрасывания правилами).
+    // → { chains: [chainId…], skipped: сколько операций снято }. ops мутируется на месте.
+    function refuseWorkLosingChains(ops, ctx, balanceBefore) {
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !chainFn || ops.manual === true) return { chains: [], skipped: 0 };
+        var broken = {}, chains = [];
+        Object.keys(balanceBefore || {}).forEach(function(chainId) {
+            if (Number(balanceBefore[chainId]) < -0.001) { broken[chainId] = true; chains.push(chainId); }
+        });
+        if (!chains.length) return { chains: [], skipped: 0 };
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        var skipped = 0;
+        ops.updates = (ops.updates || []).filter(function(u) {
+            if (u && u.cutId != null && broken[chainOf(u.cutId)]) { skipped++; return false; }
+            return true;
+        });
+        ops.deletes = (ops.deletes || []).filter(function(id) {
+            if (id != null && broken[chainOf(id)]) { skipped++; return false; }
+            return true;
+        });
+        ops.creates = (ops.creates || []).filter(function(cr) {
+            if (cr && cr.parentCutId != null && broken[chainOf(cr.parentCutId)]) { skipped++; return false; }
+            return true;
+        });
+        return { chains: chains, skipped: skipped };
     }
 
     // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
