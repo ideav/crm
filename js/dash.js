@@ -1638,14 +1638,13 @@ function dashCalcRGFormulas() {
 
             // Replace named refs [colName]
             expr = expr.replace(/\[([^\]]+)\]/g, function(match, ref) {
-                // Check if numeric offset. Both signs are written explicitly by
-                // users ([-1], [+2]), so the leading plus is part of the number
-                // and not a column name — without this the ref fell through to
-                // the named branch, found nothing and silently gave 0 (#4646).
-                var refTrim = ref.trim(), num = parseInt(refTrim, 10);
-                if (!isNaN(num) && String(num) === refTrim.replace(/^\+/, '')) {
-                    // numeric relative ref
-                    var targetIdx = myIdx + num;
+                // Relative refs carry an explicit sign — [-1] is the column to the
+                // left, [+1] the one to the right. A number without a sign is an
+                // id everywhere else in the model language (row formulas address
+                // rows as [123]), so it stays a name here too (#4648, #4646).
+                var refTrim = ref.trim();
+                if (/^[+-]\d+$/.test(refTrim)) {
+                    var targetIdx = myIdx + parseInt(refTrim, 10);
                     if (targetIdx < 0 || targetIdx >= cells.length) return '0';
                     var tc = cells[targetIdx];
                     if (!tc || tc.getAttribute('ready') !== '1') { allReady = false; return match; }
@@ -1654,7 +1653,11 @@ function dashCalcRGFormulas() {
                 // Named ref: find column index by name
                 var colIdx = colNameMap[refTrim];
                 if (colIdx === undefined) {
-                    // fallback: search all cells in row for a column with that header
+                    // An unsigned number here used to be read as an offset; say so
+                    // out loud instead of silently substituting 0 (#4648).
+                    if (/^\d+$/.test(refTrim))
+                        console.log('RGformula: [' + refTrim + '] — колонки с таким именем нет;'
+                            + ' относительный адрес пишется со знаком: [+' + refTrim + '] или [-' + refTrim + ']');
                     return '0';
                 }
                 var tc = cells[colIdx];
