@@ -15960,22 +15960,50 @@
     // раньше). Перезаписывает ручные перестановки оператора (#3449), поэтому с подтверждением.
     // #3792: зафиксированные задания остаются на своих днях (не переносятся/не разбиваются) —
     // тот же замок на день, что и при генерации.
-    AtexProductionPlanning.prototype.optimizeQueue = function(actionsEl) {
+    // #4642: `opts.slitterId` — режим «Станок»: пересобираем ТОЛЬКО этот станок (см. runOptimizeQueue).
+    // Пусто/не задан — режим «Все» (прежнее поведение).
+    AtexProductionPlanning.prototype.optimizeQueue = function(actionsEl, opts) {
         var self = this;
         if (this.busy) return;
         if (this._pendingPlan) { this.notify('Пересчёт уже показан — нажмите «Применить» или «Отменить»', 'info'); return; }
         if (!(this.cuts && this.cuts.length)) { this.notify('Нет заданий для упорядочивания', 'info'); return; }
+        var sid = (opts && opts.slitterId != null) ? String(opts.slitterId) : '';
+        // #4642: режим «Станок» без выбранного станка — не молчим и не подменяем его режимом «Все».
+        if (opts && sid === '') { this.notify('Станок не выбран — упорядочивать в его рамках нечего', 'info'); return; }
+        var label = sid ? this.slitterLabelById(sid) : '';
         var host = actionsEl || (this.root && this.root.querySelector('.atex-pp-panel-actions'));
         var oldBar = host && host.querySelector && host.querySelector('.atex-pp-confirm-bar');
         if (oldBar && oldBar.parentNode) oldBar.parentNode.removeChild(oldBar);
         var msg = el('span', { class: 'atex-pp-confirm-msg', text:
-            'Пересобрать очередь в оптимальный порядок: группировка по сырью (минимум переналадок), ' +
-            'при прочих равных — больше полос раньше. Ручные перестановки заменятся; ' +
-            'зафиксированные задания останутся на своих днях (#3792). ' +
+            (sid ? ('Пересобрать очередь станка «' + label + '»: задания других станков не тронем и сюда '
+                    + 'не перенесём. ')
+                 : 'Пересобрать очередь ВСЕХ станков (задание может переехать на другой станок). ') +
+            'Порядок — группировка по сырью (минимум переналадок), при прочих равных — больше полос раньше. ' +
+            'Ручные перестановки заменятся; зафиксированные задания останутся на своих днях (#3792). ' +
             'Результат сперва ПОКАЖЕМ на карточках — в базу он запишется только по «Применить» (#4402).' });
         this.confirmAction(msg, host, [
-            { label: 'Упорядочить', inline: true, onConfirm: function() { self.runOptimizeQueue(); } }
+            { label: sid ? 'Упорядочить станок' : 'Упорядочить все', inline: true,
+              onConfirm: function() { self.runOptimizeQueue(sid ? { slitterId: sid } : null); } }
         ]);
+    };
+
+    // #4642: подпись станка по id — для сообщений режима «Станок». Нет в справочнике → сам id
+    // (говорить «станок undefined» хуже, чем назвать число).
+    AtexProductionPlanning.prototype.slitterLabelById = function(sid) {
+        var key = String(sid == null ? '' : sid);
+        var found = (this.slitters || []).filter(function(s) { return String(s && s.id) === key; })[0];
+        return (found && found.label) ? String(found.label) : key;
+    };
+
+    // #4642: id станка АКТИВНОЙ вкладки очереди. Ключ вкладки задаёт groupKey (renderQueue): у
+    // группы «Без слиттера» это служебный сентинел, а не id. Сентинел здесь НЕ повторяем —
+    // сверяемся со справочником: ключа, которого нет среди slitters, станком не считаем. Так
+    // помощник не разъедется с groupKey, если сентинел сменят. Пусто → станок не выбран.
+    AtexProductionPlanning.prototype.activeSlitterId = function() {
+        var key = String(this.activeSlitter == null ? '' : this.activeSlitter);
+        if (key === '') return '';
+        var known = (this.slitters || []).some(function(s) { return s && s.id != null && String(s.id) === key; });
+        return known ? key : '';
     };
 
     // #4064: один день опоздания в объективе «Упорядочить» весит больше любой переналадки — срок
@@ -16525,9 +16553,24 @@
     // При равенстве кандидатов берём B (без смены станка). Улучшения нет (min ≥ текущего) → план
     // НЕ трогаем («уже оптимальна»): смена станка rebalance-ом, добавлявшая переналадку, отсекается.
     // Пишем только изменившиеся значения (applySplitPlan / _m_set лишь сменившимся цепочкам).
-    AtexProductionPlanning.prototype.runOptimizeQueue = function() {
+    //
+    // #4642: РЕЖИМ «СТАНОК» (`scope.slitterId`) — та же машинерия, но заперта на одном станке:
+    //   • кандидат B строится с `moveScope.withinSlitterIds = [станок]` — во вход планировщика идут
+    //     ТОЛЬКО задания этого станка (#4225), соседние не трогаются и не заимствуются;
+    //   • кандидат A (переназначение станков) НЕ рассматривается вовсе — он ровно тем и занят, что
+    //     раскидывает задания между станками, а оператор попросил обратного;
+    //   • кандидат C (перестановка внутри дней) сужен тем же станком.
+    // Мерки (переналадка, срок, «Отпуск», недоупаковка) считаем по ВСЕЙ очереди, как и раньше:
+    // задания вне станка в обеих чашах весов одинаковы и в сравнении сокращаются, а собственной
+    // арифметики для режима заводить нельзя (#4499 — вторая арифметика всегда расходится).
+    AtexProductionPlanning.prototype.runOptimizeQueue = function(scope) {
         var self = this;
         if (this.busy) return;
+        // #4642: пустой/неизвестный станок сюда не доходит (optimizeQueue уже отказал), но метод
+        // зовут и из тестов — нормализуем здесь же, чтобы режим определялся ОДНИМ выражением.
+        var onlySid = (scope && scope.slitterId != null && String(scope.slitterId) !== '')
+            ? String(scope.slitterId) : null;
+        var moveScope = onlySid ? { withinSlitterIds: [onlySid] } : null;
         this.setBusy(true);
         // #4064: объектив кандидата — дни_опоздания × LATE_DAY_WEIGHT + переналадка(мин). Срок (ТЗ §14)
         // старший критерий: сперва минимизируем опоздания, затем переналадку. coX/lateX храним отдельно
@@ -16583,7 +16626,8 @@
                 cutCount: (self.cuts || []).length,
                 fixedCount: (self.cuts || []).filter(function(c) { return c && c.fixed; }).length,
                 slitterCount: (self.slitters || []).length,
-                windowLabel: self.optimizeWindowLabel(),
+                windowLabel: self.optimizeWindowLabel()
+                    + (onlySid ? ', ТОЛЬКО станок «' + self.slitterLabelById(onlySid) + '»' : ''),   // #4642
                 lateBefore: round3(lateBefore), coBefore: round3(coBefore),
                 downtimeBefore: dtBefore.length, downtimeIds: dtBefore.slice(0, 10),
                 underfilledBefore: ufBefore.length, underfilledDays: ufBefore.slice(0, 10),
@@ -16593,7 +16637,8 @@
             };
 
             // Кандидат B: пересобрать порядок/дни на ТЕКУЩИХ станках (без переназначения).
-            builtB = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false);
+            // #4642: в режиме «Станок» — с moveScope, то есть только на нём одном.
+            builtB = self.buildSequenceOps(self.cuts, PLANNING_STRATEGY_SETUP, false, moveScope);
             // #4471: кандидат меряется СВОИМ планом целиком (станок и минуты от упаковщика), а не
             // картой стартов поверх хранимых колонок — иначе объектив врёт и хороший план выбрасывается.
             coB = self.planChangeoverMin(self.cuts, builtB.ops);
@@ -16610,10 +16655,16 @@
 
             // Кандидат A: переназначить станки. Считаем В ПАМЯТИ — временно подменяем станок на
             // self.cuts (buildSequenceOps/planCutOperations синхронны), меряем, ВОЗВРАЩАЕМ обратно.
-            plan = self.computeReassignmentPlan();
+            // #4642: в режиме «Станок» кандидата A НЕТ. Он именно тем и занят, что раскидывает задания
+            // между станками, — а оператор нажал «Станок», чтобы этого не случилось. Не «считаем и не
+            // берём», а не считаем вовсе: иначе он попал бы в выбор и увёз работу с соседних станков.
+            plan = onlySid ? { changed: false, slitterByRecordId: {} } : self.computeReassignmentPlan();
             objA = Infinity;
             builtA = null;
-            if (plan.changed) {
+            if (onlySid) {
+                trace.candidates.push({ key: 'A', title: 'со сменой станка',
+                    skipped: 'режим «Станок» — миграция между станками запрещена' });
+            } else if (plan.changed) {
                 var cutsById = {}; (self.cuts || []).forEach(function(c) { cutsById[String(c.id)] = c; });
                 var saved = {};
                 Object.keys(plan.slitterByRecordId).forEach(function(mid) {
@@ -16648,7 +16699,7 @@
             // меняются, поэтому опоздания и конфликты с «Отпуском» те же — меняется только переналадка.
             // Кандидат равноправен с B и A: берём того, чей объектив меньше (issue #4440 — «какая
             // разница глобальный/локальный, что выгоднее, то и берём»).
-            localC = self.intraDayImprovementOps();
+            localC = self.intraDayImprovementOps(onlySid ? { slitterId: onlySid } : null);   // #4642
             objC = Infinity;
             if (localC.updates.length && localC.gainMin > 0) {
                 coC = round3(coBefore - localC.gainMin);
@@ -16682,6 +16733,7 @@
             self.fillOptimizeMovesTrace(trace, localOps, null);
             self.startPlanPreview({
                 ops: localOps,
+                slitterId: onlySid,   // #4642: рамки режима «Станок» — их же держит полировка
                 reassign: null,
                 tailSetup: tailBefore,
                 slitterChange: false,
@@ -16742,7 +16794,11 @@
             } else {
                 trace.stop = { code: 'none-optimal', text: 'план НЕ изменён — очередь уже оптимальна (опозданий 0 дн)' };
                 emitOptimizeTrace(trace);
-                self.notify('Очередь уже оптимальна (опозданий 0 дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
+                // #4642: в режиме «Станок» «оптимальна» относится к НЕМУ, а не ко всей очереди —
+                // иначе оператор прочтёт отчёт как приговор всему плану и не нажмёт «Все».
+                self.notify((onlySid ? ('Очередь станка «' + self.slitterLabelById(onlySid) + '» уже оптимальна')
+                                     : 'Очередь уже оптимальна')
+                    + ' (опозданий 0 дн, переналадка ' + round3(coBefore) + ' мин)', 'success');
             }
             return;
         }
@@ -16765,6 +16821,7 @@
         self.setBusy(false);
         self.startPlanPreview({
             ops: ops,
+            slitterId: onlySid,   // #4642: рамки режима «Станок» — их же держит полировка
             reassign: useA ? { slitterByRecordId: plan.slitterByRecordId, slitterReqId: plan.slitterReqId } : null,
             tailSetup: tailBefore,
             slitterChange: useA,
@@ -16948,7 +17005,9 @@
         // я делал вручную»). Полируем ВЫБРАННЫЙ кандидат тем же локальным проходом, что и кандидат C
         // (#4440): состав дня, его номер и станок не меняются, меняется только порядок внутри дня,
         // поэтому ни сроки, ни загрузка дней не страдают, а переналадка может только уменьшиться.
-        var polished = this.intraDayImprovementOps();
+        // #4642: полируем В ТЕХ ЖЕ РАМКАХ, что считался кандидат. В режиме «Станок» полировка по всем
+        // станкам добавила бы в предпросмотр правки соседей — ровно то, чего оператор кнопкой избегал.
+        var polished = this.intraDayImprovementOps(pend.slitterId ? { slitterId: String(pend.slitterId) } : null);
         if (polished.updates.length) {
             this.applyPreviewStarts(polished.updates.map(function(u) {
                 return { cutId: String(u.cutId), ts: Number(u.planStartTs) };
@@ -23553,7 +23612,11 @@
     // Возвращает { updates, gainByMachine, gainMin } — updates в том же формате, что кандидаты A/B
     // (перестановка = переназначение уже занятых стартов дня новому порядку; точные минуты потом
     // сведёт reconcilePlanStarts, #4438). Пусто → улучшать нечего.
-    AtexProductionPlanning.prototype.intraDayImprovementOps = function() {
+    // #4642: `opts.slitterId` — считать ТОЛЬКО этот станок (режим «Станок» кнопки «Упорядочить»).
+    // Не задан — все станки, как раньше.
+    AtexProductionPlanning.prototype.intraDayImprovementOps = function(opts) {
+        var onlySid = (opts && opts.slitterId != null && String(opts.slitterId) !== '')
+            ? String(opts.slitterId) : null;
         var self = this;
         var empty = { updates: [], gainByMachine: {}, gainMin: 0 };
         if (!(this.cuts && this.cuts.length)) return empty;
@@ -23580,6 +23643,7 @@
         (this.slitters || []).forEach(function(s){
             var sid = String(s && s.id == null ? '' : s.id);
             if (sid === '') return;
+            if (onlySid && sid !== onlySid) return;   // #4642: режим «Станок» — соседей не трогаем
             var ordered = (self.cuts || []).filter(function(c){
                 if (!c || String(c.slitter && c.slitter.id) !== sid) return false;
                 if (String(c.status || '').trim() === 'Завершён') return false;
@@ -25357,6 +25421,16 @@
             this.downtimeBtn.disabled = !actId;
             this.downtimeActiveSlitter = actId ? { id: actId, label: actSlitter.label } : null;
         }
+        // #4642: «Станок» упорядочивает АКТИВНУЮ вкладку — называем её в подсказке и гасим кнопку,
+        // когда станка нет (группа «Без слиттера»: упорядочивать «в рамках станка» там нечего).
+        if (this.orderOneBtn) {
+            var ordSlitter = activeGroup && activeGroup.slitter;
+            var ordId = ordSlitter && ordSlitter.id != null ? String(ordSlitter.id) : '';
+            this.orderOneBtn.disabled = !ordId;
+            this.orderOneBtn.title = ordId
+                ? ('Пересобрать очередь станка «' + (ordSlitter.label || ordId) + '»: задания на другие станки не переезжают')
+                : 'Станок не выбран — упорядочивать в его рамках нечего';
+        }
         var groupEl = el('div', { class: 'atex-pp-queue-group' });
 
         // #4434 п.3: после РУЧНОГО перемещения (↑↓/drag) кнопки не будет — перестановка пересчитывает
@@ -26445,7 +26519,7 @@
         this.formEl = el('section', { class: 'atex-pp-form', 'data-submit-scope': '' });
 
         // #3475: панель действий — под заголовком (.atex-pp-panel-head column в CSS).
-        // Порядок: «Сгенерировать» (основная) → «Добавить вручную» (второстепенная) →
+        // Порядок: «Сгенерировать» (основная) → «Добавить» (второстепенная) →
         // «Удалить» (warning, последняя). Названия укорочены, акценты переставлены.
         var queueActions = el('div', { class: 'atex-pp-panel-actions' });
         var genSpinner = el('span', { class: 'atex-pp-spinner atex-pp-gen-spinner', title: 'Идёт генерация заданий…' });
@@ -26458,17 +26532,34 @@
         // «Сгенерировать резки» только создаёт резки для незапланированных позиций и
         // дописывает их в конец очереди (#3449); уже запланированные резки не трогает.
         // Перестановку очереди оператор делает вручную (↑↓).
-        // #3475: «Добавить вручную» — второстепенная кнопка (без -primary).
-        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить вручную' });
+        // #3475: «Добавить» — второстепенная кнопка (без -primary). #4642: было «Добавить вручную» —
+        // «вручную» ничего не уточняло (второго способа добавить одно задание нет) и только длинило ряд.
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-add', type: 'button', text: 'Добавить' });
         addBtn.addEventListener('click', function() { self.openForm(); });
         // #3783/#3785: «Упорядочить» — пересобрать очередь видимого диапазона в оптимальный
         // порядок (минимум переналадок: группировка сырья; при прочих равных больше полос
         // раньше). Перезаписывает ручной порядок (#3449) — поэтому через подтверждение.
-        var orderBtn = el('button', { class: 'atex-pp-btn atex-pp-order-queue', type: 'button', text: 'Упорядочить',
-            title: 'Пересобрать очередь: группировка по сырью, минимум переналадок (при прочих равных больше полос раньше)' });
-        orderBtn.addEventListener('click', function() { self.optimizeQueue(queueActions); });
+        // #4642 (решение заказчика 07.08.2026): у кнопки ДВА РАЗНЫХ смысла, и раньше выбора не было —
+        // нажатие всегда пересобирало ВЕСЬ горизонт по всем станкам, включая переназначение станков
+        // (кандидат A). Диспетчер же обычно правит ОДИН станок, на который смотрит, и не хочет, чтобы
+        // заодно переехали соседние. Теперь это три смежные части: подпись «Упорядочить» (не кнопка,
+        // она называет группу) + «Станок» (только активная вкладка, миграции между станками нет) +
+        // «Все» (прежнее поведение целиком).
+        var orderGroup = el('div', { class: 'atex-pp-order-group' });
+        orderGroup.appendChild(el('span', { class: 'atex-pp-order-title', text: 'Упорядочить' }));
+        var orderOneBtn = el('button', { class: 'atex-pp-btn atex-pp-order-queue atex-pp-order-one', type: 'button', text: 'Станок',
+            title: 'Пересобрать очередь ТОЛЬКО выбранного станка: задания на другие станки не переезжают' });
+        orderOneBtn.addEventListener('click', function() {
+            self.optimizeQueue(queueActions, { slitterId: self.activeSlitterId() });
+        });
+        this.orderOneBtn = orderOneBtn;
+        var orderAllBtn = el('button', { class: 'atex-pp-btn atex-pp-order-queue atex-pp-order-all', type: 'button', text: 'Все',
+            title: 'Пересобрать очередь всех станков: группировка по сырью, минимум переналадок, при необходимости — смена станка' });
+        orderAllBtn.addEventListener('click', function() { self.optimizeQueue(queueActions); });
+        orderGroup.appendChild(orderOneBtn);
+        orderGroup.appendChild(orderAllBtn);
         // #3508 п.2: «Зафиксировать» — проставить флаг всем заданиям выбранного дня
-        // (все станки). Между «Добавить вручную» и «Удалить».
+        // (все станки). Между «Добавить» и «Удалить».
         var fixBtn = el('button', { class: 'atex-pp-btn atex-pp-fix-day', type: 'button', text: 'Зафиксировать', title: 'Зафиксировать все задания этого дня' });
         fixBtn.addEventListener('click', function() { self.fixDayTasks(); });
         // #3475: «Удалить» (warning, жёлтая) — удаляет все задания выбранного дня:
@@ -26495,7 +26586,7 @@
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
-        queueActions.appendChild(orderBtn);
+        queueActions.appendChild(orderGroup);   // #4642: «Упорядочить | Станок | Все»
         queueActions.appendChild(fixBtn);
         queueActions.appendChild(delBtn);
         queueActions.appendChild(downtimeBtn);

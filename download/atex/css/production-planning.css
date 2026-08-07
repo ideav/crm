@@ -90,6 +90,36 @@
 }
 .atex-pp-add { white-space: nowrap; }
 
+/* #4642: «Упорядочить | Станок | Все» — три СМЕЖНЫЕ части одного элемента: подпись группы (не
+   кнопка — нажимать нечего) и две кнопки области действия. Слитая рамка и общий радиус говорят
+   глазом то же, что подпись: это один орган управления с выбором, а не три независимые кнопки. */
+.atex-pp-order-group {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.atex-pp-order-title {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--pp-surface);
+    color: var(--pp-muted);
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+}
+/* Кнопки внутри группы теряют собственную рамку/скругления — их держит сама группа. */
+.atex-pp-order-group .atex-pp-btn {
+    border: 0;
+    border-left: 1px solid var(--pp-border);
+    border-radius: 0;
+    white-space: nowrap;
+}
+.atex-pp-order-group .atex-pp-btn:disabled { opacity: .45; cursor: not-allowed; }
+.atex-pp-order-group .atex-pp-btn:disabled:hover { background: var(--pp-bg); }
+
 .atex-pp-panel {
     border: 1px solid var(--pp-border);
     border-radius: 8px;
@@ -751,6 +781,9 @@
    состояния (на экране проекция в памяти). Вкладки станков, даты и поиск остаются живыми —
    план ради того и показан, чтобы его рассмотреть. */
 .atex-pp.is-plan-preview .atex-pp-panel-actions .atex-pp-btn,
+/* #4642: вместе с кнопками гаснет и подпись их группы — иначе «Упорядочить» осталась бы яркой
+   рядом с погашенными «Станок»/«Все» и читалась бы как живая кнопка. */
+.atex-pp.is-plan-preview .atex-pp-order-title,
 .atex-pp.is-plan-preview .atex-pp-cut-controls,
 .atex-pp.is-plan-preview .atex-pp-recalc-setup {
     pointer-events: none;
