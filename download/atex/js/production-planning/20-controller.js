@@ -131,6 +131,7 @@
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
         daySplitChainNote: daySplitChainNote,   // #4617: «проходов 1 из 5 · остальные 4 → 07.08»
+        settleSplitNote: settleSplitNote,       // #4651: «сделано 27 из 45 · остаток 18 → 11.08» на ОБЕИХ половинах
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
         chainRecordIdsForCut: chainRecordIdsForCut,     // #4292: цепочка дробления (голова + продолжения) для удаления
@@ -1466,24 +1467,30 @@
     //   materialBatch: { cutId: batchId } }.
     AtexProductionPlanning.prototype.loadCutSequences = function() {
         var meta = this.meta.cut;
-        var empty = { seq: {}, fixed: {}, winding: {}, materialBatch: {} };
+        var empty = { seq: {}, fixed: {}, winding: {}, materialBatch: {}, settledFrom: {} };
         if (!meta) return Promise.resolve(empty);
         var fixedIdx = columnIndex(meta, CUT_REQ.fixed);    // #3508
         var windIdx = columnIndex(meta, CUT_REQ.winding);   // #4128
         var matBatchIdx = columnIndex(meta, CUT_REQ.materialBatch);   // #4155
-        if (fixedIdx < 0 && windIdx < 0 && matBatchIdx < 0) return Promise.resolve(empty);
+        // #4651: «ID выполненной части» — связь остатка с половиной, которую уже сделали. Отчёт
+        // cut_planning её не отдаёт, а это чтение и так забирает таблицу целиком: колонки нет в
+        // схеме → карта пуста, подписи просто не будет (фича деградирует молча, как #4155).
+        var settledIdx = columnIndex(meta, CUT_REQ.settledFrom);
+        if (fixedIdx < 0 && windIdx < 0 && matBatchIdx < 0 && settledIdx < 0) return Promise.resolve(empty);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
             var fixed = {};
             var winding = {};
             var materialBatch = {};
+            var settledFrom = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 if (fixedIdx >= 0) fixed[String(rec.i)] = truthyFlag(r[fixedIdx]);    // #3508
                 if (windIdx >= 0) winding[String(rec.i)] = normWinding(r[windIdx]);   // #4128
                 // #4155: ref-колонка приходит как «id:Подпись» — берём id через parseRef.
                 if (matBatchIdx >= 0) { var mb = parseRef(r[matBatchIdx]); materialBatch[String(rec.i)] = mb.id ? String(mb.id) : ''; }
+                if (settledIdx >= 0) settledFrom[String(rec.i)] = String(r[settledIdx] == null ? '' : r[settledIdx]).trim();   // #4651
             });
-            return { seq: {}, fixed: fixed, winding: winding, materialBatch: materialBatch };
+            return { seq: {}, fixed: fixed, winding: winding, materialBatch: materialBatch, settledFrom: settledFrom };
         });
     };
 
@@ -1927,6 +1934,7 @@
             var fixedByCut = seqResult.fixed || {};   // #3508
             var windingByCut = seqResult.winding || {};   // #4128
             var materialBatchByCut = seqResult.materialBatch || {};   // #4155
+            var settledFromByCut = seqResult.settledFrom || {};   // #4651
             self.reportCutPlanningDiagnostics(rows || []);
             self.reportSupplyRollsDiagnostic(rows || []);   // #4536: количество обеспечения — из отчёта или никак
             var p = rowsToPlanning(rows || []);
@@ -1947,6 +1955,11 @@
                 // applySplitPlan копировал её в новые сегменты (иначе «Партия сырья» пустая).
                 var ownBatch = materialBatchByCut[String(cut.id)];
                 if (ownBatch) cut.batchId = ownBatch;
+                // #4651: от какой ВЫПОЛНЕННОЙ части отрезан этот остаток («Урегулировать», #4564).
+                // Ею карточка называет свою половину — иначе две записи одного заказа в разных днях
+                // читаются как «резка перекинулась на другой день».
+                var settledFrom = settledFromByCut[String(cut.id)];
+                if (settledFrom) cut.settledFromId = String(settledFrom);
             });
             if (!self.footageBySupply) self.footageBySupply = {};
             p.supplies.forEach(function(supply) {
@@ -2737,6 +2750,33 @@
     // записи: `ops.ruleBreaks` из buildSequenceOps — одна проверка на все пути (ТЗ §15).
     var RULE_BREAK_WEIGHT = 1e12;
 
+    // #4652: ОБЪЕКТИВ ПЛАНА — ОДНО ВЫРАЖЕНИЕ НА ВСЕХ. Лексикографический порядок: задания в окне
+    // «Отпуска» (станок не работает — невыполнимо) → новые нарушения §15 → дни опоздания (срок,
+    // ТЗ §14) → недоупакованные станко-дни (ТЗ §15) → минуты переналадки. Тем же выражением судятся
+    // кандидаты «Упорядочить» и ИТОГОВЫЙ план перед показом (#4652): пока мерок было две, один и
+    // тот же план оказывался лучше сам себя в обе стороны, и нажатия подряд переворачивали план
+    // туда-обратно (issue #4652: 23 прохода цепочки 4587 ходили между головой и хвостом).
+    function combinedPlanObjective(dt, rb, late, uf, co) {
+        return dt * DOWNTIME_CONFLICT_WEIGHT + rb * RULE_BREAK_WEIGHT
+            + late * LATE_DAY_WEIGHT + uf * UNDERFILL_DAY_WEIGHT + co;
+    }
+
+    // #4652: измерить ПЛАН одной меркой. ops == null — план, ЗАПИСАННЫЙ в резках (хранимые колонки
+    // и старты); ops — план кандидата (минуты и станок от упаковщика, #4471). Обе ветки считают
+    // ОДНИМИ И ТЕМИ ЖЕ функциями (planDowntimeConflicts / planLatenessDays / planUnderfilledDays /
+    // planChangeoverMin), поэтому объективы сравнимы между собой.
+    //   ruleBreaks — нарушения §15 кандидата сверх унаследованных (#4622); у записанного плана 0.
+    // → { dt, late, uf, co, rb, value }
+    AtexProductionPlanning.prototype.planObjective = function(cutsArray, ops, ruleBreaks) {
+        var dt = this.planDowntimeConflicts(cutsArray, ops).length;
+        var late = this.planLatenessDays(cutsArray, ops);
+        var uf = this.planUnderfilledDays(cutsArray, ops).length;
+        var co = this.planChangeoverMin(cutsArray, ops);
+        var rb = Math.max(0, Number(ruleBreaks) || 0);
+        return { dt: dt, late: late, uf: uf, co: co, rb: rb,
+                 value: combinedPlanObjective(dt, rb, late, uf, co) };
+    };
+
     // #4475: НАРУШЕНИЕ ПРАВИЛА → ФРАЗА ОПЕРАТОРУ. Реестр (05-invariants.js) отдаёт нарушения
     // СТРУКТУРОЙ (правило, станок, день, минуты, задания) — здесь она превращается в текст на языке
     // экрана: станок называется своей подписью, день — датой, задание — номером. Разговоров про
@@ -3312,10 +3352,9 @@
             creates: [], createsTotal: 0, deletes: [], deletesTotal: 0, result: null, stop: null };
         // #4413/#4469: объектив лексикографический — сперва задания в окне «Отпуска» (невыполнимо),
         // затем опоздания (срок §14), затем недоупакованные дни (ТЗ §15), затем переналадка.
-        function combined(dt, rb, late, uf, co) {
-            return dt * DOWNTIME_CONFLICT_WEIGHT + rb * RULE_BREAK_WEIGHT
-                + late * LATE_DAY_WEIGHT + uf * UNDERFILL_DAY_WEIGHT + co;
-        }
+        // #4652: само выражение — одно на весь модуль (combinedPlanObjective), им же меряется
+        // ИТОГОВЫЙ план перед показом предпросмотра.
+        var combined = combinedPlanObjective;
         try {
             coBefore = self.planChangeoverMin(self.cuts, null);
             lateBefore = self.planLatenessDays(self.cuts, null);
@@ -3444,6 +3483,7 @@
             self.startPlanPreview({
                 ops: localOps,
                 slitterId: onlySid,   // #4642: рамки режима «Станок» — их же держит полировка
+                objectiveBefore: before,   // #4652: та же мерка судит ИТОГОВЫЙ план после полировки/сведения
                 reassign: null,
                 tailSetup: tailBefore,
                 slitterChange: false,
@@ -3532,6 +3572,7 @@
         self.startPlanPreview({
             ops: ops,
             slitterId: onlySid,   // #4642: рамки режима «Станок» — их же держит полировка
+            objectiveBefore: before,   // #4652: та же мерка судит ИТОГОВЫЙ план после полировки/сведения
             reassign: useA ? { slitterByRecordId: plan.slitterByRecordId, slitterReqId: plan.slitterReqId } : null,
             tailSetup: tailBefore,
             slitterChange: useA,
@@ -3744,6 +3785,46 @@
         // показывают другое, и «сведённым встык» оказывается план, который встык уже стоял.
         var stitched = this.reconcilePreviewStarts(pend.ops, setupRes.updates);
         if (stitched) setupRes = this.computeCutSetupUpdates(null, { planCols: planCols.byCut });   // старты новые — колонки перечитываем от них
+        // #4652 (ТЗ §14): ПОКАЗЫВАЕМ ТОЛЬКО ТО, ЧТО ЛУЧШЕ ХРАНИМОГО ПЛАНА — и меряем ОДНОЙ меркой.
+        // Кандидат выигрывал по минутам УПАКОВЩИКА, а после выбора его правили ещё дважды: полировка
+        // порядка внутри дней (#4446) и сведение стартов встык (#4444). Записывался, стало быть, НЕ
+        // тот план, который победил в сравнении, и следующее нажатие честно видело «этот план хуже»
+        // и откатывало его: боевая ateh 07.08.2026, четыре нажатия подряд гоняли 23 прохода цепочки
+        // 4587 между головой и хвостом (666705 58↔81, 669458 42↔19), каждое — два десятка записей
+        // (issue #4652). Мерим ИТОГ так же, как будет прочитан в следующий раз, — по проекции с уже
+        // проставленными колонками (this.cuts), ops=null. Не лучше — предпросмотра нет, очередь
+        // остаётся как была: «Упорядочить» — решение, а не подбрасывание монетки. Нарушения §15 у
+        // кандидата к этому месту уже отсеяны (runOptimizeQueue).
+        //   `objectiveBefore` — объектив ХРАНИМОГО плана, посчитанный тем же planObjective у
+        //   вызывающего (runOptimizeQueue меряет его до расчёта кандидатов). Мерку приносит тот, кто
+        //   принимает решение; без неё предпросмотр остаётся простым показом (прочие вызовы, тесты).
+        var objStored = (pend.objectiveBefore == null) ? null : { value: Number(pend.objectiveBefore) };
+        var objFinal = objStored ? this.planObjective(this.cuts, null) : null;
+        // Померить не вышло (в объективе не число) — молча блокировать кнопку нельзя: это отказ
+        // без причины. Показываем план и КРИЧИМ в консоль, чтобы дефект мерки был виден.
+        if (objFinal && !(isFinite(objFinal.value) && isFinite(objStored.value))) {
+            console.warn('[pp] ⚠️ #4652: объектив итогового плана не посчитан (хранимый ' + objStored.value
+                + ', итог ' + objFinal.value + ') — показываю предпросмотр без сравнения');
+            objStored = null;
+        }
+        if (objStored && !(objFinal.value < objStored.value)) {
+            // Возвращаем очередь как была — тем же откатом, что «Отменить» (cancelPendingPlan).
+            this.cuts = snapshot;
+            this.plannedTailSetup = pend.tailSetup || {};
+            this._pendingPlan = null;
+            var same = 'опоздания ' + round3(Number(pend.lateBefore) || 0) + ' → ' + round3(objFinal.late) + ' дн, '
+                + 'недоупакованных дней ' + (Number(pend.underfilledBefore) || 0) + ' → ' + objFinal.uf + ', '
+                + 'переналадка ' + round3(Number(pend.coBefore) || 0) + ' → ' + round3(objFinal.co) + ' мин';
+            if (pend.trace) {
+                pend.trace.stop = { code: 'none-not-better',
+                    text: 'план НЕ изменён — итоговый план (после полировки #4446 и сведения #4444) не лучше хранимого: ' + same };
+                emitOptimizeTrace(pend.trace);
+            }
+            console.log('[pp] ⚙️ #4652: итоговый план не лучше хранимого — не показываем (' + same + ')');
+            this.notify('Очередь уже оптимальна: предложенный план не лучше текущего (' + same + ')', 'success');
+            this.render();
+            return false;
+        }
         pend.after = this.computeQualityStats(scopeFromKey, scopeToKey);
         pend.snapshot = snapshot;
         pend.createdIds = projected.createdIds;
@@ -4741,6 +4822,11 @@
                 ops.creates.push({
                     parentCutId: String(sp.id), planStartTs: sp.restPlanStart, plannedRuns: sp.restRuns,
                     firstPartSelf: wasHead, firstPartId: wasHead ? '' : storedHead,
+                    // #4651: остаток НАЗЫВАЕТ СВОЁ ПРОИСХОЖДЕНИЕ — «ID выполненной части». Цепочки
+                    // дробления между половинами нет по построению (см. выше), и без этой ссылки
+                    // карточки не связаны ничем: диспетчер читает их как «резка перекинулась на
+                    // другой день» (issue #4650/#4651).
+                    settledFromId: String(sp.id),
                     splitOf: String(sp.id)
                 });
             }
@@ -8581,7 +8667,8 @@
             leader: reqIdByName(cutMeta, CUT_REQ.leader),   // #3569: лидер копируется в запись-продолжение
             length: lengthReqId,   // #3781: «Метраж, м» — длина прогона (одинакова у всех сегментов цепочки)
             material: reqIdByName(cutMeta, CUT_REQ.material),   // #3795: «Вид сырья» — копируется в продолжение, иначе очередь следующего дня без сырья
-            firstPart: reqIdByName(cutMeta, CUT_REQ.firstPart)   // #3892: «ID первой части» (голова цепочки) — на голову и все продолжения
+            firstPart: reqIdByName(cutMeta, CUT_REQ.firstPart),   // #3892: «ID первой части» (голова цепочки) — на голову и все продолжения
+            settledFrom: reqIdByName(cutMeta, CUT_REQ.settledFrom)   // #4651: «ID выполненной части» — только у остатка «Урегулировать»
         };
         var firstPartReqId = cutReqIds.firstPart;
         // #3781: длина прогона по id любой записи цепочки = длина прогона её ГОЛОВЫ. Записи-
@@ -9076,7 +9163,10 @@
                             // (сама себе голова). Её id известен только после `_m_new`, поэтому
                             // маркер дописывается ниже; здесь поле не пишем вовсе.
                             firstPart: cr.firstPartSelf ? ''
-                                : ((cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId))
+                                : ((cr.firstPartId != null && cr.firstPartId !== '') ? String(cr.firstPartId) : String(parentId)),
+                            // #4651: «ID выполненной части» — ставит ТОЛЬКО «Урегулировать» (#4564),
+                            // разбиение по дням его не ставит: там половины связаны цепочкой.
+                            settledFrom: (cr.settledFromId != null && cr.settledFromId !== '') ? String(cr.settledFromId) : ''
                         });
                         // #3916: продолжение дробления — «Длительность»/«Резка и Лидер» по его
                         // проходам (cr.plannedRuns), длина прогона/фольга — головы (parentId).
@@ -12914,6 +13004,24 @@
             if (chainNote) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note',
                     title: chainNote.title, text: 'ℹ ' + chainNote.text }));
+            }
+            // #4651: карточка РАЗДЕЛЁННОГО ПО ФАКТУ задания называет свою половину — «сделано 27 из
+            // 45 · остаток 18 → 11.08.2026» на выполненной части и «остаток задания 4608 · сделано
+            // 27 из 45 07.08.2026» на остатке. Цепочки дробления между ними нет (её рвёт само
+            // «Урегулировать», #4564), поэтому подпись #4617 выше на этих карточках не появляется, и
+            // две записи одного заказа в разных днях читались как «резка перекинулась» (issue #4650).
+            // Проходы половины считаем по ЕЁ ЦЕПОЧКЕ: остаток мог быть после этого разбит по дням.
+            var settleNote = settleSplitNote(c, self.cuts || [], function(planDate) {
+                return formatPlanDayLabel(planDateIso(planDate));
+            }, function(part) {
+                return splitChainPartsOf(self.cuts || [], part && part.id).reduce(function(sum, p) {
+                    var n = Number(p && p.plannedRuns);
+                    return sum + (isFinite(n) && n > 0 ? n : 0);
+                }, 0);
+            });
+            if (settleNote) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note is-settle',
+                    title: settleNote.title, text: 'ℹ ' + settleNote.text }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {

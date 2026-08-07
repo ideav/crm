@@ -4470,6 +4470,75 @@
         };
     }
 
+    // #4651: КАРТОЧКА НАЗЫВАЕТ СВОЮ ПОЛОВИНУ — «сделано 27 из 45 · остаток 18 → 11.08.2026».
+    // «Урегулировать» делит частично выполненное задание по ФАКТУ (#4564): выполненная часть —
+    // исходная запись (при ней «Начато», погонаж, события смены), остаток — новая. Цепочки
+    // дробления между ними нет по построению (выполненная часть из неё выходит, остаток становится
+    // новой головой), поэтому подпись #4617 на этих карточках не появляется вовсе, и две записи
+    // одного заказа в разных днях читаются как «резка перекинулась на другой день» (боевое: заказ
+    // 4608, 667620 «300 x 27» 07.08 и 669318 «300 x 18» 11.08 — работа цела, 27 + 18 = 45).
+    // Связь держит ЯВНЫЙ реквизит «ID выполненной части» (settledFromId у остатка, #4651) — тот же
+    // приём, что «ID первой части» (#3892): гадать по данным (заказ + позиция + «у соседа в прошлом
+    // есть Закончено») нельзя, на повторно резавшемся заказе такая догадка врёт.
+    //   cut — записываемая карточка; cuts — вся очередь; dateLabel(planDate) → подпись дня или '';
+    //   runsOfChain(cut) → сумма проходов ЦЕПОЧКИ записи (остаток мог быть после этого разбит по
+    //   дням, и его половина — это вся его цепочка); не задан → проходы самой записи.
+    // → { text, title, role:'done'|'rest' } либо null. Чистая (без DOM) → покрыта тестом.
+    function settleSplitNote(cut, cuts, dateLabel, runsOfChain) {
+        if (!cut || cut.id == null) return null;
+        var id = String(cut.id);
+        var list = (cuts || []).filter(function(c){ return c && c.id != null; });
+        function runsOf(c) {
+            if (typeof runsOfChain === 'function') {
+                var n = Number(runsOfChain(c));
+                if (isFinite(n) && n > 0) return n;
+            }
+            var own = Number(c && c.plannedRuns);
+            return isFinite(own) && own > 0 ? own : 0;
+        }
+        function label(c) {
+            var lab = (typeof dateLabel === 'function') ? String(dateLabel(c.planDate) || '') : '';
+            return lab;
+        }
+        var originId = String(cut.settledFromId == null ? '' : cut.settledFromId).trim();
+        if (originId !== '' && originId !== id) {
+            // Эта запись — ОСТАТОК: называем выполненную часть.
+            var done = null;
+            list.forEach(function(c){ if (String(c.id) === originId) done = c; });
+            if (!done) return null;                              // выполненную часть не видим — молчим
+            var doneRuns = runsOf(done), restRuns = runsOf(cut);
+            if (!(doneRuns > 0) && !(restRuns > 0)) return null;
+            var doneWhen = label(done);
+            return {
+                role: 'rest',
+                text: 'остаток задания' + (cut.orderId ? ' ' + cut.orderId : '') + ' · сделано '
+                    + doneRuns + ' из ' + (doneRuns + restRuns) + (doneWhen ? ' ' + doneWhen : ''),
+                title: 'Это ОСТАТОК разделённого задания: ' + doneRuns + ' из ' + (doneRuns + restRuns)
+                    + ' проходов сделано' + (doneWhen ? ' ' + doneWhen : '') + ' (задание №' + originId
+                    + '), здесь стоят остальные ' + restRuns + '. Работа не потеряна: '
+                    + doneRuns + ' + ' + restRuns + ' = ' + (doneRuns + restRuns) + '.'
+            };
+        }
+        // Эта запись — ВЫПОЛНЕННАЯ ЧАСТЬ, если на неё ссылается остаток.
+        var rest = null;
+        list.forEach(function(c){
+            if (String(c.settledFromId == null ? '' : c.settledFromId).trim() === id && String(c.id) !== id) rest = c;
+        });
+        if (!rest) return null;
+        var doneRuns2 = runsOf(cut), restRuns2 = runsOf(rest);
+        if (!(doneRuns2 > 0) && !(restRuns2 > 0)) return null;
+        var restWhen = label(rest);
+        return {
+            role: 'done',
+            text: 'сделано ' + doneRuns2 + ' из ' + (doneRuns2 + restRuns2) + ' · остаток ' + restRuns2
+                + (restWhen ? ' → ' + restWhen : ''),
+            title: 'Это ВЫПОЛНЕННАЯ ЧАСТЬ разделённого задания: сделано ' + doneRuns2 + ' из '
+                + (doneRuns2 + restRuns2) + ' проходов, остальные ' + restRuns2 + ' стоят отдельным '
+                + 'заданием №' + rest.id + (restWhen ? ' — ' + restWhen : '')
+                + '. Работа не потеряна: ' + doneRuns2 + ' + ' + restRuns2 + ' = ' + (doneRuns2 + restRuns2) + '.'
+        };
+    }
+
     // #3737: недостающий сосед карточки через ВНЕШНЮЮ границу выбранного диапазона дат.
     // Сегмент-продолжение задания за границей диапазона лежит в дне ВНЕ фильтра — в очередь
     // он не попадает, но присутствует в полном наборе резок (cut_planning грузится целиком).
