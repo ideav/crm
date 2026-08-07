@@ -8772,22 +8772,56 @@ function NormalSize($size)
    else
        return round($size/1099511627776, 2)." TB";
 }
+// RFC 2047 encoded-word для заголовков с не-ASCII. Закрывается "?=", а не "=?=":
+// лишний "=" ломал base64-паддинг во всех заголовках писем (Subject, To, From).
+// Кавычки вокруг encoded-word тоже недопустимы — RFC 2047 §5. Issue #4639.
+function mime_word($text){
+	global $mail_config;
+	return '=?'.$mail_config['smtp_charset'].'?B?'.base64_encode($text).'?=';
+}
+// Имя нашего узла для HELO/EHLO и правой части Message-ID. Берём домен адреса
+// отправителя (care@integram.io -> integram.io): он совпадает с доменом SPF/DKIM,
+// и по нему получатель сверяет отправителя. smtp_host не годится — в нём лежит
+// транспорт для fsockopen ("ssl://smtp.yandex.ru"), а схема в HELO недопустима.
+// Issue #4639.
+function smtp_helo_name(){
+	global $mail_config;
+	$helo = trim(integram_env('INTEGRAM_SMTP_HELO', ''));
+	if ($helo) return $helo;
+	if (strpos($mail_config['smtp_username'], '@') !== false){
+		$domain = trim(substr(strrchr($mail_config['smtp_username'], '@'), 1));
+		if ($domain) return $domain;
+	}
+	$host = preg_replace('#^[a-z0-9+.-]+://#i', '', $mail_config['smtp_host']);
+	return $host ? $host : 'localhost';
+}
 function smtpmail($to, $mail_to, $subject, $message, $headers='') {
 	global $mail_config;
-	$SEND =	"Date: ".date("D, d M Y H:i:s") . " UT\r\n";
-	$SEND .= 'Subject: =?'.$mail_config['smtp_charset'].'?B?'.base64_encode($subject)."=?=\r\n";
-	if ($headers) $SEND .= $headers."\r\n\r\n";
+	$helo = smtp_helo_name();
+	// Date с числовой зоной и Message-ID обязательны по RFC 5322: без них письмо
+	// штрафуют все крупные фильтры (было "... UT" и Message-ID вовсе не было).
+	$SEND =	"Date: ".date("r")."\r\n";
+	$SEND .= "Message-ID: <".str_replace('.', '', uniqid('', true))."@".$helo.">\r\n";
+	$SEND .= "Subject: ".mime_word($subject)."\r\n";
+	if ($headers)
+	{
+			$SEND .= $headers."\r\n\r\n";
+			$SEND .=  $message."\r\n"; // тело кодирует вызывающий — он же задал Content-Transfer-Encoding
+	}
 	else
 	{
-			$SEND .= "Reply-To: IdeaV\r\n";
-			$SEND .= "To: \"=?".$mail_config['smtp_charset']."?B?".base64_encode($to)."=?=\" <$mail_to>\r\n";
+			// Reply-To должен быть адресом, а не голым именем: "IdeaV" — битый заголовок.
+			$SEND .= "Reply-To: ".mime_word($mail_config['smtp_from'])." <".integram_env('INTEGRAM_SMTP_REPLYTO', $mail_config['smtp_username']).">\r\n";
+			$SEND .= "To: ".mime_word($to)." <$mail_to>\r\n";
 			$SEND .= "MIME-Version: 1.0\r\n";
 			$SEND .= "Content-Type: text/plain; charset=\"".$mail_config['smtp_charset']."\"\r\n";
-			$SEND .= "Content-Transfer-Encoding: 8bit\r\n";
-			$SEND .= "From: \"=?".$mail_config['smtp_charset']."?B?".base64_encode($mail_config['smtp_from'])."=?=\" <".$mail_config['smtp_username'].">\r\n";
+			// base64 вместо 8bit: снимает и строки длиннее 998 октетов (в письмах о готовности
+			// приложения абзацы длинные), и точку в начале строки, обрывающую DATA.
+			$SEND .= "Content-Transfer-Encoding: base64\r\n";
+			$SEND .= "From: ".mime_word($mail_config['smtp_from'])." <".$mail_config['smtp_username'].">\r\n";
 			$SEND .= "X-Priority: 3\r\n\r\n";
+			$SEND .= chunk_split(base64_encode($message), 76, "\r\n");
 	}
-	$SEND .=  $message."\r\n";
 
     $file = fopen("logs/sendmail.txt", "a+");
     fwrite($file, "\n---SEND---\n".$SEND."\n---------\n");
@@ -8801,11 +8835,14 @@ function smtpmail($to, $mail_to, $subject, $message, $headers='') {
  
 	if (!server_parse($socket, "220", __LINE__)) return false;
  
-	fputs($socket, "HELO " . $mail_config['smtp_host'] . "\r\n");
+	fputs($socket, "EHLO " . $helo . "\r\n");
 	if (!server_parse($socket, "250", __LINE__)) {
-		if ($mail_config['smtp_debug']) echo '<p>Не могу отправить HELO!</p>';
-		fclose($socket);
-		return false;
+		fputs($socket, "HELO " . $helo . "\r\n"); // сервер без ESMTP
+		if (!server_parse($socket, "250", __LINE__)) {
+			if ($mail_config['smtp_debug']) echo '<p>Не могу отправить HELO!</p>';
+			fclose($socket);
+			return false;
+		}
 	}
 	fputs($socket, "AUTH LOGIN\r\n");
 	if (!server_parse($socket, "334", __LINE__)) {
