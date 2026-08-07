@@ -3071,13 +3071,44 @@
         put(r.user, String((ctx.user && (ctx.user.name || ctx.user.login)) || ctx.userName || ''));
         f = addMainValueField(jm.meta, f, Math.floor(Date.now() / 1000));
         return ctx.post('_m_new/' + jm.meta.id + '?JSON&up=1', f)
-            .then(function() { return true; })
-            .catch(function(err) {
-                if (typeof console !== 'undefined' && console.warn) {
-                    console.warn('[pp] #4618 журнал не записан: ' + (err && err.message));
-                }
-                return false;   // журнал молчит, но действие продолжается
-            });
+            .then(function() { ctx._journalWrote = true; return true; })
+            .catch(function(err) { journalWriteFailed(ctx, err); return false; });   // действие продолжается
+    }
+
+    // #4645: ЖУРНАЛ, КОТОРЫЙ НЕ ПИШЕТСЯ, ХУЖЕ ОТСУТСТВУЮЩЕГО — на него рассчитывают при разборе.
+    // Боевой день 07.08.2026: рабочее место отправило 309 запросов `_m_new/665850`, в базе не
+    // появилось НИ ОДНОЙ строки, и узналось это только из серверного лога. Причина — права:
+    // `_m_new` с `up=1` требует WRITE на саму таблицу (index.php, `Grant_1level($id) != "WRITE"`
+    // → `die('У вас нет прав на создание объектов этого типа')`), а у роли диспетчера на «Журнал»
+    // был только READ — его хватает, чтобы таблица попала в metadata и код честно пробовал писать.
+    // Отказ приходит ПЛАЙН-ТЕКСТОМ с кодом 200, поэтому от «сервер прилёг» он неотличим, а
+    // `console.warn` не читает никто: строки 06.08 писал admin (`Grant_1level` отдаёт ему WRITE
+    // всегда), и в боевой роли журнал был мёртв с первого дня.
+    //
+    // Правило «журнал не вправе сорвать действие» остаётся: план продолжается, исключение наружу
+    // не уходит. Но МОЛЧАТЬ о том, что трассировки нет, нельзя (ТЗ §14) — говорим ОДИН раз за
+    // загрузку страницы: тост оператору и console.error разработчику. Дальше журнал не шумит.
+    function journalWriteFailed(ctx, err) {
+        var msg = (err && err.message) ? String(err.message) : 'причина неизвестна';
+        if (typeof console !== 'undefined' && console.warn) {
+            console.warn('[pp] #4618 журнал не записан: ' + msg);
+        }
+        if (ctx._journalDeadReported) return;
+        ctx._journalDeadReported = true;
+        var noRights = /нет прав|permission/i.test(msg);
+        if (typeof console !== 'undefined' && console.error) {
+            console.error('[pp] ⛔ #4645: ТРАССИРОВКА ПЛАНА ВЫКЛЮЧЕНА — журнал не пишется. ' + msg
+                + (noRights ? ' Роли нужен грант WRITE на таблицу «Журнал» (index.php: _m_new с up=1'
+                            + ' требует Grant_1level == WRITE).' : ''));
+        }
+        if (typeof ctx.notify === 'function') {
+            ctx.notify(noRights
+                ? 'Журнал изменений плана не пишется: у роли нет прав на запись в таблицу «Журнал». '
+                  + 'Разбирать потерянные проходы будет нечем — попросите админа выдать грант.'
+                : 'Журнал изменений плана не пишется (' + msg.slice(0, 120) + '). '
+                  + 'План записывается как обычно, но трассировки не будет.',
+                'warning');
+        }
     }
 
     // Пачка строк — последовательно, чтобы не занимать пул записи плана.
