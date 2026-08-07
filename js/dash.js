@@ -1638,9 +1638,12 @@ function dashCalcRGFormulas() {
 
             // Replace named refs [colName]
             expr = expr.replace(/\[([^\]]+)\]/g, function(match, ref) {
-                // Check if numeric offset
-                var num = parseInt(ref, 10);
-                if (!isNaN(num) && String(num) === ref.trim()) {
+                // Check if numeric offset. Both signs are written explicitly by
+                // users ([-1], [+2]), so the leading plus is part of the number
+                // and not a column name — without this the ref fell through to
+                // the named branch, found nothing and silently gave 0 (#4646).
+                var refTrim = ref.trim(), num = parseInt(refTrim, 10);
+                if (!isNaN(num) && String(num) === refTrim.replace(/^\+/, '')) {
                     // numeric relative ref
                     var targetIdx = myIdx + num;
                     if (targetIdx < 0 || targetIdx >= cells.length) return '0';
@@ -1649,7 +1652,7 @@ function dashCalcRGFormulas() {
                     return dashNumberForFormula(dashCellText(tc));
                 }
                 // Named ref: find column index by name
-                var colIdx = colNameMap[ref.trim()];
+                var colIdx = colNameMap[refTrim];
                 if (colIdx === undefined) {
                     // fallback: search all cells in row for a column with that header
                     return '0';
