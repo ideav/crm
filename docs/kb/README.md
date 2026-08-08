@@ -19,6 +19,7 @@
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность |
 | Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки |
+| Дэшборд / финмодель `dash` | [dashboard.md](dashboard.md) | Дэшборд 559, Лист, Панель, RG, Строка, Значение, period, RGtype, RGcolumns, Метка, формулы, словарь периодов |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 
@@ -46,7 +47,9 @@
 | НЕУСТОЙЧИВО: перечитывание сразу после `_m_set` отдаёт старое значение (UI не обновился, F5 чинит) | read-after-write lag реплики/кеша — применять записанное value к модели поверх reload | [crud.md](crud.md) |
 | `FR_` даёт 0 строк по дате/числу | нужен оператор `>`/`<` (открытый интервал) | [queries.md](queries.md) |
 | `object/…?FR_{Колонка}=` отвечает `Unknown column 'X' in 'on clause'` | имя фильтра резолвилось только по имени ТИПА (`С_т`), не по псевдониму («С») — в `object/` надёжнее `F_{reqId}` | [queries.md](queries.md) |
-| дэшборд рисует только имена строк, `period=undefined` | отчёт «Дэшборд» не отдаёт `period`/`RGtype`/`RGcolumns` (колонка без «Имени в отчете» или со «Скрыть») | [queries.md](queries.md) |
+| дэшборд рисует только имена строк, `period=undefined` | отчёт «Дэшборд» не отдаёт `period`/`RGtype`/`RGcolumns` (колонка без «Имени в отчете» или со «Скрыть») | [dashboard.md](dashboard.md) |
+| колонки периодов есть, клетки пустые | значение ищется по ИМЕНИ строки + «Метке» — «Строка бюджета» названа иначе | [dashboard.md](dashboard.md) |
+| правка js/css выложена, у пользователя старый код | сброс кэша повесили на `VERSION` в `index.php` — он не в `update.conf`; версию бить суффиксом `?{_global_.version}.N` в шаблоне | [deploy.md](deploy.md) |
 | РМ ведёт себя как «данных нет», а записи есть | `report/` отдал `[]` со статусом 200 (правка отчёта / нет гранта) — `catch` не срабатывает | [queries.md](queries.md) |
 | поле позиции пропало в UI после закрытия заказа | «списочный» отчёт (`positions_list`) отдаёт только активные — дублировать поле в широкий (`cut_planning`) | [queries.md](queries.md) |
 | ссылочный реквизит записи «пустой», хотя в таблице заполнен | одноимённая колонка отчёта ведёт не туда (`cut_planning.batch_id` = «Партия ГП») — ссылку записи читать через `object/…JSON_OBJ` + `parseRef` | [queries.md](queries.md) |

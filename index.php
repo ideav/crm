@@ -175,7 +175,7 @@ define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
 define("SECRET", 130);
-define("VERSION", 123);  # cache-bust версия ассетов (?0{_global_.version}); бить при правках js/css — #3418
+define("VERSION", 122);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
