@@ -1087,7 +1087,10 @@ body.dash-chart-resizing {
 }
 
 /* ── Оптимизация модели (issue #249) ───────────────────────────────── */
-.dash-opt-fab {
+/* Кнопка скрыта, пока js/dash-optimize.js не увидит в хэше флаг `opti` (issue #4659). */
+.dash-opt-fab { display: none; }
+.dash-opt-fab.dash-opt-on {
+    display: inline-block;
     position: fixed;
     right: 1rem;
     bottom: 1rem;

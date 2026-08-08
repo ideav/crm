@@ -70,7 +70,9 @@
     </div>
 </div>
 
-<!-- Optimization modal (issue #249): граф зависимостей + goal-seek/аномалии/диагностика -->
+<!-- Optimization modal (issue #249): граф зависимостей + goal-seek/аномалии/диагностика.
+     Кнопка и модалка появляются только по флагу `opti` в хэше — иначе dash-optimize.js
+     убирает их из DOM на загрузке (issue #4659). -->
 <div id="dash-opt-modal" role="dialog" aria-modal="true">
     <div class="dash-modal-box dash-opt-modal-box">
         <h6>Оптимизация модели</h6>
