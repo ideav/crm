@@ -46,26 +46,79 @@
     }
 
     // ---- адаптер: нормализованная модель из живого состояния dash.js ----
+    // ---- живая модель рабочего места dash ----
+    // dash.js держит разобранную модель в замыкании и отдаёт её геттером dashLiveState()
+    // (issue #4661): items — строки (имя, «Метка» компании), formulas — их формулы,
+    // values — ряды значений `имя[:колонка группы]` → [{date, val, Метка}], periods —
+    // словарь периодов (Год/Квартал/Месяц/Неделя) строками object/: r[0] имя, r[1] С, r[2] По.
+    function ymd(d) { var s = String(d || ''); return s.length === 10 ? s.slice(6) + s.slice(3, 5) + s.slice(0, 2) : s; }
+
+    // Формулы модели пишут и по имени, и по id строки — приводим к именам: пуре-функции
+    // (граф, goal-seek, диагностика) резолвят ссылки по именам строк.
+    function formulaByNames(formula, nameById) {
+        return String(formula || '').replace(/\[([^\[\]]+)\]/g, function (whole, ref) {
+            var name = nameById[String(ref).trim()];
+            return name ? '[' + name + ']' : whole;
+        });
+    }
+
     function modelFromDashState(g) {
         g = g || root;
-        var items = g.dashItems || {}, formulas = g.dashFormulas || {}, matrix = g.dashMatrixValues || [];
-        // period-колонки из dashPeriodData (первый отчёт), иначе из матрицы
-        var qs = [];
-        try { var pd = g.dashPeriodData || {}; Object.keys(pd).forEach(function (rep) { Object.keys(pd[rep]).forEach(function (from) { Object.keys(pd[rep][from]).forEach(function (j) { var c = pd[rep][from][j]; if (c && qs.indexOf(c) < 0) qs.push(c); }); }); }); } catch (e) {}
-        var rows = {}, series = {}, companies = [];
+        var state = (g && typeof g.dashLiveState === 'function') ? g.dashLiveState() : null;
+        if (!state) return { quarters: [], companies: [], rows: {}, series: {}, byCol: true };
+        var items = state.items || {}, formulas = state.formulas || {}
+            , values = state.values || {}, periods = state.periods || {};
+
+        // Колонки — те же периоды, что в шапке панели, по возрастанию начала.
+        var cols = [];
+        Object.keys(periods).forEach(function (dict) {
+            var list = periods[dict];
+            (Array.isArray(list) ? list : []).forEach(function (row) {
+                var r = row && row.r;
+                if (!r || !r[0] || !r[1] || !r[2]) return;
+                if (!cols.some(function (c) { return c.name === r[0]; }))
+                    cols.push({ name: r[0], fr: ymd(r[1]), to: ymd(r[2]) });
+            });
+        });
+        cols.sort(function (a, b) { return a.fr < b.fr ? -1 : (a.fr > b.fr ? 1 : 0); });
+
+        var rows = {}, series = {}, companies = [], nameById = {}, nameByKey = {};
+        Object.keys(items).forEach(function (id) { if (items[id] && items[id].name) nameById[id] = items[id].name; });
         Object.keys(items).forEach(function (id) {
             var it = items[id], comp = it.label || '', name = it.name;
             if (!comp || !name) return;
+            nameByKey[name.toLowerCase()] = name;      // ключи рядов dash.js — в нижнем регистре
             if (!rows[comp]) { rows[comp] = []; companies.push(comp); }
-            rows[comp].push({ name: name, formula: formulas[id] || '', level: +(it.level || 1) });
+            rows[comp].push({ name: name, formula: formulaByNames(formulas[id], nameById), level: +(it.level || 1) });
         });
-        matrix.forEach(function (row) {
-            var comp = row['Метка'] || '', line = row.line, col = row.col;
-            if (!comp || !line) return;
-            var s = (series[comp] || (series[comp] = {}))[line] || (series[comp][line] = {});
-            s[col] = num(row.val);                      // keyed by column label (period)
+
+        // Ряды значений раскладываем по колонкам периодов. Колонку группы («Факт»/«План»)
+        // не смешиваем: на строку берём один ряд — без группы, иначе «факт», иначе первый.
+        var groupsByLine = {}, chosen = {};
+        Object.keys(values).forEach(function (key) {
+            var parts = String(key).split(':'), line = nameByKey[parts[0]] || parts[0];
+            (groupsByLine[line] || (groupsByLine[line] = [])).push(parts[1] || '');
         });
-        return { quarters: qs, companies: companies, rows: rows, series: series, byCol: true };
+        Object.keys(groupsByLine).forEach(function (line) {
+            var gs = groupsByLine[line].slice().sort();
+            chosen[line] = gs.indexOf('') >= 0 ? '' : (gs.indexOf('факт') >= 0 ? 'факт' : gs[0]);
+        });
+        Object.keys(values).forEach(function (key) {
+            var parts = String(key).split(':'), line = nameByKey[parts[0]] || parts[0], group = parts[1] || '';
+            if (chosen[line] !== group) return;
+            (values[key] || []).forEach(function (v) {
+                var comp = v && v['Метка'] || '';
+                if (!comp) return;
+                var col = null;
+                for (var c = 0; c < cols.length; c++)
+                    if (String(v.date) >= cols[c].fr && String(v.date) <= cols[c].to) { col = cols[c]; break; }
+                if (!col) return;
+                var s = (series[comp] || (series[comp] = {}))[line] || (series[comp][line] = {});
+                s[col.name] = (s[col.name] || 0) + num(v.val);
+            });
+        });
+        return { quarters: cols.map(function (c) { return c.name; }), companies: companies,
+                 rows: rows, series: series, byCol: true };
     }
 
     // ---- D1: граф зависимостей ----

@@ -31,6 +31,10 @@ function dashCellSrc(rowId, baseType) {
 }
 
 let dashCurrentId = null, dashRecordId = null, dashDateFr = null, dashDateTo = null, dashPeriodVal = 'Месяц';
+// Диапазон расчёта в YMD — по нему отбираются строки словаря периодов (issue #4661).
+let dashPeriodFrYMD = '', dashPeriodToYMD = '';
+// Пока пользователь не нажал «Применить», строку фильтра задаёт сам дэшборд (issue #4661).
+let dashFilterFromUser = false;
 
 function dashToInputDate(s) {
     if (!s) return '';
@@ -1512,6 +1516,51 @@ function dashCalcLineTotals() {
     });
 }
 
+// Формулы строк модели пишут по ИМЕНИ: «[Выручка]-[Себестоимость]». Считает же dashCalcCells
+// по id (`[648]-[652]`, itemIdRegex): имя в арифметике не разбиралось, и вычисляемые строки
+// (валовая прибыль, EBITDA, ROI) оставались пустыми (issue #4661). Переводим имена в id
+// один раз, когда все строки модели уже в DOM: сначала внутри своей панели, затем по всей
+// модели — если имя там единственное. Цельные `[Имя]`/`[Отчёт.Поле]` не трогаем: это не
+// арифметика, а ссылка на источник (dashCellSrc, itemRegex/repRegex). Незнакомое имя
+// оставляем как есть — ячейка покажет ошибку, как и раньше.
+function dashFormulaNameKey(name) {
+    return String(name == null ? '' : name).trim().toLowerCase();
+}
+
+function dashResolveFormulaNames() {
+    var idByName = {}, ambiguous = {};
+    document.querySelectorAll('#dash-model .f-item').forEach(function(row) {
+        var item = dashItems[row.id]
+            , key = item ? dashFormulaNameKey(item.name) : '';
+        if (!key) return;
+        if (idByName[key] && idByName[key] !== row.id) ambiguous[key] = 1;
+        else idByName[key] = row.id;
+    });
+    Object.keys(dashFormulas).forEach(function(itemId) {
+        var f = dashFormulas[itemId];
+        if (!f || f.indexOf('[') === -1) return;
+        if (itemRegex.test(f) || repRegex.test(f)) return;
+        var row = document.getElementById(itemId)
+            , panel = row && row.closest ? row.closest('.f-panel') : null
+            , inPanel = {};
+        if (panel) panel.querySelectorAll('.f-item').forEach(function(r) {
+            var item = dashItems[r.id]
+                , key = item ? dashFormulaNameKey(item.name) : '';
+            if (key && !inPanel[key]) inPanel[key] = r.id;
+        });
+        var resolved = f.replace(/\[([^\[\]]+)\]/g, function(whole, ref) {
+            if (/^\d+$/.test(ref)) return whole;               // уже id
+            var key = dashFormulaNameKey(ref)
+                , id = inPanel[key] || (ambiguous[key] ? '' : idByName[key]);
+            return id ? '[' + id + ']' : whole;
+        });
+        if (resolved !== f) {
+            dashTrace('formula-name-resolve', { itemId: itemId, from: f, to: resolved });
+            dashFormulas[itemId] = resolved;
+        }
+    });
+}
+
 function dashReplaceItems(match, key) {
     if (dashItems[key]) return '[' + dashItems[key].name + ']';
     return '(Not found ' + key + ')';
@@ -2138,7 +2187,27 @@ function dashDebug() {
     dashSetStatus('Готово | ' + panelCount + ' панелей (отладка в консоли)');
 }
 
+// Словарь периодов (Год/Квартал/Месяц/Неделя) сервер отдаёт целиком: фильтр
+// `FR_<колонка>` в object/ понимает только имя ТИПА реквизита, а не его псевдоним,
+// и на «С»/«По» отвечает SQL-ошибкой вместо строк — колонок в панели не появлялось
+// вовсе (issue #4661). Диапазон [С; По] отбираем здесь, из тех же r[1]/r[2],
+// по которым потом рисуются заголовки периодов.
+function dashFilterPeriodDict(json, fr, to) {
+    if (!Array.isArray(json) || !fr || !to) return json;
+    return json.filter(function(row) {
+        var r = row && row.r;
+        if (!r || !r[1] || !r[2]) return false;
+        return dashDateYMD(r[1]) >= fr && dashDateYMD(r[2]) <= to;
+    });
+}
+
+function dashGetPeriodDict(json, period) {
+    dashGetPeriods(dashFilterPeriodDict(json, dashPeriodFrYMD, dashPeriodToYMD), period);
+}
+
 function dashGetPeriods(json, period) {
+    if (!json || typeof json !== 'object')  // ошибка сервера приходит строкой — не молчать
+        console.error('dash: список периодов «' + period + '» не получен', json);
     dashPeriodData[period] = (json && typeof json === 'object') ? json : {};
     if (dashRgSourceIds[period] && dashHasRows(json))
         dashFetchMatrixValues();
@@ -2427,26 +2496,24 @@ function dashGetModel(json) {
 
     fr = dashDateFr || json[i].periodFrom;
     to = dashDateTo || json[i].periodTo;
+    // Строка фильтра показывает то же, по чему считается модель: без этого поля дат стояли
+    // на текущем годе, а детализация — на «Месяц», хотя данные брались за период дэшборда
+    // и по его периодичности (у ТехноСбыт — 2024–2025, кварталы).
+    dashDateFr = fr;
+    dashDateTo = to;
+    if (!dashFilterFromUser && json[i].period) dashPeriodVal = json[i].period;
+    dashPeriodFrYMD = dashDateYMD(fr);
+    dashPeriodToYMD = dashDateYMD(to);
+    document.querySelectorAll('#dash-model .f-sheet').forEach(dashInitFilterBar);
 
     dashAjaxes++;
     newApi('GET', 'report/Дэшборд.ЗначенияЗаПериод?JSON_KV&Fr=' + dashDateYMD(fr) + '&To=' + dashDateYMD(to), 'dashGetSrc');
 
-    if (dashPeriods['Год']) {
+    ['Год', 'Квартал', 'Месяц', 'Неделя'].forEach(function(dict) {
+        if (!dashPeriods[dict]) return;
         dashAjaxes++;
-        newApi('GET', 'object/Год?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Год');
-    }
-    if (dashPeriods['Квартал']) {
-        dashAjaxes++;
-        newApi('GET', 'object/Квартал?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Квартал');
-    }
-    if (dashPeriods['Месяц']) {
-        dashAjaxes++;
-        newApi('GET', 'object/Месяц?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Месяц');
-    }
-    if (dashPeriods['Неделя']) {
-        dashAjaxes++;
-        newApi('GET', 'object/Неделя?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Неделя');
-    }
+        newApi('GET', 'object/' + encodeURIComponent(dict) + '?JSON_DATA&LIMIT=10000', 'dashGetPeriodDict', '', dict);
+    });
 
     var model = document.getElementById('dash-model');
 
@@ -2594,6 +2661,8 @@ function dashGetModel(json) {
             }
         }
     }
+    dashResolveFormulaNames();
+
     // For panels that declare panelQuery AND have rows, fetch per-panel
     // values via JSON_KV. They become the data source for those panels
     // (cells rendered read-only, see f-panel-readonly).
@@ -6128,6 +6197,8 @@ function dashReset() {
     dashQueryNameById = {}; dashQueryIdByName = {}; dashPendingPanelRows = {};
     dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
+    // Диапазон и детализация принадлежат дэшборду: у следующего они свои (issue #4661).
+    dashDateFr = null; dashDateTo = null; dashPeriodFrYMD = ''; dashPeriodToYMD = ''; dashFilterFromUser = false;
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
     model.querySelector('.sheets').innerHTML = '';
@@ -6137,6 +6208,12 @@ window.dashGetRecord  = dashGetRecord;
 window.dashGetModel   = dashGetModel;
 window.dashGetSrc     = dashGetSrc;
 window.dashGetPeriods = dashGetPeriods;
+window.dashGetPeriodDict = dashGetPeriodDict;
+// Разобранная модель для js/dash-optimize.js: dash.js держит её в замыкании, поэтому
+// отдаём геттером — dashReset пересоздаёт объекты, снимок бы устарел (issue #4661).
+window.dashLiveState = function() {
+    return { items: dashItems, formulas: dashFormulas, values: dashValues, periods: dashPeriodData };
+};
 window.dashGetMatrixValues = dashGetMatrixValues;
 window.dashGetRepDone             = dashGetRepDone;
 window.dashGetVizReportDone       = dashGetVizReportDone;
@@ -6150,6 +6227,7 @@ window.dashApplyFilter = function(sheetEl) {
     dashDateFr    = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
     dashDateTo    = dashFromInputDate(sheetEl.querySelector('.dash-to-input').value);
     dashPeriodVal = sheetEl.querySelector('.dash-period-sel').value;
+    dashFilterFromUser = true;  // дальше строку фильтра держит пользователь, а не дэшборд
 
     // Get active sheet name for FR_sheet filter
     var model = document.getElementById('dash-model');
