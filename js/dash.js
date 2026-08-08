@@ -2610,7 +2610,7 @@ function dashGetModel(json) {
     if (!model.querySelector('.dash-sheet-tab.active')) {
         var savedTab = null;
         try {
-            var hashMatch = window.location.hash.match(/^#tab=(.+)/);
+            var hashMatch = window.location.hash.match(/(?:^#|&)tab=([^&]+)/);
             if (hashMatch) savedTab = model.querySelector('.dash-sheet-tab#' + CSS.escape(decodeURIComponent(hashMatch[1])));
         } catch(e) {}
         var targetTab = savedTab || model.querySelector('.dash-sheet-tab');
@@ -6202,8 +6202,12 @@ window.dashSetActive = function(el) {
     var sheet = document.getElementById('ds' + el.id);
     if (sheet) sheet.style.display = '';
     if (sheet) dashInitSheetTileMode(sheet);
-    // Persist active tab in URL hash so page refresh restores it (issue #1840)
-    try { history.replaceState(null, '', '#tab=' + encodeURIComponent(el.id)); } catch(e) {}
+    // Persist active tab in URL hash so page refresh restores it (issue #1840).
+    // Прочие токены хэша (флаги вида `opti`, issue #4659) сохраняем — вкладка ими не владеет.
+    try {
+        var flags = window.location.hash.replace(/^#/, '').split('&').filter(function(p) { return p && !/^tab=/.test(p); });
+        history.replaceState(null, '', '#' + ['tab=' + encodeURIComponent(el.id)].concat(flags).join('&'));
+    } catch(e) {}
 };
 
 window.dashOpenSettings = function() {

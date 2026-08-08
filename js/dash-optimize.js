@@ -192,10 +192,22 @@
                  gpContribRevenue: dRev, gpContribCost: -dCost };
     }
 
+    // ---- гейт показа: механизм включает только явный флаг в хэше (issue #4659) ----
+    // Хэш рабочего места — набор токенов через `&` (dash.js хранит там активную вкладку:
+    // `tab=<id>`); наш флаг — отдельный токен `opti` (регистр не важен, `opti=1` тоже годится).
+    var OPTI_FLAG = 'opti';
+    function optiRequested(hash) {
+        return String(hash == null ? '' : hash).replace(/^#/, '').split('&').some(function (p) {
+            var t = p.trim().toLowerCase();
+            return t === OPTI_FLAG || t.indexOf(OPTI_FLAG + '=') === 0;
+        });
+    }
+
     var API = {
         modelFromReports: modelFromReports, modelFromDashState: modelFromDashState,
         buildGraph: buildGraph, periodValues: periodValues, periodKeys: periodKeys,
-        goalSeek: goalSeek, findAnomalies: findAnomalies, diagnose: diagnose, refsOf: refsOf, classify: classify
+        goalSeek: goalSeek, findAnomalies: findAnomalies, diagnose: diagnose, refsOf: refsOf, classify: classify,
+        optiRequested: optiRequested
     };
     root.DashOptimize = API;
     if (typeof module !== 'undefined' && module.exports) module.exports = API;
@@ -261,12 +273,20 @@
     }
 
     if (typeof document !== 'undefined') {
+        // Флаг читаем на загрузке: дальше dash.js перепишет хэш на `#tab=<вкладка>` (issue #1840).
+        var enabled = optiRequested(root.location && root.location.hash);
         document.addEventListener('DOMContentLoaded', function () {
             var open = document.getElementById('dash-opt-open'),
                 modal = document.getElementById('dash-opt-modal'),
                 body = document.getElementById('dash-opt-body'),
                 close = document.getElementById('dash-opt-close');
             if (!open || !modal) return;
+            if (!enabled) {                                 // не запрошено — разметки не остаётся вовсе
+                if (open.parentNode) open.parentNode.removeChild(open);
+                if (modal.parentNode) modal.parentNode.removeChild(modal);
+                return;
+            }
+            open.classList.add('dash-opt-on');              // по умолчанию кнопка скрыта в css/dash.css
             open.addEventListener('click', function () {
                 var model = modelFromDashState(root);
                 var company = model.companies[0] || '';
