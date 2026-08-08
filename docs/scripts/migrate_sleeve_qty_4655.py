@@ -5,35 +5,42 @@
 # реквизитах, которые для втулок ничего не значат: у 27 «настоящих» карточек — в
 # «Остаток, м²», у 6 старых заглушек — в «Остаток, м». Решение по #4655: количество
 # втулок живёт в реквизите «Кол-во» (670848). Рабочее место /atex/intake читает и
-# пишет ТОЛЬКО его и помечает неперененесённые карточки, а не считает их нулём.
+# пишет ТОЛЬКО его и помечает неперенесённые карточки, а не считает их нулём.
 #
 # ЧТО ДЕЛАЕТ (идемпотентно — карточку с непустым «Кол-во» не трогает):
 #   • «Кол-во» = прежнее количество; исходный реквизит очищается — число живёт в
-#     одном месте;
+#     одном месте (исключение — заглушки, см. ниже);
 #   • «Ед.изм.» проставляется ТОЛЬКО если пусто, по правилу объекта: у втулки задана
 #     «Ширина втулки, мм» → шт, иначе → Метр. Уже проставленную человеком единицу
 #     миграция не переписывает: расхождение правила с данными — повод разобраться
 #     с данными (например, у втулки 104603 «PE Cores 25,6*35*100» ширина не
 #     заполнена, хотя её карточка ведётся в штуках), а не молча сменить меру.
 #
-# ЗАГЛУШКИ (--stubs). Шесть карточек без склада с «Остаток, м» = 1 000 000 — не
-# реальный запас, а «бесконечный» остаток. Их читает отчёт sleeve_batches_active
-# (колонка remaining_m ← «Остаток, м»), по которому планировщик подбирает партию
-# втулок для «Задачи на втулки». Очистка «Остаток, м» у них ОСТАВИТ ПЛАНИРОВЩИК
-# БЕЗ ПАРТИЙ ВТУЛОК, пока отчёт не переведут на «Кол-во». Поэтому по умолчанию
-# скрипт их не трогает; ключ --stubs включает перенос осознанно.
+# ОТЧЁТ. Шаг [1] дозаводит отчёту sleeve_batches_active колонку remaining_qty
+# («Кол-во»): по этому отчёту планировщик подбирает партию втулок для «Задачи на
+# втулки», а до #4655 он читал только remaining_m («Остаток, м») и потому видел
+# лишь шесть старых заглушек без склада с «бесконечным» остатком 1 000 000.
+#
+# ЗАГЛУШКИ. «Остаток, м» у этих шести карточек скрипт НЕ очищает: пока в проде
+# крутится старая сборка production-planning.js (она читает remaining_m), очистка
+# оставила бы планировщик без партий втулок. Убрать легаси-число после выкладки —
+# ключ --clear-stub-meters.
 #
 # Запуск (сначала всегда --dry-run — он печатает полный план «было → стало»):
 #   TOKEN=<сессионный X-Authorization> DB=https://ideav.ru/ateh \
 #   python3 docs/scripts/migrate_sleeve_qty_4655.py --dry-run
-#   python3 docs/scripts/migrate_sleeve_qty_4655.py [--stubs]
+#   python3 docs/scripts/migrate_sleeve_qty_4655.py
+#   python3 docs/scripts/migrate_sleeve_qty_4655.py --clear-stub-meters   # после выкладки
 
 import os, sys, json, urllib.request, urllib.parse
 
 DB = os.environ.get('DB', 'https://ideav.ru/ateh').rstrip('/')
 TOKEN = os.environ.get('TOKEN', '')
 DRY = '--dry-run' in sys.argv
-STUBS = '--stubs' in sys.argv
+CLEAR_STUB_METERS = '--clear-stub-meters' in sys.argv
+
+REPORT = 'sleeve_batches_active'
+REPORT_COL = 'remaining_qty'
 
 CARD_TABLE = 'Партия сырья'
 SLEEVE_TABLE = 'Диаметр втулки'
@@ -89,6 +96,24 @@ def num(value):
     except ValueError:
         return 0.0
 
+def ensure_report_column(qty_req_id):
+    """Идемпотентно добавляет отчёту колонку remaining_qty ← реквизит «Кол-во»."""
+    reports = {str((rec.get('r') or [''])[0]).strip(): str(rec['i'])
+               for rec in _req('GET', 'object/22/?JSON_OBJ&LIMIT=0,5000')}
+    qid = reports.get(REPORT)
+    if not qid:
+        print(f'  ~ отчёт {REPORT} не найден — пропуск')
+        return
+    have = {str((rec.get('r') or ['', ''])[1]).strip()
+            for rec in _req('GET', f'object/28/?JSON_OBJ&LIMIT=0,200&F_U={qid}')}
+    if REPORT_COL in have:
+        print(f'  ∙ колонка {REPORT_COL} уже есть (queryId={qid})')
+        return
+    print(f'  + колонка {REPORT_COL} (t28={qty_req_id}) в отчёт {REPORT} (queryId={qid})')
+    if DRY:
+        return
+    post(f'_m_new/28?JSON&up={qid}', {'t28': qty_req_id, 't100': REPORT_COL})
+
 def main():
     global META, XSRF
     if not TOKEN:
@@ -114,8 +139,12 @@ def main():
     unit_by_name = {str((rec.get('r') or [''])[0]).strip().lower(): str(rec['i'])
                     for rec in _req('GET', f'object/{units["id"]}/?JSON_OBJ&LIMIT=0,200')}
 
+    print(f'\n[1] Отчёт {REPORT}: колонка {REPORT_COL} ← «{R_QTY}»')
+    ensure_report_column(rid_qty)
+
+    print('\n[2] Карточки втулок')
     rows = _req('GET', f'object/{cards["id"]}/?JSON_OBJ&LIMIT=0,5000')
-    plan, skipped, stubs = [], 0, 0
+    plan, skipped = [], 0
     for rec in rows or []:
         r = rec.get('r') or []
         sleeve_ref = str(r[i_sleeve] or '')
@@ -133,9 +162,6 @@ def main():
         else:
             continue                                   # нечего переносить
         is_stub = source == R_METERS
-        if is_stub and not STUBS:
-            stubs += 1
-            continue
         stored_unit = str(r[i_unit] or '')
         unit_name = UNIT_PIECES if width_by_id.get(sleeve_id, 0) > 0 else UNIT_METERS
         plan.append({
@@ -143,27 +169,47 @@ def main():
             'source': source, 'qty': qty,
             'unit': stored_unit.split(':', 1)[-1] if stored_unit else unit_name,
             'unit_id': '' if stored_unit else unit_by_name.get(unit_name.lower(), ''),
-            'clear': rid_area if source == R_AREA else rid_meters,
+            # «Остаток, м» у заглушек оставляем: его читает выложенная сборка
+            # планировщика, пока не приедет та, что читает remaining_qty.
+            'clear': rid_area if source == R_AREA else None,
+            'stub': is_stub,
         })
 
-    print(f'\nК переносу: {len(plan)} · уже перенесено: {skipped}'
-          + (f' · заглушек пропущено: {stubs} (--stubs, чтобы включить)' if stubs else ''))
+    print(f'\nК переносу: {len(plan)} · уже перенесено: {skipped}')
     for p in plan:
-        print(f'  {p["id"]:>8}  {p["label"]:<44} {p["source"]} {p["qty"]:>12,.3f} → «Кол-во», Ед.изм.={p["unit"]}')
-    if stubs:
-        print('\n  ВНИМАНИЕ: заглушки без склада читает отчёт sleeve_batches_active (remaining_m ←'
-              '\n  «Остаток, м») — по нему планировщик подбирает партию втулок. Переносить их можно'
-              '\n  только вместе с переводом отчёта на «Кол-во».')
-    if DRY or not plan:
-        print('\nDry-run: ничего не записано.' if DRY else '\nПереносить нечего.')
+        mark = ' (заглушка, «Остаток, м» остаётся)' if p['stub'] else ''
+        print(f'  {p["id"]:>8}  {p["label"]:<44} {p["source"]} {p["qty"]:>12,.3f} → «Кол-во», Ед.изм.={p["unit"]}{mark}')
+
+    stub_rows = [p for p in plan if p['stub']]
+    if stub_rows:
+        print(f'\n  Заглушек: {len(stub_rows)}. Их «Остаток, м» читает ВЫЛОЖЕННАЯ сборка планировщика;'
+              '\n  очистить его — отдельным прогоном --clear-stub-meters ПОСЛЕ выкладки PR #4656.')
+    if DRY:
+        print('\nDry-run: ничего не записано.')
+        return
+    if not plan and not CLEAR_STUB_METERS:
+        print('\nПереносить нечего.')
         return
 
     for p in plan:
-        fields = {f't{rid_qty}': p['qty'], f't{p["clear"]}': ''}
+        fields = {f't{rid_qty}': p['qty']}
+        if p['clear']:
+            fields[f't{p["clear"]}'] = ''
         if p['unit_id']:
             fields[f't{rid_unit}'] = p['unit_id']
         post(f'_m_set/{p["id"]}?JSON', fields)
     print(f'\nГотово: перенесено карточек {len(plan)}.')
+
+    if CLEAR_STUB_METERS:
+        cleared = 0
+        for rec in rows or []:
+            r = rec.get('r') or []
+            if not str(r[i_sleeve] or ''):
+                continue
+            if num(r[i_meters]) > 0 and (str(r[i_qty] or '').strip() or num(r[i_area]) == 0):
+                post(f'_m_set/{rec["i"]}?JSON', {f't{rid_meters}': ''})
+                cleared += 1
+        print(f'Легаси «Остаток, м» очищен у карточек: {cleared}.')
 
 if __name__ == '__main__':
     main()

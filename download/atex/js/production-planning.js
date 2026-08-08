@@ -15254,15 +15254,24 @@
     // #3340: партии втулок «в работе» из отчёта sleeve_batches_active (для FIFO-подбора
     // «Партии сырья» при создании «Задачи на втулки») + резолв id втулкореза TC-20.
     // → this.sleeveBatches = [{ id, diameterId, dateKey, remaining, active }].
+    // #4655: количество втулок живёт в реквизите «Кол-во» карточки остатка (колонка
+    // отчёта remaining_qty) — в нём и штучные, и метражные втулки. remaining_m
+    // («Остаток, м») остаётся фолбэком для карточек, которые ещё не перенесены.
     AtexProductionPlanning.prototype.loadSleeveBatches = function() {
         var self = this;
         var batches = this.getJson('report/sleeve_batches_active?JSON_KV&LIMIT=0,5000').then(function(rows) {
             self.sleeveBatches = (rows || []).map(function(row) {
+                var qty = row.remaining_qty;
+                var legacy = qty == null || String(qty).trim() === '';
+                if (legacy && stripNum(row.remaining_m) > 0) {
+                    console.warn('[pp] партия втулок ' + row.batch_id +
+                        ': количество ещё не перенесено в «Кол-во» (docs/scripts/migrate_sleeve_qty_4655.py)');
+                }
                 return {
                     id: row.batch_id == null ? '' : String(row.batch_id),
                     diameterId: row.sleeve_diameter_id == null ? '' : String(row.sleeve_diameter_id).trim(),
                     dateKey: Number(row.batch_date) || 0,
-                    remaining: stripNum(row.remaining_m),
+                    remaining: stripNum(legacy ? row.remaining_m : qty),
                     active: String(row.active == null ? '' : row.active).trim() !== ''
                 };
             });
