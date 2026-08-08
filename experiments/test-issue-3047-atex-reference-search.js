@@ -52,10 +52,14 @@ assert.deepStrictEqual(
 });
 
 const cases = [
+    // #4655: «Приёмка сырья» стала «Движением сырья», BATCH_REQ переименован в CARD_REQ.
+    // Длинный справочник здесь — ЕДИНЫЙ список объектов передачи (риббоны + втулки):
+    // itemOptions → refSelect → AtexRefSearch.createSelect. Выбор СКЛАДА остался обычным
+    // <select> — складов два, это не длинный справочник (та же оговорка, что у втулкореза).
     {
         file: 'download/atex/js/intake.js',
-        forbidden: "el('select', { class: 'atex-in-input', id: 'atex-in-material' })",
-        required: ['AtexRefSearch', 'BATCH_REQ.material']
+        forbidden: "el('select', { class: 'atex-in-input', id: 'atex-in-item' })",
+        required: ['AtexRefSearch', 'createSelect', 'CARD_REQ.material', 'itemOptions']
     },
     {
         file: 'download/atex/js/production-planning.js',
