@@ -1,23 +1,31 @@
-// Рабочее место atex «Приёмка сырья» (роль Кладовщик).
+// Рабочее место atex «Движение сырья» (роли Кладовщик/Оператор, Диспетчер).
+// URL — /atex/intake. Решение ideav/crm#4655 (исходно #2914). Правила разработки
+// рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md, описание — docs/atex_workplaces.md §3.4.
 //
-// Оприходование партии сырья (вид сырья, дата прихода, получено м²) и ведение
-// остатка с FIFO-порядком по дате прихода. Решение задачи ideav/crm#2914
-// (часть #2903). Правила разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md,
-// описание рабочего места — docs/atex_workplaces.md §3.4.
+// МОДЕЛЬ. Запись «Партия сырья» (1074) — карточка остатка: ровно одна на пару
+// (объект, склад); в базе ateh пара уникальна для всех 97 записей, а реквизиты
+// «Вид сырья», «Склад» и «Диаметр втулки» помечены `key:true`. Рабочее место
+// поэтому не «создаёт партии», а проводит ТРИ операции над остатками:
+//   • Приход      — сырьё поступило на склад;
+//   • Перемещение — со склада на склад;
+//   • Списание    — брак или отгрузка вовне (остаток уменьшается, причина обязательна).
 //
-// На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): создание — `_m_new/{Партия сырья}`, правки и остаток — `_m_set`,
-// чтение — `object/{Партия сырья}/?JSON_OBJ` (сортировка по дате прихода для
-// FIFO делается на клиенте). ID таблиц и реквизитов не хардкодятся: они берутся
-// по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
-// разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап
-// и в объём этой задачи не входит.
+// ОБЪЕКТ ПЕРЕДАЧИ выбирается из ОДНОГО списка: риббоны (справочник «Вид сырья»,
+// 1069) и втулки (справочник «Диаметр втулки», 8188). Мера объекта определяется
+// самим объектом, пользователь её не выбирает:
+//   • риббон           → «Остаток, м²», взаимно с «Остаток, м» через «Номинальная
+//                        ширина» вида сырья: S(м²) = L(м) × W(мм) / 1000;
+//   • втулка с «Ширина втулки, мм» → штуки, реквизит «Кол-во», «Ед.изм.» = шт;
+//   • втулка без ширины           → метры, реквизит «Кол-во», «Ед.изм.» = Метр.
 //
-// Ключевое правило (дизайн-спека atex / критерии приёмки #2914):
-//   • при оприходовании «Остаток, м²» инициализируется значением «Получено, м²».
+// ЖУРНАЛ. Каждая проводка пишется в таблицу «Движение сырья» (кто/когда/откуда/
+// куда/сколько/почему/было/стало). «Было»/«Стало» — остаток карточки, С КОТОРОЙ
+// операция берёт (списание, перемещение) или В КОТОРУЮ кладёт (приход). Склады
+// журнал хранит ТЕКСТОМ: в одной записи Интеграма не бывает двух ссылок на одну
+// таблицу, а «Со склада» и «На склад» смотрят в один справочник.
 //
-// Чистое ядро (объект `calc`) экспортируется через module.exports для модульных
-// тестов (experiments/atex-intake.test.js).
+// Чистое ядро (`calc`) и метаданные-хелперы (`helpers`) экспортируются через
+// module.exports для модульных тестов (experiments/atex-intake.test.js).
 
 (function(root, factory) {
     'use strict';
@@ -38,18 +46,53 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     'use strict';
 
-    // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
-    // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = { batch: 'Партия сырья', material: 'Вид сырья' };
-    var BATCH_REQ = {
+    // Имена таблиц и реквизитов схемы atex. По именам рабочее место находит
+    // числовые id в метаданных текущей сборки — код переживает пересборку базы.
+    var TABLE = {
+        card: 'Партия сырья',
         material: 'Вид сырья',
-        barcode: 'Штрих-код',
-        arrivedAt: 'Дата прихода',
-        received: 'Получено, м²',
-        remainder: 'Остаток, м²',
-        lengthM: 'Длина, м',
-        remainderM: 'Остаток, м'
+        sleeve: 'Диаметр втулки',
+        warehouse: 'Склад',
+        unit: 'Ед.изм.',
+        journal: 'Движение сырья'
     };
+    var CARD_REQ = {
+        material: 'Вид сырья',
+        sleeve: 'Диаметр втулки',
+        warehouse: 'Склад',
+        remainder: 'Остаток, м²',
+        remainderM: 'Остаток, м',
+        qty: 'Кол-во',
+        unit: 'Ед.изм.',
+        barcode: 'Штрих-код',
+        active: 'В работе',
+        note: 'Примечание'
+    };
+    var MATERIAL_REQ = { nominalWidth: 'Номинальная ширина' };
+    var SLEEVE_REQ = { width: 'Ширина втулки, мм' };
+    var JOURNAL_REQ = {
+        operation: 'Операция',
+        material: 'Вид сырья',
+        sleeve: 'Диаметр втулки',
+        from: 'Со склада',
+        to: 'На склад',
+        qty: 'Кол-во',
+        unit: 'Ед.изм.',
+        was: 'Было',
+        became: 'Стало',
+        reason: 'Причина',
+        note: 'Примечание',
+        user: 'Пользователь'
+    };
+
+    var OP = { in: 'in', move: 'move', out: 'out' };
+    var OP_TITLE = { in: 'Приход', move: 'Перемещение', out: 'Списание' };
+    var KIND = { ribbon: 'ribbon', sleeve: 'sleeve' };
+    var UNIT = { area: 'm2', pieces: 'pcs', meters: 'm' };
+    var UNIT_LABEL = { m2: 'м²', pcs: 'шт', m: 'м' };
+    // Названия записей справочника «Ед.изм.» (104590) для каждой меры.
+    var UNIT_REF_NAME = { m2: 'м2', pcs: 'шт', m: 'Метр' };
+    var REASONS = ['Брак', 'Отгрузка вовне'];
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
 
@@ -67,106 +110,266 @@
         return Math.round(n * 1000) / 1000;
     }
 
-    // Критерий приёмки #2914: «Остаток, м²» при оприходовании равен «Получено, м²».
-    function initialRemainder(received) {
-        return round3(toNumber(received));
+    function trimValue(value) {
+        return String(value == null ? '' : value).trim();
     }
 
-    // Длина джамбо по умолчанию: «Длина рулона, м» выбранного вида сырья.
-    // materials: [{ id, label, rollLength }]. Нет данных → 0.
-    function materialDefaultLength(materials, materialId) {
-        if (materialId == null) return 0;
-        var m = (materials || []).filter(function(x) {
-            return String(x.id) === String(materialId);
-        })[0];
-        return m ? round3(toNumber(m.rollLength)) : 0;
+    // Взаимный пересчёт риббона по номинальной ширине рулона (мм) — та же
+    // арифметика, что на пульте слиттера (#3861):
+    //   L(м)  = S(м²) × 1000 / W(мм)
+    //   S(м²) = L(м)  × W(мм) / 1000
+    // Ширина ≤ 0 (не задана у вида сырья) → 0: пересчёт невозможен.
+    function metersFromArea(areaM2, widthMm) {
+        var w = toNumber(widthMm);
+        return w > 0 ? round3(toNumber(areaM2) * 1000 / w) : 0;
+    }
+    function areaFromMeters(meters, widthMm) {
+        var w = toNumber(widthMm);
+        return w > 0 ? round3(toNumber(meters) * w / 1000) : 0;
     }
 
-    // Сортировочный ключ даты для FIFO: ISO (YYYY-MM-DD) и Д.М.Г → число.
-    // Пустая/непарсируемая дата → +∞ (такие партии уходят в конец очереди).
-    function dateKey(value) {
-        var s = String(value == null ? '' : value).trim();
-        if (!s) return Infinity;
-        var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
-        var dmy = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
-        if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
-        var t = Date.parse(s);
-        return isNaN(t) ? Infinity : t;
+    // Мера объекта передачи. Втулка с заданной «Шириной втулки, мм» — готовая,
+    // её приходуют и расходуют штуками; без ширины втулку меряют метражом.
+    function unitOfItem(item) {
+        if (!item) return UNIT.area;
+        if (item.kind === KIND.sleeve) {
+            return toNumber(item.sleeveWidth) > 0 ? UNIT.pieces : UNIT.meters;
+        }
+        return UNIT.area;
     }
 
-    // FIFO-порядок: по возрастанию даты прихода (старые — первыми). Стабильна
-    // (равные даты сохраняют исходный порядок). Не мутирует входной массив.
-    function sortFifo(batches) {
-        return (batches || [])
-            .map(function(b, i) { return { b: b, i: i, k: dateKey(b && b.arrivedAt) }; })
-            .sort(function(a, c) { return a.k - c.k || a.i - c.i; })
-            .map(function(x) { return x.b; });
+    function unitLabel(unit) {
+        return UNIT_LABEL[unit] || '';
     }
 
-    // Сводка по партиям: количество, получено всего, остаток всего.
-    function summarize(batches) {
-        return (batches || []).reduce(function(acc, b) {
+    // Остаток карточки в мере её объекта. Риббон — «Остаток, м²»; втулка —
+    // «Кол-во» (см. шапку файла).
+    function cardQuantity(card, item) {
+        if (!card) return 0;
+        var kind = (item && item.kind) || card.kind;
+        return round3(toNumber(kind === KIND.sleeve ? card.qty : card.remainder));
+    }
+
+    // Карточка втулки, у которой количество ещё лежит в старых реквизитах
+    // («Остаток, м²» или «Остаток, м»), а «Кол-во» пусто, — данные не
+    // перенесены. Молча подставлять старое поле нельзя, показывать ноль при
+    // непустом складе — тем более: рабочее место такую карточку помечает.
+    function needsQtyMigration(card) {
+        return !!card && card.kind === KIND.sleeve && trimValue(card.qty) === '' &&
+            (toNumber(card.remainder) > 0 || toNumber(card.remainderM) > 0);
+    }
+
+    // Число для подписи: без хвостовых нулей, с пробелом-разделителем тысяч.
+    function formatQty(value) {
+        var n = round3(toNumber(value));
+        var text = String(n);
+        var parts = text.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        return parts.join(',');
+    }
+
+    // Ключ карточки остатка: пара (объект, склад).
+    function cardKey(kind, itemId, warehouseId) {
+        return String(kind || '') + '|' + trimValue(itemId) + '|' + trimValue(warehouseId);
+    }
+
+    // Карточка пары (объект, склад) среди загруженных остатков; нет — null.
+    function findCard(cards, item, warehouseId) {
+        if (!item || !item.id) return null;
+        var wanted = cardKey(item.kind, item.id, warehouseId);
+        var found = (cards || []).filter(function(c) {
+            return cardKey(c.kind, c.itemId, c.warehouseId) === wanted;
+        });
+        return found.length ? found[0] : null;
+    }
+
+    // План проводки — чистая функция: на входе намерение оператора и текущие
+    // остатки, на выходе шаги записи и запись журнала. Ошибки собираются все
+    // сразу, чтобы форма показала их одним списком.
+    //
+    // input = { op, item, quantity, fromWarehouseId, toWarehouseId, fromCard,
+    //           toCard, fromWarehouseLabel, toWarehouseLabel, reason, note, user, at }
+    // → { errors: [строки], steps: [{ role, cardId, warehouseId, was, now }], journal }
+    function planMovement(input) {
+        input = input || {};
+        var op = input.op;
+        var item = input.item || null;
+        var qty = round3(toNumber(input.quantity));
+        var unit = unitOfItem(item);
+        var errors = [];
+
+        var fromId = trimValue(input.fromWarehouseId);
+        var toId = trimValue(input.toWarehouseId);
+        var fromCard = input.fromCard || null;
+        var toCard = input.toCard || null;
+        var fromLabel = trimValue(input.fromWarehouseLabel) || fromId;
+        var toLabel = trimValue(input.toWarehouseLabel) || toId;
+
+        if (!item || !item.id) errors.push('Выберите объект передачи');
+        if (!(qty > 0)) errors.push('Укажите количество больше нуля');
+
+        if (op === OP.in) {
+            if (!toId) errors.push('Выберите склад прихода');
+        } else if (op === OP.out) {
+            if (!fromId) errors.push('Выберите склад списания');
+            if (!trimValue(input.reason)) errors.push('Укажите причину списания');
+        } else if (op === OP.move) {
+            if (!fromId) errors.push('Выберите склад-источник');
+            if (!toId) errors.push('Выберите склад-приёмник');
+            if (fromId && toId && fromId === toId) errors.push('Склад-источник и склад-приёмник совпадают');
+        } else {
+            errors.push('Неизвестная операция');
+        }
+
+        var available = cardQuantity(fromCard, item);
+        if ((op === OP.out || op === OP.move) && item && item.id && fromId) {
+            if (!fromCard) {
+                errors.push('На складе «' + fromLabel + '» этого сырья нет');
+            } else if (needsQtyMigration(fromCard)) {
+                errors.push('У карточки на складе «' + fromLabel + '» количество ещё не перенесено в «Кол-во»');
+            } else if (qty > available) {
+                errors.push('На складе «' + fromLabel + '» всего ' + formatQty(available) + ' ' +
+                    unitLabel(unit) + ' — списать больше нельзя');
+            }
+        }
+        if (op === OP.in && toCard && needsQtyMigration(toCard)) {
+            errors.push('У карточки на складе «' + toLabel + '» количество ещё не перенесено в «Кол-во»');
+        }
+
+        if (errors.length) return { errors: errors, steps: [], journal: null };
+
+        var steps = [];
+        var journalWas = 0;
+        var journalNow = 0;
+
+        if (op === OP.out || op === OP.move) {
+            var fromNow = round3(available - qty);
+            steps.push({
+                role: 'from', cardId: fromCard.id, warehouseId: fromId,
+                was: available, now: fromNow
+            });
+            journalWas = available;
+            journalNow = fromNow;
+        }
+        if (op === OP.in || op === OP.move) {
+            var toWas = cardQuantity(toCard, item);
+            var toNow = round3(toWas + qty);
+            steps.push({
+                role: 'to', cardId: toCard ? toCard.id : null, warehouseId: toId,
+                was: toWas, now: toNow
+            });
+            if (op === OP.in) { journalWas = toWas; journalNow = toNow; }
+        }
+
+        return {
+            errors: [],
+            steps: steps,
+            journal: {
+                at: toNumber(input.at) || 0,
+                operation: OP_TITLE[op],
+                kind: item.kind,
+                itemId: String(item.id),
+                itemLabel: trimValue(item.label),
+                fromWarehouseId: fromId,
+                toWarehouseId: toId,
+                // Названия складов журнал хранит текстом: двух ссылок на одну
+                // таблицу «Склад» в записи Интеграма быть не может.
+                fromWarehouseLabel: fromId ? fromLabel : '',
+                toWarehouseLabel: toId ? toLabel : '',
+                quantity: qty,
+                unit: unit,
+                was: journalWas,
+                became: journalNow,
+                reason: trimValue(input.reason),
+                note: trimValue(input.note),
+                user: trimValue(input.user)
+            }
+        };
+    }
+
+    // Сводка остатков по мерам: сколько карточек и сколько всего в каждой мере.
+    function summarize(cards) {
+        return (cards || []).reduce(function(acc, c) {
             acc.count += 1;
-            acc.totalReceived = round3(acc.totalReceived + toNumber(b.received));
-            acc.totalRemaining = round3(acc.totalRemaining + toNumber(b.remainder));
+            var unit = unitOfItem({ kind: c.kind, sleeveWidth: c.sleeveWidth });
+            var value = cardQuantity(c, { kind: c.kind });
+            if (unit === UNIT.area) acc.totalM2 = round3(acc.totalM2 + value);
+            else if (unit === UNIT.pieces) acc.totalPcs = round3(acc.totalPcs + value);
+            else acc.totalM = round3(acc.totalM + value);
             return acc;
-        }, { count: 0, totalReceived: 0, totalRemaining: 0 });
+        }, { count: 0, totalM2: 0, totalPcs: 0, totalM: 0 });
+    }
+
+    // Фильтрация списка остатков на клиенте: весь список карточек грузится
+    // одним запросом (в ateh их 97), поэтому серверные фильтры не нужны.
+    function filterCards(cards, filters) {
+        filters = filters || {};
+        var kind = trimValue(filters.kind);
+        var itemId = trimValue(filters.itemId);
+        var warehouseId = trimValue(filters.warehouseId);
+        var text = trimValue(filters.text).toLowerCase();
+        return (cards || []).filter(function(c) {
+            if (kind && c.kind !== kind) return false;
+            if (itemId && String(c.itemId) !== itemId) return false;
+            if (warehouseId && String(c.warehouseId) !== warehouseId) return false;
+            if (text) {
+                var haystack = (c.itemLabel + ' ' + c.warehouseLabel + ' ' + (c.barcode || '')).toLowerCase();
+                if (haystack.indexOf(text) === -1) return false;
+            }
+            return true;
+        });
+    }
+
+    // Единый список объектов передачи: риббоны и втулки одним алфавитом внутри
+    // своей группы, риббоны первыми (их выбирают чаще).
+    function mergeItems(materials, sleeves) {
+        function byLabel(a, b) { return String(a.label).localeCompare(String(b.label), 'ru'); }
+        return (materials || []).slice().sort(byLabel)
+            .concat((sleeves || []).slice().sort(byLabel));
     }
 
     var calc = {
         toNumber: toNumber,
         round3: round3,
-        initialRemainder: initialRemainder,
-        materialDefaultLength: materialDefaultLength,
-        dateKey: dateKey,
-        sortFifo: sortFifo,
-        summarize: summarize
+        metersFromArea: metersFromArea,
+        areaFromMeters: areaFromMeters,
+        unitOfItem: unitOfItem,
+        unitLabel: unitLabel,
+        cardQuantity: cardQuantity,
+        needsQtyMigration: needsQtyMigration,
+        formatQty: formatQty,
+        cardKey: cardKey,
+        findCard: findCard,
+        planMovement: planMovement,
+        summarize: summarize,
+        filterCards: filterCards,
+        mergeItems: mergeItems,
+        OP: OP,
+        OP_TITLE: OP_TITLE,
+        KIND: KIND,
+        UNIT: UNIT,
+        REASONS: REASONS
     };
 
-    // ─────────────────────────── Браузерный слой ───────────────────────────
-    // Ниже — DOM-контроллер. Требует window/document/fetch; в Node не выполняется.
+    // ──────────────────── Метаданные: чтение и запись полей ────────────────────
 
-    function el(tag, attrs, children) {
-        var node = document.createElement(tag);
-        if (attrs) Object.keys(attrs).forEach(function(k) {
-            if (k === 'class') node.className = attrs[k];
-            else if (k === 'text') node.textContent = attrs[k];
-            else if (k === 'html') node.innerHTML = attrs[k];
-            else if (k === 'dataset') Object.keys(attrs[k]).forEach(function(d) { node.dataset[d] = attrs[k][d]; });
-            else node.setAttribute(k, attrs[k]);
-        });
-        (children || []).forEach(function(c) {
-            if (c == null) return;
-            node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
-        });
-        return node;
+    // Псевдоним реквизита в конкретной таблице (attrs.alias). Реквизит с
+    // псевдонимом приходит в metadata под ИМЕНЕМ ТИПА («Движение сырья.Операция»),
+    // а колонка в таблице называется «Операция» — искать нужно по обоим.
+    function reqAlias(req) {
+        var raw = req && req.attrs;
+        if (!raw) return '';
+        if (typeof raw === 'object') return String(raw.alias || '');
+        try { return String((JSON.parse(raw) || {}).alias || ''); }
+        catch (e) { return ''; }
     }
 
-    // ISO-дата для <input type="date">. Приводит Д.М.Г к YYYY-MM-DD; иначе ''.
-    function toIsoDate(value) {
-        var s = String(value == null ? '' : value).trim();
-        if (!s) return '';
-        var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
-        var dmy = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
-        if (dmy) {
-            var pad = function(n) { return ('0' + n).slice(-2); };
-            return dmy[3] + '-' + pad(dmy[2]) + '-' + pad(dmy[1]);
-        }
-        return '';
-    }
-
-    function todayIso() {
-        var now = new Date();
-        var pad = function(n) { return ('0' + n).slice(-2); };
-        return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-    }
-
-    // Значение реквизита из метаданных по имени → его числовой id (t{id}).
+    // Реквизит по имени → его числовой id (ключ `t{id}` в данных и фильтрах).
     function reqIdByName(meta, name) {
+        var wanted = String(name).trim().toLowerCase();
         var found = (meta && meta.reqs || []).filter(function(r) {
-            return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
+            return String(r.val).trim().toLowerCase() === wanted ||
+                reqAlias(r).trim().toLowerCase() === wanted;
         })[0];
         return found ? String(found.id) : null;
     }
@@ -180,109 +383,200 @@
     }
 
     // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
+    // Мультизначение («id1,id2:зн1,зн2») сводится к первому id.
     function parseRef(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
+        var m = String(raw == null ? '' : raw).match(/^([\d,]+):([\s\S]*)$/);
+        if (!m) return { id: null, label: String(raw == null ? '' : raw) };
+        return { id: String(m[1]).split(',')[0], label: m[2] };
     }
 
-    function trimValue(value) {
-        return String(value == null ? '' : value).trim();
-    }
-
-    function appendQueryPart(parts, name, value) {
-        parts.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
-    }
-
-    function hasBatchFilters(filters) {
-        filters = filters || {};
-        return !!(trimValue(filters.materialId) || trimValue(filters.barcode) || trimValue(filters.arrivedAt));
-    }
-
-    function buildBatchListPath(meta, filters, limit) {
-        filters = filters || {};
-        var parts = ['JSON_OBJ', 'LIMIT=0,' + (limit || 5000)];
-        var materialReqId = reqIdByName(meta, BATCH_REQ.material);
-        var barcodeReqId = reqIdByName(meta, BATCH_REQ.barcode);
-        var arrivedReqId = reqIdByName(meta, BATCH_REQ.arrivedAt);
-        var materialId = trimValue(filters.materialId);
-        var barcode = trimValue(filters.barcode);
-        var arrivedAt = toIsoDate(filters.arrivedAt) || trimValue(filters.arrivedAt);
-
-        if (materialReqId && materialId) appendQueryPart(parts, 'FR_' + materialReqId, '@' + materialId);
-        if (barcodeReqId && barcode) appendQueryPart(parts, 'FR_' + barcodeReqId, barcode + '%');
-        if (arrivedReqId && arrivedAt) appendQueryPart(parts, 'FR_' + arrivedReqId, arrivedAt);
-        return 'object/' + encodeURIComponent(meta.id) + '/?' + parts.join('&');
-    }
-
-    function mapBatchRecord(rec, meta) {
-        var iMat = columnIndex(meta, BATCH_REQ.material);
-        var iBarcode = columnIndex(meta, BATCH_REQ.barcode);
-        var iArr = columnIndex(meta, BATCH_REQ.arrivedAt);
-        var iRec = columnIndex(meta, BATCH_REQ.received);
-        var iRem = columnIndex(meta, BATCH_REQ.remainder);
-        var iLen = columnIndex(meta, BATCH_REQ.lengthM);
-        var iRemM = columnIndex(meta, BATCH_REQ.remainderM);
+    // Запись карточки остатка из JSON_OBJ. Объект карточки — либо вид сырья
+    // (риббон), либо диаметр втулки; пустые обе колонки → карточка без объекта.
+    function mapCardRecord(rec, meta) {
         var r = rec && rec.r || [];
-        var matRef = iMat >= 0 ? parseRef(r[iMat]) : { id: null, label: '' };
+        function at(name) {
+            var i = columnIndex(meta, name);
+            return i >= 0 ? (r[i] == null ? '' : r[i]) : '';
+        }
+        var material = parseRef(at(CARD_REQ.material));
+        var sleeve = parseRef(at(CARD_REQ.sleeve));
+        var warehouse = parseRef(at(CARD_REQ.warehouse));
+        var unit = parseRef(at(CARD_REQ.unit));
+        var kind = sleeve.id ? KIND.sleeve : KIND.ribbon;
         return {
             id: String(rec && rec.i),
-            name: r[0] || '',
-            materialId: matRef.id,
-            materialLabel: matRef.label,
-            barcode: iBarcode >= 0 ? (r[iBarcode] || '') : '',
-            arrivedAt: iArr >= 0 ? (r[iArr] || '') : '',
-            received: iRec >= 0 ? (r[iRec] || '') : '',
-            remainder: iRem >= 0 ? (r[iRem] || '') : '',
-            lengthM: iLen >= 0 ? (r[iLen] || '') : '',
-            remainderM: iRemM >= 0 ? (r[iRemM] || '') : ''
+            at: r[0] || '',
+            kind: kind,
+            itemId: kind === KIND.sleeve ? sleeve.id : material.id,
+            itemLabel: kind === KIND.sleeve ? sleeve.label : material.label,
+            warehouseId: warehouse.id || '',
+            warehouseLabel: warehouse.label || '',
+            remainder: at(CARD_REQ.remainder),
+            remainderM: at(CARD_REQ.remainderM),
+            qty: at(CARD_REQ.qty),
+            unitId: unit.id || '',
+            unitLabel: unit.label || '',
+            barcode: at(CARD_REQ.barcode),
+            active: at(CARD_REQ.active),
+            note: at(CARD_REQ.note)
         };
     }
 
-    function buildBatchFields(meta, c) {
-        c = c || {};
+    // Поля остатка карточки для `_m_set`/`_m_new` — одна арифметика на все пути.
+    // Риббон: «Остаток, м²» = quantity, «Остаток, м» досчитывается по номинальной
+    // ширине; ширина не задана — метровый остаток НЕ трогаем (пересчитать нечем,
+    // рабочее место об этом предупреждает).
+    // Втулка: «Кол-во» = quantity.
+    function cardQuantityFields(meta, item, quantity) {
         var fields = {};
-        function setReq(reqName, value, includeEmpty) {
+        var value = round3(toNumber(quantity));
+        function set(reqName, v) {
+            var id = reqIdByName(meta, reqName);
+            if (id) fields['t' + id] = v;
+        }
+        if (item && item.kind === KIND.sleeve) {
+            set(CARD_REQ.qty, value);
+        } else {
+            set(CARD_REQ.remainder, value);
+            var width = toNumber(item && item.nominalWidth);
+            if (width > 0) set(CARD_REQ.remainderM, metersFromArea(value, width));
+        }
+        return fields;
+    }
+
+    // Поля новой карточки: объект, склад, остаток, единица измерения и флаг
+    // «В работе» (иначе планировщик карточку не увидит). Главное значение
+    // таблицы — момент заведения карточки (колонка типа «дата/время», unix).
+    function buildCardCreateParams(meta, item, warehouseId, quantity, unitRefId, at) {
+        var params = cardQuantityFields(meta, item, quantity);
+        function set(reqName, value) {
+            var id = reqIdByName(meta, reqName);
+            if (id && value !== '' && value != null) params['t' + id] = value;
+        }
+        set(item && item.kind === KIND.sleeve ? CARD_REQ.sleeve : CARD_REQ.material, item && item.id);
+        set(CARD_REQ.warehouse, warehouseId);
+        set(CARD_REQ.unit, unitRefId);
+        set(CARD_REQ.active, 'X');
+        // Главное значение таблицы — колонка «дата/время»: пишем unix-секунды
+        // строкой, как это делают остальные рабочие места atex.
+        var stamp = toNumber(at);
+        if (stamp > 0) params['t' + meta.id] = String(stamp);
+        return params;
+    }
+
+    // Поля записи журнала «Движение сырья».
+    function buildJournalFields(meta, journal) {
+        if (!meta || !journal) return null;
+        var fields = {};
+        function set(reqName, value) {
             var id = reqIdByName(meta, reqName);
             if (!id) return;
-            if (value === undefined || value === null) return;
-            if (!includeEmpty && value === '') return;
+            if (value === '' || value == null) return;
             fields['t' + id] = value;
         }
-
-        setReq(BATCH_REQ.material, c.materialId);
-        setReq(BATCH_REQ.barcode, trimValue(c.barcode), true);
-        setReq(BATCH_REQ.arrivedAt, c.arrivedAt || todayIso());
-        setReq(BATCH_REQ.received, round3(toNumber(c.received)));
-
-        var remainder = (c.remainder === '' || c.remainder == null)
-            ? initialRemainder(c.received)
-            : round3(toNumber(c.remainder));
-        setReq(BATCH_REQ.remainder, remainder);
-
-        var lengthM = round3(toNumber(c.lengthM));
-        var remainderM = (c.remainderM === '' || c.remainderM == null)
-            ? lengthM
-            : round3(toNumber(c.remainderM));
-        setReq(BATCH_REQ.lengthM, lengthM);
-        setReq(BATCH_REQ.remainderM, remainderM);
-
+        var stamp = toNumber(journal.at);
+        if (stamp > 0) fields['t' + meta.id] = String(stamp);
+        set(JOURNAL_REQ.operation, journal.operation);
+        set(journal.kind === KIND.sleeve ? JOURNAL_REQ.sleeve : JOURNAL_REQ.material, journal.itemId);
+        set(JOURNAL_REQ.from, journal.fromWarehouseLabel);
+        set(JOURNAL_REQ.to, journal.toWarehouseLabel);
+        set(JOURNAL_REQ.qty, journal.quantity);
+        set(JOURNAL_REQ.unit, journal.unitRefId);
+        set(JOURNAL_REQ.was, journal.was);
+        set(JOURNAL_REQ.became, journal.became);
+        set(JOURNAL_REQ.reason, journal.reason);
+        set(JOURNAL_REQ.note, journal.note);
+        set(JOURNAL_REQ.user, journal.user);
         return fields;
+    }
+
+    // Запись журнала из JSON_OBJ — для ленты последних операций.
+    function mapJournalRecord(rec, meta) {
+        var r = rec && rec.r || [];
+        function at(name) {
+            var i = columnIndex(meta, name);
+            return i >= 0 ? (r[i] == null ? '' : r[i]) : '';
+        }
+        var material = parseRef(at(JOURNAL_REQ.material));
+        var sleeve = parseRef(at(JOURNAL_REQ.sleeve));
+        return {
+            id: String(rec && rec.i),
+            at: r[0] || '',
+            operation: at(JOURNAL_REQ.operation),
+            itemLabel: sleeve.id ? sleeve.label : material.label,
+            fromLabel: at(JOURNAL_REQ.from),
+            toLabel: at(JOURNAL_REQ.to),
+            quantity: at(JOURNAL_REQ.qty),
+            unitLabel: parseRef(at(JOURNAL_REQ.unit)).label,
+            was: at(JOURNAL_REQ.was),
+            became: at(JOURNAL_REQ.became),
+            reason: at(JOURNAL_REQ.reason),
+            note: at(JOURNAL_REQ.note),
+            user: at(JOURNAL_REQ.user)
+        };
+    }
+
+    var helpers = {
+        reqAlias: reqAlias,
+        reqIdByName: reqIdByName,
+        columnIndex: columnIndex,
+        parseRef: parseRef,
+        mapCardRecord: mapCardRecord,
+        cardQuantityFields: cardQuantityFields,
+        buildCardCreateParams: buildCardCreateParams,
+        buildJournalFields: buildJournalFields,
+        mapJournalRecord: mapJournalRecord
+    };
+
+    // ─────────────────────────── Браузерный слой ───────────────────────────
+    // Ниже — DOM-контроллер. Требует window/document/fetch; в Node не выполняется.
+
+    function el(tag, attrs, children) {
+        var node = document.createElement(tag);
+        if (attrs) Object.keys(attrs).forEach(function(k) {
+            if (attrs[k] === undefined || attrs[k] === null) return;
+            if (k === 'class') node.className = attrs[k];
+            else if (k === 'text') node.textContent = attrs[k];
+            else if (k === 'dataset') Object.keys(attrs[k]).forEach(function(d) { node.dataset[d] = attrs[k][d]; });
+            else node.setAttribute(k, attrs[k]);
+        });
+        (children || []).forEach(function(c) {
+            if (c == null) return;
+            node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+        });
+        return node;
+    }
+
+    function nowUnix() {
+        return Math.floor(Date.now() / 1000);
+    }
+
+    // Unix-штамп главного значения (колонка «дата/время») → «ДД.ММ.ГГГГ ЧЧ:ММ».
+    function formatStamp(value) {
+        var n = toNumber(value);
+        if (!(n > 0)) return '—';
+        var d = new Date(n * 1000);
+        var pad = function(x) { return ('0' + x).slice(-2); };
+        return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
+            ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
     }
 
     function AtexIntake(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { batch: null, material: null };
-        this.materials = [];   // [{ id, label, rollLength }]
-        this.batches = [];     // загруженные партии [{ id, name, materialId, materialLabel, barcode, arrivedAt, received, remainder }]
-        this.filters = { materialId: '', barcode: '', arrivedAt: '' };
-        this.refOptions = {};  // кеш опций searchable reference inputs по reqId
-        this.current = null;   // редактируемая/новая партия
-        this.remainderTouched = false; // пользователь вручную правил «Остаток»?
-        this.remainderMTouched = false; // пользователь вручную правил «Остаток, м»?
+        this.user = root.getAttribute('data-user') || '';
+        this.meta = { card: null, material: null, sleeve: null, warehouse: null, unit: null, journal: null };
+        this.items = [];        // единый список объектов передачи [{ kind, id, label, nominalWidth|sleeveWidth }]
+        this.itemsById = {};    // индекс по «kind|id»
+        this.warehouses = [];   // [{ id, label }]
+        this.units = {};        // { 'm2'|'pcs'|'m': id записи «Ед.изм.» }
+        this.cards = [];        // остатки [{ id, kind, itemId, warehouseId, ... }]
+        this.journal = [];      // лента последних движений
+        this.filters = { kind: '', itemId: '', warehouseId: '', text: '' };
+        this.refOptions = {};   // кеш опций searchable-ref по ключу
+        this.form = null;       // намерение оператора
         this.busy = false;
-        this.filterTimer = null;
-        this.batchLoadSeq = 0;
+        this.warnings = [];     // предупреждения об окружении (нет журнала, нет ширины…)
     }
 
     AtexIntake.prototype.url = function(path) {
@@ -297,40 +591,6 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
-    };
-
-    AtexIntake.prototype.loadRefOptions = function(reqId, query, limit) {
-        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
-    };
-
-    AtexIntake.prototype.refSelect = function(opts) {
-        var self = this;
-        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
-        if (helper && typeof helper.createSelect === 'function') {
-            return helper.createSelect({
-                classPrefix: 'atex-in',
-                inputClass: 'atex-in-input',
-                id: opts.id,
-                options: opts.options || [],
-                value: opts.value,
-                placeholder: opts.placeholder,
-                reqId: opts.reqId,
-                cache: this.refOptions,
-                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
-                onChange: opts.onChange,
-                clearOnInput: opts.clearOnInput
-            });
-        }
-
-        var sel = el('select', { class: 'atex-in-input', id: opts.id });
-        sel.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
-        (opts.options || []).forEach(function(item) {
-            var o = el('option', { value: item.id, text: item.label });
-            if (String(opts.value) === String(item.id)) o.selected = true;
-            sel.appendChild(o);
-        });
-        sel.addEventListener('change', function() { opts.onChange(sel.value); });
-        return sel;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -355,7 +615,7 @@
         });
     };
 
-    // ── Загрузка метаданных и справочников ──
+    // ── Загрузка справочников ──
 
     AtexIntake.prototype.loadMetadata = function() {
         var self = this;
@@ -366,159 +626,313 @@
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
                 })[0] || null;
             }
-            self.meta.batch = byName(TABLE.batch);
+            self.meta.card = byName(TABLE.card);
             self.meta.material = byName(TABLE.material);
-            if (!self.meta.batch) throw new Error('В метаданных не найдена таблица «' + TABLE.batch + '»');
+            self.meta.sleeve = byName(TABLE.sleeve);
+            self.meta.warehouse = byName(TABLE.warehouse);
+            self.meta.unit = byName(TABLE.unit);
+            self.meta.journal = byName(TABLE.journal);
+            if (!self.meta.card) throw new Error('В метаданных не найдена таблица «' + TABLE.card + '»');
+            if (!self.meta.warehouse) throw new Error('В метаданных не найдена таблица «' + TABLE.warehouse + '»');
+            if (!self.meta.journal) {
+                self.warnings.push('Таблица «' + TABLE.journal + '» в этой базе не заведена — ' +
+                    'операции проводятся, но в журнал не записываются');
+            }
         });
     };
 
+    // Риббоны: «Вид сырья» + «Номинальная ширина» (для пересчёта м² ↔ м).
     AtexIntake.prototype.loadMaterials = function() {
         var self = this;
-        if (!this.meta.material) { this.materials = []; return Promise.resolve(); }
-        return this.getJson('object/' + this.meta.material.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            var lenIdx = self.colIndex(self.meta.material, 'Длина рулона, м');
-            self.materials = (rows || []).map(function(r) {
-                var row = r.r || [];
+        var meta = this.meta.material;
+        if (!meta) return Promise.resolve([]);
+        var wIdx = columnIndex(meta, MATERIAL_REQ.nominalWidth);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            return (rows || []).map(function(rec) {
+                var r = rec.r || [];
                 return {
-                    id: String(r.i),
-                    label: row[0] || ('#' + r.i),
-                    rollLength: lenIdx >= 0 ? (row[lenIdx] || '') : ''
+                    kind: KIND.ribbon,
+                    id: String(rec.i),
+                    label: String(r[0] || ('#' + rec.i)),
+                    fullName: String(r[1] || ''),
+                    nominalWidth: wIdx >= 0 ? toNumber(r[wIdx]) : 0
                 };
             });
         });
     };
 
-    AtexIntake.prototype.colIndex = function(meta, reqName) {
-        return columnIndex(meta, reqName);
-    };
-
-    AtexIntake.prototype.fetchBatches = function() {
-        var meta = this.meta.batch;
-        return this.getJson(buildBatchListPath(meta, this.filters, 5000)).then(function(rows) {
-            return sortFifo((rows || []).map(function(rec) { return mapBatchRecord(rec, meta); }));
+    // Втулки: «Диаметр втулки» + «Ширина втулки, мм» (задана → считаем штуками).
+    AtexIntake.prototype.loadSleeves = function() {
+        var meta = this.meta.sleeve;
+        if (!meta) return Promise.resolve([]);
+        var wIdx = columnIndex(meta, SLEEVE_REQ.width);
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            return (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                return {
+                    kind: KIND.sleeve,
+                    id: String(rec.i),
+                    label: String(r[0] || ('#' + rec.i)),
+                    sleeveWidth: wIdx >= 0 ? toNumber(r[wIdx]) : 0
+                };
+            });
         });
     };
 
-    AtexIntake.prototype.loadBatches = function() {
+    AtexIntake.prototype.loadWarehouses = function() {
         var self = this;
-        return this.fetchBatches().then(function(list) {
-            self.batches = list;
+        var meta = this.meta.warehouse;
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            self.warehouses = (rows || []).map(function(rec) {
+                return { id: String(rec.i), label: String((rec.r || [])[0] || ('#' + rec.i)) };
+            });
         });
     };
 
-    AtexIntake.prototype.reloadBatches = function() {
+    // Записи справочника «Ед.изм.» по названиям мер: шт / Метр / м2.
+    AtexIntake.prototype.loadUnits = function() {
         var self = this;
-        var ticket = ++this.batchLoadSeq;
-        if (this.listEl) this.listEl.classList.add('is-loading');
-        return this.fetchBatches().then(function(list) {
-            if (ticket !== self.batchLoadSeq) return;
-            self.batches = list;
-            if (self.listEl) self.listEl.classList.remove('is-loading');
-            self.renderList();
-        }).catch(function(err) {
-            if (ticket !== self.batchLoadSeq) return;
-            if (self.listEl) self.listEl.classList.remove('is-loading');
-            self.notify('Ошибка фильтра: ' + err.message, 'error');
+        var meta = this.meta.unit;
+        self.units = {};
+        if (!meta) {
+            this.warnings.push('Справочник «' + TABLE.unit + '» недоступен — новые карточки останутся без единицы измерения');
+            return Promise.resolve();
+        }
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            var byName = {};
+            (rows || []).forEach(function(rec) {
+                byName[String((rec.r || [])[0] || '').trim().toLowerCase()] = String(rec.i);
+            });
+            var missing = [];
+            Object.keys(UNIT_REF_NAME).forEach(function(unit) {
+                var id = byName[UNIT_REF_NAME[unit].toLowerCase()];
+                if (id) self.units[unit] = id;
+                else missing.push(UNIT_REF_NAME[unit]);
+            });
+            if (missing.length) {
+                self.warnings.push('В справочнике «' + TABLE.unit + '» нет записей: ' + missing.join(', ') +
+                    ' — новые карточки с такой мерой останутся без единицы измерения');
+            }
         });
     };
 
-    AtexIntake.prototype.scheduleBatchReload = function(delay) {
+    AtexIntake.prototype.indexItems = function(materials, sleeves) {
         var self = this;
-        if (this.filterTimer) clearTimeout(this.filterTimer);
-        this.filterTimer = setTimeout(function() {
-            self.reloadBatches();
-        }, delay || 0);
+        this.items = mergeItems(materials, sleeves);
+        this.itemsById = {};
+        this.items.forEach(function(item) {
+            self.itemsById[item.kind + '|' + item.id] = item;
+        });
+    };
+
+    AtexIntake.prototype.itemOf = function(kind, id) {
+        return this.itemsById[String(kind) + '|' + String(id)] || null;
+    };
+
+    // Остатки: весь список карточек одним запросом. Упёрлись в потолок выборки —
+    // кричим, а не показываем часть склада как весь склад.
+    AtexIntake.prototype.loadCards = function() {
+        var self = this;
+        var meta = this.meta.card;
+        var limit = 5000;
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,' + limit).then(function(rows) {
+            // Флагом, а не push в warnings: остатки перезагружаются после каждой
+            // проводки, и накопленный список предупреждений размножился бы.
+            self.cardsTruncated = (rows || []).length >= limit ? limit : 0;
+            self.cards = (rows || []).map(function(rec) {
+                var card = mapCardRecord(rec, meta);
+                var item = self.itemOf(card.kind, card.itemId);
+                card.sleeveWidth = item ? item.sleeveWidth : 0;
+                card.nominalWidth = item ? item.nominalWidth : 0;
+                return card;
+            });
+        });
+    };
+
+    AtexIntake.prototype.loadJournal = function() {
+        var self = this;
+        var meta = this.meta.journal;
+        if (!meta) { this.journal = []; return Promise.resolve(); }
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,200').then(function(rows) {
+            self.journal = (rows || [])
+                .map(function(rec) { return mapJournalRecord(rec, meta); })
+                .sort(function(a, b) { return toNumber(b.at) - toNumber(a.at); })
+                .slice(0, 15);
+        }).catch(function() { self.journal = []; });
     };
 
     // ── Состояние формы ──
 
-    AtexIntake.prototype.newBatch = function() {
-        this.current = {
-            id: null, name: '', materialId: null, barcode: '',
-            arrivedAt: todayIso(), received: '', remainder: '',
-            lengthM: '', remainderM: ''
+    AtexIntake.prototype.newForm = function(op) {
+        this.form = {
+            op: op || (this.form && this.form.op) || OP.in,
+            kind: null, itemId: '',
+            fromWarehouseId: '', toWarehouseId: '',
+            quantity: '', quantityM: '',
+            reason: '', note: ''
         };
-        this.remainderTouched = false;
-        this.remainderMTouched = false;
     };
 
-    AtexIntake.prototype.openBatch = function(id) {
-        var b = this.batches.filter(function(x) { return String(x.id) === String(id); })[0];
-        if (!b) return;
-        this.current = {
-            id: b.id, name: b.name, materialId: b.materialId, barcode: b.barcode,
-            arrivedAt: toIsoDate(b.arrivedAt) || b.arrivedAt,
-            received: b.received, remainder: b.remainder,
-            lengthM: b.lengthM, remainderM: b.remainderM
-        };
-        this.remainderTouched = true; // у существующей партии остаток уже задан
-        this.remainderMTouched = true;
-        this.render();
+    AtexIntake.prototype.formItem = function() {
+        var f = this.form;
+        if (!f || !f.itemId) return null;
+        return this.itemOf(f.kind, f.itemId);
     };
 
-    // Автоимя партии, если кладовщик не задал свой ярлык: «<вид> от <дата>».
-    AtexIntake.prototype.autoName = function(c) {
-        var mat = (this.materials.filter(function(m) { return String(m.id) === String(c.materialId); })[0] || {}).label;
-        var date = c.arrivedAt || todayIso();
-        return (mat ? mat + ' ' : 'Партия ') + 'от ' + date;
+    AtexIntake.prototype.warehouseLabel = function(id) {
+        var found = this.warehouses.filter(function(w) { return String(w.id) === String(id); })[0];
+        return found ? found.label : String(id || '');
+    };
+
+    // Текущий план проводки — та же чистая функция, что и при сохранении:
+    // предпросмотр и запись считают ОДНУ арифметику.
+    AtexIntake.prototype.currentPlan = function() {
+        var f = this.form || {};
+        var item = this.formItem();
+        return planMovement({
+            op: f.op,
+            item: item,
+            quantity: f.quantity,
+            fromWarehouseId: f.fromWarehouseId,
+            toWarehouseId: f.toWarehouseId,
+            fromWarehouseLabel: this.warehouseLabel(f.fromWarehouseId),
+            toWarehouseLabel: this.warehouseLabel(f.toWarehouseId),
+            fromCard: findCard(this.cards, item, f.fromWarehouseId),
+            toCard: findCard(this.cards, item, f.toWarehouseId),
+            reason: f.reason,
+            note: f.note,
+            user: this.user,
+            at: nowUnix()
+        });
     };
 
     // ── Рендеринг ──
 
     AtexIntake.prototype.render = function() {
-        if (this.listEl) this.renderList();
+        this.renderWarnings();
+        this.renderList();
         this.renderForm();
+        this.renderJournal();
+    };
+
+    AtexIntake.prototype.renderWarnings = function() {
+        var box = this.warnEl;
+        if (!box) return;
+        box.innerHTML = '';
+        var list = this.warnings.slice();
+        if (this.cardsTruncated) {
+            list.push('Карточек остатка больше ' + this.cardsTruncated + ' — список показан не полностью');
+        }
+        var mismatched = this.unitMismatches();
+        if (mismatched.length) {
+            list.push('Единица измерения карточки расходится с правилом объекта у ' + mismatched.length +
+                ' карточек (' + mismatched.slice(0, 3).join(', ') +
+                (mismatched.length > 3 ? ', …' : '') + ') — проверьте «Ширину втулки, мм» и «Ед.изм.»');
+        }
+        var stale = this.cards.filter(needsQtyMigration).length;
+        if (stale) {
+            list.push('У ' + stale + ' карточек втулок количество лежит в старых реквизитах остатка, ' +
+                'а не в «Кол-во» — операции по ним заблокированы до переноса данных ' +
+                '(docs/scripts/migrate_sleeve_qty_4655.py)');
+        }
+        list.forEach(function(text) {
+            box.appendChild(el('div', { class: 'atex-in-warn', text: text }));
+        });
+        box.hidden = !list.length;
+    };
+
+    // Карточки, у которых сохранённая «Ед.изм.» не та, что даёт правило объекта
+    // (риббон — м², втулка с шириной — шт, без ширины — м). Такое расхождение —
+    // дыра в справочнике («Ширина втулки, мм» не заполнена) или ошибка в карточке;
+    // рабочее место о нём говорит вслух, а не подстраивается молча.
+    AtexIntake.prototype.unitMismatches = function() {
+        var self = this;
+        if (!this.meta.unit) return [];
+        var out = [];
+        this.cards.forEach(function(c) {
+            if (!c.unitId) return;
+            var expected = self.units[unitOfItem(self.itemOf(c.kind, c.itemId) || c)];
+            if (expected && String(expected) !== String(c.unitId)) out.push(c.itemLabel);
+        });
+        return out.filter(function(label, i) { return out.indexOf(label) === i; });
+    };
+
+    AtexIntake.prototype.refSelect = function(opts) {
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-in',
+                inputClass: 'atex-in-input',
+                id: opts.id,
+                cacheKey: opts.id,
+                replaceCache: true,
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                cache: this.refOptions,
+                onChange: opts.onChange
+            });
+        }
+        var sel = el('select', { class: 'atex-in-input', id: opts.id });
+        sel.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function() { opts.onChange(sel.value); });
+        return sel;
+    };
+
+    // Опции единого списка объектов: id вида «kind|id», чтобы риббон и втулка с
+    // одинаковым числовым id не смешивались.
+    AtexIntake.prototype.itemOptions = function() {
+        return this.items.map(function(item) {
+            var suffix = item.kind === KIND.sleeve ? '' : (item.fullName ? ' · ' + item.fullName : '');
+            return { id: item.kind + '|' + item.id, label: item.label + suffix };
+        });
     };
 
     AtexIntake.prototype.renderFilters = function() {
-        if (!this.filtersEl || this.filtersRendered) return;
         var self = this;
-        this.filtersRendered = true;
-        this.filtersEl.innerHTML = '';
+        var box = this.filtersEl;
+        box.innerHTML = '';
 
-        var materialRef = this.refSelect({
-            id: 'atex-in-filter-material',
-            options: this.materials,
-            value: this.filters.materialId,
-            placeholder: 'Все виды сырья',
-            reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
-            onChange: function(value) {
-                self.filters.materialId = value || '';
-                self.scheduleBatchReload(0);
-            }
+        var kindSel = el('select', { class: 'atex-in-input' });
+        [['', 'Всё сырьё'], [KIND.ribbon, 'Риббоны'], [KIND.sleeve, 'Втулки']].forEach(function(pair) {
+            var o = el('option', { value: pair[0], text: pair[1] });
+            if (self.filters.kind === pair[0]) o.selected = true;
+            kindSel.appendChild(o);
         });
-        this.filtersEl.appendChild(filterField('Вид сырья', materialRef));
+        kindSel.addEventListener('change', function() {
+            self.filters.kind = kindSel.value;
+            self.renderList();
+        });
+        box.appendChild(filterField('Тип сырья', kindSel));
 
-        var barcodeInput = el('input', {
-            class: 'atex-in-input',
-            type: 'text',
-            autocomplete: 'off',
-            inputmode: 'text',
-            placeholder: 'Штрих-код'
+        var whSel = el('select', { class: 'atex-in-input' });
+        whSel.appendChild(el('option', { value: '', text: 'Все склады' }));
+        this.warehouses.forEach(function(w) {
+            var o = el('option', { value: w.id, text: w.label });
+            if (String(self.filters.warehouseId) === String(w.id)) o.selected = true;
+            whSel.appendChild(o);
         });
-        barcodeInput.value = this.filters.barcode || '';
-        barcodeInput.addEventListener('input', function() {
-            self.filters.barcode = barcodeInput.value;
-            self.scheduleBatchReload(250);
+        whSel.addEventListener('change', function() {
+            self.filters.warehouseId = whSel.value;
+            self.renderList();
         });
-        this.filtersEl.appendChild(filterField('Штрих-код', barcodeInput));
+        box.appendChild(filterField('Склад', whSel));
 
-        var dateInput = el('input', { class: 'atex-in-input', type: 'date' });
-        dateInput.value = toIsoDate(this.filters.arrivedAt) || '';
-        dateInput.addEventListener('input', function() {
-            self.filters.arrivedAt = dateInput.value;
-            self.scheduleBatchReload(0);
+        var textInput = el('input', {
+            class: 'atex-in-input', type: 'text', autocomplete: 'off',
+            placeholder: 'Название или штрих-код'
         });
-        this.filtersEl.appendChild(filterField('Дата прихода', dateInput));
-
-        var reset = el('button', { class: 'atex-in-btn atex-in-btn-secondary atex-in-filter-reset', type: 'button', text: 'Сбросить' });
-        reset.addEventListener('click', function() {
-            self.filters = { materialId: '', barcode: '', arrivedAt: '' };
-            self.filtersRendered = false;
-            self.renderFilters();
-            self.scheduleBatchReload(0);
+        textInput.value = this.filters.text || '';
+        textInput.addEventListener('input', function() {
+            self.filters.text = textInput.value;
+            self.renderList();
         });
-        this.filtersEl.appendChild(el('div', { class: 'atex-in-filter-action' }, [reset]));
+        box.appendChild(filterField('Поиск', textInput));
 
         function filterField(label, control) {
             return el('div', { class: 'atex-in-filter-field' }, [
@@ -533,42 +947,41 @@
         var box = this.listEl;
         box.innerHTML = '';
 
-        var s = summarize(this.batches);
+        var visible = filterCards(this.cards, this.filters);
+        var s = summarize(visible);
         this.summaryEl.innerHTML = '';
-        this.summaryEl.appendChild(metric('Партий', s.count));
-        this.summaryEl.appendChild(metric('Получено, м²', s.totalReceived));
-        this.summaryEl.appendChild(metric('Остаток, м²', s.totalRemaining));
+        this.summaryEl.appendChild(metric('Карточек', s.count));
+        this.summaryEl.appendChild(metric('Риббоны, м²', formatQty(s.totalM2)));
+        this.summaryEl.appendChild(metric('Втулки, шт', formatQty(s.totalPcs)));
+        this.summaryEl.appendChild(metric('Втулки, м', formatQty(s.totalM)));
 
-        if (!this.batches.length) {
-            box.appendChild(el('div', {
-                class: 'atex-in-empty',
-                text: hasBatchFilters(this.filters) ? 'Партий по фильтрам не найдено' : 'Партий сырья пока нет'
-            }));
+        if (!visible.length) {
+            box.appendChild(el('div', { class: 'atex-in-empty', text: 'Остатков по фильтрам не найдено' }));
             return;
         }
-        // Шапка таблицы FIFO.
         box.appendChild(el('div', { class: 'atex-in-row atex-in-row-head' }, [
-            el('span', { text: '№' }),
-            el('span', { text: 'Вид сырья' }),
-            el('span', { text: 'Штрих-код' }),
-            el('span', { text: 'Дата прихода' }),
-            el('span', { text: 'Получено, м²' }),
-            el('span', { text: 'Остаток, м²' })
+            el('span', { text: 'Объект' }),
+            el('span', { text: 'Склад' }),
+            el('span', { text: 'Остаток' })
         ]));
-        this.batches.forEach(function(b, idx) {
-            var active = self.current && String(self.current.id) === String(b.id);
+        visible.forEach(function(c) {
+            var item = self.itemOf(c.kind, c.itemId) || { kind: c.kind, sleeveWidth: c.sleeveWidth };
+            var unit = unitOfItem(item);
+            var stale = needsQtyMigration(c);
+            var active = self.form && self.form.itemId === c.itemId && self.form.kind === c.kind;
             var row = el('button', {
-                class: 'atex-in-row atex-in-row-item' + (active ? ' is-active' : ''),
-                type: 'button'
+                class: 'atex-in-row atex-in-row-item' + (active ? ' is-active' : '') + (stale ? ' is-stale' : ''),
+                type: 'button',
+                title: stale ? 'Количество не перенесено в «Кол-во»' : 'Подставить объект и склад в форму'
             }, [
-                el('span', { class: 'atex-in-num', text: String(idx + 1) }),
-                el('span', { text: b.materialLabel || b.name || ('#' + b.id) }),
-                el('span', { class: 'atex-in-code', text: b.barcode || '—' }),
-                el('span', { text: toIsoDate(b.arrivedAt) || b.arrivedAt || '—' }),
-                el('span', { class: 'atex-in-amount', text: String(b.received || '—') }),
-                el('span', { class: 'atex-in-amount', text: String(b.remainder || '—') })
+                el('span', { class: 'atex-in-object' }, [
+                    el('span', { class: 'atex-in-chip atex-in-chip-' + c.kind, text: c.kind === KIND.sleeve ? 'втулка' : 'риббон' }),
+                    el('span', { text: c.itemLabel || ('#' + c.id) })
+                ]),
+                el('span', { text: c.warehouseLabel || '— не указан —' }),
+                el('span', { class: 'atex-in-amount', text: stale ? 'не перенесено' : (formatQty(cardQuantity(c, item)) + ' ' + unitLabel(unit)) })
             ]);
-            row.addEventListener('click', function() { self.openBatch(b.id); });
+            row.addEventListener('click', function() { self.pickCard(c); });
             box.appendChild(row);
         });
 
@@ -580,112 +993,163 @@
         }
     };
 
+    // Клик по строке остатка подставляет объект и склад в форму: приход — как
+    // склад назначения, перемещение/списание — как склад-источник.
+    AtexIntake.prototype.pickCard = function(card) {
+        var f = this.form;
+        f.kind = card.kind;
+        f.itemId = card.itemId;
+        if (f.op === OP.in) f.toWarehouseId = card.warehouseId;
+        else f.fromWarehouseId = card.warehouseId;
+        this.render();
+    };
+
     AtexIntake.prototype.renderForm = function() {
         var self = this;
-        var c = this.current || {};
+        var f = this.form;
         var form = this.formEl;
+        var item = this.formItem();
+        var unit = unitOfItem(item);
         form.innerHTML = '';
 
-        form.appendChild(el('h2', { class: 'atex-in-form-title', text: c.id ? ('Партия: ' + (c.name || '#' + c.id)) : 'Оприходовать партию сырья' }));
+        // Переключатель операции.
+        var tabs = el('div', { class: 'atex-in-tabs', role: 'tablist' });
+        [OP.in, OP.move, OP.out].forEach(function(op) {
+            var btn = el('button', {
+                class: 'atex-in-tab' + (f.op === op ? ' is-active' : ''),
+                type: 'button', role: 'tab', 'aria-selected': f.op === op ? 'true' : 'false',
+                text: OP_TITLE[op]
+            });
+            btn.addEventListener('click', function() {
+                self.newForm(op);
+                self.render();
+            });
+            tabs.appendChild(btn);
+        });
+        form.appendChild(tabs);
 
-        // Вид сырья (ссылка)
-        var materialRef = this.refSelect({
-            id: 'atex-in-material',
-            options: this.materials,
-            value: c.materialId,
-            placeholder: '— не выбрано —',
-            reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
+        // Объект передачи — единый список риббонов и втулок.
+        var itemRef = this.refSelect({
+            id: 'atex-in-item',
+            options: this.itemOptions(),
+            value: f.itemId ? (f.kind + '|' + f.itemId) : '',
+            placeholder: 'Начните вводить название',
             onChange: function(value) {
-                c.materialId = value || null;
-                // подставляем дефолт длины только если длина ещё не задана (вручную не трогали)
-                if (!self.remainderMTouched && (c.lengthM === '' || c.lengthM == null)) {
-                    var def = calc.materialDefaultLength(self.materials, c.materialId);
-                    if (def > 0) {
-                        c.lengthM = String(def);
-                        c.remainderM = String(def);
-                        if (self.lengthInput) self.lengthInput.value = c.lengthM;
-                        if (self.remainderMInput) self.remainderMInput.value = c.remainderM;
-                    }
-                }
+                var parts = String(value || '').split('|');
+                f.kind = parts[0] || null;
+                f.itemId = parts[1] || '';
+                f.quantity = '';
+                f.quantityM = '';
+                // Пустое значение приходит, пока оператор ДОнабирает название:
+                // перерисовка на каждый символ отобрала бы фокус у поиска.
+                if (!f.itemId) return;
+                self.focusQuantity = true;
+                self.render();
             }
         });
-        form.appendChild(field('Вид сырья', materialRef));
+        form.appendChild(field('Объект передачи', itemRef,
+            item ? (item.kind === KIND.sleeve
+                ? ('Втулка · учёт ' + (unit === UNIT.pieces ? 'штуками' : 'метражом'))
+                : ('Риббон · номинальная ширина ' + (item.nominalWidth > 0 ? formatQty(item.nominalWidth) + ' мм' : 'НЕ ЗАДАНА')))
+                : 'Риббоны и втулки в одном списке'));
 
-        // Штрих-код — короткая строка для сканера barcode-reader.
-        var barcodeInput = el('input', {
-            class: 'atex-in-input',
-            type: 'text',
-            autocomplete: 'off',
-            inputmode: 'text',
-            maxlength: '127',
-            placeholder: 'Отсканируйте или введите'
-        });
-        barcodeInput.value = c.barcode == null ? '' : c.barcode;
-        barcodeInput.addEventListener('input', function() { c.barcode = barcodeInput.value; });
-        form.appendChild(field('Штрих-код', barcodeInput));
+        // Склады: набор полей зависит от операции.
+        if (f.op === OP.move || f.op === OP.out) {
+            form.appendChild(field(f.op === OP.move ? 'Со склада' : 'Списать со склада',
+                this.warehouseSelect('atex-in-from', f.fromWarehouseId, function(value) {
+                    f.fromWarehouseId = value;
+                    self.render();
+                }), this.stockHint(item, f.fromWarehouseId)));
+        }
+        if (f.op === OP.in || f.op === OP.move) {
+            form.appendChild(field(f.op === OP.move ? 'На склад' : 'Принять на склад',
+                this.warehouseSelect('atex-in-to', f.toWarehouseId, function(value) {
+                    f.toWarehouseId = value;
+                    self.render();
+                }), this.stockHint(item, f.toWarehouseId)));
+        }
 
-        // Дата прихода
-        var dateInput = el('input', { class: 'atex-in-input', type: 'date' });
-        dateInput.value = toIsoDate(c.arrivedAt) || c.arrivedAt || '';
-        dateInput.addEventListener('input', function() { c.arrivedAt = dateInput.value; });
-        form.appendChild(field('Дата прихода', dateInput));
+        // Количество. Риббон вводится в м² или в метрах — поля связаны
+        // номинальной шириной; втулка — одним полем в своей мере.
+        if (item && item.kind === KIND.ribbon) {
+            var areaInput = numberInput(f.quantity);
+            var metersInput = numberInput(f.quantityM);
+            var width = toNumber(item.nominalWidth);
+            areaInput.addEventListener('input', function() {
+                f.quantity = areaInput.value;
+                f.quantityM = width > 0 && areaInput.value !== '' ? String(metersFromArea(areaInput.value, width)) : '';
+                metersInput.value = f.quantityM;
+                self.renderPreview();
+            });
+            metersInput.addEventListener('input', function() {
+                f.quantityM = metersInput.value;
+                f.quantity = width > 0 && metersInput.value !== '' ? String(areaFromMeters(metersInput.value, width)) : f.quantity;
+                if (width > 0) areaInput.value = f.quantity;
+                self.renderPreview();
+            });
+            if (!(width > 0)) metersInput.disabled = true;
+            this.quantityInput = areaInput;
+            form.appendChild(field('Количество, м²', areaInput));
+            form.appendChild(field('Количество, м', metersInput, width > 0
+                ? 'Пересчёт по номинальной ширине ' + formatQty(width) + ' мм'
+                : 'У вида сырья не задана «Номинальная ширина» — пересчёт в метры невозможен, «Остаток, м» не изменится'));
+        } else {
+            var qtyInput = numberInput(f.quantity);
+            qtyInput.addEventListener('input', function() {
+                f.quantity = qtyInput.value;
+                self.renderPreview();
+            });
+            this.quantityInput = qtyInput;
+            form.appendChild(field('Количество' + (item ? ', ' + unitLabel(unit) : ''), qtyInput,
+                item ? null : 'Мера появится после выбора объекта'));
+        }
 
-        // Получено, м² — при вводе автоматически инициализирует остаток (если
-        // его ещё не правили вручную): критерий приёмки #2914.
-        var recInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
-        recInput.value = c.received == null ? '' : c.received;
-        recInput.addEventListener('input', function() {
-            c.received = recInput.value;
-            if (!self.remainderTouched) {
-                c.remainder = recInput.value;
-                if (self.remainderInput) self.remainderInput.value = recInput.value;
-            }
-        });
-        form.appendChild(field('Получено, м²', recInput));
+        // Причина списания — обязательна (решение по #4655).
+        if (f.op === OP.out) {
+            var reasonSel = el('select', { class: 'atex-in-input' });
+            reasonSel.appendChild(el('option', { value: '', text: '— выберите причину —' }));
+            REASONS.forEach(function(reason) {
+                var o = el('option', { value: reason, text: reason });
+                if (f.reason === reason) o.selected = true;
+                reasonSel.appendChild(o);
+            });
+            reasonSel.addEventListener('change', function() {
+                f.reason = reasonSel.value;
+                self.renderPreview();
+            });
+            form.appendChild(field('Причина списания', reasonSel));
+        }
 
-        // Длина, м — метраж джамбо. Дефолт из «Длина рулона, м» вида сырья.
-        var lenInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
-        lenInput.value = c.lengthM == null ? '' : c.lengthM;
-        lenInput.addEventListener('input', function() {
-            c.lengthM = lenInput.value;
-            if (!self.remainderMTouched) {
-                c.remainderM = lenInput.value;
-                if (self.remainderMInput) self.remainderMInput.value = lenInput.value;
-            }
-        });
-        this.lengthInput = lenInput;
-        form.appendChild(field('Длина, м', lenInput, 'Метраж рулона Jumbo Roll'));
+        var noteInput = el('input', { class: 'atex-in-input', type: 'text', maxlength: '127', placeholder: 'Необязательно' });
+        noteInput.value = f.note || '';
+        noteInput.addEventListener('input', function() { f.note = noteInput.value; });
+        form.appendChild(field('Комментарий', noteInput));
 
-        // Остаток, м — по умолчанию = длине; правка фиксирует ручной режим.
-        var remMInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
-        remMInput.value = c.remainderM == null ? '' : c.remainderM;
-        remMInput.addEventListener('input', function() {
-            c.remainderM = remMInput.value;
-            self.remainderMTouched = true;
-        });
-        this.remainderMInput = remMInput;
-        form.appendChild(field('Остаток, м', remMInput, 'Инициализируется значением «Длина, м»'));
+        this.previewEl = el('div', { class: 'atex-in-preview' });
+        form.appendChild(this.previewEl);
 
-        // Остаток, м² — по умолчанию = получено; правка фиксирует ручной режим.
-        var remInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
-        remInput.value = c.remainder == null ? '' : c.remainder;
-        remInput.addEventListener('input', function() {
-            c.remainder = remInput.value;
-            self.remainderTouched = true;
-        });
-        this.remainderInput = remInput;
-        form.appendChild(field('Остаток, м²', remInput, 'Инициализируется значением «Получено, м²»'));
-
-        // Кнопки
         var actions = el('div', { class: 'atex-in-actions' });
-        var saveBtn = el('button', { class: 'atex-in-btn atex-in-btn-primary', type: 'button', text: c.id ? 'Сохранить' : 'Оприходовать' });
-        saveBtn.addEventListener('click', function() { self.save(); });
-        var newBtn = el('button', { class: 'atex-in-btn atex-in-btn-secondary', type: 'button', text: 'Новая партия' });
-        newBtn.addEventListener('click', function() { self.newBatch(); self.render(); });
+        var saveBtn = el('button', { class: 'atex-in-btn atex-in-btn-primary', type: 'button', text: 'Провести' });
+        saveBtn.addEventListener('click', function() { self.submit(); });
+        var resetBtn = el('button', { class: 'atex-in-btn atex-in-btn-secondary', type: 'button', text: 'Очистить' });
+        resetBtn.addEventListener('click', function() { self.newForm(f.op); self.render(); });
         actions.appendChild(saveBtn);
-        actions.appendChild(newBtn);
+        actions.appendChild(resetBtn);
         form.appendChild(actions);
 
+        this.renderPreview();
+        // После выбора объекта курсор сразу в поле количества — оператор не
+        // ищет, куда кликнуть дальше.
+        if (this.focusQuantity && this.quantityInput) {
+            this.focusQuantity = false;
+            this.quantityInput.focus();
+        }
+
+        function numberInput(value) {
+            var input = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+            input.value = value == null ? '' : value;
+            return input;
+        }
         function field(label, control, hint) {
             return el('div', { class: 'atex-in-field' }, [
                 el('label', { class: 'atex-in-label', text: label }),
@@ -695,50 +1159,134 @@
         }
     };
 
-    // ── Сохранение ──
+    AtexIntake.prototype.warehouseSelect = function(id, value, onChange) {
+        var sel = el('select', { class: 'atex-in-input', id: id });
+        sel.appendChild(el('option', { value: '', text: '— не выбран —' }));
+        this.warehouses.forEach(function(w) {
+            var o = el('option', { value: w.id, text: w.label });
+            if (String(value) === String(w.id)) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function() { onChange(sel.value); });
+        return sel;
+    };
 
-    AtexIntake.prototype.save = function() {
+    // Подсказка «сколько сейчас на этом складе».
+    AtexIntake.prototype.stockHint = function(item, warehouseId) {
+        if (!item || !warehouseId) return null;
+        var card = findCard(this.cards, item, warehouseId);
+        if (!card) return 'На складе карточки нет — приход её заведёт';
+        if (needsQtyMigration(card)) return 'Количество не перенесено в «Кол-во» — операции по карточке заблокированы';
+        return 'Сейчас на складе: ' + formatQty(cardQuantity(card, item)) + ' ' + unitLabel(unitOfItem(item));
+    };
+
+    // Предпросмотр: либо список ошибок, либо «склад: было → стало» по каждому шагу.
+    AtexIntake.prototype.renderPreview = function() {
+        var self = this;
+        var box = this.previewEl;
+        if (!box) return;
+        box.innerHTML = '';
+        var f = this.form;
+        var item = this.formItem();
+        // Пока объект и количество не заданы, ошибки-заглушки не показываем.
+        if (!item || !(toNumber(f.quantity) > 0)) return;
+
+        var plan = this.currentPlan();
+        if (plan.errors.length) {
+            plan.errors.forEach(function(text) {
+                box.appendChild(el('div', { class: 'atex-in-preview-error', text: text }));
+            });
+            return;
+        }
+        var unit = unitLabel(unitOfItem(item));
+        plan.steps.forEach(function(step) {
+            box.appendChild(el('div', { class: 'atex-in-preview-step' }, [
+                el('span', { class: 'atex-in-preview-wh', text: self.warehouseLabel(step.warehouseId) + ':' }),
+                el('span', { text: formatQty(step.was) + ' → ' + formatQty(step.now) + ' ' + unit }),
+                step.cardId ? null : el('span', { class: 'atex-in-preview-new', text: 'новая карточка' })
+            ]));
+        });
+    };
+
+    AtexIntake.prototype.renderJournal = function() {
+        var box = this.journalEl;
+        if (!box) return;
+        box.innerHTML = '';
+        box.appendChild(el('h3', { class: 'atex-in-journal-title', text: 'Последние движения' }));
+        if (!this.meta.journal) {
+            box.appendChild(el('div', { class: 'atex-in-empty', text: 'Журнал в этой базе не заведён' }));
+            return;
+        }
+        if (!this.journal.length) {
+            box.appendChild(el('div', { class: 'atex-in-empty', text: 'Движений пока нет' }));
+            return;
+        }
+        this.journal.forEach(function(row) {
+            var route = row.operation === OP_TITLE.move
+                ? (row.fromLabel + ' → ' + row.toLabel)
+                : (row.operation === OP_TITLE.in ? ('→ ' + row.toLabel) : (row.fromLabel + ' →'));
+            box.appendChild(el('div', { class: 'atex-in-journal-row' }, [
+                el('span', { class: 'atex-in-journal-when', text: formatStamp(row.at) }),
+                el('span', { class: 'atex-in-journal-op', text: row.operation }),
+                el('span', { class: 'atex-in-journal-item', text: row.itemLabel }),
+                el('span', { class: 'atex-in-journal-route', text: route }),
+                el('span', { class: 'atex-in-journal-qty', text: formatQty(row.quantity) + ' ' + (row.unitLabel || '') }),
+                el('span', { class: 'atex-in-journal-why', text: [row.reason, row.note, row.user].filter(Boolean).join(' · ') })
+            ]));
+        });
+    };
+
+    // ── Проводка ──
+
+    AtexIntake.prototype.submit = function() {
         var self = this;
         if (this.busy) return;
-        var c = this.current;
-        if (!c) return;
-        if (!c.materialId) { this.notify('Выберите вид сырья', 'error'); return; }
-        if (String(c.received).trim() === '') { this.notify('Укажите «Получено, м²»', 'error'); return; }
-
-        var meta = this.meta.batch;
-        var name = String(c.name || '').trim() || this.autoName(c);
-        var fields = buildBatchFields(meta, c);
-
-        this.setBusy(true);
-        var chain;
-        if (c.id) {
-            // Правка: имя — _m_save (первая колонка), реквизиты — _m_set.
-            chain = this.post('_m_save/' + c.id + '?JSON', { val: name })
-                .then(function() { return self.post('_m_set/' + c.id + '?JSON', fields); })
-                .then(function() { return c.id; });
-        } else {
-            // Создание: главное значение — t{batchTableId}; реквизиты — здесь же.
-            var createParams = {};
-            Object.keys(fields).forEach(function(k) { createParams[k] = fields[k]; });
-            createParams['t' + meta.id] = name;
-            chain = this.post('_m_new/' + meta.id + '?JSON&up=1', createParams).then(function(res) {
-                var id = res && (res.obj || res.id || res.i);
-                if (!id) throw new Error('Сервер не вернул id новой партии');
-                c.id = String(id);
-                return c.id;
-            });
+        var item = this.formItem();
+        var plan = this.currentPlan();
+        if (plan.errors.length) {
+            this.notify(plan.errors[0], 'error');
+            this.renderPreview();
+            return;
         }
 
+        var meta = this.meta.card;
+        var unit = unitOfItem(item);
+        var unitRefId = this.units[unit] || '';
+        var at = plan.journal.at;
+
+        this.setBusy(true);
+        // Сначала списание с источника, потом зачисление в приёмник: при обрыве
+        // связи сырьё не «размножится».
+        var chain = plan.steps.reduce(function(acc, step) {
+            return acc.then(function() {
+                if (step.cardId) {
+                    return self.post('_m_set/' + step.cardId + '?JSON',
+                        cardQuantityFields(meta, item, step.now));
+                }
+                var params = buildCardCreateParams(meta, item, step.warehouseId, step.now, unitRefId, at);
+                params.up = 1;
+                return self.post('_m_new/' + meta.id + '?JSON', params);
+            });
+        }, Promise.resolve());
+
         chain.then(function() {
-            return self.loadBatches();
+            if (!self.meta.journal) return null;
+            var journal = plan.journal;
+            journal.unitRefId = unitRefId;
+            return self.post('_m_new/' + self.meta.journal.id + '?JSON',
+                Object.assign({ up: 1 }, buildJournalFields(self.meta.journal, journal)));
+        }).then(function() {
+            return Promise.all([self.loadCards(), self.loadJournal()]);
         }).then(function() {
             self.setBusy(false);
-            self.notify('Партия сырья оприходована', 'success');
-            self.newBatch();
+            self.notify('Проведено · ' + OP_TITLE[self.form.op] + ' · ' +
+                formatQty(plan.journal.quantity) + ' ' + unitLabel(unit) + ' · ' + item.label, 'success');
+            self.newForm(self.form.op);
             self.render();
         }).catch(function(err) {
             self.setBusy(false);
-            self.notify('Ошибка сохранения: ' + err.message, 'error');
+            self.notify('Ошибка проводки: ' + err.message, 'error');
+            self.loadCards().then(function() { self.render(); });
         });
     };
 
@@ -761,7 +1309,7 @@
         setTimeout(function() {
             toast.classList.remove('is-visible');
             setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
-        }, 3500);
+        }, 4000);
     };
 
     AtexIntake.prototype.fatal = function(message) {
@@ -771,13 +1319,11 @@
 
     AtexIntake.prototype.start = function() {
         var self = this;
-        // Каркас разметки.
         this.root.innerHTML = '';
         var layout = el('div', { class: 'atex-in-layout' });
+
         var aside = el('aside', { class: 'atex-in-sidebar' }, [
-            el('div', { class: 'atex-in-sidebar-head' }, [
-                el('h2', { text: 'Партии сырья (FIFO)' })
-            ])
+            el('div', { class: 'atex-in-sidebar-head' }, [el('h2', { text: 'Остатки на складах' })])
         ]);
         this.filtersEl = el('div', { class: 'atex-in-filters' });
         aside.appendChild(this.filtersEl);
@@ -785,18 +1331,35 @@
         aside.appendChild(this.summaryEl);
         this.listEl = el('div', { class: 'atex-in-list' });
         aside.appendChild(this.listEl);
-        this.formEl = el('section', { class: 'atex-in-form', 'data-submit-scope': '' });
+
+        var main = el('section', { class: 'atex-in-main' });
+        this.warnEl = el('div', { class: 'atex-in-warnings', hidden: 'hidden' });
+        main.appendChild(this.warnEl);
+        this.formEl = el('div', { class: 'atex-in-form', 'data-submit-scope': '' });
+        main.appendChild(this.formEl);
+        this.journalEl = el('div', { class: 'atex-in-journal' });
+        main.appendChild(this.journalEl);
+
         layout.appendChild(aside);
-        layout.appendChild(this.formEl);
+        layout.appendChild(main);
         this.root.appendChild(layout);
         this.toastHost = this.root;
 
-        this.newBatch();
+        this.newForm(OP.in);
         this.formEl.appendChild(el('div', { class: 'atex-in-loading', text: 'Загрузка…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadMaterials(), self.loadBatches()]); })
-            .then(function() { self.renderFilters(); self.render(); })
+            .then(function() {
+                return Promise.all([self.loadMaterials(), self.loadSleeves(), self.loadWarehouses(), self.loadUnits()]);
+            })
+            .then(function(results) {
+                self.indexItems(results[0], results[1]);
+                return Promise.all([self.loadCards(), self.loadJournal()]);
+            })
+            .then(function() {
+                self.renderFilters();
+                self.render();
+            })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
@@ -809,16 +1372,6 @@
         root._atexIntake = controller;
         controller.start();
     }
-
-    var helpers = {
-        reqIdByName: reqIdByName,
-        columnIndex: columnIndex,
-        parseRef: parseRef,
-        hasBatchFilters: hasBatchFilters,
-        buildBatchListPath: buildBatchListPath,
-        mapBatchRecord: mapBatchRecord,
-        buildBatchFields: buildBatchFields
-    };
 
     return { calc: calc, helpers: helpers, Controller: AtexIntake, init: init };
 });

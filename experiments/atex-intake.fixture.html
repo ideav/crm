@@ -1,52 +1,94 @@
 <!DOCTYPE html>
-<!-- Браузерный стенд для рабочего места «Приёмка сырья» (#2914).
-     Мокает fetch: metadata, object/{id} и команды _m_*.
+<!-- Браузерный стенд для рабочего места «Движение сырья» (#4655, исходно #2914).
+     Мокает fetch: metadata, object/{id} и команды _m_*; проводки применяются к
+     заглушке-хранилищу, поэтому список остатков и журнал живут по-настоящему.
      Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>atex · Приёмка сырья — стенд</title>
+<title>atex · Движение сырья — стенд</title>
 <link rel="stylesheet" href="../download/atex/css/atex-brand.css">
 <link rel="stylesheet" href="../download/atex/css/intake.css">
 <style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
 </head>
 <body>
-<div id="atex-intake" class="atex-in atex-brand" data-db="atex" data-xsrf="test-token">
+<div id="atex-intake" class="atex-in atex-brand" data-db="atex" data-xsrf="test-token" data-user="operator">
     <div class="atex-in-loading">Загрузка…</div>
 </div>
 
 <script>
-// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+// ── Мок схемы atex (имена как в живой базе ateh; id укорочены) ──
 var META = [
-    { id: 100, val: 'Вид сырья', reqs: [
-        { id: 1001, val: 'Полное название' },
-        { id: 1003, val: 'Ширина, мм' },
-        { id: 1005, val: 'Длина рулона, м' }
+    { id: 1069, val: 'Вид сырья', reqs: [
+        { id: 1084, val: 'Полное название' },
+        { id: 1086, val: 'Ширина, мм' },
+        { id: 1088, val: 'Длина рулона, м' },
+        { id: 81089, val: 'Номинальная ширина' }
     ]},
-    { id: 106, val: 'Партия сырья', reqs: [
-        { id: 1044, val: 'Вид сырья' },
-        { id: 1155, val: 'Штрих-код' },
-        { id: 1046, val: 'Дата прихода' },
-        { id: 1048, val: 'Получено, м²' },
-        { id: 1050, val: 'Остаток, м²' },
-        { id: 1147, val: 'Длина, м' },
-        { id: 1148, val: 'Остаток, м' }
+    { id: 8188, val: 'Диаметр втулки', reqs: [
+        { id: 35567, val: 'Готовые' },
+        { id: 66225, val: 'Дюймы' },
+        { id: 143162, val: 'Ширина втулки, мм' }
+    ]},
+    { id: 35549, val: 'Склад', reqs: [] },
+    { id: 104590, val: 'Ед.изм.', reqs: [] },
+    { id: 1074, val: 'Партия сырья', reqs: [
+        { id: 1117, val: 'Вид сырья', ref: '1069' },
+        { id: 1121, val: 'Получено, м²' },
+        { id: 1123, val: 'Остаток, м²' },
+        { id: 8454, val: 'Длина, м' },
+        { id: 8456, val: 'Остаток, м' },
+        { id: 8667, val: 'Штрих-код' },
+        { id: 16427, val: 'В работе' },
+        { id: 35551, val: 'Склад', ref: '35549' },
+        { id: 52653, val: 'Диаметр втулки', ref: '8188' },
+        { id: 77404, val: 'Примечание' },
+        { id: 104592, val: 'Ед.изм.', ref: '104590' },
+        { id: 670848, val: 'Кол-во' }
+    ]},
+    { id: 670849, val: 'Движение сырья', reqs: [
+        { id: 670851, val: 'Движение сырья.Операция', attrs: '{"alias":"Операция"}' },
+        { id: 670852, val: 'Вид сырья', ref: '1069' },
+        { id: 670853, val: 'Диаметр втулки', ref: '8188' },
+        { id: 670855, val: 'Движение сырья.Со склада', attrs: '{"alias":"Со склада"}' },
+        { id: 670857, val: 'Движение сырья.На склад', attrs: '{"alias":"На склад"}' },
+        { id: 670859, val: 'Движение сырья.Кол-во', attrs: '{"alias":"Кол-во"}' },
+        { id: 670860, val: 'Ед.изм.', ref: '104590' },
+        { id: 670862, val: 'Движение сырья.Было', attrs: '{"alias":"Было"}' },
+        { id: 670864, val: 'Движение сырья.Стало', attrs: '{"alias":"Стало"}' },
+        { id: 670866, val: 'Движение сырья.Причина', attrs: '{"alias":"Причина"}' },
+        { id: 670868, val: 'Движение сырья.Примечание', attrs: '{"alias":"Примечание"}' },
+        { id: 670870, val: 'Движение сырья.Пользователь', attrs: '{"alias":"Пользователь"}' }
     ]}
 ];
 
-// Хранилище-заглушка
+// Порядок колонок JSON_OBJ = [главное значение, ...reqs].
 var DB = {
     materials: [
-        { i: 201, r: ['MR131', 'Бумага термо 80 г/м²', '80', '1200'] },
-        { i: 202, r: ['MWR118', 'Плёнка PP 50 мкм', '50', '1500'] }
+        { i: 1237, r: ['MWR118', 'M118 WAX/RESIN NE Jumbo 910 х 20000', '891', '20000', '910'] },
+        { i: 2036, r: ['MA', 'Сырьё без номинальной ширины', '', '', ''] }
     ],
-    // r = [главное значение, Вид сырья(ref), Штрих-код, Дата прихода, Получено, Остаток, Длина, Остаток м]
-    batches: [
-        { i: 301, r: ['MR131 от 2026-05-10', '201:MR131', '4607001234567', '2026-05-10', '5000', '3200', '1200', '820'] },
-        { i: 302, r: ['MWR118 от 2026-05-22', '202:MWR118', '4607007654321', '2026-05-22', '2400', '2400', '1500', '1500'] }
+    sleeves: [
+        { i: 35561, r: ['Втулка картонная 0.5" ширина 110 мм', 'X', '0.50', '110'] },
+        { i: 8190, r: ['Втулка картонная 1" длина 1 метр', '', '1.00', ''] }
     ],
-    nextId: 500
+    warehouses: [ { i: 35552, r: ['Производство'] }, { i: 35554, r: ['Атех'] } ],
+    units: [ { i: 104616, r: ['шт'] }, { i: 104617, r: ['м2'] }, { i: 104619, r: ['Метр'] } ],
+    cards: [
+        { i: 74909, r: ['1781038800', '1237:MWR118', '', '11254.096', '', '12367.138', '', 'X', '35552:Производство', '', '', '104617:м2', ''] },
+        { i: 77190, r: ['1781384400', '1237:MWR118', '', '36081.5', '', '', '', 'X', '35554:Атех', '', '', '104617:м2', ''] },
+        { i: 104736, r: ['1781384400', '', '', '', '', '', '', 'X', '35554:Атех', '35561:Втулка картонная 0.5" ширина 110 мм', '', '104616:шт', '20000'] },
+        // Не перенесённая карточка: количество ещё в «Остаток, м²», «Кол-во» пусто.
+        { i: 104625, r: ['1781038800', '', '', '1757.082', '', '', '', 'X', '35552:Производство', '8190:Втулка картонная 1" длина 1 метр', '', '104619:Метр', ''] }
+    ],
+    journal: [],
+    nextId: 700000
 };
+
+function refLabel(list, id) {
+    var row = list.filter(function(x) { return String(x.i) === String(id); })[0];
+    return row ? row.r[0] : '';
+}
 
 var realFetch = window.fetch;
 window.fetch = function(url, opts) {
@@ -55,53 +97,56 @@ window.fetch = function(url, opts) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
-    if (/\/_ref_reqs\/1044/.test(u)) return json(DB.materials.map(function(m) { return { id: m.i, label: m.r[0] }; }));
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj) {
-        var tid = mObj[1];
-        if (tid === '100') return json(DB.materials);
-        if (tid === '106') {
-            var query = new URLSearchParams(u.split('?')[1] || '');
-            var rows = DB.batches.slice();
-            var material = query.get('FR_1044') || '';
-            var barcode = query.get('FR_1155') || '';
-            var arrived = query.get('FR_1046') || '';
-            if (material.charAt(0) === '@') {
-                rows = rows.filter(function(row) { return String(row.r[1]).indexOf(material.slice(1) + ':') === 0; });
-            }
-            if (barcode) {
-                var prefix = barcode.replace(/%$/, '');
-                rows = rows.filter(function(row) { return String(row.r[2]).indexOf(prefix) === 0; });
-            }
-            if (arrived) {
-                rows = rows.filter(function(row) { return String(row.r[3]) === arrived; });
-            }
-            return json(rows);
-        }
+        var byTable = {
+            '1069': DB.materials, '8188': DB.sleeves, '35549': DB.warehouses,
+            '104590': DB.units, '1074': DB.cards, '670849': DB.journal
+        };
+        return json(byTable[mObj[1]] || []);
     }
-    if (/\/_m_new\//.test(u)) {
+    var body = new URLSearchParams((opts && opts.body) || '');
+    var mNew = u.match(/\/_m_new\/(\d+)/);
+    if (mNew) {
         var id = DB.nextId++;
-        console.log('[mock] _m_new', u, opts && opts.body);
-        // Простейшая регистрация новой партии для отображения в списке.
-        var p = new URLSearchParams((opts && opts.body) || '');
-        var matRef = p.get('t1044');
-        var mat = (DB.materials.filter(function(m){return String(m.i)===String(matRef);})[0] || {}).r;
-        DB.batches.push({ i: id, r: [
-            p.get('t106') || ('#' + id),
-            matRef + ':' + (mat ? mat[0] : ''),
-            p.get('t1155') || '',
-            p.get('t1046') || '',
-            p.get('t1048') || '',
-            p.get('t1050') || '',
-            p.get('t1147') || '',
-            p.get('t1148') || ''
-        ]});
-        return json({ obj: id, i: id });
+        console.log('[mock] _m_new', mNew[1], (opts && opts.body));
+        if (mNew[1] === '1074') {
+            DB.cards.push({ i: id, r: [
+                body.get('t1074') || '', '', '', body.get('t1123') || '', '', body.get('t8456') || '',
+                '', body.get('t16427') || '', body.get('t35551') ? (body.get('t35551') + ':' + refLabel(DB.warehouses, body.get('t35551'))) : '',
+                body.get('t52653') ? (body.get('t52653') + ':' + refLabel(DB.sleeves, body.get('t52653'))) : '',
+                '', body.get('t104592') ? (body.get('t104592') + ':' + refLabel(DB.units, body.get('t104592'))) : '',
+                body.get('t670848') || ''
+            ]});
+            if (body.get('t1117')) {
+                DB.cards[DB.cards.length - 1].r[1] = body.get('t1117') + ':' + refLabel(DB.materials, body.get('t1117'));
+            }
+        }
+        if (mNew[1] === '670849') {
+            DB.journal.push({ i: id, r: [
+                body.get('t670849') || '', body.get('t670851') || '',
+                body.get('t670852') ? (body.get('t670852') + ':' + refLabel(DB.materials, body.get('t670852'))) : '',
+                body.get('t670853') ? (body.get('t670853') + ':' + refLabel(DB.sleeves, body.get('t670853'))) : '',
+                body.get('t670855') || '', body.get('t670857') || '', body.get('t670859') || '',
+                body.get('t670860') ? (body.get('t670860') + ':' + refLabel(DB.units, body.get('t670860'))) : '',
+                body.get('t670862') || '', body.get('t670864') || '',
+                body.get('t670866') || '', body.get('t670868') || '', body.get('t670870') || ''
+            ]});
+        }
+        return json({ obj: id, id: id });
     }
-    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
-        console.log('[mock]', u, opts && opts.body);
+    var mSet = u.match(/\/_m_set\/(\d+)/);
+    if (mSet) {
+        console.log('[mock] _m_set', mSet[1], (opts && opts.body));
+        var card = DB.cards.filter(function(c) { return String(c.i) === mSet[1]; })[0];
+        if (card) {
+            if (body.has('t1123')) card.r[3] = body.get('t1123');
+            if (body.has('t8456')) card.r[5] = body.get('t8456');
+            if (body.has('t670848')) card.r[12] = body.get('t670848');
+        }
         return json({ ok: 1 });
     }
+    if (/\/_m_del\//.test(u)) return json({ ok: 1 });
     return realFetch(url, opts);
 };
 </script>
