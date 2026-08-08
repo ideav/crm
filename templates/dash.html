@@ -70,4 +70,17 @@
     </div>
 </div>
 
+<!-- Optimization modal (issue #249): граф зависимостей + goal-seek/аномалии/диагностика -->
+<div id="dash-opt-modal" role="dialog" aria-modal="true">
+    <div class="dash-modal-box dash-opt-modal-box">
+        <h6>Оптимизация модели</h6>
+        <div id="dash-opt-body" class="dash-opt-body"></div>
+        <div class="dash-modal-btns">
+            <button class="dash-apply-btn dash-btn-secondary" id="dash-opt-close">Закрыть</button>
+        </div>
+    </div>
+</div>
+<button type="button" id="dash-opt-open" class="dash-opt-fab" title="Оптимизация модели">🎯 Оптимизация</button>
+
 <script src="/js/dash.js?{_global_.version}"></script>
+<script src="/js/dash-optimize.js?{_global_.version}"></script>

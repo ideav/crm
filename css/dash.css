@@ -1085,3 +1085,48 @@ body.dash-chart-resizing {
 .dash-viz-custom-options-status--error {
     color: var(--danger, #c0392b);
 }
+
+/* ── Оптимизация модели (issue #249) ───────────────────────────────── */
+.dash-opt-fab {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 9998;
+    border: 1px solid var(--border-color, #dee2e6);
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, #212529);
+    border-radius: 999px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+}
+.dash-opt-fab:hover { background: var(--bg-hover, #f1f3f5); }
+#dash-opt-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0,0,0,0.4);
+    align-items: center;
+    justify-content: center;
+}
+#dash-opt-modal.open { display: flex; }
+.dash-opt-modal-box {
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 6px;
+    padding: 1.25rem;
+    min-width: 360px;
+    max-width: min(760px, 95vw);
+    max-height: 85vh;
+    overflow: auto;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+}
+.dash-opt-body { font-size: 0.85rem; line-height: 1.5; }
+.dash-opt-body h5 { font-size: 0.9rem; font-weight: 600; margin: 0.9rem 0 0.35rem; }
+.dash-opt-body h5:first-child { margin-top: 0; }
+.dash-opt-body table { border-collapse: collapse; width: 100%; margin: 0.25rem 0; }
+.dash-opt-body th, .dash-opt-body td { border: 1px solid var(--border-color, #dee2e6); padding: 0.2rem 0.45rem; text-align: left; }
+.dash-opt-body .opt-warn { color: var(--danger, #c0392b); }
+.dash-opt-body .opt-muted { color: var(--text-muted, #868e96); }
