@@ -83,17 +83,42 @@
     .atex-in-filters { grid-template-columns: 1fr; }
 }
 
+/* Итоги — отдельные плитки в рамках: разряды тысяч внутри сумм пишутся
+   пробелом, поэтому соседние суммы, стоящие встык, читались как одно длинное
+   число. Рамка и фон отделяют каждую сумму от соседней (#4662). */
 .atex-in-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 8px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--in-border);
     background: var(--in-surface);
 }
-.atex-in-metric { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
-.atex-in-metric-label { font-size: 11px; color: var(--in-muted); text-transform: uppercase; letter-spacing: .03em; }
-.atex-in-metric-value { font-size: 20px; font-weight: 700; }
+.atex-in-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--in-border);
+    border-radius: 8px;
+    background: var(--in-bg);
+}
+.atex-in-metric-label {
+    font-size: 11px;
+    color: var(--in-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.atex-in-metric-value {
+    font-size: 19px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
 
 .atex-in-list { display: flex; flex-direction: column; max-height: 68vh; overflow: auto; }
 .atex-in-row {
