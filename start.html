@@ -1588,7 +1588,11 @@ mark.search-highlight {
         </div>
     </div>
 
-    <script src="assets/vendor/qrcode/qrcode.js"></script>
+    <!-- issue #4671: библиотека лежит в js/, а не в assets/ — update.conf раскладывает
+         `js/*`, а `assets/*` не раскладывает вовсе, и файл на боевой не доезжал:
+         сервер отдавал на него HTML, браузер спотыкался о «<» и window.QRCode не
+         появлялся. Рядом по той же причине лежит js/xlsx0.18.5.full.min.js. -->
+    <script src="js/qrcode.js"></script>
     <script src="js/app.js"></script>
 
 <style>

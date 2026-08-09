@@ -179,7 +179,7 @@ const SESSION = {
   let jsQR = null;
   try { jsQR = require('jsqr'); } catch (e) { /* нет зависимости — пропускаем */ }
   if (jsQR) {
-    const qrcode = require('../assets/vendor/qrcode/qrcode.js');
+    const qrcode = require('../js/qrcode.js');
     const qr = qrcode(0, 'M');
     qr.addData(SESSION.url);
     qr.make();

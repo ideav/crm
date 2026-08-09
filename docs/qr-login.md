@@ -3,7 +3,7 @@
 Кнопка с QR на экране входа (`start.html`, между «Войти» и «Код на почту») даёт
 войти в базу на компьютере, подтвердив вход с телефона. Реализация — issue #4667:
 `index.php` (маршруты и хранилище), `js/app.js` (`QrLoginManager`), `start.html`,
-`css/styles.css`, вендорный кодировщик `assets/vendor/qrcode/qrcode.js`.
+`css/styles.css`, вендорный кодировщик `js/qrcode.js` (в `js/`, а не в `assets/`: `update.conf` раскладывает только `js/*`).
 
 ## Как это выглядит
 
