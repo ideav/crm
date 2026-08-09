@@ -12,6 +12,10 @@
     <div class="atex-sl-loading">Загрузка пульта слиттера…</div>
 </div>
 <script src="/download/{_global_.z}/js/ref-search.js?0{_global_.version}" defer></script>
+<!-- issue #4682: счётчик времени активности. 3 часа без действий — кука с токеном -->
+<!-- снимается, человек уходит на форму входа. См. docs/atex_workplaces.md §3.15 -->
+<script src="/download/{_global_.z}/js/idle-logout.js?{_global_.version}.1"
+        data-idle-root="atex-slitter" defer></script>
 <!-- issue #4666: скрипт пульта подключает сторож планшета — и только после того, -->
 <!-- как планшет опознан в таблице «Планшет». Незарегистрированный планшет пульт -->
 <!-- вообще не загружает. -->
