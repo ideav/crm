@@ -178,7 +178,7 @@ define("SECRET", 130);
 define("QR_LOGIN_TTL", 120);  # Вход по QR: время жизни кода, сек (#4667)
 define("QR_LOGIN_MAX", 200);  # Вход по QR: одновременных сессий на базу
 define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");  # Вход по QR: формат кода и секрета
-define("VERSION", 122);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
+define("VERSION", 120);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
@@ -7170,7 +7170,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 				$GLOBALS["REQS"][$row["t"]] = $row["base_typ"]; # Store Reqs for filter constructor
 				$GLOBALS["REQNAMES"][$row["t"]] = $row["val"]; # Names of reqs
-				$GLOBALS["REQALIASES"][$row["t"]] = $val; # Псевдоним колонки — под этим именем её видят в UI и по нему фильтруют (#4661)
 				$f = $GLOBALS["FILTER"];
 				if(!isset($_REQUEST["desc"]) && ($GLOBALS["ORDER_VAL"]==$row["t"])) # Revert the sort order, if needed
 					$blocks[$block]["filter"][] = "$f&desc=0";
@@ -7296,13 +7295,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$col = substr($key, strpos($key, "_")+1);
 					# Replace field name with its ID and remove the named filter
 					if(is_array($GLOBALS["REQNAMES"]) && ($tmp = array_search($col, $GLOBALS["REQNAMES"]))){ // Reqs names
-						$col = $tmp;
-						$_REQUEST[$pre."_$col"] = $value;
-						unset($_REQUEST[$key]);
-					}
-					# Колонку зовут её псевдонимом («С» при типе «С_т») — по нему и фильтруют.
-					# Без этого имя уезжало в SQL как идентификатор: Unknown column 'По' (#4661).
-					elseif(isset($GLOBALS["REQALIASES"]) && is_array($GLOBALS["REQALIASES"]) && ($tmp = array_search($col, $GLOBALS["REQALIASES"]))){ // Reqs aliases
 						$col = $tmp;
 						$_REQUEST[$pre."_$col"] = $value;
 						unset($_REQUEST[$key]);
