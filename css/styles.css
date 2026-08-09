@@ -959,6 +959,65 @@ body {
         width: 100%;
     }
 }
+
+/* Вход по QR-коду (#4667) */
+.btn-square {
+    width: 42px;
+    padding: 0.625rem 0;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.btn-square .pi {
+    font-size: 1.1rem;
+}
+
+.qr-login-panel {
+    margin-top: 0.75rem;
+    text-align: center;
+}
+
+/* Модули QR всегда чёрные на белом — иначе камера не читает код в тёмной теме */
+.qr-login-code {
+    display: inline-block;
+    background: #fff;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    line-height: 0;
+}
+
+/* Устаревший код гасим, но оставляем на месте: вёрстка не прыгает */
+.qr-login-code.qr-login-expired {
+    opacity: 0.25;
+}
+
+.qr-login-code svg {
+    width: 200px;
+    height: 200px;
+    display: block;
+}
+
+.qr-login-hint {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.qr-login-status {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    min-height: 1.2rem;
+}
+
+.qr-login-status.qr-login-error {
+    color: var(--color-error);
+}
+
+#qr-refresh-btn {
+    margin-top: 0.75rem;
+}
 #cookie-consent {
     display: none;
     position: fixed;

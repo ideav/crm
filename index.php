@@ -175,6 +175,9 @@ define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
 define("SECRET", 130);
+define("QR_LOGIN_TTL", 120);  # Вход по QR: время жизни кода, сек (#4667)
+define("QR_LOGIN_MAX", 200);  # Вход по QR: одновременных сессий на базу
+define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");  # Вход по QR: формат кода и секрета
 define("VERSION", 122);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
@@ -583,7 +586,10 @@ elseif(($z == "my") && !empty($_GET['code'])){
 		# Redirect to a validated local workspace only — never to raw $_GET['state'],
 		# which an attacker can set to an arbitrary URL (open redirect, issue #2123).
 		# $db was already validated against USER_DB_MASK at line 317 (Yandex) and 360 (Google).
-		header("Location: /".(!$isYandex && strlen($db) ? $db : $z));
+		# #4667: телефон пришёл сюда со страницы подтверждения входа по QR — вернуть его
+		# туда же, а не в рабочее место (адрес собирается из куки, значения проверены).
+		$qrBack = qrLoginPendingRedirect();
+		header("Location: ".($qrBack !== "" ? $qrBack : "/".(!$isYandex && strlen($db) ? $db : $z)));
     }
     else
         login("", "", "oauthError", isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : "tokenExchangeFailed"));
@@ -880,6 +886,244 @@ function secureToken(){
 		if ($bytes !== false && $strong) return bin2hex($bytes);
 		throw $e;
 	}
+}
+# ============================================================
+# Вход по QR-коду (issue #4667)
+# ------------------------------------------------------------
+# Экран входа (start.html) просит у сервера ВРЕМЕННЫЙ код (qrnew), рисует QR со
+# ссылкой <схема>://<хост>/<база>/qrlogin?c=<код> и опрашивает qrpoll. Телефон
+# открывает ссылку, входит штатно (пароль / код на почту / Яндекс) и подтверждает
+# вход — сервер кладёт в сессию ПОСТОЯННЫЙ токен пользователя, следующий qrpoll
+# отдаёт токен браузеру-инициатору и УДАЛЯЕТ сессию (одноразово).
+#
+# Хранилище — файл во временном каталоге (как ai_agent_jobs): состояние живёт две
+# минуты, переживать перезапуск и попадать в БД ему незачем.
+#
+# Код `c` видит каждый, кто видит экран с QR, поэтому токен отдаётся только тому,
+# кто знает ВТОРОЙ секрет `s`: он возвращается создателю сессии и в QR не попадает.
+# ============================================================
+function qrLoginFile($db){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    if($safeDb === "")
+        return "";
+    return sys_get_temp_dir()."/qr_login_".$safeDb.".json";
+}
+# --- Чистые операции над списком сессий (тестируются без файловой системы) ---
+function qrLoginNew($now, $client=""){
+    return array(
+        "code" => secureToken(),
+        "secret" => secureToken(),
+        "createdAt" => (int)$now,
+        "status" => "pending",
+        "client" => (string)$client,
+        "user" => "",
+        "token" => "",
+        "xsrf" => ""
+    );
+}
+function qrLoginPrune($sessions, $now, $ttl){
+    if(!is_array($sessions))
+        return array();
+    $kept = array();
+    foreach($sessions as $session){
+        if(!is_array($session) || !isset($session["createdAt"]) || !isset($session["code"]))
+            continue;
+        if(((int)$now - (int)$session["createdAt"]) > (int)$ttl)
+            continue;
+        $kept[] = $session;
+    }
+    return array_values($kept);
+}
+function qrLoginAppend($sessions, $session, $max){
+    $sessions = is_array($sessions) ? array_values($sessions) : array();
+    $sessions[] = $session;
+    $max = (int)$max > 0 ? (int)$max : 1;
+    if(count($sessions) > $max)
+        $sessions = array_slice($sessions, count($sessions) - $max);
+    return array_values($sessions);
+}
+function qrLoginFind($sessions, $code){
+    if(!is_array($sessions) || (string)$code === "")
+        return null;
+    foreach($sessions as $session)
+        if(is_array($session) && isset($session["code"]) && hash_equals((string)$session["code"], (string)$code))
+            return $session;
+    return null;
+}
+function qrLoginReplace($sessions, $code, $newSession){
+    $out = array();
+    foreach($sessions as $session){
+        if(is_array($session) && isset($session["code"]) && $session["code"] === $code)
+            $out[] = $newSession;
+        else
+            $out[] = $session;
+    }
+    return array_values($out);
+}
+function qrLoginRemove($sessions, $code){
+    $out = array();
+    foreach($sessions as $session)
+        if(!(is_array($session) && isset($session["code"]) && $session["code"] === $code))
+            $out[] = $session;
+    return array_values($out);
+}
+function qrLoginExpired($session, $now, $ttl){
+    if(!is_array($session) || !isset($session["createdAt"]))
+        return true;
+    return ((int)$now - (int)$session["createdAt"]) > (int)$ttl;
+}
+# Что вернуть на опрос qrpoll: "denied" — чужой секрет, "expired" — кода нет или он
+# просрочен, "pending" — ждём телефон, "confirmed" — токен готов к выдаче.
+function qrLoginClaimStatus($session, $secret, $now, $ttl){
+    if(qrLoginExpired($session, $now, $ttl) || !isset($session["secret"]))
+        return "expired";
+    if((string)$secret === "" || !hash_equals((string)$session["secret"], (string)$secret))
+        return "denied";
+    return (isset($session["status"]) && $session["status"] === "confirmed") ? "confirmed" : "pending";
+}
+# --- Файловые обёртки (эксклюзивная блокировка на чтение-модификацию-запись) ---
+function qrLoginEncode($sessions){
+    return json_encode(array("sessions" => array_values($sessions)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+function qrLoginDecode($raw){
+    $data = (is_string($raw) && trim($raw) !== "") ? json_decode($raw, true) : null;
+    if(is_array($data) && isset($data["sessions"]) && is_array($data["sessions"]))
+        return array_values($data["sessions"]);
+    return array();
+}
+function qrLoginLoadRaw($db){
+    $path = qrLoginFile($db);
+    if($path === "" || !is_readable($path))
+        return array();
+    $raw = @file_get_contents($path);
+    return qrLoginDecode($raw === false ? "" : $raw);
+}
+# $mutator(array $sessions): array — должен вернуть array($newSessions, $return).
+function qrLoginMutate($db, $mutator){
+    $path = qrLoginFile($db);
+    if($path === "")
+        return null;
+    $fp = @fopen($path, "c+");
+    if(!$fp)
+        return null;
+    @flock($fp, LOCK_EX);
+    $raw = stream_get_contents($fp);
+    $sessions = qrLoginDecode($raw === false ? "" : $raw);
+    list($sessions, $ret) = $mutator($sessions);
+    @ftruncate($fp, 0);
+    @rewind($fp);
+    @fwrite($fp, qrLoginEncode($sessions));
+    @fflush($fp);
+    @flock($fp, LOCK_UN);
+    @fclose($fp);
+    @chmod($path, 0600);
+    return $ret;
+}
+function qrLoginCreate($db, $client){
+    $now = time();
+    $session = qrLoginNew($now, $client);
+    return qrLoginMutate($db, function($sessions) use ($session, $now){
+        $sessions = qrLoginPrune($sessions, $now, QR_LOGIN_TTL);
+        $sessions = qrLoginAppend($sessions, $session, QR_LOGIN_MAX);
+        return array($sessions, $session);
+    });
+}
+# Телефон подтвердил вход: кладём в сессию постоянный токен пользователя.
+function qrLoginConfirm($db, $code, $user, $token, $xsrf){
+    $now = time();
+    return qrLoginMutate($db, function($sessions) use ($code, $user, $token, $xsrf, $now){
+        $sessions = qrLoginPrune($sessions, $now, QR_LOGIN_TTL);
+        $session = qrLoginFind($sessions, $code);
+        if(!$session)
+            return array($sessions, "expired");
+        if($session["status"] === "confirmed")
+            return array($sessions, "confirmed");
+        $session["status"] = "confirmed";
+        $session["user"] = (string)$user;
+        $session["token"] = (string)$token;
+        $session["xsrf"] = (string)$xsrf;
+        $session["confirmedAt"] = $now;
+        return array(qrLoginReplace($sessions, $code, $session), "confirmed");
+    });
+}
+# Опрос от браузера-инициатора идёт раз в две секунды, поэтому «ещё ждём» — это
+# просто чтение файла. Подтверждённая сессия забирается под блокировкой и сразу
+# удаляется: токен выдаётся ОДИН раз.
+function qrLoginClaim($db, $code, $secret){
+    $now = time();
+    $session = qrLoginFind(qrLoginLoadRaw($db), $code);
+    $status = qrLoginClaimStatus($session, $secret, $now, QR_LOGIN_TTL);
+    if($status !== "confirmed")
+        return array("status" => $status, "session" => null);
+    return qrLoginMutate($db, function($sessions) use ($code, $secret, $now){
+        $session = qrLoginFind($sessions, $code);
+        $status = qrLoginClaimStatus($session, $secret, $now, QR_LOGIN_TTL);
+        if($status !== "confirmed")
+            return array($sessions, array("status" => $status, "session" => null));
+        $sessions = qrLoginPrune(qrLoginRemove($sessions, $code), $now, QR_LOGIN_TTL);
+        return array($sessions, array("status" => $status, "session" => $session));
+    });
+}
+function qrLoginGet($db, $code){
+    $found = qrLoginFind(qrLoginLoadRaw($db), $code);
+    if(!$found || qrLoginExpired($found, time(), QR_LOGIN_TTL))
+        return null;
+    return $found;
+}
+# Короткая подпись устройства, которое показывает QR — телефон показывает её,
+# чтобы человек видел, чей именно вход он подтверждает.
+function qrLoginClientHint(){
+    $ua = isset($_SERVER["HTTP_USER_AGENT"]) ? $_SERVER["HTTP_USER_AGENT"] : "";
+    $browser = "";
+    foreach(array("YaBrowser" => "Яндекс.Браузер", "Edg" => "Edge", "OPR" => "Opera"
+                , "Firefox" => "Firefox", "Chrome" => "Chrome", "Safari" => "Safari") as $needle => $name)
+        if(stripos($ua, $needle) !== false){ $browser = $name; break; }
+    $os = "";
+    foreach(array("Windows" => "Windows", "Macintosh" => "macOS", "Android" => "Android"
+                , "iPhone" => "iPhone", "iPad" => "iPad", "Linux" => "Linux") as $needle => $name)
+        if(stripos($ua, $needle) !== false){ $os = $name; break; }
+    $parts = array_filter(array($browser, $os, isset($_SERVER["REMOTE_ADDR"]) ? $_SERVER["REMOTE_ADDR"] : ""));
+    return mb_substr(implode(" · ", $parts), 0, 120);
+}
+# Страница подтверждения на телефоне: отдельная от рабочего места, поэтому
+# собирается здесь, а оформление берёт общий css сайта.
+function qrLoginPageHtml($title, $inner){
+    return '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">'
+        .'<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        .'<title>'.htmlspecialchars($title).'</title>'
+        .'<link rel="stylesheet" href="/css/styles.css">'
+        .'<script>try{document.documentElement.setAttribute("data-theme", localStorage.getItem("theme")||"light");}catch(e){}</script>'
+        .'</head><body><div class="auth-container"><div class="auth-card">'.$inner.'</div></div></body></html>';
+}
+function qrLoginDie($title, $inner){
+    header("Content-Type: text/html; charset=UTF-8");
+    die(qrLoginPageHtml($title, $inner));
+}
+# Адрес для QR собирается по СВОЕМУ запросу: локальная установка в докере живёт и
+# по http, а зашитый https дал бы код, по которому телефон никуда не попадёт.
+function qrLoginBaseUrl(){
+    $https = (!empty($_SERVER["HTTPS"]) && strtolower($_SERVER["HTTPS"]) !== "off")
+        || (isset($_SERVER["HTTP_X_FORWARDED_PROTO"]) && strtolower($_SERVER["HTTP_X_FORWARDED_PROTO"]) === "https");
+    $host = isset($_SERVER["HTTP_HOST"]) ? $_SERVER["HTTP_HOST"] : $_SERVER["SERVER_NAME"];
+    return ($https ? "https" : "http")."://".$host;
+}
+function qrLoginJson($data, $httpCode=""){
+    if($httpCode !== "")
+        header("HTTP/1.0 $httpCode");
+    header("Content-Type: application/json; charset=UTF-8");
+    die(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+# Вход через OAuth возвращает не по параметру uri, а на /<база>. Куку ставит
+# qrlogin (см. пред-авторизационный switch), здесь она превращается в адрес
+# страницы подтверждения и гасится.
+function qrLoginPendingRedirect(){
+    if(empty($_COOKIE["qr_pending"]))
+        return "";
+    $parts = explode(":", (string)$_COOKIE["qr_pending"], 2);
+    setcookie("qr_pending", "", time() - 3600, "/");
+    if(count($parts) !== 2 || !preg_match(DB_MASK, $parts[0]) || !preg_match(QR_CODE_MASK, $parts[1]))
+        return "";
+    return "/".$parts[0]."/qrlogin?c=".$parts[1];
 }
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
@@ -10815,6 +11059,51 @@ switch($a)  # Check actions, which don't require authentication
 	    die('{"error":"invalid data"}');
 		break;
 
+	# #4667: экран входа просит временный код и рисует QR со ссылкой на qrlogin.
+	case "qrnew":
+		if($_SERVER["REQUEST_METHOD"] !== "POST")
+			qrLoginJson(array("error" => t9n("[RU]Только POST[EN]POST only")), "405 Method Not Allowed");
+		$session = qrLoginCreate($z, qrLoginClientHint());
+		if(!$session)
+			qrLoginJson(array("error" => t9n("[RU]Не удалось создать код[EN]Could not create the code")), "500 Internal Server Error");
+		qrLoginJson(array(
+			"code" => $session["code"],
+			"secret" => $session["secret"],
+			"url" => qrLoginBaseUrl()."/$z/qrlogin?c=".$session["code"],
+			"ttl" => QR_LOGIN_TTL
+		));
+		break;
+
+	# #4667: опрос состояния кода браузером, который показывает QR. Токен отдаётся
+	# только вместе с секретом — он известен лишь создателю сессии, в QR его нет.
+	case "qrpoll":
+		$c = isset($_REQUEST["c"]) ? (string)$_REQUEST["c"] : "";
+		$s = isset($_REQUEST["s"]) ? (string)$_REQUEST["s"] : "";
+		if(!preg_match(QR_CODE_MASK, $c) || !preg_match(QR_CODE_MASK, $s))
+			qrLoginJson(array("status" => "expired"));
+		$claim = qrLoginClaim($z, $c, $s);
+		if(!$claim)
+			qrLoginJson(array("status" => "expired"));
+		if($claim["status"] === "confirmed")
+			qrLoginJson(array(
+				"status" => "confirmed",
+				"token" => $claim["session"]["token"],
+				"_xsrf" => $claim["session"]["xsrf"],
+				"user" => $claim["session"]["user"]
+			));
+		if($claim["status"] === "denied")
+			qrLoginJson(array("status" => "denied"), "403 Forbidden");
+		qrLoginJson(array("status" => $claim["status"]));
+		break;
+
+	# #4667: телефон открыл ссылку из QR. Страницу подтверждения рисует уже
+	# авторизованная ветка (см. switch ниже) — здесь только запоминаем код, чтобы
+	# вход через Яндекс/Google вернул телефон на неё же (см. qrLoginPendingRedirect).
+	case "qrlogin":
+		if(isset($_GET["c"]) && preg_match(QR_CODE_MASK, $_GET["c"]))
+			setcookie("qr_pending", "$z:".$_GET["c"], time() + QR_LOGIN_TTL, "/");
+		break;
+
 	case "restore_admin":
 		if($_SERVER["REQUEST_METHOD"] === "POST"){
     		$data_set = Exec_sql("SELECT u.id, r.id rid, r.t rol FROM $z u LEFT JOIN $z r ON r.up=u.id AND r.val='115' WHERE u.t=".USER." AND u.val='$z'"
@@ -12266,7 +12555,69 @@ if(Validate_Token())
 			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"]
 			    ,"role"=>$GLOBALS["GLOBAL_VARS"]["role"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>""), JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE), "login.json");
 		    break;
-		    
+
+		# #4667: страница, на которую ведёт QR-код с экрана входа. Сюда попадают уже
+		# авторизованными: гостя и неопознанный токен Validate_Token отправляет на
+		# /start.html, а параметр uri (и кука qr_pending для входа через OAuth)
+		# возвращают телефон обратно. Подтверждение — ТОЛЬКО POST с xsrf: по одной
+		# лишь ссылке чужой вход не подтверждается, даже если её открыть из письма.
+		case "qrlogin":
+			header("Content-Type: text/html; charset=UTF-8");
+			$qrUser = $GLOBALS["GLOBAL_VARS"]["user"];
+			if($qrUser === "guest")
+				login($z, "", "InvalidToken");
+			$qrCode = isset($_POST["c"]) ? (string)$_POST["c"] : (isset($_GET["c"]) ? (string)$_GET["c"] : "");
+			setcookie("qr_pending", "", time() - 3600, "/");
+			if(!preg_match(QR_CODE_MASK, $qrCode))
+				qrLoginDie(t9n("[RU]Вход по QR-коду[EN]QR sign-in")
+					, '<h1>'.t9n("[RU]Ссылка не распознана[EN]Unrecognized link").'</h1>'
+					.'<p>'.t9n("[RU]Откройте страницу входа на компьютере и отсканируйте QR-код заново."
+					        ."[EN]Open the sign-in page on your computer and scan the QR code again.").'</p>');
+			$qrSession = qrLoginGet($z, $qrCode);
+			if(!$qrSession)
+				qrLoginDie(t9n("[RU]Вход по QR-коду[EN]QR sign-in")
+					, '<h1>'.t9n("[RU]Код устарел[EN]The code has expired").'</h1>'
+					.'<p>'.t9n("[RU]QR-код живёт две минуты. Обновите его на компьютере и отсканируйте заново."
+					        ."[EN]A QR code is valid for two minutes. Refresh it on your computer and scan again.").'</p>');
+			if($_SERVER["REQUEST_METHOD"] === "POST"){
+				check();
+				# Отдаём ПОСТОЯННЫЙ токен пользователя — тот, что лежит у него в базе
+				# (создан при этом входе или раньше), а не то, чем телефон
+				# аутентифицировался в этом запросе (это мог быть, например, secret).
+				$qrToken = $GLOBALS["GLOBAL_VARS"]["token"];
+				if((int)$GLOBALS["GLOBAL_VARS"]["user_id"] > 0)
+					if($qrRow = mysqli_fetch_array(Exec_sql("SELECT tok.val FROM $z tok WHERE tok.t=".TOKEN
+											." AND tok.up=".(int)$GLOBALS["GLOBAL_VARS"]["user_id"], "QR: get the permanent token")))
+						$qrToken = $qrRow["val"];
+				if(qrLoginConfirm($z, $qrCode, $qrUser, $qrToken, $GLOBALS["GLOBAL_VARS"]["xsrf"]) !== "confirmed")
+					qrLoginDie(t9n("[RU]Вход по QR-коду[EN]QR sign-in")
+						, '<h1>'.t9n("[RU]Код устарел[EN]The code has expired").'</h1>'
+						.'<p>'.t9n("[RU]QR-код живёт две минуты. Обновите его на компьютере и отсканируйте заново."
+						        ."[EN]A QR code is valid for two minutes. Refresh it on your computer and scan again.").'</p>');
+				wlog("[QR] confirmed for $qrUser@$z from ".$_SERVER["REMOTE_ADDR"], "log");
+				qrLoginDie(t9n("[RU]Вход подтверждён[EN]Sign-in confirmed")
+					, '<h1>'.t9n("[RU]Вход подтверждён[EN]Sign-in confirmed").'</h1>'
+					.'<p>'.t9n("[RU]Вернитесь к компьютеру — там уже открывается база."
+					        ."[EN]Get back to your computer — the database is opening there.").'</p>'
+					.'<a class="btn-primary" style="text-decoration:none;" href="/'.htmlspecialchars($z).'">'
+						.t9n("[RU]Открыть базу здесь[EN]Open the database here").'</a>');
+			}
+			qrLoginDie(t9n("[RU]Вход по QR-коду[EN]QR sign-in")
+				, '<h1>'.t9n("[RU]Подтвердите вход[EN]Confirm the sign-in").'</h1>'
+				.'<p>'.t9n("[RU]База[EN]Database").': <b>'.htmlspecialchars($z).'</b><br>'
+					.t9n("[RU]Пользователь[EN]User").': <b>'.htmlspecialchars($qrUser).'</b>'
+					.($qrSession["client"] !== "" ? '<br>'.t9n("[RU]Запрос с устройства[EN]Requested from")
+						.': '.htmlspecialchars($qrSession["client"]) : '').'</p>'
+				.'<form method="post" action="/'.htmlspecialchars($z).'/qrlogin?c='.htmlspecialchars($qrCode).'">'
+					.'<input type="hidden" name="c" value="'.htmlspecialchars($qrCode).'">'
+					.'<input type="hidden" name="_xsrf" value="'.htmlspecialchars($GLOBALS["GLOBAL_VARS"]["xsrf"]).'">'
+					.'<button type="submit" class="btn-primary">'.t9n("[RU]Подтвердить вход[EN]Confirm sign-in").'</button>'
+				.'</form>'
+				.'<p style="margin-top:1.5rem; margin-bottom:0; font-size:0.85rem;">'
+					.t9n("[RU]Если вы не открывали вход на другом устройстве — просто закройте страницу."
+					    ."[EN]If you did not start a sign-in on another device, just close this page.").'</p>');
+		    break;
+
 		case "terms":
 			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val, reqs.ord reqs_ord FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
 					WHERE a.up=0 AND a.id!=a.t AND a.val!='' AND a.t!=0 ORDER BY a.val";

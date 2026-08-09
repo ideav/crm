@@ -256,6 +256,141 @@ class YandexAuthManager {
 }
 
 // ============================================================
+// Вход по QR-коду (issue #4667)
+// ------------------------------------------------------------
+// Сервер выдаёт временный код и секрет: код уходит в QR, секрет остаётся здесь.
+// Токен по опросу отдают только тому, кто знает оба, поэтому снятый с экрана
+// QR чужой сессии не открывает.
+//
+// Опрос, а не веб-сокет: Apache+mod_php держит на каждое соединение отдельный
+// воркер, а ждать нужно не дольше двух минут — 60 коротких запросов дешевле
+// занятого воркера и не требуют отдельного ws-сервера.
+// ============================================================
+class QrLoginManager {
+    constructor(onAuthorized) {
+        this.onAuthorized = onAuthorized;
+        this.pollTimer = null;
+        this.tickTimer = null;
+        this.db = '';
+        this.session = null;
+        this.expiresAt = 0;
+    }
+
+    isSupported() {
+        return typeof window.qrcode === 'function';
+    }
+
+    _el(id) {
+        return document.getElementById(id);
+    }
+
+    _setStatus(text, isError) {
+        const status = this._el('qr-login-status');
+        if (!status) return;
+        status.textContent = text;
+        status.classList.toggle('qr-login-error', !!isError);
+    }
+
+    async start(db) {
+        this.stop();
+        this.db = db;
+        const codeBox = this._el('qr-login-code');
+        const refreshBtn = this._el('qr-refresh-btn');
+        if (refreshBtn) refreshBtn.style.display = 'none';
+        if (codeBox) {
+            codeBox.innerHTML = '';
+            codeBox.classList.remove('qr-login-expired');
+        }
+        this._setStatus('Готовим код…', false);
+        try {
+            const response = await fetch(`${encodeURIComponent(db)}/qrnew?JSON`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: ''
+            });
+            const data = await response.json();
+            if (!response.ok || !data || !data.code || !data.secret || !data.url) {
+                this._fail((data && data.error) || 'Не удалось получить код');
+                return;
+            }
+            this.session = data;
+            this.expiresAt = Date.now() + (data.ttl || 120) * 1000;
+            this._render(data.url);
+            this._tick();
+            this.tickTimer = setInterval(() => this._tick(), 1000);
+            this.pollTimer = setInterval(() => this._poll(), 2000);
+        } catch (err) {
+            this._fail(err.message || 'Не удалось получить код');
+        }
+    }
+
+    stop() {
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+        if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+        this.session = null;
+    }
+
+    _render(url) {
+        const codeBox = this._el('qr-login-code');
+        if (!codeBox) return;
+        // Уровень коррекции M: ссылка короткая, а код читают с экрана вблизи.
+        const qr = window.qrcode(0, 'M');
+        qr.addData(url);
+        qr.make();
+        codeBox.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    }
+
+    _tick() {
+        const left = Math.ceil((this.expiresAt - Date.now()) / 1000);
+        if (left <= 0) {
+            this._expire();
+            return;
+        }
+        const mm = Math.floor(left / 60);
+        const ss = left % 60;
+        this._setStatus(`Код действует ещё ${mm}:${ss < 10 ? '0' : ''}${ss}`, false);
+    }
+
+    _expire() {
+        this.stop();
+        const codeBox = this._el('qr-login-code');
+        if (codeBox) codeBox.classList.add('qr-login-expired');
+        const refreshBtn = this._el('qr-refresh-btn');
+        if (refreshBtn) refreshBtn.style.display = '';
+        this._setStatus('Код устарел', true);
+    }
+
+    _fail(message) {
+        this.stop();
+        const refreshBtn = this._el('qr-refresh-btn');
+        if (refreshBtn) refreshBtn.style.display = '';
+        this._setStatus(message, true);
+    }
+
+    async _poll() {
+        if (!this.session) return;
+        const db = this.db;
+        try {
+            const url = `${encodeURIComponent(db)}/qrpoll?JSON&c=${encodeURIComponent(this.session.code)}`
+                + `&s=${encodeURIComponent(this.session.secret)}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            if (!data) return;
+            if (data.status === 'confirmed' && data.token) {
+                this.stop();
+                this._setStatus('Вход подтверждён', false);
+                this.onAuthorized(db, data.token);
+            } else if (data.status === 'expired' || data.status === 'denied') {
+                this._expire();
+            }
+        } catch (err) {
+            // Разрыв связи на одном опросе не повод гасить код — следующий повторит.
+            console.log('[qr] poll error:', err);
+        }
+    }
+}
+
+// ============================================================
 // Authentication & UI controller
 // ============================================================
 class AuthManager {
@@ -524,6 +659,7 @@ class App {
         this.apiConfig = new ApiConfig();
         this.auth = new AuthManager(this.apiConfig);
         this.yandexAuth = new YandexAuthManager(this.apiConfig);
+        this.qrLogin = new QrLoginManager((db, token) => this.completeTokenLogin(db, token));
         // Issue #2906: set to true when a valid auth token is found, so the captcha
         // is hidden and its client-side check is skipped for returning users.
         // Issue #2947: the token check is performed lazily (see _ensureCaptchaBypass),
@@ -555,6 +691,22 @@ class App {
         if (!this._postLoginUri) return '';
         if (!selectedDb || this._postLoginDb !== selectedDb) return '';
         return this._postLoginUri;
+    }
+
+    // Куда уходим после успешного входа: на страницу, с которой нас развернули на
+    // логин (?uri=...), иначе в саму базу. Issue #4667: этим путём телефон,
+    // отсканировавший QR, возвращается на страницу подтверждения — а не в базу.
+    postLoginRedirect(selectedDb) {
+        const postLoginUri = this._getPostLoginUriForDb(selectedDb);
+        window.location.href = window.location.origin + (postLoginUri || '/' + selectedDb);
+    }
+
+    // Вход, при котором токен пришёл ответом (код на почту, QR): сервер куку не
+    // ставил, ставим её сами — как и раньше делал разбор ответа checkcode.
+    completeTokenLogin(selectedDb, token) {
+        CookieUtil.set('idb_' + selectedDb, token, 30);
+        CookieUtil.set('last_db', selectedDb, 365);
+        this.postLoginRedirect(selectedDb);
     }
 
     async init() {
@@ -682,12 +834,7 @@ class App {
                 const result = await this.auth.login(email, password, selectedDb, captchaToken);
                 if (result.success) {
                     CookieUtil.set('last_db', selectedDb, 365);
-                    const postLoginUri = this._getPostLoginUriForDb(selectedDb);
-                    if (postLoginUri) {
-                        window.location.href = window.location.origin + postLoginUri;
-                    } else {
-                        window.location.href = window.location.origin + '/' + selectedDb;
-                    }
+                    this.postLoginRedirect(selectedDb);
                 } else {
                     showToast(result.message, 'error');
                     resetCaptcha('login-captcha-container');
@@ -755,6 +902,7 @@ class App {
                 e.preventDefault();
                 exitResetMode();
                 exitOtpCodeMode();
+                exitQrMode();
             });
         }
 
@@ -814,6 +962,7 @@ class App {
         }
 
         // OTP (one-time password to email)
+        const app = this;
         const otpBtn = document.getElementById('otp-btn');
         const otpMessage = document.getElementById('otp-message');
         const otpCodeGroup = document.getElementById('otp-code-group');
@@ -852,6 +1001,7 @@ class App {
             if (loginCaptchaContainer) loginCaptchaContainer.style.display = 'none';
             if (loginSubmitBtn) loginSubmitBtn.style.display = 'none';
             if (otpBtn) otpBtn.style.display = 'none';
+            if (qrBtn) qrBtn.style.display = 'none';
             if (loginPasswordInput) loginPasswordInput.removeAttribute('required');
             if (otpCodeInput) otpCodeInput.focus();
         }
@@ -862,8 +1012,76 @@ class App {
             if (loginCaptchaContainer) loginCaptchaContainer.style.display = '';
             if (loginSubmitBtn) loginSubmitBtn.style.display = '';
             if (otpBtn) otpBtn.style.display = '';
+            if (qrBtn) qrBtn.style.display = '';
             if (loginPasswordInput) loginPasswordInput.setAttribute('required', '');
             if (otpMessage) otpMessage.style.display = 'none';
+        }
+
+        // QR-вход (issue #4667): форма схлопывается до одного кода — пароль, капча и
+        // почтовый код в этом режиме не нужны, а выбор базы остаётся: код выдаётся
+        // именно для неё.
+        const qrBtn = document.getElementById('qr-btn');
+        const qrPanel = document.getElementById('qr-login-panel');
+        const qrRefreshBtn = document.getElementById('qr-refresh-btn');
+        const loginEmailGroup = loginEmailInput ? loginEmailInput.closest('.database-field-group') : null;
+        let qrMode = false;
+
+        function enterQrMode() {
+            qrMode = true;
+            if (qrPanel) qrPanel.style.display = '';
+            if (loginEmailGroup) loginEmailGroup.style.display = 'none';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = 'none';
+            if (loginCaptchaContainer) loginCaptchaContainer.style.display = 'none';
+            if (loginSubmitBtn) loginSubmitBtn.style.display = 'none';
+            if (otpBtn) otpBtn.style.display = 'none';
+            if (qrBtn) qrBtn.style.display = 'none';
+            if (resetLink) resetLink.style.display = 'none';
+            if (backToLoginLink) backToLoginLink.style.display = '';
+            if (loginPasswordInput) loginPasswordInput.removeAttribute('required');
+            if (loginEmailInput) loginEmailInput.removeAttribute('required');
+        }
+
+        function exitQrMode() {
+            if (!qrMode) return;
+            qrMode = false;
+            app.qrLogin.stop();
+            if (qrPanel) qrPanel.style.display = 'none';
+            if (loginEmailGroup) loginEmailGroup.style.display = '';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = '';
+            if (loginCaptchaContainer) loginCaptchaContainer.style.display = '';
+            if (loginSubmitBtn) loginSubmitBtn.style.display = '';
+            if (otpBtn) otpBtn.style.display = '';
+            if (qrBtn) qrBtn.style.display = '';
+            if (loginPasswordInput) loginPasswordInput.setAttribute('required', '');
+            if (loginEmailInput) loginEmailInput.setAttribute('required', '');
+        }
+
+        if (qrBtn) {
+            if (!app.qrLogin.isSupported())
+                qrBtn.style.display = 'none';
+            qrBtn.addEventListener('click', () => {
+                const selectedDb = getSelectedDb();
+                if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
+                enterQrMode();
+                app.qrLogin.start(selectedDb);
+            });
+        }
+
+        if (qrRefreshBtn) {
+            qrRefreshBtn.addEventListener('click', () => {
+                const selectedDb = getSelectedDb();
+                if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
+                app.qrLogin.start(selectedDb);
+            });
+        }
+
+        // Код выдан для конкретной базы — сменили базу, выдаём новый.
+        if (authDbSelect) {
+            authDbSelect.addEventListener('change', () => {
+                if (!qrMode) return;
+                const selectedDb = getSelectedDb();
+                if (selectedDb) app.qrLogin.start(selectedDb);
+            });
         }
 
         // Step 1: send email → request OTP code
@@ -925,9 +1143,7 @@ class App {
                 let data = null;
                 try { data = JSON.parse(text); } catch (e) { data = null; }
                 if (response.ok && data && data.token) {
-                    CookieUtil.set('idb_' + selectedDb, data.token, 30);
-                    CookieUtil.set('last_db', selectedDb, 365);
-                    window.location.href = window.location.origin + '/' + selectedDb;
+                    app.completeTokenLogin(selectedDb, data.token);
                 } else {
                     const errText = (data && (data.error || data.msg || data.message)) || text || 'Неверный код';
                     showOtpMessage(errText, true);

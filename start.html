@@ -1515,6 +1515,7 @@ mark.search-highlight {
                     <br />
                     <div style="display:flex; gap:0.5rem; align-items:stretch; margin-top:0.8rem;">
                         <button type="submit" id="login-submit-btn" class="btn-primary" style="flex:1; justify-content:center;">Войти</button>
+                        <button type="button" id="qr-btn" class="btn-secondary btn-square" title="Войти по QR-коду с телефона" aria-label="Войти по QR-коду"><i class="pi pi-qrcode"></i></button>
                         <button type="button" id="otp-btn" class="btn-secondary" style="flex:1; justify-content:center;" title="Получить одноразовый пароль на зарегистрированную почту">Код на почту</button>
                         <button type="button" id="reset-submit-btn" class="btn-primary" style="display:none; flex:1; justify-content:center;">Сбросить пароль</button>
                     </div>
@@ -1526,6 +1527,12 @@ mark.search-highlight {
                         <input type="text" id="otp-code-input" class="database-field-input" placeholder="Введите код" autocomplete="one-time-code">
                         <button type="button" id="otp-submit-btn" class="btn-primary">Войти по коду</button>
                     </div>
+                </div>
+                <div id="qr-login-panel" class="qr-login-panel" style="display:none;">
+                    <div class="qr-login-code" id="qr-login-code"></div>
+                    <div class="qr-login-hint">Наведите камеру телефона на код и подтвердите вход — эта страница откроется сама.</div>
+                    <div class="qr-login-status" id="qr-login-status"></div>
+                    <button type="button" id="qr-refresh-btn" class="btn-secondary" style="display:none;">Обновить код</button>
                 </div>
                 <div id="reset-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
                 <div style="text-align:center; margin-top:0.75rem;">
@@ -1581,6 +1588,7 @@ mark.search-highlight {
         </div>
     </div>
 
+    <script src="assets/vendor/qrcode/qrcode.js"></script>
     <script src="js/app.js"></script>
 
 <style>
