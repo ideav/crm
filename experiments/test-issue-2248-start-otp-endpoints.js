@@ -33,6 +33,33 @@ class FakeElement {
     focus() {
         this.focused = true;
     }
+
+    matches(selector) {
+        if (selector.startsWith('.'))
+            return String(this.className || '').split(/\s+/).indexOf(selector.slice(1)) !== -1;
+        if (selector.startsWith('#')) return this.id === selector.slice(1);
+        return false;
+    }
+
+    // Поля экрана входа обёрнуты в `.database-field-group` (start.html), и код
+    // добирается до обёртки через closest — у элемента без родителя её нет.
+    closest(selector) {
+        let node = this;
+        while (node) {
+            if (node.matches(selector)) return node;
+            node = node.parentElement || null;
+        }
+        return null;
+    }
+}
+
+// Обёртки полей — как в start.html: у поля пароля и селектора базы группа
+// именованная, у поля email — без id, поэтому её и ищут селектором класса.
+function fieldGroup(child, id) {
+    const group = new FakeElement(id || '');
+    group.className = 'database-field-group';
+    child.parentElement = group;
+    return group;
 }
 
 const elements = {
@@ -49,6 +76,9 @@ const elements = {
     'otp-code-input': new FakeElement('otp-code-input'),
     'otp-submit-btn': new FakeElement('otp-submit-btn')
 };
+fieldGroup(elements['login-email']);
+fieldGroup(elements['login-password'], 'login-password-group');
+fieldGroup(elements['auth-db-select'], 'auth-db-group');
 elements['auth-db-select'].value = 'demo';
 elements['login-email'].value = 'user@example.com';
 elements['otp-code-input'].value = 'ABCD';

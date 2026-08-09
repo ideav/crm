@@ -77,6 +77,24 @@ class FakeElement {
     querySelectorAll() {
         return [];
     }
+
+    matches(selector) {
+        if (selector.startsWith('.'))
+            return String(this.className || '').split(/\s+/).indexOf(selector.slice(1)) !== -1;
+        if (selector.startsWith('#')) return this.id === selector.slice(1);
+        return false;
+    }
+
+    // Поля экрана входа обёрнуты в `.database-field-group` (start.html), и код
+    // добирается до обёртки через closest — у элемента без родителя её нет.
+    closest(selector) {
+        let node = this;
+        while (node) {
+            if (node.matches(selector)) return node;
+            node = node.parentElement || null;
+        }
+        return null;
+    }
 }
 
 function createFakeDocument() {
@@ -106,6 +124,15 @@ function createFakeDocument() {
 
     for (const id of requiredIds) {
         elements.set(id, new FakeElement(id));
+    }
+
+    // Обёртки полей — как в start.html: у поля пароля и селектора базы группа
+    // именованная, у поля email — без id, поэтому её и ищут селектором класса.
+    for (const [childId, groupId] of [['login-email', ''], ['login-password', 'login-password-group'], ['auth-db-select', 'auth-db-group']]) {
+        const group = new FakeElement(groupId);
+        group.className = 'database-field-group';
+        elements.get(childId).parentElement = group;
+        if (groupId) elements.set(groupId, group);
     }
 
     return {
