@@ -26,10 +26,15 @@
 // Событие — корневой объект (up=1), как у пульта слиттера: подчинять его заданию
 // нельзя, связь держится реквизитом «Задание в производство».
 //
-// Количество по умолчанию — `qty_fact`, а если его нет — `qty`. Упаковщик может его
-// поправить, но тогда обязан написать примечание (иначе отметка не сохранится).
+// Количество по умолчанию — `qty_fact`, а если его нет — `qty`. Меняют его КЛИКОМ ПО
+// САМОМУ КОЛИЧЕСТВУ в карточке: открывается модалка, где поправленное количество
+// требует примечания. Кнопка «Упаковано» ничего не спрашивает — фиксирует упаковку тем
+// количеством, которое видно в карточке (#4680). У неупакованной позиции правка живёт в
+// модели до отметки, у упакованной уходит в базу сразу.
 // Упаковочное место запоминается в localStorage: пока оно там есть, таблицу
 // «Упаковочное место» (669269) не запрашиваем вовсе — только по клику на само место.
+// Отчёт запрашивается с фильтром `FR_packer_no={номер места}` — упаковщик видит только
+// свои позиции (#4681); без выбранного места отчёт не запрашивается вовсе.
 //
 // ID таблиц и реквизитов не хардкодятся — берутся по именам из `GET /{db}/metadata`
 // (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6). Чистое ядро (разбор строк отчёта,
@@ -69,9 +74,11 @@
     // Значение справочника «Тип события» (1193, запись 670935): отметка упаковки.
     var EVENT_TYPE_PACK = 'Упаковка';
 
-    // Отчёт с заданиями упаковщика и имена его колонок.
+    // Отчёт с заданиями упаковщика и имена его колонок. Фильтр `FR_packer_no` оставляет
+    // в отчёте только позиции выбранного упаковочного места (#4681).
     var REPORT = 'packer';
     var REPORT_LIMIT = 5000;
+    var REPORT_PLACE_FILTER = 'FR_packer_no';
     var COL = {
         task: 'task', taskId: 'task_id', gpId: 'gp_id',
         orderNo: 'order_no', orderClient: 'order',
@@ -178,7 +185,7 @@
         return text;
     }
 
-    // Сколько штук предлагаем упаковать: факт, а если его нет — план.
+    // Сколько штук предлагает отчёт: факт, а если его нет — план.
     function packQtyFor(item) {
         var it = item || {};
         return toNumber(it.factQty) || toNumber(it.planQty);
@@ -189,12 +196,47 @@
         return toNumber((item || {}).packedQty) > 0;
     }
 
+    // От какого количества считается «поправил»: подсказка отчёта, а у упакованной
+    // позиции — уже записанное «Упаковано шт».
+    function baseQty(item) {
+        var it = item || {};
+        return isPacked(it) ? toNumber(it.packedQty) : packQtyFor(it);
+    }
+
+    // Что стоит в карточке и что уйдёт в отметку по кнопке «Упаковано»: правка
+    // упаковщика сильнее подсказки отчёта. Правку ставят кликом по количеству и она
+    // живёт до отметки (#4680) — упакованную позицию правка не касается, там уже
+    // записанное значение.
+    function currentQty(item) {
+        var it = item || {};
+        if (isPacked(it)) return toNumber(it.packedQty);
+        if (it.editedQty != null && it.editedQty !== '') return toNumber(it.editedQty);
+        return packQtyFor(it);
+    }
+
+    // Количество в карточке отличается от того, что предложил отчёт?
+    function isEdited(item) {
+        var it = item || {};
+        if (isPacked(it)) return false;
+        return it.editedQty != null && it.editedQty !== '' && toNumber(it.editedQty) !== packQtyFor(it);
+    }
+
     // Количество поправили относительно предложенного?
     function noteRequired(qty, suggested) {
         return toNumber(qty) !== toNumber(suggested);
     }
 
-    // Проверка формы отметки: пустой текст = всё в порядке, иначе — что не так.
+    // Адрес отчёта: упаковщик видит только позиции СВОЕГО упаковочного места (#4681).
+    // `{n}` фильтра — номер места, то самое главное значение таблицы «Упаковочное
+    // место», которое стоит в правом верхнем углу. Места нет — фильтр не ставим.
+    function itemsPath(place) {
+        var path = 'report/' + REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT;
+        var no = str(place && place.label).trim();
+        if (no) path += '&' + REPORT_PLACE_FILTER + '=' + encodeURIComponent(no);
+        return path;
+    }
+
+    // Проверка формы количества: пустой текст = всё в порядке, иначе — что не так.
     // Поправил количество — обязан объяснить почему (решение заказчика по #4658).
     function validatePack(form) {
         var f = form || {};
@@ -228,7 +270,7 @@
         var list = items || [];
         var rolls = 0, packedRolls = 0, packed = 0;
         list.forEach(function(item) {
-            rolls += packQtyFor(item);
+            rolls += currentQty(item);
             if (isPacked(item)) { packed++; packedRolls += toNumber(item.packedQty); }
         });
         return { total: list.length, packed: packed, rolls: rolls, packedRolls: packedRolls };
@@ -329,8 +371,12 @@
         itemFromReportRow: itemFromReportRow,
         describeItem: describeItem,
         packQtyFor: packQtyFor,
+        baseQty: baseQty,
+        currentQty: currentQty,
+        isEdited: isEdited,
         isPacked: isPacked,
         noteRequired: noteRequired,
+        itemsPath: itemsPath,
         validatePack: validatePack,
         groupByTask: groupByTask,
         summarize: summarize,
@@ -441,7 +487,7 @@
 
     AtexPacker.prototype.loadItems = function() {
         var self = this;
-        return this.getJson('report/' + REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT).then(function(rows) {
+        return this.getJson(core.itemsPath(this.place)).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
             self.items = list.map(function(row) { return core.itemFromReportRow(row); });
         });
@@ -575,7 +621,9 @@
     };
 
     // Карточка позиции: слева крупный номер заказа, посередине привычная подпись
-    // ролика и время задания, справа количество и кнопка отметки.
+    // ролика и время задания, справа количество и кнопка отметки. Количество —
+    // кнопка: клик по нему открывает правку, кнопка «Упаковано» ничего не спрашивает
+    // и просто фиксирует упаковку тем количеством, которое видно (#4680).
     AtexPacker.prototype.renderCard = function(item) {
         var self = this;
         var packed = core.isPacked(item);
@@ -587,26 +635,38 @@
         if (item.orderClient) order.appendChild(el('span', { class: 'atex-pk-order-client', text: item.orderClient }));
         card.appendChild(order);
 
+        var edited = core.isEdited(item);
         var meta = ['задание ' + (core.unixToLocalTime(item.taskUnix) || '—')];
         if (item.planQty) meta.push('план ' + item.planQty);
         if (item.factQty) meta.push('факт ' + item.factQty);
-        if (item.notes) meta.push(item.notes);
+        var note = item.editedNote || item.notes;
+        if (note) meta.push(note);
         card.appendChild(el('div', { class: 'atex-pk-body' }, [
             el('div', { class: 'atex-pk-desc', text: core.describeItem(item) || '—' }),
             el('div', { class: 'atex-pk-meta', text: meta.join(' · ') })
         ]));
 
         var side = el('div', { class: 'atex-pk-side' });
-        side.appendChild(el('div', { class: 'atex-pk-qty' }, [
-            el('span', { class: 'atex-pk-qty-value', text: String(packed ? item.packedQty : core.packQtyFor(item)) }),
+        // Количество — кнопка: по клику по самому числу открывается правка (#4680).
+        var qty = el('button', {
+            class: 'atex-pk-qty' + (edited ? ' is-edited' : ''),
+            type: 'button',
+            title: 'Изменить количество'
+        }, [
+            el('span', { class: 'atex-pk-qty-value', text: String(core.currentQty(item)) }),
             el('span', { class: 'atex-pk-qty-unit', text: 'шт' })
-        ]));
+        ]);
+        qty.addEventListener('click', function() { self.openQtyDialog(item); });
+        side.appendChild(qty);
         var btn = el('button', {
             class: 'atex-pk-btn ' + (packed ? 'atex-pk-btn-edit' : 'atex-pk-btn-pack'),
             type: 'button',
             text: packed ? 'Изменить' : 'Упаковано'
         });
-        btn.addEventListener('click', function() { self.openPackDialog(item); });
+        btn.addEventListener('click', function() {
+            if (packed) { self.openQtyDialog(item); return; }
+            self.packNow(item);
+        });
         side.appendChild(btn);
         if (packed) side.appendChild(el('span', { class: 'atex-pk-badge', text: 'упаковано' }));
         card.appendChild(side);
@@ -653,18 +713,21 @@
         function close() { overlay.close(); }
     };
 
-    // Отметка упаковки: количество подставляется само (факт, иначе план) и его можно
-    // поправить — но тогда обязательно примечание.
-    AtexPacker.prototype.openPackDialog = function(item) {
+    // Правка количества — по клику на само количество в карточке (#4680). Подставляется
+    // то, что в карточке и стоит; поправил — обязательно примечание. У НЕупакованной
+    // позиции правка только запоминается: в базу её унесёт кнопка «Упаковано». У
+    // упакованной писать некуда откладывать — отметка уже есть, правка уходит сразу.
+    AtexPacker.prototype.openQtyDialog = function(item) {
         var self = this;
         if (this.busy) return;
         if (!item.gpId) {
             this.notify('В отчёте нет gp_id — отметить упаковку нечему', 'error');
             return;
         }
-        var suggested = core.isPacked(item) ? item.packedQty : core.packQtyFor(item);
-        var qtyInput = el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(suggested) });
-        var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: item.notes || '', placeholder: 'например: 10 шт в брак' });
+        var packed = core.isPacked(item);
+        var suggested = core.baseQty(item);
+        var qtyInput = el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(core.currentQty(item)) });
+        var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: item.editedNote || item.notes || '', placeholder: 'например: 10 шт в брак' });
         var hint = el('div', { class: 'atex-pk-hint' });
         var error = el('div', { class: 'atex-pk-error' });
 
@@ -677,12 +740,12 @@
         noteInput.addEventListener('input', function() { error.textContent = ''; });
         syncHint();
 
-        var save = el('button', { class: 'atex-pk-btn atex-pk-btn-pack', type: 'button', text: 'Готово' });
+        var save = el('button', { class: 'atex-pk-btn atex-pk-btn-pack', type: 'button', text: 'Сохранить' });
         var cancel = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Отмена' });
 
-        var overlay = this.modal('Заказ ' + (item.orderNo || '—'), [
+        var overlay = this.modal('Количество · заказ ' + (item.orderNo || '—'), [
             el('div', { class: 'atex-pk-modal-desc', text: core.describeItem(item) }),
-            el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Упаковано, шт' }), qtyInput]),
+            el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : 'Количество, шт' }), qtyInput]),
             el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]),
             hint, error
         ], [cancel, save]);
@@ -695,7 +758,12 @@
             // Пока висит ошибка, подсказку убираем — иначе одно и то же сказано дважды.
             if (problem) { hint.textContent = ''; return; }
             overlay.close();
-            self.markPacked(item, core.toNumber(form.qty), String(form.note || '').trim());
+            var qty = core.toNumber(form.qty);
+            var note = str(form.note).trim();
+            if (packed) { self.markPacked(item, qty, note); return; }
+            item.editedQty = qty;
+            item.editedNote = note;
+            self.renderList();
         });
     };
 
@@ -719,6 +787,20 @@
 
     // ── Запись отметки ──
 
+    // Кнопка «Упаковано»: ничего не спрашивает — фиксирует упаковку тем количеством,
+    // которое стоит в карточке (#4680). Количество берётся только оттуда, поэтому
+    // упаковщик пишет ровно то, что видит.
+    AtexPacker.prototype.packNow = function(item) {
+        var qty = core.currentQty(item);
+        if (!(qty > 0)) {
+            // Отчёт не дал ни плана, ни факта — сказать нечего, зовём правку количества.
+            this.notify('Количество неизвестно — укажите его', 'error');
+            this.openQtyDialog(item);
+            return;
+        }
+        this.markPacked(item, qty, str(item.editedNote).trim());
+    };
+
     // Пишем состояние в Партию ГП («Упаковано шт» + «Примечание») и событие смены
     // «Упаковка». Локальную модель обновляем записанными значениями и не перечитываем
     // отчёт: сразу после записи он может отдать ещё старое значение (read-after-write).
@@ -738,6 +820,9 @@
         }).then(function() {
             item.packedQty = qty;
             if (note) item.notes = note;
+            // Правка доехала до базы — дальше карточка живёт записанным значением.
+            item.editedQty = null;
+            item.editedNote = '';
             self.setBusy(false);
             self.notify('Упаковано: ' + qty + ' шт', 'success');
             self.renderList();
@@ -803,7 +888,12 @@
         this.restoreShowPacked();
 
         return this.loadMetadata()
-            .then(function() { return self.loadItems(); })
+            .then(function() {
+                // Без упаковочного места список всё равно не показываем, а отчёт без него
+                // отдал бы чужие позиции — он фильтруется по месту (#4681).
+                if (self.needsPlacePick()) return null;
+                return self.loadItems();
+            })
             .then(function() {
                 self.render();
                 // Место ещё не выбрано — спрашиваем сразу, до работы со списком.

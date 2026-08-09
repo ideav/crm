@@ -122,7 +122,23 @@
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
 
 .atex-pk-side { display: flex; align-items: center; gap: 12px; }
-.atex-pk-qty { display: flex; align-items: baseline; gap: 4px; }
+/* Количество — кнопка правки (#4680): выглядит как число, но нажимается пальцем. */
+.atex-pk-qty {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-height: 44px;
+    padding: 4px 10px;
+    border: 1px dashed var(--pk-border);
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+.atex-pk-qty:hover { border-color: var(--pk-accent); }
+/* Поправленное количество — не ошибка, а ручной ввод: сплошная рамка цветом акцента. */
+.atex-pk-qty.is-edited { border-style: solid; border-color: var(--pk-accent); }
 .atex-pk-qty-value { font-size: 24px; font-weight: 700; }
 .atex-pk-qty-unit { font-size: 13px; color: var(--pk-muted); }
 .atex-pk-badge {

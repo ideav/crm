@@ -80,6 +80,44 @@ assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '110', qty_fact: '
 assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '', qty_fact: '' }))), 0,
     'packQtyFor: ни факта, ни плана → 0');
 
+// ── Правка количества живёт в карточке до отметки (#4680) ──
+(function() {
+    // Количество меняют кликом по самому количеству, а кнопка «Упаковано» фиксирует
+    // упаковку ТЕМ, ЧТО ВИДНО. Значит правка обязана быть источником и для карточки,
+    // и для записи — иначе упаковщик отметит не то, что прочитал.
+    var item = core.itemFromReportRow(row({ qty: '110', qty_fact: '60' }));
+    assertEqual(core.currentQty(item), 60, 'currentQty: правки нет → подсказка отчёта');
+    assertEqual(core.baseQty(item), 60, 'baseQty: правки нет → от подсказки и считаем');
+    assertEqual(core.isEdited(item), false, 'isEdited: правки нет');
+
+    item.editedQty = 55;
+    assertEqual(core.currentQty(item), 55, 'currentQty: правка сильнее подсказки отчёта');
+    assertEqual(core.isEdited(item), true, 'isEdited: правка отличается от отчёта');
+    assertEqual(core.baseQty(item), 60, 'baseQty: примечание требуем за отход от ОТЧЁТА, не от прежней правки');
+
+    item.editedQty = 60;
+    assertEqual(core.isEdited(item), false, 'isEdited: вернули как в отчёте — правки нет');
+
+    // Упакованная позиция живёт записанным «Упаковано шт»: правка её не касается.
+    var done = core.itemFromReportRow(row({ qty: '110', qty_fact: '110', packed: '90' }));
+    done.editedQty = 5;
+    assertEqual(core.currentQty(done), 90, 'currentQty: упаковано → записанное «Упаковано шт»');
+    assertEqual(core.baseQty(done), 90, 'baseQty: упаковано → от записанного');
+    assertEqual(core.isEdited(done), false, 'isEdited: у упакованной позиции правки не бывает');
+})();
+
+// ── Отчёт фильтруется по упаковочному месту (#4681) ──
+assertEqual(core.itemsPath({ id: '669275', label: '2' }),
+    'report/packer?JSON_KV&LIMIT=0,5000&FR_packer_no=2',
+    'itemsPath: место выбрано → FR_packer_no с его НОМЕРОМ, а не с id записи');
+assertEqual(core.itemsPath(null), 'report/packer?JSON_KV&LIMIT=0,5000',
+    'itemsPath: места нет → фильтра нет');
+assertEqual(core.itemsPath({ id: '669272', label: ' ' }), 'report/packer?JSON_KV&LIMIT=0,5000',
+    'itemsPath: пустой номер не превращается в FR_packer_no=');
+assertEqual(core.itemsPath({ id: '1', label: 'Цех №1' }),
+    'report/packer?JSON_KV&LIMIT=0,5000&FR_packer_no=%D0%A6%D0%B5%D1%85%20%E2%84%961',
+    'itemsPath: номер уезжает в URL закодированным');
+
 // ── Признак упаковки — из «Упаковано шт» отчёта ──
 assertEqual(core.isPacked(core.itemFromReportRow(row())), false, 'isPacked: пусто → нет');
 assertEqual(core.isPacked(core.itemFromReportRow(row({ packed: '110' }))), true, 'isPacked: 110 → да');
@@ -125,6 +163,10 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     ];
     assertEqual(core.summarize(items), { total: 3, packed: 1, rolls: 163, packedRolls: 110 },
         'summarize: позиции, упакованные, рулоны по qty_fact||qty');
+    items[1].editedQty = 20;
+    assertEqual(core.summarize(items), { total: 3, packed: 1, rolls: 159, packedRolls: 110 },
+        'summarize: сводка идёт за правкой количества, а не за отчётом');
+    items[1].editedQty = null;
     assertEqual(core.visibleItems(items, false).map(function(i) { return i.gpId; }), ['b', 'c'],
         'visibleItems: упакованные скрыты');
     assertEqual(core.visibleItems(items, true).map(function(i) { return i.gpId; }), ['a', 'b', 'c'],
@@ -198,6 +240,40 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     assertEqual(virgin.place, null, 'restorePlace: пусто — места нет');
     assertEqual(virgin.needsPlacePick(), true, 'needsPlacePick: без места идём в таблицу «Упаковочное место»');
     global.window = savedWindow;
+})();
+
+// ── Кнопка «Упаковано» фиксирует упаковку без вопросов (#4680) ──
+(function() {
+    // Кнопка больше не открывает модалку: она пишет ТО КОЛИЧЕСТВО, КОТОРОЕ ВИДНО в
+    // карточке, вместе с примечанием, которым эту правку объяснили.
+    var inst = Object.create(mod.Controller.prototype);
+    var written = [];
+    var asked = [];
+    var said = [];
+    inst.markPacked = function(item, qty, note) { written.push({ gpId: item.gpId, qty: qty, note: note }); };
+    inst.openQtyDialog = function(item) { asked.push(item.gpId); };
+    inst.notify = function(message) { said.push(message); };
+
+    var item = core.itemFromReportRow(row({ gp_id: 'a', qty: '110', qty_fact: '60' }));
+    inst.packNow(item);
+    assertEqual(written, [{ gpId: 'a', qty: 60, note: '' }],
+        'packNow: без правки пишем подсказку отчёта и ни о чём не спрашиваем');
+    assertEqual(asked, [], 'packNow: модалку кнопка не открывает');
+
+    written = [];
+    item.editedQty = 55;
+    item.editedNote = '5 шт в брак';
+    inst.packNow(item);
+    assertEqual(written, [{ gpId: 'a', qty: 55, note: '5 шт в брак' }],
+        'packNow: с правкой пишем поправленное количество и её примечание');
+
+    // Отчёт не дал ни плана, ни факта — писать нечего, зовём правку количества.
+    written = [];
+    var empty = core.itemFromReportRow(row({ gp_id: 'b', qty: '', qty_fact: '' }));
+    inst.packNow(empty);
+    assertEqual(written, [], 'packNow: нулевое количество в базу не уходит');
+    assertEqual(asked, ['b'], 'packNow: вместо нуля открываем правку количества');
+    assertEqual(said.length, 1, 'packNow: и говорим, почему отметка не прошла');
 })();
 
 console.log('\n' + passed + ' assertions passed');

@@ -37,12 +37,12 @@ var META = [
 
 // Строки report/packer?JSON_KV — снимок боевой базы (07.08.2026).
 var ROWS = [
-    { task: '1786094400', task_id: '667803', gp_id: '667836', order_no: '4615', order: '', material: 'MWR200', cut_width: '110.00', cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '5',   qty_fact: '5',   packed: '', notes: '', events: '1' },
-    { task: '1786094400', task_id: '667803', gp_id: '667843', order_no: '4615', order: '', material: 'MWR200', cut_width: '64.00',  cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '60',  qty_fact: '60',  packed: '', notes: '', events: '1' },
-    { task: '1786082460', task_id: '662268', gp_id: '662288', order_no: '4575', order: '', material: 'MR194',  cut_width: '33.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'втулка пластик серая для Videojet',   add_sleeve: 'Приклеить', qty: '270', qty_fact: '270', packed: '', notes: '', events: '1' },
-    { task: '1786086540', task_id: '661889', gp_id: '661936', order_no: '4561', order: '', material: 'MWR118', cut_width: '33.00',  cut_length: '650.00', wind_direction: 'IN',  sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', add_sleeve: 'Приклеить', qty: '27', qty_fact: '54', packed: '', notes: '', events: '1' },
-    { task: '1786078800', task_id: '666355', gp_id: '666392', order_no: '4619', order: '', material: 'MR192',  cut_width: '80.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '110', qty_fact: '110', packed: '110', notes: 'упаковано вчера', events: '1' },
-    { task: '1786078800', task_id: '662041', gp_id: '662082', order_no: '4572', order: '', material: 'MR194',  cut_width: '110.00', cut_length: '300.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '16',  qty_fact: '24',  packed: '', notes: '', events: '1' }
+    { task: '1786094400', task_id: '667803', gp_id: '667836', packer_no: '2', order_no: '4615', order: '', material: 'MWR200', cut_width: '110.00', cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '5',   qty_fact: '5',   packed: '', notes: '', events: '1' },
+    { task: '1786094400', task_id: '667803', gp_id: '667843', packer_no: '2', order_no: '4615', order: '', material: 'MWR200', cut_width: '64.00',  cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '60',  qty_fact: '60',  packed: '', notes: '', events: '1' },
+    { task: '1786082460', task_id: '662268', gp_id: '662288', packer_no: '2', order_no: '4575', order: '', material: 'MR194',  cut_width: '33.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'втулка пластик серая для Videojet',   add_sleeve: 'Приклеить', qty: '270', qty_fact: '270', packed: '', notes: '', events: '1' },
+    { task: '1786086540', task_id: '661889', gp_id: '661936', packer_no: '1', order_no: '4561', order: '', material: 'MWR118', cut_width: '33.00',  cut_length: '650.00', wind_direction: 'IN',  sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', add_sleeve: 'Приклеить', qty: '27', qty_fact: '54', packed: '', notes: '', events: '1' },
+    { task: '1786078800', task_id: '666355', gp_id: '666392', packer_no: '2', order_no: '4619', order: '', material: 'MR192',  cut_width: '80.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '110', qty_fact: '110', packed: '110', notes: 'упаковано вчера', events: '1' },
+    { task: '1786078800', task_id: '662041', gp_id: '662082', packer_no: '1', order_no: '4572', order: '', material: 'MR194',  cut_width: '110.00', cut_length: '300.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '16',  qty_fact: '24',  packed: '', notes: '', events: '1' }
 ];
 
 var PLACES = [ { i: 669272, r: ['1'] }, { i: 669275, r: ['2'] } ];
@@ -54,7 +54,14 @@ window.fetch = function(url, opts) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
-    if (/\/report\/packer/.test(u)) return json(ROWS);
+    if (/\/report\/packer/.test(u)) {
+        // Отчёт фильтруется по упаковочному месту (#4681): стенд повторяет боевое
+        // поведение — без фильтра отдаём всё, с фильтром только своё место.
+        var no = (u.match(/[?&]FR_packer_no=([^&]*)/) || [])[1];
+        no = no == null ? '' : decodeURIComponent(no);
+        console.log('[mock] report/packer', u, 'место=' + (no || '—'));
+        return json(no ? ROWS.filter(function(r) { return r.packer_no === no; }) : ROWS);
+    }
 
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj && mObj[1] === '669269') return json(PLACES);
