@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Упаковка» (#4658).
+     Мокает fetch: metadata, object/{Упаковочное место}, отчёт report/packer и команды _m_*.
+     Строки отчёта — снимок боевой ateh (Партия ГП внутри задания, заказ и параметры ролика
+     сбоку). Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Упаковка — стенд</title>
+<link rel="stylesheet" href="../download/atex/css/packer.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-packer" class="atex-pk" data-db="ateh" data-xsrf="test-token" data-user-id="462">
+    <div class="atex-pk-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок боевой схемы ateh ──
+var META = [
+    { id: 1081, val: 'Партия ГП', reqs: [
+        { id: 1188, val: 'Кол-во рулонов' },
+        { id: 70573, val: 'Кол-во факт' },
+        { id: 673786, val: 'Упаковано шт' },
+        { id: 673789, val: 'Примечание' }
+    ]},
+    { id: 1082, val: 'Событие смены', reqs: [
+        { id: 1196, val: 'Пользователь' },
+        { id: 1198, val: 'Значение' },
+        { id: 1199, val: 'Примечания' },
+        { id: 16415, val: 'Задание в производство' },
+        { id: 16419, val: 'Тип события' },
+        { id: 642887, val: 'Слиттер' }
+    ]},
+    { id: 669269, val: 'Упаковочное место', reqs: [] }
+];
+
+// Строки report/packer?JSON_KV — снимок боевой базы (07.08.2026).
+var ROWS = [
+    { task: '1786094400', task_id: '667803', gp_id: '667836', order_no: '4615', order: '', material: 'MWR200', cut_width: '110.00', cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '5',   qty_fact: '5',   packed: '', notes: '', events: '1' },
+    { task: '1786094400', task_id: '667803', gp_id: '667843', order_no: '4615', order: '', material: 'MWR200', cut_width: '64.00',  cut_length: '74.00',  wind_direction: 'OUT', sleeve: 'Втулка картонная 0.5" ширина 110 мм', add_sleeve: '',          qty: '60',  qty_fact: '60',  packed: '', notes: '', events: '1' },
+    { task: '1786082460', task_id: '662268', gp_id: '662288', order_no: '4575', order: '', material: 'MR194',  cut_width: '33.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'втулка пластик серая для Videojet',   add_sleeve: 'Приклеить', qty: '270', qty_fact: '270', packed: '', notes: '', events: '1' },
+    { task: '1786086540', task_id: '661889', gp_id: '661936', order_no: '4561', order: '', material: 'MWR118', cut_width: '33.00',  cut_length: '650.00', wind_direction: 'IN',  sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', add_sleeve: 'Приклеить', qty: '27', qty_fact: '54', packed: '', notes: '', events: '1' },
+    { task: '1786078800', task_id: '666355', gp_id: '666392', order_no: '4619', order: '', material: 'MR192',  cut_width: '80.00',  cut_length: '450.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '110', qty_fact: '110', packed: '110', notes: 'упаковано вчера', events: '1' },
+    { task: '1786078800', task_id: '662041', gp_id: '662082', order_no: '4572', order: '', material: 'MR194',  cut_width: '110.00', cut_length: '300.00', wind_direction: 'OUT', sleeve: 'Втулка картонная 1" длина 1 метр',    add_sleeve: '',          qty: '16',  qty_fact: '24',  packed: '', notes: '', events: '1' }
+];
+
+var PLACES = [ { i: 669272, r: ['1'] }, { i: 669275, r: ['2'] } ];
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata(?:$|\?)/.test(u)) return json(META);
+    if (/\/report\/packer/.test(u)) return json(ROWS);
+
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj && mObj[1] === '669269') return json(PLACES);
+
+    if (/\/_m_set\//.test(u)) {
+        // Применяем правку к строке отчёта, чтобы UI отражал результат после действия.
+        var id = (u.match(/_m_set\/(\d+)/) || [])[1];
+        var body = (opts && opts.body) || '';
+        var packed = (body.match(/t673786=([^&]*)/) || [])[1];
+        var note = (body.match(/t673789=([^&]*)/) || [])[1];
+        ROWS.forEach(function(r) {
+            if (r.gp_id === id) {
+                if (packed != null) r.packed = decodeURIComponent(packed);
+                if (note != null) r.notes = decodeURIComponent(note.replace(/\+/g, ' '));
+            }
+        });
+        console.log('[mock] _m_set', u, body);
+        return json({ ok: 1 });
+    }
+    if (/\/_m_new\//.test(u)) {
+        console.log('[mock] _m_new', u, opts && opts.body);
+        return json({ id: 999 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../download/atex/js/packer.js"></script>
+</body>
+</html>

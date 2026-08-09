@@ -11,6 +11,7 @@
         { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
         { "name": "Пульт слиттера", "href": "slitter", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
         { "name": "Пульт втулкореза", "href": "sleeve-cutter", "icon": "<i class=\"pi pi-cog\"></i>" },
+        { "name": "Упаковка", "href": "packer", "icon": "<i class=\"pi pi-box\"></i>" },
         { "name": "Карта раскроя", "href": "cut-map", "icon": "<i class=\"pi pi-map\"></i>" },
         { "name": "Расчёт оптимальной резки", "href": "cut-optimizer", "icon": "<i class=\"pi pi-calculator\"></i>" },
         { "name": "Склад готовой продукции", "href": "warehouse", "icon": "<i class=\"pi pi-box\"></i>" },
@@ -39,6 +40,7 @@
         { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
         { "name": "Пульт слиттера", "href": "slitter", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
         { "name": "Пульт втулкореза", "href": "sleeve-cutter", "icon": "<i class=\"pi pi-cog\"></i>" },
+        { "name": "Упаковка", "href": "packer", "icon": "<i class=\"pi pi-box\"></i>" },
         { "name": "Карта раскроя", "href": "cut-map", "icon": "<i class=\"pi pi-map\"></i>" },
         { "name": "Склад готовой продукции", "href": "warehouse", "icon": "<i class=\"pi pi-box\"></i>" }
       ]

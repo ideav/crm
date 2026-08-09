@@ -105,9 +105,14 @@
         return isFinite(n) ? n : 0;
     }
 
+    function roundTo(n, digits) {
+        var k = Math.pow(10, digits);
+        return Math.round(n * k) / k;
+    }
+
     // Округление до 3 знаков, чтобы убрать артефакты float-арифметики.
     function round3(n) {
-        return Math.round(n * 1000) / 1000;
+        return roundTo(n, 3);
     }
 
     function trimValue(value) {
@@ -159,12 +164,16 @@
             (toNumber(card.remainder) > 0 || toNumber(card.remainderM) > 0);
     }
 
-    // Число для подписи: без хвостовых нулей, с пробелом-разделителем тысяч.
-    function formatQty(value) {
-        var n = round3(toNumber(value));
+    // Число для подписи: без хвостовых нулей, с разделителем тысяч и не более
+    // `decimals` знаков после запятой (по умолчанию 3 — точный остаток карточки;
+    // сводка складских итогов зовёт с 0, дробные доли м² в сумме по складу —
+    // шум). Разделитель тысяч — НЕРАЗРЫВНЫЙ пробел: число остаётся одним словом
+    // и не разваливается по строкам.
+    function formatQty(value, decimals) {
+        var n = roundTo(toNumber(value), decimals == null ? 3 : decimals);
         var text = String(n);
         var parts = text.split('.');
-        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
         return parts.join(',');
     }
 
@@ -949,11 +958,14 @@
 
         var visible = filterCards(this.cards, this.filters);
         var s = summarize(visible);
+        // Итоги показываются целыми: доли м² в сумме по складу ничего не решают,
+        // а разряды тысяч у соседних сумм сливались в одну строку цифр (#4662).
+        // Точный остаток карточки — в строке списка ниже.
         this.summaryEl.innerHTML = '';
-        this.summaryEl.appendChild(metric('Карточек', s.count));
-        this.summaryEl.appendChild(metric('Риббоны, м²', formatQty(s.totalM2)));
-        this.summaryEl.appendChild(metric('Втулки, шт', formatQty(s.totalPcs)));
-        this.summaryEl.appendChild(metric('Втулки, м', formatQty(s.totalM)));
+        this.summaryEl.appendChild(metric('Карточек', formatQty(s.count, 0)));
+        this.summaryEl.appendChild(metric('Риббоны, м²', formatQty(s.totalM2, 0)));
+        this.summaryEl.appendChild(metric('Втулки, шт', formatQty(s.totalPcs, 0)));
+        this.summaryEl.appendChild(metric('Втулки, м', formatQty(s.totalM, 0)));
 
         if (!visible.length) {
             box.appendChild(el('div', { class: 'atex-in-empty', text: 'Остатков по фильтрам не найдено' }));

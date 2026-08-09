@@ -21,6 +21,10 @@ function assertEqual(actual, expected, name) {
     }
 }
 
+function assertTrue(cond, name) {
+    assertEqual(!!cond, true, name);
+}
+
 // Метаданные таблицы «Планшет» — как в задаче #4666.
 var PAD_TABLE = {
     id: '673803', up: '0', type: '3', val: 'Планшет', unique: '1',
@@ -136,5 +140,32 @@ assertEqual(store.getItem('atehPad'), 'deadbeef', 'токен лежит под 
 var broken = { getItem: function() { throw new Error('disabled'); }, setItem: function() { throw new Error('disabled'); } };
 assertEqual(guard.readToken(broken), '', 'отключённый localStorage не роняет пульт при чтении');
 assertEqual(guard.writeToken(broken, 'x'), false, 'отключённый localStorage честно возвращает false при записи');
+
+// ── Подключение в шаблонах ──
+// Сторож защищает ровно столько рабочих мест, сколько его подключают. Шаблон,
+// который тянет скрипт рабочего места НАПРЯМУЮ, открыт с любого планшета — это и
+// ловим: рабочих мест оператора со временем прибавляется (packer появился в
+// #4658), и каждое новое должно попасть под сторож.
+var fs = require('fs');
+var pathMod = require('path');
+var GUARDED = [
+    { tpl: 'slitter.html', root: 'atex-slitter', app: 'slitter.js' },
+    { tpl: 'sleeve-cutter.html', root: 'atex-sleeve-cutter', app: 'sleeve-cutter.js' },
+    { tpl: 'packer.html', root: 'atex-packer', app: 'packer.js' }
+];
+GUARDED.forEach(function(w) {
+    var html = fs.readFileSync(pathMod.join(__dirname, '..', 'templates', 'atex', w.tpl), 'utf8');
+    var guardTag = html.match(/<script[^>]*pad-guard\.js[^>]*>/);
+    assertTrue(guardTag, w.tpl + ': сторож планшета подключён');
+    if (!guardTag) return;
+    assertTrue(guardTag[0].indexOf('data-pad-root="' + w.root + '"') !== -1,
+        w.tpl + ': сторожу указан контейнер ' + w.root);
+    assertTrue(new RegExp('data-pad-app="[^"]*' + w.app.replace('.', '\\.') + '[^"]*"').test(guardTag[0]),
+        w.tpl + ': сторожу указан скрипт ' + w.app);
+    // Прямого тега скрипта рабочего места быть не должно — иначе он выполнится
+    // до проверки и нарисует рабочее место незарегистрированному планшету.
+    var direct = html.match(new RegExp('<script[^>]*src="[^"]*/' + w.app.replace('.', '\\.') + '\\?[^"]*"[^>]*>', 'g')) || [];
+    assertEqual(direct.length, 0, w.tpl + ': скрипт ' + w.app + ' НЕ подключён напрямую');
+});
 
 console.log('\n' + passed + ' assertions passed');

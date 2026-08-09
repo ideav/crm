@@ -1,0 +1,203 @@
+// Unit tests for the «Рабочее место упаковщика» core (ideav/crm#4658).
+//
+// Боевая схема ateh: строка отчёта `packer` — это Партия ГП внутри задания
+// («Задание в производство»), с позицией заказа и заказом сбоку. Отметка упаковки
+// пишет «Упаковано шт» в Партию ГП и событие смены «Упаковка» (тип 670935).
+// См. docs/atex_workplaces.md §3.13 и docs/integram-reports.md §11.
+//
+// Run with: node experiments/atex-packer.test.js
+
+var mod = require('../download/atex/js/packer.js');
+var core = mod.core;
+
+var passed = 0;
+function assertEqual(actual, expected, name) {
+    var ok = JSON.stringify(actual) === JSON.stringify(expected);
+    console.log((ok ? 'PASS' : 'FAIL') + ' — ' + name);
+    if (ok) {
+        passed++;
+    } else {
+        console.log('  expected:', JSON.stringify(expected));
+        console.log('  actual:  ', JSON.stringify(actual));
+        process.exitCode = 1;
+    }
+}
+
+// Строка отчёта `packer?JSON_KV` в том виде, в каком её отдаёт боевая ateh.
+function row(over) {
+    var base = {
+        task: '1786078800', task_id: '666355', gp_id: '666392',
+        order_no: '4619', order: '',
+        material: 'MWR113L', cut_width: '110.00', cut_length: '600.00',
+        wind_direction: 'IN', sleeve: 'втулка пластик серая для Videojet', add_sleeve: '',
+        qty: '110', qty_fact: '110', packed: '', notes: '', events: '1'
+    };
+    Object.keys(over || {}).forEach(function(k) { base[k] = over[k]; });
+    return base;
+}
+
+// ── toNumber / formatNumber: числа отчёта приходят строками с хвостом «.00» ──
+assertEqual(core.toNumber('110.00'), 110, 'toNumber parses decimal string');
+assertEqual(core.toNumber('12,5'), 12.5, 'toNumber accepts comma decimal');
+assertEqual(core.toNumber(''), 0, 'toNumber empty → 0');
+assertEqual(core.formatNumber('110.00'), '110', 'formatNumber: хвост .00 срезается');
+assertEqual(core.formatNumber('12.50'), '12.5', 'formatNumber: значащий знак остаётся');
+assertEqual(core.formatNumber(''), '', 'formatNumber: пусто остаётся пустым');
+
+// ── Разбор строки отчёта ──
+(function() {
+    var item = core.itemFromReportRow(row());
+    assertEqual(item.taskId, '666355', 'itemFromReportRow: task_id');
+    assertEqual(item.gpId, '666392', 'itemFromReportRow: gp_id');
+    assertEqual(item.orderNo, '4619', 'itemFromReportRow: номер заказа');
+    assertEqual(item.planQty, 110, 'itemFromReportRow: план');
+    assertEqual(item.factQty, 110, 'itemFromReportRow: факт');
+    assertEqual(item.packedQty, 0, 'itemFromReportRow: не упаковано → 0');
+
+    // JSON_KV отдаёт ссылочные колонки как {val,id} — берём отображаемое значение.
+    var kv = core.itemFromReportRow(row({ material: { val: 'MR194', id: '1101' } }));
+    assertEqual(kv.material, 'MR194', 'itemFromReportRow: {val,id} → val');
+})();
+
+// ── Подпись позиции в привычном упаковщику виде ──
+assertEqual(core.describeItem(core.itemFromReportRow(row())),
+    'MWR113L 110 х 600 IN втулка пластик серая для Videojet',
+    'describeItem: сырьё, ширина х длина, намотка, втулка');
+assertEqual(core.describeItem(core.itemFromReportRow(row({ add_sleeve: 'Приклеить' }))),
+    'MWR113L 110 х 600 IN втулка пластик серая для Videojet + доп. втулка: Приклеить',
+    'describeItem: доп. втулка добавляется хвостом');
+assertEqual(core.describeItem(core.itemFromReportRow(row({ wind_direction: '', sleeve: '' }))),
+    'MWR113L 110 х 600',
+    'describeItem: пустые поля не оставляют дыр');
+
+// ── Количество к упаковке: qty_fact, а если его нет — qty ──
+assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '110', qty_fact: '24' }))), 24,
+    'packQtyFor: есть факт → факт');
+assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '110', qty_fact: '' }))), 110,
+    'packQtyFor: факта нет → план');
+assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '110', qty_fact: '0' }))), 110,
+    'packQtyFor: факт 0 → план');
+assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '', qty_fact: '' }))), 0,
+    'packQtyFor: ни факта, ни плана → 0');
+
+// ── Признак упаковки — из «Упаковано шт» отчёта ──
+assertEqual(core.isPacked(core.itemFromReportRow(row())), false, 'isPacked: пусто → нет');
+assertEqual(core.isPacked(core.itemFromReportRow(row({ packed: '110' }))), true, 'isPacked: 110 → да');
+assertEqual(core.isPacked(core.itemFromReportRow(row({ packed: '0' }))), false, 'isPacked: 0 → нет');
+
+// ── Правка количества обязывает написать примечание ──
+assertEqual(core.noteRequired(110, 110), false, 'noteRequired: количество не меняли');
+assertEqual(core.noteRequired('110', 110), false, 'noteRequired: строка и число равны');
+assertEqual(core.noteRequired(90, 110), true, 'noteRequired: количество поправили');
+assertEqual(core.validatePack({ qty: 90, suggested: 110, note: '' }),
+    'Количество изменено — напишите примечание', 'validatePack: правка без примечания не проходит');
+assertEqual(core.validatePack({ qty: 90, suggested: 110, note: 'часть в брак' }), '',
+    'validatePack: правка с примечанием проходит');
+assertEqual(core.validatePack({ qty: 0, suggested: 110, note: 'ничего' }),
+    'Количество должно быть больше нуля', 'validatePack: ноль не принимается');
+assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
+    'validatePack: количество как предложено — примечание не нужно');
+
+// ── Группировка по заданию: одно время старта ≠ одно задание ──
+(function() {
+    // На бою у разных заданий совпадает плановый старт (коллизии planStart), поэтому
+    // группируем строго по task_id — иначе чужие позиции слипаются в одну карточку.
+    var rows = [
+        row({ task_id: '666355', gp_id: 'a', order_no: '4619' }),
+        row({ task_id: '662041', gp_id: 'b', order_no: '4572' }),
+        row({ task_id: '666355', gp_id: 'c', order_no: '4619' })
+    ];
+    var items = rows.map(core.itemFromReportRow);
+    var groups = core.groupByTask(items);
+    assertEqual(groups.map(function(g) { return g.taskId; }), ['666355', '662041'],
+        'groupByTask: порядок групп — как в отчёте (первое появление)');
+    assertEqual(groups.map(function(g) { return g.items.length; }), [2, 1],
+        'groupByTask: строки одного task_id в одной группе');
+    assertEqual(groups[0].taskUnix, 1786078800, 'groupByTask: время задания у группы');
+})();
+
+// ── Сводка и фильтр «показать упакованные» ──
+(function() {
+    var items = [
+        core.itemFromReportRow(row({ gp_id: 'a', qty: '110', qty_fact: '110', packed: '110' })),
+        core.itemFromReportRow(row({ gp_id: 'b', qty: '16', qty_fact: '24', packed: '' })),
+        core.itemFromReportRow(row({ gp_id: 'c', qty: '29', qty_fact: '', packed: '' }))
+    ];
+    assertEqual(core.summarize(items), { total: 3, packed: 1, rolls: 163, packedRolls: 110 },
+        'summarize: позиции, упакованные, рулоны по qty_fact||qty');
+    assertEqual(core.visibleItems(items, false).map(function(i) { return i.gpId; }), ['b', 'c'],
+        'visibleItems: упакованные скрыты');
+    assertEqual(core.visibleItems(items, true).map(function(i) { return i.gpId; }), ['a', 'b', 'c'],
+        'visibleItems: с переключателем видны все, на своих местах');
+    assertEqual(core.packedCount(items), 1, 'packedCount: сколько прячет переключатель');
+})();
+
+// ── Время задания → локальное HH:MM (round-trip, TZ-независимо) ──
+(function() {
+    var unix = Math.floor(new Date(2026, 7, 7, 8, 0, 0).getTime() / 1000);
+    assertEqual(core.unixToLocalTime(unix), '08:00', 'unixToLocalTime: Unix → HH:MM');
+    assertEqual(core.unixToLocalDate(unix), '07.08.2026', 'unixToLocalDate: Unix → DD.MM.YYYY');
+    assertEqual(core.unixToLocalTime(''), '', 'unixToLocalTime: пусто → пусто');
+})();
+
+// ── Поля записи: что уходит в «Партию ГП» и в «Событие смены» ──
+(function() {
+    var gpMeta = { id: '1081', reqs: [{ id: '673786', val: 'Упаковано шт' }, { id: '673789', val: 'Примечание' }] };
+    assertEqual(core.gpPackFields(gpMeta, { qty: 110, note: '' }), { t673786: 110 },
+        'gpPackFields: без примечания пишем только «Упаковано шт»');
+    assertEqual(core.gpPackFields(gpMeta, { qty: 90, note: 'часть в брак' }),
+        { t673786: 90, t673789: 'часть в брак' },
+        'gpPackFields: примечание пишется в «Примечание» партии');
+
+    var evMeta = {
+        id: '1082',
+        reqs: [
+            { id: '1196', val: 'Пользователь' }, { id: '1198', val: 'Значение' },
+            { id: '1199', val: 'Примечания' }, { id: '16415', val: 'Задание в производство' },
+            { id: '16419', val: 'Тип события' }, { id: '642887', val: 'Слиттер' }
+        ]
+    };
+    var fields = core.eventFields(evMeta, {
+        when: '2026-08-09 18:20:00', taskId: '666355', userId: '462', qty: 110, note: ''
+    });
+    assertEqual(fields, {
+        t1082: '2026-08-09 18:20:00', t16419: 'Упаковка', t16415: '666355',
+        t1196: '462', t1198: 110
+    }, 'eventFields: время, тип «Упаковка», задание, оператор, количество — и НИ СЛОВА о станке');
+    assertEqual(Object.prototype.hasOwnProperty.call(
+        core.eventFields(evMeta, { when: 'x', taskId: '1', userId: '2', qty: 1, note: '' }), 't642887'), false,
+        'eventFields: «Слиттер» не пишется — упаковка без станка');
+    assertEqual(core.eventFields(evMeta, { when: 'x', taskId: '', userId: '', qty: 5, note: 'правка' }),
+        { t1082: 'x', t16419: 'Упаковка', t1198: 5, t1199: 'правка' },
+        'eventFields: без задания и оператора — пишем что есть, примечание попадает в событие');
+})();
+
+// ── Упаковочное место: помним выбор, к таблице повторно не ходим ──
+(function() {
+    var store = {};
+    var savedWindow = global.window;
+    global.window = { localStorage: {
+        getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+        setItem: function(k, v) { store[k] = String(v); }
+    } };
+    var Controller = mod.Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.place = { id: '669275', label: '2' };
+    inst.storePlace();
+
+    var fresh = Object.create(Controller.prototype);
+    fresh.place = null;
+    fresh.restorePlace();
+    assertEqual(fresh.place, { id: '669275', label: '2' }, 'restorePlace: место поднимается из localStorage');
+    assertEqual(fresh.needsPlacePick(), false, 'needsPlacePick: место есть — таблицу не запрашиваем');
+
+    var virgin = Object.create(Controller.prototype);
+    virgin.place = null;
+    store = {};
+    virgin.restorePlace();
+    assertEqual(virgin.place, null, 'restorePlace: пусто — места нет');
+    assertEqual(virgin.needsPlacePick(), true, 'needsPlacePick: без места идём в таблицу «Упаковочное место»');
+    global.window = savedWindow;
+})();
+
+console.log('\n' + passed + ' assertions passed');

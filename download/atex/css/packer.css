@@ -1,0 +1,214 @@
+/* Рабочее место atex «Упаковка» (ideav/crm#4658).
+   Стили скоупятся под #atex-packer / .atex-pk, чтобы не пересекаться с остальными
+   рабочими местами в main.html. Планшетная раскладка: крупный номер заказа,
+   привычная подпись ролика, кнопка отметки под палец. */
+
+.atex-pk {
+    --pk-border: var(--input-border, #d9dee5);
+    --pk-border-soft: var(--border-color, #eef1f5);
+    --pk-bg: var(--input-bg, #ffffff);
+    --pk-surface: var(--bg-secondary, #f8fafc);
+    --pk-muted: var(--text-secondary, #6b7280);
+    --pk-accent: var(--atex-navy, #134174);
+    --pk-accent-d: var(--atex-navy-d, #0e3158);
+    --pk-success-bg: var(--color-success-bg, #dcfce7);
+    --pk-success-border: var(--color-success-border, #bbf7d0);
+    --pk-ok: var(--color-success, #15803d);
+    --pk-warn: var(--color-error, #b91c1c);
+    color: var(--text-primary, #1f2933);
+    font-size: 15px;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-pk {
+    --pk-success-bg: rgba(34, 197, 94, 0.16);
+    --pk-success-border: rgba(34, 197, 94, 0.45);
+}
+
+.atex-pk *,
+.atex-pk *::before,
+.atex-pk *::after { box-sizing: border-box; }
+
+.atex-pk.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-pk-loading,
+.atex-pk-placeholder { padding: 24px; color: var(--pk-muted); }
+.atex-pk-fatal { padding: 24px; color: var(--pk-warn); }
+.atex-pk-empty { padding: 20px; color: var(--pk-muted); }
+
+.atex-pk-layout { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+/* Шапка: заголовок слева, упаковочное место — в правом верхнем углу */
+.atex-pk-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.atex-pk-title { font-size: 20px; font-weight: 600; }
+.atex-pk-tools { display: flex; align-items: center; gap: 10px; }
+
+.atex-pk-place {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 14px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-pk-place:hover { border-color: var(--pk-accent); }
+.atex-pk-place-label { color: var(--pk-muted); font-size: 13px; }
+.atex-pk-place-value { font-size: 20px; font-weight: 700; color: var(--pk-accent); }
+
+.atex-pk-place-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 4px; }
+.atex-pk-place-option {
+    min-width: 72px;
+    padding: 14px 20px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-bg);
+    font-size: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    color: inherit;
+}
+.atex-pk-place-option:hover { border-color: var(--pk-accent); }
+.atex-pk-place-option.is-current { border-color: var(--pk-accent); background: var(--pk-surface); }
+
+/* Сводка */
+.atex-pk-summary {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border: 1px solid var(--pk-border-soft);
+    border-radius: 8px;
+    background: var(--pk-surface);
+}
+.atex-pk-metric { display: flex; flex-direction: column; }
+.atex-pk-metric-label { font-size: 12px; color: var(--pk-muted); }
+.atex-pk-metric-value { font-size: 17px; font-weight: 600; }
+.atex-pk-toggle { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--pk-muted); }
+
+/* Список */
+.atex-pk-main { display: flex; flex-direction: column; gap: 12px; }
+.atex-pk-group { display: flex; flex-direction: column; gap: 8px; }
+.atex-pk-group-head { font-size: 13px; color: var(--pk-muted); padding-left: 4px; }
+
+.atex-pk-card {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    border: 1px solid var(--pk-border);
+    border-radius: 10px;
+    background: var(--pk-bg);
+}
+.atex-pk-card.is-packed { background: var(--pk-success-bg); border-color: var(--pk-success-border); }
+
+.atex-pk-order { display: flex; flex-direction: column; }
+.atex-pk-order-no { font-size: 30px; font-weight: 700; line-height: 1.1; color: var(--pk-accent); }
+.atex-pk-order-client { font-size: 12px; color: var(--pk-muted); }
+
+.atex-pk-body { min-width: 0; }
+.atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
+.atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
+
+.atex-pk-side { display: flex; align-items: center; gap: 12px; }
+.atex-pk-qty { display: flex; align-items: baseline; gap: 4px; }
+.atex-pk-qty-value { font-size: 24px; font-weight: 700; }
+.atex-pk-qty-unit { font-size: 13px; color: var(--pk-muted); }
+.atex-pk-badge {
+    font-size: 12px;
+    color: var(--pk-ok);
+    border: 1px solid var(--pk-success-border);
+    border-radius: 999px;
+    padding: 2px 10px;
+}
+
+.atex-pk-btn {
+    padding: 10px 18px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-bg);
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    min-height: 44px;
+}
+.atex-pk-btn:hover { border-color: var(--pk-accent); }
+.atex-pk-btn-pack {
+    background: var(--pk-accent);
+    border-color: var(--pk-accent);
+    color: #fff;
+    font-weight: 600;
+}
+.atex-pk-btn-pack:hover { background: var(--pk-accent-d); border-color: var(--pk-accent-d); }
+
+/* Модалки */
+.atex-pk-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+}
+.atex-pk-modal {
+    width: min(460px, 100%);
+    background: var(--pk-bg);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.atex-pk-modal-title { font-size: 22px; font-weight: 700; }
+.atex-pk-modal-desc { color: var(--pk-muted); }
+.atex-pk-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+.atex-pk-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--pk-muted); }
+.atex-pk-input {
+    padding: 10px 12px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-bg);
+    color: var(--text-primary, #1f2933);
+    font-size: 18px;
+    min-height: 44px;
+}
+.atex-pk-input.is-required { border-color: var(--pk-warn); }
+.atex-pk-hint { font-size: 13px; color: var(--pk-muted); }
+.atex-pk-error { font-size: 13px; color: var(--pk-warn); }
+
+/* Тосты */
+.atex-pk-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    padding: 12px 18px;
+    border-radius: 8px;
+    background: var(--pk-accent);
+    color: #fff;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .2s ease, transform .2s ease;
+    z-index: 1100;
+}
+.atex-pk-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-pk-toast-success { background: var(--pk-ok); }
+.atex-pk-toast-error { background: var(--pk-warn); }
+
+@media (max-width: 760px) {
+    .atex-pk-card { grid-template-columns: 1fr; gap: 10px; }
+    .atex-pk-side { justify-content: space-between; }
+}
