@@ -63,3 +63,91 @@
     color: var(--atex-navy);
     outline: none;
 }
+
+/* Экран допуска планшета (ideav/crm#4666): показывается ВМЕСТО рабочего места,
+   пока планшет не опознан в таблице «Планшет». Кнопки крупные — пульт работает
+   пальцем на планшете. */
+.atex-pad-guard {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    padding: 1.5rem;
+    font-family: var(--atex-font);
+}
+
+.atex-pad-card {
+    width: 100%;
+    max-width: 460px;
+    padding: 1.75rem;
+    border: 1px solid var(--atex-steel-l);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 6px 24px rgba(19, 65, 116, 0.08);
+    text-align: center;
+}
+
+.atex-pad-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.35rem;
+    color: var(--atex-navy);
+}
+
+.atex-pad-text {
+    margin: 0;
+    color: var(--atex-ink);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.atex-pad-label {
+    display: block;
+    margin: 1.5rem 0 0.375rem;
+    text-align: left;
+    font-size: 0.9rem;
+    color: var(--atex-ink);
+}
+
+.atex-pad-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--atex-steel);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--atex-ink);
+    box-sizing: border-box;
+}
+
+.atex-pad-input:focus {
+    outline: none;
+    border-color: var(--atex-navy);
+}
+
+/* Место под ошибку держим всегда — при её появлении вёрстка не прыгает. */
+.atex-pad-error {
+    min-height: 1.25rem;
+    margin: 0.375rem 0 0.75rem;
+    text-align: left;
+    font-size: 0.85rem;
+    color: #b3261e;
+}
+
+.atex-pad-btn {
+    width: 100%;
+    padding: 0.875rem 1rem;
+    border: 0;
+    border-radius: 8px;
+    background: var(--atex-navy);
+    color: var(--atex-on-navy);
+    font-family: inherit;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.atex-pad-btn:hover:not(:disabled) { background: var(--atex-navy-d); }
+
+.atex-pad-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}

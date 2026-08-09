@@ -1,7 +1,7 @@
 <!-- Рабочее место atex «Пульт слиттера» (роль Оператор, планшет). -->
 <!-- Решение ideav/crm#2915 (часть #2903). См. docs/atex_workplaces.md §3.5 -->
 <!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/slitter -->
-<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?0{_global_.version}">
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.1">
 <link rel="stylesheet" href="/download/{_global_.z}/css/slitter.css?{_global_.version}.2">
 <div id="atex-slitter"
      class="atex-sl atex-brand"
@@ -12,4 +12,9 @@
     <div class="atex-sl-loading">Загрузка пульта слиттера…</div>
 </div>
 <script src="/download/{_global_.z}/js/ref-search.js?0{_global_.version}" defer></script>
-<script src="/download/{_global_.z}/js/slitter.js?{_global_.version}.11" defer></script>
+<!-- issue #4666: скрипт пульта подключает сторож планшета — и только после того, -->
+<!-- как планшет опознан в таблице «Планшет». Незарегистрированный планшет пульт -->
+<!-- вообще не загружает. -->
+<script src="/download/{_global_.z}/js/pad-guard.js?{_global_.version}.1"
+        data-pad-root="atex-slitter"
+        data-pad-app="/download/{_global_.z}/js/slitter.js?{_global_.version}.11" defer></script>
