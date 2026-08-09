@@ -38,9 +38,12 @@
 
 (function(root, factory) {
     'use strict';
-    var api = factory();
+    var api;
     if (typeof module === 'object' && module.exports) {
+        api = factory(require('./packaging-size.js'));
         module.exports = api;
+    } else {
+        api = factory(root.AtexPackagingSize);
     }
     if (typeof window !== 'undefined') {
         window.AtexPacker = api;
@@ -52,8 +55,11 @@
             }
         }
     }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function() {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(PackagingSize) {
     'use strict';
+
+    // #4665: справочник «Типоразмер» — сколько роликов и в какой короб укладывать.
+    var packing = (PackagingSize && PackagingSize.core) || null;
 
     // Имена таблиц и реквизитов схемы ateh: по ним рабочее место находит числовые id
     // в метаданных текущей сборки.
@@ -77,7 +83,9 @@
         orderNo: 'order_no', orderClient: 'order',
         material: 'material', width: 'cut_width', length: 'cut_length',
         wind: 'wind_direction', sleeve: 'sleeve', addSleeve: 'add_sleeve',
-        qty: 'qty', qtyFact: 'qty_fact', packed: 'packed', notes: 'notes', events: 'events'
+        qty: 'qty', qtyFact: 'qty_fact', packed: 'packed', notes: 'notes', events: 'events',
+        // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
+        tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type'
     };
 
     var STORE_PLACE_ID = 'atex-pk-place-id';
@@ -161,9 +169,42 @@
             factQty: toNumber(kvVal(r[COL.qtyFact])),
             packedQty: toNumber(kvVal(r[COL.packed])),
             notes: str(kvVal(r[COL.notes])).trim(),
-            events: toNumber(kvVal(r[COL.events]))
+            events: toNumber(kvVal(r[COL.events])),
+            tipo: str(kvVal(r[COL.tipo])).trim(),
+            tipoId: str(kvVal(r[COL.tipoId])),
+            materialType: str(kvVal(r[COL.materialType])).trim()
         };
         return item;
+    }
+
+    // #4665: типоразмер позиции. Обычно он уже проставлен планированием — берём его по
+    // id из справочника; если у партии его нет (старая запись), подбираем на месте по
+    // ширине, длине, фольге и доп. втулке. Без справочника — null, карточка просто без короба.
+    function sizeForItem(item, sizes) {
+        if (!packing || !item) return null;
+        var list = sizes || [];
+        var id = str(item.tipoId);
+        if (id) {
+            var stored = list.filter(function(s) { return String(s.id) === id; })[0];
+            if (stored) return stored;
+        }
+        return packing.matchSize(list, {
+            width: item.width,
+            length: item.length,
+            foil: packing.isFoilType(item.materialType) || packing.isFoilType(item.material),
+            addSleeve: item.addSleeve
+        });
+    }
+
+    // Подпись упаковки для карточки: «короб №125 · по 36 шт · 3 короба».
+    function packingLabel(size, qty) {
+        if (!packing || !size) return '';
+        var parts = [];
+        if (size.box) parts.push('короб ' + size.box);
+        if (size.perBox > 0) parts.push('по ' + size.perBox + ' шт');
+        var boxes = packing.boxesFor(size, qty);
+        if (boxes > 0) parts.push(boxes + (boxes === 1 ? ' короб' : (boxes < 5 ? ' короба' : ' коробов')));
+        return parts.join(' · ');
     }
 
     // Подпись позиции в том виде, к которому привык упаковщик:
@@ -336,6 +377,8 @@
         summarize: summarize,
         visibleItems: visibleItems,
         packedCount: packedCount,
+        sizeForItem: sizeForItem,
+        packingLabel: packingLabel,
         aliasOf: aliasOf,
         matchesName: matchesName,
         tableByName: tableByName,
@@ -369,6 +412,7 @@
         this.meta = { gp: null, event: null, place: null };
         this.places = [];          // справочник упаковочных мест (грузится только по нужде)
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
+        this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — выбранное упаковочное место
         this.showPacked = false;
         this.busy = false;
@@ -438,6 +482,19 @@
     };
 
     // ── Позиции к упаковке ──
+
+    // #4665: справочник типоразмеров — отчётом (он идёт под правами владельца, поэтому
+    // роли не нужен грант на сам справочник). Не прочитался — работаем без коробов.
+    AtexPacker.prototype.loadSizes = function() {
+        var self = this;
+        if (!PackagingSize) { this.sizes = []; return Promise.resolve(); }
+        return this.getJson('report/' + PackagingSize.REPORT + '?JSON_KV&LIMIT=0,1000').then(function(rows) {
+            self.sizes = packing.sizesFromReport(rows);
+        }).catch(function(err) {
+            console.error('atex-packer: справочник типоразмеров не прочитан — ' + err.message);
+            self.sizes = [];
+        });
+    };
 
     AtexPacker.prototype.loadItems = function() {
         var self = this;
@@ -591,10 +648,17 @@
         if (item.planQty) meta.push('план ' + item.planQty);
         if (item.factQty) meta.push('факт ' + item.factQty);
         if (item.notes) meta.push(item.notes);
-        card.appendChild(el('div', { class: 'atex-pk-body' }, [
+        var body = [
             el('div', { class: 'atex-pk-desc', text: core.describeItem(item) || '—' }),
             el('div', { class: 'atex-pk-meta', text: meta.join(' · ') })
-        ]));
+        ];
+        // #4665: в какой короб и по сколько штук — из справочника «Типоразмер».
+        var size = core.sizeForItem(item, this.sizes);
+        var packLabel = core.packingLabel(size, packed ? item.packedQty : core.packQtyFor(item));
+        if (packLabel) {
+            body.push(el('div', { class: 'atex-pk-pack', title: size.name, text: packLabel }));
+        }
+        card.appendChild(el('div', { class: 'atex-pk-body' }, body));
 
         var side = el('div', { class: 'atex-pk-side' });
         side.appendChild(el('div', { class: 'atex-pk-qty' }, [
@@ -803,6 +867,7 @@
         this.restoreShowPacked();
 
         return this.loadMetadata()
+            .then(function() { return self.loadSizes(); })
             .then(function() { return self.loadItems(); })
             .then(function() {
                 self.render();
