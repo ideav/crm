@@ -301,6 +301,7 @@ class QrLoginManager {
             codeBox.innerHTML = '';
             codeBox.classList.remove('qr-login-expired');
         }
+        this._renderPair('');
         this._setStatus('Готовим код…', false);
         try {
             const response = await fetch(`${encodeURIComponent(db)}/qrnew?JSON`, {
@@ -316,6 +317,7 @@ class QrLoginManager {
             this.session = data;
             this.expiresAt = Date.now() + (data.ttl || 120) * 1000;
             this._render(data.url);
+            this._renderPair(data.pair);
             this._tick();
             this.tickTimer = setInterval(() => this._tick(), 1000);
             this.pollTimer = setInterval(() => this._poll(), 2000);
@@ -328,6 +330,18 @@ class QrLoginManager {
         if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
         if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
         this.session = null;
+    }
+
+    // Проверочное число сервер выводит из кода сессии и печатает такое же на
+    // странице подтверждения. Человек сверяет два числа — подсунутый чужой QR
+    // покажет на телефоне не то, что нарисовано здесь (#4677).
+    _renderPair(pair) {
+        const box = this._el('qr-login-pair');
+        const value = this._el('qr-login-pair-value');
+        if (!box || !value) return;
+        if (!pair) { box.style.display = 'none'; return; }
+        value.textContent = pair;
+        box.style.display = '';
     }
 
     _render(url) {
@@ -353,6 +367,7 @@ class QrLoginManager {
 
     _expire() {
         this.stop();
+        this._renderPair('');
         const codeBox = this._el('qr-login-code');
         if (codeBox) codeBox.classList.add('qr-login-expired');
         const refreshBtn = this._el('qr-refresh-btn');
@@ -371,9 +386,17 @@ class QrLoginManager {
         if (!this.session) return;
         const db = this.db;
         try {
-            const url = `${encodeURIComponent(db)}/qrpoll?JSON&c=${encodeURIComponent(this.session.code)}`
-                + `&s=${encodeURIComponent(this.session.secret)}`;
-            const response = await fetch(url);
+            // Код и секрет уходят ТЕЛОМ POST: в строке запроса секрет осел бы в
+            // access-логе сервера, в логе приложения и в истории браузера, а он
+            // отпирает выдачу постоянного токена (#4677).
+            const body = new URLSearchParams();
+            body.set('c', this.session.code);
+            body.set('s', this.session.secret);
+            const response = await fetch(`${encodeURIComponent(db)}/qrpoll?JSON`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            });
             const data = await response.json();
             if (!data) return;
             if (data.status === 'confirmed' && data.token) {

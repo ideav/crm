@@ -116,9 +116,15 @@ const SESSION = {
   fireTimers(2000);
   await new Promise(r => setImmediate(r));
   const pollUrl = fetchCalls[1].url;
+  const pollBody = new URLSearchParams(fetchCalls[1].opts.body);
   expect(pollUrl.indexOf('ateh/qrpoll?JSON') === 0, 'опрос идёт в qrpoll');
-  expect(pollUrl.indexOf('c=' + SESSION.code) !== -1 && pollUrl.indexOf('s=' + SESSION.secret) !== -1
-       , 'опрос шлёт и код, и секрет');
+  expect(fetchCalls[1].opts.method === 'POST', 'опрос отправляется методом POST');
+  expect(pollBody.get('c') === SESSION.code && pollBody.get('s') === SESSION.secret
+       , 'опрос шлёт и код, и секрет — ТЕЛОМ запроса');
+  // #4677: секрет отпирает выдачу постоянного токена, а строка запроса оседает в
+  // access-логе сервера, в логе приложения и в истории браузера.
+  expect(pollUrl.indexOf(SESSION.secret) === -1, 'секрета в адресе опроса НЕТ');
+  expect(pollUrl.indexOf(SESSION.code) === -1, 'кода в адресе опроса тоже нет');
   expect(t.authorized.length === 0, 'пока pending — входа нет');
 
   // 3) Подтверждение: вход выполняется один раз, таймеры сняты.

@@ -26,6 +26,7 @@ function expect($cond, $name){
 
 define("QR_LOGIN_TTL", 120);
 define("QR_LOGIN_MAX", 200);
+define("QR_LOGIN_MAX_IP", 5);
 define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");
 define("DB_MASK", "/^[a-z0-9_]{1,15}$/i");
 
@@ -47,6 +48,7 @@ $fns = array(
     "secureToken","qrLoginFile","qrLoginNew","qrLoginPrune","qrLoginAppend","qrLoginFind",
     "qrLoginReplace","qrLoginRemove","qrLoginExpired","qrLoginClaimStatus",
     "qrLoginEncode","qrLoginDecode","qrLoginLoadRaw","qrLoginMutate",
+    "qrLoginPairCode","qrLoginIpCount",
     "qrLoginCreate","qrLoginConfirm","qrLoginClaim","qrLoginGet","qrLoginPendingRedirect"
 );
 foreach($fns as $fn) eval(extract_function_source($source, $fn));
@@ -118,11 +120,48 @@ $list = array(
 );
 $pruned = qrLoginPrune($list, $now, QR_LOGIN_TTL);
 expect(count($pruned) === 1 && $pruned[0]["code"] === "b", "прополка убирает просроченные и мусор");
+# Потолок ОТКАЗЫВАЕТ, а не вытесняет: вытеснение позволяло неаутентифицированным
+# флудом qrnew выкинуть чужие сессии, включая подтверждённые (#4677).
 $capped = array();
-for($i = 0; $i < QR_LOGIN_MAX + 5; $i++)
-    $capped = qrLoginAppend($capped, array("code"=>"c$i","createdAt"=>$now), QR_LOGIN_MAX);
+for($i = 0; $i < QR_LOGIN_MAX; $i++)
+    $capped = qrLoginAppend($capped, array("code"=>"c$i","createdAt"=>$now,"ip"=>"10.0.0.$i"), QR_LOGIN_MAX);
 expect(count($capped) === QR_LOGIN_MAX, "потолок QR_LOGIN_MAX держит размер файла");
-expect($capped[count($capped)-1]["code"] === "c".(QR_LOGIN_MAX + 4), "последней остаётся самая свежая сессия");
+expect(qrLoginAppend($capped, array("code"=>"over","createdAt"=>$now), QR_LOGIN_MAX) === null,
+    "переполнение = ОТКАЗ, а не вытеснение старых");
+expect($capped[0]["code"] === "c0", "самая старая сессия остаётся на месте");
+
+# Потолок на один адрес: флуд с одного клиента не занимает весь файл.
+$ips = array(
+    array("code"=>"i1","createdAt"=>$now,"ip"=>"1.2.3.4"),
+    array("code"=>"i2","createdAt"=>$now,"ip"=>"1.2.3.4"),
+    array("code"=>"i3","createdAt"=>$now,"ip"=>"5.6.7.8")
+);
+expect(qrLoginIpCount($ips, "1.2.3.4") === 2, "сессии считаются по адресу");
+expect(qrLoginIpCount($ips, "9.9.9.9") === 0, "чужой адрес — ноль сессий");
+expect(qrLoginIpCount($ips, "") === 0, "пустой адрес не считаем");
+
+$flood = "qf".getmypid();
+@unlink(qrLoginFile($flood));
+$made = 0;
+for($i = 0; $i < QR_LOGIN_MAX_IP + 3; $i++)
+    if(qrLoginCreate($flood, "", "203.0.113.7"))
+        $made++;
+expect($made === QR_LOGIN_MAX_IP, "с одного адреса больше QR_LOGIN_MAX_IP сессий не создать");
+expect(is_array(qrLoginCreate($flood, "", "203.0.113.8")), "другому адресу вход по QR остаётся доступен");
+@unlink(qrLoginFile($flood));
+
+# Проверочное число: одинаковое для одного кода, разное для разных, 6 цифр.
+# Права на файле: в нём лежат постоянные токены подтверждённых сессий (#4677).
+$permDb = "qp".getmypid();
+@unlink(qrLoginFile($permDb));
+qrLoginCreate($permDb, "", "198.51.100.1");
+clearstatcache();
+expect((fileperms(qrLoginFile($permDb)) & 0777) === 0600, "файл сессий доступен только владельцу (0600)");
+@unlink(qrLoginFile($permDb));
+
+expect(qrLoginPairCode("abc") === qrLoginPairCode("abc"), "проверочное число устойчиво для кода");
+expect(qrLoginPairCode("abc") !== qrLoginPairCode("abd"), "разные коды — разные числа");
+expect(preg_match('/^[0-9]{6}$/', qrLoginPairCode(str_repeat("a", 64))) === 1, "проверочное число — 6 цифр");
 
 # 7) Возврат после входа через OAuth: адрес собирается только из валидных значений.
 $_COOKIE["qr_pending"] = "ateh:".str_repeat("f", 64);

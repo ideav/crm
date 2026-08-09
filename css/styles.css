@@ -998,6 +998,28 @@ body {
     display: block;
 }
 
+/* Проверочное число (issue #4677): его же печатает страница подтверждения на
+   телефоне — человек сверяет и не подтверждает подсунутый чужой вход. */
+.qr-login-pair {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.qr-login-pair-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.qr-login-pair-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--text-primary);
+}
+
 .qr-login-hint {
     margin-top: 0.75rem;
     font-size: 0.85rem;

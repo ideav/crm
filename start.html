@@ -1530,7 +1530,13 @@ mark.search-highlight {
                 </div>
                 <div id="qr-login-panel" class="qr-login-panel" style="display:none;">
                     <div class="qr-login-code" id="qr-login-code"></div>
-                    <div class="qr-login-hint">Наведите камеру телефона на код и подтвердите вход — эта страница откроется сама.</div>
+                    <!-- issue #4677: проверочное число дублируется на телефоне. Совпало —
+                         подтверждать можно; не совпало — вам подсунули чужой код. -->
+                    <div class="qr-login-pair" id="qr-login-pair" style="display:none;">
+                        <span class="qr-login-pair-label">Проверочное число</span>
+                        <span class="qr-login-pair-value" id="qr-login-pair-value"></span>
+                    </div>
+                    <div class="qr-login-hint">Наведите камеру телефона на код и подтвердите вход, сверив проверочное число — эта страница откроется сама.</div>
                     <div class="qr-login-status" id="qr-login-status"></div>
                     <button type="button" id="qr-refresh-btn" class="btn-secondary" style="display:none;">Обновить код</button>
                 </div>

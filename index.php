@@ -177,6 +177,7 @@ define("TOKEN", 125);
 define("SECRET", 130);
 define("QR_LOGIN_TTL", 120);  # Вход по QR: время жизни кода, сек (#4667)
 define("QR_LOGIN_MAX", 200);  # Вход по QR: одновременных сессий на базу
+define("QR_LOGIN_MAX_IP", 5); # Вход по QR: одновременных сессий с одного адреса (#4677)
 define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");  # Вход по QR: формат кода и секрета
 define("VERSION", 120);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
@@ -270,7 +271,7 @@ if(!$billing && ($z !== "auth.asp")){
 																									
 # The trace cookie to be deleted upon the session close
 if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
-	$GLOBALS["TRACE"] = "****".preg_replace('/([?&](secret|token|c|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"])."<br/>\n";
+	$GLOBALS["TRACE"] = "****".preg_replace('/([?&](secret|token|c|s|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"])."<br/>\n";
     if(isset($_GET["TRACE_IT"]))
 	    setcookie("TRACE_IT", 1, time() + 3600*3, "/$z"); // 3 hours
 	$logPath = "templates/custom/$z/logs";
@@ -301,7 +302,9 @@ if(strlen($rawInput)){
         foreach($json AS $key => $value)
             $_POST[$key] = $_REQUEST[$key] = $value;
 }
-$sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1'];
+# `c`/`s` — код и секрет входа по QR: секрет отпирает выдачу ПОСТОЯННОГО токена,
+# поэтому в лог не попадает ни телом, ни строкой запроса (#4677).
+$sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1', 'c', 's'];
 foreach($_POST AS $key => $value){
     $value = maskSensitiveLogValue($key, $value, $sensitivePostKeys);
 	if(is_array($value))
@@ -310,7 +313,7 @@ foreach($_POST AS $key => $value){
 		if(strlen($value) && !in_array(strtolower($key), $sensitivePostKeys))
 			$params .= " $key=$value;";
 }
-$safeUri = preg_replace('/([?&](secret|token|c|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]);
+$safeUri = preg_replace('/([?&](secret|token|c|s|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]);
 wlog($_SERVER["REMOTE_ADDR"]." ".$safeUri." $params", "log");
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
     # Check if this is a confirmation request
@@ -909,17 +912,36 @@ function qrLoginFile($db){
     return sys_get_temp_dir()."/qr_login_".$safeDb.".json";
 }
 # --- Чистые операции над списком сессий (тестируются без файловой системы) ---
-function qrLoginNew($now, $client=""){
+function qrLoginNew($now, $client="", $ip=""){
     return array(
         "code" => secureToken(),
         "secret" => secureToken(),
         "createdAt" => (int)$now,
         "status" => "pending",
         "client" => (string)$client,
+        "ip" => (string)$ip,
         "user" => "",
         "token" => "",
         "xsrf" => ""
     );
+}
+# Короткий проверочный код — ОДИН И ТОТ ЖЕ на экране с QR и на странице
+# подтверждения. Человек сверяет два числа и не подтверждает чужой вход: подсунутый
+# QR даст на телефоне не то число, что нарисовано на его собственном экране (#4677).
+# Выводится из кода сессии, поэтому хранить его отдельно не нужно.
+function qrLoginPairCode($code){
+    $hex = substr(hash("sha256", (string)$code), 0, 6);
+    return str_pad((string)(hexdec($hex) % 1000000), 6, "0", STR_PAD_LEFT);
+}
+function qrLoginIpCount($sessions, $ip){
+    $ip = (string)$ip;
+    if($ip === "")
+        return 0;
+    $n = 0;
+    foreach($sessions as $session)
+        if(is_array($session) && isset($session["ip"]) && (string)$session["ip"] === $ip)
+            $n++;
+    return $n;
 }
 function qrLoginPrune($sessions, $now, $ttl){
     if(!is_array($sessions))
@@ -934,12 +956,16 @@ function qrLoginPrune($sessions, $now, $ttl){
     }
     return array_values($kept);
 }
+# Переполнение — ОТКАЗ, а не вытеснение старых. Вытесняя, неаутентифицированный
+# флуд `qrnew` выносил бы из файла чужие сессии — в том числе ПОДТВЕРЖДЁННЫЕ
+# телефоном и ещё не забранные: человек жмёт «Подтвердить», а компьютер получает
+# «код устарел» (#4677). `null` = мест нет.
 function qrLoginAppend($sessions, $session, $max){
     $sessions = is_array($sessions) ? array_values($sessions) : array();
-    $sessions[] = $session;
     $max = (int)$max > 0 ? (int)$max : 1;
-    if(count($sessions) > $max)
-        $sessions = array_slice($sessions, count($sessions) - $max);
+    if(count($sessions) >= $max)
+        return null;
+    $sessions[] = $session;
     return array_values($sessions);
 }
 function qrLoginFind($sessions, $code){
@@ -1006,6 +1032,11 @@ function qrLoginMutate($db, $mutator){
     $fp = @fopen($path, "c+");
     if(!$fp)
         return null;
+    # Права — СРАЗУ после создания, до первой записи: в файле лежат постоянные
+    # токены подтверждённых сессий, а между fopen по umask (обычно 0644) и chmod
+    # в конце любой локальный процесс успевал открыть его на чтение — открытый
+    # дескриптор переживает последующий chmod (#4677).
+    @chmod($path, 0600);
     @flock($fp, LOCK_EX);
     $raw = stream_get_contents($fp);
     $sessions = qrLoginDecode($raw === false ? "" : $raw);
@@ -1016,16 +1047,22 @@ function qrLoginMutate($db, $mutator){
     @fflush($fp);
     @flock($fp, LOCK_UN);
     @fclose($fp);
-    @chmod($path, 0600);
     return $ret;
 }
-function qrLoginCreate($db, $client){
+# Возвращает сессию либо null, если мест нет — на базе целиком (QR_LOGIN_MAX) или
+# на одном адресе (QR_LOGIN_MAX_IP). Потолок на адрес не даёт одному клиенту
+# занять весь файл и тем самым закрыть вход по QR остальным (#4677).
+function qrLoginCreate($db, $client, $ip=""){
     $now = time();
-    $session = qrLoginNew($now, $client);
-    return qrLoginMutate($db, function($sessions) use ($session, $now){
+    $session = qrLoginNew($now, $client, $ip);
+    return qrLoginMutate($db, function($sessions) use ($session, $now, $ip){
         $sessions = qrLoginPrune($sessions, $now, QR_LOGIN_TTL);
-        $sessions = qrLoginAppend($sessions, $session, QR_LOGIN_MAX);
-        return array($sessions, $session);
+        if(qrLoginIpCount($sessions, $ip) >= QR_LOGIN_MAX_IP)
+            return array($sessions, null);
+        $appended = qrLoginAppend($sessions, $session, QR_LOGIN_MAX);
+        if($appended === null)
+            return array($sessions, null);
+        return array($appended, $session);
     });
 }
 # Телефон подтвердил вход: кладём в сессию постоянный токен пользователя.
@@ -1101,11 +1138,21 @@ function qrLoginDie($title, $inner){
 }
 # Адрес для QR собирается по СВОЕМУ запросу: локальная установка в докере живёт и
 # по http, а зашитый https дал бы код, по которому телефон никуда не попадёт.
-function qrLoginBaseUrl(){
-    $https = (!empty($_SERVER["HTTPS"]) && strtolower($_SERVER["HTTPS"]) !== "off")
+function qrLoginIsHttps(){
+    return (!empty($_SERVER["HTTPS"]) && strtolower($_SERVER["HTTPS"]) !== "off")
         || (isset($_SERVER["HTTP_X_FORWARDED_PROTO"]) && strtolower($_SERVER["HTTP_X_FORWARDED_PROTO"]) === "https");
-    $host = isset($_SERVER["HTTP_HOST"]) ? $_SERVER["HTTP_HOST"] : $_SERVER["SERVER_NAME"];
-    return ($https ? "https" : "http")."://".$host;
+}
+# Хост берётся из заголовка запроса (Host), поэтому чистим его до допустимых в
+# имени хоста символов и откатываемся на SERVER_NAME: в QR должен попасть адрес,
+# а не то, что клиент вписал в заголовок (#4677).
+function qrLoginHost(){
+    $host = isset($_SERVER["HTTP_HOST"]) ? (string)$_SERVER["HTTP_HOST"] : "";
+    if(!preg_match('/^[a-z0-9.\-]+(:[0-9]{1,5})?$/i', $host))
+        $host = isset($_SERVER["SERVER_NAME"]) ? (string)$_SERVER["SERVER_NAME"] : "";
+    return preg_replace('/[^a-z0-9.\-:]/i', '', $host);
+}
+function qrLoginBaseUrl(){
+    return (qrLoginIsHttps() ? "https" : "http")."://".qrLoginHost();
 }
 function qrLoginJson($data, $httpCode=""){
     if($httpCode !== "")
@@ -11055,12 +11102,14 @@ switch($a)  # Check actions, which don't require authentication
 	case "qrnew":
 		if($_SERVER["REQUEST_METHOD"] !== "POST")
 			qrLoginJson(array("error" => t9n("[RU]Только POST[EN]POST only")), "405 Method Not Allowed");
-		$session = qrLoginCreate($z, qrLoginClientHint());
+		$session = qrLoginCreate($z, qrLoginClientHint(), isset($_SERVER["REMOTE_ADDR"]) ? $_SERVER["REMOTE_ADDR"] : "");
 		if(!$session)
-			qrLoginJson(array("error" => t9n("[RU]Не удалось создать код[EN]Could not create the code")), "500 Internal Server Error");
+			qrLoginJson(array("error" => t9n("[RU]Слишком много запросов кода. Подождите две минуты и повторите."
+			                               ."[EN]Too many code requests. Wait two minutes and try again.")), "429 Too Many Requests");
 		qrLoginJson(array(
 			"code" => $session["code"],
 			"secret" => $session["secret"],
+			"pair" => qrLoginPairCode($session["code"]),
 			"url" => qrLoginBaseUrl()."/$z/qrlogin?c=".$session["code"],
 			"ttl" => QR_LOGIN_TTL
 		));
@@ -11069,8 +11118,13 @@ switch($a)  # Check actions, which don't require authentication
 	# #4667: опрос состояния кода браузером, который показывает QR. Токен отдаётся
 	# только вместе с секретом — он известен лишь создателю сессии, в QR его нет.
 	case "qrpoll":
-		$c = isset($_REQUEST["c"]) ? (string)$_REQUEST["c"] : "";
-		$s = isset($_REQUEST["s"]) ? (string)$_REQUEST["s"] : "";
+		# ТОЛЬКО POST и только тело: секрет отпирает выдачу постоянного токена, а
+		# строка запроса оседает в access-логе сервера, в логе приложения, в логах
+		# прокси и в истории браузера (#4677).
+		if($_SERVER["REQUEST_METHOD"] !== "POST")
+			qrLoginJson(array("error" => t9n("[RU]Только POST[EN]POST only")), "405 Method Not Allowed");
+		$c = isset($_POST["c"]) ? (string)$_POST["c"] : "";
+		$s = isset($_POST["s"]) ? (string)$_POST["s"] : "";
 		if(!preg_match(QR_CODE_MASK, $c) || !preg_match(QR_CODE_MASK, $s))
 			qrLoginJson(array("status" => "expired"));
 		$claim = qrLoginClaim($z, $c, $s);
@@ -11092,8 +11146,16 @@ switch($a)  # Check actions, which don't require authentication
 	# авторизованная ветка (см. switch ниже) — здесь только запоминаем код, чтобы
 	# вход через Яндекс/Google вернул телефон на неё же (см. qrLoginPendingRedirect).
 	case "qrlogin":
+		# Кука техническая (база и код, секрета в ней нет), но флаги ставим: JS её не
+		# читает, по http на https-сайте не уходит, с чужого сайта не отправляется (#4677).
 		if(isset($_GET["c"]) && preg_match(QR_CODE_MASK, $_GET["c"]))
-			setcookie("qr_pending", "$z:".$_GET["c"], time() + QR_LOGIN_TTL, "/");
+			setcookie("qr_pending", "$z:".$_GET["c"], array(
+				"expires" => time() + QR_LOGIN_TTL,
+				"path" => "/",
+				"secure" => qrLoginIsHttps(),
+				"httponly" => true,
+				"samesite" => "Lax"
+			));
 		break;
 
 	case "restore_admin":
@@ -12596,6 +12658,13 @@ if(Validate_Token())
 			}
 			qrLoginDie(t9n("[RU]Вход по QR-коду[EN]QR sign-in")
 				, '<h1>'.t9n("[RU]Подтвердите вход[EN]Confirm the sign-in").'</h1>'
+				# Проверочное число — против подсунутого чужого QR: подтверждать можно
+				# только если оно совпало с числом на своём экране (#4677).
+				.'<p style="margin-bottom:0.25rem;">'.t9n("[RU]Проверочное число[EN]Verification number").':</p>'
+				.'<p style="font-size:2rem; font-weight:700; letter-spacing:0.2em; margin:0 0 0.75rem;">'
+					.htmlspecialchars(qrLoginPairCode($qrCode)).'</p>'
+				.'<p style="margin-top:0;"><b>'.t9n("[RU]Подтверждайте, только если это же число показано на том экране, где вы отсканировали код."
+				        ."[EN]Confirm only if the same number is shown on the screen where you scanned the code.").'</b></p>'
 				.'<p>'.t9n("[RU]База[EN]Database").': <b>'.htmlspecialchars($z).'</b><br>'
 					.t9n("[RU]Пользователь[EN]User").': <b>'.htmlspecialchars($qrUser).'</b>'
 					.($qrSession["client"] !== "" ? '<br>'.t9n("[RU]Запрос с устройства[EN]Requested from")
