@@ -991,7 +991,6 @@
     };
 
     AtexCutOptimizer.prototype.renderResult = function() {
-        var self = this;
         var view = this.viewEl;
         view.innerHTML = '';
         var p = this.plan;
@@ -1008,8 +1007,12 @@
         var head = el('div', { class: 'atex-co-result-head' }, [
             el('h2', { class: 'atex-co-result-title', text: 'План резки' + (mat ? ': ' + mat.label : '') })
         ]);
+        // #4690: кнопка деактивирована — заказ из оптимизатора не создаём.
+        // Обработчик не вешаем; сама модалка (openOrderModal) оставлена нетронутой,
+        // чтобы вернуть кнопку в строй одной строкой.
         var toOrderBtn = el('button', { class: 'atex-co-btn atex-co-btn-primary atex-co-to-order', type: 'button', text: 'В заказ' });
-        toOrderBtn.addEventListener('click', function() { self.openOrderModal(); });
+        toOrderBtn.disabled = true;
+        toOrderBtn.title = 'Создание заказа из оптимизатора отключено';
         head.appendChild(toOrderBtn);
         view.appendChild(head);
 

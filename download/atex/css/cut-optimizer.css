@@ -158,6 +158,10 @@
     margin-top: 4px;
 }
 .atex-co-btn-primary:hover { filter: brightness(1.08); background: var(--co-accent); }
+/* #4690: деактивированная кнопка («В заказ») — видна, но не нажимается */
+.atex-co-btn:disabled { opacity: .45; cursor: not-allowed; }
+.atex-co-btn:disabled:hover { filter: none; background: var(--co-bg); }
+.atex-co-btn-primary:disabled:hover { background: var(--co-accent); }
 
 /* Подходящие партии сырья (внизу формы) */
 .atex-co-batches { margin-top: 16px; border-top: 1px solid var(--co-border-soft); padding-top: 12px; }
