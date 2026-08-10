@@ -103,7 +103,7 @@
 
 .atex-pk-card {
     display: grid;
-    grid-template-columns: 120px 1fr auto;
+    grid-template-columns: 140px 1fr auto;
     align-items: center;
     gap: 16px;
     padding: 12px 16px;
@@ -113,9 +113,20 @@
 }
 .atex-pk-card.is-packed { background: var(--pk-success-bg); border-color: var(--pk-success-border); }
 
-.atex-pk-order { display: flex; flex-direction: column; }
-.atex-pk-order-no { font-size: 30px; font-weight: 700; line-height: 1.1; color: var(--pk-accent); }
-.atex-pk-order-client { font-size: 12px; color: var(--pk-muted); }
+/* #4688: крупно — номер заказа клиента (он же на этикетке ролика), мелко — наш
+   внутренний номер. Клиентский номер — свободный текст, поэтому переносится. */
+.atex-pk-order { display: flex; flex-direction: column; min-width: 0; }
+.atex-pk-order-main {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--pk-accent);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+.atex-pk-order-main.is-long { font-size: 22px; }
+.atex-pk-order-main.is-tiny { font-size: 17px; }
+.atex-pk-order-sub { font-size: 12px; color: var(--pk-muted); }
 
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }

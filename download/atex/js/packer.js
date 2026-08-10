@@ -26,6 +26,10 @@
 // Событие — корневой объект (up=1), как у пульта слиттера: подчинять его заданию
 // нельзя, связь держится реквизитом «Задание в производство».
 //
+// Крупно в карточке стоит номер заказа КЛИЕНТА (`order`) — тот же, что напечатан на
+// этикетке ролика; наш внутренний `order_no` идёт мелкой строкой под ним. Клиентский
+// номер есть не у каждого заказа: без него крупным остаётся внутренний (#4688).
+//
 // Количество по умолчанию — `qty_fact`, а если его нет — `qty`. Меняют его КЛИКОМ ПО
 // САМОМУ КОЛИЧЕСТВУ в карточке: открывается модалка, где поправленное количество
 // требует примечания. Кнопка «Упаковано» ничего не спрашивает — фиксирует упаковку тем
@@ -227,6 +231,18 @@
         return text;
     }
 
+    // Номера заказа для карточки (#4688). Крупно стоит номер, который упаковщик читает
+    // на этикетке ролика, — «Заказ клиента»; наш внутренний номер уходит строкой ниже.
+    // Клиентский номер есть не у каждого заказа: без него крупным остаётся внутренний,
+    // и второй строки просто нет.
+    function orderTitle(item) {
+        var it = item || {};
+        var client = str(it.orderClient).trim();
+        var no = str(it.orderNo).trim();
+        if (client) return { main: client, sub: no };
+        return { main: no || '—', sub: '' };
+    }
+
     // Сколько штук предлагает отчёт: факт, а если его нет — план.
     function packQtyFor(item) {
         var it = item || {};
@@ -412,6 +428,7 @@
         eventStamp: eventStamp,
         itemFromReportRow: itemFromReportRow,
         describeItem: describeItem,
+        orderTitle: orderTitle,
         packQtyFor: packQtyFor,
         baseQty: baseQty,
         currentQty: currentQty,
@@ -678,7 +695,8 @@
         ]);
     };
 
-    // Карточка позиции: слева крупный номер заказа, посередине привычная подпись
+    // Карточка позиции: слева крупно номер заказа клиента (тот же, что на этикетке
+    // ролика), под ним наш внутренний номер, посередине привычная подпись
     // ролика и время задания, справа количество и кнопка отметки. Количество —
     // кнопка: клик по нему открывает правку, кнопка «Упаковано» ничего не спрашивает
     // и просто фиксирует упаковку тем количеством, которое видно (#4680).
@@ -687,10 +705,15 @@
         var packed = core.isPacked(item);
         var card = el('div', { class: 'atex-pk-card' + (packed ? ' is-packed' : '') });
 
+        var title = core.orderTitle(item);
+        // Клиентский номер — свободный текст: длинный набирается мельче, чтобы
+        // уместиться в колонку целиком, а не рваться посередине.
+        var mainClass = 'atex-pk-order-main' +
+            (title.main.length > 12 ? ' is-tiny' : (title.main.length > 6 ? ' is-long' : ''));
         var order = el('div', { class: 'atex-pk-order' }, [
-            el('span', { class: 'atex-pk-order-no', text: item.orderNo || '—' })
+            el('span', { class: mainClass, text: title.main })
         ]);
-        if (item.orderClient) order.appendChild(el('span', { class: 'atex-pk-order-client', text: item.orderClient }));
+        if (title.sub) order.appendChild(el('span', { class: 'atex-pk-order-sub', text: title.sub }));
         card.appendChild(order);
 
         var edited = core.isEdited(item);
@@ -808,7 +831,8 @@
         var save = el('button', { class: 'atex-pk-btn atex-pk-btn-pack', type: 'button', text: 'Сохранить' });
         var cancel = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Отмена' });
 
-        var overlay = this.modal('Количество · заказ ' + (item.orderNo || '—'), [
+        // В заголовке — тот же номер, что крупно стоит в карточке и на этикетке (#4688).
+        var overlay = this.modal('Количество · заказ ' + core.orderTitle(item).main, [
             el('div', { class: 'atex-pk-modal-desc', text: core.describeItem(item) }),
             el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : 'Количество, шт' }), qtyInput]),
             el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]),
