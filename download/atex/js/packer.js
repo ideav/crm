@@ -211,7 +211,7 @@
         if (size.box) parts.push('короб ' + size.box);
         if (size.perBox > 0) parts.push('по ' + size.perBox + ' шт');
         var boxes = packing.boxesFor(size, qty);
-        if (boxes > 0) parts.push(boxes + (boxes === 1 ? ' короб' : (boxes < 5 ? ' короба' : ' коробов')));
+        if (boxes > 0) parts.push(packing.boxesLabel(boxes));
         return parts.join(' · ');
     }
 

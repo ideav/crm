@@ -114,6 +114,15 @@ assertEqual(match({ width: 110, length: 74, addSleeve: 'Приклеить' }), 
     assertEqual(core.boxesFor(s, 37), 2, 'boxesFor: остаток — ещё короб');
     assertEqual(core.boxesFor(s, 0), 0, 'boxesFor: нечего упаковывать');
     assertEqual(core.boxesFor(null, 10), 0, 'boxesFor: без типоразмера — 0');
+
+    // #4685: счётная форма — одна на упаковщика и планирование.
+    assertEqual(core.boxesLabel(1), '1 короб', 'boxesLabel: один');
+    assertEqual(core.boxesLabel(3), '3 короба', 'boxesLabel: 2–4 — «короба»');
+    assertEqual(core.boxesLabel(9), '9 коробов', 'boxesLabel: 5–9 — «коробов»');
+    assertEqual(core.boxesLabel(11), '11 коробов', 'boxesLabel: 11 — «коробов», а не «11 короб»');
+    assertEqual(core.boxesLabel(13), '13 коробов', 'boxesLabel: 13 — «коробов»');
+    assertEqual(core.boxesLabel(21), '21 короб', 'boxesLabel: 21 — «короб»');
+    assertEqual(core.boxesLabel(22), '22 короба', 'boxesLabel: 22 — «короба»');
 })();
 
 console.log('\n' + passed + ' assertions passed');

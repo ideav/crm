@@ -95,6 +95,24 @@ var FB_META = { id: '1081', reqs: [
         'stripPackTitle: подпись строки полосы');
     assertEqual(ctl.stripPackTitle({ id: '703', length: 5000 }, 33, 33), '',
         'stripPackTitle: нечего подсказать — подписи нет');
+
+    // #4685: со числом полос — ещё и сколько коробов уйдёт на мотки ЭТОЙ строки.
+    // Мотки = проходы × полос (та же арифметика, что в подписи строки): 14 × 22 = 308,
+    // по 36 в коробе → 9 коробов (последний неполный).
+    var manyRuns = { id: '704', length: 450, isFoil: false, materialType: '', plannedRuns: 14 };
+    ctl.cuts = [manyRuns];
+    assertEqual(planning.stripRollsForCut(manyRuns, 22), 308, 'stripRollsForCut: мотки = проходы × полос');
+    assertEqual(ctl.stripPackTitle(manyRuns, 33, 33, 22),
+        '31-40 Х 330/450 — №125 · 36 шт в коробе (3 × 12) · 9 коробов',
+        'stripPackTitle: число коробов на мотки строки');
+    // Ровно один короб — «1 короб», а не «1 коробов».
+    assertEqual(ctl.stripPackTitle({ id: '705', length: 450, plannedRuns: 36 }, 33, 33, 1),
+        '31-40 Х 330/450 — №125 · 36 шт в коробе (3 × 12) · 1 короб',
+        'stripPackTitle: ровно один короб');
+    // Проходов ещё нет (setup-хвост) — коробов не выдумываем.
+    assertEqual(ctl.stripPackTitle({ id: '706', length: 450, plannedRuns: 0 }, 33, 33, 22),
+        '31-40 Х 330/450 — №125 · 36 шт в коробе (3 × 12)',
+        'stripPackTitle: без проходов коробов не считаем');
 })();
 
 console.log('\n' + passed + ' assertions passed');

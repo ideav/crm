@@ -10516,6 +10516,15 @@
     // «{сырьё} {ширина} x {длина} {намотка} — {факт.ширина}мм х {резок} x {полос} = {мотков} шт.»
     // actualWidth — фактическая ширина резки (#3372; при отсутствии правила = номинал);
     // мотков = резок × полос. Чистая (DOM не трогает) → проверяется модульно.
+    // #4685: рулоны полосы данной ширины = проходы задания × полос. ОДНА арифметика для
+    // подписи строки и для подсказки типоразмера: сколько мотков написано в строке,
+    // на столько и считаются короба (иначе подпись и подсказка разъедутся, #4499).
+    function stripRollsForCut(cut, count) {
+        var runs = stripNum(cut && cut.plannedRuns);
+        var strips = Math.max(0, Math.floor(stripNum(count)));
+        return round3((runs > 0 ? runs : 0) * strips);
+    }
+
     function formatStripSummaryLine(cut, group, actualWidth, runLength) {
         var material = (cut && cut.materialName) || (cut && cut.materialId != null && String(cut.materialId) !== '' ? '#' + cut.materialId : '—');
         var width = stripNum(group && group.width);
@@ -10525,7 +10534,7 @@
         var runs = stripNum(cut && cut.plannedRuns);
         var actual = stripNum(actualWidth);
         if (!(actual > 0)) actual = width;
-        var rolls = round3((runs > 0 ? runs : 0) * count);
+        var rolls = stripRollsForCut(cut, count);
         var line = material + ' ' + round3(width) + ' x ' + (len > 0 ? round3(len) : '—');
         if (winding) line += ' ' + winding;
         // «х» между мм и резками — кириллическая; «x» между резками и полосами — латинская.
@@ -13996,6 +14005,7 @@
         formatCutDimensions: formatCutDimensions,
         cutStripGroups: cutStripGroups,
         formatStripSummaryLine: formatStripSummaryLine,
+        stripRollsForCut: stripRollsForCut,
         resolveTolerance: resolveTolerance
     };
 
@@ -14921,12 +14931,19 @@
     // #4665: подпись типоразмера для строки полосы: «31-40 Х 330/450 — №125 · 36 шт в
     // коробе (3 × 12)». Ширину пробуем номинальную (как в подписи строки), затем
     // фактическую. Ничего не подошло — пустая строка, атрибут title не ставится.
-    AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth) {
+    // #4685: со ЧИСЛОМ полос в конце дописывается «· 13 коробов» — сколько коробов уйдёт
+    // на мотки этой строки (последний может быть неполным). Рулоны считает
+    // `stripRollsForCut` — та же арифметика, что и в самой подписи строки.
+    AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth, stripCount) {
         if (!packing()) return '';
         var size = this.packSizeFor(cut, nominalWidth) || this.packSizeFor(cut, actualWidth);
         if (!size) return '';
+        var parts = [];
         var tail = packing().describeSize(size);
-        return size.name + (tail ? ' — ' + tail : '');
+        if (tail) parts.push(tail);
+        var boxes = packing().boxesFor(size, stripRollsForCut(cut, stripCount));
+        if (boxes > 0) parts.push(packing().boxesLabel(boxes));
+        return size.name + (parts.length ? ' — ' + parts.join(' · ') : '');
     };
 
     AtexProductionPlanning.prototype.packSizeIdForCutId = function(cutId, width) {
@@ -26430,7 +26447,7 @@
                     // #4665: в подсказке строки — типоразмер упаковки: в какой короб и по
                     // сколько штук укладывать. Справочник не прочитан/ничего не подошло —
                     // подсказки просто нет.
-                    var packTitle = self.stripPackTitle(c, nominal, g.width);
+                    var packTitle = self.stripPackTitle(c, nominal, g.width, g.count);
                     if (ordered) {
                         var row = el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
                             text: lineText + dueSuffix });

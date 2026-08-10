@@ -340,6 +340,7 @@
         formatCutDimensions: formatCutDimensions,
         cutStripGroups: cutStripGroups,
         formatStripSummaryLine: formatStripSummaryLine,
+        stripRollsForCut: stripRollsForCut,
         resolveTolerance: resolveTolerance
     };
 
@@ -1265,12 +1266,19 @@
     // #4665: подпись типоразмера для строки полосы: «31-40 Х 330/450 — №125 · 36 шт в
     // коробе (3 × 12)». Ширину пробуем номинальную (как в подписи строки), затем
     // фактическую. Ничего не подошло — пустая строка, атрибут title не ставится.
-    AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth) {
+    // #4685: со ЧИСЛОМ полос в конце дописывается «· 13 коробов» — сколько коробов уйдёт
+    // на мотки этой строки (последний может быть неполным). Рулоны считает
+    // `stripRollsForCut` — та же арифметика, что и в самой подписи строки.
+    AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth, stripCount) {
         if (!packing()) return '';
         var size = this.packSizeFor(cut, nominalWidth) || this.packSizeFor(cut, actualWidth);
         if (!size) return '';
+        var parts = [];
         var tail = packing().describeSize(size);
-        return size.name + (tail ? ' — ' + tail : '');
+        if (tail) parts.push(tail);
+        var boxes = packing().boxesFor(size, stripRollsForCut(cut, stripCount));
+        if (boxes > 0) parts.push(packing().boxesLabel(boxes));
+        return size.name + (parts.length ? ' — ' + parts.join(' · ') : '');
     };
 
     AtexProductionPlanning.prototype.packSizeIdForCutId = function(cutId, width) {
@@ -12774,7 +12782,7 @@
                     // #4665: в подсказке строки — типоразмер упаковки: в какой короб и по
                     // сколько штук укладывать. Справочник не прочитан/ничего не подошло —
                     // подсказки просто нет.
-                    var packTitle = self.stripPackTitle(c, nominal, g.width);
+                    var packTitle = self.stripPackTitle(c, nominal, g.width, g.count);
                     if (ordered) {
                         var row = el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
                             text: lineText + dueSuffix });

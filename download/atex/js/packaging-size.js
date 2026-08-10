@@ -152,6 +152,17 @@
         return Math.ceil(n / per);
     }
 
+    // «1 короб» / «3 короба» / «13 коробов» — счётная форма по правилам русского языка
+    // (11–14 всегда «коробов»). Одна на всех потребителей: и упаковщик, и планирование.
+    function boxesLabel(qty) {
+        var n = Math.max(0, Math.floor(toNumber(qty)));
+        var mod100 = n % 100, mod10 = n % 10;
+        var word = 'коробов';
+        if (mod10 === 1 && mod100 !== 11) word = 'короб';
+        else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = 'короба';
+        return n + ' ' + word;
+    }
+
     return {
         REPORT: REPORT,
         COL: COL,
@@ -162,7 +173,8 @@
             sizesFromReport: sizesFromReport,
             matchSize: matchSize,
             describeSize: describeSize,
-            boxesFor: boxesFor
+            boxesFor: boxesFor,
+            boxesLabel: boxesLabel
         }
     };
 });
