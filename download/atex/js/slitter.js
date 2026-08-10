@@ -2306,7 +2306,7 @@
         input.value = String(total);   // по умолчанию — весь план: чаще всего сделано всё
         var hint = el('div', { class: 'atex-sl-confirm-hint' });
         var err = el('div', { class: 'atex-sl-confirm-error' });
-        var ok = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Отметить' });
+        var ok = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Готово' });
         var cancel = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отмена' });
 
         function refresh() {
