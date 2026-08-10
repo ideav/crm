@@ -1945,7 +1945,7 @@
     }
     // #3989 Фаза 2: явная длительность рабочего дня (мин), ТЗ §5. DAY_DURATION_MN (по умолч. 450).
     function resolveDayDurationMin(settings){ return settingMinutes(settings, 'DAY_DURATION', 450); }
-    // #3989 Фаза 2: внутридневные паузы — два перерыва (FIRST_INTERVAL/SECCOND_INTERVAL по
+    // #3989 Фаза 2: внутридневные паузы — два перерыва (FIRST_INTERVAL/SECOND_INTERVAL по
     // INTERVAL_DURATION_MN) и обед — как НЕрабочие интервалы дня. Прозрачны для планирования (не
     // вычитаются из ёмкости), рисуются на Ганте (ТЗ §5). → отсортированный по началу
     // [{ startMin, durationMin, kind:'break'|'lunch', label }]. Не заданы → [].
@@ -1959,8 +1959,7 @@
             if (isFinite(m)) out.push({ startMin: round3(m), durationMin: round3(durMin), kind: kind, label: label });
         }
         addBreak(cfg.FIRST_INTERVAL, intervalDur, 'break', 'Перерыв');
-        // ТЗ пишет ключ с опечаткой SECCOND_INTERVAL — принимаем и корректное написание SECOND_INTERVAL.
-        addBreak(pickSetting(cfg, 'SECCOND_INTERVAL', 'SECOND_INTERVAL'), intervalDur, 'break', 'Перерыв');
+        addBreak(cfg.SECOND_INTERVAL, intervalDur, 'break', 'Перерыв');
         addBreak(cfg.LUNCH_START, settingMinutes(cfg, 'LUNCH_DURATION', 0), 'lunch', 'Обед');
         out.sort(function(a, b){ return a.startMin - b.startMin; });
         return out;

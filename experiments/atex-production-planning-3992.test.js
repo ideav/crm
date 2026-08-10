@@ -2,7 +2,7 @@
 // docs/atex_planning_tz.md §5/§5.1/§14):
 //   • захлёст за конец смены по ключам с суффиксом _MN (MAX_OVERWORK_CUTS_MN/_TUNE_MN),
 //     с откатом на старые имена (обратная совместимость);
-//   • два внутридневных перерыва (FIRST_INTERVAL/SECCOND_INTERVAL) + обед как
+//   • два внутридневных перерыва (FIRST_INTERVAL/SECOND_INTERVAL) + обед как
 //     НЕрабочие паузы дня (прозрачны для планирования, рисуются на Ганте);
 //   • явная длительность дня DAY_DURATION_MN.
 //
@@ -50,7 +50,7 @@ eq(planning.resolveDayDurationMin({ DAY_DURATION: 480 }), 480, 'откат на 
 // ---------------------------------------------------------------------------
 console.log('\n== два перерыва + обед (intraDayBreaks) ==');
 var breaks = planning.intraDayBreaks({
-    FIRST_INTERVAL: '10:00', SECCOND_INTERVAL: '15:00', INTERVAL_DURATION_MN: 10,
+    FIRST_INTERVAL: '10:00', SECOND_INTERVAL: '15:00', INTERVAL_DURATION_MN: 10,
     LUNCH_START: '12:20', LUNCH_DURATION_MN: 40
 });
 eq(breaks.length, 3, 'три паузы: два перерыва + обед');

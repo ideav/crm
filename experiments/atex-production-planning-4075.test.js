@@ -69,9 +69,9 @@ var re = planning.computeQueueBreakMarkers(dayGroups, schedById, []);
 eq(re.markersByCut, {}, 'пустой список перерывов → нет значков');
 eq(re.shiftByCut, {}, 'пустой список перерывов → нет сдвигов');
 
-console.log('\n== intraDayBreaks: из «Настройки» получаем 2 перерыва + обед (обе орфографии SECCOND/SECOND) ==');
+console.log('\n== intraDayBreaks: из «Настройки» получаем 2 перерыва + обед ==');
 var br = planning.intraDayBreaks({
-    FIRST_INTERVAL: '10:00', SECCOND_INTERVAL: '15:00', INTERVAL_DURATION: '10',
+    FIRST_INTERVAL: '10:00', SECOND_INTERVAL: '15:00', INTERVAL_DURATION: '10',
     LUNCH_START: '12:20', LUNCH_DURATION: '40'
 });
 eq(br.length, 3, 'три записи (2 перерыва + обед)');

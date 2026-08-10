@@ -84,14 +84,14 @@
 ### 1.5. Обед и два перерыва — прозрачны для планирования (НОВОЕ)
 
 Целевое: планирование **не учитывает** обед (`LUNCH_START`×`LUNCH_DURATION_MN`) и два перерыва
-(`FIRST_INTERVAL 10:00`, `SECCOND_INTERVAL 15:00`, каждый `INTERVAL_DURATION_MN` = 10). На Ганте
+(`FIRST_INTERVAL 10:00`, `SECOND_INTERVAL 15:00`, каждый `INTERVAL_DURATION_MN` = 10). На Ганте
 перерывы рисуются **в разрыв** задания, попавшего на них; время окончания/начала последующих
 увеличивается на длительность перерыва. День начинается в `DAY_START_HOUR` и длится
 `DAY_DURATION_MN` (450).
 
 > Разрыв: сейчас **обратный** подход — генерация **зашивает** обед в `planStart`, а показ его
 > лишь «находит» как зазор (#3816/#3846, `lunchBlocksFromSchedule`). Двух перерывов
-> (`FIRST_INTERVAL`/`SECCOND_INTERVAL`) в коде **нет вообще** (grep пуст).
+> (`FIRST_INTERVAL`/`SECOND_INTERVAL`) в коде **нет вообще** (grep пуст).
 
 ---
 
@@ -105,7 +105,7 @@
 | `DAY_START_HOUR` | 8:00 | да | — |
 | `DAY_DURATION_MN` | 450 | ёмкость выводится из окна/интервалов | перейти на явную `DAY_DURATION_MN` |
 | `LUNCH_START` / `LUNCH_DURATION_MN` | 12:20 / 40 | да (зашивается в план) | §1.5: сделать прозрачным |
-| `FIRST_INTERVAL` / `SECCOND_INTERVAL` / `INTERVAL_DURATION_MN` | 10:00 / 15:00 / 10 | **нет** | добавить 2 перерыва (прозрачно для плана, рисуются на Ганте) |
+| `FIRST_INTERVAL` / `SECOND_INTERVAL` / `INTERVAL_DURATION_MN` | 10:00 / 15:00 / 10 | **нет** | добавить 2 перерыва (прозрачно для плана, рисуются на Ганте) |
 | `CLEANUP_SHIFT_MN` | 30 | да | — |
 | `MAX_OVERWORK_CUTS_MN` / `MAX_OVERWORK_TUNE_MN` | 5 / 10 | да (#3847) | — |
 | `FORESEE_ORDERS_DAY` / `DAYS_FORECAST` | 5 / 10 | частично | сверить семантику |

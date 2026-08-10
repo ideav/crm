@@ -619,7 +619,7 @@
     }
 
     // #4007 (ТЗ §5): маркеры коротких перерывов для Ганта. В отличие от обеда (его генерация
-    // ЗАШИВАЕТ в planStart послеобеденных резок), перерывы (FIRST_INTERVAL 10:00 / SECCOND_INTERVAL
+    // ЗАШИВАЕТ в planStart послеобеденных резок), перерывы (FIRST_INTERVAL 10:00 / SECOND_INTERVAL
     // 15:00, по INTERVAL_DURATION_MN 10 мин) при планировании НЕ участвуют — их нет в сохранённых
     // стартах. Поэтому Гант дорисовывает их сам: перерыв попадает в задание, чьё СОХРАНЁННОЕ окно
     // (наладка+резка) его накрывает («несущее»); это задание визуально раздвигается на длительность
@@ -1872,11 +1872,10 @@
             .then(function(rows) {
                 var dbKey = String(self.db || '').trim().toUpperCase();
                 // #3846/#3904: \u043E\u0431\u0430 \u043A\u043B\u044E\u0447\u0430 \u0438\u0437 \u00AB\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u00BB \u0441 \u0443\u0447\u0451\u0442\u043E\u043C \u043E\u0431\u043B\u0430\u0441\u0442\u0438 \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
-                // #4007 (\u0422\u0417 \u00A75): \u043F\u043E\u043C\u0438\u043C\u043E \u043E\u0431\u0435\u0434\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u0434\u0432\u0430 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 (FIRST_INTERVAL/
-                // SECCOND_INTERVAL, \u0432\u0440\u0435\u043C\u044F \u00AB\u0427\u0427:\u041C\u041C\u00BB) \u0438 \u0438\u0445 \u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C (INTERVAL_DURATION_MN, \u043E\u0442\u043A\u0430\u0442
-                // \u043D\u0430 INTERVAL_DURATION). \u041A\u043B\u044E\u0447 SECCOND_INTERVAL \u2014 \u043A\u0430\u043A \u0432 \u0422\u0417 (\u0441 \u043E\u043F\u0435\u0447\u0430\u0442\u043A\u043E\u0439), \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u043C
-                // \u0438 \u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u043E\u0435 SECOND_INTERVAL. \u041E\u0431\u043B\u0430\u0441\u0442\u044C \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 \u2014 \u043A\u0430\u043A \u0443 \u043E\u0431\u0435\u0434\u0430 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
-                var KEYS = ['LUNCH_DURATION', 'LUNCH_START', 'FIRST_INTERVAL', 'SECCOND_INTERVAL',
+                // #4007 (\u0422\u0417 \u00A75): \u043F\u043E\u043C\u0438\u043C\u043E \u043E\u0431\u0435\u0434\u0430 \u0447\u0438\u0442\u0430\u0435\u043C \u0434\u0432\u0430 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 (FIRST_INTERVAL /
+                // SECOND_INTERVAL, \u0432\u0440\u0435\u043C\u044F \u00AB\u0427\u0427:\u041C\u041C\u00BB) \u0438 \u0438\u0445 \u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C (INTERVAL_DURATION_MN, \u043E\u0442\u043A\u0430\u0442
+                // \u043D\u0430 INTERVAL_DURATION). \u041E\u0431\u043B\u0430\u0441\u0442\u044C \u0432\u0438\u0434\u0438\u043C\u043E\u0441\u0442\u0438 \u2014 \u043A\u0430\u043A \u0443 \u043E\u0431\u0435\u0434\u0430 (db-\u0442\u0438\u043F > ATEH > \u043E\u0431\u0449\u0438\u0439).
+                var KEYS = ['LUNCH_DURATION', 'LUNCH_START', 'FIRST_INTERVAL',
                             'SECOND_INTERVAL', 'INTERVAL_DURATION', 'INTERVAL_DURATION_MN'];
                 var bestRank = {}, bestVal = {};
                 KEYS.forEach(function(k) { bestRank[k] = -1; bestVal[k] = null; });
@@ -1898,8 +1897,7 @@
                     : (bestVal.INTERVAL_DURATION != null ? Number(bestVal.INTERVAL_DURATION) : 10);
                 if (!(isFinite(intervalDur) && intervalDur > 0)) intervalDur = 10;
                 var breaks = [];
-                var secondRaw = bestVal.SECCOND_INTERVAL != null ? bestVal.SECCOND_INTERVAL : bestVal.SECOND_INTERVAL;
-                [bestVal.FIRST_INTERVAL, secondRaw].forEach(function(raw) {
+                [bestVal.FIRST_INTERVAL, bestVal.SECOND_INTERVAL].forEach(function(raw) {
                     var startMin = parseLunchStartMinutes(raw);   // \u00AB10:00\u00BB \u2192 600; \u0438\u043D\u0430\u0447\u0435 NaN \u2192 \u043F\u0435\u0440\u0435\u0440\u044B\u0432\u0430 \u043D\u0435\u0442
                     if (isFinite(startMin)) breaks.push({ startMin: startMin, durationMin: Math.round(intervalDur), label: '\u041F\u0435\u0440\u0435\u0440\u044B\u0432' });
                 });
