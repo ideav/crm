@@ -237,8 +237,10 @@ function passButtons(inst) {
         '#4604: до записи показано, сколько проходов добавится и на сколько метров (91 × 450)');
     assert(hint.indexOf('Останется 1') >= 0, '#4604: сказано, что задание останется в работе с остатком 1 прохода');
 
-    var buttons = overlay.querySelectorAll('.atex-sl-btn');
-    buttons.filter(function(b) { return b.textContent === 'Отметить'; })[0].click();
+    // Кнопку подтверждения ищем по классу, а не по подписи: подпись — вопрос
+    // формулировки и меняется (#4692), правило же тут про то, что уходит в
+    // markPassDone.
+    overlay.querySelector('.atex-sl-btn-primary').click();
     assert(JSON.stringify(marked) === '[[false,99]]', '#4604: «Отметить» отдаёт число проходов в markPassDone');
     assert(document.body.childNodes.indexOf(overlay) === -1, '#4604: после отметки модалка закрывается');
 })();
@@ -254,10 +256,10 @@ function passButtons(inst) {
     input.dispatch('input');
     assert(overlay.querySelector('.atex-sl-confirm-error').textContent.indexOf('100') >= 0,
         '#4604: 150 при плане 100 — ошибка видна сразу, до нажатия');
-    overlay.querySelectorAll('.atex-sl-btn').filter(function(b) { return b.textContent === 'Отметить'; })[0].click();
+    overlay.querySelector('.atex-sl-btn-primary').click();
     assert(marked.length === 0 && document.body.childNodes.indexOf(overlay) !== -1,
         '#4604: с негодным числом модалка не закрывается и ничего не отмечает');
-    overlay.querySelectorAll('.atex-sl-btn').filter(function(b) { return b.textContent === 'Отмена'; })[0].click();
+    overlay.querySelector('.atex-sl-btn-secondary').click();
     assert(document.body.childNodes.indexOf(overlay) === -1, '#4604: «Отмена» закрывает модалку без записи');
 })();
 
