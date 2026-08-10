@@ -1185,6 +1185,93 @@
         });
     };
 
+    // #4665: справочник «Типоразмер» (короб и норма укладки) — отчётом `pack_sizes`,
+    // он идёт под правами владельца, поэтому роли Диспетчера грант на справочник не нужен.
+    // Не прочитался — планирование работает как раньше, просто без типоразмера.
+    AtexProductionPlanning.prototype.loadPackSizes = function() {
+        var self = this;
+        this.packSizes = [];
+        if (!packing) return Promise.resolve();
+        return this.getJson('report/pack_sizes?JSON_KV&LIMIT=0,1000').then(function(rows) {
+            self.packSizes = packing.sizesFromReport(rows);
+            console.log('[pp] 📦 loadPackSizes: типоразмеров упаковки:', self.packSizes.length);
+        }).catch(function(err) {
+            console.error('[pp] 📦 loadPackSizes: справочник «Типоразмер» не прочитан:', err && err.message);
+            self.packSizes = [];
+        });
+    };
+
+    // #4665: доп. втулка полосы — у ОБЕСПЕЧИВАЕМОЙ позиции той же ширины: у роликов с
+    // доп. втулкой своя норма укладки. Полоса не в заказ (добор ходовыми) — доп. втулки нет.
+    AtexProductionPlanning.prototype.addSleeveForCutWidth = function(cut, width) {
+        if (!cut) return '';
+        var key = stripWidthKey(width);
+        var byId = {};
+        (this.genPositions || []).forEach(function(p) { if (p && p.id) byId[String(p.id)] = p; });
+        var found = '';
+        (this.supplies || []).forEach(function(s) {
+            if (found || !s || String(s.cutId) !== String(cut.id) || !s.positionId) return;
+            var pos = byId[String(s.positionId)];
+            var posWidth = pos ? pos.width : s.positionWidth;
+            if (stripWidthKey(posWidth) !== key) return;
+            if (pos && pos.addSleeve) found = pos.addSleeve;
+        });
+        return found || this.addSleeveByWidthLength(width, cut.length);
+    };
+
+    // #4665: типоразмер упаковки полосы задания: ширина — полосы, длина намотки и фольга —
+    // задания, доп. втулка — обеспечиваемой позиции. Ничего не подошло → '' (поле не пишем).
+    AtexProductionPlanning.prototype.packSizeFor = function(cut, width) {
+        if (!packing || !cut || !(this.packSizes || []).length) return null;
+        return packing.matchSize(this.packSizes, {
+            width: width,
+            length: cut.length,
+            foil: !!cut.isFoil || packing.isFoilType(cut.materialType),
+            addSleeve: this.addSleeveForCutWidth(cut, width)
+        });
+    };
+    AtexProductionPlanning.prototype.packSizeIdFor = function(cut, width) {
+        var size = this.packSizeFor(cut, width);
+        return size ? size.id : '';
+    };
+    // #4665: доп. втулка ролика по ширине и длине — из активных позиций заказа. Нужна там,
+    // где задания ещё нет в очереди (генерация создаёт «Партии ГП» сразу за резкой).
+    AtexProductionPlanning.prototype.addSleeveByWidthLength = function(width, length) {
+        var wKey = stripWidthKey(width);
+        var lNum = stripNum(length);
+        var hit = (this.genPositions || []).filter(function(p) {
+            if (!p || !p.addSleeve || stripWidthKey(p.width) !== wKey) return false;
+            return !(lNum > 0) || stripNum(p.length) === lNum;
+        })[0];
+        return hit ? hit.addSleeve : '';
+    };
+
+    // #4665: подбор по голым значениям — для путей, где объекта задания ещё нет.
+    AtexProductionPlanning.prototype.packSizeIdForValues = function(width, length, foil, addSleeve) {
+        if (!packing || !(this.packSizes || []).length) return '';
+        var size = packing.matchSize(this.packSizes, {
+            width: width, length: length, foil: !!foil,
+            addSleeve: addSleeve == null ? this.addSleeveByWidthLength(width, length) : addSleeve
+        });
+        return size ? size.id : '';
+    };
+
+    // #4665: подпись типоразмера для строки полосы: «31-40 Х 330/450 — №125 · 36 шт в
+    // коробе (3 × 12)». Ширину пробуем номинальную (как в подписи строки), затем
+    // фактическую. Ничего не подошло — пустая строка, атрибут title не ставится.
+    AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth) {
+        if (!packing) return '';
+        var size = this.packSizeFor(cut, nominalWidth) || this.packSizeFor(cut, actualWidth);
+        if (!size) return '';
+        var tail = packing.describeSize(size);
+        return size.name + (tail ? ' — ' + tail : '');
+    };
+
+    AtexProductionPlanning.prototype.packSizeIdForCutId = function(cutId, width) {
+        var cut = (this.cuts || []).filter(function(x) { return String(x.id) === String(cutId); })[0];
+        return cut ? this.packSizeIdFor(cut, width) : '';
+    };
+
     // #3445: текущий остаток ГП по номенклатуре — суммарные рулоны «Партий ГП»,
     // физически лежащих на складе (статус не «Отгружен»). Номенклатуру берём из
     // родительской «Производственной резки» (up): сырьё через batchMaterialById
@@ -2461,11 +2548,15 @@
                         // позиции — её рулоны (plan.qty) под этот заказ, прочие ширины (добор
                         // ходовыми) — в запас (спрос/заказ пусто).
                         var isPosWidth = stripWidthKey(b.width) === stripWidthKey(plan.posWidth);
+                        var pos = plan.position || {};
                         var f = buildFinishedBatchFields(fbMeta, { width: b.width, strips: b.strips,
                             planned: finishedBatchRolls(b.strips, plan.plannedRuns),
                             rolls: isPosWidth && plan.qty > 0 ? plan.qty : '',
-                            orderId: isPosWidth ? (plan.position && plan.position.orderId) || '' : '',
-                            footage: b.length > 0 ? b.length : '', active: '1' });
+                            orderId: isPosWidth ? pos.orderId || '' : '',
+                            footage: b.length > 0 ? b.length : '', active: '1',
+                            // #4665: короб и норма укладки — подсказка упаковщику.
+                            size: self.packSizeIdForValues(b.width, b.length > 0 ? b.length : pos.length,
+                                pos.isFoil, isPosWidth ? pos.addSleeve : null) });
                         return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(cutId), f).then(function(r) {
                             var bid = r && (r.obj || r.id || r.i);
                             if (bid) widthToBatchId[stripWidthKey(b.width)] = String(bid);
@@ -5662,7 +5753,8 @@
                 if (it.strip.id != null) return null;
                 var batchFields = buildFinishedBatchFields(fbMeta, {
                     width: it.strip.width, strips: it.strip.qty,
-                    planned: finishedBatchRolls(it.strip.qty, o.passes), active: '1'
+                    planned: finishedBatchRolls(it.strip.qty, o.passes), active: '1',
+                    size: self.packSizeIdForCutId(o.cutId, it.strip.width)   // #4665
                 });
                 return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(o.cutId), batchFields)
                     .then(function(res) {
@@ -6505,7 +6597,8 @@
         // проходов резки. «Кол-во рулонов» (спрос) и «ID заказа» проставляются при
         // привязке «Обеспечения», поэтому здесь не пишутся (ручное редактирование состава).
         var fields = buildFinishedBatchFields(sm, { width: strip.width, strips: strip.qty,
-            planned: finishedBatchRolls(strip.qty, this.cutPlannedRunsById(cutId)), active: '1' });
+            planned: finishedBatchRolls(strip.qty, this.cutPlannedRunsById(cutId)), active: '1',
+            size: this.packSizeIdForCutId(cutId, strip.width) });   // #4665
         if (strip.id) {
             return self.post('_m_set/' + strip.id + '?JSON', fields).catch(function(err) {
                 self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
@@ -6543,7 +6636,8 @@
             // #3431/#3433: «Кол-во полос» = введённое число полос; «Кол-во план» = полосы ×
             // проходов. «Кол-во рулонов» (спрос)/«ID заказа» — при привязке «Обеспечения».
             var fields = buildFinishedBatchFields(sm, { width: s.width, strips: s.qty,
-                planned: finishedBatchRolls(s.qty, runs), active: '1' });
+                planned: finishedBatchRolls(s.qty, runs), active: '1',
+                size: self.packSizeIdForCutId(cutId, s.width) });   // #4665
             if (s.id) {
                 keepIds[String(s.id)] = true;
                 var o = origById[String(s.id)];
@@ -7358,7 +7452,10 @@
                                 rolls: demand > 0 ? demand : '',
                                 orderId: batchOrderId(ordersByWidth[key]),
                                 footage: batch.length > 0 ? batch.length : '',
-                                active: '1'
+                                active: '1',
+                                // #4665: короб и норма укладки — подсказка упаковщику.
+                                size: self.packSizeIdForValues(batch.width,
+                                    batch.length > 0 ? batch.length : runLength, lay && lay.isFoil)
                             });
                             return self.post('_m_new/' + finishedBatchMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
                                 .then(function(res) {
@@ -9224,7 +9321,9 @@
                                         var f = buildFinishedBatchFields(fbMeta, { width: st.width, strips: st.qty,
                                             planned: finishedBatchRolls(st.qty, cr.plannedRuns),
                                             rolls: segDemand > 0 ? segDemand : '',
-                                            orderId: st.orderId || '', active: '1' });
+                                            orderId: st.orderId || '', active: '1',
+                                            // #4665: геометрия продолжения та же, что у головы цепочки.
+                                            size: self.packSizeIdForCutId(parentId, st.width) });
                                         return self.post('_m_new/' + fbMeta.id + '?JSON&up=' + encodeURIComponent(bId), f).then(function(r2) {
                                             var nid = r2 && (r2.obj || r2.id || r2.i);
                                             if (nid) stripMap[String(st.id)] = String(nid);
@@ -12666,15 +12765,22 @@
                     var nominal = resolveNominalWidth(g.width, ctx, self.actualWidthIndex);
                     var lineText = formatStripSummaryLine(c, { width: nominal, count: g.count }, g.width, runLengthForCut);
                     var ordered = !!(orderedWidthKeys[stripWidthKey(nominal)] || orderedWidthKeys[stripWidthKey(g.width)]);
+                    // #4665: в подсказке строки — типоразмер упаковки: в какой короб и по
+                    // сколько штук укладывать. Справочник не прочитан/ничего не подошло —
+                    // подсказки просто нет.
+                    var packTitle = self.stripPackTitle(c, nominal, g.width);
                     if (ordered) {
-                        return el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
+                        var row = el('div', { class: 'atex-pp-strip-row' + (dueClass ? ' ' + dueClass : ''),
                             text: lineText + dueSuffix });
+                        if (packTitle) row.setAttribute('title', packTitle);
+                        return row;
                     }
                     // #4230: не в заказ — «Склад»/«Отходы» вместо срока, вся строка красная.
                     var purpose = stockStripPurpose(self.maxStockIndex, {
                         material: c.materialId, width: g.width, length: c.length, winding: c.winding
                     });
                     var rowEl = el('div', { class: 'atex-pp-strip-row is-nonorder', text: lineText + ' ' });
+                    if (packTitle) rowEl.setAttribute('title', packTitle);
                     rowEl.appendChild(el('span', { class: 'atex-pp-strip-nonorder-flag', text: '(' + purpose + ')' }));
                     return rowEl;
                 });
@@ -13534,6 +13640,7 @@
                     }),
                     self.loadMaterialBatches(),
                     self.loadMaxStock(),   // #3391: целесообразные к хранению номенклатуры (склад vs отход)
+                    self.loadPackSizes(),  // #4665: справочник «Типоразмер» — короб и норма укладки
                     self.loadLeaders(),    // #3569: справочник «Лидер» — резолв метки лидера позиции в id для задания
                     self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
                     // #3445: loadStockBalance после loadGenBatches — нужен batchMaterialById (сырьё резки).

@@ -276,4 +276,34 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     assertEqual(said.length, 1, 'packNow: и говорим, почему отметка не прошла');
 })();
 
+// ── #4665: короб и норма укладки на карточке ──
+(function() {
+    var packing = require('../download/atex/js/packaging-size.js').core;
+    var SIZES = packing.sizesFromReport([
+        { size_id: '670992', size_name: '31-40 Х 330/450', add_sleeve: '', rows_cnt: '3', per_row: '12', per_box: '36', box: '№125', w_from: '31.00', w_to: '40.00', l_from: '321', l_to: '450', foil: '' },
+        { size_id: '671017', size_name: '62-83 Х 330/450', add_sleeve: '', rows_cnt: '2', per_row: '12', per_box: '24', box: '№165', w_from: '62.00', w_to: '83.00', l_from: '321', l_to: '450', foil: '' }
+    ]);
+
+    // Обычный случай: типоразмер уже проставлен планированием — берём его по id.
+    var stored = core.itemFromReportRow(row({ cut_width: '80.00', cut_length: '450.00', tipo_id: '671017', tipo: '62-83 Х 330/450' }));
+    assertEqual(core.sizeForItem(stored, SIZES).name, '62-83 Х 330/450', 'sizeForItem: берёт проставленный типоразмер');
+
+    // Старая партия без ссылки — подбираем на месте по ширине и длине.
+    var legacy = core.itemFromReportRow(row({ cut_width: '33.00', cut_length: '450.00', tipo_id: '', tipo: '' }));
+    assertEqual(core.sizeForItem(legacy, SIZES).name, '31-40 Х 330/450', 'sizeForItem: без ссылки подбирает сам');
+
+    // Ссылка на запись, которой в справочнике нет, не должна ронять подбор.
+    var orphan = core.itemFromReportRow(row({ cut_width: '33.00', cut_length: '450.00', tipo_id: '999999' }));
+    assertEqual(core.sizeForItem(orphan, SIZES).name, '31-40 Х 330/450', 'sizeForItem: чужой id — подбираем заново');
+
+    var nothing = core.itemFromReportRow(row({ cut_width: '250.00', cut_length: '450.00', tipo_id: '' }));
+    assertEqual(core.sizeForItem(nothing, SIZES), null, 'sizeForItem: нечего подобрать → null');
+
+    var size = core.sizeForItem(stored, SIZES);
+    assertEqual(core.packingLabel(size, 24), 'короб №165 · по 24 шт · 1 короб', 'packingLabel: ровно один короб');
+    assertEqual(core.packingLabel(size, 50), 'короб №165 · по 24 шт · 3 короба', 'packingLabel: остаток — ещё короб');
+    assertEqual(core.packingLabel(size, 200), 'короб №165 · по 24 шт · 9 коробов', 'packingLabel: склонение «коробов»');
+    assertEqual(core.packingLabel(null, 10), '', 'packingLabel: без типоразмера — пусто');
+})();
+
 console.log('\n' + passed + ' assertions passed');

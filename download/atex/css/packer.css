@@ -120,6 +120,8 @@
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
+/* #4665: в какой короб и по сколько штук укладывать */
+.atex-pk-pack { font-size: 13px; color: var(--pk-accent); margin-top: 2px; font-weight: 600; }
 
 .atex-pk-side { display: flex; align-items: center; gap: 12px; }
 /* Количество — кнопка правки (#4680): выглядит как число, но нажимается пальцем. */
