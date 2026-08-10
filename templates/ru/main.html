@@ -50,6 +50,35 @@
             document.head.appendChild(el);
         })();
     </script>
+    <!-- Меню роли объявлено в head (а не перед скриптами внизу): при единственном
+         пункте решение о том, что левого меню не будет, надо принять до отрисовки
+         body, иначе оно успевает мелькнуть (#4690). -->
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}',expanded:'{expanded}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <script>
+        (function() {
+            // #4690: пункт меню всего один — левое меню не показываем совсем,
+            // а с корня базы сразу уходим в этот единственный пункт.
+            if (typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
+            var items = menuData.filter(function(m) {
+                return m && m.menu_id && String(m.menu_id).charAt(0) !== '{';
+            });
+            if (items.length !== 1) return;
+            var href = String(items[0].href || '');
+            if (!href || href.charAt(0) === '{') return;
+            var css = document.createElement('style');
+            css.id = 'single-menu-style';
+            css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}';
+            document.head.appendChild(css);
+            var target = '/' + db + '/' + href;
+            if (action === '' && location.pathname !== target) location.replace(target);
+        })();
+    </script>
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -172,13 +201,7 @@
         </main>
     </div>
 
-    <script>
-        var menuData = [
-        <!-- Begin: MyRoleMenu -->
-        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}',expanded:'{expanded}'},
-        <!-- End: MyRoleMenu -->
-        ];
-    </script>
+    <!-- menuData объявлен в head — см. #4690 -->
     <script src="/js/app.js"></script>
     <script src="/js/ai-agent-chat.js"></script>
     <script src="/js/main-app.js"></script>
