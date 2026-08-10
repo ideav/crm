@@ -1191,9 +1191,15 @@
     AtexProductionPlanning.prototype.loadPackSizes = function() {
         var self = this;
         this.packSizes = [];
-        if (!packing) return Promise.resolve();
+        // #4685: молча выключаться нельзя — именно так подсказка и пропала незаметно.
+        // Нет модуля подбора → говорим об этом в консоль и не делаем лишнего запроса.
+        if (!packing()) {
+            console.error('[pp] 📦 loadPackSizes: packaging-size.js не подключён (window.AtexPackagingSize нет) — ' +
+                'подсказки с типоразмером не будет; проверь тег в templates/atex/production-planning.html');
+            return Promise.resolve();
+        }
         return this.getJson('report/pack_sizes?JSON_KV&LIMIT=0,1000').then(function(rows) {
-            self.packSizes = packing.sizesFromReport(rows);
+            self.packSizes = packing().sizesFromReport(rows);
             console.log('[pp] 📦 loadPackSizes: типоразмеров упаковки:', self.packSizes.length);
         }).catch(function(err) {
             console.error('[pp] 📦 loadPackSizes: справочник «Типоразмер» не прочитан:', err && err.message);
@@ -1222,11 +1228,11 @@
     // #4665: типоразмер упаковки полосы задания: ширина — полосы, длина намотки и фольга —
     // задания, доп. втулка — обеспечиваемой позиции. Ничего не подошло → '' (поле не пишем).
     AtexProductionPlanning.prototype.packSizeFor = function(cut, width) {
-        if (!packing || !cut || !(this.packSizes || []).length) return null;
-        return packing.matchSize(this.packSizes, {
+        if (!packing() || !cut || !(this.packSizes || []).length) return null;
+        return packing().matchSize(this.packSizes, {
             width: width,
             length: cut.length,
-            foil: !!cut.isFoil || packing.isFoilType(cut.materialType),
+            foil: !!cut.isFoil || packing().isFoilType(cut.materialType),
             addSleeve: this.addSleeveForCutWidth(cut, width)
         });
     };
@@ -1248,8 +1254,8 @@
 
     // #4665: подбор по голым значениям — для путей, где объекта задания ещё нет.
     AtexProductionPlanning.prototype.packSizeIdForValues = function(width, length, foil, addSleeve) {
-        if (!packing || !(this.packSizes || []).length) return '';
-        var size = packing.matchSize(this.packSizes, {
+        if (!packing() || !(this.packSizes || []).length) return '';
+        var size = packing().matchSize(this.packSizes, {
             width: width, length: length, foil: !!foil,
             addSleeve: addSleeve == null ? this.addSleeveByWidthLength(width, length) : addSleeve
         });
@@ -1260,10 +1266,10 @@
     // коробе (3 × 12)». Ширину пробуем номинальную (как в подписи строки), затем
     // фактическую. Ничего не подошло — пустая строка, атрибут title не ставится.
     AtexProductionPlanning.prototype.stripPackTitle = function(cut, nominalWidth, actualWidth) {
-        if (!packing) return '';
+        if (!packing()) return '';
         var size = this.packSizeFor(cut, nominalWidth) || this.packSizeFor(cut, actualWidth);
         if (!size) return '';
-        var tail = packing.describeSize(size);
+        var tail = packing().describeSize(size);
         return size.name + (tail ? ' — ' + tail : '');
     };
 

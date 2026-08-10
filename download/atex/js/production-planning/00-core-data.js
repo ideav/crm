@@ -54,13 +54,22 @@
     // download/atex/js/packaging-size.js. В браузере он подключён шаблоном
     // (window.AtexPackagingSize), в Node приезжает соседним файлом рядом с бандлом.
     // Нет модуля — планирование работает как раньше, просто без коробов.
-    var packing = (function() {
-        if (typeof window !== 'undefined' && window.AtexPackagingSize) return window.AtexPackagingSize.core;
-        if (typeof require === 'function') {
-            try { return require('./packaging-size.js').core; } catch (e) { /* модуль рядом не лежит */ }
+    // #4685: ищем модуль КАЖДЫЙ раз, а не единожды при разборе бандла: старый шаблон
+    // без тега (шаблоны выкладываются отдельно от js) или загрузка бандла раньше модуля
+    // навсегда оставляли бы подбор выключенным — ровно та тишина, из-за которой
+    // типоразмера не было видно. Нашли — запоминаем.
+    var packingCached = null;
+    function packing() {
+        if (packingCached) return packingCached;
+        if (typeof window !== 'undefined' && window.AtexPackagingSize) {
+            packingCached = window.AtexPackagingSize.core;
+            return packingCached;
         }
-        return null;
-    })();
+        if (typeof require === 'function') {
+            try { packingCached = require('./packaging-size.js').core; } catch (e) { /* модуль рядом не лежит */ }
+        }
+        return packingCached;
+    }
 
     // #3914: диагностическая трассировка планирования дня. По умолчанию МОЛЧИТ
     // (в Node/тестах window нет). Включить в браузере одним из способов:
