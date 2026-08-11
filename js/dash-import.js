@@ -360,29 +360,62 @@
     // Таблицы модели резолвим ПО ИМЕНИ из `metadata` — ids у каждой базы свои (`docs/kb/dashboard.md`).
     // Чистая: на вход — массив metadata, на выход — схема либо список того, чего не хватает.
     function resolveSchema(metadata) {
-        var byName = {};
+        var byId = {}, byName = {};
         (metadata || []).forEach(function (t) {
-            var name = String(t.val || '').trim();
-            // Дублирующиеся имена: берём запись с бо́льшим числом реквизитов — она и есть рабочая.
-            if (!byName[name] || (t.reqs || []).length > (byName[name].reqs || []).length) byName[name] = t;
+            byId[String(t.id)] = t;
+            (byName[String(t.val || '').trim()] = byName[String(t.val || '').trim()] || []).push(t);
         });
-        function id(name) { return byName[name] ? Number(byName[name].id) : null; }
-        function reqId(tableName, reqName) {
-            var t = byName[tableName];
+        // Реквизит таблицы по имени — сравниваем и с именем, и с псевдонимом («Метка_т» ↔ «Метка»).
+        function req(tableId, reqName) {
+            var t = byId[String(tableId)];
             if (!t) return null;
-            var q = (t.reqs || []).filter(function (r) { return String(r.val || '').trim() === reqName; })[0];
-            return q ? Number(q.id) : null;
+            return (t.reqs || []).filter(function (r) {
+                if (String(r.val || '').trim() === reqName) return true;
+                var attrs = {};
+                try { attrs = JSON.parse(r.attrs || '{}'); } catch (e) { attrs = {}; }
+                return String(attrs.alias || '').trim() === reqName;
+            })[0] || null;
         }
+        function reqId(tableId, reqName) { var q = req(tableId, reqName); return q ? Number(q.id) : null; }
+        // Таблица, на которую смотрит реквизит: подчинённая (`arr_id`) или справочник (`ref`).
+        function linked(tableId, reqName) {
+            var q = req(tableId, reqName);
+            var target = q && (q.arr_id || q.ref);
+            return target ? String(target) : null;
+        }
+        // Корень ищем по имени, но из одноимённых берём ТУ, у которой есть подчинённые «Листы»:
+        // имя таблицы уникальным не бывает.
+        var dashboard = (byName['Дэшборд'] || []).filter(function (t) {
+            return linked(t.id, 'Лист'); })[0];
+        dashboard = dashboard ? String(dashboard.id) : null;
+
+        // ИЕРАРХИЮ БЕРЁМ ПО ССЫЛКАМ, А НЕ ПО ИМЕНАМ (#4714). В базе бывают одноимённые таблицы:
+        // в `finmo` «Панель» — это и 138, и 537, и по имени выбиралась чужая. Запись в неё
+        // отвечала «У вас нет доступа к реквизиту объекта … 138» и конвертор падал. Настоящую
+        // цепочку задаёт сама модель: Дэшборд → реквизит «Лист» → Лист → «Панель» → Панель →
+        // «Строка»/«RG». Так же ищутся и справочники — по реквизиту, который на них смотрит.
+        var sheet = dashboard ? linked(dashboard, 'Лист') : null;
+        var panel = sheet ? linked(sheet, 'Панель') : null;
+        var row = panel ? linked(panel, 'Строка') : null;
+        var rg = panel ? linked(panel, 'RG') : null;
+        var values = ((byName['Значение'] || [])[0] || {}).id;
+        values = values ? String(values) : null;
+
         var schema = {
-            dashboard: id('Дэшборд'), sheet: id('Лист'), panel: id('Панель'), row: id('Строка'),
-            rg: id('RG'), rgTypeDict: id('Тип RG'), values: id('Значение'),
-            periodDict: id('Период'), yearTable: id('Год'), budgetRows: id('Строка бюджета'),
+            dashboard: num(dashboard), sheet: num(sheet), panel: num(panel), row: num(row), rg: num(rg),
+            rgTypeDict: num(rg ? linked(rg, 'Тип RG') : null),
+            values: num(values),
+            budgetRows: num(values ? linked(values, 'Строка бюджета') : null),
+            periodDict: num(dashboard ? linked(dashboard, 'Период') : null),
+            yearTable: num(sheet ? linked(sheet, 'Год') : null),
             req: {
-                dashPeriod: reqId('Дэшборд', 'Период'),
-                rowFormula: reqId('Строка', 'Формула_т'), rowLabel: reqId('Строка', 'Метка_т'),
-                rgType: reqId('RG', 'Тип RG'),
-                valDate: reqId('Значение', 'Дата_т'), valRow: reqId('Значение', 'Строка бюджета'),
-                valLabel: reqId('Значение', 'Метка_т')
+                dashPeriod: dashboard ? reqId(dashboard, 'Период') : null,
+                rowFormula: row ? reqId(row, 'Формула') : null,
+                rowLabel: row ? reqId(row, 'Метка') : null,
+                rgType: rg ? reqId(rg, 'Тип RG') : null,
+                valDate: values ? reqId(values, 'Дата') : null,
+                valRow: values ? reqId(values, 'Строка бюджета') : null,
+                valLabel: values ? reqId(values, 'Метка') : null
             },
             periodName: 'Год'
         };
@@ -390,6 +423,7 @@
             .filter(function (k) { return !schema[k]; });
         return schema;
     }
+    function num(v) { return v == null || v === '' ? null : Number(v); }
 
     var api = {
         newObjectPath: newObjectPath,

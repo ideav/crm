@@ -152,4 +152,44 @@ assert(DI.newObjectPath(509, 0) === '_m_new/509?JSON&up=1' &&
 assert(DI.newObjectPath(525, 'a b').indexOf('up=a%20b') !== -1,
     '#4711: значение родителя экранируется в адресе');
 
+// ── #4714: схема берётся ПО ИЕРАРХИИ, а не по именам таблиц ──────────────────────────────
+// В базе бывают одноимённые таблицы: в finmo «Панель» — это и 138, и 537. Резолв по имени брал
+// чужую, и запись отвечала «У вас нет доступа к реквизиту объекта … 138». Настоящую цепочку
+// задаёт сама модель: Дэшборд → «Лист» → Лист → «Панель» → Панель → «Строка»/«RG».
+function req(id, val, alias, target, kind) {
+    var r = { id: String(id), val: val, attrs: JSON.stringify({ alias: alias || val }) };
+    if (target) r[kind || 'arr_id'] = String(target);
+    return r;
+}
+var META = [
+    // Ловушка: одноимённая «Панель» с тем же числом реквизитов, но вне иерархии модели.
+    { id: '138', val: 'Панель', reqs: [req(139, 'Строка', 'Строка', 999), req(140, 'RG', 'RG', 998)] },
+    { id: '559', val: 'Дэшборд', reqs: [req(562, 'Период', 'Период', 481, 'ref'), req(563, 'Лист', 'Лист', 551)] },
+    { id: '551', val: 'Лист',    reqs: [req(552, 'Панель', 'Панель', 537), req(554, 'Год', 'Год', 490, 'ref')] },
+    { id: '537', val: 'Панель',  reqs: [req(538, 'Строка', 'Строка', 509), req(539, 'RG', 'RG', 525)] },
+    { id: '509', val: 'Строка',  reqs: [req(515, 'Формула_т', 'Формула'), req(524, 'Метка_т', 'Метка')] },
+    { id: '525', val: 'RG',      reqs: [req(527, 'Тип RG', 'Тип RG', 473, 'ref')] },
+    { id: '496', val: 'Значение', reqs: [req(498, 'Дата_т', 'Дата'), req(500, 'Строка бюджета', 'Строка бюджета', 493, 'ref'),
+                                         req(508, 'Метка_т', 'Метка')] },
+    { id: '473', val: 'Тип RG', reqs: [] }, { id: '490', val: 'Год', reqs: [] },
+    { id: '481', val: 'Период', reqs: [] }, { id: '493', val: 'Строка бюджета', reqs: [] }
+];
+var sch = DI.resolveSchema(META);
+assert(sch.panel === 537,
+    '#4714: панель взята ПО ИЕРАРХИИ (Лист → «Панель»), а не одноимённая 138', String(sch.panel));
+assertEqual([sch.dashboard, sch.sheet, sch.row, sch.rg], [559, 551, 509, 525],
+    '#4714: вся цепочка модели резолвится по ссылкам реквизитов');
+assertEqual([sch.rgTypeDict, sch.values, sch.budgetRows, sch.periodDict, sch.yearTable],
+    [473, 496, 493, 481, 490],
+    '#4714: справочники найдены через реквизиты, которые на них смотрят');
+assertEqual([sch.req.rowFormula, sch.req.rowLabel, sch.req.rgType, sch.req.valDate, sch.req.valRow, sch.req.valLabel],
+    [515, 524, 527, 498, 500, 508],
+    '#4714: реквизиты ищутся и по имени, и по псевдониму («Метка_т» ↔ «Метка»)');
+assertEqual(sch.missing, [], '#4714: на полной схеме ничего не потеряно');
+
+var noModel = DI.resolveSchema([{ id: '138', val: 'Панель', reqs: [] }]);
+assert(noModel.missing.length >= 5 && !noModel.dashboard,
+    '#4714: без таблиц модели схема честно называет недостачу, а не берёт что попало',
+    JSON.stringify(noModel.missing));
+
 console.log('\n' + passed + ' проверок прошли из ' + total);
