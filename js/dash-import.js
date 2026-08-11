@@ -242,7 +242,7 @@
     // Ключ значения: строка + период + метка. По нему повторный залив того же файла НЕ задваивает
     // числа — он их узнаёт (правило «импорт не плодит дубли», #4327).
     function valueKey(rowName, year, label) {
-        return [String(rowName || '').trim(), String(year), String(label || '').trim()].join('');
+        return [String(rowName || '').trim(), String(year), String(label || '').trim()].join('\u0001');   // разделитель — управляющий символ: в именах строк его не бывает
     }
 
     // ТИП RG БЕРЁМ ПО КОДУ, А НЕ ПО ID (#4709). Коды (`rg`, `line`, `value`, `mu`, `col`, `query`)
