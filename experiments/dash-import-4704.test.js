@@ -68,13 +68,13 @@ assertEqual(sheet.panels[0].rows[0].total, 60, 'значение колонки 
 // ── Формулы: своя панель переносится, чужие ссылки — в журнал ────────────────────────────
 assert(sheet.panels[0].rows[2].formula === 'SUM(C2:C3)', 'формула внутри своей панели переносится', sheet.panels[0].rows[2].formula);
 assert(sheet.panels[1].rows[1].formula === null, 'формула со ссылкой на параметр справа НЕ переносится');
-var formulaEntries = res.journal.filter(function (e) { return e.kind === 'formula'; });
+var formulaEntries = res.journal.all().filter(function (e) { return e.kind === 'formula'; });
 assert(formulaEntries.length === 1 && /C8\*I1/.test(formulaEntries[0].what),
     'непереносимая формула попала в журнал с исходным текстом', JSON.stringify(formulaEntries.map(function (e) { return e.what; })));
 
 // ── Безымянная строка — в журнал, а не в модель ──────────────────────────────────────────
-var unnamed = res.journal.filter(function (e) { return e.kind === 'unnamed-row'; });
-assert(unnamed.length === 1 && unnamed[0].row === 6, 'строка с числами без подписи названа номером строки', JSON.stringify(unnamed[0]));
+var unnamed = res.journal.all().filter(function (e) { return e.kind === 'unnamed-row'; });
+assert(unnamed.length === 1 && unnamed[0].address === 'C6', 'строка с числами без подписи названа адресом ячейки', JSON.stringify(unnamed[0]));
 var allRows = sheet.panels.reduce(function (a, p) { return a.concat(p.rows); }, []);
 assert(allRows.every(function (r) { return r.name; }), 'ни одна строка модели не осталась без имени');
 
@@ -84,9 +84,11 @@ assertEqual(DI.periodValues([2026, 2027, 2028], 3), [2026, 2027, 2028, 2029, 203
 assertEqual(DI.periodValues([], 3), [], 'нет годов — нечего создавать');
 
 // ── Журнал → текст issue ─────────────────────────────────────────────────────────────────
-var text = DI.journalIssueText(res.journal, 'Лангемак — финмодель.xlsx');
-assert(/^## Не перенеслось/.test(text), 'журнал начинается заголовком с именем модели');
-assert(/\| Лист1 \| `[A-Z]+\d+` \|/.test(text), 'каждая запись журнала называет лист и адрес ячейки');
+var text = res.journal.toIssueMarkdown();
+assert(/^## Не перенеслось: Лангемак — финмодель/.test(text), 'журнал начинается заголовком с именем источника');
+assert(/Инструмент: `dash-import`/.test(text), 'issue называет инструмент и приёмник — по тикету видно, чем переносили');
+assert(/Перенесено записей: \*\*\d+\*\*, осталось за бортом: \*\*\d+\*\*/.test(text), 'issue начинается со сводки «перенесено / осталось» — иначе список читается как «всё сломалось»');
+assert(/\| лист «Лист1» \| `[A-Z]+\d+` \|/.test(text), 'каждая запись называет источник и адрес');
 assert(/C8\*I1/.test(text), 'в тексте issue видно исходное содержимое ячейки');
 
 // ── Операции записи ──────────────────────────────────────────────────────────────────────

@@ -1,0 +1,54 @@
+<link rel="stylesheet" href="/css/dash.css?{_global_.version}.1">
+<link rel="stylesheet" href="/css/dash-import.css?{_global_.version}.1">
+
+<div id="dash-import"
+     class="m-3"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user="{_global_.user}">
+
+    <h5 class="mb-3">Конвертор Excel → модель дэшборда</h5>
+
+    <!-- Шаг 1. Файл. Имя модели берётся из имени файла (issue #4704). -->
+    <div class="di-step">
+        <label class="di-file-box" for="di-file">
+            <input type="file" id="di-file" accept=".xlsx,.xlsm,.xls" hidden>
+            <span class="di-file-btn">Выбрать файл Excel</span>
+            <span id="di-file-name" class="di-file-name">файл не выбран</span>
+        </label>
+        <div class="di-hint">
+            Имя модели — имя файла. Лист с тем же именем в существующей модели дописывается, а не
+            создаётся заново.
+        </div>
+    </div>
+
+    <!-- Шаг 2. Предпросмотр распознанного. Пока оператор его не увидел, в базу ничего не пишется. -->
+    <div class="di-step" id="di-preview-step" hidden>
+        <h6>Что распознано</h6>
+        <div id="di-summary" class="di-summary"></div>
+        <div id="di-preview" class="di-preview"></div>
+    </div>
+
+    <!-- Шаг 3. Журнал непереносимого — готов к копированию в issue. -->
+    <div class="di-step" id="di-journal-step" hidden>
+        <h6>Не переносится <span id="di-journal-count" class="di-badge"></span></h6>
+        <div class="di-hint">
+            Готово к вставке в issue репозитория: лист, адрес ячейки, исходное содержимое и причина.
+        </div>
+        <textarea id="di-journal-text" class="di-journal" rows="10" readonly></textarea>
+        <button type="button" id="di-journal-copy" class="dash-apply-btn dash-btn-secondary">
+            Скопировать как issue
+        </button>
+    </div>
+
+    <!-- Шаг 4. Запись. -->
+    <div class="di-step" id="di-create-step" hidden>
+        <button type="button" id="di-create" class="dash-apply-btn dash-btn-primary">Создать модель</button>
+        <span id="di-target" class="di-hint"></span>
+    </div>
+
+    <div id="di-status" class="di-status" aria-live="polite"></div>
+</div>
+
+<script src="/js/import-journal.js?{_global_.version}.1"></script>
+<script src="/js/dash-import.js?{_global_.version}.1"></script>

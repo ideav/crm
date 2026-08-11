@@ -1,0 +1,47 @@
+/* Конвертор Excel → модель дэшборда (issue #4704). Экран из четырёх шагов: файл → предпросмотр →
+   журнал непереносимого → запись. Пока оператор не увидел предпросмотр, в базу ничего не идёт. */
+
+#dash-import { max-width: 1100px; }
+
+.di-step { margin: 0 0 1.25rem; }
+.di-hint { color: var(--text-secondary, #6c757d); font-size: .85rem; margin-top: .35rem; }
+.di-dim { color: var(--text-secondary, #6c757d); font-weight: 400; }
+
+/* Шаг 1 — файл */
+.di-file-box { display: flex; align-items: center; gap: .75rem; cursor: pointer; margin: 0; }
+.di-file-btn {
+    display: inline-block; padding: .45rem .9rem; border-radius: .3rem;
+    background: var(--bg-secondary, #f1f3f5); border: 1px solid var(--border-color, #ced4da);
+}
+.di-file-box:hover .di-file-btn { background: var(--bg-hover, #e9ecef); }
+.di-file-name { color: var(--text-secondary, #6c757d); font-size: .9rem; }
+
+/* Шаг 2 — предпросмотр */
+.di-summary { margin: .5rem 0 .75rem; }
+.di-preview { max-height: 420px; overflow: auto; border: 1px solid var(--border-color, #dee2e6); border-radius: .3rem; padding: .5rem .75rem; }
+.di-sheet + .di-sheet { margin-top: .75rem; }
+.di-sheet-name { font-weight: 600; margin: .25rem 0; }
+.di-panel { margin: .35rem 0 .35rem .75rem; }
+.di-panel-name { font-weight: 600; font-size: .92rem; }
+.di-rows { margin: .15rem 0 .5rem 1rem; padding: 0; list-style: disc; font-size: .88rem; }
+.di-rows li { margin: .05rem 0; }
+.di-f { color: #0b7285; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .82rem; }
+
+/* Шаг 3 — журнал */
+.di-badge {
+    display: inline-block; padding: .05rem .45rem; border-radius: .8rem; font-size: .8rem;
+    background: var(--bg-secondary, #f1f3f5); border: 1px solid var(--border-color, #ced4da);
+}
+.di-journal {
+    width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem;
+    margin: .4rem 0; border: 1px solid var(--border-color, #ced4da); border-radius: .3rem; padding: .5rem;
+}
+
+/* Статус — единственный канал сообщений экрана (без alert, по правилам рабочих мест) */
+.di-status { margin-top: .75rem; font-size: .9rem; min-height: 1.2rem; }
+.di-status-ok { color: #2b8a3e; }
+.di-status-err { color: #c92a2a; }
+
+[data-theme="dark"] .di-f { color: #66d9e8; }
+[data-theme="dark"] .di-status-ok { color: #8ce99a; }
+[data-theme="dark"] .di-status-err { color: #ffa8a8; }
