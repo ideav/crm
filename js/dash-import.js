@@ -226,32 +226,90 @@
         });
     }
 
-    // Чего в словаре ещё нет (#4327 — импорт не плодит дубли: перед вставкой ищем по ключу).
-    function missingDictRows(rows, existingNames) {
-        var have = {};
-        (existingNames || []).forEach(function (n) { have[String(n == null ? '' : n).trim()] = 1; });
-        return (rows || []).filter(function (r) { return !have[String(r.name).trim()]; });
+    // ── Справочники: один способ на все ─────────────────────────────────────────────────────
+    //
+    // Модель опирается на четыре справочника: «Период» (вид оси), «Год» (сами колонки),
+    // «Тип RG» (режим колонок панели), «Строка бюджета» (по имени связаны числа со строками).
+    // Каждый из них обрабатывался по-своему и каждый умел молча отвалиться: словарь «Год» не
+    // заполнялся вовсе (#4718), «Тип RG» и «Строка бюджета» на пустой ответ подставляли `{}` —
+    // после чего панель оставалась без колонок, а числа не записывались, и экран всё равно
+    // рапортовал «Готово». Поэтому путь теперь один на все: прочитать → дописать недостающее →
+    // отдать индекс «ключ → id» → писать в модель ТОЛЬКО id.
+    //
+    // Почему именно id: `_m_new` ссылку по имени ещё резолвит (и молча создаёт запись, если у
+    // роли есть WRITE), а `_m_set` приводит значение к `(int)` — имя превращается в 0 и СТИРАЕТ
+    // ссылку. Один формат записи на оба пути снимает этот класс ошибок целиком.
+
+    // ПЛАН ПРИВЕДЕНИЯ СПРАВОЧНИКА В ПОРЯДОК — чистой функцией, чтобы его проверял тест, а не
+    // браузер. Чего нет — создать; что нашлось по имени, но без ключа — дописать ключ
+    // (иначе «Тип RG» с пустым «Кодом» тихо ломает отрисовку колонок).
+    //   needed:   [{ name, key?, fields? }]
+    //   existing: строки `JSON_OBJ`
+    //   opts:     { keyCol — индекс ключевой колонки в r[], keyReq — id реквизита ключа }
+    // → { create: [{ name, key, fields }], patch: [{ id, name, key, fields }], index: { ключ: id } }
+    function dictPlan(needed, existing, opts) {
+        opts = opts || {};
+        var byName = {}, byKey = {}, index = {}, create = [], patch = [];
+        (existing || []).forEach(function (rec) {
+            var r = (rec && rec.r) || [];
+            var name = String(r[0] == null ? '' : r[0]).trim();
+            var key = opts.keyCol == null ? '' : String(r[opts.keyCol] == null ? '' : r[opts.keyCol]).trim();
+            if (name && !byName[name]) byName[name] = { id: String(rec.i), key: key };
+            if (key && !byKey[key]) byKey[key] = String(rec.i);
+        });
+        var queued = {};
+        (needed || []).forEach(function (want) {
+            var name = String(want.name == null ? '' : want.name).trim();
+            var key = want.key == null ? '' : String(want.key).trim();
+            var slot = key || name;
+            if (!name || index[slot] || queued[slot]) return;   // повтор в списке — одна запись
+            queued[slot] = 1;
+            var found = key ? byKey[key] : (byName[name] && byName[name].id);
+            if (found) { index[slot] = found; return; }
+            var sameName = byName[name];
+            if (key && sameName && !sameName.key && opts.keyReq) {
+                var f = {};
+                f[opts.keyReq] = key;
+                patch.push({ id: sameName.id, name: name, key: key, fields: f });
+                index[slot] = sameName.id;
+                return;
+            }
+            var fields = {};
+            Object.keys(want.fields || {}).forEach(function (k) { fields[k] = want.fields[k]; });
+            // Ключевая колонка заполняется и у СОЗДАВАЕМОЙ записи: «Тип RG» без «Кода» рабочее
+            // место не узнаёт — оно сравнивает `rg`/`line`, название ему ничего не говорит.
+            if (key && opts.keyReq) fields[opts.keyReq] = key;
+            create.push({ name: name, key: key, fields: fields });
+        });
+        return { create: create, patch: patch, index: index };
     }
 
-    // ПЛАН ЗАПОЛНЕНИЯ СЛОВАРЯ — чистой функцией (#4718). Раньше запись словаря жила бы прямо в
-    // обработчике кнопки, и её отсутствие никакой тест поймать не мог: тест проверяет ядро, а
-    // браузерную цепочку — никто. Теперь экран только исполняет этот план.
-    // → { table, problem, rows: [{ name, from, to, fields }] }
-    function yearDictPlan(schema, model, existingNames, extra) {
+    // Чего не хватает в справочниках под эту модель. Один список — один порядок обработки:
+    // «Период» и «Год» нужны до дэшборда, «Тип RG» — до панелей, «Строка бюджета» — до чисел.
+    // → [{ key, name, table, needed, keyCol, keyReq }]
+    function dictSpecs(schema, model, extra) {
         schema = schema || {};
-        if (schema.periodDictProblem) return { table: null, problem: schema.periodDictProblem, rows: [] };
-        var rows = missingDictRows(yearDictRows((model && model.years) || [], extra), existingNames);
-        var req = schema.req || {};
-        return {
-            table: schema.periodTable || null,
-            problem: null,
-            rows: rows.map(function (r) {
-                var fields = {};
-                fields[req.yearFrom] = r.from;
-                fields[req.yearTo] = r.to;
-                return { name: r.name, from: r.from, to: r.to, fields: fields };
-            })
-        };
+        var dicts = schema.dicts || {};
+        var years = yearDictRows((model && model.years) || [], extra);
+        var needLine = ((model && model.sheets) || []).some(function (s) {
+            return (s.panels || []).some(function (p) { return p.totalCol != null; }); });
+        var rgTypes = [{ name: 'Repeating group', key: 'rg' }];
+        if (needLine) rgTypes.push({ name: 'Сумма строки', key: 'line' });
+        return [
+            { key: 'period', name: 'Период', table: dicts.period,
+              needed: [{ name: schema.periodName || 'Год' }] },
+            { key: 'years', name: schema.periodName || 'Год', table: dicts.years,
+              needed: years.map(function (y) {
+                  var f = {};
+                  f[(schema.req || {}).yearFrom] = y.from;
+                  f[(schema.req || {}).yearTo] = y.to;
+                  return { name: y.name, fields: f };
+              }) },
+            { key: 'rgTypes', name: 'Тип RG', table: dicts.rgTypes, keyCol: 1,
+              keyReq: (schema.req || {}).rgTypeCode, needed: rgTypes },
+            { key: 'budget', name: 'Строка бюджета', table: dicts.budget,
+              needed: budgetRowNames(model || {}).map(function (n) { return { name: n }; }) }
+        ];
     }
 
     // Реквизит таблицы по имени — сравниваем и с именем ТИПА, и с псевдонимом: в finmo тип
@@ -472,15 +530,18 @@
                 rgType: rg ? reqId(rg, 'Тип RG') : null,
                 valDate: values ? reqId(values, 'Дата') : null,
                 valRow: values ? reqId(values, 'Строка бюджета') : null,
-                valLabel: values ? reqId(values, 'Метка') : null
+                valLabel: values ? reqId(values, 'Метка') : null,
+                rgTypeCode: rg && linked(rg, 'Тип RG') ? reqId(linked(rg, 'Тип RG'), 'Код') : null
             },
             periodName: 'Год'
         };
         schema.missing = ['dashboard', 'sheet', 'panel', 'row', 'rg', 'values']
             .filter(function (k) { return !schema[k]; });
 
-        // СЛОВАРЬ ПЕРИОДА — отдельная проверка (#4718). Модель без записей «Год» рисуется без
-        // единой колонки, поэтому недостачу называем ДО записи, а не после.
+        // СПРАВОЧНИКИ МОДЕЛИ — проверяются ВСЕ и ДО записи. Каждый из них умеет сломать модель
+        // тихо: без «Года» нет колонок (#4718), без «Типа RG» панель пустая, без «Строки
+        // бюджета» не пишутся числа. Пусть недостача называется словами, пока в базе ещё ничего
+        // не создано.
         var period = periodDictTable(metadata, schema.periodName, schema.yearTable);
         schema.periodTable = period ? period.id : null;
         schema.req.yearFrom = period ? period.from : null;
@@ -491,6 +552,29 @@
                 ? 'у таблицы «' + period.name + '» нет колонок «С» и «По» — без границ период не' +
                   ' попадает в модель'
                 : null);
+
+        schema.dicts = {
+            period: schema.periodDict, years: schema.periodTable,
+            rgTypes: schema.rgTypeDict, budget: schema.budgetRows
+        };
+        schema.dictProblems = [];
+        if (schema.periodDictProblem) schema.dictProblems.push(schema.periodDictProblem);
+        if (!schema.periodDict)
+            schema.dictProblems.push('нет справочника «Период» — дэшборду нечем назвать свою ось');
+        if (!schema.req.dashPeriod)
+            schema.dictProblems.push('у «Дэшборда» нет колонки «Период» — вид оси задать негде');
+        if (!schema.rgTypeDict)
+            schema.dictProblems.push('нет справочника «Тип RG» — панели останутся без колонок');
+        else if (!schema.req.rgTypeCode)
+            schema.dictProblems.push('у справочника «Тип RG» нет колонки «Код» — рабочее место ' +
+                'сравнивает именно код (`rg`, `line`), название ему ничего не говорит');
+        if (!schema.req.rgType)
+            schema.dictProblems.push('у «RG» нет ссылки «Тип RG» — режим колонок задать негде');
+        if (!schema.budgetRows)
+            schema.dictProblems.push('нет справочника «Строка бюджета» — числа не с чем связать');
+        if (!schema.req.valRow)
+            schema.dictProblems.push('у «Значения» нет ссылки «Строка бюджета» — число повиснет ' +
+                'без строки');
         return schema;
     }
     function num(v) { return v == null || v === '' ? null : Number(v); }
@@ -552,8 +636,8 @@
         resolveSchema: resolveSchema,
         periodDictTable: periodDictTable,
         yearDictRows: yearDictRows,
-        yearDictPlan: yearDictPlan,
-        missingDictRows: missingDictRows,
+        dictPlan: dictPlan,
+        dictSpecs: dictSpecs,
         createTrace: createTrace,
         budgetRowNames: budgetRowNames,
         valueDateForYear: valueDateForYear,
@@ -632,6 +716,25 @@
                             { id: String(id), up: up == null ? 1 : up, value: mainValue, fields: fields });
             return String(id);
         });
+    }
+
+    // Правка записи. Ссылку `_m_set` принимает ТОЛЬКО id: имя приводится к `(int)` = 0 и стирает
+    // значение (index.php, «_m_set» → ветка非-MULTI ref). Поэтому в модель уходят одни id.
+    function setObj(objId, fields) {
+        var keys = Object.keys(fields || {}).filter(function (k) {
+            return k && k !== 'null' && k !== 'undefined' && fields[k] != null && fields[k] !== ''; });
+        if (!keys.length) return Promise.resolve(String(objId));
+        var f = new FormData();
+        keys.forEach(function (k) { f.append('t' + k, String(fields[k])); });
+        return api2('_m_set/' + objId + '?JSON', f).then(function () {
+            state.trace.add('правка записи ' + objId, { fields: fields });
+            return String(objId);
+        });
+    }
+    function makeField(reqId, value) {
+        var f = {};
+        if (reqId && value) f[reqId] = value;
+        return f;
     }
 
     // ── Панель отладки ──────────────────────────────────────────────────────────────────────
@@ -766,38 +869,53 @@
         var btn = el('di-create');
         btn.disabled = true;
         status('Читаю схему базы…');
-        var schema, dashId, sheetIds = {}, createdYears = 0;
+        var schema, dashId, sheetIds = {}, dicts = {}, dictCounts = {};
         api2('metadata?JSON').then(function (meta) {
             schema = resolveSchema(meta);
             state.trace.add('схема базы', {
                 dashboard: schema.dashboard, sheet: schema.sheet, panel: schema.panel,
                 row: schema.row, rg: schema.rg, values: schema.values,
-                budgetRows: schema.budgetRows, rgTypeDict: schema.rgTypeDict,
-                periodDict: schema.periodDict, periodTable: schema.periodTable,
-                req: schema.req, missing: schema.missing,
-                periodDictProblem: schema.periodDictProblem
+                dicts: schema.dicts, req: schema.req, missing: schema.missing,
+                dictProblems: schema.dictProblems
             });
             renderDebug();
             if (schema.missing.length) throw new Error('в базе нет таблиц модели: ' + schema.missing.join(', '));
-            // СЛОВАРЬ ПЕРИОДА ЗАПОЛНЯЕТСЯ ПЕРВЫМ (#4718). Раньше экран его не трогал вовсе:
-            // модель, листы и значения создавались, а таблица «Год» оставалась пустой — и
-            // дэшборд рисовался без единой колонки периода. Порядок тот же, что в
-            // `buildCreateOps`: словарь → дэшборд → листы.
-            if (schema.periodDictProblem) throw new Error(schema.periodDictProblem);
-            status('Заполняю словарь «' + schema.periodName + '»…');
-            return api2('object/' + schema.periodTable + '/?JSON_OBJ&LIMIT=0,1000');
-        }).then(function (list) {
-            var have = (list || []).map(function (r) { return String((r.r && r.r[0]) || '').trim(); });
-            var plan = yearDictPlan(schema, state.model, have, 3);
-            state.trace.add('словарь «' + schema.periodName + '»', {
-                table: plan.table, уже_есть: have.length,
-                создаём: plan.rows.map(function (r) { return r.name; })
-            });
+            // СПРАВОЧНИКИ ЗАПОЛНЯЮТСЯ ДО МОДЕЛИ И ВСЕ ОДИНАКОВО. Раньше каждый шёл своим путём и
+            // каждый умел отвалиться молча: «Год» не заполнялся вовсе (#4718), «Тип RG» и
+            // «Строка бюджета» на пустой ответ подставляли `{}` — панель оставалась без колонок,
+            // числа не писались, а экран рапортовал «Готово». Недостачу называем здесь, пока в
+            // базе ещё ничего не создано.
+            if (schema.dictProblems.length)
+                throw new Error('справочники модели: ' + schema.dictProblems.join('; '));
+            status('Проверяю справочники…');
+            var specs = dictSpecs(schema, state.model, 3);
             var chain = Promise.resolve();
-            plan.rows.forEach(function (row) {
+            specs.forEach(function (spec) {
                 chain = chain.then(function () {
-                    createdYears++;
-                    return createObj(plan.table, null, row.name, row.fields);
+                    return api2('object/' + spec.table + '/?JSON_OBJ&LIMIT=0,5000');
+                }).then(function (rows) {
+                    var plan = dictPlan(spec.needed, rows,
+                                        { keyCol: spec.keyCol, keyReq: spec.keyReq });
+                    dicts[spec.key] = plan.index;
+                    dictCounts[spec.name] = { было: (rows || []).length,
+                                              создаём: plan.create.length,
+                                              дописываем_код: plan.patch.length };
+                    state.trace.add('справочник «' + spec.name + '»', {
+                        table: spec.table, было: (rows || []).length,
+                        создаём: plan.create.map(function (r) { return r.key || r.name; }),
+                        дописываем_код: plan.patch.map(function (r) { return r.name + '→' + r.key; })
+                    });
+                    var inner = Promise.resolve();
+                    plan.patch.forEach(function (p) {
+                        inner = inner.then(function () { return setObj(p.id, p.fields); });
+                    });
+                    plan.create.forEach(function (rec) {
+                        inner = inner.then(function () {
+                            return createObj(spec.table, null, rec.name, rec.fields)
+                                .then(function (id) { plan.index[rec.key || rec.name] = id; });
+                        });
+                    });
+                    return inner;
                 });
             });
             return chain;
@@ -805,40 +923,34 @@
             // Модель с таким именем уже есть? Тогда дописываем в неё (#4704).
             return api2('object/' + schema.dashboard + '/?JSON_OBJ&LIMIT=0,500');
         }).then(function (list) {
+            // ВИД ОСИ ПИШЕТСЯ ID ЗАПИСИ СПРАВОЧНИКА, А НЕ ЕЁ ИМЕНЕМ. `_m_new` имя ещё резолвит,
+            // `_m_set` приводит значение к `(int)` — имя там превращается в 0 и СТИРАЕТ ссылку.
+            var periodId = dicts.period[schema.periodName];
+            if (!periodId)
+                throw new Error('в справочнике «Период» нет записи «' + schema.periodName +
+                                '» — модели нечем задать ось, колонок не будет');
             var found = (list || []).filter(function (r) {
                 return String(r.r && r.r[0]).trim() === state.model.name; })[0];
-            if (found) { dashId = String(found.i); status('Модель найдена — дописываю листы…'); return null; }
+            if (found) {
+                dashId = String(found.i);
+                status('Модель найдена — дописываю листы…');
+                // У найденной модели период мог остаться пустым (её создавали прежней версией
+                // конвертора или руками) — проставляем; запись того же id ничего не меняет.
+                return setObj(dashId, makeField(schema.req.dashPeriod, periodId));
+            }
             status('Создаю модель…');
-            var fields = {};
-            if (schema.req.dashPeriod && schema.periodDict) fields[schema.req.dashPeriod] = 'Год';
-            return createObj(schema.dashboard, null, state.model.name, fields).then(function (id) { dashId = id; });
+            return createObj(schema.dashboard, null, state.model.name,
+                             makeField(schema.req.dashPeriod, periodId))
+                .then(function (id) { dashId = id; });
         }).then(function () {
             // Листы: одноимённый переиспользуем, новый создаём.
             return api2('object/' + schema.sheet + '/?JSON_OBJ&LIMIT=0,500&up=' + dashId).then(function (list) {
                 (list || []).forEach(function (r) { sheetIds[String(r.r && r.r[0]).trim()] = String(r.i); });
             }).catch(function () { /* подчинённых ещё нет */ });
         }).then(function () {
-            // Тип RG берём ПО КОДУ (#4709): id записей «Тип RG» у каждой базы свои.
-            if (!schema.rgTypeDict) return {};
-            return api2('object/' + schema.rgTypeDict + '/?JSON_OBJ&LIMIT=0,50')
-                .then(rgTypeIdsByCode).catch(function () { return {}; });
-        }).then(function (rgTypes) {
-            // Справочник «Строка бюджета»: значение связано со строкой ПО ИМЕНИ (#4709).
-            // Заводим недостающие имена — существующие переиспользуем (#4327).
-            if (!schema.budgetRows) return { rgTypes: rgTypes, budget: {} };
-            return api2('object/' + schema.budgetRows + '/?JSON_OBJ&LIMIT=0,2000').then(function (list) {
-                var byName = {};
-                (list || []).forEach(function (r) { byName[String(r.r && r.r[0]).trim()] = String(r.i); });
-                var need = budgetRowNames(state.model).filter(function (nm) { return !byName[nm]; });
-                var chain = Promise.resolve();
-                need.forEach(function (nm) {
-                    chain = chain.then(function () {
-                        return createObj(schema.budgetRows, null, nm, {}).then(function (id) { byName[nm] = id; });
-                    });
-                });
-                return chain.then(function () { return { rgTypes: rgTypes, budget: byName }; });
-            });
-        }).then(function (ctx) {
+            // Справочники уже приведены в порядок общим проходом: «Тип RG» — по КОДУ (#4709),
+            // «Строка бюджета» — по имени строки (#4709), недостающие записи созданы.
+            var ctx = { rgTypes: dicts.rgTypes, budget: dicts.budget };
             // Уже записанные значения — чтобы повторный залив того же файла не задваивал числа.
             if (!schema.values) { ctx.seenValues = {}; return ctx; }
             return api2('object/' + schema.values + '/?JSON_OBJ&LIMIT=0,5000').then(function (list) {
@@ -867,21 +979,21 @@
                             created.panels++;
                             return createObj(schema.panel, sheetId, panel.title, {});
                         }).then(function (panelId) {
-                            // Колонки панели: повтор по периодам, плюс сумма строки при колонке «Итог».
-                            var rgChain = Promise.resolve();
-                            if (schema.rg && schema.req.rgType && ctx.rgTypes.rg) {
+                            // Колонки панели: повтор по периодам, плюс сумма строки при колонке
+                            // «Итог». Типы взяты из общего прохода по справочникам, поэтому
+                            // «нет кода rg» здесь уже невозможно — раньше в этом месте панель
+                            // молча оставалась без единой колонки.
+                            var rgChain = Promise.resolve().then(function () {
+                                created.rgs++;
+                                var f = {}; f[schema.req.rgType] = ctx.rgTypes.rg;
+                                return createObj(schema.rg, panelId, '', f);
+                            });
+                            if (panel.totalCol != null) {
                                 rgChain = rgChain.then(function () {
                                     created.rgs++;
-                                    var f = {}; f[schema.req.rgType] = ctx.rgTypes.rg;
-                                    return createObj(schema.rg, panelId, '', f);
+                                    var f2 = {}; f2[schema.req.rgType] = ctx.rgTypes.line;
+                                    return createObj(schema.rg, panelId, '', f2);
                                 });
-                                if (panel.totalCol != null && ctx.rgTypes.line) {
-                                    rgChain = rgChain.then(function () {
-                                        created.rgs++;
-                                        var f2 = {}; f2[schema.req.rgType] = ctx.rgTypes.line;
-                                        return createObj(schema.rg, panelId, '', f2);
-                                    });
-                                }
                             }
                             return rgChain.then(function () {
                                 var rowsChain = Promise.resolve();
@@ -894,7 +1006,11 @@
                                         return createObj(schema.row, panelId, row.name, f);
                                     }).then(function () {
                                         // Значения: число + дата периода + ссылка на «Строку бюджета» + метка.
-                                        if (!schema.values || !ctx.budget[row.name]) return null;
+                                        // Имя строки заведено общим проходом по справочникам; если его
+                                        // всё же нет — это молчаливая потеря чисел, поэтому падаем.
+                                        if (!ctx.budget[row.name])
+                                            throw new Error('в справочнике «Строка бюджета» нет записи «' +
+                                                row.name + '» — числа этой строки записать некуда');
                                         var vChain = Promise.resolve();
                                         Object.keys(row.values).forEach(function (year) {
                                             var key = valueKey(row.name, year, row.label);
@@ -923,8 +1039,10 @@
         }).then(function (created) {
             ['sheets', 'panels', 'rows', 'rgs', 'values', 'skipped'].forEach(function (k) {
                 state.trace.count(k, created[k]); });
+            var createdYears = (dictCounts[schema.periodName] || {}).создаём || 0;
             state.trace.count('years', createdYears);
-            state.trace.add('готово', { dashboard: dashId, created: created, years: createdYears });
+            state.trace.add('готово', { dashboard: dashId, created: created,
+                                        справочники: dictCounts });
             renderDebug();
             status('Готово: годов ' + createdYears + ', листов ' + created.sheets +
                    ', панелей ' + created.panels +

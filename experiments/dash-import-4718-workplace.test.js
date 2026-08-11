@@ -42,7 +42,7 @@ var META = [
     { id: '525', val: 'RG',      reqs: [req(527, 'Тип RG', 'Тип RG', 473, 'ref')] },
     { id: '496', val: 'Значение', reqs: [req(498, 'Дата_т', 'Дата'), req(500, 'Строка бюджета', 'Строка бюджета', 493, 'ref'),
                                          req(508, 'Метка_т', 'Метка')] },
-    { id: '473', val: 'Тип RG', reqs: [] }, { id: '481', val: 'Период', reqs: [] },
+    { id: '473', val: 'Тип RG', reqs: [req(475, 'Код', 'Код')] }, { id: '481', val: 'Период', reqs: [] },
     { id: '493', val: 'Строка бюджета', reqs: [] },
     { id: '490', val: 'Год', reqs: [req(491, 'С_т', 'С'), req(492, 'По_т', 'По')] }
 ];
@@ -86,7 +86,13 @@ global.window = {
 };
 
 // ── Поддельная сеть ─────────────────────────────────────────────────────────────────────────
+// ROUTES меняется между прогонами: второй сценарий поднимает УЖЕ СУЩЕСТВУЮЩУЮ модель и ПУСТОЙ
+// справочник «Тип RG» — так проверяется дописывание в готовую базу.
 var CALLS = [], newId = 1000;
+var ROUTES = {
+    '473': [{ i: 574, r: ['Repeating group', 'rg'] }, { i: 566, r: ['Сумма строки', 'line'] }],
+    '559': []                                            // моделей ещё нет
+};
 global.FormData = function () {
     this.pairs = {};
     this.append = function (k, v) { this.pairs[k] = v; };
@@ -95,10 +101,11 @@ global.fetch = function (url, opts) {
     var body = (opts && opts.body) || null;
     CALLS.push({ url: url, method: (opts && opts.method) || 'GET', fields: body ? body.pairs : null });
     var answer = [];
+    var table = (url.match(/object\/(\d+)\//) || [])[1];
     if (/metadata\?JSON/.test(url)) answer = META;
     else if (/_m_new\//.test(url)) answer = { id: ++newId };
-    else if (/object\/473\//.test(url)) answer = [{ i: 574, r: ['Repeating group', 'rg'] },
-                                                  { i: 566, r: ['Сумма строки', 'line'] }];
+    else if (/_m_set\//.test(url)) answer = { id: 1 };
+    else if (table && ROUTES[table]) answer = ROUTES[table];
     else answer = [];                                    // пустая база: словарь «Год» тоже пуст
     return Promise.resolve({
         ok: true, status: 200,
@@ -169,6 +176,43 @@ settle(10).then(function () {
         '#4718: выгрузка отладки — это JSON с трассой');
     assert(/создано в таблице 490/.test(el('di-debug-text').value),
         '#4718: запись года видна в панели отладки — по ней разбирают чужой прогон');
+
+    // ── Справочники вообще: «Период», «Строка бюджета» и запись ссылки ID ───────────────────
+    var periodRecs = CALLS.filter(function (c) { return /_m_new\/481/.test(c.url); });
+    assertEqual(periodRecs.map(function (c) { return c.fields.t481; }), ['Год'],
+        'справочник «Период» дополняется записью вида оси — раньше её никто не заводил');
+
+    var dash = CALLS.filter(function (c) { return /_m_new\/559/.test(c.url); })[0];
+    assert(dash && dash.fields.t562 === String(periodRecs[0] ? 1001 : ''),
+        'вид оси записан ID записи справочника: `_m_set` имя приводит к 0 и стирает ссылку',
+        JSON.stringify(dash && dash.fields.t562));
+
+    var budget = CALLS.filter(function (c) { return /_m_new\/493/.test(c.url); });
+    assertEqual(budget.map(function (c) { return c.fields.t493; }), ['Выручка', 'ФОТ'],
+        'справочник «Строка бюджета» получает имена строк модели — без них числа записать некуда');
+
+    // ── Второй прогон: модель уже есть, словарь «Тип RG» пуст ───────────────────────────────
+    ROUTES['559'] = [{ i: 900, r: ['Лангемак'] }];         // модель нашлась по имени
+    ROUTES['473'] = [];                                    // а кодов режимов колонок в базе нет
+    ROUTES['481'] = [{ i: 1001, r: ['Год'] }];             // вид оси уже заведён первым прогоном
+    CALLS.length = 0;
+    el('di-create').handlers.click();
+    return settle(120);
+}).then(function () {
+    var rgTypes = CALLS.filter(function (c) { return /_m_new\/473/.test(c.url); });
+    assertEqual(rgTypes.map(function (c) { return c.fields.t475; }), ['rg', 'line'],
+        'пустой справочник «Тип RG» конвертор заполняет сам — коды `rg` и `line`, а не названия');
+
+    var setDash = CALLS.filter(function (c) { return /_m_set\/900/.test(c.url); })[0];
+    assert(setDash && setDash.fields.t562 === '1001',
+        'у найденной модели вид оси проставляется правкой записи — пустой период оставлял её без колонок',
+        JSON.stringify(setDash && setDash.fields));
+
+    assertEqual(CALLS.filter(function (c) { return /_m_new\/481/.test(c.url); }).length, 0,
+        'существующая запись справочника переиспользуется, дубль не заводится (#4327)');
+
+    assert(!CALLS.some(function (c) { return /_m_new\/490/.test(c.url); }) === false,
+        'годы дописываются и во второй раз (словарь по-прежнему пуст в этой фикстуре)');
 
     console.log('\n' + passed + ' проверок прошли из ' + total);
 });

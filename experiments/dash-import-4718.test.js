@@ -45,7 +45,7 @@ var META = [
     { id: '525', val: 'RG',      reqs: [req(527, 'Тип RG', 'Тип RG', 473, 'ref')] },
     { id: '496', val: 'Значение', reqs: [req(498, 'Дата_т', 'Дата'), req(500, 'Строка бюджета', 'Строка бюджета', 493, 'ref'),
                                          req(508, 'Метка_т', 'Метка')] },
-    { id: '473', val: 'Тип RG', reqs: [] }, { id: '481', val: 'Период', reqs: [] },
+    { id: '473', val: 'Тип RG', reqs: [req(475, 'Код', 'Код')] }, { id: '481', val: 'Период', reqs: [] },
     { id: '493', val: 'Строка бюджета', reqs: [] },
     { id: '490', val: 'Год', reqs: [req(491, 'С_т', 'С'), req(492, 'По_т', 'По')] }
 ];
@@ -63,11 +63,11 @@ assert(DI.yearDictRows([2026], 0).every(function (r) { return r.from && r.to; })
 
 assertEqual(DI.yearDictRows([], 3), [], 'нет годов в файле — словарь не трогаем');
 
-// ── Повторный залив не плодит дубли (#4327) ─────────────────────────────────────────────────
-assertEqual(DI.missingDictRows(DI.yearDictRows([2026, 2027], 0), ['2026'])
-                .map(function (r) { return r.name; }), ['2027'],
+// ── Повторный залив не плодит дубли (#4327) — общим планом справочника ──────────────────────
+assertEqual(DI.dictPlan(DI.yearDictRows([2026, 2027], 0), [{ i: 1, r: ['2026'] }], {})
+                .create.map(function (r) { return r.name; }), ['2027'],
     'существующий год переиспользуется, создаётся только недостающий');
-assertEqual(DI.missingDictRows(DI.yearDictRows([2026], 0), [' 2026 ']), [],
+assertEqual(DI.dictPlan(DI.yearDictRows([2026], 0), [{ i: 1, r: [' 2026 '] }], {}).create, [],
     'пробелы по краям имени в базе не создают второй такой же год');
 
 // ── Таблица словаря ищется по имени периода, как её читает `dash` ───────────────────────────
@@ -106,22 +106,27 @@ assert(/«С» и «По»/.test(String(noBounds.periodDictProblem)),
     'словарь без границ — тоже названная проблема, а не тихий пропуск', String(noBounds.periodDictProblem));
 
 // ── ПЛАН ЗАПИСИ: тот самый шаг, которого не было ────────────────────────────────────────────
-var plan = DI.yearDictPlan(schema, MODEL, [], 3);
-assert(plan.table === 490, 'план пишет в таблицу словаря периода', String(plan.table));
-assertEqual(plan.rows.map(function (r) { return r.name; }),
+// Экран строит его ровно так же: спека справочника «Год» из dictSpecs → dictPlan.
+function yearsPlan(sch, model, existing) {
+    var spec = DI.dictSpecs(sch, model, 3).filter(function (s) { return s.key === 'years'; })[0];
+    return { spec: spec, plan: DI.dictPlan(spec.needed, existing, {}) };
+}
+var years = yearsPlan(schema, MODEL, []);
+assert(years.spec.table === 490, 'план пишет в таблицу словаря периода', String(years.spec.table));
+assertEqual(years.plan.create.map(function (r) { return r.name; }),
     ['2026', '2027', '2028', '2029', '2030', '2031'],
     'план создаёт годы файла плюс запас — по ним появятся колонки модели');
-assertEqual(plan.rows[0].fields, { 491: '01.01.2026', 492: '31.12.2026' },
+assertEqual(years.plan.create[0].fields, { 491: '01.01.2026', 492: '31.12.2026' },
     'поля записи адресуются id реквизитов границ — «С» и «По» уходят в базу вместе с именем');
-assert(plan.rows.length > 0,
+assert(years.plan.create.length > 0,
     'план заполнения словаря НЕ пустой — именно его отсутствие оставило /finmo/table/490 пустой');
 
-var planAgain = DI.yearDictPlan(schema, MODEL, ['2026', '2027', '2028', '2029', '2030', '2031'], 3);
-assertEqual(planAgain.rows, [], 'повторный залив того же файла не создаёт ни одной лишней записи');
+var again = yearsPlan(schema, MODEL,
+    ['2026', '2027', '2028', '2029', '2030', '2031'].map(function (n) { return { i: n, r: [n] }; }));
+assertEqual(again.plan.create, [], 'повторный залив того же файла не создаёт ни одной лишней записи');
 
-var planBroken = DI.yearDictPlan(noBounds, MODEL, [], 3);
-assertEqual([planBroken.rows.length, planBroken.problem === null], [0, false],
-    'при названной проблеме план пуст — экран останавливается ДО записи модели');
+assert(noBounds.dictProblems.length > 0 && /«С» и «По»/.test(noBounds.dictProblems.join('; ')),
+    'при названной проблеме экран останавливается ДО записи модели — план даже не строится');
 
 // ── Трасса отладки (второе требование тикета) ───────────────────────────────────────────────
 var tick = 0;
@@ -151,5 +156,73 @@ assert(text.split('\n').length < 60, 'на экран идёт хвостом у
 assert(/ещё \d+ записей/.test(text), 'урезание названо вслух — иначе читается как «это всё»');
 assert(/последний шаг упал/.test(text),
     'ошибка показывается даже за пределами лимита — ради неё панель и открывают');
+
+// ── Справочники вообще: один путь на все четыре ─────────────────────────────────────────────
+// Модель держится на четырёх справочниках, и каждый умел отвалиться молча: «Год» не заполнялся
+// (#4718), «Тип RG» и «Строка бюджета» на пустой ответ подставляли {} — панель оставалась без
+// колонок, числа не писались, а экран рапортовал «Готово».
+var MODEL2 = { name: 'М', years: [2026, 2027, 2028], sheets: [{ panels: [
+    { title: 'P&L', totalCol: 15, rows: [{ name: 'Выручка' }, { name: 'ФОТ' }] }] }] };
+
+var specs = DI.dictSpecs(schema, MODEL2, 3);
+assertEqual(specs.map(function (s) { return s.key; }), ['period', 'years', 'rgTypes', 'budget'],
+    'справочники обрабатываются одним списком и в нужном порядке: вид оси и годы — до дэшборда');
+assertEqual(specs.map(function (s) { return s.table; }), [481, 490, 473, 493],
+    'у каждого справочника найдена своя таблица');
+assertEqual(specs[0].needed, [{ name: 'Год' }],
+    'в «Периоде» нужна запись вида оси — на неё ссылается дэшборд');
+assertEqual(specs[2].needed.map(function (n) { return n.key; }), ['rg', 'line'],
+    'у панели есть колонка «Итог» — нужен и режим суммы строки');
+assertEqual(specs[3].needed.map(function (n) { return n.name; }), ['Выручка', 'ФОТ'],
+    'в «Строку бюджета» идут имена строк модели');
+
+var noTotal = JSON.parse(JSON.stringify(MODEL2));
+noTotal.sheets[0].panels[0].totalCol = null;
+assertEqual(DI.dictSpecs(schema, noTotal, 3)[2].needed.map(function (n) { return n.key; }), ['rg'],
+    'нет колонки «Итог» — лишний режим колонок не заводится');
+
+// План: что создать, чему дописать ключ, что переиспользовать.
+var pRg = DI.dictPlan(specs[2].needed,
+    [{ i: 574, r: ['Repeating group', 'rg'] }], { keyCol: 1, keyReq: 475 });
+assertEqual(pRg.index, { rg: '574' }, 'существующий режим найден ПО КОДУ, а не по названию');
+assertEqual(pRg.create.map(function (c) { return [c.name, c.fields[475]]; }),
+    [['Сумма строки', 'line']],
+    'недостающий режим создаётся вместе с кодом — без кода рабочее место его не узнает');
+
+var pPatch = DI.dictPlan([{ name: 'Repeating group', key: 'rg' }],
+    [{ i: 700, r: ['Repeating group', ''] }], { keyCol: 1, keyReq: 475 });
+assertEqual([pPatch.create.length, pPatch.patch, pPatch.index],
+    [0, [{ id: '700', name: 'Repeating group', key: 'rg', fields: { 475: 'rg' } }], { rg: '700' }],
+    'запись есть, а код пустой — код дописывается правкой, дубль не заводится');
+
+var pDup = DI.dictPlan([{ name: 'Выручка' }, { name: 'Выручка' }], [], {});
+assertEqual(pDup.create.length, 1, 'повтор в списке нужного не создаёт вторую запись справочника');
+
+var pReuse = DI.dictPlan([{ name: 'Выручка' }, { name: 'ФОТ' }],
+    [{ i: 11, r: [' Выручка '] }], {});
+assertEqual([pReuse.index, pReuse.create.map(function (c) { return c.name; })],
+    [{ 'Выручка': '11' }, ['ФОТ']],
+    'существующая запись переиспользуется (пробелы по краям не мешают), создаётся только новая');
+
+// Недостача справочников называется ДО записи — всеми пунктами сразу.
+assertEqual(schema.dictProblems, [], 'на полной схеме претензий к справочникам нет');
+
+function without(id) { return META.filter(function (t) { return t.id !== id; }); }
+assert(/нет справочника «Тип RG»/.test(DI.resolveSchema(META.map(function (t) {
+        return t.id === '525' ? { id: '525', val: 'RG', reqs: [] } : t; })).dictProblems.join('; ')),
+    'нет справочника «Тип RG» — сказано словами, панели без колонок не создаются молча');
+
+assert(/нет колонки «Код»/.test(DI.resolveSchema(META.map(function (t) {
+        return t.id === '473' ? { id: '473', val: 'Тип RG', reqs: [] } : t; })).dictProblems.join('; ')),
+    '«Тип RG» без «Кода» — тоже стоп: рабочее место сравнивает код, а не название');
+
+assert(/нет справочника «Строка бюджета»/.test(DI.resolveSchema(META.map(function (t) {
+        return t.id === '496' ? { id: '496', val: 'Значение', reqs: [] } : t; })).dictProblems.join('; ')),
+    'нет «Строки бюджета» — стоп: раньше в этом месте молча терялись все числа');
+
+assert(/нет справочника «Период»/.test(DI.resolveSchema(META.map(function (t) {
+        return t.id === '559'
+            ? { id: '559', val: 'Дэшборд', reqs: [req(563, 'Лист', 'Лист', 551)] } : t; })).dictProblems.join('; ')),
+    'нет «Периода» — дэшборду нечем назвать свою ось');
 
 console.log('\n' + passed + ' проверок прошли из ' + total);
