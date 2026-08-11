@@ -20,6 +20,10 @@
     // формат записи, виды и сборка issue едины для всех импортёров.
     var Journal = (typeof require === 'function') ? require('./import-journal.js')
                 : (typeof window !== 'undefined' ? window.ImportJournal : null);
+    // МАССОВАЯ ЗАПИСЬ — общий инструмент (`js/integram-batch.js`, #4716): пул до пяти потоков и
+    // семафор на транспорте. Своей реализации у конвертора нет.
+    var Batch = (typeof require === 'function') ? require('./integram-batch.js')
+              : (typeof window !== 'undefined' ? window.IntegramBatch : null);
 
     // ── Разбор формы книги ──────────────────────────────────────────────────────────────────
 
@@ -680,6 +684,8 @@
 
     // Интеграм-API. Ошибка приходит как [{error}] с 4xx — смотрим resp.ok, а не только тело.
     // Каждый запрос попадает в трассу (#4718): по ней потом видно, что именно ушло в базу.
+    // Потолок держит САМ транспорт: пулы вкладываются (листы → панели → строки), и пять
+    // вложенных пулов по пять дали бы 25 запросов разом (#4480).
     function api2(path, form) {
         var opts = { method: form ? 'POST' : 'GET', credentials: 'same-origin' };
         if (form) { form.append('_xsrf', XSRF); opts.body = form; }
@@ -701,11 +707,13 @@
             });
         });
     }
+    var post5 = Batch.limiter(api2, 5);
+
     function createObj(tableId, up, mainValue, fields) {
         var f = new FormData();
         f.append('t' + tableId, mainValue == null ? '' : String(mainValue));
         Object.keys(fields || {}).forEach(function (k) { f.append('t' + k, String(fields[k])); });
-        return api2(newObjectPath(tableId, up), f).then(function (res) {
+        return post5(newObjectPath(tableId, up), f).then(function (res) {
             var id = res && (res.id || res.ID || (res[0] && res[0].id));
             if (!id) {
                 state.trace.error('создание в таблице ' + tableId + ' — ответ без id',
@@ -905,17 +913,18 @@
                         создаём: plan.create.map(function (r) { return r.key || r.name; }),
                         дописываем_код: plan.patch.map(function (r) { return r.name + '→' + r.key; })
                     });
-                    var inner = Promise.resolve();
-                    plan.patch.forEach(function (p) {
-                        inner = inner.then(function () { return setObj(p.id, p.fields); });
-                    });
-                    plan.create.forEach(function (rec) {
-                        inner = inner.then(function () {
-                            return createObj(spec.table, null, rec.name, rec.fields)
-                                .then(function (id) { plan.index[rec.key || rec.name] = id; });
-                        });
-                    });
-                    return inner;
+                    // Записи справочника друг от друга не зависят — пишем пулом (#4716).
+                    // Барьер между правками и созданием не нужен: правка трогает найденную
+                    // запись, создание заводит новую, пересечений нет.
+                    return Batch.runWithConcurrency(
+                        plan.patch.map(function (p) {
+                            return function () { return setObj(p.id, p.fields); };
+                        }).concat(plan.create.map(function (rec) {
+                            return function () {
+                                return createObj(spec.table, null, rec.name, rec.fields)
+                                    .then(function (id) { plan.index[rec.key || rec.name] = id; });
+                            };
+                        })), 5);
                 });
             });
             return chain;
@@ -995,40 +1004,39 @@
                                     return createObj(schema.rg, panelId, '', f2);
                                 });
                             }
+                            // Строки панели друг от друга не зависят — пишем пулом (#4716),
+                            // а значения строки не зависят и от самой записи строки: они
+                            // ссылаются на «Строку бюджета», которая уже заведена.
                             return rgChain.then(function () {
-                                var rowsChain = Promise.resolve();
-                                panel.rows.forEach(function (row) {
-                                    rowsChain = rowsChain.then(function () {
+                                return Batch.runWithConcurrency(panel.rows.map(function (row) {
+                                    return function () {
                                         created.rows++;
                                         var f = {};
                                         if (schema.req.rowFormula && row.formula) f[schema.req.rowFormula] = row.formula;
                                         if (schema.req.rowLabel && row.label) f[schema.req.rowLabel] = row.label;
-                                        return createObj(schema.row, panelId, row.name, f);
-                                    }).then(function () {
-                                        // Значения: число + дата периода + ссылка на «Строку бюджета» + метка.
-                                        // Имя строки заведено общим проходом по справочникам; если его
-                                        // всё же нет — это молчаливая потеря чисел, поэтому падаем.
+                                        // Имя строки заведено общим проходом по справочникам;
+                                        // если его всё же нет — это молчаливая потеря чисел,
+                                        // поэтому падаем ДО записи самой строки.
                                         if (!ctx.budget[row.name])
                                             throw new Error('в справочнике «Строка бюджета» нет записи «' +
                                                 row.name + '» — числа этой строки записать некуда');
-                                        var vChain = Promise.resolve();
-                                        Object.keys(row.values).forEach(function (year) {
+                                        var rowOp = createObj(schema.row, panelId, row.name, f);
+                                        var valueOps = Object.keys(row.values).map(function (year) {
                                             var key = valueKey(row.name, year, row.label);
-                                            if (ctx.seenValues[key]) { created.skipped++; return; }
-                                            vChain = vChain.then(function () {
+                                            if (ctx.seenValues[key]) { created.skipped++; return null; }
+                                            ctx.seenValues[key] = true;
+                                            return function () {
                                                 created.values++;
-                                                ctx.seenValues[key] = true;
                                                 var vf = {};
                                                 if (schema.req.valDate) vf[schema.req.valDate] = valueDateForYear(year);
                                                 if (schema.req.valRow) vf[schema.req.valRow] = ctx.budget[row.name];
                                                 if (schema.req.valLabel && row.label) vf[schema.req.valLabel] = row.label;
                                                 return createObj(schema.values, null, row.values[year], vf);
-                                            });
-                                        });
-                                        return vChain;
-                                    });
-                                });
-                                return rowsChain;
+                                            };
+                                        }).filter(Boolean);
+                                        return Promise.all([rowOp, Batch.runWithConcurrency(valueOps, 5)]);
+                                    };
+                                }), 5);
                             });
                         });
                     });
