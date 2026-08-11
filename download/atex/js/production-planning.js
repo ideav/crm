@@ -7536,6 +7536,20 @@
         // #4542: задания, которые оператор двигает ПРЯМО СЕЙЧАС (все ручные признаки — см.
         // planCutOperations). Запрет «🔒 не обгонять» их не связывает (ТЗ §15).
         var manualMoveBy = opts.manualMoveByCut || {};
+        var manualMoveIds = Object.keys(manualMoveBy);
+        // #4693 (ТЗ §15): «ОПЕРАТОР ДВИГАЕТ ЭТО ЗАДАНИЕ ПРЯМО СЕЙЧАС» — ОДИН предикат на все
+        // исключения §15 внутри упаковщика (уступка 🔒 своим местом, разрыв по дням, монолит,
+        // пропуск вперёд замка). Признак собирается из ВСЕХ полей, которыми ручное действие
+        // выражено: `manualMoveByCut` (замок дня «по весу» #4221 + явное место в дне #4464) и
+        // резерв «целиком» `wholeDayByCut`, который остался у «Урегулировать» (#4569).
+        // Спрашивать одно `wholeDayBy` нельзя: ручной перенос 🗓 его не ставит (резерв «целиком»
+        // снят — задание берёт остаток дня, #4693), и все четыре исключения выключились бы разом,
+        // а ручное действие получило бы отказ.
+        function movedByOperator(id) {
+            var key = String(id);
+            return wholeDayBy[key] != null || !!manualMoveBy[key];
+        }
+        function anyMovedByOperator() { return wholeDayIds.length > 0 || manualMoveIds.length > 0; }
         // #4497 (ТЗ §15): ХРАНИМОЕ МЕСТО 🔒 В ДНЕ. Перед зафиксированным заданием автоматика ничего не
         // ставит: замок держит не только ДЕНЬ, но и МЕСТО в дне — иначе новое задание садится в голову
         // дня, а весь паровоз 🔒 уезжает на его длительность (issue #4497). Единственное, чему
@@ -7617,7 +7631,7 @@
             var key = String(id), st = state[key];
             if (!st || st.yieldedForFit || st.isCont) return false;   // продолжение доводим здесь: ножи на станке
             if (fitWholeBy[key] != null) return false;                // резерв ЕГО собственный
-            if (wholeDayBy[key] != null || manualMoveBy[key]) return false;   // оператор двигает прямо сейчас (#4488/#4542)
+            if (movedByOperator(key)) return false;                    // оператор двигает прямо сейчас (#4488/#4542/#4693)
             if (!(st.remaining > 0) || !(st.perPass > 0)) return false;
             if (!(fitReserve(d, key) > 0)) return false;              // место отнял не резерв целостности
             var nd = nextUnfrozenDay(d + 1);
@@ -7855,7 +7869,7 @@
             // в плане ещё нет («Сгенерировать», «по позициям»), хранимого места нет — значит, оно не
             // стояло перед 🔒 нигде и идёт ПОСЛЕ последнего замка станка.
             function mayPrecedeFixed(candId, fixedId) {
-                if (wholeDayBy[String(candId)] != null || manualMoveBy[String(candId)]) return true;   // оператор двигает прямо сейчас
+                if (movedByOperator(candId)) return true;   // оператор двигает прямо сейчас
                 var fst = state[fixedId], cst = state[candId];
                 if (!fst || fst.anchor == null) return true;           // хранимого дня 🔒 нет — защищать нечего
                 if (storedPlanTs(fixedId) == null) return true;
@@ -8047,7 +8061,7 @@
             //     твёрдости, и 🔒-фольга от уступки не страдает — она остаётся последней в дне;
             //   • кандидат стоял перед ней в ХРАНИМОМ плане (его место не переворачиваем).
             function fixedYieldsTo(fixedId, candId, atDay){
-                if (wholeDayBy[fixedId] != null) return true;
+                if (movedByOperator(fixedId)) return true;
                 if (storedPlanTs(fixedId) == null) return true;   // хранимого места у 🔒 нет — защищать нечего
                 var fst = state[fixedId], cst = state[candId];
                 // Приезжая 🔒 (её день сдвинул потолок, #4467/#4491): в ЭТОМ дне её место не хранимое —
@@ -8073,7 +8087,7 @@
             // смена не может быть длиннее себя (#4467), проход атомарен (#4149).
             function maySplitInto(id, nd){
                 var st2 = state[id];
-                if (!st2 || st2.isCont || st2.fixedDay != null || wholeDayBy[String(id)] != null) return true;
+                if (!st2 || st2.isCont || st2.fixedDay != null || movedByOperator(id)) return true;
                 var blocked = false;
                 for (var bi = 0; bi < poolOrder.length; bi++){
                     var fid = poolOrder[bi], fst2 = state[fid];
@@ -8147,7 +8161,7 @@
                     // обязано уехать к ближайшему СВОБОДНОМУ дню (решение заказчика 29.07.2026):
                     // иначе разрыв по потолку просто перекладывал бы перегруз в следующий
                     // замороженный день. Чужие продолжения доводим как раньше — их наладка здесь.
-                    inProgress = inProgress.filter(function(id){ return wholeDayIds.indexOf(String(id)) === -1; });
+                    inProgress = inProgress.filter(function(id){ return !movedByOperator(id); });
                     // #4512: и остаток, родившийся разрывом 🔒 по потолку, — тоже не доводим здесь.
                     inProgress = inProgress.filter(function(id){ return !state[id].splitFromFixed; });
                     if (!inProgress.length && !fixedToday.length) { day += 1; clock = 0; continue; }
@@ -8205,12 +8219,12 @@
                     // день «по весу», вправе встроиться внутрь монолита — место ему выбрал §8 по
                     // минимальному штрафу, и это решение человека. Порядок ОСТАЛЬНЫХ звеньев при
                     // этом не меняется: монолит лишь расступается в одной точке.
-                    if (monolithNext != null && wholeDayIds.length) {
+                    if (monolithNext != null && anyMovedByOperator()) {
                         var pi491 = poolOrder.indexOf(String(prevPhysical.id));
                         for (var pk = pi491 + 1; pi491 >= 0 && pk < poolOrder.length; pk++) {
                             var pid = poolOrder[pk], pst = state[pid];
                             if (!pst || !(pst.remaining > 0 || (pst.perPass <= 0 && !pst.placedEmpty))) continue;
-                            if (wholeDayBy[pid] != null && pst.fixedDay === day) monolithNext = null;   // пропускаем перенесённое
+                            if (movedByOperator(pid) && pst.fixedDay === day) monolithNext = null;   // пропускаем перенесённое
                             break;
                         }
                     }
@@ -8239,7 +8253,7 @@
                     // дня, которых в `fixedNow` ещё не было (Станок 1, Чт 30.07.2026: шесть заданий
                     // встали перед 649432 и 653120, а те уехали в конец дня). Разрешение обязано быть
                     // у КАЖДОЙ 🔒, стоящей в дне, — как и у гарантии ёмкости `fixedRoomAfter` ниже.
-                    var mayPassFixed = wholeDayBy[String(freeCandNow)] != null
+                    var mayPassFixed = movedByOperator(freeCandNow)
                         || fixedToday.every(function(fid){ return fixedYieldsTo(fid, freeCandNow, day); });
                     var earlierByOrder;
                     if (orderAuthoritative) {
@@ -18121,7 +18135,12 @@
             // 666411 были разорваны до ОДНОГО прохода каждое (issue #4693).
             // «В начало дня» и «По весу» правило #4488 сохраняют: там оператор выбирает МЕСТО, а не
             // хвост дня, и уступают соседи.
-            if (position !== 'end') moveScope.wholeDayCutIds = [String(cut.id)];
+            // ПРАВИЛО ОДНО НА ВСЕ ПЕРЕСТАНОВКИ: день не превышает потолок, а задание берёт
+            // столько, сколько в дне осталось. Поэтому резерв «целиком» не выдаётся НИ ПРИ КАКОМ
+            // положении — ни «в конец дня», ни «в начало», ни «по весу».
+            // Проверено живьём на ateh1 (Пн 10.08.2026, потолок 455): «в конец дня» без резерва
+            // дал 454 мин и целых соседей, а «в начало дня» С резервом — 492 мин (+37) и три
+            // 🔒-задания, раскрошенных до ОДНОГО прохода (2→1, 7→1, 27→1).
             // «По весу» — МЕСТО В ДНЕ ВЫБИРАЮТ ВЕСА, и с галкой «Зафиксировать» тоже (#4506, решение
             // заказчика 30.07.2026). Замок дня «по весу» (weightPositionCutIds → dayLockByCut) отдаёт
             // задание слою размещения ПОДВИЖНЫМ: §8 перебирает точки вставки внутри выбранного дня и
