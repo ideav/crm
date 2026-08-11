@@ -20,6 +20,10 @@
     // формат записи, виды и сборка issue едины для всех импортёров.
     var Journal = (typeof require === 'function') ? require('./import-journal.js')
                 : (typeof window !== 'undefined' ? window.ImportJournal : null);
+    // МАССОВАЯ ЗАПИСЬ — общий инструмент (`js/integram-batch.js`, #4716): пул до пяти потоков и
+    // семафор на транспорте. Своей реализации у конвертора нет.
+    var Batch = (typeof require === 'function') ? require('./integram-batch.js')
+              : (typeof window !== 'undefined' ? window.IntegramBatch : null);
 
     // ── Разбор формы книги ──────────────────────────────────────────────────────────────────
 
@@ -434,6 +438,8 @@
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
 
     // Интеграм-API. Ошибка приходит как [{error}] с 4xx — смотрим resp.ok, а не только тело.
+    // Потолок держит САМ транспорт: пулы вкладываются (листы → панели → строки), и пять
+    // вложенных пулов по пять дали бы 25 запросов разом (#4480).
     function api2(path, form) {
         var opts = { method: form ? 'POST' : 'GET', credentials: 'same-origin' };
         if (form) { form.append('_xsrf', XSRF); opts.body = form; }
@@ -449,11 +455,13 @@
             });
         });
     }
+    var post5 = Batch.limiter(api2, 5);
+
     function createObj(tableId, up, mainValue, fields) {
         var f = new FormData();
         f.append('t' + tableId, mainValue == null ? '' : String(mainValue));
         Object.keys(fields || {}).forEach(function (k) { f.append('t' + k, String(fields[k])); });
-        return api2(newObjectPath(tableId, up), f).then(function (res) {
+        return post5(newObjectPath(tableId, up), f).then(function (res) {
             var id = res && (res.id || res.ID || (res[0] && res[0].id));
             if (!id) throw new Error('создание в таблице ' + tableId + ': ответ без id');
             return String(id);
@@ -572,13 +580,12 @@
                 var byName = {};
                 (list || []).forEach(function (r) { byName[String(r.r && r.r[0]).trim()] = String(r.i); });
                 var need = budgetRowNames(state.model).filter(function (nm) { return !byName[nm]; });
-                var chain = Promise.resolve();
-                need.forEach(function (nm) {
-                    chain = chain.then(function () {
+                // Записи справочника независимы — пишем пулом (#4716).
+                return Batch.runWithConcurrency(need.map(function (nm) {
+                    return function () {
                         return createObj(schema.budgetRows, null, nm, {}).then(function (id) { byName[nm] = id; });
-                    });
-                });
-                return chain.then(function () { return { rgTypes: rgTypes, budget: byName }; });
+                    };
+                }), 5).then(function () { return { rgTypes: rgTypes, budget: byName }; });
             });
         }).then(function (ctx) {
             // Уже записанные значения — чтобы повторный залив того же файла не задваивал числа.
@@ -625,36 +632,34 @@
                                     });
                                 }
                             }
+                            // Строки панели друг от друга не зависят — пишем пулом (#4716),
+                            // а значения строки не зависят и от самой записи строки: они
+                            // ссылаются на «Строку бюджета», которая уже заведена.
                             return rgChain.then(function () {
-                                var rowsChain = Promise.resolve();
-                                panel.rows.forEach(function (row) {
-                                    rowsChain = rowsChain.then(function () {
+                                return Batch.runWithConcurrency(panel.rows.map(function (row) {
+                                    return function () {
                                         created.rows++;
                                         var f = {};
                                         if (schema.req.rowFormula && row.formula) f[schema.req.rowFormula] = row.formula;
                                         if (schema.req.rowLabel && row.label) f[schema.req.rowLabel] = row.label;
-                                        return createObj(schema.row, panelId, row.name, f);
-                                    }).then(function () {
-                                        // Значения: число + дата периода + ссылка на «Строку бюджета» + метка.
-                                        if (!schema.values || !ctx.budget[row.name]) return null;
-                                        var vChain = Promise.resolve();
-                                        Object.keys(row.values).forEach(function (year) {
+                                        var rowOp = createObj(schema.row, panelId, row.name, f);
+                                        if (!schema.values || !ctx.budget[row.name]) return rowOp;
+                                        var valueOps = Object.keys(row.values).map(function (year) {
                                             var key = valueKey(row.name, year, row.label);
-                                            if (ctx.seenValues[key]) { created.skipped++; return; }
-                                            vChain = vChain.then(function () {
+                                            if (ctx.seenValues[key]) { created.skipped++; return null; }
+                                            ctx.seenValues[key] = true;
+                                            return function () {
                                                 created.values++;
-                                                ctx.seenValues[key] = true;
                                                 var vf = {};
                                                 if (schema.req.valDate) vf[schema.req.valDate] = valueDateForYear(year);
                                                 if (schema.req.valRow) vf[schema.req.valRow] = ctx.budget[row.name];
                                                 if (schema.req.valLabel && row.label) vf[schema.req.valLabel] = row.label;
                                                 return createObj(schema.values, null, row.values[year], vf);
-                                            });
-                                        });
-                                        return vChain;
-                                    });
-                                });
-                                return rowsChain;
+                                            };
+                                        }).filter(Boolean);
+                                        return Promise.all([rowOp, Batch.runWithConcurrency(valueOps, 5)]);
+                                    };
+                                }), 5);
                             });
                         });
                     });
