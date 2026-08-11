@@ -217,6 +217,72 @@
         return out;
     }
 
+    // ЗАПИСЬ СЛОВАРЯ ГОДА — ЭТО ИМЯ И ГРАНИЦЫ (#4718). Рабочее место `dash` отбирает периоды по
+    // «С» и «По» (`dashFilterPeriodDict` в `js/dash.js`): строка без обеих дат отбрасывается
+    // молча. Год, записанный одним именем, для модели невидим — колонок по нему не появится.
+    function yearDictRows(years, extra) {
+        return periodValues(years, extra).map(function (y) {
+            return { name: String(y), from: '01.01.' + y, to: '31.12.' + y };
+        });
+    }
+
+    // Чего в словаре ещё нет (#4327 — импорт не плодит дубли: перед вставкой ищем по ключу).
+    function missingDictRows(rows, existingNames) {
+        var have = {};
+        (existingNames || []).forEach(function (n) { have[String(n == null ? '' : n).trim()] = 1; });
+        return (rows || []).filter(function (r) { return !have[String(r.name).trim()]; });
+    }
+
+    // ПЛАН ЗАПОЛНЕНИЯ СЛОВАРЯ — чистой функцией (#4718). Раньше запись словаря жила бы прямо в
+    // обработчике кнопки, и её отсутствие никакой тест поймать не мог: тест проверяет ядро, а
+    // браузерную цепочку — никто. Теперь экран только исполняет этот план.
+    // → { table, problem, rows: [{ name, from, to, fields }] }
+    function yearDictPlan(schema, model, existingNames, extra) {
+        schema = schema || {};
+        if (schema.periodDictProblem) return { table: null, problem: schema.periodDictProblem, rows: [] };
+        var rows = missingDictRows(yearDictRows((model && model.years) || [], extra), existingNames);
+        var req = schema.req || {};
+        return {
+            table: schema.periodTable || null,
+            problem: null,
+            rows: rows.map(function (r) {
+                var fields = {};
+                fields[req.yearFrom] = r.from;
+                fields[req.yearTo] = r.to;
+                return { name: r.name, from: r.from, to: r.to, fields: fields };
+            })
+        };
+    }
+
+    // Реквизит таблицы по имени — сравниваем и с именем ТИПА, и с псевдонимом: в finmo тип
+    // зовётся «С_т», а колонка — «С» (#4672).
+    function findReq(table, reqName) {
+        return ((table && table.reqs) || []).filter(function (r) {
+            if (String(r.val || '').trim() === reqName) return true;
+            var attrs = {};
+            try { attrs = JSON.parse(r.attrs || '{}'); } catch (e) { attrs = {}; }
+            return String(attrs.alias || '').trim() === reqName;
+        })[0] || null;
+    }
+
+    // ТАБЛИЦА-СЛОВАРЬ ПЕРИОДА ищется ПО ИМЕНИ ПЕРИОДА — ровно так её читает `dash`
+    // (`object/Год?JSON_DATA&LIMIT=10000`). Имена таблиц не уникальны (#4714), поэтому из
+    // одноимённых берём ту, у которой есть границы «С» и «По»; запасной путь — id, на который
+    // смотрит реквизит «Год» листа. → { id, from, to } | null
+    function periodDictTable(metadata, name, fallbackId) {
+        var wanted = String(name || '').trim();
+        var named = (metadata || []).filter(function (t) {
+            return String(t.val || '').trim() === wanted; });
+        var withBounds = named.filter(function (t) { return findReq(t, 'С') && findReq(t, 'По'); });
+        var table = withBounds[0] || named[0] ||
+            (fallbackId ? (metadata || []).filter(function (t) {
+                return String(t.id) === String(fallbackId); })[0] : null);
+        if (!table) return null;
+        var from = findReq(table, 'С'), to = findReq(table, 'По');
+        return { id: Number(table.id), name: String(table.val || '').trim(),
+                 from: from ? Number(from.id) : null, to: to ? Number(to.id) : null };
+    }
+
     // ── Значения: справочник строк, дата периода, ключ ──────────────────────────────────────
 
     // ЗНАЧЕНИЕ СВЯЗАНО СО СТРОКОЙ ПО ИМЕНИ, А НЕ ССЫЛКОЙ НА СТРОКУ МОДЕЛИ (#4709).
@@ -366,16 +432,7 @@
             (byName[String(t.val || '').trim()] = byName[String(t.val || '').trim()] || []).push(t);
         });
         // Реквизит таблицы по имени — сравниваем и с именем, и с псевдонимом («Метка_т» ↔ «Метка»).
-        function req(tableId, reqName) {
-            var t = byId[String(tableId)];
-            if (!t) return null;
-            return (t.reqs || []).filter(function (r) {
-                if (String(r.val || '').trim() === reqName) return true;
-                var attrs = {};
-                try { attrs = JSON.parse(r.attrs || '{}'); } catch (e) { attrs = {}; }
-                return String(attrs.alias || '').trim() === reqName;
-            })[0] || null;
-        }
+        function req(tableId, reqName) { return findReq(byId[String(tableId)], reqName); }
         function reqId(tableId, reqName) { var q = req(tableId, reqName); return q ? Number(q.id) : null; }
         // Таблица, на которую смотрит реквизит: подчинённая (`arr_id`) или справочник (`ref`).
         function linked(tableId, reqName) {
@@ -421,13 +478,83 @@
         };
         schema.missing = ['dashboard', 'sheet', 'panel', 'row', 'rg', 'values']
             .filter(function (k) { return !schema[k]; });
+
+        // СЛОВАРЬ ПЕРИОДА — отдельная проверка (#4718). Модель без записей «Год» рисуется без
+        // единой колонки, поэтому недостачу называем ДО записи, а не после.
+        var period = periodDictTable(metadata, schema.periodName, schema.yearTable);
+        schema.periodTable = period ? period.id : null;
+        schema.req.yearFrom = period ? period.from : null;
+        schema.req.yearTo = period ? period.to : null;
+        schema.periodDictProblem = !period
+            ? 'в базе нет таблицы-словаря «' + schema.periodName + '» — годам модели негде лежать'
+            : (!period.from || !period.to
+                ? 'у таблицы «' + period.name + '» нет колонок «С» и «По» — без границ период не' +
+                  ' попадает в модель'
+                : null);
         return schema;
     }
     function num(v) { return v == null || v === '' ? null : Number(v); }
 
+    // ── Трасса переноса (панель отладки, #4718) ─────────────────────────────────────────────
+
+    // Импорт делает сотни записей по сети, а экран показывал одну итоговую строку. Когда
+    // «прошло успешно», но в базе чего-то нет (годы!), разбирать нечего. Трасса пишет каждый
+    // шаг и КАЖДЫЙ запрос — адрес, статус, id созданной записи — и выгружается файлом.
+    // Часы передаются параметром: тесту нужен предсказуемый отсчёт.
+    function createTrace(meta, now) {
+        var clock = now || function () { return Date.now(); };
+        var t0 = clock(), entries = [], counters = {};
+        function push(kind, step, data) {
+            var e = { ms: clock() - t0, kind: kind, step: step,
+                      data: data === undefined ? null : data };
+            entries.push(e);
+            return e;
+        }
+        return {
+            add:   function (step, data) { return push('step', step, data); },
+            api:   function (step, data) { return push('api', step, data); },
+            error: function (step, data) { return push('error', step, data); },
+            count: function (name, by) { counters[name] = (counters[name] || 0) + (by == null ? 1 : by); },
+            counters: function () { return counters; },
+            all: function () { return entries.slice(); },
+            errors: function () { return entries.filter(function (e) { return e.kind === 'error'; }); },
+            toJSON: function () {
+                var out = { tool: 'dash-import', entries: entries.slice(), counters: counters };
+                Object.keys(meta || {}).forEach(function (k) { out[k] = meta[k]; });
+                return out;
+            },
+            // Текст для экрана: хвост урезаем (модель на 700 значений даёт тысячи строк), но
+            // ошибки показываем ВСЕ — ради них панель и открывают.
+            toText: function (limit) {
+                var max = limit == null ? 200 : limit;
+                var lines = entries.slice(0, max).map(function (e) {
+                    return '+' + e.ms + 'мс  ' + (e.kind === 'error' ? '⛔ ' : '') + e.step +
+                           (e.data == null ? '' : '  ' + JSON.stringify(e.data));
+                });
+                if (entries.length > max) {
+                    lines.push('… ещё ' + (entries.length - max) + ' записей — они в выгруженном файле');
+                    entries.slice(max).filter(function (e) { return e.kind === 'error'; })
+                        .forEach(function (e) {
+                            lines.push('+' + e.ms + 'мс  ⛔ ' + e.step +
+                                       (e.data == null ? '' : '  ' + JSON.stringify(e.data)));
+                        });
+                }
+                var names = Object.keys(counters);
+                if (names.length) lines.push('— итог: ' + names.map(function (n) {
+                    return n + ' ' + counters[n]; }).join(', '));
+                return lines.join('\n');
+            }
+        };
+    }
+
     var api = {
         newObjectPath: newObjectPath,
         resolveSchema: resolveSchema,
+        periodDictTable: periodDictTable,
+        yearDictRows: yearDictRows,
+        yearDictPlan: yearDictPlan,
+        missingDictRows: missingDictRows,
+        createTrace: createTrace,
         budgetRowNames: budgetRowNames,
         valueDateForYear: valueDateForYear,
         valueKey: valueKey,
@@ -456,7 +583,7 @@
 
     var DB = root.getAttribute('data-db') || '';
     var XSRF = root.getAttribute('data-xsrf') || '';
-    var state = { model: null, journal: [], fileName: '' };
+    var state = { model: null, journal: [], fileName: '', trace: createTrace({ db: DB }) };
 
     function el(id) { return document.getElementById(id); }
     function status(text, kind) {
@@ -468,6 +595,7 @@
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
 
     // Интеграм-API. Ошибка приходит как [{error}] с 4xx — смотрим resp.ok, а не только тело.
+    // Каждый запрос попадает в трассу (#4718): по ней потом видно, что именно ушло в базу.
     function api2(path, form) {
         var opts = { method: form ? 'POST' : 'GET', credentials: 'same-origin' };
         if (form) { form.append('_xsrf', XSRF); opts.body = form; }
@@ -477,8 +605,14 @@
                 try { data = JSON.parse(text); } catch (e) { data = null; }
                 if (!resp.ok) {
                     var msg = (data && data[0] && data[0].error) || text.slice(0, 200);
+                    state.trace.error(opts.method + ' ' + path, { status: resp.status, answer: msg });
                     throw new Error(path + ' → ' + resp.status + ' ' + msg);
                 }
+                state.trace.api(opts.method + ' ' + path, {
+                    status: resp.status,
+                    rows: Array.isArray(data) ? data.length : undefined,
+                    id: (data && !Array.isArray(data) && (data.id || data.ID)) || undefined
+                });
                 return data;
             });
         });
@@ -489,9 +623,32 @@
         Object.keys(fields || {}).forEach(function (k) { f.append('t' + k, String(fields[k])); });
         return api2(newObjectPath(tableId, up), f).then(function (res) {
             var id = res && (res.id || res.ID || (res[0] && res[0].id));
-            if (!id) throw new Error('создание в таблице ' + tableId + ': ответ без id');
+            if (!id) {
+                state.trace.error('создание в таблице ' + tableId + ' — ответ без id',
+                                  { up: up, value: mainValue, answer: res });
+                throw new Error('создание в таблице ' + tableId + ': ответ без id');
+            }
+            state.trace.add('создано в таблице ' + tableId,
+                            { id: String(id), up: up == null ? 1 : up, value: mainValue, fields: fields });
             return String(id);
         });
+    }
+
+    // ── Панель отладки ──────────────────────────────────────────────────────────────────────
+
+    function renderDebug() {
+        el('di-debug-text').value = state.trace.toText();
+        var errs = state.trace.errors().length;
+        el('di-debug-count').textContent = state.trace.all().length + ' шагов' +
+            (errs ? ', ошибок ' + errs : '');
+        el('di-debug-step').hidden = false;
+    }
+    function debugFileName() {
+        var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+        var stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+                    p(d.getHours()) + p(d.getMinutes());
+        var name = String((state.model && state.model.name) || 'модель').replace(/[\\/:*?"<>|]/g, '_');
+        return 'dash-import-' + name + '-' + stamp + '.json';
     }
 
     // SheetJS подгружаем лениво — он нужен только когда файл выбран (как в upload.html).
@@ -551,15 +708,31 @@
         state.fileName = file.name;
         el('di-file-name').textContent = file.name;
         status('Читаю файл…');
+        state.trace = createTrace({ db: DB, file: file.name });
+        state.trace.add('выбран файл', { name: file.name, size: file.size });
         withXLSX().then(function (XLSX) {
             return file.arrayBuffer().then(function (buf) {
                 var wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
                 var res = recognizeModel(file.name, gridsFromWorkbook(XLSX, wb));
                 state.model = res.model; state.journal = res.journal;
+                state.trace.add('файл разобран', {
+                    model: res.model.name, years: res.model.years,
+                    sheets: res.model.sheets.map(function (s) {
+                        return { name: s.name, panels: s.panels.map(function (p) {
+                            return { title: p.title, rows: p.rows.length,
+                                     total: p.totalCol != null }; }) };
+                    }),
+                    journal: res.journal.count()
+                });
                 renderPreview();
+                renderDebug();
                 status('Разобрано. Проверьте структуру — в базу пока ничего не записано.', 'ok');
             });
-        }).catch(function (e) { status('Не удалось разобрать файл: ' + e.message, 'err'); });
+        }).catch(function (e) {
+            state.trace.error('разбор файла', { message: e.message });
+            renderDebug();
+            status('Не удалось разобрать файл: ' + e.message, 'err');
+        });
     });
 
     el('di-journal-copy').addEventListener('click', function () {
@@ -569,15 +742,66 @@
         catch (e) { status('Скопируйте текст журнала вручную.', 'err'); }
     });
 
+    // Выгрузка трассы файлом (#4718): её прикладывают к issue целиком — на экране показан хвост.
+    el('di-debug-download').addEventListener('click', function () {
+        var blob = new Blob([JSON.stringify(state.trace.toJSON(), null, 2)],
+                            { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = debugFileName();
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+        status('Файл отладки выгружен: ' + a.download, 'ok');
+    });
+
+    el('di-debug-copy').addEventListener('click', function () {
+        var ta = el('di-debug-text');
+        ta.select();
+        try { document.execCommand('copy'); status('Трасса скопирована.', 'ok'); }
+        catch (e) { status('Скопируйте текст трассы вручную.', 'err'); }
+    });
+
     el('di-create').addEventListener('click', function () {
         if (!state.model) return;
         var btn = el('di-create');
         btn.disabled = true;
         status('Читаю схему базы…');
-        var schema, dashId, sheetIds = {};
+        var schema, dashId, sheetIds = {}, createdYears = 0;
         api2('metadata?JSON').then(function (meta) {
             schema = resolveSchema(meta);
+            state.trace.add('схема базы', {
+                dashboard: schema.dashboard, sheet: schema.sheet, panel: schema.panel,
+                row: schema.row, rg: schema.rg, values: schema.values,
+                budgetRows: schema.budgetRows, rgTypeDict: schema.rgTypeDict,
+                periodDict: schema.periodDict, periodTable: schema.periodTable,
+                req: schema.req, missing: schema.missing,
+                periodDictProblem: schema.periodDictProblem
+            });
+            renderDebug();
             if (schema.missing.length) throw new Error('в базе нет таблиц модели: ' + schema.missing.join(', '));
+            // СЛОВАРЬ ПЕРИОДА ЗАПОЛНЯЕТСЯ ПЕРВЫМ (#4718). Раньше экран его не трогал вовсе:
+            // модель, листы и значения создавались, а таблица «Год» оставалась пустой — и
+            // дэшборд рисовался без единой колонки периода. Порядок тот же, что в
+            // `buildCreateOps`: словарь → дэшборд → листы.
+            if (schema.periodDictProblem) throw new Error(schema.periodDictProblem);
+            status('Заполняю словарь «' + schema.periodName + '»…');
+            return api2('object/' + schema.periodTable + '/?JSON_OBJ&LIMIT=0,1000');
+        }).then(function (list) {
+            var have = (list || []).map(function (r) { return String((r.r && r.r[0]) || '').trim(); });
+            var plan = yearDictPlan(schema, state.model, have, 3);
+            state.trace.add('словарь «' + schema.periodName + '»', {
+                table: plan.table, уже_есть: have.length,
+                создаём: plan.rows.map(function (r) { return r.name; })
+            });
+            var chain = Promise.resolve();
+            plan.rows.forEach(function (row) {
+                chain = chain.then(function () {
+                    createdYears++;
+                    return createObj(plan.table, null, row.name, row.fields);
+                });
+            });
+            return chain;
+        }).then(function () {
             // Модель с таким именем уже есть? Тогда дописываем в неё (#4704).
             return api2('object/' + schema.dashboard + '/?JSON_OBJ&LIMIT=0,500');
         }).then(function (list) {
@@ -697,7 +921,13 @@
             });
             return chain.then(function () { return created; });
         }).then(function (created) {
-            status('Готово: листов ' + created.sheets + ', панелей ' + created.panels +
+            ['sheets', 'panels', 'rows', 'rgs', 'values', 'skipped'].forEach(function (k) {
+                state.trace.count(k, created[k]); });
+            state.trace.count('years', createdYears);
+            state.trace.add('готово', { dashboard: dashId, created: created, years: createdYears });
+            renderDebug();
+            status('Готово: годов ' + createdYears + ', листов ' + created.sheets +
+                   ', панелей ' + created.panels +
                    ', строк ' + created.rows + ', колонок (RG) ' + created.rgs +
                    ', значений ' + created.values +
                    (created.skipped ? ' (уже были: ' + created.skipped + ')' : '') +
@@ -706,7 +936,10 @@
             el('di-target').innerHTML = '<a href="/' + DB + '/dash/' + dashId + '" target="_blank">Открыть модель</a>';
             btn.disabled = false;
         }).catch(function (e) {
-            status('Запись прервана: ' + e.message + '. Что успело создаться — осталось в базе.', 'err');
+            state.trace.error('запись прервана', { message: e.message });
+            renderDebug();
+            status('Запись прервана: ' + e.message +
+                   '. Что успело создаться — осталось в базе; выгрузите отладку и приложите к issue.', 'err');
             btn.disabled = false;
         });
     });
