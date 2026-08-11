@@ -217,6 +217,46 @@
         return out;
     }
 
+    // ── Значения: справочник строк, дата периода, ключ ──────────────────────────────────────
+
+    // ЗНАЧЕНИЕ СВЯЗАНО СО СТРОКОЙ ПО ИМЕНИ, А НЕ ССЫЛКОЙ НА СТРОКУ МОДЕЛИ (#4709).
+    // Запись «Значение» ссылается на справочник «Строка бюджета»; строка модели и строка значений —
+    // разные таблицы, связывает их имя (плюс «Метка»), см. `docs/kb/dashboard.md`. Поэтому перед
+    // записью чисел нужны имена строк в справочнике — уникальные, без дублей (#4327).
+    function budgetRowNames(model) {
+        var seen = {}, out = [];
+        (model.sheets || []).forEach(function (s) {
+            (s.panels || []).forEach(function (p) {
+                (p.rows || []).forEach(function (r) {
+                    var name = String(r.name || '').trim();
+                    if (name && !seen[name]) { seen[name] = 1; out.push(name); }
+                });
+            });
+        });
+        return out;
+    }
+
+    // Дата периода для годовой оси — первое число года: «Значение» хранит дату, а не номер периода.
+    function valueDateForYear(year) { return '01.01.' + String(year); }
+
+    // Ключ значения: строка + период + метка. По нему повторный залив того же файла НЕ задваивает
+    // числа — он их узнаёт (правило «импорт не плодит дубли», #4327).
+    function valueKey(rowName, year, label) {
+        return [String(rowName || '').trim(), String(year), String(label || '').trim()].join('');
+    }
+
+    // ТИП RG БЕРЁМ ПО КОДУ, А НЕ ПО ID (#4709). Коды (`rg`, `line`, `value`, `mu`, `col`, `query`)
+    // — это контракт рабочего места `dash`; id записей «Тип RG» у каждой базы свои.
+    // rows — записи справочника «Тип RG» в виде { i, r:[название, код, …] }. → { код: id }
+    function rgTypeIdsByCode(rows) {
+        var out = {};
+        (rows || []).forEach(function (rec) {
+            var code = String((rec.r && rec.r[1]) || '').trim();
+            if (code) out[code] = String(rec.i);
+        });
+        return out;
+    }
+
     // ── Операции записи ─────────────────────────────────────────────────────────────────────
 
     // Структура → операции. Ничего не пишет и не знает про сеть: возвращает список действий,
@@ -343,6 +383,10 @@
 
     var api = {
         resolveSchema: resolveSchema,
+        budgetRowNames: budgetRowNames,
+        valueDateForYear: valueDateForYear,
+        valueKey: valueKey,
+        rgTypeIdsByCode: rgTypeIdsByCode,
         recognizeModel: recognizeModel,
         recognizeSheet: recognizeSheet,
         periodHeader: periodHeader,
@@ -506,7 +550,43 @@
                 (list || []).forEach(function (r) { sheetIds[String(r.r && r.r[0]).trim()] = String(r.i); });
             }).catch(function () { /* подчинённых ещё нет */ });
         }).then(function () {
-            var chain = Promise.resolve(), created = { sheets: 0, panels: 0, rows: 0, values: 0 };
+            // Тип RG берём ПО КОДУ (#4709): id записей «Тип RG» у каждой базы свои.
+            if (!schema.rgTypeDict) return {};
+            return api2('object/' + schema.rgTypeDict + '/?JSON_OBJ&LIMIT=0,50')
+                .then(rgTypeIdsByCode).catch(function () { return {}; });
+        }).then(function (rgTypes) {
+            // Справочник «Строка бюджета»: значение связано со строкой ПО ИМЕНИ (#4709).
+            // Заводим недостающие имена — существующие переиспользуем (#4327).
+            if (!schema.budgetRows) return { rgTypes: rgTypes, budget: {} };
+            return api2('object/' + schema.budgetRows + '/?JSON_OBJ&LIMIT=0,2000').then(function (list) {
+                var byName = {};
+                (list || []).forEach(function (r) { byName[String(r.r && r.r[0]).trim()] = String(r.i); });
+                var need = budgetRowNames(state.model).filter(function (nm) { return !byName[nm]; });
+                var chain = Promise.resolve();
+                need.forEach(function (nm) {
+                    chain = chain.then(function () {
+                        return createObj(schema.budgetRows, null, nm, {}).then(function (id) { byName[nm] = id; });
+                    });
+                });
+                return chain.then(function () { return { rgTypes: rgTypes, budget: byName }; });
+            });
+        }).then(function (ctx) {
+            // Уже записанные значения — чтобы повторный залив того же файла не задваивал числа.
+            if (!schema.values) { ctx.seenValues = {}; return ctx; }
+            return api2('object/' + schema.values + '/?JSON_OBJ&LIMIT=0,5000').then(function (list) {
+                var seen = {};
+                (list || []).forEach(function (r) {
+                    var row = String((r.r && r.r[2]) || '').split(':').slice(1).join(':').trim();
+                    var year = String((r.r && r.r[1]) || '').slice(-4);
+                    var label = String((r.r && r.r[6]) || '').trim();
+                    if (row && year) seen[valueKey(row, year, label)] = true;
+                });
+                ctx.seenValues = seen;
+                return ctx;
+            }).catch(function () { ctx.seenValues = {}; return ctx; });
+        }).then(function (ctx) {
+            var chain = Promise.resolve();
+            var created = { sheets: 0, panels: 0, rows: 0, rgs: 0, values: 0, budget: 0, skipped: 0 };
             state.model.sheets.forEach(function (sheet) {
                 chain = chain.then(function () {
                     if (sheetIds[sheet.name]) return sheetIds[sheet.name];
@@ -519,17 +599,53 @@
                             created.panels++;
                             return createObj(schema.panel, sheetId, panel.title, {});
                         }).then(function (panelId) {
-                            var rowsChain = Promise.resolve();
-                            panel.rows.forEach(function (row) {
-                                rowsChain = rowsChain.then(function () {
-                                    created.rows++;
-                                    var f = {};
-                                    if (schema.req.rowFormula && row.formula) f[schema.req.rowFormula] = row.formula;
-                                    if (schema.req.rowLabel && row.label) f[schema.req.rowLabel] = row.label;
-                                    return createObj(schema.row, panelId, row.name, f);
+                            // Колонки панели: повтор по периодам, плюс сумма строки при колонке «Итог».
+                            var rgChain = Promise.resolve();
+                            if (schema.rg && schema.req.rgType && ctx.rgTypes.rg) {
+                                rgChain = rgChain.then(function () {
+                                    created.rgs++;
+                                    var f = {}; f[schema.req.rgType] = ctx.rgTypes.rg;
+                                    return createObj(schema.rg, panelId, '', f);
                                 });
+                                if (panel.totalCol != null && ctx.rgTypes.line) {
+                                    rgChain = rgChain.then(function () {
+                                        created.rgs++;
+                                        var f2 = {}; f2[schema.req.rgType] = ctx.rgTypes.line;
+                                        return createObj(schema.rg, panelId, '', f2);
+                                    });
+                                }
+                            }
+                            return rgChain.then(function () {
+                                var rowsChain = Promise.resolve();
+                                panel.rows.forEach(function (row) {
+                                    rowsChain = rowsChain.then(function () {
+                                        created.rows++;
+                                        var f = {};
+                                        if (schema.req.rowFormula && row.formula) f[schema.req.rowFormula] = row.formula;
+                                        if (schema.req.rowLabel && row.label) f[schema.req.rowLabel] = row.label;
+                                        return createObj(schema.row, panelId, row.name, f);
+                                    }).then(function () {
+                                        // Значения: число + дата периода + ссылка на «Строку бюджета» + метка.
+                                        if (!schema.values || !ctx.budget[row.name]) return null;
+                                        var vChain = Promise.resolve();
+                                        Object.keys(row.values).forEach(function (year) {
+                                            var key = valueKey(row.name, year, row.label);
+                                            if (ctx.seenValues[key]) { created.skipped++; return; }
+                                            vChain = vChain.then(function () {
+                                                created.values++;
+                                                ctx.seenValues[key] = true;
+                                                var vf = {};
+                                                if (schema.req.valDate) vf[schema.req.valDate] = valueDateForYear(year);
+                                                if (schema.req.valRow) vf[schema.req.valRow] = ctx.budget[row.name];
+                                                if (schema.req.valLabel && row.label) vf[schema.req.valLabel] = row.label;
+                                                return createObj(schema.values, null, row.values[year], vf);
+                                            });
+                                        });
+                                        return vChain;
+                                    });
+                                });
+                                return rowsChain;
                             });
-                            return rowsChain;
                         });
                     });
                     return inner;
@@ -538,7 +654,10 @@
             return chain.then(function () { return created; });
         }).then(function (created) {
             status('Готово: листов ' + created.sheets + ', панелей ' + created.panels +
-                   ', строк ' + created.rows + '. Модель: ' + state.model.name +
+                   ', строк ' + created.rows + ', колонок (RG) ' + created.rgs +
+                   ', значений ' + created.values +
+                   (created.skipped ? ' (уже были: ' + created.skipped + ')' : '') +
+                   '. Модель: ' + state.model.name +
                    ' (dash/' + dashId + ').', 'ok');
             el('di-target').innerHTML = '<a href="/' + DB + '/dash/' + dashId + '" target="_blank">Открыть модель</a>';
             btn.disabled = false;
