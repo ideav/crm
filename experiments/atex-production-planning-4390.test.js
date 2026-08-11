@@ -129,8 +129,14 @@ Promise.resolve()
         var wlFix = cap.moveScope && cap.moveScope.weightPositionCutIds;
         assert(!!(wlFix && wlFix.length === 1 && String(wlFix[0]) === 'C1'),
             '#4506: fix=true + «По весу» — задание отдано в замок дня (место в дне выбирают веса), день держит фикс-якорь');
-        assert(!!(cap.moveScope && cap.moveScope.wholeDayCutIds && cap.moveScope.wholeDayCutIds.length === 1),
-            '#4488: перенесённое задание помечено как «ложится в день целиком»');
+        // #4693 (решение заказчика 11.08.2026, отменяет #4488): «У всех перестановок единое
+        // правило» — день не превышает потолок, а перенесённое берёт столько, сколько в дне
+        // осталось; хвост уезжает в следующий день. Резерв «целиком» не выдаётся ни при каком
+        // положении: с ним упаковщик, которому вытеснять некого (соседи под 🔒), крошил их по
+        // одному проходу — боевая ateh1 10.08.2026: 492 мин при потолке 455, 🔒-задания 2→1,
+        // 7→1 и 27→1 прохода.
+        assert(!(cap.moveScope && cap.moveScope.wholeDayCutIds && cap.moveScope.wholeDayCutIds.length),
+            '#4693: резерв «целиком» перенесённому НЕ выдаётся — задание берёт остаток дня');
         assert(cap.notify && cap.notify.kind === 'success' && /27\.07\.2026/.test(cap.notify.msg),
             '#4390-B: легло на целевой день → тост success с датой 27.07 (' + (cap.notify && cap.notify.msg) + ')');
     })
