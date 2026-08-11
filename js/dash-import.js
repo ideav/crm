@@ -483,6 +483,23 @@
         return '_m_new/' + tableId + '?JSON&up=' + encodeURIComponent(parent);
     }
 
+    // ЧТЕНИЕ ПОДЧИНЁННЫХ — ПО `F_U`, А НЕ ПО `up` (#4720). Параметр `up` действует при СОЗДАНИИ
+    // записи; при чтении он не фильтрует ничего и молча отдаёт пустой список. Из-за этого лист
+    // модели «не находился», и каждый прогон конвертора создавал ещё один одноимённый лист —
+    // в finmo их набралось четыре, а строки одной модели разъехались по двум.
+    function childListPath(tableId, parentId, limit) {
+        return 'object/' + tableId + '/?JSON_OBJ&LIMIT=0,' + (limit || 500) +
+               '&F_U=' + encodeURIComponent(parentId);
+    }
+
+    // Границы дэшборда «С»/«По» выводятся из годов файла: без них отбор периодов не выполняется
+    // вовсе — в диапазон берутся периоды, целиком лежащие внутри [С; По] (`docs/kb/dashboard.md`).
+    function modelDateRange(years) {
+        var list = (years || []).slice().sort(function (a, b) { return a - b; });
+        if (!list.length) return null;
+        return { from: '01.01.' + list[0], to: '31.12.' + list[list.length - 1] };
+    }
+
     // ── Схема целевой базы ──────────────────────────────────────────────────────────────────
 
     // Таблицы модели резолвим ПО ИМЕНИ из `metadata` — ids у каждой базы свои (`docs/kb/dashboard.md`).
@@ -529,6 +546,8 @@
             yearTable: num(sheet ? linked(sheet, 'Год') : null),
             req: {
                 dashPeriod: dashboard ? reqId(dashboard, 'Период') : null,
+                dashFrom: dashboard ? reqId(dashboard, 'С') : null,
+                dashTo: dashboard ? reqId(dashboard, 'По') : null,
                 rowFormula: row ? reqId(row, 'Формула') : null,
                 rowLabel: row ? reqId(row, 'Метка') : null,
                 rgType: rg ? reqId(rg, 'Тип RG') : null,
@@ -637,6 +656,8 @@
 
     var api = {
         newObjectPath: newObjectPath,
+        childListPath: childListPath,
+        modelDateRange: modelDateRange,
         resolveSchema: resolveSchema,
         periodDictTable: periodDictTable,
         yearDictRows: yearDictRows,
@@ -932,6 +953,15 @@
             // Модель с таким именем уже есть? Тогда дописываем в неё (#4704).
             return api2('object/' + schema.dashboard + '/?JSON_OBJ&LIMIT=0,500');
         }).then(function (list) {
+            // ГРАНИЦЫ [С; По] ОБЯЗАТЕЛЬНЫ (#4720): без них отбор периодов не выполняется, и модель
+            // открывается без колонок. Берём их из годов файла — 01.01.<первый> … 31.12.<последний>.
+            function dashFields(periodId) {
+                var f = makeField(schema.req.dashPeriod, periodId);
+                var range = modelDateRange(state.model.years);
+                if (range && schema.req.dashFrom) f[schema.req.dashFrom] = range.from;
+                if (range && schema.req.dashTo) f[schema.req.dashTo] = range.to;
+                return f;
+            }
             // ВИД ОСИ ПИШЕТСЯ ID ЗАПИСИ СПРАВОЧНИКА, А НЕ ЕЁ ИМЕНЕМ. `_m_new` имя ещё резолвит,
             // `_m_set` приводит значение к `(int)` — имя там превращается в 0 и СТИРАЕТ ссылку.
             var periodId = dicts.period[schema.periodName];
@@ -945,15 +975,14 @@
                 status('Модель найдена — дописываю листы…');
                 // У найденной модели период мог остаться пустым (её создавали прежней версией
                 // конвертора или руками) — проставляем; запись того же id ничего не меняет.
-                return setObj(dashId, makeField(schema.req.dashPeriod, periodId));
+                return setObj(dashId, dashFields(periodId));
             }
             status('Создаю модель…');
-            return createObj(schema.dashboard, null, state.model.name,
-                             makeField(schema.req.dashPeriod, periodId))
+            return createObj(schema.dashboard, null, state.model.name, dashFields(periodId))
                 .then(function (id) { dashId = id; });
         }).then(function () {
             // Листы: одноимённый переиспользуем, новый создаём.
-            return api2('object/' + schema.sheet + '/?JSON_OBJ&LIMIT=0,500&up=' + dashId).then(function (list) {
+            return api2(childListPath(schema.sheet, dashId)).then(function (list) {
                 (list || []).forEach(function (r) { sheetIds[String(r.r && r.r[0]).trim()] = String(r.i); });
             }).catch(function () { /* подчинённых ещё нет */ });
         }).then(function () {
@@ -1013,7 +1042,9 @@
                                         created.rows++;
                                         var f = {};
                                         if (schema.req.rowFormula && row.formula) f[schema.req.rowFormula] = row.formula;
-                                        if (schema.req.rowLabel && row.label) f[schema.req.rowLabel] = row.label;
+                                        // «Метка» — КОМПАНИЯ (подпись модели и ключ, по которому
+                                        // значение находит строку), а не название блока (#4720).
+                                        if (schema.req.rowLabel) f[schema.req.rowLabel] = state.model.name;
                                         // Имя строки заведено общим проходом по справочникам;
                                         // если его всё же нет — это молчаливая потеря чисел,
                                         // поэтому падаем ДО записи самой строки.
@@ -1022,7 +1053,7 @@
                                                 row.name + '» — числа этой строки записать некуда');
                                         var rowOp = createObj(schema.row, panelId, row.name, f);
                                         var valueOps = Object.keys(row.values).map(function (year) {
-                                            var key = valueKey(row.name, year, row.label);
+                                            var key = valueKey(row.name, year, state.model.name);
                                             if (ctx.seenValues[key]) { created.skipped++; return null; }
                                             ctx.seenValues[key] = true;
                                             return function () {
@@ -1030,7 +1061,7 @@
                                                 var vf = {};
                                                 if (schema.req.valDate) vf[schema.req.valDate] = valueDateForYear(year);
                                                 if (schema.req.valRow) vf[schema.req.valRow] = ctx.budget[row.name];
-                                                if (schema.req.valLabel && row.label) vf[schema.req.valLabel] = row.label;
+                                                if (schema.req.valLabel) vf[schema.req.valLabel] = state.model.name;
                                                 return createObj(schema.values, null, row.values[year], vf);
                                             };
                                         }).filter(Boolean);
