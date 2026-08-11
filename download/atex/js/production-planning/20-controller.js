@@ -304,6 +304,8 @@
         setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
+        workingWindowFallbacks: workingWindowFallbacks,   // #4696: какие настройки окна НЕ доехали
+        workingWindowLabel: workingWindowLabel,           // #4696: окно дня одной строкой (лог/тост)
         dayCeilingMin: dayCeilingMin,                   // #4563: ЕДИНСТВЕННЫЙ потолок дня (cutEnd + нахлёст по виду)
         dayCapacityMinutes: dayCapacityMinutes,         // #4563: и ёмкость дня из него же
         resolveOverworkLimits: resolveOverworkLimits,     // #3992: лимиты захлёста (ключи _MN)
@@ -658,6 +660,25 @@
                 }
             });
             self.daySettings = values;
+            // #4696: ОКНО ДНЯ ВИДНО ВСЕГДА, а его фолбэк не молчит. Потолок резки задают четыре
+            // ключа (`DAY_START_HOUR`, `DAY_END_HOUR`, `TOTAL_INTERVALS`, `MAX_OVERWORK_CUTS_MN`);
+            // не доехал любой — потолок молча ниже, день недобирается, и снаружи это выглядит как
+            // «планировщик не заполняет день» (боевая ateh, Станок 1, 11.08.2026: 439 мин при 451).
+            // Печатаем ФАКТИЧЕСКОЕ окно (без флага трассировки — его в тот раз никто не включал) и
+            // кричим о каждом фолбэке, как #4059 кричит о нечисловых весах.
+            var win4696 = resolveWorkingWindow(values, self.changeTimes && self.changeTimes.CLEANUP_SHIFT);
+            console.log('[pp] 📐 окно дня: ' + workingWindowLabel(win4696));
+            var cutCeil4696 = ppClock(dayCeilingMin(win4696, 'cuts'));
+            var winMiss = workingWindowFallbacks(values, self.changeTimes && self.changeTimes.CLEANUP_SHIFT);
+            if (winMiss.length) {
+                var missTxt = winMiss.map(function(m){ return m.key + ' → ' + m.fallback; }).join('; ');
+                console.error('[pp] ❌ #4696: настройки окна дня не доехали — ' + missTxt +
+                    '. Потолок резки: ' + cutCeil4696 +
+                    '. День будет недобираться, пока ключи не появятся в «Настройке» (ТЗ §14).');
+                if (self.notify) self.notify('Настройки окна дня не применились: ' +
+                    winMiss.map(function(m){ return m.key; }).join(', ') +
+                    ' — потолок резки ' + cutCeil4696 + ', день недоберётся', 'error');
+            }
             // #4059: «что-то непонятно» — значение веса/лимита ЕСТЬ в «Настройке», но НЕ число. Не
             // игнорируем молча: ошибка в лог и оператору (иначе planWeight тихо возьмёт дефолт, и
             // оператор не узнает, что настройка не применилась — как со сроком в issue #4059).

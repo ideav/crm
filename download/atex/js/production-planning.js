@@ -6568,6 +6568,48 @@
         };
     }
 
+    // #4696 (ТЗ §14): ФОЛБЭК ОКНА ДНЯ НЕ МОЛЧИТ. Настройка потолка, не доехавшая до расчёта,
+    // опускает потолок молча — оператор видит только недобор дня и никакой причины.
+    // Боевой случай (ateh, Станок 1, 11.08.2026): без `TOTAL_INTERVALS` (20) и
+    // `MAX_OVERWORK_CUTS_MN` (5) потолок резки = 16:00 вместо 16:15, в хвост дня влезает 5 проходов
+    // вместо 7, день стои́т 439 мин вместо 451 — и «Упорядочить» этот недобор не убирает.
+    // Прецедент того же класса — #4017: белый список `loadDaySettings` терял `MAX_OVERWORK_*_MN`.
+    // Чистая: → [{ key, fallback }] по ключам, которые задают окно дня и НЕ доехали. Пусто = всё на
+    // месте. Отсутствие ключа — законный фолбэк (ТЗ §14), но НЕ молчаливый: зовущий обязан сказать.
+    function workingWindowFallbacks(settings, cleanupMin) {
+        var cfg = settings || {};
+        var out = [];
+        function rawVal(k){ var v = cfg[k]; return v == null ? '' : String(v).trim(); }
+        var cleanup = Number(cleanupMin != null ? cleanupMin : DEFAULT_OP_TIMES.CLEANUP_SHIFT);
+        if (!isFinite(cleanup) || cleanup < 0) cleanup = DEFAULT_OP_TIMES.CLEANUP_SHIFT;
+        if (rawVal('DAY_START_HOUR') === '' || !isFinite(parseClockMinutes(rawVal('DAY_START_HOUR'), NaN)))
+            out.push({ key: 'DAY_START_HOUR', fallback: 'начало смены ' + ppClock(DAY_START_MIN) });
+        if (rawVal('DAY_END_HOUR') === '' || !isFinite(parseClockMinutes(rawVal('DAY_END_HOUR'), NaN)))
+            out.push({ key: 'DAY_END_HOUR', fallback: 'конец смены ' + ppClock(DAY_END_MIN) });
+        if (!(parseDurationMinutes(cfg.TOTAL_INTERVALS) > 0))
+            out.push({ key: 'TOTAL_INTERVALS', fallback: 'буфер до конца смены = уборка ' + Math.round(cleanup) + ' мин' });
+        var over = resolveOverworkLimits(cfg);
+        if (over.cutsMin == null && over.tuneMin == null)
+            out.push({ key: 'MAX_OVERWORK_CUTS_MN', fallback: 'нахлёст за конец смены выключен' });
+        // Обед: выключен целиком — законная конфигурация; задана ПОЛОВИНА — настройка не применилась.
+        var hasLunchStart = rawVal('LUNCH_START') !== '' && isFinite(parseClockMinutes(rawVal('LUNCH_START'), NaN));
+        var hasLunchDur = parseDurationMinutes(cfg.LUNCH_DURATION) > 0;
+        if (hasLunchStart !== hasLunchDur)
+            out.push({ key: hasLunchStart ? 'LUNCH_DURATION' : 'LUNCH_START', fallback: 'обед выключен' });
+        return out;
+    }
+
+    // #4696: окно дня одной строкой — для лога и тоста. win — результат `resolveWorkingWindow`.
+    function workingWindowLabel(win) {
+        if (!win) return '—';
+        return ppClock(win.startMin) + '..' + ppClock(win.cutEndMin) +
+            ' (конец смены ' + ppClock(win.endMin) +
+            ', нахлёст ' + (win.maxOverworkCutsMin != null ? win.maxOverworkCutsMin : '—') + '/' +
+            (win.maxOverworkTuneMin != null ? win.maxOverworkTuneMin : '—') +
+            ', потолок резки ' + ppClock(dayCeilingMin(win, 'cuts')) + ')' +
+            ', обед ' + (win.lunchStartMin != null ? ppClock(win.lunchStartMin) + '×' + win.lunchDurationMin : 'нет');
+    }
+
     // #4563 (ТЗ §15): ПОТОЛОК ДНЯ — ОДНА ФУНКЦИЯ НА ВСЮ СИСТЕМУ. Решение заказчика 01.08.2026:
     // потолок = `cutEndMin` + нахлёст ПО ВИДУ ОПЕРАЦИИ (резка → MAX_OVERWORK_CUTS, настройка →
     // MAX_OVERWORK_TUNE). Другого правила нет ни у кого.
@@ -13968,6 +14010,8 @@
         setupTaskIdSet: setupTaskIdSet,   // #3635 п.5
         parseClockMinutes: parseClockMinutes,
         resolveWorkingWindow: resolveWorkingWindow,
+        workingWindowFallbacks: workingWindowFallbacks,   // #4696: какие настройки окна НЕ доехали
+        workingWindowLabel: workingWindowLabel,           // #4696: окно дня одной строкой (лог/тост)
         dayCeilingMin: dayCeilingMin,                   // #4563: ЕДИНСТВЕННЫЙ потолок дня (cutEnd + нахлёст по виду)
         dayCapacityMinutes: dayCapacityMinutes,         // #4563: и ёмкость дня из него же
         resolveOverworkLimits: resolveOverworkLimits,     // #3992: лимиты захлёста (ключи _MN)
@@ -14322,6 +14366,25 @@
                 }
             });
             self.daySettings = values;
+            // #4696: ОКНО ДНЯ ВИДНО ВСЕГДА, а его фолбэк не молчит. Потолок резки задают четыре
+            // ключа (`DAY_START_HOUR`, `DAY_END_HOUR`, `TOTAL_INTERVALS`, `MAX_OVERWORK_CUTS_MN`);
+            // не доехал любой — потолок молча ниже, день недобирается, и снаружи это выглядит как
+            // «планировщик не заполняет день» (боевая ateh, Станок 1, 11.08.2026: 439 мин при 451).
+            // Печатаем ФАКТИЧЕСКОЕ окно (без флага трассировки — его в тот раз никто не включал) и
+            // кричим о каждом фолбэке, как #4059 кричит о нечисловых весах.
+            var win4696 = resolveWorkingWindow(values, self.changeTimes && self.changeTimes.CLEANUP_SHIFT);
+            console.log('[pp] 📐 окно дня: ' + workingWindowLabel(win4696));
+            var cutCeil4696 = ppClock(dayCeilingMin(win4696, 'cuts'));
+            var winMiss = workingWindowFallbacks(values, self.changeTimes && self.changeTimes.CLEANUP_SHIFT);
+            if (winMiss.length) {
+                var missTxt = winMiss.map(function(m){ return m.key + ' → ' + m.fallback; }).join('; ');
+                console.error('[pp] ❌ #4696: настройки окна дня не доехали — ' + missTxt +
+                    '. Потолок резки: ' + cutCeil4696 +
+                    '. День будет недобираться, пока ключи не появятся в «Настройке» (ТЗ §14).');
+                if (self.notify) self.notify('Настройки окна дня не применились: ' +
+                    winMiss.map(function(m){ return m.key; }).join(', ') +
+                    ' — потолок резки ' + cutCeil4696 + ', день недоберётся', 'error');
+            }
             // #4059: «что-то непонятно» — значение веса/лимита ЕСТЬ в «Настройке», но НЕ число. Не
             // игнорируем молча: ошибка в лог и оператору (иначе planWeight тихо возьмёт дефолт, и
             // оператор не узнает, что настройка не применилась — как со сроком в issue #4059).
