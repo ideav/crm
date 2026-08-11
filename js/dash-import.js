@@ -345,6 +345,16 @@
         });
     }
 
+    // АДРЕС СОЗДАНИЯ ЗАПИСИ — ОДНО МЕСТО (#4711). Ядро требует родителя ВСЕГДА: у подчинённой
+    // записи это id владельца, у независимой — единица. Без `up` приходит
+    // «Недопустимые данные: up=0. Установите значение=1 для независимых объектов», и кнопка
+    // «Создать модель» падает на первой же записи (дэшборд). Правило записано здесь, а не в каждом
+    // вызове: иначе следующая создаваемая сущность снова забудет родителя.
+    function newObjectPath(tableId, up) {
+        var parent = (up === undefined || up === null || up === '' || Number(up) === 0) ? 1 : up;
+        return '_m_new/' + tableId + '?JSON&up=' + encodeURIComponent(parent);
+    }
+
     // ── Схема целевой базы ──────────────────────────────────────────────────────────────────
 
     // Таблицы модели резолвим ПО ИМЕНИ из `metadata` — ids у каждой базы свои (`docs/kb/dashboard.md`).
@@ -382,6 +392,7 @@
     }
 
     var api = {
+        newObjectPath: newObjectPath,
         resolveSchema: resolveSchema,
         budgetRowNames: budgetRowNames,
         valueDateForYear: valueDateForYear,
@@ -442,8 +453,7 @@
         var f = new FormData();
         f.append('t' + tableId, mainValue == null ? '' : String(mainValue));
         Object.keys(fields || {}).forEach(function (k) { f.append('t' + k, String(fields[k])); });
-        var path = '_m_new/' + tableId + '?JSON=1' + (up ? '&up=' + up : '');
-        return api2(path, f).then(function (res) {
+        return api2(newObjectPath(tableId, up), f).then(function (res) {
             var id = res && (res.id || res.ID || (res[0] && res[0].id));
             if (!id) throw new Error('создание в таблице ' + tableId + ': ответ без id');
             return String(id);
