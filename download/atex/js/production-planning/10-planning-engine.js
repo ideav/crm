@@ -4586,6 +4586,93 @@
         return out;
     }
 
+    // #4735: ЧАСТИ ОДНОЙ РАБОТЫ, ОКАЗАВШИЕСЯ РЯДОМ В ОДНОМ ДНЕ, — ОДНО ЗАДАНИЕ (ТЗ §15).
+    // Отвечает на другой вопрос, чем `mergeableOrderGroups` (#4424). Тот спрашивает «одна работа
+    // живёт несколькими ЗАПИСЯМИ?» и смотрит только на сами записи (заказ + конфигурация), не
+    // глядя на раскладку; цепочку дробления он пропускает — она и есть законный результат
+    // разрезания задания потолком смены. Этот спрашивает «в РАСКЛАДКЕ рядом стоят части одной
+    // работы?»: соседи по очереди станка, оба в ОДНОМ дне. Разрезать задание внутри дня незачем —
+    // наладка платится дважды, оператор видит два номера там, где работа одна, а сумма проходов
+    // разъезжается по двум записям (боевое 12.08.2026, заказ 4675: «проходов 7 из 38» и
+    // «проходов 31 из 38» подряд в Чт 13.08 — issue #4735).
+    //
+    // ОДНА РАБОТА — это либо части одной цепочки дробления (общий «ID первой части»), либо разные
+    // задания одного ЗАКАЗА; и в том, и в другом случае конфигурация обязана совпасть
+    // (continuationSignature: станок|сырьё|намотка|ножи) — иначе между ними стои́т переналадка, и
+    // это две разные работы. Заказ у продолжения бывает потерян (#4175), поэтому цепочка признаётся
+    // и по одному маркеру.
+    //
+    // СМЕЖНОСТЬ — по хранимому старту (тот же порядок, что читает экран, #3923): между членами
+    // группы нет ЧУЖОГО задания. Части, законно разнесённые по РАЗНЫМ дням (не влезло в смену, §9),
+    // группой не становятся — их день разный.
+    //   cuts — задания (обычно весь план);
+    //   opts.skipIds — id, которые сливать НЕЛЬЗЯ (начатые #4381, замороженный день #4326,
+    //                  завершённые, прошлые дни #4294). Такая запись РАЗРЫВАЕТ смежность, как и
+    //                  чужое задание: слить через неё значило бы переставить её саму.
+    //   opts.dayKeyOf(cut) — ключ дня задания; по умолчанию календарный день хранимого старта.
+    // → [{ headId, memberIds:[…], orderId, runs, slitterId, dayKey }] (только группы из ≥2 записей).
+    // Голова — ПЕРВАЯ ПО ПОРЯДКУ: она уже стои́т на своём месте в дне, и слияние в неё ничего не
+    // двигает. Чистая — покрыта тестом.
+    function adjacentOrderMergeGroups(cuts, opts){
+        opts = opts || {};
+        var skip = opts.skipIds || {};
+        var dayKeyOf = (typeof opts.dayKeyOf === 'function') ? opts.dayKeyOf : planDayNumber;
+        function chainRootOf(c){
+            var fp = String(c && c.firstPartId == null ? '' : c.firstPartId).trim();
+            return fp !== '' ? fp : String(c && c.id);
+        }
+        function sameWork(a, b){
+            if (continuationSignature(a) !== continuationSignature(b)) return false;
+            if (chainRootOf(a) === chainRootOf(b)) return true;
+            var oa = String(a.orderId == null ? '' : a.orderId).trim();
+            var ob = String(b.orderId == null ? '' : b.orderId).trim();
+            return oa !== '' && oa === ob;
+        }
+        var bySlitter = {}, order = [];
+        (cuts || []).forEach(function(c){
+            if (!c || c.id == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null) return;                                   // без старта места в очереди нет
+            var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            if (!bySlitter[sid]) { bySlitter[sid] = []; order.push(sid); }
+            bySlitter[sid].push({ cut: c, ts: ts });
+        });
+        var out = [];
+        order.forEach(function(sid){
+            var seq = bySlitter[sid].slice().sort(function(a, b){
+                if (a.ts !== b.ts) return a.ts - b.ts;
+                return String(a.cut.id).localeCompare(String(b.cut.id), 'ru');
+            });
+            var run = [];
+            function flush(){
+                if (run.length >= 2) {
+                    out.push({
+                        headId: String(run[0].id),
+                        memberIds: run.map(function(c){ return String(c.id); }),
+                        orderId: String(run[0].orderId == null ? '' : run[0].orderId),
+                        runs: run.reduce(function(s, c){ return s + (Number(c.plannedRuns) || 0); }, 0),
+                        slitterId: sid,
+                        dayKey: dayKeyOf(run[0])
+                    });
+                }
+                run = [];
+            }
+            seq.forEach(function(row){
+                var c = row.cut;
+                if (skip[String(c.id)]) { flush(); return; }
+                var prev = run.length ? run[run.length - 1] : null;
+                if (prev && sameWork(prev, c) && dayKeyOf(prev) != null && dayKeyOf(prev) === dayKeyOf(c)) {
+                    run.push(c);
+                    return;
+                }
+                flush();
+                run = [c];
+            });
+            flush();
+        });
+        return out;
+    }
+
     // #3613: какие значки смежности дня показать на карточке очереди. Карточка —
     // первая в своём рабочем дне, если сосед слева (prev) попал в другой день; последняя —
     // если сосед справа (next) в другом дне. Значок ставим только когда соседний сегмент

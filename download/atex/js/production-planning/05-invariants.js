@@ -750,6 +750,89 @@
             }
         },
         {
+            id: 'ORDER_PARTS_ADJACENT',
+            tz: '§15 (#4735)',
+            actor: 'any',      // рядом в дне их кладёт и автоматика, и человек
+            mode: 'audit',     // отбрасывать нечего: соседей схлопывает СЛИЯНИЕ записей, а не отказ
+            why: 'отбрасывать нечего: две записи одной работы, ставшие соседями в дне, чинятся '
+                 + 'СЛИЯНИЕМ в одну (#4735), а не отказом от записи — отказ оставил бы их ровно так же',
+            title: 'Части одной работы, оказавшиеся рядом в одном дне, — одно задание',
+            // ЧТО ПРОВЕРЯЕТСЯ. Дробление задания по дням законно: не влезло в смену — хвост уезжает
+            // назавтра (§9). Дробление ВНУТРИ ДНЯ бессмысленно: наладка платится дважды, оператор
+            // видит два номера там, где работа одна, а сумма проходов живёт двумя записями. Если
+            // два СОСЕДА по очереди станка стоят в ОДНОМ дне и это одна работа — общая цепочка
+            // дробления либо один заказ при одной конфигурации, — они обязаны быть одной записью.
+            // Боевое 12.08.2026 (issue #4735): после «Урегулировать» в Чт 13.08 подряд стояли
+            // «проходов 7 из 38» и «проходов 31 из 38» одного заказа 4675.
+            //
+            // ПОЧЕМУ mode:'audit'. Выбросить операцию нельзя: соседство — свойство раскладки, а не
+            // одной записи, и отказ оставил бы обе записи на месте. Чинится оно СЛИЯНИЕМ
+            // (`mergeAdjacentOrderTasks` в хвосте любой записи плана). Правило здесь — детектор:
+            // сработало — значит какой-то путь снова оставил работу двумя записями.
+            //
+            // ЧЕГО ПРАВИЛО НЕ ТРЕБУЕТ. Записи, которых автоматика не трогает вовсе, — НАЧАТАЯ
+            // (#4381), завершённая и стоящая в замороженном дне (#4326) — слить нельзя, и это
+            // нормальное, постоянное состояние плана: половина, сделанная сегодня, и её продолжение
+            // так и живут двумя записями (#4564/#4651). Такая запись, как и чужое задание, СМЕЖНОСТЬ
+            // РАЗРЫВАЕТ — иначе правило обвиняло бы план в том, чего чинить нельзя.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, chainId, orderId, workSig, started }],
+            // ctx.isFrozenCut(id). `workSig` — подпись конфигурации (станок|сырьё|намотка|ножи). Нет
+            // её ни у одной записи → правило не срабатывает (общая конвенция реестра: нет данных —
+            // нет обвинений).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var frozenCut = ppCtxFn(ctx, 'isFrozenCut');
+                var snap = snapFn() || [];
+                if (!snap.some(function(r) { return r && r.workSig != null && String(r.workSig) !== ''; })) return [];
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs),
+                                           chain: String(r.chainId == null ? '' : r.chainId).trim() || String(r.id),
+                                           order: String(r.orderId == null ? '' : r.orderId).trim(),
+                                           sig: String(r.workSig == null ? '' : r.workSig),
+                                           started: !!r.started };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var cur = byId[String(u.cutId)];
+                    if (!cur) return;   // запись вне снимка — о её работе мы ничего не знаем
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                var rows = Object.keys(byId).map(function(k) { return byId[k]; })
+                    .filter(function(r) { return isFinite(r.ts) && r.sig !== ''; });
+                var bySlitter = {};
+                rows.forEach(function(r) { (bySlitter[r.sid] = bySlitter[r.sid] || []).push(r); });
+                var out = [];
+                Object.keys(bySlitter).forEach(function(sid) {
+                    // Порядок на станке — по времени старта, как читает очередь экран (#3923).
+                    var seq = bySlitter[sid].sort(function(a, b) { return a.ts - b.ts; });
+                    var prev = null;
+                    seq.forEach(function(cur) {
+                        if (cur.started || frozenCut(cur.id)) { prev = null; return; }   // слить нельзя — смежности нет
+                        var day = dayOfTs(cur.ts);
+                        var oneWork = prev && prev.sig === cur.sig
+                            && ((prev.chain === cur.chain) || (prev.order !== '' && prev.order === cur.order));
+                        if (oneWork && day != null && day === dayOfTs(prev.ts)) {
+                            out.push(ppViolation('ORDER_PARTS_ADJACENT', cur.id,
+                                'части одной работы стоят рядом в одном дне: ' + prev.id + ' и ' + cur.id
+                                + (cur.order !== '' ? ' (заказ ' + cur.order + ')' : '') + ' — это одно задание',
+                                { slitterId: sid, headCutId: String(prev.id), orderId: cur.order,
+                                  chainId: String(cur.chain), dayKey: day }));
+                        }
+                        prev = cur;
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул

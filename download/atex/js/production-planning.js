@@ -4066,6 +4066,89 @@
             }
         },
         {
+            id: 'ORDER_PARTS_ADJACENT',
+            tz: '§15 (#4735)',
+            actor: 'any',      // рядом в дне их кладёт и автоматика, и человек
+            mode: 'audit',     // отбрасывать нечего: соседей схлопывает СЛИЯНИЕ записей, а не отказ
+            why: 'отбрасывать нечего: две записи одной работы, ставшие соседями в дне, чинятся '
+                 + 'СЛИЯНИЕМ в одну (#4735), а не отказом от записи — отказ оставил бы их ровно так же',
+            title: 'Части одной работы, оказавшиеся рядом в одном дне, — одно задание',
+            // ЧТО ПРОВЕРЯЕТСЯ. Дробление задания по дням законно: не влезло в смену — хвост уезжает
+            // назавтра (§9). Дробление ВНУТРИ ДНЯ бессмысленно: наладка платится дважды, оператор
+            // видит два номера там, где работа одна, а сумма проходов живёт двумя записями. Если
+            // два СОСЕДА по очереди станка стоят в ОДНОМ дне и это одна работа — общая цепочка
+            // дробления либо один заказ при одной конфигурации, — они обязаны быть одной записью.
+            // Боевое 12.08.2026 (issue #4735): после «Урегулировать» в Чт 13.08 подряд стояли
+            // «проходов 7 из 38» и «проходов 31 из 38» одного заказа 4675.
+            //
+            // ПОЧЕМУ mode:'audit'. Выбросить операцию нельзя: соседство — свойство раскладки, а не
+            // одной записи, и отказ оставил бы обе записи на месте. Чинится оно СЛИЯНИЕМ
+            // (`mergeAdjacentOrderTasks` в хвосте любой записи плана). Правило здесь — детектор:
+            // сработало — значит какой-то путь снова оставил работу двумя записями.
+            //
+            // ЧЕГО ПРАВИЛО НЕ ТРЕБУЕТ. Записи, которых автоматика не трогает вовсе, — НАЧАТАЯ
+            // (#4381), завершённая и стоящая в замороженном дне (#4326) — слить нельзя, и это
+            // нормальное, постоянное состояние плана: половина, сделанная сегодня, и её продолжение
+            // так и живут двумя записями (#4564/#4651). Такая запись, как и чужое задание, СМЕЖНОСТЬ
+            // РАЗРЫВАЕТ — иначе правило обвиняло бы план в том, чего чинить нельзя.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, chainId, orderId, workSig, started }],
+            // ctx.isFrozenCut(id). `workSig` — подпись конфигурации (станок|сырьё|намотка|ножи). Нет
+            // её ни у одной записи → правило не срабатывает (общая конвенция реестра: нет данных —
+            // нет обвинений).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                if (!snapFn || !dayOfTs) return [];
+                var frozenCut = ppCtxFn(ctx, 'isFrozenCut');
+                var snap = snapFn() || [];
+                if (!snap.some(function(r) { return r && r.workSig != null && String(r.workSig) !== ''; })) return [];
+                // Итоговый план = хранимый + операции (пишутся только изменившиеся записи, #3427).
+                var byId = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    byId[String(r.id)] = { id: String(r.id), sid: String(r.slitterId == null ? '' : r.slitterId),
+                                           ts: Number(r.planStartTs),
+                                           chain: String(r.chainId == null ? '' : r.chainId).trim() || String(r.id),
+                                           order: String(r.orderId == null ? '' : r.orderId).trim(),
+                                           sig: String(r.workSig == null ? '' : r.workSig),
+                                           started: !!r.started };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var cur = byId[String(u.cutId)];
+                    if (!cur) return;   // запись вне снимка — о её работе мы ничего не знаем
+                    cur.ts = Number(u.planStartTs);
+                    if (u.slitterId != null) cur.sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete byId[String(id)]; });
+                var rows = Object.keys(byId).map(function(k) { return byId[k]; })
+                    .filter(function(r) { return isFinite(r.ts) && r.sig !== ''; });
+                var bySlitter = {};
+                rows.forEach(function(r) { (bySlitter[r.sid] = bySlitter[r.sid] || []).push(r); });
+                var out = [];
+                Object.keys(bySlitter).forEach(function(sid) {
+                    // Порядок на станке — по времени старта, как читает очередь экран (#3923).
+                    var seq = bySlitter[sid].sort(function(a, b) { return a.ts - b.ts; });
+                    var prev = null;
+                    seq.forEach(function(cur) {
+                        if (cur.started || frozenCut(cur.id)) { prev = null; return; }   // слить нельзя — смежности нет
+                        var day = dayOfTs(cur.ts);
+                        var oneWork = prev && prev.sig === cur.sig
+                            && ((prev.chain === cur.chain) || (prev.order !== '' && prev.order === cur.order));
+                        if (oneWork && day != null && day === dayOfTs(prev.ts)) {
+                            out.push(ppViolation('ORDER_PARTS_ADJACENT', cur.id,
+                                'части одной работы стоят рядом в одном дне: ' + prev.id + ' и ' + cur.id
+                                + (cur.order !== '' ? ' (заказ ' + cur.order + ')' : '') + ' — это одно задание',
+                                { slitterId: sid, headCutId: String(prev.id), orderId: cur.order,
+                                  chainId: String(cur.chain), dayKey: day }));
+                        }
+                        prev = cur;
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'CUT_BATCH',
             tz: '§15 (#4452)',
             actor: 'any',       // задание без партии — брак независимо от того, кто его тронул
@@ -9149,6 +9232,93 @@
         return out;
     }
 
+    // #4735: ЧАСТИ ОДНОЙ РАБОТЫ, ОКАЗАВШИЕСЯ РЯДОМ В ОДНОМ ДНЕ, — ОДНО ЗАДАНИЕ (ТЗ §15).
+    // Отвечает на другой вопрос, чем `mergeableOrderGroups` (#4424). Тот спрашивает «одна работа
+    // живёт несколькими ЗАПИСЯМИ?» и смотрит только на сами записи (заказ + конфигурация), не
+    // глядя на раскладку; цепочку дробления он пропускает — она и есть законный результат
+    // разрезания задания потолком смены. Этот спрашивает «в РАСКЛАДКЕ рядом стоят части одной
+    // работы?»: соседи по очереди станка, оба в ОДНОМ дне. Разрезать задание внутри дня незачем —
+    // наладка платится дважды, оператор видит два номера там, где работа одна, а сумма проходов
+    // разъезжается по двум записям (боевое 12.08.2026, заказ 4675: «проходов 7 из 38» и
+    // «проходов 31 из 38» подряд в Чт 13.08 — issue #4735).
+    //
+    // ОДНА РАБОТА — это либо части одной цепочки дробления (общий «ID первой части»), либо разные
+    // задания одного ЗАКАЗА; и в том, и в другом случае конфигурация обязана совпасть
+    // (continuationSignature: станок|сырьё|намотка|ножи) — иначе между ними стои́т переналадка, и
+    // это две разные работы. Заказ у продолжения бывает потерян (#4175), поэтому цепочка признаётся
+    // и по одному маркеру.
+    //
+    // СМЕЖНОСТЬ — по хранимому старту (тот же порядок, что читает экран, #3923): между членами
+    // группы нет ЧУЖОГО задания. Части, законно разнесённые по РАЗНЫМ дням (не влезло в смену, §9),
+    // группой не становятся — их день разный.
+    //   cuts — задания (обычно весь план);
+    //   opts.skipIds — id, которые сливать НЕЛЬЗЯ (начатые #4381, замороженный день #4326,
+    //                  завершённые, прошлые дни #4294). Такая запись РАЗРЫВАЕТ смежность, как и
+    //                  чужое задание: слить через неё значило бы переставить её саму.
+    //   opts.dayKeyOf(cut) — ключ дня задания; по умолчанию календарный день хранимого старта.
+    // → [{ headId, memberIds:[…], orderId, runs, slitterId, dayKey }] (только группы из ≥2 записей).
+    // Голова — ПЕРВАЯ ПО ПОРЯДКУ: она уже стои́т на своём месте в дне, и слияние в неё ничего не
+    // двигает. Чистая — покрыта тестом.
+    function adjacentOrderMergeGroups(cuts, opts){
+        opts = opts || {};
+        var skip = opts.skipIds || {};
+        var dayKeyOf = (typeof opts.dayKeyOf === 'function') ? opts.dayKeyOf : planDayNumber;
+        function chainRootOf(c){
+            var fp = String(c && c.firstPartId == null ? '' : c.firstPartId).trim();
+            return fp !== '' ? fp : String(c && c.id);
+        }
+        function sameWork(a, b){
+            if (continuationSignature(a) !== continuationSignature(b)) return false;
+            if (chainRootOf(a) === chainRootOf(b)) return true;
+            var oa = String(a.orderId == null ? '' : a.orderId).trim();
+            var ob = String(b.orderId == null ? '' : b.orderId).trim();
+            return oa !== '' && oa === ob;
+        }
+        var bySlitter = {}, order = [];
+        (cuts || []).forEach(function(c){
+            if (!c || c.id == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null) return;                                   // без старта места в очереди нет
+            var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
+            if (!bySlitter[sid]) { bySlitter[sid] = []; order.push(sid); }
+            bySlitter[sid].push({ cut: c, ts: ts });
+        });
+        var out = [];
+        order.forEach(function(sid){
+            var seq = bySlitter[sid].slice().sort(function(a, b){
+                if (a.ts !== b.ts) return a.ts - b.ts;
+                return String(a.cut.id).localeCompare(String(b.cut.id), 'ru');
+            });
+            var run = [];
+            function flush(){
+                if (run.length >= 2) {
+                    out.push({
+                        headId: String(run[0].id),
+                        memberIds: run.map(function(c){ return String(c.id); }),
+                        orderId: String(run[0].orderId == null ? '' : run[0].orderId),
+                        runs: run.reduce(function(s, c){ return s + (Number(c.plannedRuns) || 0); }, 0),
+                        slitterId: sid,
+                        dayKey: dayKeyOf(run[0])
+                    });
+                }
+                run = [];
+            }
+            seq.forEach(function(row){
+                var c = row.cut;
+                if (skip[String(c.id)]) { flush(); return; }
+                var prev = run.length ? run[run.length - 1] : null;
+                if (prev && sameWork(prev, c) && dayKeyOf(prev) != null && dayKeyOf(prev) === dayKeyOf(c)) {
+                    run.push(c);
+                    return;
+                }
+                flush();
+                run = [c];
+            });
+            flush();
+        });
+        return out;
+    }
+
     // #3613: какие значки смежности дня показать на карточке очереди. Карточка —
     // первая в своём рабочем дне, если сосед слева (prev) попал в другой день; последняя —
     // если сосед справа (next) в другом дне. Значок ставим только когда соседний сегмент
@@ -13870,6 +14040,7 @@
         continuationSignature: continuationSignature,
         isDaySplitSibling: isDaySplitSibling,
         mergeableOrderGroups: mergeableOrderGroups,   // #4424: задания одного заказа+конфигурации → объединить по первому
+        adjacentOrderMergeGroups: adjacentOrderMergeGroups,   // #4735: части одной работы, ставшие соседями в одном дне → схлопнуть
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
         daySplitChainNote: daySplitChainNote,   // #4617: «проходов 1 из 5 · остальные 4 → 07.08»
@@ -22166,7 +22337,9 @@
     AtexProductionPlanning.prototype.mergeSameOrderTasks = function(opts) {
         var self = this;
         var forcedGroups = opts && opts.groups;
-        this._ppOp = forcedGroups ? 'mergeSplitChain' : 'mergeSameOrderTasks';   // #4177: контекст трассы записей
+        // #4177: контекст трассы записей. #4735: автора называет вызывающий (`opts.op`) — готовые
+        // группы приходят уже из двух мест, и «mergeSplitChain» в журнале было бы неправдой.
+        this._ppOp = (opts && opts.op) || (forcedGroups ? 'mergeSplitChain' : 'mergeSameOrderTasks');
         var cutMeta = this.meta.cut, fbMeta = this.meta.finishedBatch, supMeta = this.meta.supply;
         if (!cutMeta || !fbMeta || !supMeta) return Promise.resolve(0);
         // Кого объединять нельзя (см. выше).
@@ -22360,7 +22533,9 @@
                         }
                         if (timingReqId) fields['t' + timingReqId] = cutTimingDetails(runLength, g.runs, self.opTimes, head);   // #4501
                         // #4488: поля, которые задаёт вызывающий (маркер цепочки на себя, замок).
+                        // #4735: функцией — когда групп несколько и у каждой головы свои поля.
                         var extra = (opts && opts.headFields) || null;
+                        if (typeof extra === 'function') extra = extra(g) || null;
                         if (extra) Object.keys(extra).forEach(function(k) { fields[k] = extra[k]; });
                         return self.post('_m_set/' + encodeURIComponent(g.headId) + '?JSON', fields).then(function() {
                             return Object.keys(byWidth).reduce(function(uChain, w) {
@@ -22385,7 +22560,9 @@
         return chain.then(function() {
             if (!mergedCount) return 0;
             var what = label ? label(mergedCount) : ('Объединено заданий одного заказа: ' + mergedCount + ' (' + report.join('; ') + ')');
-            console.log('[pp] 🔗 ' + (forcedGroups ? '#4488 сшито частей задания: ' : '#4424 объединено заданий: ')
+            var who = (opts && opts.op === 'mergeAdjacentOrderTasks') ? '#4735 схлопнуто соседей дня: '
+                : (forcedGroups ? '#4488 сшито частей задания: ' : '#4424 объединено заданий: ');
+            console.log('[pp] 🔗 ' + who
                 + mergedCount + ' — ' + report.join('; ')
                 + (foldedSupplies ? ('; #4483 связей влито в существующие: ' + foldedSupplies) : ''));
             self.notify(what + (foldedSupplies ? (' · связей с позициями влито: ' + foldedSupplies) : ''), 'success');
@@ -22446,6 +22623,91 @@
                        orderId: String(head.orderId == null ? '' : head.orderId) }],
             headFields: headFields,
             label: function(n) { return 'Задание собрано из частей: ' + (n + 1) + ' → 1 (проходов ' + runs + ')'; }
+        });
+    };
+
+    // #4735 (ТЗ §15): СХЛОПНУТЬ ЧАСТИ ОДНОЙ РАБОТЫ, ОКАЗАВШИЕСЯ РЯДОМ В ОДНОМ ДНЕ.
+    // Разрезать задание внутри дня незачем: наладка платится дважды, оператор видит два номера
+    // там, где работа одна, а сумма проходов живёт двумя записями. Дробление по дням (§9) —
+    // законно, оно и остаётся: правило смотрит на СОСЕДЕЙ ОДНОГО ДНЯ.
+    // Кого не трогаем — тот же список, что у #4424: начатые (#4381), завершённые, задания
+    // замороженных дней (#4326) и прошлых дней раньше «С» (#4294). Такая запись РАЗРЫВАЕТ
+    // смежность: слить через неё значило бы её переставить.
+    // Слияние выполняет та же машинерия, что #4424/#4488 (`mergeSameOrderTasks`): партии ГП,
+    // обеспечения, сумма проходов, пересчёт «Длительности»/«Тайминга», удаление доноров. Второй
+    // арифметики слияния нет.
+    // Схлопывать нечего → 0 и ни одной записи в БД (идемпотентно).
+    // → Promise<{ merged: число влитых записей, dayKeys: [ГГГГММДД] тронутых дней }>. Дни нужны
+    // вызывающему: после удаления записи день сводится встык, а он бывает за окном фильтра [С;По].
+    AtexProductionPlanning.prototype.mergeAdjacentOrderTasks = function() {
+        var self = this;
+        var nothing = { merged: 0, dayKeys: [] };
+        var cutMeta = this.meta && this.meta.cut;
+        if (!cutMeta) return Promise.resolve(nothing);
+        if (typeof adjacentOrderMergeGroups !== 'function') return Promise.resolve(nothing);
+        var skipIds = {};
+        var baseMs = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        (this.cuts || []).forEach(function(c) {
+            if (!c) return;
+            if (cutIsStarted(c)) { skipIds[String(c.id)] = 1; return; }                       // #4381
+            if (planTsSeconds(c.endDate) != null) { skipIds[String(c.id)] = 1; return; }      // завершённое
+            if (typeof self.dayIsFrozen === 'function' && self.dayIsFrozen(c.planDate)) { skipIds[String(c.id)] = 1; return; }   // #4326
+            var off = dayOffsetFromBase(c.planDate, baseMs);
+            if (off != null && off < 0) skipIds[String(c.id)] = 1;                            // #4294
+        });
+        var groups = adjacentOrderMergeGroups(this.cuts || [], {
+            skipIds: skipIds,
+            dayKeyOf: function(c) { var k = planDateDayKey(c && c.planDate); return k == null || k === Infinity ? null : k; }
+        });
+        if (!groups.length) return Promise.resolve(nothing);
+        var dayKeys = [];
+        groups.forEach(function(g) { if (g.dayKey != null && dayKeys.indexOf(g.dayKey) === -1) dayKeys.push(g.dayKey); });
+        // Маркер цепочки и замок — по КАЖДОЙ группе своей головы.
+        var firstPartReqId = reqIdByName(cutMeta, CUT_REQ.firstPart);
+        var fixedReqId = reqIdByName(cutMeta, CUT_REQ.fixed);
+        var cutById = {};
+        (this.cuts || []).forEach(function(c) { if (c && c.id != null) cutById[String(c.id)] = c; });
+        function chainRootOf(c) {
+            var fp = String(c && c.firstPartId == null ? '' : c.firstPartId).trim();
+            return fp !== '' ? fp : String(c && c.id);
+        }
+        try {
+            console.log('[pp] 🔗 #4735: части одной работы стоят рядом в одном дне — схлопываю: '
+                + groups.map(function(g) {
+                    return 'станок ' + g.slitterId + ', день ' + g.dayKey + ': №'
+                        + g.memberIds.join(' + №') + ' → №' + g.headId + ' (проходов ' + g.runs + ')';
+                }).join('; '));
+        } catch (e) {}
+        return this.mergeSameOrderTasks({
+            groups: groups,
+            op: 'mergeAdjacentOrderTasks',
+            headFields: function(g) {
+                var f = {};
+                var members = {};
+                g.memberIds.forEach(function(id) { members[String(id)] = 1; });
+                var head = cutById[String(g.headId)] || {};
+                // Замок с любой из частей переходит на результат (как при сшивании #4488): иначе
+                // правило снимало бы 🔒 ровно там, где оператор его и поставил.
+                var anyFixed = g.memberIds.some(function(id) { return !!(cutById[String(id)] && cutById[String(id)].fixed); });
+                if (fixedReqId && anyFixed && !head.fixed) f['t' + fixedReqId] = '1';
+                // Задание снова ЦЕЛЬНОЕ — только если группа поглотила цепочку целиком: иначе
+                // продолжения в других днях остались бы без своей головы.
+                var roots = {};
+                g.memberIds.forEach(function(id) { roots[chainRootOf(cutById[String(id)])] = 1; });
+                var whole = (self.cuts || []).every(function(c) {
+                    if (!c || c.id == null) return true;
+                    if (members[String(c.id)]) return true;
+                    return !roots[chainRootOf(c)];
+                });
+                if (firstPartReqId && whole) f['t' + firstPartReqId] = String(g.headId);
+                return f;
+            },
+            label: function(n) {
+                return 'Части одной работы стояли рядом в одном дне — объединено записей: ' + n
+                    + ' (' + groups.map(function(g) { return '№' + g.headId + ' — проходов ' + g.runs; }).join('; ') + ')';
+            }
+        }).then(function(merged) {
+            return { merged: Number(merged) || 0, dayKeys: dayKeys };
         });
     };
 
@@ -23913,12 +24175,18 @@
                 // и в каком порядке (операции несут только изменившиеся записи, #3427).
                 // #4488: chainId («ID первой части») — по нему правило CHAIN_CONTIGUOUS видит, какие
                 // записи суть части одного задания и не разъехались ли они по станку.
+                // #4735: orderId + workSig (подпись конфигурации) — по ним правило
+                // ORDER_PARTS_ADJACENT видит, что два соседа одного дня суть одна работа.
                 planSnapshot: function(){
                     return (cuts || []).filter(function(c){ return c && c.id != null; }).map(function(c){
                         return { id: String(c.id),
                                  slitterId: String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id),
                                  planStartTs: Number(c.planDate), fixed: !!c.fixed,
-                                 chainId: String(c.firstPartId == null ? '' : c.firstPartId).trim() };
+                                 chainId: String(c.firstPartId == null ? '' : c.firstPartId).trim(),
+                                 orderId: String(c.orderId == null ? '' : c.orderId).trim(),
+                                 workSig: continuationSignature(c),
+                                 // начатую/завершённую слить нельзя — она смежность разрывает
+                                 started: cutIsStarted(c) || planTsSeconds(c.endDate) != null };
                     });
                 },
                 // #4452: разрешение «Партии сырья» задания — правило CUT_BATCH сперва ЧИНИТ операцию
@@ -24069,11 +24337,17 @@
             if (fillViol.length) {
                 console.error('[pp] ⛔ #4469: день недоупакован — ' + fillViol.map(function(v){ return v.msg; }).join('; '));
             }
+            // #4735: две записи одной работы стоят соседями в дне — регрессия (ТЗ §15).
+            var adjViol = (guard.violations || []).filter(function(v){ return v.rule === 'ORDER_PARTS_ADJACENT'; });
+            if (adjViol.length) {
+                console.error('[pp] ⛔ #4735: части одной работы рядом в одном дне — ' + adjViol.map(function(v){ return v.msg; }).join('; '));
+            }
             // Правила-наблюдатели (enforce:false) ничего не отбрасывают — только сообщают, что
             // сработали бы. По этому журналу и решается, включать ли им запрет.
             var watched = (guard.violations || []).filter(function(v){
                 return v.rule !== 'FROZEN_DAY' && v.rule !== 'CUT_BATCH' && v.rule !== 'FIXED_BLOCK'
-                    && v.rule !== 'DAY_CAPACITY' && v.rule !== 'DAY_FILL' && v.rule !== 'FIXED_NO_PUSH'; });
+                    && v.rule !== 'DAY_CAPACITY' && v.rule !== 'DAY_FILL' && v.rule !== 'FIXED_NO_PUSH'
+                    && v.rule !== 'ORDER_PARTS_ADJACENT'; });
             if (watched.length) {
                 console.log('[pp] ⚠️ инварианты-наблюдатели сработали бы:',
                     watched.map(function(v){ return v.rule + ' #' + v.cutId + ' (' + v.msg + ')'; }).join('; '));
@@ -24092,7 +24366,12 @@
             // #4475: ВСЁ, о чём стоит сказать оператору, если этот план будет ЗАПИСАН. Передаётся в
             // applySplitPlan вместе с операциями (`ops.audit`) — фразу собирает formatPlanAuditMessage.
             // FROZEN_DAY сюда не идёт: нарушающие операции страж уже отбросил (enforce), записи не будет.
-            ops.ruleAudit = (guard.violations || []).filter(function(v){ return v.rule !== 'FROZEN_DAY'; });
+            // #4735: ORDER_PARTS_ADJACENT тоже не идёт — его чинит ХВОСТ ЭТОГО ЖЕ действия
+            // (`mergeAdjacentOrderTasks`): тост описывал бы состояние, которого к моменту прочтения
+            // уже нет. Молчания нет — нарушение уходит в журнал (console.error выше), а если слияние
+            // сорвалось, оператору говорит сам `mergeSameOrderTasks`.
+            ops.ruleAudit = (guard.violations || []).filter(function(v){
+                return v.rule !== 'FROZEN_DAY' && v.rule !== 'ORDER_PARTS_ADJACENT'; });
             // #4645: цепочки, чьи операции сняты как ОТНИМАЮЩИЕ проходы. Отдаём с операциями: тот,
             // кто пишет план, обязан сказать оператору, что эти задания остались как были, — иначе
             // «нажал, ничего не изменилось» снова без объяснения (ТЗ §14).
@@ -24204,35 +24483,58 @@
             ? moveScope.unfrozenDayKeys.slice() : null;
     }
 
+    // #4735 (ТЗ §15): ЗДЕСЬ ЖЕ СХЛОПЫВАЮТСЯ ЧАСТИ ОДНОЙ РАБОТЫ, ОКАЗАВШИЕСЯ РЯДОМ В ОДНОМ ДНЕ.
+    // Это тот же хвост «после любой записи плана», и другого общего места у правила нет: смежность
+    // создаёт САМА раскладка (паровоз «Урегулировать» подтянул остаток к его же половине, боевое
+    // 12.08.2026 — заказ 4675), поэтому проверять её до планирования бессмысленно. Слияние идёт
+    // ПЕРЕД выравниванием: оно убирает лишнюю наладку, и день, бывший за потолком, может в него
+    // уложиться. После слияния день сводится ВСТЫК (`reconcilePlanStarts`) — на месте удалённой
+    // записи иначе осталась бы дыра в её наладку (рецидив #4300/#4312).
     AtexProductionPlanning.prototype.levelOverfilledAfterWrite = function(moveScope, result) {
         var self = this;
         if (this._levelingDays) return Promise.resolve(result);
         if (typeof this.overfilledDaysOf !== 'function' || typeof this.levelDayLoad !== 'function') {
             return Promise.resolve(result);   // стаб-self в юнит-тестах
         }
-        var ids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
-            ? moveScope.withinSlitterIds.map(String)
-            : (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
-        var manualDays = manualScopeDays(moveScope);
-        // #4582: дни действия надо не только РАЗМОРОЗИТЬ, но и внести в область видимости: состав дня
-        // берётся через recalcScopeCutIds, а он ограничен окном фильтра [С;По]. Оператор жмёт кнопку
-        // на одном дне, а работа уезжает в другой — и переполнение там оставалось НЕВИДИМЫМ
-        // (боевое #4582: 621 мин при потолке 455, и ни одной строки о выравнивании в логе).
-        var levelOpts = manualDays
-            ? { manual: true, dayKeys: manualDays, unfrozenDayKeys: manualDays } : null;
-        var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
-        if (!over.length) return Promise.resolve(result);
-        this._levelingDays = true;
-        // #4732: ВСЕ переполненные станки — ОДНИМ вызовом. Цепочка «по станку за раз» писала свою
-        // сессию плана на каждый станок, и одно нажатие оператора превращалось в четыре прохода
-        // планирования подряд. Станки друг друга не задевают (очередь у каждого своя), поэтому
-        // выравнивать их вместе — то же самое, но одной записью.
-        return this.levelDayLoad(over, levelOpts).then(function() {
-            self._levelingDays = false;
-            return result;
-        }).catch(function(err) {
-            self._levelingDays = false;
-            throw err;
+        function levelNow() {
+            var ids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
+                ? moveScope.withinSlitterIds.map(String)
+                : (self.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
+            var manualDays = manualScopeDays(moveScope);
+            // #4582: дни действия надо не только РАЗМОРОЗИТЬ, но и внести в область видимости: состав дня
+            // берётся через recalcScopeCutIds, а он ограничен окном фильтра [С;По]. Оператор жмёт кнопку
+            // на одном дне, а работа уезжает в другой — и переполнение там оставалось НЕВИДИМЫМ
+            // (боевое #4582: 621 мин при потолке 455, и ни одной строки о выравнивании в логе).
+            var levelOpts = manualDays
+                ? { manual: true, dayKeys: manualDays, unfrozenDayKeys: manualDays } : null;
+            // #4555: «отсюда и до конца» — прошлое станка не трогаем и при выравнивании.
+            if (moveScope && moveScope.fromCutId != null && String(moveScope.fromCutId) !== '') {
+                (levelOpts = levelOpts || {}).fromCutId = String(moveScope.fromCutId);
+            }
+            var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
+            // #4735: без `result` (пути пересчёта наладки) отвечаем как `levelDayLoad` — «план пересобран».
+            if (!over.length) return Promise.resolve(result === undefined ? false : result);
+            self._levelingDays = true;
+            // #4732: ВСЕ переполненные станки — ОДНИМ вызовом. Цепочка «по станку за раз» писала свою
+            // сессию плана на каждый станок, и одно нажатие оператора превращалось в четыре прохода
+            // планирования подряд. Станки друг друга не задевают (очередь у каждого своя), поэтому
+            // выравнивать их вместе — то же самое, но одной записью.
+            return self.levelDayLoad(over, levelOpts).then(function(changed) {
+                self._levelingDays = false;
+                return result === undefined ? !!changed : result;
+            }).catch(function(err) {
+                self._levelingDays = false;
+                throw err;
+            });
+        }
+        if (typeof this.mergeAdjacentOrderTasks !== 'function') return levelNow();
+        return this.mergeAdjacentOrderTasks().then(function(res) {
+            var merged = Number(res && res.merged) || 0;
+            if (!merged) return levelNow();
+            // Дыру в наладку удалённой записи закрываем ТЕМ ЖЕ сведе́нием стартов, что и всюду
+            // (#4438/#4569): дни называем явно — слияние бывает и за окном фильтра [С;По].
+            return self.reconcilePlanStarts({ dayKeys: (res && res.dayKeys) || [], manual: true })
+                .then(levelNow);
         });
     };
 
@@ -24796,17 +25098,19 @@
         }
         var stale = this.computeCutSetupUpdates(scopeIds, { dryRun: true, manual: manualRecalc }).updates || [];
         var startOps = this.recalcStartUpdates(sid, { updates: stale, manual: manualRecalc });   // #4408: старты — ДО записи колонок
+        // #4735: хвост записи — ОДИН на все пути (схлопывание смежных частей + выравнивание дня).
+        // #4582: дни, которые оператор пересчитывает, для этого действия разморожены — иначе
+        // переполненный замороженный день выровнять нечем. У АВТОМАТИЧЕСКОГО вызова (opts.auto)
+        // заморозка в силе, как и была (#4436).
+        var tailScope = { withinSlitterIds: [sid] };
+        if (manualRecalc) tailScope.unfrozenDayKeys = scopeDayKeys(this, scopeIds);
         if (!stale.length && !startOps.length) {
             // #4473: в колонках и стартах пересчитывать нечего — но день мог остаться ДЛИННЕЕ смены
             // (перестановка соседей одинаковой конфигурации расхождений не даёт, а минуты дня растут
             // от смены переналадки). Потолок дня старше ответа «пересчитывать нечего»: выравниваем.
             if (this.overfilledDaysOf(sid, { manual: manualRecalc }).length) {
                 this.render();
-                // #4582: дни, которые оператор пересчитывает, для этого действия разморожены — иначе
-                // переполненный замороженный день выровнять нечем. У АВТОМАТИЧЕСКОГО вызова
-                // (opts.auto) заморозка в силе, как и была (#4436).
-                return this.levelDayLoad(sid, manualRecalc
-                    ? { manual: true, unfrozenDayKeys: scopeDayKeys(this, scopeIds) } : null);
+                return this.levelOverfilledAfterWrite(tailScope);
             }
             // #4416: кнопку показывает тот же детектор — если он насчитал расхождения, а писать
             // нечего, это ПРОТИВОРЕЧИЕ, а не «всё хорошо»: кнопка висит, нажатие не даёт эффекта
@@ -24824,7 +25128,9 @@
                 this.notify('Наладка уже актуальна — пересчитывать нечего', 'info');
             }
             this.render();
-            return Promise.resolve(false);
+            // #4735: «пересчитывать нечего» — не то же самое, что «с планом всё в порядке»: части
+            // одной работы могли остаться соседями в дне. Хвост это увидит и схлопнет.
+            return this.levelOverfilledAfterWrite(tailScope);
         }
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey) startOps = [];   // некуда писать planStart — тайминг пишем всё равно
@@ -24854,9 +25160,7 @@
                     + startOps.length + ' (порядок не менялся)'), 'success');
             // #4473: день длиннее смены — ВЫРАВНИВАЕМ (разрыв по потолку + продолжение назавтра),
             // а не предупреждаем «перенесите лишнее вручную» (#4408).
-            return self.levelDayLoad(sid, manualRecalc
-                ? { manual: true, unfrozenDayKeys: scopeDayKeys(self, scopeIds) } : null)
-                .then(function() { return true; });
+            return self.levelOverfilledAfterWrite(tailScope).then(function() { return true; });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -24924,8 +25228,9 @@
             self.notify('Пересчитано от выбранного задания и до конца: наладка — ' + stale.length
                 + ', время старта — ' + startOps.length + ' (порядок и прошлое не менялись)', 'success');
             // Потолок дня старше «пересчитывать нечего»: лишнее рвём и переливаем на следующий день,
-            // но только от выбранного задания вперёд.
-            return self.levelDayLoad(sid, { fromCutId: scopeOpts.fromCutId }).then(function() { return true; });
+            // но только от выбранного задания вперёд. #4735: тот же общий хвост записи.
+            return self.levelOverfilledAfterWrite({ withinSlitterIds: [sid], fromCutId: scopeOpts.fromCutId })
+                .then(function() { return true; });
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -25168,7 +25473,9 @@
     // мерку не воспроизвести (#4469). Контроллер лишь РЕШАЕТ, что день переполнен, и зовёт упаковщик.
     //
     // Слияния заданий одного заказа (#4424, `mergeSameOrderTasks`) здесь НЕ делаем: ручное
-    // перемещение не повод перекраивать записи оператора — только физика смены.
+    // перемещение не повод перекраивать записи оператора — только физика смены. Схлопывание
+    // СОСЕДЕЙ ОДНОГО ДНЯ (#4735) — не здесь, а в общем хвосте записи `levelOverfilledAfterWrite`,
+    // до выравнивания: это правило §15, и оно одно на все пути.
     // → Promise<boolean> (true, если план пересобран).
     // #4732: ВЫРАВНИВАНИЕ — ПАРОВОЗ, А НЕ ПЕРЕСБОРКА (`trainOnly`, решение заказчика 11.08.2026,
     // повторено 12.08.2026). Обещание этого метода — «лишнее разбито по потолку и уехало на
