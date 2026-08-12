@@ -10011,6 +10011,9 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
+            // #4732: ПАРОВОЗ — очередь двигается только вперёд и только по потолку дня. Порядок
+            // авторитетен, назад (в день раньше хранимого) не переносим ничего.
+            trainOnly: !!(moveScope && moveScope.trainOnly),
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
@@ -10478,9 +10481,11 @@
         var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
         if (!over.length) return Promise.resolve(result);
         this._levelingDays = true;
-        return over.reduce(function(chain, sid) {
-            return chain.then(function() { return self.levelDayLoad(sid, levelOpts); });
-        }, Promise.resolve()).then(function() {
+        // #4732: ВСЕ переполненные станки — ОДНИМ вызовом. Цепочка «по станку за раз» писала свою
+        // сессию плана на каждый станок, и одно нажатие оператора превращалось в четыре прохода
+        // планирования подряд. Станки друг друга не задевают (очередь у каждого своя), поэтому
+        // выравнивать их вместе — то же самое, но одной записью.
+        return this.levelDayLoad(over, levelOpts).then(function() {
             self._levelingDays = false;
             return result;
         }).catch(function(err) {
@@ -11423,24 +11428,41 @@
     // Слияния заданий одного заказа (#4424, `mergeSameOrderTasks`) здесь НЕ делаем: ручное
     // перемещение не повод перекраивать записи оператора — только физика смены.
     // → Promise<boolean> (true, если план пересобран).
+    // #4732: ВЫРАВНИВАНИЕ — ПАРОВОЗ, А НЕ ПЕРЕСБОРКА (`trainOnly`, решение заказчика 11.08.2026,
+    // повторено 12.08.2026). Обещание этого метода — «лишнее разбито по потолку и уехало на
+    // следующий день, порядок сохранён» — упаковщик не выполнял: при `orderAuthoritative = false`
+    // он выбирал следующее задание по цене переналадки (перемешивал очередь), а набивка хвоста
+    // смены (#3739) тянула работу НАЗАД, в уже отработанный день. Теперь оба ограничения включены
+    // явно, и метод делает ровно то, что говорит.
+    //
+    // #4732: станки берём СПИСКОМ — одно нажатие оператора обязано дать одну запись плана. Прежде
+    // `levelOverfilledAfterWrite` звал этот метод по станку в цепочке, и каждый вызов писал свою
+    // сессию: боевая 12.08.2026 — одно «Урегулировать» дало четыре сессии `applySplitPlan` и
+    // четыре сведе́ния стартов за две минуты («множество проходов планирования», issue #4732).
     AtexProductionPlanning.prototype.levelDayLoad = function(slitterId, opts) {
         var self = this;
-        var sid = String(slitterId == null ? '' : slitterId);
-        var over = this.overfilledDaysOf(sid, opts);
+        var sids = (Object.prototype.toString.call(slitterId) === '[object Array]' ? slitterId : [slitterId])
+            .map(function(id) { return String(id == null ? '' : id); })
+            .filter(function(id) { return id !== ''; });
+        if (!sids.length) return Promise.resolve(false);
+        var over = [];
+        sids.forEach(function(sid) {
+            self.overfilledDaysOf(sid, opts).forEach(function(d) { over.push({ sid: sid, day: d }); });
+        });
         if (!over.length) return Promise.resolve(false);
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var label = over.map(function(d) {
-            return formatPlanDayHeading(base, d.dayOffset) + ' (+' + d.overMin + ' мин)';
+        var label = over.map(function(o) {
+            return formatPlanDayHeading(base, o.day.dayOffset) + ' (+' + o.day.overMin + ' мин)';
         }).join('; ');
         if (typeof console !== 'undefined' && console.log) {
-            console.log('[pp] ⚖️ #4473: день длиннее смены — выравниваю упаковщиком (порядок сохраняю)',
-                { slitterId: sid, days: over });
+            console.log('[pp] ⚖️ #4473/#4732: день длиннее смены — выравниваю паровозом (порядок и дни только вперёд)',
+                { slitterIds: sids, days: over.map(function(o) { return o.day; }) });
         }
         // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
         if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
         // #4555: выравнивание «отсюда и до конца» — прошлое станка закрепляем (keepBeforeCutId),
         // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
-        var scope = { withinSlitterIds: [sid] };
+        var scope = { withinSlitterIds: sids.slice(), trainOnly: true };
         if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
         // #4577: те же дни, что разморозило вызвавшее ручное действие — иначе переложить переполненный
         // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
@@ -11448,8 +11470,11 @@
         if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
-                var left = self.overfilledDaysOf(sid);
-                if (left.length) { self.warnOverfilledDays(sid); return !!changed; }
+                var left = [];
+                sids.forEach(function(sid) {
+                    if (self.overfilledDaysOf(sid).length) left.push(sid);
+                });
+                if (left.length) { left.forEach(function(sid) { self.warnOverfilledDays(sid); }); return !!changed; }
                 self.notify('День выровнен по смене: ' + label
                     + ' — лишнее разбито по потолку и уехало на следующий день, порядок сохранён', 'success');
                 return !!changed;

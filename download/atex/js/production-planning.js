@@ -7420,7 +7420,17 @@
         // выбрал порядок перебором точек вставки; здесь его НЕ переигрываем. Ключ выбора схлопывается в
         // [idx] (исходный порядок), роняя члены переналадка / −stripBandCount. Вся механика тайминга
         // (нахлёст, обед, отпуск, дробление, setup-хвост) — без изменений.
-        var orderAuthoritative = !!opts.orderAuthoritative;
+        // #4732 (решение заказчика 11.08.2026, повторено 12.08.2026): режим ПАРОВОЗА. Выравнивание
+        // дня по потолку — не пересборка: оно вправе двигать задания только ВПЕРЁД и только по
+        // границе дня. Два ограничения разом:
+        //   • порядок очереди авторитетен (как у слоя размещения) — переналадка мест не переигрывает;
+        //   • ни одно задание не встаёт в день РАНЬШЕ своего хранимого (day floor ниже, floorAllows).
+        // Без второго набивка хвоста смены (#3739) тянула работу назад — в день, который станок уже
+        // отработал: боевая 12.08.2026, Станок 1 — остаток 690758 встал на 12:54 МЕЖДУ выполненными
+        // заданиями начатого дня, и оба остатка «Урегулировать» тут же снова стали просроченными
+        // (issue #4732).
+        var trainOnly = !!opts.trainOnly;
+        var orderAuthoritative = !!opts.orderAuthoritative || trainOnly;
         // #4085 (модель #3985): резерв хвоста дня под дедлайн-фольгу (#4068, ТЗ §12) СНЯТ — фольга у
         // своего срока обеспечивается локальным штрафом в слое размещения, а не резервированием минут.
         // Карты резерва всегда пусты → ветки reserveForDay/isReservedFoil в цикле упаковки ниже инертны
@@ -7922,11 +7932,18 @@
                 return a < storedPlanTs(fixedId);
             }
             // Самый поздний день 🔒, которую задание обгонять не вправе: раньше него его не кладём.
+            // #4732: и день, раньше которого задание не встаёт в режиме ПАРОВОЗА — его ХРАНИМЫЙ.
+            // Пол один на оба правила (их вопрос один: «с какого дня это задание вообще можно
+            // класть»), поэтому и предикат один — floorAllows.
             var fixedFloorDay = {};
             poolOrder.forEach(function(id) {
                 var st = state[id];
                 if (!st || (st.cut && st.cut.fixed)) return;   // про саму 🔒 правило не спрашивают
                 var floor = null;
+                if (trainOnly) {
+                    var storedDay = Number(storedDayBy[String(id)]);
+                    if (isFinite(storedDay)) floor = storedDay;   // #4732: назад — никогда
+                }
                 poolOrder.forEach(function(fid) {
                     var fst = state[fid];
                     if (!fst || !(fst.cut && fst.cut.fixed) || fst.anchor == null) return;
@@ -7939,8 +7956,12 @@
             // придержало. Без этой строки «день недобит, а задание уехало дальше» выглядело бы
             // необъяснимым: причина (замок впереди) нигде не названа.
             Object.keys(fixedFloorDay).forEach(function(id) {
-                ppTrace('#4542 задание ' + id + ' не ставим раньше дня ' + fixedFloorDay[id]
-                    + ' — там стои́т 🔒, которую оно не обгоняет');
+                var storedFloor = trainOnly ? Number(storedDayBy[String(id)]) : NaN;
+                var byTrain = isFinite(storedFloor) && storedFloor >= fixedFloorDay[String(id)];
+                ppTrace((byTrain ? '#4732' : '#4542') + ' задание ' + id + ' не ставим раньше дня '
+                    + fixedFloorDay[id] + (byTrain
+                        ? ' — паровоз двигает только вперёд, это его хранимый день'
+                        : ' — там стои́т 🔒, которую оно не обгоняет'));
             });
             function floorAllows(id, d) {
                 var f = fixedFloorDay[String(id)];
@@ -9829,6 +9850,7 @@
                 // размещения (слой ещё считает) порядок авторитетен явно — спрашивают про конкретную
                 // рассматриваемую расстановку.
                 orderAuthoritative: forceOrderAuthoritative || !!slotPlan,
+                trainOnly: !!opts.trainOnly,   // #4732: выравнивание по потолку двигает только вперёд и по порядку
                 pinDayPosByCut: opts.pinDayPosByCut,   // #4464: ручной перенос 🗓 «в начало дня» / «в конец дня»
                 wholeDayByCut: opts.wholeDayByCut,     // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
                 dueDayByCut: opts.dueDayByCut,         // #4650: чей срок раньше — тот и не разрывается
@@ -23731,6 +23753,9 @@
             lunchStartMin: dayWindow.lunchStartMin,
             lunchDurationMin: dayWindow.lunchDurationMin,
             preserveOrder: preserveOrder,   // #3619: только заполнить дни, не пересобирая порядок
+            // #4732: ПАРОВОЗ — очередь двигается только вперёд и только по потолку дня. Порядок
+            // авторитетен, назад (в день раньше хранимого) не переносим ничего.
+            trainOnly: !!(moveScope && moveScope.trainOnly),
             dayAnchorByCut: dayAnchorByCut,   // #3974: день держит только 🔒 (planCutOperations отбирает фикс.); свободные — от «С»
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
@@ -24198,9 +24223,11 @@
         var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
         if (!over.length) return Promise.resolve(result);
         this._levelingDays = true;
-        return over.reduce(function(chain, sid) {
-            return chain.then(function() { return self.levelDayLoad(sid, levelOpts); });
-        }, Promise.resolve()).then(function() {
+        // #4732: ВСЕ переполненные станки — ОДНИМ вызовом. Цепочка «по станку за раз» писала свою
+        // сессию плана на каждый станок, и одно нажатие оператора превращалось в четыре прохода
+        // планирования подряд. Станки друг друга не задевают (очередь у каждого своя), поэтому
+        // выравнивать их вместе — то же самое, но одной записью.
+        return this.levelDayLoad(over, levelOpts).then(function() {
             self._levelingDays = false;
             return result;
         }).catch(function(err) {
@@ -25143,24 +25170,41 @@
     // Слияния заданий одного заказа (#4424, `mergeSameOrderTasks`) здесь НЕ делаем: ручное
     // перемещение не повод перекраивать записи оператора — только физика смены.
     // → Promise<boolean> (true, если план пересобран).
+    // #4732: ВЫРАВНИВАНИЕ — ПАРОВОЗ, А НЕ ПЕРЕСБОРКА (`trainOnly`, решение заказчика 11.08.2026,
+    // повторено 12.08.2026). Обещание этого метода — «лишнее разбито по потолку и уехало на
+    // следующий день, порядок сохранён» — упаковщик не выполнял: при `orderAuthoritative = false`
+    // он выбирал следующее задание по цене переналадки (перемешивал очередь), а набивка хвоста
+    // смены (#3739) тянула работу НАЗАД, в уже отработанный день. Теперь оба ограничения включены
+    // явно, и метод делает ровно то, что говорит.
+    //
+    // #4732: станки берём СПИСКОМ — одно нажатие оператора обязано дать одну запись плана. Прежде
+    // `levelOverfilledAfterWrite` звал этот метод по станку в цепочке, и каждый вызов писал свою
+    // сессию: боевая 12.08.2026 — одно «Урегулировать» дало четыре сессии `applySplitPlan` и
+    // четыре сведе́ния стартов за две минуты («множество проходов планирования», issue #4732).
     AtexProductionPlanning.prototype.levelDayLoad = function(slitterId, opts) {
         var self = this;
-        var sid = String(slitterId == null ? '' : slitterId);
-        var over = this.overfilledDaysOf(sid, opts);
+        var sids = (Object.prototype.toString.call(slitterId) === '[object Array]' ? slitterId : [slitterId])
+            .map(function(id) { return String(id == null ? '' : id); })
+            .filter(function(id) { return id !== ''; });
+        if (!sids.length) return Promise.resolve(false);
+        var over = [];
+        sids.forEach(function(sid) {
+            self.overfilledDaysOf(sid, opts).forEach(function(d) { over.push({ sid: sid, day: d }); });
+        });
         if (!over.length) return Promise.resolve(false);
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        var label = over.map(function(d) {
-            return formatPlanDayHeading(base, d.dayOffset) + ' (+' + d.overMin + ' мин)';
+        var label = over.map(function(o) {
+            return formatPlanDayHeading(base, o.day.dayOffset) + ' (+' + o.day.overMin + ' мин)';
         }).join('; ');
         if (typeof console !== 'undefined' && console.log) {
-            console.log('[pp] ⚖️ #4473: день длиннее смены — выравниваю упаковщиком (порядок сохраняю)',
-                { slitterId: sid, days: over });
+            console.log('[pp] ⚖️ #4473/#4732: день длиннее смены — выравниваю паровозом (порядок и дни только вперёд)',
+                { slitterIds: sids, days: over.map(function(o) { return o.day; }) });
         }
         // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
         if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
         // #4555: выравнивание «отсюда и до конца» — прошлое станка закрепляем (keepBeforeCutId),
         // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
-        var scope = { withinSlitterIds: [sid] };
+        var scope = { withinSlitterIds: sids.slice(), trainOnly: true };
         if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
         // #4577: те же дни, что разморозило вызвавшее ручное действие — иначе переложить переполненный
         // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
@@ -25168,8 +25212,11 @@
         if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
-                var left = self.overfilledDaysOf(sid);
-                if (left.length) { self.warnOverfilledDays(sid); return !!changed; }
+                var left = [];
+                sids.forEach(function(sid) {
+                    if (self.overfilledDaysOf(sid).length) left.push(sid);
+                });
+                if (left.length) { left.forEach(function(sid) { self.warnOverfilledDays(sid); }); return !!changed; }
                 self.notify('День выровнен по смене: ' + label
                     + ' — лишнее разбито по потолку и уехало на следующий день, порядок сохранён', 'success');
                 return !!changed;
