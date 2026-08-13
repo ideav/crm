@@ -8133,6 +8133,17 @@
             // Пол один на оба правила (их вопрос один: «с какого дня это задание вообще можно
             // класть»), поэтому и предикат один — floorAllows.
             var fixedFloorDay = {};
+            // #4743: САМЫЙ РАННИЙ ДЕНЬ, В КОТОРЫЙ ПАРОВОЗ ВПРАВЕ ОПУСТИТЬ РАБОТУ, — первый день
+            // ПОСЛЕ последнего отработанного. Ищем от хранимого дня задания вниз: как только
+            // упёрлись в отработанный день, останавливаемся на следующем за ним. Нет предиката
+            // (старый вызывающий) → пол прежний, «не раньше хранимого дня» (#4732).
+            var workedDay = typeof opts.workedDayFor === 'function' ? opts.workedDayFor : null;
+            function trainFloorDay(storedDay) {
+                if (!workedDay) return storedDay;
+                var d = storedDay;
+                while (d > 0 && !workedDay(d - 1)) d -= 1;
+                return d;
+            }
             poolOrder.forEach(function(id) {
                 var st = state[id];
                 // #4736: 🔒, чей день уступил ручному сдвигу, пол получает наравне со свободными —
@@ -8141,7 +8152,20 @@
                 var floor = null;
                 if (trainOnly) {
                     var storedDay = Number(storedDayBy[String(id)]);
-                    if (isFinite(storedDay)) floor = storedDay;   // #4732: назад — никогда
+                    // #4743 (решение заказчика 13.08.2026): ПОЛ ПАРОВОЗА — ПОСЛЕДНИЙ ОТРАБОТАННЫЙ
+                    // ДЕНЬ, А НЕ ХРАНИМЫЙ. Прежний пол «назад — никогда» (#4732) запирал КАЖДОЕ
+                    // задание в его собственном дне, и недобранный день добить было нечем: работа
+                    // следующего дня в него не спускалась НИКОГДА. Оператор видел «День не набит до
+                    // конца» после «Урегулировать» и «Упорядочить», которое он не просил (issue
+                    // #4743: Чт 13.08 — 306 минут при потолке 455).
+                    // Смысл запрета #4732 при этом ЦЕЛ: он защищал не «хранимый день», а день,
+                    // который станок УЖЕ ОТРАБОТАЛ, — туда работу не возвращают (боевое #4732:
+                    // остатки уехали из 13.08 обратно в начатый 12.08 и встали МЕЖДУ выполненными).
+                    // Теперь это сказано прямо: `workedDayFor` — тот же предикат, которым мерка
+                    // решает, добивать ли день (#4740), так что раскладка и мерка не расходятся.
+                    // Внутри дня работу не подрежут: порядок авторитетен (`orderAuthoritative`),
+                    // и приезжее задание встаёт в ХВОСТ дня, а не между сделанными.
+                    if (isFinite(storedDay)) floor = Math.min(storedDay, trainFloorDay(storedDay));
                 }
                 poolOrder.forEach(function(fid) {
                     var fst = state[fid];
@@ -8159,7 +8183,7 @@
                 var byTrain = isFinite(storedFloor) && storedFloor >= fixedFloorDay[String(id)];
                 ppTrace((byTrain ? '#4732' : '#4542') + ' задание ' + id + ' не ставим раньше дня '
                     + fixedFloorDay[id] + (byTrain
-                        ? ' — паровоз двигает только вперёд, это его хранимый день'
+                        ? ' — паровоз не спускается ниже отработанного дня'
                         : ' — там стои́т 🔒, которую оно не обгоняет'));
             });
             function floorAllows(id, d) {
@@ -8892,6 +8916,7 @@
             segments.underfilled = underfilledLayoutDays(segments, {
                 freeMinFor: function(d) { return availFor(d, 'cuts'); },
                 isFrozenDay: opts.frozenDayFor,
+                dayIsOver: opts.workedDayFor,   // #4740: отработанный день не добиваем
                 overtakesFixedAt: function(id, d) { return !floorAllows(id, d); }   // #4542: замок сильнее набивки
             });
             (segments.underfilled || []).forEach(function(u) {
@@ -10144,6 +10169,12 @@
                 gapFill: opts.gapFill,   // #3739: заполнять хвосты смены будущими резками, нахлёст разрешён
                 blockedRanges: (opts.blockedRangesBySlitter || {})[key],   // #3764: окна «Отпуска» этого станка
                 frozenDayFor: opts.frozenDayFor,   // #4326-seal: замороженный день — новые резки в него НЕ кладём (существующие остаются)
+                // #4740/#4743: станко-день уже отработан (прошёл, смена закрыта или он кончается
+                // сделанной работой). Им живут ДВА правила раскладки: недобор такого дня не
+                // считается дефектом и пол паровоза не спускается ниже него. Предикат приходит
+                // фабрикой по станку — «отработан» это свойство ИМЕННО ЭТОГО станка (#4596).
+                workedDayFor: (typeof opts.workedDayForSlitter === 'function')
+                    ? opts.workedDayForSlitter(key) : null,
                 // #4085: порядок задан слоем размещения — не переигрывать. #4547: при вопросе ИЗ
                 // размещения (слой ещё считает) порядок авторитетен явно — спрашивают про конкретную
                 // рассматриваемую расстановку.
@@ -24310,7 +24341,13 @@
             orderIdsByCut: orderIdsByCut,   // #4194: заказы заданий для штрафа/бонуса смежности (слой размещения)
             feasibleMachineFor: slotOn ? feasibleMachineFor : null,
             machineDayOffFor: slotOn ? machineDayOffFor : null,
-            frozenDayFor: frozenDayFor   // #4326-seal: новые резки в замороженный день не кладём
+            frozenDayFor: frozenDayFor,   // #4326-seal: новые резки в замороженный день не кладём
+            // #4740/#4743: «этот станко-день уже отработан» — один предикат на мерку недобора и на
+            // пол паровоза, чтобы раскладка заполняла ровно те дни, о которых говорит мерка.
+            // typeof-гард — как у slotPlacementOn: в юнит-тестах buildSequenceOps зовут на стаб-self
+            // без прототипа; там предиката нет, и раскладка работает по прежним правилам.
+            workedDayForSlitter: (typeof self.dayIsWorkedOutFn === 'function')
+                ? function(sid){ return self.dayIsWorkedOutFn(String(sid), planBaseMidnightMs); } : null
         });
         } finally {
             pinnedRestore.forEach(function(c){ c.fixed = false; });   // #4074: снять временный замок перенесённого задания
@@ -24778,7 +24815,24 @@
             if (moveScope && moveScope.fromCutId != null && String(moveScope.fromCutId) !== '') {
                 (levelOpts = levelOpts || {}).fromCutId = String(moveScope.fromCutId);
             }
-            var over = ids.filter(function(sid) { return sid !== '' && self.overfilledDaysOf(sid, levelOpts).length > 0; });
+            // #4743 (ТЗ §15): ПОТОЛОК ДНЯ РАБОТАЕТ В ОБЕ СТОРОНЫ. Прежде хвост запускался только на
+            // ПЕРЕПОЛНЕННОМ дне: недобранный день не трогал никто, и «Урегулировать» заканчивалось
+            // словами «День не набит до конца — нажмите „Упорядочить“». Но правило DAY_FILL (#4469)
+            // такое же жёсткое, как DAY_CAPACITY (#4467), и советовать оператору кнопку вместо того,
+            // чтобы сделать, — то же самое, что выполнить действие наполовину (боевое 13.08.2026:
+            // Чт 13.08 — 306 минут при потолке 455, issue #4743).
+            // Недобор считаем ТОЙ ЖЕ меркой, что и предупреждение (`planUnderfilledDays` — ключи
+            // «станок|ГГГГММДД»), поэтому «о чём сказали» и «что пошли чинить» не расходятся.
+            var underBySid = {};
+            if (typeof self.planUnderfilledDays === 'function') {
+                (self.planUnderfilledDays(self.cuts || [], null) || []).forEach(function(key) {
+                    underBySid[String(key).split('|')[0]] = true;
+                });
+            }
+            var over = ids.filter(function(sid) {
+                if (sid === '') return false;
+                return self.overfilledDaysOf(sid, levelOpts).length > 0 || !!underBySid[sid];
+            });
             // #4735: без `result` (пути пересчёта наладки) отвечаем как `levelDayLoad` — «план пересобран».
             if (!over.length) return Promise.resolve(result === undefined ? false : result);
             self._levelingDays = true;
@@ -25643,8 +25697,24 @@
         var sid = String(slitterId == null ? '' : slitterId);
         var todayKey = planDateDayKey(controllerNowMs(this));
         var closed = (typeof this.shiftClosedSlittersToday === 'function') ? this.shiftClosedSlittersToday() : {};
+        // #4743: ВТОРОЙ ПРИЗНАК ТОГО ЖЕ ПРАВИЛА — день КОНЧАЕТСЯ сделанной работой. Считаем его
+        // здесь, чтобы у всех потребителей («не добивать», «не судить потолком», пол паровоза)
+        // ответ был ОДИН: раскладка обязана заполнять ровно те дни, о недоборе которых говорит
+        // мерка, иначе оператор слышит «день не набит» про день, набивать который запрещено.
+        // Хвост дня берём по ХРАНИМОМУ плану — тому же, что рисует очередь.
+        var lastOfDay = {};
+        (this.cuts || []).forEach(function(c) {
+            if (!c || cutSlitterKey(c) !== sid) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null) return;
+            var d = Math.floor((ts * 1000 - baseMidnightMs) / 86400000);
+            if (!lastOfDay[d] || ts > lastOfDay[d].ts) lastOfDay[d] = { ts: ts, cut: c };
+        });
         return function(dayOffset) {
-            return dayIsOverForSlitter(dayKeyFromOffset(baseMidnightMs, dayOffset), sid, todayKey, closed);
+            var d = Number(dayOffset);
+            if (dayIsOverForSlitter(dayKeyFromOffset(baseMidnightMs, d), sid, todayKey, closed)) return true;
+            var tail = lastOfDay[d];
+            return !!(tail && cutWorkIsFact(tail.cut));
         };
     };
 
@@ -25804,14 +25874,29 @@
         sids.forEach(function(sid) {
             self.overfilledDaysOf(sid, opts).forEach(function(d) { over.push({ sid: sid, day: d }); });
         });
-        if (!over.length) return Promise.resolve(false);
+        // #4743 (ТЗ §15): ВЫРАВНИВАНИЕ РАБОТАЕТ В ОБЕ СТОРОНЫ. Переполненный день режем по потолку,
+        // НЕДОБРАННЫЙ — добиваем работой следующего дня (DAY_FILL #4469 — правило той же твёрдости,
+        // что и потолок #4467). Прежде этот вход открывал только перебор, и «Урегулировать»
+        // заканчивалось советом нажать «Упорядочить» вместо того, чтобы набить день самому.
+        // Мерка недобора — общая (`planUnderfilledDays`, ключи «станок|ГГГГММДД»), та же, что у
+        // предупреждения #4638: чинить и говорить обязаны про одни и те же дни.
+        var under = [];
+        if (typeof self.planUnderfilledDays === 'function') {
+            var wantSid = {};
+            sids.forEach(function(sid) { wantSid[sid] = true; });
+            (self.planUnderfilledDays(self.cuts || [], null) || []).forEach(function(key) {
+                var sid = String(key).split('|')[0];
+                if (wantSid[sid]) under.push({ sid: sid, dayKey: String(key).split('|')[1] });
+            });
+        }
+        if (!over.length && !under.length) return Promise.resolve(false);
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var label = over.map(function(o) {
             return formatPlanDayHeading(base, o.day.dayOffset) + ' (+' + o.day.overMin + ' мин)';
-        }).join('; ');
+        }).concat(under.map(function(u) { return formatDayKey(u.dayKey) + ' (недобран)'; })).join('; ');
         if (typeof console !== 'undefined' && console.log) {
-            console.log('[pp] ⚖️ #4473/#4732: день длиннее смены — выравниваю паровозом (порядок и дни только вперёд)',
-                { slitterIds: sids, days: over.map(function(o) { return o.day; }) });
+            console.log('[pp] ⚖️ #4473/#4732/#4743: день не по смене — выравниваю паровозом (порядок сохраняем, назад — не дальше отработанного дня)',
+                { slitterIds: sids, over: over.map(function(o) { return o.day; }), under: under });
         }
         // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
         if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
@@ -25835,7 +25920,7 @@
                 });
                 if (left.length) { left.forEach(function(sid) { self.warnOverfilledDays(sid); }); return !!changed; }
                 self.notify('День выровнен по смене: ' + label
-                    + ' — лишнее разбито по потолку и уехало на следующий день, порядок сохранён', 'success');
+                    + ' — лишнее разбито по потолку и уехало вперёд, недобранное добрано, порядок сохранён', 'success');
                 return !!changed;
             });
     };
