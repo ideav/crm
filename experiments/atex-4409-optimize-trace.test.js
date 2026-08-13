@@ -189,6 +189,10 @@ function makeController(cuts) {
     c.linkEl = new StubNode('div');
     c.toastHost = new StubNode('div');
     c.filter = { slitter: '', status: '', date: '2026-07-27', dateTo: '2026-07-28', query: '' };
+    // #4740: «сегодня» сценария — его же первый день. Без этого дни 27–28.07 оказываются ПРОШЕДШИМИ
+    // относительно реальных часов, а в отработанный день работу не затаскивают (#4596/#4740) —
+    // недобранных дней в объективе не остаётся, и «Упорядочить» не находит, что улучшать.
+    c.nowMs = function() { return new Date(2026, 6, 27, 9, 0, 0, 0).getTime(); };
     c.slitters = [{ id: '101', label: 'Станок 101' }, { id: '202', label: 'Станок 202' }];
     c.activeSlitter = '101';
     c.cuts = cuts;

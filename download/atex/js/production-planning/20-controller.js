@@ -3314,7 +3314,10 @@
                 setupMin: setup, workMin: Math.max(0, occ - setup), occMin: occ,
                 // #4434: 🔒 держит свой день; #4381: начатое задание неприкосновенно, завершённое — не работа плана.
                 fixed: !!cut.fixed,
-                immovable: cutIsStarted(cut) || String(cut.status || '').trim() === 'Завершён',
+                // #4740: «Завершён» одного статуса мало — отчёт `cut_planning` его не отдаёт (#4572,
+                // в боевой базе у ВСЕХ заданий приходит ''/'X'). Факт работы читаем так же, как всюду:
+                // «Начато»/«Закончено» (`cutWorkIsFact`), статус — вдобавок.
+                immovable: cutWorkIsFact(cut) || String(cut.status || '').trim() === 'Завершён',
                 frozen: frozenAt(ts), isCreate: !!isCreate
             };
         }
@@ -3359,6 +3362,7 @@
     // день не трогаем, проход атомарен; #4638: продолжение СВОЕЙ цепочки донор и под 🔒 — день
     // каждого звена сохраняется, двигается лишь точка разбиения). → массив ключей «станок|ГГГГММДД».
     AtexProductionPlanning.prototype.planUnderfilledDays = function(cutsArray, ops) {
+        var self = this;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         if (!isFinite(base)) return [];
         // Стаб-self в юнит-тестах прототипа не несёт (как typeof-гарды ниже) — окно не прочитать.
@@ -3405,7 +3409,9 @@
             });
             underfilledLayoutDays(items, {
                 freeMinFor: function(d){ return ceiling - (loadByDay[d] || 0) - lostToBlock(sid, d); },
-                isFrozenDay: function(d){ return !!frozenByDay[d]; }
+                isFrozenDay: function(d){ return !!frozenByDay[d]; },
+                // #4740: в отработанный станко-день (прошедший / закрывший смену) не затаскиваем.
+                dayIsOver: (typeof self.dayIsWorkedOutFn === 'function') ? self.dayIsWorkedOutFn(sid, base) : null
             }).forEach(function(u){
                 out.push(String(sid) + '|' + dayKeyFromOffset(base, u.day));
             });
@@ -11533,8 +11539,20 @@
                 return { dayOffset: d, loadMin: load,
                          endMin: round3(win.startMin + load + win.lunchDurationMin),
                          overMin: Math.round(load - cap), capMin: ceil,
-                         cutId: last.cut.id, seq: items.length, cut: last.cut };
+                         cutId: last.cut.id, seq: items.length, cut: last.cut,
+                         // #4740: перебор набран УЖЕ СДЕЛАННОЙ работой — день так прошёл.
+                         worked: cutWorkIsFact(last.cut) };
             })
+            // #4740 (ТЗ §15, решение заказчика 13.08.2026): ПЕРЕБОР, НАБРАННЫЙ СДЕЛАННОЙ РАБОТОЙ, —
+            // ФАКТ, А НЕ ДЕФЕКТ ПЛАНА. День выравнивается разрезом ПОСЛЕДНЕГО задания по потолку и
+            // отъездом остатка; если это задание НАЧАТО или ВЫПОЛНЕНО, увозить нечего — работа уже
+            // сделана в этот день, и «до 18:20 при потолке 16:15» описывает не план, а то, как день
+            // прошёл. Оператору по такому дню сказать нечего, кроме «перенесите вручную» — а
+            // перенести нельзя (боевое 13.08.2026: Станок 1, Ср 12.08 «+125 мин» и Станок 3,
+            // Чт 13.08 «+68 мин» — оба перебора создали ВЫПОЛНЕННЫЕ задания, issue #4740).
+            // Меряем ФАКТОМ (Начато/Закончено), а не календарём: «вчера» и «сегодня» — свойство
+            // момента, когда смотрят, а сделанная работа остаётся сделанной всегда.
+            .filter(function(r) { return !r.worked; })
             // #4622: ПОРОГ ПОМЕТКИ — ТОТ ЖЕ, ЧТО У СООБЩЕНИЯ. Здесь стоял допуск `loadMin > cap + 1`:
             // день на 456 мин при потолке 455 в шапке НЕ краснел (456 не больше 456), а тост про тот
             // же день ругался — оператор видел «жалуется, а день чистый» и решал, что пометка сломана
@@ -11565,7 +11583,7 @@
             var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
             (bySlitter[sid] = bySlitter[sid] || []).push(c);
         });
-        var n = 0;
+        var n = 0, self = this;
         Object.keys(bySlitter).forEach(function(sid) {
             n += overfilledDaysFromCuts(bySlitter[sid], {
                 baseMidnightMs: base, cutEndMin: win.cutEndMin, maxOverworkCutsMin: win.maxOverworkCutsMin,
@@ -11573,6 +11591,20 @@
             }).length;
         });
         return n;
+    };
+
+    // #4740 (решение заказчика 13.08.2026): «В ЭТОТ ДЕНЬ УЖЕ НИЧЕГО НЕ ЗАТАСКИВАТЬ» — по смещению
+    // от базы плана. Источник один на весь РМ: `dayIsOverForSlitter` (#4596) — прошедший день
+    // кончился для всех, сегодняшний — для станка, ЗАКРЫВШЕГО СМЕНУ. Закрытая смена и есть триггер
+    // «Урегулировать»: недоделанное из неё увозят вперёд, а обратно в неё не кладут ничего.
+    // Стаб-self в юнит-тестах прототипа не несёт — там предиката нет, поведение прежнее.
+    AtexProductionPlanning.prototype.dayIsWorkedOutFn = function(slitterId, baseMidnightMs) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var todayKey = planDateDayKey(controllerNowMs(this));
+        var closed = (typeof this.shiftClosedSlittersToday === 'function') ? this.shiftClosedSlittersToday() : {};
+        return function(dayOffset) {
+            return dayIsOverForSlitter(dayKeyFromOffset(baseMidnightMs, dayOffset), sid, todayKey, closed);
+        };
     };
 
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
@@ -11583,8 +11615,9 @@
         var inScope = {};
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
         var win = this.workingWindow() || {};
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
-            baseMidnightMs: planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)),
+            baseMidnightMs: base,
             cutEndMin: win.cutEndMin,
             maxOverworkCutsMin: win.maxOverworkCutsMin,
             // #4559: обед — часть смены, а не свободные минуты: «сквозное» задание паузит на него (#3816).

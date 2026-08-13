@@ -2572,10 +2572,12 @@
         return planTsSeconds(cut && cut.startDate) != null;
     }
 
-    // #4736: задание, которого ручной сдвиг НЕ КАСАЕТСЯ, в каком бы месте очереди оно ни стояло.
-    // Начатое (#4381) и выполненное (#4572) — это ФАКТ: работа шла (или идёт) в тот день, какой
-    // был, и переставлять его нельзя ничем, включая ручное действие.
-    function manualShiftUntouchable(cut) {
+    // #4736/#4740: РАБОТА ЭТОГО ЗАДАНИЯ — ФАКТ, А НЕ ПЛАН. Начатое (#4381) и выполненное (#4572)
+    // шло (или идёт) в тот день, какой был; переставить его нельзя ничем — ни автоматикой, ни
+    // ручным действием. Отсюда два следствия, и оба живут через этот предикат: ручной сдвиг такие
+    // задания не двигает (#4736), а мерки дня их днями не судят (#4740) — перебор смены, набранный
+    // сделанной работой, не дефект плана, а то, как прошёл день.
+    function cutWorkIsFact(cut) {
         return cutIsStarted(cut) || planTsSeconds(cut && cut.endDate) != null;
     }
 
@@ -2601,7 +2603,7 @@
             if (sid === '' || from[sid] == null) return;
             var ts = planTsSeconds(c.planDate);
             if (ts == null || ts < Number(from[sid])) return;   // стои́т РАНЬШЕ точки сдвига — он его не касается
-            if (manualShiftUntouchable(c)) return;
+            if (cutWorkIsFact(c)) return;
             if (typeof skip === 'function' && skip(c)) return;
             out.push(String(c.id));
         });
@@ -2626,7 +2628,7 @@
             if (sid === '' || from[sid] == null) return;
             var ts = planTsSeconds(c.planDate);
             if (ts == null || ts <= Number(from[sid])) return;   // строго ПОСЛЕ точки сдвига
-            if (manualShiftUntouchable(c)) return;               // факт: его и не двигали бы
+            if (cutWorkIsFact(c)) return;               // факт: его и не двигали бы
             if (!isFrozenTs(c.planDate)) return;
             var k = planDateDayKey(c.planDate);
             if (k != null && k !== Infinity) keys[String(k)] = true;

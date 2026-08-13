@@ -2573,10 +2573,12 @@
         return planTsSeconds(cut && cut.startDate) != null;
     }
 
-    // #4736: задание, которого ручной сдвиг НЕ КАСАЕТСЯ, в каком бы месте очереди оно ни стояло.
-    // Начатое (#4381) и выполненное (#4572) — это ФАКТ: работа шла (или идёт) в тот день, какой
-    // был, и переставлять его нельзя ничем, включая ручное действие.
-    function manualShiftUntouchable(cut) {
+    // #4736/#4740: РАБОТА ЭТОГО ЗАДАНИЯ — ФАКТ, А НЕ ПЛАН. Начатое (#4381) и выполненное (#4572)
+    // шло (или идёт) в тот день, какой был; переставить его нельзя ничем — ни автоматикой, ни
+    // ручным действием. Отсюда два следствия, и оба живут через этот предикат: ручной сдвиг такие
+    // задания не двигает (#4736), а мерки дня их днями не судят (#4740) — перебор смены, набранный
+    // сделанной работой, не дефект плана, а то, как прошёл день.
+    function cutWorkIsFact(cut) {
         return cutIsStarted(cut) || planTsSeconds(cut && cut.endDate) != null;
     }
 
@@ -2602,7 +2604,7 @@
             if (sid === '' || from[sid] == null) return;
             var ts = planTsSeconds(c.planDate);
             if (ts == null || ts < Number(from[sid])) return;   // стои́т РАНЬШЕ точки сдвига — он его не касается
-            if (manualShiftUntouchable(c)) return;
+            if (cutWorkIsFact(c)) return;
             if (typeof skip === 'function' && skip(c)) return;
             out.push(String(c.id));
         });
@@ -2627,7 +2629,7 @@
             if (sid === '' || from[sid] == null) return;
             var ts = planTsSeconds(c.planDate);
             if (ts == null || ts <= Number(from[sid])) return;   // строго ПОСЛЕ точки сдвига
-            if (manualShiftUntouchable(c)) return;               // факт: его и не двигали бы
+            if (cutWorkIsFact(c)) return;               // факт: его и не двигали бы
             if (!isFrozenTs(c.planDate)) return;
             var k = planDateDayKey(c.planDate);
             if (k != null && k !== Infinity) keys[String(k)] = true;
@@ -7552,6 +7554,17 @@
             var day = days[i], next = days[i + 1];
             if (day < 0) continue;                                             // раньше «С» ничего не ставим (ТЗ §15)
             if (frozen(day) || frozen(next)) continue;
+            // #4740 (ТЗ §15, решение заказчика 13.08.2026): В ОТРАБОТАННЫЙ ДЕНЬ РАБОТУ НЕ ЗАТАСКИВАЮТ.
+            // Два признака, и оба означают одно — станок в этом дне больше не работает:
+            //   • день КОНЧАЕТСЯ заданием, которое уже НАЧАТО или ВЫПОЛНЕНО (`immovable`): затянуть
+            //     сюда завтрашний проход значит дописать работу в смену, которая уже прошла;
+            //   • день для станка КОНЧИЛСЯ — прошедший или ЗАКРЫВШИЙ СМЕНУ (`dayIsOver`, #4596).
+            //     Закрытая смена — это и есть триггер «Урегулировать»: недоделанное из неё увозят
+            //     вперёд, а обратно в неё не кладут ничего.
+            // Недобор такого дня — не дефект раскладки, а то, как день прошёл (боевое 13.08.2026:
+            // «смен, не набитых до потолка, — 3», и все три уже отработаны, issue #4740).
+            if (lastOfDay[day] && lastOfDay[day].immovable) continue;
+            if (typeof opts.dayIsOver === 'function' && opts.dayIsOver(day)) continue;
             var donor = firstOfDay[next];
             // #4638: донор — продолжение ТОЙ ЖЕ цепочки, что закрывает этот день → замок дня ни при
             // чём (обе записи остаются на своих датах, двигается лишь точка разбиения).
@@ -17342,7 +17355,10 @@
                 setupMin: setup, workMin: Math.max(0, occ - setup), occMin: occ,
                 // #4434: 🔒 держит свой день; #4381: начатое задание неприкосновенно, завершённое — не работа плана.
                 fixed: !!cut.fixed,
-                immovable: cutIsStarted(cut) || String(cut.status || '').trim() === 'Завершён',
+                // #4740: «Завершён» одного статуса мало — отчёт `cut_planning` его не отдаёт (#4572,
+                // в боевой базе у ВСЕХ заданий приходит ''/'X'). Факт работы читаем так же, как всюду:
+                // «Начато»/«Закончено» (`cutWorkIsFact`), статус — вдобавок.
+                immovable: cutWorkIsFact(cut) || String(cut.status || '').trim() === 'Завершён',
                 frozen: frozenAt(ts), isCreate: !!isCreate
             };
         }
@@ -17387,6 +17403,7 @@
     // день не трогаем, проход атомарен; #4638: продолжение СВОЕЙ цепочки донор и под 🔒 — день
     // каждого звена сохраняется, двигается лишь точка разбиения). → массив ключей «станок|ГГГГММДД».
     AtexProductionPlanning.prototype.planUnderfilledDays = function(cutsArray, ops) {
+        var self = this;
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         if (!isFinite(base)) return [];
         // Стаб-self в юнит-тестах прототипа не несёт (как typeof-гарды ниже) — окно не прочитать.
@@ -17433,7 +17450,9 @@
             });
             underfilledLayoutDays(items, {
                 freeMinFor: function(d){ return ceiling - (loadByDay[d] || 0) - lostToBlock(sid, d); },
-                isFrozenDay: function(d){ return !!frozenByDay[d]; }
+                isFrozenDay: function(d){ return !!frozenByDay[d]; },
+                // #4740: в отработанный станко-день (прошедший / закрывший смену) не затаскиваем.
+                dayIsOver: (typeof self.dayIsWorkedOutFn === 'function') ? self.dayIsWorkedOutFn(sid, base) : null
             }).forEach(function(u){
                 out.push(String(sid) + '|' + dayKeyFromOffset(base, u.day));
             });
@@ -25561,8 +25580,20 @@
                 return { dayOffset: d, loadMin: load,
                          endMin: round3(win.startMin + load + win.lunchDurationMin),
                          overMin: Math.round(load - cap), capMin: ceil,
-                         cutId: last.cut.id, seq: items.length, cut: last.cut };
+                         cutId: last.cut.id, seq: items.length, cut: last.cut,
+                         // #4740: перебор набран УЖЕ СДЕЛАННОЙ работой — день так прошёл.
+                         worked: cutWorkIsFact(last.cut) };
             })
+            // #4740 (ТЗ §15, решение заказчика 13.08.2026): ПЕРЕБОР, НАБРАННЫЙ СДЕЛАННОЙ РАБОТОЙ, —
+            // ФАКТ, А НЕ ДЕФЕКТ ПЛАНА. День выравнивается разрезом ПОСЛЕДНЕГО задания по потолку и
+            // отъездом остатка; если это задание НАЧАТО или ВЫПОЛНЕНО, увозить нечего — работа уже
+            // сделана в этот день, и «до 18:20 при потолке 16:15» описывает не план, а то, как день
+            // прошёл. Оператору по такому дню сказать нечего, кроме «перенесите вручную» — а
+            // перенести нельзя (боевое 13.08.2026: Станок 1, Ср 12.08 «+125 мин» и Станок 3,
+            // Чт 13.08 «+68 мин» — оба перебора создали ВЫПОЛНЕННЫЕ задания, issue #4740).
+            // Меряем ФАКТОМ (Начато/Закончено), а не календарём: «вчера» и «сегодня» — свойство
+            // момента, когда смотрят, а сделанная работа остаётся сделанной всегда.
+            .filter(function(r) { return !r.worked; })
             // #4622: ПОРОГ ПОМЕТКИ — ТОТ ЖЕ, ЧТО У СООБЩЕНИЯ. Здесь стоял допуск `loadMin > cap + 1`:
             // день на 456 мин при потолке 455 в шапке НЕ краснел (456 не больше 456), а тост про тот
             // же день ругался — оператор видел «жалуется, а день чистый» и решал, что пометка сломана
@@ -25593,7 +25624,7 @@
             var sid = String((c.slitter && c.slitter.id) == null ? '' : c.slitter.id);
             (bySlitter[sid] = bySlitter[sid] || []).push(c);
         });
-        var n = 0;
+        var n = 0, self = this;
         Object.keys(bySlitter).forEach(function(sid) {
             n += overfilledDaysFromCuts(bySlitter[sid], {
                 baseMidnightMs: base, cutEndMin: win.cutEndMin, maxOverworkCutsMin: win.maxOverworkCutsMin,
@@ -25601,6 +25632,20 @@
             }).length;
         });
         return n;
+    };
+
+    // #4740 (решение заказчика 13.08.2026): «В ЭТОТ ДЕНЬ УЖЕ НИЧЕГО НЕ ЗАТАСКИВАТЬ» — по смещению
+    // от базы плана. Источник один на весь РМ: `dayIsOverForSlitter` (#4596) — прошедший день
+    // кончился для всех, сегодняшний — для станка, ЗАКРЫВШЕГО СМЕНУ. Закрытая смена и есть триггер
+    // «Урегулировать»: недоделанное из неё увозят вперёд, а обратно в неё не кладут ничего.
+    // Стаб-self в юнит-тестах прототипа не несёт — там предиката нет, поведение прежнее.
+    AtexProductionPlanning.prototype.dayIsWorkedOutFn = function(slitterId, baseMidnightMs) {
+        var sid = String(slitterId == null ? '' : slitterId);
+        var todayKey = planDateDayKey(controllerNowMs(this));
+        var closed = (typeof this.shiftClosedSlittersToday === 'function') ? this.shiftClosedSlittersToday() : {};
+        return function(dayOffset) {
+            return dayIsOverForSlitter(dayKeyFromOffset(baseMidnightMs, dayOffset), sid, todayKey, closed);
+        };
     };
 
     AtexProductionPlanning.prototype.overfilledDaysOf = function(slitterId, opts) {
@@ -25611,8 +25656,9 @@
         var inScope = {};
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
         var win = this.workingWindow() || {};
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
-            baseMidnightMs: planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this)),
+            baseMidnightMs: base,
             cutEndMin: win.cutEndMin,
             maxOverworkCutsMin: win.maxOverworkCutsMin,
             // #4559: обед — часть смены, а не свободные минуты: «сквозное» задание паузит на него (#3816).
