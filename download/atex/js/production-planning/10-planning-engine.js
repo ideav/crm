@@ -3038,6 +3038,13 @@
             var key = String(id);
             return wholeDayBy[key] != null || !!manualMoveBy[key];
         }
+        // #4736 (ТЗ §15): 🔒, ЧЕЙ ДЕНЬ УСТУПИЛ РУЧНОМУ СДВИГУ. Якорь дня им уже не выдан
+        // (`effAnchorByCut` в planCutOperations), поэтому `fixedDay`/`anchor` у них пусты и день они
+        // выбирают как свободные. Здесь остаётся сказать это ДВУМ правилам, которые спрашивают не
+        // якорь, а сам флаг «Зафиксировано»: пол дня (`fixedFloorDay` — паровоз обязан держать их
+        // так же, как свободных) и разрыв по потолку (`maySplitInto`).
+        var manualShiftBy = opts.manualShiftByCut || {};
+        function shiftedByManual(id) { return !!manualShiftBy[String(id)]; }
         function anyMovedByOperator() { return wholeDayIds.length > 0 || manualMoveIds.length > 0; }
         // #4497 (ТЗ §15): ХРАНИМОЕ МЕСТО 🔒 В ДНЕ. Перед зафиксированным заданием автоматика ничего не
         // ставит: замок держит не только ДЕНЬ, но и МЕСТО в дне — иначе новое задание садится в голову
@@ -3375,7 +3382,9 @@
             var fixedFloorDay = {};
             poolOrder.forEach(function(id) {
                 var st = state[id];
-                if (!st || (st.cut && st.cut.fixed)) return;   // про саму 🔒 правило не спрашивают
+                // #4736: 🔒, чей день уступил ручному сдвигу, пол получает наравне со свободными —
+                // иначе паровоз («назад никогда», #4732) её одну и потащил бы в отработанный день.
+                if (!st || (st.cut && st.cut.fixed && !shiftedByManual(id))) return;   // про саму 🔒 правило не спрашивают
                 var floor = null;
                 if (trainOnly) {
                     var storedDay = Number(storedDayBy[String(id)]);
@@ -3562,6 +3571,7 @@
             //   • кандидат стоял перед ней в ХРАНИМОМ плане (его место не переворачиваем).
             function fixedYieldsTo(fixedId, candId, atDay){
                 if (movedByOperator(fixedId)) return true;
+                if (shiftedByManual(fixedId)) return true;   // #4736: её день уступил ручному сдвигу — места в дне у неё нет
                 if (storedPlanTs(fixedId) == null) return true;   // хранимого места у 🔒 нет — защищать нечего
                 var fst = state[fixedId], cst = state[candId];
                 // Приезжая 🔒 (её день сдвинул потолок, #4467/#4491): в ЭТОМ дне её место не хранимое —
@@ -3587,7 +3597,9 @@
             // смена не может быть длиннее себя (#4467), проход атомарен (#4149).
             function maySplitInto(id, nd){
                 var st2 = state[id];
-                if (!st2 || st2.isCont || st2.fixedDay != null || movedByOperator(id)) return true;
+                // #4736: задание, которое двигает ручное действие, рвётся по общим правилам —
+                // «Зафиксировано» разрывать его не мешает (ТЗ §15).
+                if (!st2 || st2.isCont || st2.fixedDay != null || movedByOperator(id) || shiftedByManual(id)) return true;
                 var blocked = false;
                 for (var bi = 0; bi < poolOrder.length; bi++){
                     var fid = poolOrder[bi], fst2 = state[fid];
@@ -5186,10 +5198,19 @@
         // якоря «Даты план» не имеют (dayAnchorByCut #3658 отменён) и при «Создать» перепаковываются
         // от «С». Ручной перенос 🗓 без 🔒 не держится (day-anchor свободных снят).
         var anchorIn = opts.dayAnchorByCut || {};
+        // #4736 (ТЗ §15): 🔒, ЧЕЙ ДЕНЬ УСТУПАЕТ РУЧНОМУ ДЕЙСТВИЮ. Удаление, перетаскивание внутри
+        // дня, перенос 🗓 и «Урегулировать» двигают весь хвост очереди за изменяемым заданием;
+        // фиксация этот сдвиг не останавливает — 🔒 меняет день, рвётся по потолку и схлопывается в
+        // освободившееся место, как незафиксированное. Порядок при этом не меняется: его держат
+        // `preserveOrder`/`trainOnly` и `fixedFloorDay`.
+        // ЗДЕСЬ ЕДИНСТВЕННОЕ МЕСТО, где «Зафиксировано» превращается в ЯКОРЬ ДНЯ (`fixedDay`
+        // упаковщика, `st.anchor`), поэтому и снимается замок дня ровно здесь — одной строкой на все
+        // пути, а не условием в каждом потребителе.
+        var manualShiftBy = opts.manualShiftByCut || {};
         var effAnchorByCut = {};
         merged.cuts.forEach(function(c){
             var id = String(c && c.id);
-            if (c && c.fixed && anchorIn[id] != null) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
+            if (c && c.fixed && anchorIn[id] != null && !manualShiftBy[id]) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
         });
         // #4434 п.1: ЗАМОК ДНЯ АБСОЛЮТЕН. Прежний механизм «рескью снимает замок дня у просроченного
         // 🔒» (#4224/#4424) убран целиком: задание, приколотое оператором к дню, не переезжает НИ ПО
@@ -5379,7 +5400,8 @@
                 wholeDayByCut: opts.wholeDayByCut,     // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
                 dueDayByCut: opts.dueDayByCut,         // #4650: чей срок раньше — тот и не разрывается
                 fitInShiftNoSplit: opts.fitInShiftNoSplit,   // #4650: выключатель правила целостности смены
-                manualMoveByCut: manualMoveByCut       // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
+                manualMoveByCut: manualMoveByCut,      // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
+                manualShiftByCut: manualShiftBy        // #4736: 🔒, чей день уступил ручному сдвигу — рвать и схлопывать их можно
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation

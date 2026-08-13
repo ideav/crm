@@ -2572,6 +2572,87 @@
         return planTsSeconds(cut && cut.startDate) != null;
     }
 
+    // #4736: задание, которого ручной сдвиг НЕ КАСАЕТСЯ, в каком бы месте очереди оно ни стояло.
+    // Начатое (#4381) и выполненное (#4572) — это ФАКТ: работа шла (или идёт) в тот день, какой
+    // был, и переставлять его нельзя ничем, включая ручное действие.
+    function manualShiftUntouchable(cut) {
+        return cutIsStarted(cut) || planTsSeconds(cut && cut.endDate) != null;
+    }
+
+    // #4736 (ТЗ §15): КОГО ДВИГАЕТ РУЧНОЕ ДЕЙСТВИЕ. Удаление, перетаскивание внутри дня, перенос 🗓
+    // и «Урегулировать» двигают не одно задание, а ВЕСЬ ХВОСТ ОЧЕРЕДИ за ним: освободившееся место
+    // схлопывается, лишнее уезжает вперёд. Хвост считаем по ХРАНИМОМУ плану — задания затронутых
+    // станков, стоящие на месте изменяемого или ПОСЛЕ него.
+    //
+    // Отдаём только ЗАФИКСИРОВАННЫЕ (🔒) — незафиксированные сдвиг двигает и так, а вопрос правила
+    // ровно один: фиксация ручному сдвигу день не держит. Порядок 🔒 при этом не меняется — его
+    // держат прежние механизмы (`preserveOrder`/`trainOnly`, `fixedFloorDay`).
+    //   shift: { fromBySlitter: { станок: unix-сек } } — точка сдвига на каждом затронутом станке;
+    //   skip(cut) — что сдвигу неподвластно сверх начатого/выполненного (например замороженный
+    //   день); необязателен.
+    // Чистая — покрыта тестом.
+    function manualShiftFixedIds(cuts, shift, skip) {
+        var from = (shift && shift.fromBySlitter) || null;
+        if (!from) return [];
+        var out = [];
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !c.fixed) return;
+            var sid = cutSlitterKey(c);
+            if (sid === '' || from[sid] == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null || ts < Number(from[sid])) return;   // стои́т РАНЬШЕ точки сдвига — он его не касается
+            if (manualShiftUntouchable(c)) return;
+            if (typeof skip === 'function' && skip(c)) return;
+            out.push(String(c.id));
+        });
+        return out;
+    }
+
+    // #4736 (ТЗ §15): ЗАМОРОЖЕННЫЙ ДЕНЬ ВПЕРЕДИ — РУЧНОЕ ДЕЙСТВИЕ НЕ ВЫПОЛНЯЕТСЯ ВОВСЕ. Сдвиг
+    // очереди сплошной: он либо доходит до конца, либо упирается в задания, которые двигать нельзя,
+    // и тогда часть дней остаётся недобитой, а часть — за потолком. Половинчатый результат («тут
+    // сдвинули, а там не смогли») недопустим, поэтому такой сдвиг не начинаем и называем дни.
+    // Считаем дни СТРОГО ПОСЛЕ точки сдвига: день самого изменяемого задания ручное действие
+    // размораживает для себя само (#4577).
+    //   isFrozenTs(planDate) — «этот день заморожен» (у контроллера — `dayIsFrozen`).
+    // → ключи дней ГГГГММДД по возрастанию. Чистая — покрыта тестом.
+    function manualShiftFrozenDaysAhead(cuts, shift, isFrozenTs) {
+        var from = (shift && shift.fromBySlitter) || null;
+        if (!from || typeof isFrozenTs !== 'function') return [];
+        var keys = {};
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var sid = cutSlitterKey(c);
+            if (sid === '' || from[sid] == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null || ts <= Number(from[sid])) return;   // строго ПОСЛЕ точки сдвига
+            if (manualShiftUntouchable(c)) return;               // факт: его и не двигали бы
+            if (!isFrozenTs(c.planDate)) return;
+            var k = planDateDayKey(c.planDate);
+            if (k != null && k !== Infinity) keys[String(k)] = true;
+        });
+        return Object.keys(keys).sort();
+    }
+
+    // #4736: точка сдвига по станкам — самое раннее ХРАНИМОЕ время среди заданий, которые действие
+    // трогает, плюс явные точки (`extra`: у переноса 🗓 это полночь ВЫБРАННОГО дня — перенос назад
+    // двигает и то, что стои́т между новым местом и старым). → { fromBySlitter }. Чистая.
+    function manualShiftFrom(cuts, ids, extra) {
+        var want = {};
+        (ids || []).forEach(function(id) { if (id != null && id !== '') want[String(id)] = true; });
+        var from = {};
+        function put(sid, ts) {
+            if (sid === '' || ts == null || !isFinite(Number(ts))) return;
+            if (from[sid] == null || Number(ts) < Number(from[sid])) from[sid] = Number(ts);
+        }
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !want[String(c.id)]) return;
+            put(cutSlitterKey(c), planTsSeconds(c.planDate));
+        });
+        Object.keys(extra || {}).forEach(function(sid) { put(String(sid), extra[sid]); });
+        return Object.keys(from).length ? { fromBySlitter: from } : null;
+    }
+
     // #4596: СОБЫТИЯ СМЕНЫ — ТЕ ЖЕ, ЧТО У ПУЛЬТА. Пульт слиттера пишет «Начало смены»/«Конец
     // смены» в журнал событий (отчёт `slitter_shift_events`), каждое событие несёт ссылку на свой
     // станок (#4359); у событий, записанных до появления ссылки, станок опознаётся меткой в

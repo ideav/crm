@@ -2573,6 +2573,87 @@
         return planTsSeconds(cut && cut.startDate) != null;
     }
 
+    // #4736: задание, которого ручной сдвиг НЕ КАСАЕТСЯ, в каком бы месте очереди оно ни стояло.
+    // Начатое (#4381) и выполненное (#4572) — это ФАКТ: работа шла (или идёт) в тот день, какой
+    // был, и переставлять его нельзя ничем, включая ручное действие.
+    function manualShiftUntouchable(cut) {
+        return cutIsStarted(cut) || planTsSeconds(cut && cut.endDate) != null;
+    }
+
+    // #4736 (ТЗ §15): КОГО ДВИГАЕТ РУЧНОЕ ДЕЙСТВИЕ. Удаление, перетаскивание внутри дня, перенос 🗓
+    // и «Урегулировать» двигают не одно задание, а ВЕСЬ ХВОСТ ОЧЕРЕДИ за ним: освободившееся место
+    // схлопывается, лишнее уезжает вперёд. Хвост считаем по ХРАНИМОМУ плану — задания затронутых
+    // станков, стоящие на месте изменяемого или ПОСЛЕ него.
+    //
+    // Отдаём только ЗАФИКСИРОВАННЫЕ (🔒) — незафиксированные сдвиг двигает и так, а вопрос правила
+    // ровно один: фиксация ручному сдвигу день не держит. Порядок 🔒 при этом не меняется — его
+    // держат прежние механизмы (`preserveOrder`/`trainOnly`, `fixedFloorDay`).
+    //   shift: { fromBySlitter: { станок: unix-сек } } — точка сдвига на каждом затронутом станке;
+    //   skip(cut) — что сдвигу неподвластно сверх начатого/выполненного (например замороженный
+    //   день); необязателен.
+    // Чистая — покрыта тестом.
+    function manualShiftFixedIds(cuts, shift, skip) {
+        var from = (shift && shift.fromBySlitter) || null;
+        if (!from) return [];
+        var out = [];
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !c.fixed) return;
+            var sid = cutSlitterKey(c);
+            if (sid === '' || from[sid] == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null || ts < Number(from[sid])) return;   // стои́т РАНЬШЕ точки сдвига — он его не касается
+            if (manualShiftUntouchable(c)) return;
+            if (typeof skip === 'function' && skip(c)) return;
+            out.push(String(c.id));
+        });
+        return out;
+    }
+
+    // #4736 (ТЗ §15): ЗАМОРОЖЕННЫЙ ДЕНЬ ВПЕРЕДИ — РУЧНОЕ ДЕЙСТВИЕ НЕ ВЫПОЛНЯЕТСЯ ВОВСЕ. Сдвиг
+    // очереди сплошной: он либо доходит до конца, либо упирается в задания, которые двигать нельзя,
+    // и тогда часть дней остаётся недобитой, а часть — за потолком. Половинчатый результат («тут
+    // сдвинули, а там не смогли») недопустим, поэтому такой сдвиг не начинаем и называем дни.
+    // Считаем дни СТРОГО ПОСЛЕ точки сдвига: день самого изменяемого задания ручное действие
+    // размораживает для себя само (#4577).
+    //   isFrozenTs(planDate) — «этот день заморожен» (у контроллера — `dayIsFrozen`).
+    // → ключи дней ГГГГММДД по возрастанию. Чистая — покрыта тестом.
+    function manualShiftFrozenDaysAhead(cuts, shift, isFrozenTs) {
+        var from = (shift && shift.fromBySlitter) || null;
+        if (!from || typeof isFrozenTs !== 'function') return [];
+        var keys = {};
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            var sid = cutSlitterKey(c);
+            if (sid === '' || from[sid] == null) return;
+            var ts = planTsSeconds(c.planDate);
+            if (ts == null || ts <= Number(from[sid])) return;   // строго ПОСЛЕ точки сдвига
+            if (manualShiftUntouchable(c)) return;               // факт: его и не двигали бы
+            if (!isFrozenTs(c.planDate)) return;
+            var k = planDateDayKey(c.planDate);
+            if (k != null && k !== Infinity) keys[String(k)] = true;
+        });
+        return Object.keys(keys).sort();
+    }
+
+    // #4736: точка сдвига по станкам — самое раннее ХРАНИМОЕ время среди заданий, которые действие
+    // трогает, плюс явные точки (`extra`: у переноса 🗓 это полночь ВЫБРАННОГО дня — перенос назад
+    // двигает и то, что стои́т между новым местом и старым). → { fromBySlitter }. Чистая.
+    function manualShiftFrom(cuts, ids, extra) {
+        var want = {};
+        (ids || []).forEach(function(id) { if (id != null && id !== '') want[String(id)] = true; });
+        var from = {};
+        function put(sid, ts) {
+            if (sid === '' || ts == null || !isFinite(Number(ts))) return;
+            if (from[sid] == null || Number(ts) < Number(from[sid])) from[sid] = Number(ts);
+        }
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null || !want[String(c.id)]) return;
+            put(cutSlitterKey(c), planTsSeconds(c.planDate));
+        });
+        Object.keys(extra || {}).forEach(function(sid) { put(String(sid), extra[sid]); });
+        return Object.keys(from).length ? { fromBySlitter: from } : null;
+    }
+
     // #4596: СОБЫТИЯ СМЕНЫ — ТЕ ЖЕ, ЧТО У ПУЛЬТА. Пульт слиттера пишет «Начало смены»/«Конец
     // смены» в журнал событий (отчёт `slitter_shift_events`), каждое событие несёт ссылку на свой
     // станок (#4359); у событий, записанных до появления ссылки, станок опознаётся меткой в
@@ -3521,10 +3602,21 @@
             // и это же разрешают #4487/#4491 («по весу» вправе встроиться внутрь 🔒-блока). Запрет
             // защищает ОСТАЛЬНЫЕ 🔒 дня — ровно то, о чём #4511/#4512: «делаю перенос, а оно
             // выкидывает зафиксированные из этого дня».
+            //
+            // #4736 (решение заказчика 13.08.2026). РУЧНОЕ ДЕЙСТВИЕ ДВИГАЕТ И СОСЕДЕЙ ПОД 🔒. Одного
+            // `isManualMoveCut` мало: он освобождает только НЕСОМОЕ задание, а уехать обязан ВЕСЬ
+            // ХВОСТ ОЧЕРЕДИ за ним — иначе удаление оставляет дыру, а перенос распирает день, потому
+            // что соседи зафиксированы и «не могут быть перемещены в другой день или разбиты»
+            // (#4732). Кого именно двигает это действие, решает ОДИН расчёт (`manualShiftFixedIds`),
+            // и его вердикт правило спрашивает предикатом `ctx.isFixedShiftedCut` — тот же набор
+            // получает упаковщик. Замок при этом не отменён: он держит ПОРЯДОК (🔒 остаётся там же в
+            // очереди) и по-прежнему абсолютен для АВТОМАТИКИ — «Сгенерировать»/«Упорядочить»
+            // признака не ставят и ничего с 🔒 сделать не могут.
             check: function(ops, ctx) {
                 var isFixed = ppCtxFn(ctx, 'isFixedCut');
                 var released = ppCtxFn(ctx, 'isFixedReleasedCut');   // #4512: вердикт упаковщика
                 var manual = ppCtxFn(ctx, 'isManualMoveCut');        // задание, которое оператор двигает СЕЙЧАС
+                var shifted = ppCtxFn(ctx, 'isFixedShiftedCut');     // #4736: 🔒 в хвосте ручного сдвига
                 var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
                 var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
                 var out = [];
@@ -3532,6 +3624,7 @@
                     if (!isFixed(u.cutId) || !dayOfCut || !dayOfTs) return;
                     if (released(u.cutId)) return;   // день физически нерабочий — переезд законен
                     if (manual(u.cutId)) return;     // оператор несёт ЭТУ 🔒 сам — ТЗ §15, он не ограничен
+                    if (shifted(u.cutId)) return;    // #4736: её двигает ручное действие над соседом
                     var was = dayOfCut(u.cutId), will = dayOfTs(u.planStartTs);
                     if (was != null && will != null && was !== will) {
                         out.push(ppViolation('FIXED_CUT_DAY', u.cutId, 'зафиксированное задание уезжает с ' + was + ' на ' + will,
@@ -3539,7 +3632,7 @@
                     }
                 });
                 (ops && ops.deletes || []).forEach(function(id) {
-                    if (isFixed(id) && !released(id) && !manual(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
+                    if (isFixed(id) && !released(id) && !manual(id) && !shifted(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
                 });
                 return out;
             },
@@ -3548,7 +3641,8 @@
                 var isFixed = ppCtxFn(ctx, 'isFixedCut');
                 var released = ppCtxFn(ctx, 'isFixedReleasedCut');
                 var manual = ppCtxFn(ctx, 'isManualMoveCut');
-                if (!isFixed(op.cutId) || released(op.cutId) || manual(op.cutId)) return false;
+                var shifted = ppCtxFn(ctx, 'isFixedShiftedCut');   // #4736
+                if (!isFixed(op.cutId) || released(op.cutId) || manual(op.cutId) || shifted(op.cutId)) return false;
                 if (kind === 'delete') return true;
                 if (kind === 'create') return false;   // продолжение — дело CHAIN_CONTIGUOUS, не переезд 🔒
                 var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
@@ -7684,6 +7778,13 @@
             var key = String(id);
             return wholeDayBy[key] != null || !!manualMoveBy[key];
         }
+        // #4736 (ТЗ §15): 🔒, ЧЕЙ ДЕНЬ УСТУПИЛ РУЧНОМУ СДВИГУ. Якорь дня им уже не выдан
+        // (`effAnchorByCut` в planCutOperations), поэтому `fixedDay`/`anchor` у них пусты и день они
+        // выбирают как свободные. Здесь остаётся сказать это ДВУМ правилам, которые спрашивают не
+        // якорь, а сам флаг «Зафиксировано»: пол дня (`fixedFloorDay` — паровоз обязан держать их
+        // так же, как свободных) и разрыв по потолку (`maySplitInto`).
+        var manualShiftBy = opts.manualShiftByCut || {};
+        function shiftedByManual(id) { return !!manualShiftBy[String(id)]; }
         function anyMovedByOperator() { return wholeDayIds.length > 0 || manualMoveIds.length > 0; }
         // #4497 (ТЗ §15): ХРАНИМОЕ МЕСТО 🔒 В ДНЕ. Перед зафиксированным заданием автоматика ничего не
         // ставит: замок держит не только ДЕНЬ, но и МЕСТО в дне — иначе новое задание садится в голову
@@ -8021,7 +8122,9 @@
             var fixedFloorDay = {};
             poolOrder.forEach(function(id) {
                 var st = state[id];
-                if (!st || (st.cut && st.cut.fixed)) return;   // про саму 🔒 правило не спрашивают
+                // #4736: 🔒, чей день уступил ручному сдвигу, пол получает наравне со свободными —
+                // иначе паровоз («назад никогда», #4732) её одну и потащил бы в отработанный день.
+                if (!st || (st.cut && st.cut.fixed && !shiftedByManual(id))) return;   // про саму 🔒 правило не спрашивают
                 var floor = null;
                 if (trainOnly) {
                     var storedDay = Number(storedDayBy[String(id)]);
@@ -8208,6 +8311,7 @@
             //   • кандидат стоял перед ней в ХРАНИМОМ плане (его место не переворачиваем).
             function fixedYieldsTo(fixedId, candId, atDay){
                 if (movedByOperator(fixedId)) return true;
+                if (shiftedByManual(fixedId)) return true;   // #4736: её день уступил ручному сдвигу — места в дне у неё нет
                 if (storedPlanTs(fixedId) == null) return true;   // хранимого места у 🔒 нет — защищать нечего
                 var fst = state[fixedId], cst = state[candId];
                 // Приезжая 🔒 (её день сдвинул потолок, #4467/#4491): в ЭТОМ дне её место не хранимое —
@@ -8233,7 +8337,9 @@
             // смена не может быть длиннее себя (#4467), проход атомарен (#4149).
             function maySplitInto(id, nd){
                 var st2 = state[id];
-                if (!st2 || st2.isCont || st2.fixedDay != null || movedByOperator(id)) return true;
+                // #4736: задание, которое двигает ручное действие, рвётся по общим правилам —
+                // «Зафиксировано» разрывать его не мешает (ТЗ §15).
+                if (!st2 || st2.isCont || st2.fixedDay != null || movedByOperator(id) || shiftedByManual(id)) return true;
                 var blocked = false;
                 for (var bi = 0; bi < poolOrder.length; bi++){
                     var fid = poolOrder[bi], fst2 = state[fid];
@@ -9832,10 +9938,19 @@
         // якоря «Даты план» не имеют (dayAnchorByCut #3658 отменён) и при «Создать» перепаковываются
         // от «С». Ручной перенос 🗓 без 🔒 не держится (day-anchor свободных снят).
         var anchorIn = opts.dayAnchorByCut || {};
+        // #4736 (ТЗ §15): 🔒, ЧЕЙ ДЕНЬ УСТУПАЕТ РУЧНОМУ ДЕЙСТВИЮ. Удаление, перетаскивание внутри
+        // дня, перенос 🗓 и «Урегулировать» двигают весь хвост очереди за изменяемым заданием;
+        // фиксация этот сдвиг не останавливает — 🔒 меняет день, рвётся по потолку и схлопывается в
+        // освободившееся место, как незафиксированное. Порядок при этом не меняется: его держат
+        // `preserveOrder`/`trainOnly` и `fixedFloorDay`.
+        // ЗДЕСЬ ЕДИНСТВЕННОЕ МЕСТО, где «Зафиксировано» превращается в ЯКОРЬ ДНЯ (`fixedDay`
+        // упаковщика, `st.anchor`), поэтому и снимается замок дня ровно здесь — одной строкой на все
+        // пути, а не условием в каждом потребителе.
+        var manualShiftBy = opts.manualShiftByCut || {};
         var effAnchorByCut = {};
         merged.cuts.forEach(function(c){
             var id = String(c && c.id);
-            if (c && c.fixed && anchorIn[id] != null) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
+            if (c && c.fixed && anchorIn[id] != null && !manualShiftBy[id]) effAnchorByCut[id] = anchorIn[id];   // 🔒 держит свой день
         });
         // #4434 п.1: ЗАМОК ДНЯ АБСОЛЮТЕН. Прежний механизм «рескью снимает замок дня у просроченного
         // 🔒» (#4224/#4424) убран целиком: задание, приколотое оператором к дню, не переезжает НИ ПО
@@ -10025,7 +10140,8 @@
                 wholeDayByCut: opts.wholeDayByCut,     // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ
                 dueDayByCut: opts.dueDayByCut,         // #4650: чей срок раньше — тот и не разрывается
                 fitInShiftNoSplit: opts.fitInShiftNoSplit,   // #4650: выключатель правила целостности смены
-                manualMoveByCut: manualMoveByCut       // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
+                manualMoveByCut: manualMoveByCut,      // #4542: кого оператор двигает СЕЙЧАС — запрет обгона 🔒 их не связывает
+                manualShiftByCut: manualShiftBy        // #4736: 🔒, чей день уступил ручному сдвигу — рвать и схлопывать их можно
             };
             // #4085 (модель #3985): дедлайн-фольга у своего срока обеспечивается локальным штрафом в слое
             // размещения (scorePosition), а не резервированием хвоста дня (#4068 снят — computeFoilDeadlineReservation
@@ -14001,6 +14117,11 @@
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
+        // #4736 (ТЗ §15): ручной сдвиг — кого он двигает, откуда считается и что его останавливает.
+        // Проверяется `experiments/atex-pp-4736-manual-shift-over-fixed.test.js`.
+        manualShiftFrom: manualShiftFrom,
+        manualShiftFixedIds: manualShiftFixedIds,
+        manualShiftFrozenDaysAhead: manualShiftFrozenDaysAhead,
         rowsToShiftEvents: rowsToShiftEvents,     // #4596: строки slitter_shift_events → события открытия/закрытия смены
         shiftClosedSlitters: shiftClosedSlitters, // #4596: станки, закрывшие смену в дне → { id: штамп закрытия }
         dayIsOverForSlitter: dayIsOverForSlitter, // #4596: день для станка кончился (прошёл или смена закрыта)
@@ -18284,6 +18405,14 @@
             this.notify('Станок ' + ((slv && slv.label) || ('#' + sidStr)) + ' в отпуске на ' + dateLabel + ' — перенос невозможен', 'error');
             return Promise.resolve(false);
         }
+        // #4736 (ТЗ §15): перенос двигает не одно задание, а ХВОСТ ОЧЕРЕДИ — на исходном станке
+        // схлопывается дыра от вынутого, на целевом соседи уступают ему место. Точка сдвига на
+        // каждом станке — самое раннее из «где задание стои́т» и «куда его кладут» (перенос назад
+        // двигает и то, что стои́т между новым местом и старым). Зафиксированные (🔒) в этом хвосте
+        // меняют день и рвутся наравне со свободными; замороженный день впереди — отказ.
+        var moveShift = manualShiftFrom(this.cuts || [], [String(cut.id)],
+            (function(){ var e = {}; if (sidStr !== '') e[sidStr] = targetTs; return e; })());
+        if (refuseManualShift(self, moveShift, 'Перенос задания')) return Promise.resolve(false);
         // Задания станка-получателя на целевом дне (по хранимой «Дате план»), без перемещаемого.
         var dayCuts = (this.cuts || []).filter(function(c) {
             if (!c || String(c.id) === String(cut.id)) return false;
@@ -18377,6 +18506,9 @@
             // (при смене станка) исходный. Прочие станки не трогаем; задания между станками не кидаем
             // (buildSequenceOps замыкает каждое задание на свой станок при scope >1).
             var moveScope = {};
+            // #4736 (ТЗ §15): хвост очереди за перенесённым заданием двигается по правилам
+            // незафиксированных — 🔒 на пути меняет день и рвётся по потолку, порядок сохраняется.
+            moveScope.manualShift = moveShift;
             // #4488 (ТЗ §15): задание, которое двигал ОПЕРАТОР, встаёт в выбранный день ЦЕЛИКОМ —
             // независимо от положения в дне и от галки «Зафиксировать». Соседи уезжают на следующий
             // день сами (сначала незафиксированные, затем 🔒); само перенесённое рвётся в последнюю
@@ -18754,6 +18886,26 @@
             return Promise.resolve(false);
         }
 
+        // #4736 (ТЗ §15): «Урегулировать» сдвигает ПАРОВОЗ (#4732) — весь хвост очереди за
+        // урегулированными заданиями, включая зафиксированные (🔒). Точку сдвига считаем ДО первой
+        // записи: если впереди замороженные дни, сдвиг застрянет на них, и половина дней окажется
+        // недобитой, а половина — за потолком. Такое действие не начинаем вовсе.
+        var settleShift = manualShiftFrom(this.cuts || [],
+            plan.map(function(p) { return String(p.id); }).concat(splits.map(function(sp) { return String(sp.id); })),
+            (function() {
+                // Куда действие КЛАДЁТ работу, тоже точка сдвига: остаток встаёт перед следующим
+                // заданием станка, и всё за ним едет — даже если само задание стояло позже.
+                var e = {};
+                plan.forEach(function(p) {
+                    var c = byId[String(p.id)];
+                    var sid = cutSlitterKey(c);
+                    if (sid === '' || p.planStart == null) return;
+                    if (e[sid] == null || Number(p.planStart) < Number(e[sid])) e[sid] = Number(p.planStart);
+                });
+                return e;
+            })());
+        if (refuseManualShift(self, settleShift, 'Урегулирование отклонений')) return Promise.resolve(false);
+
         var createdRestIds = [];   // #4569: id остатков, созданных этим действием
         this.setBusy(true);
         this.showProgress('Урегулирование отклонений…', writes.length);
@@ -18792,6 +18944,10 @@
             //      (machineLockByCut) — миграции нет по построению.
             var settleTouched = settleTouchedDayKeys(plan, splits);
             var settleScope = settleMoveScope(plan, createdRestIds, self.cuts || [], settleTouched);
+            // #4736 (ТЗ §15): сдвиг паровоза фиксацию соседей не признаёт — 🔒 за урегулированным
+            // заданием меняет день и рвётся по потолку, иначе дни за ним остаются недобитыми
+            // (симптом #4732: «оставила все дни после сдвинутых заданий неполными»).
+            settleScope.manualShift = settleShift;
             // #4726 (решение заказчика 11.08.2026): «УРЕГУЛИРОВАТЬ НЕ РАССУЖДАЕТ. Его дело — сдвинуть
             // паровоз после урегулированного задания, соблюдая ПОТОЛОК ДНЯ и ПОСЛЕДОВАТЕЛЬНОСТЬ
             // заданий, и больше ничего».
@@ -19157,6 +19313,11 @@
             this.notify('Задание уже начато — удалить нельзя', 'error');
             return;
         }
+        // #4736 (ТЗ §15): удаление освобождает место, и весь хвост очереди за ним схлопывается —
+        // включая зафиксированные (🔒) соседи, иначе на месте удалённого остаётся простой, а дни за
+        // ним недобиты. Точку сдвига берём ДО удаления: после него записи в очереди уже нет.
+        var deleteShift = manualShiftFrom(self.cuts || [], chainIds, null);
+        if (refuseManualShift(self, deleteShift, 'Удаление задания')) return;
         var label = cutTaskLabel(cut);
         this.setBusy(true);
         // Обеспечения ВСЕХ звеньев цепочки (у продолжений их обычно нет, но собираем на всякий случай).
@@ -19173,7 +19334,7 @@
                 '? Будет удалено обеспечений — ' + fulfillmentIds.length + '. Действие необратимо.' });
             self.confirmAction(msg, cardEl, [
                 { label: 'Удалить', warning: true, onConfirm: function() {
-                    self.runDeleteCutTask(chainIds, fulfillmentIds, label);
+                    self.runDeleteCutTask(chainIds, fulfillmentIds, label, deleteShift);
                 } }
             ]);
         }).catch(function(err) {
@@ -19185,7 +19346,7 @@
     // #3486: удаление одной резки. Порядок как у заданий дня (#3475): сперва все
     // «Обеспечение» (снимаем ссылки на «Партии ГП»), затем сама «Производственная
     // резка» — backend каскадом (BatchDelete) сносит подчинённые Партии ГП/Полосы/Расход.
-    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutIds, fulfillmentIds, label) {
+    AtexProductionPlanning.prototype.runDeleteCutTask = function(cutIds, fulfillmentIds, label, shift) {
         var self = this;
         if (this.busy) return;
         var ids = (fulfillmentIds || []).map(function(x) { return String(x); })
@@ -19238,7 +19399,9 @@
             // пакует встык, дыра схлопывается. autoSequenceQueue сам пишет изменившееся
             // (planStart/«Очередность») + persistCutSetupColumns + reload/render. Терминальный
             // шаг — как после генерации (runGenerateCuts) и переноса (moveCutToDay).
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true);
+            // #4736: дыру схлопывает и зафиксированный (🔒) сосед — сдвиг, вызванный удалением,
+            // фиксацию не признаёт (порядок при этом не меняется, preserveOrder).
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true, shift ? { manualShift: shift } : null);
         }).catch(function(err) {
             self.hideProgress();
             self.setBusy(false);
@@ -23712,6 +23875,44 @@
         return String(v == null ? '' : v).trim() !== '0';
     };
 
+    // #4736 (ТЗ §15): ОБЩИЙ ШЛЮЗ РУЧНОГО СДВИГА — ЗАМОРОЖЕННЫЙ ДЕНЬ ВПЕРЕДИ ОСТАНАВЛИВАЕТ ДЕЙСТВИЕ
+    // ЦЕЛИКОМ. Удаление, перетаскивание внутри дня, перенос 🗓 и «Урегулировать» двигают ВЕСЬ хвост
+    // очереди за изменяемым заданием. Задания замороженного дня двигать нельзя (решение 27.07.2026),
+    // поэтому сдвиг, упершийся в такой день, останавливается на нём: до него дни едут, за ним стоят —
+    // получается ровно тот половинчатый результат («тут сдвинули, а там не смогли»), который
+    // недопустим. Значит действие не начинаем вовсе и называем дни оператору — снять заморозку или
+    // не двигать.
+    //
+    // ПОЧЕМУ ОДНА ТОЧКА, А НЕ ПРОВЕРКА В КАЖДОЙ КНОПКЕ: правило одно на четыре обработчика, а
+    // размноженное по ним оно разъезжается (так уже было у заморозки — #4569: починили страж, а
+    // пиннинг остался, и команда выполнялась наполовину). Отказ обязан случиться ДО первой записи:
+    // «Урегулировать» пишет переносы раньше пересборки, и остановка на середине оставила бы план
+    // разъехавшимся.
+    //   shift — та же точка сдвига, что уходит в moveScope.manualShift (`manualShiftFrom`).
+    // → true, если действие отклонено (оператору уже сказано).
+    //
+    // Обработчики зовут его ЧЕРЕЗ `refuseManualShift` (ниже): методы очереди вызывают и на
+    // самодельных объектах без цепочки прототипов (юнит-тесты, deep-link) — там же приём, что у
+    // `moveWholeCutToDay`.
+    AtexProductionPlanning.prototype.manualShiftRefused = function(shift, actionLabel) {
+        var self = this;
+        if (!shift) return false;
+        if (typeof this.dayIsFrozen !== 'function') return false;   // стаб-self в юнит-тестах
+        if (!(this.meta && this.meta.freeze && this.freezeByDay && Object.keys(this.freezeByDay).length)) return false;
+        var days = manualShiftFrozenDaysAhead(this.cuts || [], shift, function(ts){ return self.dayIsFrozen(ts); });
+        if (!days.length) return false;
+        var label = days.map(formatDayKey).filter(function(s){ return s !== ''; }).join(', ');
+        this.notify((actionLabel || 'Действие') + ' не выполнено: впереди замороженные дни (' + label
+            + ') — сдвиг очереди через них не пройдёт. Снимите заморозку этих дней и повторите', 'error');
+        return true;
+    };
+
+    // #4736: единственный способ спросить шлюз. Через прототип — обработчики очереди зовут и на
+    // объектах без цепочки прототипов (юнит-тесты, deep-link), как `moveWholeCutToDay`.
+    function refuseManualShift(self, shift, actionLabel) {
+        return AtexProductionPlanning.prototype.manualShiftRefused.call(self, shift, actionLabel);
+    }
+
     // #4047: ЧИСТЫЙ расчёт операций раскладки (planCutOperations) для ПРОИЗВОЛЬНОГО набора резок,
     // БЕЗ записи в БД. Нужен, чтобы «Упорядочить» оценило план-кандидат (переналадку) в памяти до
     // применения. cutsArray по умолчанию self.cuts; читает слиттер/поля из переданных объектов
@@ -23874,6 +24075,50 @@
                 });
             }
         }
+        // #4577: ДНИ, КОТОРЫХ КАСАЕТСЯ ТЕКУЩЕЕ РУЧНОЕ ДЕЙСТВИЕ, для него РАЗМОРОЖЕНЫ (подробности —
+        // у пиннинга замороженных дней ниже). Объявлено здесь, потому что об этом спрашивают четыре
+        // механизма разом, и первый из них — расчёт хвоста ручного сдвига (#4736).
+        var unfrozenDays = {};
+        ((moveScope && moveScope.unfrozenDayKeys) || []).forEach(function(k){
+            if (k != null && k !== '') unfrozenDays[String(k)] = true;
+        });
+        function manualUnfrozen(planDateOrTs) {
+            if (!Object.keys(unfrozenDays).length) return false;
+            var k = planDateDayKey(planDateOrTs);
+            return k != null && k !== Infinity && !!unfrozenDays[String(k)];
+        }
+        // #4736 (ТЗ §15): РУЧНОЕ ДЕЙСТВИЕ ДВИГАЕТ И ЗАФИКСИРОВАННЫХ СОСЕДЕЙ. Удаление, перетаскивание
+        // внутри дня, перенос 🗓 и «Урегулировать» сдвигают весь хвост очереди за изменяемым
+        // заданием; 🔒 в этом хвосте меняет день, рвётся по потолку и схлопывается в освободившееся
+        // место наравне с незафиксированными (порядок при этом не меняется). Кого именно двигает
+        // действие — ОДИН чистый расчёт `manualShiftFixedIds`; его вердикт получают ОБА потребителя:
+        // упаковщик (`manualShiftByCut`) и страж (`isFixedShiftedCut`). Признак ставят только ручные
+        // обработчики: у «Сгенерировать»/«Упорядочить»/«Пересчитать наладку» его нет, и замок дня
+        // остаётся для них абсолютным (#4434/#4512).
+        //   Считаем ДО временных пометок `c.fixed` ниже (замороженные дни #4326, начатые #4381,
+        //   прошлое #4555, перенесённое #4074): они — приём пиннинга, а не замок оператора, и
+        //   снимать с них день нельзя.
+        var manualShiftByCut = {};
+        if (moveScope && moveScope.manualShift) {
+            var freezeOnShift = !!(self.meta && self.meta.freeze && self.freezeByDay
+                && Object.keys(self.freezeByDay).length && typeof self.dayIsFrozen === 'function');
+            // Задание, которое действие НЕСЁТ САМО, из хвоста исключаем: ему день ВЫБРАЛ оператор, и
+            // держится этот выбор ровно тем же якорем (`pinCutIds` → временный c.fixed → effAnchor).
+            // Сняв с него якорь заодно с соседями, мы отменили бы саму команду: остаток
+            // «Урегулировать» уехал бы с выбранного дня (#4574), а перенос 🗓 с галкой
+            // «Зафиксировать» — с выбранного дня переноса.
+            var carriedNow = {};
+            [(moveScope.wholeDayCutIds) || [], (moveScope.pinCutIds) || [],
+             (moveScope.weightPositionCutIds) || []].forEach(function(list){
+                list.forEach(function(id){ carriedNow[String(id)] = true; });
+            });
+            manualShiftFixedIds(cuts, moveScope.manualShift, function(c){
+                if (carriedNow[String(c.id)]) return true;
+                // Замороженный день сдвиг не проходит вовсе (отказ — `manualShiftRefused`); сюда
+                // попадает лишь день, который это же действие себе разморозило (#4577).
+                return freezeOnShift && !manualUnfrozen(c.planDate) && self.dayIsFrozen(c.planDate);
+            }).forEach(function(id){ manualShiftByCut[String(id)] = true; });
+        }
         // #4074: ручной перенос 🗓 пересобирает план ПО СРОКАМ (deadlineAware, как «Упорядочить»,
         // preserveOrder=false), чтобы задания не уезжали за срок. Прежде перенос завершался
         // preserveOrder-пересборкой (deadlineAware выкл): она паковала всё от «С» вперёд без учёта
@@ -23910,17 +24155,10 @@
         // механизмах (пиннинг входа, предикат упаковщика, страж записи, выравнивание дня) — и
         // отключать её надо во всех сразу, иначе получается полумера: работу в день положили, а
         // вынести лишнее оттуда некому (боевое #4577: 95 мин остатка + 425 мин 🔒 = 520 при 455).
-        // Замок 🔒 при этом НЕ снимается: день выравнивается разрывом последнего задания по потолку
-        // (#4467/#4512), а не вытеснением зафиксированного.
-        var unfrozenDays = {};
-        ((moveScope && moveScope.unfrozenDayKeys) || []).forEach(function(k){
-            if (k != null && k !== '') unfrozenDays[String(k)] = true;
-        });
-        function manualUnfrozen(planDateOrTs) {
-            if (!Object.keys(unfrozenDays).length) return false;
-            var k = planDateDayKey(planDateOrTs);
-            return k != null && k !== Infinity && !!unfrozenDays[String(k)];
-        }
+        // Замок 🔒 при этом НЕ снимается заморозкой: день выравнивается разрывом последнего задания
+        // по потолку (#4467/#4512), а не вытеснением зафиксированного. Снимает его ручной сдвиг —
+        // отдельным правилом и только с соседей ПОСЛЕ изменяемого задания (#4736, выше).
+        // `unfrozenDays`/`manualUnfrozen` объявлены выше — их спрашивает и расчёт хвоста сдвига.
         if (self.meta && self.meta.freeze && self.freezeByDay && Object.keys(self.freezeByDay).length) {
             // #4569: задание, которое оператор несёт ПРЯМО СЕЙЧАС, замороженный день не пришпиливает —
             // ручное действие сильнее заморозки (решение заказчика 02.08.2026), и правило обязано
@@ -24022,6 +24260,7 @@
             dayLockByCut: dayLockByCut,   // #4221: перенос «По весу» — замок дня/станка (позиция в дне по весу)
             pinDayPosByCut: (moveScope && moveScope.pinDayPosByCut) || null,   // #4464: перенос «в начало дня» / «в конец дня»
             wholeDayByCut: wholeDayByCut,   // #4488: перенесённое задание ложится в свой день ЦЕЛИКОМ, соседи уступают
+            manualShiftByCut: manualShiftByCut,   // #4736: 🔒 в хвосте ручного сдвига — замок дня им не выдаём
             machineLockByCut: machineLockByCut,   // #4225: «В пределах одного станка» — задание не мигрирует между станками
             dueDayByCut: dueDayByCut,   // #4050: срок каждой резки (индекс дня от «С») для §8-штрафа размещения
             // #4434 п.1: 🔒 не удержало свой день (день нерабочий — выходной/праздник/«Отпуск») —
@@ -24114,6 +24353,9 @@
                 isFrozenTs: function(ts){ return freezeOn && !manualUnfrozen(String(ts)) && self.dayIsFrozen(String(ts)); },
                 isFixedCut: function(id){ return !!fixedNow[String(id)]; },
                 isManualMoveCut: function(id){ return !!manualMoveNow[String(id)]; },
+                // #4736: 🔒 из ХВОСТА этого ручного действия — её день уступил сдвигу. Набор тот же,
+                // что получил упаковщик: правило и раскладка обязаны судить по одному списку.
+                isFixedShiftedCut: function(id){ return !!manualShiftByCut[String(id)]; },
                 dayKeyOfCut: function(id){ var k = dayKeyNow[String(id)]; return k == null || k === Infinity ? null : k; },
                 dayKeyOfTs: function(ts){ var k = planDateDayKey(String(ts)); return k == null || k === Infinity ? null : k; },
                 // #4512: замок снят упаковщиком ЗАКОННО (день физически нерабочий) — единственный
@@ -24507,6 +24749,12 @@
             // (боевое #4582: 621 мин при потолке 455, и ни одной строки о выравнивании в логе).
             var levelOpts = manualDays
                 ? { manual: true, dayKeys: manualDays, unfrozenDayKeys: manualDays } : null;
+            // #4736: выравнивание — ХВОСТ того же ручного действия, поэтому и признак сдвига тот
+            // же. Без него последний шаг снова упирался бы в 🔒: работу в день положили, а вынести
+            // лишнее некому — ровно та половинчатость, из-за которой заведено правило.
+            if (moveScope && moveScope.manualShift) {
+                (levelOpts = levelOpts || {}).manualShift = moveScope.manualShift;
+            }
             // #4555: «отсюда и до конца» — прошлое станка не трогаем и при выравнивании.
             if (moveScope && moveScope.fromCutId != null && String(moveScope.fromCutId) !== '') {
                 (levelOpts = levelOpts || {}).fromCutId = String(moveScope.fromCutId);
@@ -24574,6 +24822,11 @@
             return Promise.resolve(false);
         }
         if (!plan.assignments.length) return Promise.resolve(false);
+        // #4736 (ТЗ §15): перестановка внутри дня меняет наладку, а значит и длину дня — хвост
+        // очереди за переставленным заданием обязан подвинуться, включая зафиксированные (🔒).
+        // Точка сдвига — самое раннее из двух мест перестановки; замороженный день впереди — отказ.
+        var dragShift = manualShiftFrom(this.cuts || [], [String(dragId), String(targetId)], null);
+        if (refuseManualShift(self, dragShift, 'Перестановка задания')) return Promise.resolve(false);
         this.setBusy(true);
         // #4477: перестановка — независимые записи, пишем пулом через шлюз (было — цепочкой в
         // один поток). Совпавшие с хранимым planDragReorder уже не отдаёт, шлюз проверяет ещё раз.
@@ -24586,8 +24839,10 @@
             self.render();
             // #4434 п.3: после ручного перетаскивания наладку пересчитываем СРАЗУ, а не показываем
             // кнопку «↻ Пересчитать наладку» (см. moveCutInDay).
+            // #4736: пересчёт несёт признак ручного сдвига дальше — до выравнивания дня, которому и
+            // приходится двигать хвост (в том числе 🔒), если день вырос за потолок.
             if (typeof self.recalcSetupTiming !== 'function') return true;   // стаб-self в юнит-тестах
-            return self.recalcSetupTiming(sid, { auto: true }).then(function() { return true; });
+            return self.recalcSetupTiming(sid, { auto: true, manualShift: dragShift }).then(function() { return true; });
         }).catch(function(err) {
             self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -25104,6 +25359,11 @@
         // заморозка в силе, как и была (#4436).
         var tailScope = { withinSlitterIds: [sid] };
         if (manualRecalc) tailScope.unfrozenDayKeys = scopeDayKeys(this, scopeIds);
+        // #4736: пересчёт зовут и из ручного сдвига (перетаскивание внутри дня, #4434 п.3) — его
+        // признак обязан дойти до ВЫРАВНИВАНИЯ ДНЯ: только там хвост, выросший за потолок, уезжает
+        // назавтра, и упереться в зафиксированного соседа ему нельзя. Кладём в тот же tailScope,
+        // которым #4735 увёл ОБА выхода пересчёта в общий хвост.
+        if (opts && opts.manualShift) tailScope.manualShift = opts.manualShift;
         if (!stale.length && !startOps.length) {
             // #4473: в колонках и стартах пересчитывать нечего — но день мог остаться ДЛИННЕЕ смены
             // (перестановка соседей одинаковой конфигурации расхождений не даёт, а минуты дня растут
@@ -25513,6 +25773,10 @@
         // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
         var scope = { withinSlitterIds: sids.slice(), trainOnly: true };
         if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
+        // #4736: выравнивание, вызванное РУЧНЫМ действием, двигает хвост очереди и через 🔒 — иначе
+        // день остаётся за потолком, потому что разгружать его нечем (все соседи зафиксированы).
+        // Автоматическое выравнивание признака не получает, и для него замок дня прежний.
+        if (opts && opts.manualShift) scope.manualShift = opts.manualShift;
         // #4577: те же дни, что разморозило вызвавшее ручное действие — иначе переложить переполненный
         // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
         // задания по потолку (#4467/#4512), а не вытеснением зафиксированного.

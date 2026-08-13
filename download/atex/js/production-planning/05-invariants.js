@@ -205,10 +205,21 @@
             // и это же разрешают #4487/#4491 («по весу» вправе встроиться внутрь 🔒-блока). Запрет
             // защищает ОСТАЛЬНЫЕ 🔒 дня — ровно то, о чём #4511/#4512: «делаю перенос, а оно
             // выкидывает зафиксированные из этого дня».
+            //
+            // #4736 (решение заказчика 13.08.2026). РУЧНОЕ ДЕЙСТВИЕ ДВИГАЕТ И СОСЕДЕЙ ПОД 🔒. Одного
+            // `isManualMoveCut` мало: он освобождает только НЕСОМОЕ задание, а уехать обязан ВЕСЬ
+            // ХВОСТ ОЧЕРЕДИ за ним — иначе удаление оставляет дыру, а перенос распирает день, потому
+            // что соседи зафиксированы и «не могут быть перемещены в другой день или разбиты»
+            // (#4732). Кого именно двигает это действие, решает ОДИН расчёт (`manualShiftFixedIds`),
+            // и его вердикт правило спрашивает предикатом `ctx.isFixedShiftedCut` — тот же набор
+            // получает упаковщик. Замок при этом не отменён: он держит ПОРЯДОК (🔒 остаётся там же в
+            // очереди) и по-прежнему абсолютен для АВТОМАТИКИ — «Сгенерировать»/«Упорядочить»
+            // признака не ставят и ничего с 🔒 сделать не могут.
             check: function(ops, ctx) {
                 var isFixed = ppCtxFn(ctx, 'isFixedCut');
                 var released = ppCtxFn(ctx, 'isFixedReleasedCut');   // #4512: вердикт упаковщика
                 var manual = ppCtxFn(ctx, 'isManualMoveCut');        // задание, которое оператор двигает СЕЙЧАС
+                var shifted = ppCtxFn(ctx, 'isFixedShiftedCut');     // #4736: 🔒 в хвосте ручного сдвига
                 var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
                 var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
                 var out = [];
@@ -216,6 +227,7 @@
                     if (!isFixed(u.cutId) || !dayOfCut || !dayOfTs) return;
                     if (released(u.cutId)) return;   // день физически нерабочий — переезд законен
                     if (manual(u.cutId)) return;     // оператор несёт ЭТУ 🔒 сам — ТЗ §15, он не ограничен
+                    if (shifted(u.cutId)) return;    // #4736: её двигает ручное действие над соседом
                     var was = dayOfCut(u.cutId), will = dayOfTs(u.planStartTs);
                     if (was != null && will != null && was !== will) {
                         out.push(ppViolation('FIXED_CUT_DAY', u.cutId, 'зафиксированное задание уезжает с ' + was + ' на ' + will,
@@ -223,7 +235,7 @@
                     }
                 });
                 (ops && ops.deletes || []).forEach(function(id) {
-                    if (isFixed(id) && !released(id) && !manual(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
+                    if (isFixed(id) && !released(id) && !manual(id) && !shifted(id)) out.push(ppViolation('FIXED_CUT_DAY', id, 'удаление зафиксированного задания'));
                 });
                 return out;
             },
@@ -232,7 +244,8 @@
                 var isFixed = ppCtxFn(ctx, 'isFixedCut');
                 var released = ppCtxFn(ctx, 'isFixedReleasedCut');
                 var manual = ppCtxFn(ctx, 'isManualMoveCut');
-                if (!isFixed(op.cutId) || released(op.cutId) || manual(op.cutId)) return false;
+                var shifted = ppCtxFn(ctx, 'isFixedShiftedCut');   // #4736
+                if (!isFixed(op.cutId) || released(op.cutId) || manual(op.cutId) || shifted(op.cutId)) return false;
                 if (kind === 'delete') return true;
                 if (kind === 'create') return false;   // продолжение — дело CHAIN_CONTIGUOUS, не переезд 🔒
                 var dayOfCut = (ctx && typeof ctx.dayKeyOfCut === 'function') ? ctx.dayKeyOfCut : null;
