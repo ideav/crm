@@ -173,7 +173,10 @@ Promise.all([lvlDone, afterDone]).then(function () {
 
     var src = require('fs').readFileSync(
         __dirname + '/../download/atex/js/production-planning/20-controller.js', 'utf8');
-    assert((src.match(/plannerUnderfilledDays\(\)/g) || []).length >= 3,
+    // #4749: у вердикта появился параметр — права текущего действия (`manualShift`): мерить надо
+    // тем же планом, который это действие вправе записать. Источник по-прежнему ОДИН, поэтому
+    // считаем вызовы, а не их пустые скобки.
+    assert((src.match(/plannerUnderfilledDays\(/g) || []).length >= 3,
         'F. вход в выравнивание и предупреждение берут недобор у ОДНОГО источника — вердикта упаковщика (#4745)');
 
     console.log('\n' + passed + '/' + total + ' проверок пройдено');

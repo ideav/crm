@@ -22,6 +22,9 @@
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
+        // #4749: мерка НЕДОБОРА дня — разница раскладки с хранимым планом (проверяется
+        // `experiments/atex-pp-4749-underfill-vs-stored.test.js`).
+        underfilledDaysFromPlan: underfilledDaysFromPlan,
         overfilledDayPhrase: overfilledDayPhrase,         // #4531: один переполненный день фразой
         cutShortLabel: cutShortLabel,                   // #4531: задание одной строкой (как первая строка карточки)
         parseDeepLink: parseDeepLink,
@@ -5001,20 +5004,56 @@
     // Второй расчёт остаётся ОБЪЕКТИВУ «Упорядочить» (там сравнивают планы между собой одной
     // меркой), а оператору говорит только упаковщик.
     // Пусто/нет ops → говорить не о чем. → [{ key, slitterId, day, freeMin, needMin, donorCutId }].
-    AtexProductionPlanning.prototype.plannerUnderfilledDays = function() {
+    // #4749: ВЕРДИКТ УПАКОВЩИКА О СВОЕЙ РАСКЛАДКЕ ДЫРУ ХРАНИМОГО ПЛАНА НЕ ВИДИТ — он её закрывает.
+    // Поэтому к `ops.dayFill` («в моей раскладке день остался недобранным — держит замок/заморозка»)
+    // добавлена разница с ХРАНИМЫМ планом (`underfilledDaysFromPlan`): дни, куда эта же раскладка
+    // кладёт работы больше, чем стои́т сейчас. Обе строки об одном («день можно набить плотнее»), и
+    // чинит их одна и та же запись — выравнивание паровозом (#4743), которое пишет ровно эту
+    // раскладку. Совпавшие дни не задваиваем.
+    // #4749: МЕРИТЬ НАДО ТЕМ ЖЕ ПЛАНОМ, КОТОРЫЙ БУДЕТ ЗАПИСАН — ВКЛЮЧАЯ ПРАВА ДЕЙСТВИЯ. Ручное
+    // действие двигает хвост очереди и через 🔒 (#4736), и выравнивание получает от него этот
+    // признак (`opts.manualShift`). Без него мерка спрашивала упаковщика с ДРУГИМИ правами: страж
+    // выбрасывал слияние 🔒-продолжения в свою цепочку (FIXED_CUT_DAY), за ним операции всей цепочки
+    // снимал #4536 — и раскладка, по которой мерили, оказывалась беднее той, которую записали бы.
+    // Боевое 13.08.2026: Станок 1, Чт 13.08 — 306 мин при потолке 455, донор 684571 (🔒-продолжение
+    // цепочки 678349, которой день кончается), в трассе «under: []» (issue #4749).
+    //   opts.manualShift — точка сдвига текущего ручного действия (`manualShiftFrom`).
+    AtexProductionPlanning.prototype.plannerUnderfilledDays = function(opts) {
         if (typeof this.buildSequenceOps !== 'function') return [];
         try {
-            var built = this.buildSequenceOps(this.cuts || [], PLANNING_STRATEGY_SETUP, true, { trainOnly: true });
-            return ((built && built.ops && built.ops.dayFill) || []).slice();
+            var scope = { trainOnly: true };
+            if (opts && opts.manualShift) scope.manualShift = opts.manualShift;
+            // #4749: и с ЗАМКОМ СТАНКОВ (#4225), как у выравнивания: паровоз задания между станками
+            // не перекидывает. Без замка раскладка мерки переносила резку на соседний станок, и на
+            // том станке появлялся «недобор» из чужой работы, которого запись никогда не сделает
+            // (боевое 13.08.2026: 678732 уезжала со Станка 2 на Станок 3, и день 17.08 Станка 3
+            // объявлялся недобранным на 4 прохода).
+            var lockSids = (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); })
+                .filter(function(id) { return id !== ''; });
+            if (lockSids.length) scope.withinSlitterIds = lockSids;
+            var built = this.buildSequenceOps(this.cuts || [], PLANNING_STRATEGY_SETUP, true, scope);
+            var ops = (built && built.ops) || null;
+            var rows = ((ops && ops.dayFill) || []).slice();
+            var seen = {};
+            rows.forEach(function(u) { seen[String(u && u.key)] = true; });
+            var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+            var win = (typeof this.workingWindow === 'function') ? (this.workingWindow() || {}) : {};
+            underfilledDaysFromPlan(this.cuts || [], ops,
+                { baseMidnightMs: base, capMin: dayCapacityMinutes(win, 'cuts') }).forEach(function(u) {
+                if (!seen[String(u.key)]) { seen[String(u.key)] = true; rows.push(u); }
+            });
+            return rows;
         } catch (err) {
             console.warn('[pp] #4745: недоупакованные дни не посчитаны:', err && err.message);
             return [];
         }
     };
 
-    AtexProductionPlanning.prototype.warnUnderfilledAfterSettle = function() {
+    //   opts.manualShift — права действия, о котором отчитываемся (#4749): говорить надо о том же
+    //   плане, который это действие вправе записать.
+    AtexProductionPlanning.prototype.warnUnderfilledAfterSettle = function(opts) {
         if (typeof this.plannerUnderfilledDays !== 'function') return 0;
-        var rows = this.plannerUnderfilledDays();
+        var rows = this.plannerUnderfilledDays(opts);
         if (!rows.length) return 0;
         // #4745: ТЗ §14 — число, которое нельзя развернуть в объекты, оператору бесполезно. Называем
         // день, донора и обе меры: сколько в дне свободно и сколько нужно на его проход с наладкой.
@@ -5022,8 +5061,14 @@
         var byId = {};
         (this.slitters || []).forEach(function(s) { byId[String(s.id)] = s.label || ('станок #' + s.id); });
         var parts = rows.slice(0, 3).map(function(u) {
-            return (byId[String(u.slitterId)] || ('станок #' + u.slitterId)) + ', '
-                + formatPlanDayHeading(base, u.day) + ' — свободно ' + Math.round(Number(u.freeMin) || 0)
+            var where = (byId[String(u.slitterId)] || ('станок #' + u.slitterId)) + ', ' + formatPlanDayHeading(base, u.day);
+            // #4749: строка разницы с хранимым планом — сколько работы план успевает сверх него.
+            if (u.addRuns != null) {
+                return where + ' — план успевает ещё ' + Math.round(Number(u.addRuns) || 0) + ' проход(ов), '
+                    + Math.round(Number(u.addMin) || 0) + ' мин: работа задания '
+                    + (u.donorCutId == null ? '?' : u.donorCutId) + ' стои́т в следующих днях';
+            }
+            return where + ' — свободно ' + Math.round(Number(u.freeMin) || 0)
                 + ' мин, проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
                 + 'стои́т ' + (Math.round((Number(u.needMin) || 0) * 10) / 10) + ' мин';
         });
@@ -10804,7 +10849,9 @@
             if (typeof self.plannerUnderfilledDays === 'function') {
                 // #4745: вердикт УПАКОВЩИКА (`ops.dayFill`), а не второй расчёт: чиним ровно то, о
                 // чём говорим, и не гоняем выравнивание по дням, которые он считает полными.
-                self.plannerUnderfilledDays().forEach(function(u) { underBySid[String(u.slitterId)] = true; });
+                // #4749: с ПРАВАМИ этого действия — иначе мерка меряет план, который записать нельзя.
+                self.plannerUnderfilledDays({ manualShift: moveScope && moveScope.manualShift })
+                    .forEach(function(u) { underBySid[String(u.slitterId)] = true; });
             }
             var over = ids.filter(function(sid) {
                 if (sid === '') return false;
@@ -11636,6 +11683,139 @@
             .filter(function(r) { return r.overMin >= 1; });
     }
 
+    // #4749 (ТЗ §15, «одна арифметика» — #4499): НЕДОБОР ДНЯ — ЭТО РАЗНИЦА С ТЕМ ПЛАНОМ, КОТОРЫЙ
+    // МЫ САМИ И ЗАПИШЕМ. День недобран ровно тогда, когда раскладка успевает в нём БОЛЬШЕ РАБОТЫ,
+    // чем стои́т в хранимом плане: тогда есть что чинить, и чинится оно записью этой же раскладки.
+    //
+    // ЗАЧЕМ ИМЕННО ТАК. Прежние мерки отвечали на другой вопрос и потому врали в обе стороны:
+    //   • `planUnderfilledDays` («потолок − Σ хранимых минут») звал недобранными дни, набивать
+    //     которые нечем — оператор слышал совет нажать кнопку, которая ничего не изменит (#4745);
+    //   • `ops.dayFill` — вердикт упаковщика о СВОЕЙ раскладке. Она у него всегда плотная: дыру
+    //     хранимого плана он ЗАКРЫВАЕТ (тянет проходы следующего дня к себе) и потому о ней
+    //     молчит. Боевое 13.08.2026, ateh1, бандл .149: Станок 1, Чт 13.08 — 306 минут при потолке
+    //     455 (выполненные задания ушли из дня, остаток сведён к 08:00, станок пуст с 13:56), а в
+    //     трассе «under: []» — ни предупреждения, ни выравнивания (issue #4749).
+    // Сравнение с хранимым планом снимает обе беды сразу: набивать нечем ⇒ раскладка равна
+    // хранимой ⇒ молчим; дыру можно закрыть ⇒ разница видна ⇒ выравнивание её и закрывает.
+    //
+    // МЕРИМ ПРОХОДАМИ, А НЕ МИНУТАМИ. Проход — целое число и единица дробления задания (#3280),
+    // поэтому разница «сколько работы» не зависит ни от округления занятости (#4149), ни от того,
+    // какую переналадку раскладка пересчитала. Минуты считаем тем же, чем их считает бейдж дня и
+    // страж потолка (хранимые колонки против `occMin` раскладки), но только ДЛЯ ФРАЗЫ оператору.
+    //
+    // СРАВНИВАЕМ НАКОПИТЕЛЬНО И ТОЛЬКО ПО ТОЙ РАБОТЕ, КОТОРОЙ КАСАЕТСЯ ПЛАН. Накопительно — чтобы
+    // не назвать недобранным день, который просто ПРИНЯЛ лишнее из переполненного соседа (там
+    // работа уехала вперёд, и до конца этого дня раскладка успевает не больше хранимого). Только по
+    // затронутой работе — потому что ВЫПОЛНЕННЫЕ задания раскладка не перекладывает: их нет ни в
+    // одной операции, и в обеих суммах их быть не должно, иначе сделанная вчера работа навсегда
+    // перевесит чашу и настоящий недобор станет невидим (ровно случай 13.08).
+    //   cuts — задания (все станки); ops — операции раскладки (`planCutOperations`);
+    //   opts: { baseMidnightMs }.
+    // → [{ key, slitterId, day, addRuns, addMin, donorCutId }] по возрастанию дня. Чистая.
+    function underfilledDaysFromPlan(cuts, ops, opts) {
+        var base = Number((opts || {}).baseMidnightMs);
+        var cap = Number((opts || {}).capMin) || 0;   // потолок дня — тот же, что у мерки перебора (#4563)
+        if (!ops || !isFinite(base)) return [];
+        var dayOfTs = function(tsSec) {
+            var t = Number(tsSec);
+            return isFinite(t) && t > 0 ? Math.floor((t * 1000 - base) / 86400000) : null;
+        };
+        var cutById = {};
+        (cuts || []).forEach(function(c) { if (c && c.id != null) cutById[String(c.id)] = c; });
+        // #4749: ЗАДАНИЕ, СМЕНИВШЕЕ СТАНОК, В СРАВНЕНИИ НЕ УЧАСТВУЕТ. Набивка дня — это работа
+        // ЭТОГО станка, приехавшая из его же следующих дней; переезд между станками — другое
+        // действие («Упорядочить» — reassignment, #4001), и учитывать его как недобор нельзя: у
+        // принимающего станка появился бы «недобор» из чужой работы, а у отдающего — исчез свой
+        // (боевое 13.08.2026: 678732 уезжала со Станка 2 на Станок 3, и Станок 3 объявлялся
+        // недобранным на 4 прохода в дне, куда его запись ничего не положит).
+        var migrated = {};
+        (ops.updates || []).forEach(function(u) {
+            var c = u && cutById[String(u.cutId)];
+            if (!c || u.slitterId == null) return;
+            if (String(u.slitterId) !== cutSlitterKey(c)) migrated[String(u.cutId)] = true;
+        });
+        var storedRuns = {}, storedMin = {}, planRuns = {}, planMin = {}, storedDayOf = {}, days = {};
+        // ЗАНЯТОСТЬ ДНЯ — ПО ВСЕМ ЕГО ЗАДАНИЯМ (как бейдж «(N мин)» и мерка потолка #4531), а не
+        // только по тем, которых план касается: свободное место в дне надо мерить целым днём.
+        var fullMin = {};
+        (cuts || []).forEach(function(c) {
+            if (!c) return;
+            var d = dayOfTs(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (d == null) return;
+            var key = cutSlitterKey(c) + '|' + d;
+            fullMin[key] = (fullMin[key] || 0) + Math.round(stripNum(c.storedKnifeSetupMin))
+                + Math.round(stripNum(c.storedMaterialWindingMin)) + Math.round(stripNum(c.storedCutAndLeaderMin));
+        });
+        function bump(map, sid, day, v) {
+            var k = String(sid) + '|' + day;
+            map[k] = (map[k] || 0) + (Number(v) || 0);
+        }
+        function noteDay(sid, day) { (days[String(sid)] = days[String(sid)] || {})[day] = true; }
+        // ХРАНИМАЯ сторона — записи, которых план касается (обновляет или удаляет).
+        function addStored(id) {
+            var c = cutById[String(id)];
+            if (!c || migrated[String(id)]) return null;
+            var day = dayOfTs(c.planDate != null && c.planDate !== '' ? c.planDate : c.number);
+            if (day == null) return null;
+            var sid = cutSlitterKey(c);
+            storedDayOf[String(id)] = { day: day, sid: sid };
+            bump(storedRuns, sid, day, Number(c.plannedRuns) || 0);
+            bump(storedMin, sid, day, Math.round(stripNum(c.storedKnifeSetupMin)) + Math.round(stripNum(c.storedMaterialWindingMin))
+                                    + Math.round(stripNum(c.storedCutAndLeaderMin)));
+            noteDay(sid, day);
+            return c;
+        }
+        (ops.updates || []).forEach(function(u) { addStored(u && u.cutId); });
+        (ops.deletes || []).forEach(function(id) { addStored(id); });
+        // СТОРОНА РАСКЛАДКИ — куда она эту же работу кладёт (у создаваемых сегментов станок берём
+        // у головы цепочки: `slitterId` операции заполнен только на пути размещения по станкам).
+        function addPlanned(op, ownerId) {
+            var day = dayOfTs(op && op.planStartTs);
+            if (day == null || migrated[String(ownerId)]) return;
+            var owner = cutById[String(ownerId)];
+            var sid = op && op.slitterId != null ? String(op.slitterId) : (owner ? cutSlitterKey(owner) : '');
+            if (sid === '') return;
+            bump(planRuns, sid, day, Number(op.plannedRuns) || 0);
+            bump(planMin, sid, day, Number(op.occMin) || 0);
+            noteDay(sid, day);
+        }
+        (ops.updates || []).forEach(function(u) { addPlanned(u, u && u.cutId); });
+        (ops.creates || []).forEach(function(c) { addPlanned(c, c && c.parentCutId); });
+        var out = [];
+        Object.keys(days).forEach(function(sid) {
+            var list = Object.keys(days[sid]).map(Number).sort(function(a, b) { return a - b; });
+            var cumStored = 0, cumPlan = 0, cumStoredMin = 0, cumPlanMin = 0;
+            list.forEach(function(day) {
+                var k = sid + '|' + day;
+                cumStored += (storedRuns[k] || 0);
+                cumPlan += (planRuns[k] || 0);
+                cumStoredMin += (storedMin[k] || 0);
+                cumPlanMin += (planMin[k] || 0);
+                if (cumPlan <= cumStored) return;
+                // #4749: НЕДОБОР — ЭТО ПРО ДЕНЬ, В КОТОРЫЙ ЭТА РАБОТА ФИЗИЧЕСКИ ВЛЕЗАЕТ. Считаем
+                // минуты (проходы говорят, что работы больше, минуты — сколько её) и сверяем со
+                // СВОБОДНЫМ местом дня по тому же потолку, которым меряют перебор (#4467/#4563).
+                // Иначе оператор слышит «день не набит» про день на 453 минуты при потолке 455,
+                // где упаковщик всего лишь переразбил бы работу иначе, — та самая ложная тревога,
+                // из-за которой мерку меняли в #4745.
+                var gainMin = cumPlanMin - cumStoredMin;
+                if (gainMin < 1) return;
+                if (cap > 0 && (cap - (fullMin[k] || 0)) < gainMin) return;
+                // ДОНОР — задание, чья работа стои́т ПОЗЖЕ этого дня и потому спускается в него:
+                // первое такое по хранимому дню (в очереди это первое задание следующего дня).
+                var donor = null, donorDay = Infinity;
+                Object.keys(storedDayOf).forEach(function(id) {
+                    var st = storedDayOf[id];
+                    if (st.sid !== sid || st.day <= day || st.day >= donorDay) return;
+                    donor = id; donorDay = st.day;
+                });
+                out.push({ key: sid + '|' + day, slitterId: sid, day: day,
+                           addRuns: cumPlan - cumStored, addMin: Math.round(gainMin), donorCutId: donor });
+            });
+        });
+        return out.sort(function(a, b) { return (a.day - b.day) || (a.slitterId < b.slitterId ? -1 : 1); });
+    }
+
     // #4408/#4473: переполненные дни СТАНКА в видимых днях — набор заданий берём из scope пересчёта
     // (тот же, что переписывает старты), мерку — из общей `overfilledDaysFromCuts`.
     // → массив [{ dayOffset, endMin, overMin, capMin, cutId, seq, cut }].
@@ -11864,7 +12044,8 @@
             var wantSid = {};
             sids.forEach(function(sid) { wantSid[sid] = true; });
             // #4745: недобор берём у УПАКОВЩИКА — одна арифметика на «что чиним» и «о чём говорим».
-            self.plannerUnderfilledDays().forEach(function(u) {
+            // #4749: и с ТЕМИ ЖЕ ПРАВАМИ, с какими будем писать (`opts.manualShift` уходит в scope ниже).
+            self.plannerUnderfilledDays({ manualShift: opts && opts.manualShift }).forEach(function(u) {
                 if (wantSid[String(u.slitterId)]) under.push({ sid: String(u.slitterId), day: u.day });
             });
         }
