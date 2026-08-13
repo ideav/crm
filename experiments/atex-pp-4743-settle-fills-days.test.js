@@ -142,7 +142,9 @@ lvl.filter = { date: '2026-08-13' };
 lvl.nowMs = function () { return BASE; };
 lvl.cuts = [];
 lvl.overfilledDaysOf = function () { return []; };            // переполнения НЕТ
-lvl.planUnderfilledDays = function () { return [SID + '|20260813']; };   // а недобор ЕСТЬ
+lvl.plannerUnderfilledDays = function () {   // а недобор ЕСТЬ — вердиктом упаковщика (#4745)
+    return [{ key: SID + '|0', slitterId: SID, day: 0, freeMin: 50, needMin: 6.8, donorCutId: 'd1' }];
+};
 lvl.autoSequenceQueueAfterMerge = function (strategy, preserveOrder, scope) {
     levelSeen = scope; return Promise.resolve(true);
 };
@@ -155,7 +157,9 @@ var after = Object.create(Controller.prototype);
 after.slitters = [{ id: SID }];
 after.cuts = [];
 after.overfilledDaysOf = function () { return []; };
-after.planUnderfilledDays = function () { return [SID + '|20260813']; };
+after.plannerUnderfilledDays = function () {
+    return [{ key: SID + '|0', slitterId: SID, day: 0, freeMin: 50, needMin: 6.8, donorCutId: 'd1' }];
+};
 after.levelDayLoad = function (ids) { afterSeen = ids; return Promise.resolve(true); };
 var afterDone = after.levelOverfilledAfterWrite({ withinSlitterIds: [SID] }, true);
 
@@ -169,8 +173,8 @@ Promise.all([lvlDone, afterDone]).then(function () {
 
     var src = require('fs').readFileSync(
         __dirname + '/../download/atex/js/production-planning/20-controller.js', 'utf8');
-    assert((src.match(/planUnderfilledDays\(self\.cuts \|\| \[\], null\)/g) || []).length >= 2,
-        'F. вход в выравнивание и предупреждение считают недобор ОДНОЙ меркой — чиним то, о чём говорим');
+    assert((src.match(/plannerUnderfilledDays\(\)/g) || []).length >= 3,
+        'F. вход в выравнивание и предупреждение берут недобор у ОДНОГО источника — вердикта упаковщика (#4745)');
 
     console.log('\n' + passed + '/' + total + ' проверок пройдено');
 }).catch(function (err) {

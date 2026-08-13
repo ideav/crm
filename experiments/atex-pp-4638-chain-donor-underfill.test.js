@@ -230,21 +230,29 @@ function ctrlSelf(cuts) {
 
 // ── D. «УРЕГУЛИРОВАТЬ» НЕ ЗАКАНЧИВАЕТ МОЛЧА ─────────────────────────────────────────────────────
 (function () {
+    // #4745: вердикт о недоборе даёт САМ УПАКОВЩИК (`ops.dayFill`) — оператору говорят его числа,
+    // а не второй, более оптимистичный расчёт (`planUnderfilledDays` остался объективу).
     var cuts = liveCuts();
     var self = ctrlSelf(cuts);
     var said = [];
     self.notify = function (msg, kind) { said.push({ msg: msg, kind: kind }); };
+    self.plannerUnderfilledDays = function () {
+        return [{ key: '1277|1', slitterId: '1277', day: 1, freeMin: 30, needMin: 5.2, donorCutId: '4608' },
+                { key: '1285|1', slitterId: '1285', day: 1, freeMin: 22, needMin: 4.1, donorCutId: '4576' }];
+    };
     var n = self.warnUnderfilledAfterSettle();
     assert(n === 2, 'D1 названы оба недоупакованных станко-дня', '(' + n + ')');
-    assert(said.length === 1 && said[0].kind === 'warning' && /не набит до конца/.test(said[0].msg),
+    assert(said.length === 1 && said[0].kind === 'warning' && /не набит до потолка/.test(said[0].msg),
         'D2 оператор получает предупреждение, а не тишину', '(' + (said[0] && said[0].msg) + ')');
-    assert(/Упорядочить/.test(said[0].msg), 'D3 сказано, чем дыру закрыть');
+    assert(/4608/.test(said[0].msg) && /свободно 30 мин/.test(said[0].msg),
+        'D3 названы донор и обе меры — число, которое можно развернуть в объекты (ТЗ §14)',
+        '(' + said[0].msg + ')');
 
     // Здоровый план — молчим (говорить не о чем, а не «всё скрыли»).
-    var okCuts = liveCuts().filter(function (c) { return String(c.slitter.id) === '1282'; });
-    var ok = ctrlSelf(okCuts);
+    var ok = ctrlSelf(liveCuts().filter(function (c) { return String(c.slitter.id) === '1282'; }));
     var quiet = [];
     ok.notify = function (m) { quiet.push(m); };
+    ok.plannerUnderfilledDays = function () { return []; };
     assert(ok.warnUnderfilledAfterSettle() === 0 && quiet.length === 0,
         'D4 дыр нет → ни одного сообщения');
 })();

@@ -19046,17 +19046,49 @@
     // Закрывает дыру «Упорядочить» (недоупакованные дни — член его объектива выше переналадки,
     // #4469), поэтому его и называем. Пусто → молчим (говорить не о чем).
     // → число станко-дней, о которых сказали (для тестов).
+    // #4745 (ТЗ §15, «одна арифметика» — #4499): НЕДОБОР ДНЯ НАЗЫВАЕТ САМ УПАКОВЩИК. `ops.dayFill`
+    // — его собственный вердикт на его же числах: свободные минуты он меряет тем же гейтом потолка,
+    // которым паковал (`availFor` — целая занятость #4149, обед, простои, резервы), а нужду донора —
+    // РЕАЛЬНОЙ переналадкой от фактического предшественника. `planUnderfilledDays` считает то же
+    // самое ВТОРЫМ, более оптимистичным расчётом (`потолок − Σ хранимых минут`, наладка донора из
+    // колонок) и потому объявляет недобранными дни, которые упаковщик считает полными: оператор
+    // слышал «День не набит до конца — нажмите „Упорядочить“» на дне, где набивать нечем (боевое
+    // 13.08.2026: Станок 1, Чт 13.08 — 405 мин при потолке 455, а лишние 50 минут съедены
+    // переналадкой и округлением, issue #4745).
+    // Второй расчёт остаётся ОБЪЕКТИВУ «Упорядочить» (там сравнивают планы между собой одной
+    // меркой), а оператору говорит только упаковщик.
+    // Пусто/нет ops → говорить не о чем. → [{ key, slitterId, day, freeMin, needMin, donorCutId }].
+    AtexProductionPlanning.prototype.plannerUnderfilledDays = function() {
+        if (typeof this.buildSequenceOps !== 'function') return [];
+        try {
+            var built = this.buildSequenceOps(this.cuts || [], PLANNING_STRATEGY_SETUP, true, { trainOnly: true });
+            return ((built && built.ops && built.ops.dayFill) || []).slice();
+        } catch (err) {
+            console.warn('[pp] #4745: недоупакованные дни не посчитаны:', err && err.message);
+            return [];
+        }
+    };
+
     AtexProductionPlanning.prototype.warnUnderfilledAfterSettle = function() {
-        if (typeof this.planUnderfilledDays !== 'function') return 0;
-        var days = [];
-        try { days = this.planUnderfilledDays(this.cuts || [], null) || []; }
-        catch (err) { console.warn('[pp] #4638: недоупакованные дни не посчитаны:', err && err.message); return 0; }
-        if (!days.length) return 0;
-        console.warn('[pp] ⚠️ #4638 DAY_FILL: после «Урегулировать» станко-дни не набиты до потолка смены: '
-            + days.join(', '));
-        this.notify('День не набит до конца: смен, не набитых до потолка, — ' + days.length
-            + '. Недостающая работа стои́т в следующем дне — нажмите «Упорядочить», чтобы затянуть её сюда', 'warning');
-        return days.length;
+        if (typeof this.plannerUnderfilledDays !== 'function') return 0;
+        var rows = this.plannerUnderfilledDays();
+        if (!rows.length) return 0;
+        // #4745: ТЗ §14 — число, которое нельзя развернуть в объекты, оператору бесполезно. Называем
+        // день, донора и обе меры: сколько в дне свободно и сколько нужно на его проход с наладкой.
+        var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
+        var byId = {};
+        (this.slitters || []).forEach(function(s) { byId[String(s.id)] = s.label || ('станок #' + s.id); });
+        var parts = rows.slice(0, 3).map(function(u) {
+            return (byId[String(u.slitterId)] || ('станок #' + u.slitterId)) + ', '
+                + formatPlanDayHeading(base, u.day) + ' — свободно ' + Math.round(Number(u.freeMin) || 0)
+                + ' мин, проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
+                + 'стои́т ' + (Math.round((Number(u.needMin) || 0) * 10) / 10) + ' мин';
+        });
+        console.warn('[pp] ⚠️ #4638/#4745 DAY_FILL: упаковщик оставил станко-дни недобранными: '
+            + rows.map(function(u) { return u.key; }).join(', '), rows);
+        this.notify('День не набит до потолка: ' + parts.join('; ')
+            + (rows.length > 3 ? ' и ещё ' + (rows.length - 3) : ''), 'warning');
+        return rows.length;
     };
 
     // #4564: РАЗДЕЛИТЬ ЧАСТИЧНО ВЫПОЛНЕННЫЕ задания — вторая половина «Урегулировать».
@@ -24824,10 +24856,10 @@
             // Недобор считаем ТОЙ ЖЕ меркой, что и предупреждение (`planUnderfilledDays` — ключи
             // «станок|ГГГГММДД»), поэтому «о чём сказали» и «что пошли чинить» не расходятся.
             var underBySid = {};
-            if (typeof self.planUnderfilledDays === 'function') {
-                (self.planUnderfilledDays(self.cuts || [], null) || []).forEach(function(key) {
-                    underBySid[String(key).split('|')[0]] = true;
-                });
+            if (typeof self.plannerUnderfilledDays === 'function') {
+                // #4745: вердикт УПАКОВЩИКА (`ops.dayFill`), а не второй расчёт: чиним ровно то, о
+                // чём говорим, и не гоняем выравнивание по дням, которые он считает полными.
+                self.plannerUnderfilledDays().forEach(function(u) { underBySid[String(u.slitterId)] = true; });
             }
             var over = ids.filter(function(sid) {
                 if (sid === '') return false;
@@ -25881,19 +25913,19 @@
         // Мерка недобора — общая (`planUnderfilledDays`, ключи «станок|ГГГГММДД»), та же, что у
         // предупреждения #4638: чинить и говорить обязаны про одни и те же дни.
         var under = [];
-        if (typeof self.planUnderfilledDays === 'function') {
+        if (typeof self.plannerUnderfilledDays === 'function') {
             var wantSid = {};
             sids.forEach(function(sid) { wantSid[sid] = true; });
-            (self.planUnderfilledDays(self.cuts || [], null) || []).forEach(function(key) {
-                var sid = String(key).split('|')[0];
-                if (wantSid[sid]) under.push({ sid: sid, dayKey: String(key).split('|')[1] });
+            // #4745: недобор берём у УПАКОВЩИКА — одна арифметика на «что чиним» и «о чём говорим».
+            self.plannerUnderfilledDays().forEach(function(u) {
+                if (wantSid[String(u.slitterId)]) under.push({ sid: String(u.slitterId), day: u.day });
             });
         }
         if (!over.length && !under.length) return Promise.resolve(false);
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
         var label = over.map(function(o) {
             return formatPlanDayHeading(base, o.day.dayOffset) + ' (+' + o.day.overMin + ' мин)';
-        }).concat(under.map(function(u) { return formatDayKey(u.dayKey) + ' (недобран)'; })).join('; ');
+        }).concat(under.map(function(u) { return formatPlanDayHeading(base, u.day) + ' (недобран)'; })).join('; ');
         if (typeof console !== 'undefined' && console.log) {
             console.log('[pp] ⚖️ #4473/#4732/#4743: день не по смене — выравниваю паровозом (порядок сохраняем, назад — не дальше отработанного дня)',
                 { slitterIds: sids, over: over.map(function(o) { return o.day; }), under: under });
