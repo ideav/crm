@@ -4425,7 +4425,9 @@
             if (ph != null) starts.push({ cutId: String(c.id), ts: ph, wasTs: c.planDate });
         });
         return postCutStarts(self, starts, {
-            onPlan: function(n) { self.showProgress('Перенос задания…', n); },
+            // #4742: рамка действия — перенос кончается пересборкой очереди по срокам, до неё форму
+            // не отпускаем (окно прогресса остаётся, вторая команда не начинается).
+            onPlan: function(n) { actionBegin(self, 'Перенос задания…', n); },
             onWrite: function(done) { self.updateProgress(done); }
         }).then(function() {
             var fields = {};
@@ -4445,7 +4447,8 @@
             var toStr = String(self.filter && self.filter.dateTo || '').trim();
             if (fromStr !== '' && planDateDayKey(fromStr) > targetDayKey) self.filter.date = dateStr;
             if (toStr !== '' && planDateDayKey(toStr) < targetDayKey) self.filter.dateTo = dateStr;
-            self.hideProgress(); self.setBusy(false); self.render();
+            self.setBusy(false); self.render();   // #4742: рамку держим до конца пересборки
+            self.updateProgress(starts.length, 'Пересобираю очередь по срокам…');
             // #3669 п.1: если станок сменился — называем его в сообщении.
             var slitLabel = '';
             if (slitterChanged) {
@@ -4578,9 +4581,9 @@
                     }
                 }
                 return res;
-            });
+            }).then(function(res) { actionEnd(self); return res; });
         }).catch(function(err) {
-            self.hideProgress(); self.setBusy(false);
+            actionEnd(self); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка переноса задания: ' + (err && err.message || err), 'error');
             return false;
@@ -4885,8 +4888,12 @@
         if (refuseManualShift(self, settleShift, 'Урегулирование отклонений')) return Promise.resolve(false);
 
         var createdRestIds = [];   // #4569: id остатков, созданных этим действием
-        this.setBusy(true);
-        this.showProgress('Урегулирование отклонений…', writes.length);
+        // #4742: РАМКА ДЕЙСТВИЯ — от первой записи до последней. «Урегулировать» состои́т из пяти
+        // фаз (переносы → разделение → слияние соседей → сведе́ние стартов → выравнивание дня), и
+        // каждая внутри снимает `busy`, чтобы следующая вообще смогла начаться. Рамка держит окно
+        // прогресса и блокировку поверх них: оператор видит действие целиком, а не «успех» на
+        // середине и всплывающее следом окно.
+        actionBegin(this, 'Урегулирование отклонений…', writes.length);
         // #4477: пулом до 5 потоков через шлюз (было — цепочкой в один поток); совпавшее с
         // хранимым отсеяно и выше (writes), и в самом шлюзе.
         return postCutStarts(self, writes.map(function(p) {
@@ -4898,17 +4905,11 @@
             createdRestIds = ((splitRes && splitRes.createdIds) || []).map(String);
             return self.reload();
         }).then(function() {
-            self.hideProgress(); self.setBusy(false); self.render();
-            var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
-            var freeDay = byReason('free-day');
-            var splitN = splits.filter(function(sp) { return sp.restRuns > 0; }).length;
-            // #4596: «просроченных» здесь читается как «не выполненных в свой день» — в этом же
-            // числе едут задания станков, закрывших смену сегодня (решение по ним одно).
-            self.notify('Урегулировано заданий: ' + (writes.length + splits.length)
-                + ' · не выполненных в свой день — ' + (byReason('before-next') + freeDay)
-                + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
-                + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
-                + ' · досрочных — ' + byReason('early'), 'success');
+            // #4742: `busy` снимаем (иначе следующие фазы откажут своим `if (this.busy) return`), а
+            // окно прогресса и блокировку держит рамка действия. Об успехе говорим в САМОМ КОНЦЕ:
+            // пока идут записи, «Урегулировано заданий: 10» — неправда.
+            self.setBusy(false); self.render();
+            self.updateProgress(writes.length, 'Сдвигаю очередь и выравниваю дни…');
             // #4569: «Урегулировать» — РУЧНОЕ ДЕЙСТВИЕ, и оно ОДНОЗНАЧНО: сдвинуть всё. Отсюда две
             // рамки для пересборки (решение заказчика 02.08.2026).
             //   1. Задания этого действия объявлены ручными (`wholeDayCutIds`) — тем же полем, что и
@@ -4957,8 +4958,22 @@
                     self.warnUnderfilledAfterSettle(); return res;
                 });
             });
+        }).then(function(res) {
+            // #4742: действие ЗАКОНЧЕНО — снимаем рамку и только теперь отчитываемся.
+            actionEnd(self);
+            var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
+            var freeDay = byReason('free-day');
+            var splitN = splits.filter(function(sp) { return sp.restRuns > 0; }).length;
+            // #4596: «просроченных» здесь читается как «не выполненных в свой день» — в этом же
+            // числе едут задания станков, закрывших смену сегодня (решение по ним одно).
+            self.notify('Урегулировано заданий: ' + (writes.length + splits.length)
+                + ' · не выполненных в свой день — ' + (byReason('before-next') + freeDay)
+                + (freeDay ? ' (из них на ближайший рабочий день — ' + freeDay + ')' : '')
+                + (splitN ? ' · разделено частично выполненных — ' + splitN : '')
+                + ' · досрочных — ' + byReason('early'), 'success');
+            return res;
         }).catch(function(err) {
-            self.hideProgress(); self.setBusy(false);
+            actionEnd(self); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка урегулирования отклонений: ' + (err && err.message || err), 'error');
             return false;
@@ -5334,8 +5349,9 @@
             .filter(function(id) { return id && id !== 'null'; });
         var total = ids.length + cutList.length;   // обеспечения + записи цепочки
 
-        this.setBusy(true);
-        this.showProgress('Удаление задания «' + label + '»…', total);
+        // #4742: рамка действия — удаление кончается терминальной пересборкой очереди, и до неё
+        // форму отпускать нельзя.
+        actionBegin(this, 'Удаление задания «' + label + '»…', total);
         var done = 0;
         // #4005: обеспечения резки независимы друг от друга — сносим их пулом до
         // MAX_PARALLEL_DELETES потоков (как сохранение #3998/#4004), затем БАРЬЕР и записи резок.
@@ -5364,10 +5380,10 @@
             if (typeof self.reconcileSleeveTasks !== 'function') return null;
             return self.reconcileSleeveTasks(sleevePositionIds);
         }).then(function() {
-            self.hideProgress();
-            self.setBusy(false);
+            self.setBusy(false);   // #4742: замок повторного входа снимаем, рамку действия — нет
             if (cutList.indexOf(String(self.selectedCutId)) >= 0) self.selectedCutId = null;
             self.render();
+            self.updateProgress(total, 'Схлопываю освободившееся место…');
             var contCount = cutList.length - 1;
             self.notify('Задание удалено' + (contCount > 0 ? ' (продолжений — ' + contCount + ')' : '') +
                 ': обеспечений — ' + ids.length, 'success');
@@ -5379,9 +5395,10 @@
             // шаг — как после генерации (runGenerateCuts) и переноса (moveCutToDay).
             // #4736: дыру схлопывает и зафиксированный (🔒) сосед — сдвиг, вызванный удалением,
             // фиксацию не признаёт (порядок при этом не меняется, preserveOrder).
-            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true, shift ? { manualShift: shift } : null);
+            return self.autoSequenceQueue(PLANNING_STRATEGY_SETUP, true, shift ? { manualShift: shift } : null)
+                .then(function(r) { actionEnd(self); return r; });
         }).catch(function(err) {
-            self.hideProgress();
+            actionEnd(self);
             self.setBusy(false);
             // Часть записей могла удалиться — перечитываем очередь, чтобы UI не врал.
             self.reload().then(function() { self.render(); }).catch(function() {});
@@ -11395,8 +11412,9 @@
         }
         var mainKey = (this.meta.cut && this.meta.cut.id != null) ? 't' + this.meta.cut.id : null;
         if (!mainKey) startOps = [];   // некуда писать planStart — тайминг пишем всё равно
-        this.setBusy(true);
-        this.showProgress('Пересчёт наладки…', 1);
+        // #4742: рамка действия — пересчёт кончается выравниванием дня (запись), до него форму не
+        // отпускаем. Автоматический вызов (перетаскивание, #4434 п.3) — та же рамка, вложенная.
+        actionBegin(this, 'Пересчёт наладки…', 1);
         // #4601/#4602: ПИСАТЕЛЬ МЕРЯЕТ ТЕМ ЖЕ, ЧЕМ ДЕТЕКТОР. Расхождения считаются с `manual`
         // (ручной путь заморозку не соблюдает — #4582), а колонки писались БЕЗ него, то есть по
         // правилам автоматики: задания замороженного дня писатель молча пропускал. Кнопка
@@ -11413,7 +11431,8 @@
         }).then(function() {
             return self.reload();
         }).then(function() {
-            self.hideProgress(); self.setBusy(false); self.render();
+            self.setBusy(false); self.render();   // #4742: рамку держим до конца выравнивания
+            self.updateProgress(1, 'Выравниваю дни по смене…');
             self.notify(auto
                 ? ('Перестановка учтена: пересчитана наладка (' + stale.length + ') и время старта ('
                     + startOps.length + ') — порядок не менялся')
@@ -11421,9 +11440,9 @@
                     + startOps.length + ' (порядок не менялся)'), 'success');
             // #4473: день длиннее смены — ВЫРАВНИВАЕМ (разрыв по потолку + продолжение назавтра),
             // а не предупреждаем «перенесите лишнее вручную» (#4408).
-            return self.levelOverfilledAfterWrite(tailScope).then(function() { return true; });
+            return self.levelOverfilledAfterWrite(tailScope).then(function() { actionEnd(self); return true; });
         }).catch(function(err) {
-            self.hideProgress(); self.setBusy(false);
+            actionEnd(self); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
             self.notify('Ошибка пересчёта наладки: ' + (err && err.message || err), 'error');
             return false;
@@ -13827,9 +13846,66 @@
 
     // ── Служебное ──
 
+    // #4742 (решение заказчика 13.08.2026): ОДНО ДЕЙСТВИЕ ОПЕРАТОРА — ОДНО ОКНО ПРОГРЕССА.
+    // «Пока действие не закончено, я должен видеть окно прогресса и понимать что происходит».
+    //
+    // Почему так не было. `busy` служил ДВУМ разным вещам сразу: замком повторного входа («второе
+    // действие не начинаем») и блокировкой формы. Действие из нескольких фаз обязано СНЯТЬ первый
+    // замок перед следующей фазой — иначе её метод откажет своим `if (this.busy) return`, — и вместе
+    // с ним снималась блокировка: форма оживала, приходил тост «Урегулировано заданий: 10», а запись
+    // ещё шла (боевое 13.08.2026: `WRITE#68 DEL`, `WRITE#69 SET [mergeAdjacentOrderTasks]` уже после
+    // «успеха», и следом снова всплывало окно прогресса — issue #4742).
+    //
+    // Теперь это два РАЗНЫХ понятия:
+    //   • `busy` — замок повторного входа, как был: фазы его снимают и ставят между собой;
+    //   • ДЕЙСТВИЕ (`beginAction`/`endAction`) — рамка от первой записи до последней. Пока она
+    //     открыта, форма заблокирована, окно прогресса на экране, и закрыть его вправе только
+    //     владелец рамки. Рамки вкладываются: внутренняя фаза лишь МЕНЯЕТ заголовок.
     AtexProductionPlanning.prototype.setBusy = function(on) {
         this.busy = on;
-        if (this.root) this.root.classList.toggle('is-busy', !!on);
+        // Рамка действия открыта — форма остаётся заблокированной, что бы ни делали фазы внутри.
+        if (this.root) this.root.classList.toggle('is-busy', !!on || (this._actionDepth || 0) > 0);
+    };
+
+    // Открыть рамку действия. title/total — что показать в окне прогресса (у вложенной фазы это
+    // просто новый заголовок). → this, чтобы звать цепочкой.
+    AtexProductionPlanning.prototype.beginAction = function(title, total) {
+        this._actionDepth = (this._actionDepth || 0) + 1;
+        this.showProgress(title, total);
+        this.setBusy(true);
+        return this;
+    };
+
+    // Закрыть рамку. Окно прогресса и блокировка снимаются, только когда закрылась ВНЕШНЯЯ рамка.
+    AtexProductionPlanning.prototype.endAction = function() {
+        this._actionDepth = Math.max(0, (this._actionDepth || 0) - 1);
+        if (this._actionDepth > 0) return this;
+        this.setBusy(false);
+        this.hideProgress(true);
+        return this;
+    };
+
+    // #4742: рамку открывают/закрывают ЧЕРЕЗ ПРОТОТИП — методы очереди зовут и на самодельных
+    // объектах без цепочки прототипов (юнит-тесты, deep-link), тот же приём, что у
+    // `moveWholeCutToDay` и `refuseManualShift`. Свои `showProgress`/`setBusy` у таких объектов есть
+    // (их и звали раньше), поэтому внутри рамки всё работает как прежде.
+    function actionBegin(self, title, total) {
+        return AtexProductionPlanning.prototype.beginAction.call(self, title, total);
+    }
+    function actionEnd(self) {
+        return AtexProductionPlanning.prototype.endAction.call(self);
+    }
+
+    // #4742: обёртка «действие целиком»: рамка держится до конца цепочки и снимается на ошибке.
+    // fn() → Promise; результат/исключение пробрасываются как есть.
+    AtexProductionPlanning.prototype.runAction = function(title, total, fn) {
+        var self = this;
+        this.beginAction(title, total);
+        var done = function() { actionEnd(self); };
+        var out;
+        try { out = fn(); } catch (err) { done(); throw err; }
+        if (!out || typeof out.then !== 'function') { done(); return Promise.resolve(out); }
+        return out.then(function(v) { done(); return v; }, function(err) { done(); throw err; });
     };
 
     // Деактивирует кнопку «Сгенерировать резки» и показывает крутилку слева от неё
@@ -13897,7 +13973,7 @@
     // чтобы не тускнеть под .atex-pp.is-busy (opacity .65) и быть поверх всего.
     // Без кнопок: операция неотменяема, окно — только индикатор хода.
     AtexProductionPlanning.prototype.showProgress = function(title, total) {
-        this.hideProgress();
+        this.hideProgress(true);   // #4742: окно ЗАМЕНЯЕМ (у фазы свой заголовок), а не закрываем
         this.progressTotal = Number(total) || 0;
         // #3865: total ≤ 0 → этап подготовки без счётчика, полоса «бежит» (is-indeterminate),
         // под ней показываем текст «что происходит» (updateProgress detail).
@@ -13932,7 +14008,11 @@
         }
     };
 
-    AtexProductionPlanning.prototype.hideProgress = function() {
+    // #4742: пока открыта рамка действия, окно прогресса закрывает только её владелец
+    // (`endAction`) — фазы внутри его не гасят. `force` — для владельца и для `showProgress`,
+    // который окно не закрывает, а ЗАМЕНЯЕТ (иначе на экране копились бы два оверлея).
+    AtexProductionPlanning.prototype.hideProgress = function(force) {
+        if (!force && (this._actionDepth || 0) > 0) return;
         if (this.progressEl && this.progressEl.parentNode) {
             this.progressEl.parentNode.removeChild(this.progressEl);
         }
