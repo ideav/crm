@@ -278,7 +278,7 @@
   // слияний (B&B по парам): две раскладки сливаются в комбо ТОЛЬКО если это
   // лексикографически снижает цель (прогоны → скрап → отход) — заказ не дробится,
   // объединение лишь по выгоде. Комбо ограничено (#3472 п.3): не более
-  // options.maxWidthsPerCut (3) ширин и options.maxPositionsPerCut (3) заказов.
+  // options.maxWidthsPerCut (5) ширин и options.maxPositionsPerCut (3) заказов.
   // Позиции шире джамбо → skipped. Вход не мутирует.
   function planLayouts(input){
     input = input || {};
@@ -288,9 +288,9 @@
     var windowDays = (opts.windowDays == null) ? 3 : opts.windowDays;
     var tolerance = toNumber(opts.tolerance);
     // #3472 п.3: разумные ограничения комбо-резки — отсекают бессмысленные слияния и
-    // держат резку дружелюбной к оператору/упаковщику. Дефолты: ≤3 ширин, ≤3 позиций.
+    // держат резку дружелюбной к оператору/упаковщику. Дефолты: ≤5 ширин, ≤3 позиций.
     // 0/Infinity → ограничение снято (toNumber делает не-конечное 0).
-    var maxWidths = (opts.maxWidthsPerCut == null) ? 3 : toNumber(opts.maxWidthsPerCut);
+    var maxWidths = (opts.maxWidthsPerCut == null) ? 5 : toNumber(opts.maxWidthsPerCut);
     var maxPositions = (opts.maxPositionsPerCut == null) ? 3 : toNumber(opts.maxPositionsPerCut);
     var positions = (input.positions || []).map(function(p){
       return { id: p.id, orderId: p.orderId, width: toNumber(p.width), qty: toNumber(p.qty),
