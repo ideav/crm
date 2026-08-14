@@ -687,6 +687,16 @@
             mode: 'audit',     // отбрасывать нечего: разрыв чинится СШИВАНИЕМ задания, а не отказом
             why: 'отбрасывать нечего: разрыв цепочки чинится СШИВАНИЕМ задания в одну запись (#4488), а не '
                  + 'отказом от записи',
+            // #4751: ХРАПОВИК — набор операций не вправе РАЗОРВАТЬ цепочку, которая в хранимом плане
+            // была цела. Ось `gate` ортогональна `mode`: причина наблюдателя выше остаётся верной
+            // (одна выброшенная операция разрыв не сшивает), но НАБОР, который разрыв создаёт,
+            // откатывается целиком. Подробности механики — у `refuseRatchetRegressions`.
+            gate: 'ratchet',
+            // Кого откатывать: саму цепочку и тех, кто в неё вклинился, — иначе части вернутся на
+            // хранимые места, а чужое задание останется стоять между ними.
+            subjects: function(v) {
+                return { chains: [v && v.chainId], cuts: [v && v.cutId, v && v.headCutId].concat((v && v.betweenIds) || []) };
+            },
             title: 'Части задания, разорванного по дням, идут непрерывно: между ними нет чужих заданий',
             // ЧТО ПРОВЕРЯЕТСЯ. Задание, не влезшее в смену, живёт цепочкой записей (голова +
             // продолжения, общий «ID первой части»). Работа непрерывна: продолжение начинается там,
@@ -990,6 +1000,18 @@
                  + 'операцию, мы не добавим заказу ни одного прохода, зато оставим задание с прежним '
                  + 'planStart и получим дыру в дне (#4300/#4312). Недостачу чинит план (проходы '
                  + 'добираются) или оператор; шлюз называет позицию и сколько штук не хватает',
+            // #4751: ХРАПОВИК — набор операций не вправе УМЕНЬШИТЬ обеспечение заказа. Наблюдателем
+            // правило видело недостачу и пропускало её: боевое 13.08.2026 записало 168 команд и
+            // четырьмя проходами подряд напечатало «сработали бы» про 13 позиций (заказы 4340…4538).
+            // Ось `gate` ортогональна `mode`: причина наблюдателя выше остаётся верной (выброшенная
+            // ОПЕРАЦИЯ заказу проходов не добирает), но НАБОР, который недостачу создаёт или
+            // углубляет, откатывается целиком. Подробности — у `refuseRatchetRegressions`.
+            gate: 'ratchet',
+            // Мера тяжести: недостача, УГЛУБЛЁННАЯ набором, — тоже ухудшение, а не «то же нарушение».
+            severity: function(v) { return Number(v && v.shortRolls) || 0; },
+            // Кого откатывать: все задания, покрывающие эту позицию, — иначе голова вернётся к
+            // хранимым проходам, а удаление донора останется, и работа исчезнет совсем (#4536).
+            subjects: function(v) { return { cuts: (v && v.cutIds) || [v && v.cutId] }; },
             title: 'Обеспечение равно заказу: выпуск позиции по всем заданиям не меньше заказанного количества',
             // ЧТО ПРОВЕРЯЕТСЯ. Позиция заказа обеспечена, когда сумма выпуска ВСЕХ покрывающих её
             // заданий («Кол-во полос» её «Партии ГП» × «Кол-во резок план» задания) не меньше
@@ -1163,7 +1185,7 @@
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
         if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled,
-                           restoredChains: [], lostWorkChains: [] };
+                           restoredChains: [], lostWorkChains: [], ratchetChains: [], ratchetViolations: [] };
 
         var skipped = 0;
         function keep(op, kind) {
@@ -1181,8 +1203,15 @@
         var lostWork = refuseWorkLosingChains(ops, ctx, balanceBefore);
         skipped += lostWork.skipped;
         if (!droppers.length) {
+            // #4751: ХРАПОВИК СМОТРИТ ВСЕГДА — как и сохранность работы выше (#4645). Пути, где
+            // отбрасывать некому (актор `human`, набор правил без `mode: 'drop'`), — это как раз
+            // фазы, которые пишут сами: слияние соседей и сведе́ние стартов. Именно они и уносили
+            // обеспечение в базу без единой проверки (боевые WRITE#61…70).
+            var ratchetOnly = refuseRatchetRegressions(rules, ops, ctx, who);
+            skipped += ratchetOnly.skipped;
             return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                     restoredChains: [], lostWorkChains: lostWork.chains };
+                     restoredChains: [], lostWorkChains: lostWork.chains,
+                     ratchetChains: ratchetOnly.chains, ratchetViolations: ratchetOnly.violations };
         }
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
@@ -1190,8 +1219,13 @@
         ops.creates = (ops.creates || []).filter(function(cr) { return keep(cr || {}, 'create'); });
         var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
         skipped += restoredChains.skipped;
+        // #4751: храповик — ПОСЛЕДНИЙ шаг: он судит набор, который реально уйдёт в базу, а не тот,
+        // из которого страж ещё не выбросил операции по заморозке и 🔒.
+        var ratchet = refuseRatchetRegressions(rules, ops, ctx, who);
+        skipped += ratchet.skipped;
         return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains };
+                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains,
+                 ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations };
     }
 
     // #4645 (ТЗ §15): ПЛАН НЕ ВПРАВЕ УНИЧТОЖИТЬ РАБОТУ. `restoreSplitChainIntegrity` (#4536) лечит
@@ -1244,6 +1278,122 @@
             return true;
         });
         return { chains: chains, skipped: skipped };
+    }
+
+    // #4751 (ТЗ §15): ХРАПОВИК ЖЁСТКИХ ПРАВИЛ — НАБОР ОПЕРАЦИЙ НЕ ВПРАВЕ УХУДШИТЬ ПРАВИЛО.
+    //
+    // ЗАЧЕМ ТРЕТЬЯ ОСЬ, А НЕ СМЕНА РЕЖИМА. У правила уже есть `mode`: 'drop' — «выброси нарушающую
+    // ОПЕРАЦИЮ», 'audit' — «выбросить нельзя, кричи». Для SUPPLY_CONSERVED и CHAIN_CONTIGUOUS второе
+    // верно и остаётся верным: одна выброшенная операция заказу проходов не добирает и цепочку не
+    // сшивает, а задание осталось бы с прежним `planStart` — дыра в дне (#4300/#4312). Но из «нельзя
+    // выбросить ОДНУ» не следует «надо записать ВЕСЬ набор»: недостача и разрыв — свойства ВСЕЙ
+    // раскладки, значит и решение принимается о ВСЁМ наборе. `gate: 'ratchet'` — про набор,
+    // `mode` — про операцию; они не конкурируют, поэтому режим правил не тронут.
+    //
+    // ПОЧЕМУ СРАВНЕНИЕ С ХРАНИМЫМ, А НЕ АБСОЛЮТНЫЙ ЗАПРЕТ. В боевом плане нарушение обычно УЖЕ
+    // стои́т: 13.08.2026 одни и те же 13 недообеспеченных позиций печатались на всех четырёх
+    // проходах с одними и теми же числами. Абсолютный запрет отказал бы КАЖДОЙ записи навсегда —
+    // план нельзя было бы ни поправить, ни улучшить. Поэтому мерка та же, что у `capacityBreaksStored`
+    // (#4622): за УНАСЛЕДОВАННОЕ нарушение запись не отвечает, за ДОБАВЛЕННОЕ — отвечает.
+    //
+    // ЧТО СЧИТАЕТСЯ УХУДШЕНИЕМ. Нарушение по субъекту (позиция заказа, цепочка), которого в хранимом
+    // плане не было, — или было, но стало ТЯЖЕЛЕЕ (`severity` правила: сколько штук не хватает).
+    // Субъект, а не текст сообщения: формулировка меняется от чисел, а сравнивать надо предмет.
+    //
+    // ЧЕМ ОТКАТЫВАЕМ. Тем же, чем #4536/#4645: снимаем ВСЕ операции затронутых ЦЕПОЧЕК. Половинчатый
+    // откат («сняли правку головы, оставили удаление донора») — ровно та беда, из-за которой оба
+    // тех правила и заведены: работа исчезает целиком. Какие цепочки трогать, называет САМО правило
+    // (`subjects(v)` → { cuts, chains }) — теми же полями, которыми оно отчиталось в `check`.
+    //
+    // ПОЧЕМУ ЦИКЛ. Сняв операции одной цепочки, мы меняем итоговый план, и часть нарушений может
+    // исчезнуть, а часть — вскрыться (соседняя цепочка держалась на снятых операциях). Гоняем до
+    // схождения, но не больше RATCHET_PASSES проходов: набор конечен, каждый проход снимает хотя бы
+    // одну цепочку, поэтому цикл всегда кончается.
+    //
+    // ЧЕГО ХРАПОВИК НЕ ТРОГАЕТ. `ops.manual === true` — осознанная ручная правка объёма (проходы
+    // правит человек), та же оговорка, что у #4645. И правило БЕЗ `gate` им не ограничено: DAY_FILL
+    // нарушается любым недобранным днём, и объявлять из-за него откат нельзя — выравнивание никогда
+    // не записало бы свой результат.
+    //   balance — ничего не нужно; работаем на самих правилах.
+    // → { chains: [chainId…], violations: [нарушение…], skipped: сколько операций снято }.
+    // ops мутируется на месте.
+    var RATCHET_PASSES = 5;
+    function refuseRatchetRegressions(rules, ops, ctx, actor) {
+        var none = { chains: [], violations: [], skipped: 0 };
+        var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
+        if (!ops || !chainFn || ops.manual === true) return none;
+        var who = actor === 'human' ? 'human' : 'auto';
+        var gates = (rules || []).filter(function(inv) {
+            return inv && inv.gate === 'ratchet' && typeof inv.check === 'function'
+                && !(inv.actor === 'auto' && who !== 'auto');
+        });
+        if (!gates.length) return none;
+
+        function chainOf(cutId) {
+            var c = chainFn(cutId);
+            return String((c == null || c === '') ? cutId : c);
+        }
+        // Субъект нарушения — предмет, а не фраза: позиция заказа, цепочка, задание. По нему
+        // «то же самое нарушение» отличается от «нового».
+        function subjectKey(inv, v) {
+            var s = (v && (v.positionId != null ? v.positionId : (v.chainId != null ? v.chainId : v.cutId)));
+            return inv.id + '|' + String(s == null ? '' : s);
+        }
+        function severityOf(inv, v) {
+            return (typeof inv.severity === 'function') ? (Number(inv.severity(v)) || 0) : 0;
+        }
+        // Нарушения ХРАНИМОГО плана — с пустым набором операций (правила читают снимок и хранимые
+        // проходы сами). Это и есть «за что запись не отвечает».
+        var empty = { updates: [], deletes: [], creates: [] };
+        var wasBy = {};
+        gates.forEach(function(inv) {
+            (inv.check(empty, ctx) || []).forEach(function(v) {
+                var k = subjectKey(inv, v);
+                var sev = severityOf(inv, v);
+                if (wasBy[k] == null || sev > wasBy[k]) wasBy[k] = sev;
+            });
+        });
+
+        var broken = {}, chains = [], reported = [], skipped = 0;
+        for (var pass = 0; pass < RATCHET_PASSES; pass++) {
+            var fresh = [];
+            gates.forEach(function(inv) {
+                (inv.check(ops, ctx) || []).forEach(function(v) {
+                    var k = subjectKey(inv, v);
+                    var was = wasBy[k];
+                    if (was != null && severityOf(inv, v) <= was) return;   // унаследованное — не наше
+                    fresh.push({ inv: inv, v: v });
+                });
+            });
+            if (!fresh.length) break;
+            var added = 0;
+            fresh.forEach(function(hit) {
+                reported.push(hit.v);
+                var subj = (typeof hit.inv.subjects === 'function') ? (hit.inv.subjects(hit.v) || {}) : {};
+                var keys = [];
+                (subj.cuts || []).forEach(function(id) { if (id != null && id !== '') keys.push(chainOf(id)); });
+                (subj.chains || []).forEach(function(id) { if (id != null && id !== '') keys.push(String(id)); });
+                if (!keys.length && hit.v && hit.v.cutId != null) keys.push(chainOf(hit.v.cutId));
+                keys.forEach(function(k) {
+                    if (broken[k]) return;
+                    broken[k] = true; chains.push(k); added++;
+                });
+            });
+            if (!added) break;   // назвать некого — снимать нечего, второй проход даст то же самое
+            ops.updates = (ops.updates || []).filter(function(u) {
+                if (u && u.cutId != null && broken[chainOf(u.cutId)]) { skipped++; return false; }
+                return true;
+            });
+            ops.deletes = (ops.deletes || []).filter(function(id) {
+                if (id != null && broken[chainOf(id)]) { skipped++; return false; }
+                return true;
+            });
+            ops.creates = (ops.creates || []).filter(function(cr) {
+                if (cr && cr.parentCutId != null && broken[chainOf(cr.parentCutId)]) { skipped++; return false; }
+                return true;
+            });
+        }
+        return { chains: chains, violations: reported, skipped: skipped };
     }
 
     // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
