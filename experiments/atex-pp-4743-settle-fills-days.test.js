@@ -171,13 +171,49 @@ Promise.all([lvlDone, afterDone]).then(function () {
         'E2. общий хвост записи тоже видит недобор и зовёт выравнивание',
         'станки: ' + JSON.stringify(afterSeen));
 
-    var src = require('fs').readFileSync(
-        __dirname + '/../download/atex/js/production-planning/20-controller.js', 'utf8');
-    // #4749: у вердикта появился параметр — права текущего действия (`manualShift`): мерить надо
-    // тем же планом, который это действие вправе записать. Источник по-прежнему ОДИН, поэтому
-    // считаем вызовы, а не их пустые скобки.
-    assert((src.match(/plannerUnderfilledDays\(/g) || []).length >= 3,
-        'F. вход в выравнивание и предупреждение берут недобор у ОДНОГО источника — вердикта упаковщика (#4745)');
+    // F. ОДИН ИСТОЧНИК НЕДОБОРА — проверяется ПОВЕДЕНИЕМ, а не текстом файла.
+    //
+    // Раньше здесь стоял счётчик вхождений `plannerUnderfilledDays(` в исходнике
+    // (`src.match(...).length >= 3`). Такая проверка не видит, ЧТО код делает: она молчит, когда
+    // потребитель начинает считать недобор сам, и краснеет от любого рефакторинга. Её и правили
+    // дважды подряд — #4745 и #4749, — каждый раз подгоняя число под свою правку.
+    //
+    // Настоящее правило: у недобора ОДИН источник, и каждый потребитель обязан ЕГО СПРОСИТЬ.
+    // Потребителей три — выравнивание дня, общий хвост записи и предупреждение оператору.
+    // Считаем обращения к источнику у каждого: перестал спрашивать — значит завёл свою мерку.
+    // Заглушать разрешено ВСЁ, кроме самого проверяемого потребителя: иначе счётчик мерил бы
+    // заглушку. Поэтому каждый случай глушит только СОСЕДЕЙ по цепочке.
+    function asksSource(stubs, build) {
+        var asked = 0;
+        var s = Object.create(Controller.prototype);
+        s.filter = { date: '2026-08-13' };
+        s.nowMs = function () { return BASE; };
+        s.cuts = []; s.slitters = [{ id: SID }];
+        s.overfilledDaysOf = function () { return []; };
+        s.plannerUnderfilledDays = function () {
+            asked++;
+            return [{ key: SID + '|0', slitterId: SID, day: 0, addRuns: 6, addMin: 42, donorCutId: 'd1' }];
+        };
+        s.warnOverfilledDays = function () {};
+        s.notify = function () {};
+        for (var k in (stubs || {})) s[k] = stubs[k];
+        return Promise.resolve(build(s)).then(function () { return asked; });
+    }
+    return Promise.all([
+        // выравнивание дня — настоящее; глушим только то, что оно зовёт дальше
+        asksSource({ autoSequenceQueueAfterMerge: function () { return Promise.resolve(true); } },
+            function (s) { return s.levelDayLoad([SID], null); }),
+        // общий хвост записи — настоящий; глушим выравнивание
+        asksSource({ levelDayLoad: function () { return Promise.resolve(true); } },
+            function (s) { return s.levelOverfilledAfterWrite({ withinSlitterIds: [SID] }, true); }),
+        // предупреждение оператору — настоящее; глушить нечего
+        asksSource({}, function (s) { return s.warnUnderfilledAfterSettle(); })
+    ]).then(function (asked) {
+        assert(asked.every(function (n) { return n > 0; }),
+            'F. недобор берут у ОДНОГО источника: выравнивание, хвост записи и предупреждение — все спрашивают его (#4745/#4749)',
+            'обращений: выравнивание ' + asked[0] + ', хвост ' + asked[1] + ', предупреждение ' + asked[2]);
+    });
+}).then(function () {
 
     console.log('\n' + passed + '/' + total + ' проверок пройдено');
 }).catch(function (err) {

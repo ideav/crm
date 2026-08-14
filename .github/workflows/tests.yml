@@ -40,3 +40,20 @@ jobs:
         env:
           RATCHET_DECLARATION: ${{ github.event.pull_request.body }}
         run: bash scripts/check-test-ratchet.sh "origin/${{ github.event.pull_request.base.ref }}"
+
+  # #4751: НОВЫЕ проверки по ТЕКСТУ ИСХОДНИКА. Утверждение о написании кода молчит, когда
+  # поведение сломано, и краснеет от рефакторинга — тогда его правит автор соседнего фикса.
+  # Ровно так держался цикл из десяти тикетов про «день не набит» (#4469 → #4751). Отдельной
+  # работой, как и храповик: в списке чеков должно быть видно, что именно покраснело.
+  text-assertions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # нужна история: сравниваем с merge-base базовой ветки
+      - name: Новые проверки по тексту исходника
+        env:
+          TEXT_ASSERT_DECLARATION: ${{ github.event.pull_request.body }}
+        run: bash scripts/check-text-assertions.sh "origin/${{ github.event.pull_request.base.ref }}"

@@ -120,26 +120,55 @@ function kept(r, tasks) {
         'H: спрос закрыт выполненной задачей — дубль снят, новых нет', JSON.stringify(r));
 })();
 
-// ── I. Правило зовут ОБА пути — генерация и удаление задания (иначе фикс наполовину).
+// ── I. Правило зовут ВСЕ пути удаления — иначе фикс наполовину.
+//
+// ПРОВЕРЯЕТСЯ ПОВЕДЕНИЕМ, А НЕ ТЕКСТОМ. Раньше здесь стоял счётчик вхождений
+// `self.reconcileSleeveTasks(` в исходнике (`calls === 2`). Такая проверка не видит, ЧТО код
+// делает: число 2 спокойно уживалось с тем, что путь удаления ДНЯ разбор не звал вовсе, а его
+// вызов стоял в соседней функции, где переменной не существовало, — `ReferenceError` на каждом
+// удалении (issue #4753). Текстовая проверка молчала о дефекте и краснела бы от рефакторинга.
+// Теперь оба пути удаления ПРОГОНЯЮТСЯ, и правило считается соблюдённым, когда разбор ПОЛУЧИЛ
+// позиции удалённых звеньев.
 (function () {
-    var fs = require('fs');
-    var src = fs.readFileSync(__dirname + '/../download/atex/js/production-planning/20-controller.js', 'utf8');
-    // Определение записано как `= function(`, поэтому в счёт вызовов не попадает — проверяем
-    // его отдельно, а вызовов обязано быть ДВА: генерация и удаление задания.
-    var calls = (src.match(/self\.reconcileSleeveTasks\(/g) || []).length;
-    assert(/prototype\.reconcileSleeveTasks = function/.test(src), 'I: reconcileSleeveTasks определён');
-    // #4753 (RATCHET-OK): путей ТРИ, а не два — генерация, удаление ЗАДАНИЯ и удаление ДНЯ.
-    // Прежнее «=== 2» закрепляло состояние, в котором путь дня остался недоведённым: он собирал
-    // `sleevePositionIds` и не звал разбор вовсе, а сам вызов стоял в соседней функции, где
-    // переменной не существовало (ReferenceError на каждом удалении, issue #4753). Число здесь
-    // фиксировало дефект, поэтому ожидание обновлено вместе с его починкой.
-    assert(calls === 3, 'I2: вызван из ВСЕХ трёх путей — генерация, удаление задания, удаление дня',
-        'вызовов: ' + calls);
-    assert(/runGenerateCuts[\s\S]*?self\.reconcileSleeveTasks\(genPositionIds\)/.test(src)
-        || /genPositionIds[\s\S]{0,200}reconcileSleeveTasks\(genPositionIds\)/.test(src),
-        'I3: генерация сверяет набор ПОСЛЕ reload (нужны свежие «Обеспечения»)');
-    assert(/#4631[\s\S]{0,400}sleevePositionIds/.test(src),
-        'I4: при удалении позиции запоминаются ДО удаления (после связь потеряна)');
-})();
+    var Controller = require('../download/atex/js/production-planning.js').Controller;
+    function stand() {
+        var s = Object.create(Controller.prototype);
+        s.busy = false; s.cuts = []; s.slitters = []; s.got = [];
+        s.supplies = [{ id: 'S1', cutId: '100', positionId: 'P1' },
+                      { id: 'S2', cutId: '101', positionId: 'P2' }];
+        s.post = function () { return Promise.resolve({}); };
+        s.reload = function () { return Promise.resolve(); };
+        s.render = function () {};
+        s.notify = function () {};
+        s.updateProgress = function () {};
+        s.setBusy = function () {};
+        s.showProgress = function () {};
+        s.hideProgress = function () {};
+        s.autoSequenceQueue = function () { return Promise.resolve(true); };
+        s.reconcileOrphanOrderSupplies = function () { return Promise.resolve(0); };
+        s.levelOverfilledAfterWrite = function (x, r) { return Promise.resolve(r); };
+        s.reconcileSleeveTasks = function (ids) { s.got.push((ids || []).slice()); return Promise.resolve(); };
+        return s;
+    }
+    assert(typeof Controller.prototype.reconcileSleeveTasks === 'function',
+        'I: reconcileSleeveTasks определён на прототипе');
 
-console.log('\n' + passed + '/' + total + ' пройдено');
+    var byTask = stand(), byDay = stand();
+    Promise.all([
+        byTask.runDeleteCutTask(['100', '101'], ['S1', 'S2'], 'x'),
+        byDay.runDeleteDayTasks([{ id: '100' }, { id: '101' }], [{ id: 'S1' }, { id: 'S2' }], 'Чт')
+    ]).then(function () {
+        assert(byTask.got.length === 1 && String((byTask.got[0] || []).slice().sort()) === String(['P1', 'P2']),
+            'I2: удаление ЗАДАНИЯ отдаёт разбору позиции удалённых звеньев',
+            JSON.stringify(byTask.got));
+        assert(byDay.got.length === 1 && String((byDay.got[0] || []).slice().sort()) === String(['P1', 'P2']),
+            'I3: удаление ДНЯ — тоже (путь, который молчал до #4753)',
+            JSON.stringify(byDay.got));
+        console.log('\n' + passed + '/' + total + ' пройдено');
+        if (passed !== total) process.exitCode = 1;
+    }).catch(function (e) {
+        console.error('FAIL — исключение: ' + (e && e.stack || e));
+        process.exitCode = 1;
+    });
+})();
+// Итог печатается внутри блока I — он асинхронный, и до его конца счётчики не полны.
