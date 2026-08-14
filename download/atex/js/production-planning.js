@@ -4018,11 +4018,36 @@
                 var heldFn = (ctx && typeof ctx.fixedHeldDays === 'function') ? ctx.fixedHeldDays : null;
                 var held = {};
                 (heldFn ? (heldFn() || []) : []).forEach(function(k) { held[String(k)] = true; });
+                // #4759: СТАНКО-ДЕНЬ, У КОТОРОГО СТРАЖ СНЯЛ ОПЕРАЦИИ, НЕ СУДИМ. Занятость (`load`)
+                // считал упаковщик по СВОЕЙ раскладке — до отбрасывания; после него число дню
+                // больше не соответствует, а честно пересчитать его снаружи нельзя: гейт потолка
+                // (обед, простои, атомарность прохода, #4149) знает только упаковщик. Промолчать
+                // здесь правильнее, чем соврать: боевая форма — движок вытащил работу из
+                // ЗАМОРОЖЕННОГО дня в соседний и насчитал там 475 при потолке 455, страж операции
+                // снял, в дне осталось 150, а правило рапортовало «превышение 20». День
+                // пересматривается следующей записью, уже с верной меркой.
+                var dayOfTs = (ctx && typeof ctx.dayKeyOfTs === 'function') ? ctx.dayKeyOfTs : null;
+                var stale = {};
+                var droppedSets = (ops && ops.droppedOps) || null;
+                if (droppedSets && dayOfTs) {
+                    [droppedSets.updates || [], droppedSets.creates || []].forEach(function(list) {
+                        list.forEach(function(op) {
+                            // Станок известен только у операций размещения; у остальных приписать
+                            // день некому — такой станко-день судим как прежде.
+                            var sid = op && op.slitterId;
+                            if (sid == null || String(sid) === '' || op.planStartTs == null) return;
+                            var k = dayOfTs(op.planStartTs);
+                            if (k == null) return;
+                            stale[String(sid) + '|' + k] = true;
+                        });
+                    });
+                }
                 var out = [];
                 Object.keys(load).forEach(function(key) {
                     var min = Number(load[key]);
                     if (!isFinite(min) || min <= cap + 1e-6) return;
                     if (held[String(key)]) return;   // #4512: перебор из-за неснимаемой 🔒 — законен
+                    if (stale[String(key)]) return;  // #4759: операции дня сняты — число уже не про него
                     var parts = String(key).split('|');
                     out.push(ppViolation('DAY_CAPACITY', null,
                         'станок ' + parts[0] + ', день ' + parts[1] + ': ' + Math.round(min)
@@ -4577,6 +4602,10 @@
             if (!applies(inv) || typeof inv.fill !== 'function') return;
             filled = filled.concat(inv.fill(ops, ctx) || []);
         });
+        // ПОЛНЫЙ отчёт — по набору, КАКИМ ОН ПРИШЁЛ. Им объясняется, ПОЧЕМУ операции отброшены
+        // (FROZEN_DAY и прочие `mode: 'drop'`): после отбрасывания нарушающих операций уже нет, и
+        // причина потерялась бы. Контракт `violations` прежний — на него смотрят журнал и тесты
+        // #4494/#4512/реестра. Отчёт ДЛЯ ОПЕРАТОРА считается ниже отдельно (#4759).
         var violations = checkRules(rules, ops, ctx, who);
 
         // Правила, которые вправе отбрасывать: режим 'drop', актор подходит, предикат есть.
@@ -4587,9 +4616,17 @@
                            restoredChains: [], lostWorkChains: [], ratchetChains: [], ratchetViolations: [] };
 
         var skipped = 0;
+        // #4759: ЧТО ИМЕННО СНЯТО — вызывающему и правилам. Правило потолка по этому списку видит,
+        // какие станко-дни судить больше нельзя: занятость им считал упаковщик ДО отбрасывания.
+        var droppedOps = { updates: [], deletes: [], creates: [] };
+        ops.droppedOps = droppedOps;
         function keep(op, kind) {
             for (var i = 0; i < droppers.length; i++) {
-                if (droppers[i].drop(op, ctx, kind)) { skipped++; return false; }
+                if (droppers[i].drop(op, ctx, kind)) {
+                    skipped++;
+                    (kind === 'delete' ? droppedOps.deletes : (kind === 'create' ? droppedOps.creates : droppedOps.updates)).push(op);
+                    return false;
+                }
             }
             return true;
         }
@@ -4622,7 +4659,16 @@
         // из которого страж ещё не выбросил операции по заморозке и 🔒.
         var ratchet = refuseRatchetRegressions(rules, ops, ctx, who);
         skipped += ratchet.skipped;
-        return { ops: ops, violations: violations, skipped: skipped, filled: filled,
+        // #4759: ОТЧЁТ ОПЕРАТОРУ — ПО НАБОРУ, КОТОРЫЙ ЗАПИШЕТСЯ, а не по тому, который страж тут же
+        // разобрал. На 120 сгенерированных планах 60 из 78 срабатываний DAY_CAPACITY ИСЧЕЗАЛИ после
+        // отбрасывания — то есть три четверти предупреждений оператору были ложными. Боевая форма:
+        // движок вытащил работу из ЗАМОРОЖЕННОГО дня в соседний и насчитал там 475 при потолке 455;
+        // страж эти операции снял, в дне осталось 150 — а предупреждение уходило.
+        // `violations` при этом ПРЕЖНИЙ (полный, до отбрасывания): по нему журнал объясняет, что
+        // именно снято, и на него смотрят тесты #4494/#4512.
+        var violationsAfterDrop = checkRules(rules, ops, ctx, who);
+        return { ops: ops, violations: violations, violationsAfterDrop: violationsAfterDrop,
+                 skipped: skipped, filled: filled,
                  restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains,
                  ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations };
     }
@@ -25094,7 +25140,11 @@
             // (`mergeAdjacentOrderTasks`): тост описывал бы состояние, которого к моменту прочтения
             // уже нет. Молчания нет — нарушение уходит в журнал (console.error выше), а если слияние
             // сорвалось, оператору говорит сам `mergeSameOrderTasks`.
-            ops.ruleAudit = (guard.violations || []).filter(function(v){
+            // #4759: берём отчёт ПОСЛЕ отбрасывания — оператору говорим о плане, который
+            // ЗАПИШЕТСЯ. Полный отчёт (`guard.violations`) остаётся журналу: по нему видно, что
+            // именно снято и почему. Прежде сюда шёл полный, и три четверти предупреждений о
+            // переборе дня описывали план, который страж тут же разбирал.
+            ops.ruleAudit = (guard.violationsAfterDrop || guard.violations || []).filter(function(v){
                 return v.rule !== 'FROZEN_DAY' && v.rule !== 'ORDER_PARTS_ADJACENT'; });
             // #4645: цепочки, чьи операции сняты как ОТНИМАЮЩИЕ проходы. Отдаём с операциями: тот,
             // кто пишет план, обязан сказать оператору, что эти задания остались как были, — иначе
