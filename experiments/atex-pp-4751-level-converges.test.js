@@ -118,6 +118,27 @@ live.levelOverfilledAfterWrite({ withinSlitterIds: [SID, SID2] }, true).then(fun
                 JSON.stringify(withRights.underOpts.map(function(o) { return !!(o && o.manualShift); })));
         });
 }).then(function() {
+    // ── H. ВЕРДИКТ БЕЗ ЧИСЛА — ВСЁ РАВНО ДОЛГ ───────────────────────────────────────────────
+    // Мерка вправе назвать недобранный станко-день, НЕ называя `addRuns`: это контракт
+    // #4743/#4745, и он старше веса проходов из #4749. Если считать долгом только `addRuns > 0`,
+    // такой день молча выпадает из выравнивания — при живом вердикте о нём. Ровно на этом
+    // сломались `atex-pp-4743-settle-fills-days` и `atex-pp-4745-one-underfill-measure`.
+    var noRuns = Object.create(Controller.prototype);
+    var seenSids = null, step = 0;
+    noRuns.slitters = [{ id: SID }];
+    noRuns.cuts = [];
+    noRuns.overfilledDaysOf = function() { return []; };
+    noRuns.plannerUnderfilledDays = function() {
+        return step === 0 ? [{ key: SID + '|0', slitterId: SID, day: 0 }] : [];   // без addRuns
+    };
+    noRuns.levelDayLoad = function(sids) { seenSids = sids.slice(); step++; return Promise.resolve(true); };
+    noRuns.warnOverfilledDays = function() {};
+    return noRuns.levelOverfilledAfterWrite({ withinSlitterIds: [SID] }, true).then(function() {
+        assert(seenSids && String(seenSids) === String([SID]),
+            'H. недобранный день БЕЗ `addRuns` — тоже долг: выравнивание его берёт (контракт #4743/#4745)',
+            'станки: ' + JSON.stringify(seenSids));
+    });
+}).then(function() {
     // ── C. ДОЛГ НЕ УБЫВАЕТ — ОСТАНАВЛИВАЕМСЯ ────────────────────────────────────────────────
     // «Разгрузить нечем» (в дне одни 🔒 по одному проходу, проход неделим) — законный ответ.
     // Цикл здесь недопустим: до #4751 от него защищал флаг, теперь — мерка долга.

@@ -25231,16 +25231,22 @@
             // одна: минуты сверх потолка плюс проходы недобора. По ней решается и «кого выравнивать»
             // (станки с ненулевым долгом), и «продолжать ли» (долг обязан СТРОГО убывать).
             // → { sids: [станок…], score: число }.
+            // ЧТО СЧИТАЕТСЯ ДОЛГОМ. Недобранный станко-день — сам по себе: вердикт мерки о том, что
+            // день можно набить плотнее (#4743/#4745), а `addRuns` (#4749) — лишь ВЕС этого дня для
+            // сравнения проходов между собой. Требовать `addRuns > 0` для входа в выравнивание
+            // нельзя: мерка вправе назвать день, не называя числа, и тогда день остался бы
+            // недобранным при живом вердикте о нём.
             function levelDebt() {
-                var underBySid = {};
+                var underRuns = {}, underDays = {};
                 if (typeof self.plannerUnderfilledDays === 'function') {
                     // #4745: вердикт УПАКОВЩИКА (`ops.dayFill`), а не второй расчёт: чиним ровно то, о
                     // чём говорим, и не гоняем выравнивание по дням, которые он считает полными.
                     // #4749: с ПРАВАМИ этого действия — иначе мерка меряет план, который записать нельзя.
-                    self.plannerUnderfilledDays({ manualShift: moveScope && moveScope.manualShift })
+                    (self.plannerUnderfilledDays({ manualShift: moveScope && moveScope.manualShift }) || [])
                         .forEach(function(u) {
-                            var k = String(u.slitterId);
-                            underBySid[k] = (underBySid[k] || 0) + (Number(u.addRuns) || 0);
+                            var k = String(u && u.slitterId);
+                            underDays[k] = (underDays[k] || 0) + 1;
+                            underRuns[k] = (underRuns[k] || 0) + (Number(u && u.addRuns) || 0);
                         });
                 }
                 var sids = [], score = 0;
@@ -25248,9 +25254,12 @@
                     if (sid === '') return;
                     var days = self.overfilledDaysOf(sid, levelOpts) || [];
                     var overMin = days.reduce(function(s, d) { return s + (Number(d && d.overMin) || 0); }, 0);
-                    var addRuns = Number(underBySid[sid]) || 0;
-                    if (days.length || addRuns > 0) sids.push(sid);
-                    score += overMin + addRuns;
+                    var nUnder = Number(underDays[sid]) || 0;
+                    var addRuns = Number(underRuns[sid]) || 0;
+                    if (days.length || nUnder > 0) sids.push(sid);
+                    // Вес недобора — проходы, если мерка их назвала, иначе сам факт дня: без этого
+                    // день без числа давал бы нулевой долг, и цикл счёл бы план сошедшимся.
+                    score += overMin + (addRuns > 0 ? addRuns : nUnder);
                 });
                 return { sids: sids, score: score };
             }
