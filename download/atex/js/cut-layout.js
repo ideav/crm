@@ -277,8 +277,8 @@
   // консолидируется, разных заказов — нет (иначе #3684). Затем ограниченный перебор
   // слияний (B&B по парам): две раскладки сливаются в комбо ТОЛЬКО если это
   // лексикографически снижает цель (прогоны → скрап → отход) — заказ не дробится,
-  // объединение лишь по выгоде. Комбо ограничено (#3472 п.3): не более
-  // options.maxWidthsPerCut (5) ширин и options.maxPositionsPerCut (3) заказов.
+  // объединение лишь по выгоде. Комбо ограничено (#3472 п.3) ДВУМЯ НЕСВЯЗАННЫМИ проверками:
+  // не более options.maxWidthsPerCut (5) ШИРИН и не более options.maxOrdersPerCut (3) ЗАКАЗОВ.
   // Позиции шире джамбо → skipped. Вход не мутирует.
   function planLayouts(input){
     input = input || {};
@@ -288,14 +288,42 @@
     var windowDays = (opts.windowDays == null) ? 3 : opts.windowDays;
     var tolerance = toNumber(opts.tolerance);
     // #3472 п.3: разумные ограничения комбо-резки — отсекают бессмысленные слияния и
-    // держат резку дружелюбной к оператору/упаковщику. Дефолты: ≤5 ширин, ≤3 позиций.
+    // держат резку дружелюбной к оператору/упаковщику.
+    //
+    // ЭТО ДВЕ НЕСВЯЗАННЫЕ ПРОВЕРКИ (решение заказчика 14.08.2026), и ни одна не подразумевает
+    // другую:
+    //   • «≤5 ШИРИН» — про раскрой: разношёрстный набор ножей хуже читается оператором;
+    //   • «≤3 ЗАКАЗОВ» — про разборку: сколько заказов упаковщик разбирает с одной резки.
+    // Раньше второй лимит считал ПОЗИЦИИ (`positionsCovered`), а seed менеджерской модели — это
+    // «1 заказ = 1 резка по ключу (заказ, ШИРИНА)»: каждая ширина живёт своей позицией. Поэтому
+    // «≤3 позиций» ограничивал и число ШИРИН — даже когда все они принадлежат ОДНОМУ заказу и
+    // никакого смешения заказов нет, а `maxWidthsPerCut` до дела почти не доходил.
+    // Позиция БЕЗ `orderId` (склад, происхождение неизвестно) считается СВОИМ заказом: лимит
+    // остаётся таким же тугим, каким был, и входы без заказов поведения не меняют.
     // 0/Infinity → ограничение снято (toNumber делает не-конечное 0).
     var maxWidths = (opts.maxWidthsPerCut == null) ? 5 : toNumber(opts.maxWidthsPerCut);
-    var maxPositions = (opts.maxPositionsPerCut == null) ? 3 : toNumber(opts.maxPositionsPerCut);
+    // `maxPositionsPerCut` — прежнее имя того же лимита: принимается, чтобы старые вызывающие и
+    // тесты не сломались. Новое имя называет то, что считается на самом деле.
+    var maxOrdersOpt = (opts.maxOrdersPerCut == null) ? opts.maxPositionsPerCut : opts.maxOrdersPerCut;
+    var maxOrders = (maxOrdersOpt == null) ? 3 : toNumber(maxOrdersOpt);
     var positions = (input.positions || []).map(function(p){
       return { id: p.id, orderId: p.orderId, width: toNumber(p.width), qty: toNumber(p.qty),
                dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity, stockable: !!p.stockable };
     });
+    // Заказ позиции для лимита выше. Нет `orderId` → сама позиция и есть свой заказ.
+    var orderOfPosition = {};
+    positions.forEach(function(p){
+      var o = (p.orderId == null || String(p.orderId) === '') ? ('#pos:' + p.id) : String(p.orderId);
+      orderOfPosition[String(p.id)] = o;
+    });
+    function ordersInCombo(positionIds){
+      var seen = {}, n = 0;
+      (positionIds || []).forEach(function(pid){
+        var o = orderOfPosition[String(pid)] || ('#pos:' + pid);
+        if (!seen[o]) { seen[o] = 1; n++; }
+      });
+      return n;
+    }
 
     var MERGE_BUILD_LIMIT = 20000;
     var buildCalls = 0;
@@ -366,9 +394,10 @@
             var merged = buildGroup(gi.demands.concat(gj.demands));
             if (merged.overflow.length) continue;                 // не влезли вместе → не слить
             if (merged.positionsCovered.length < gi.positionsCovered.length + gj.positionsCovered.length) continue;
-            // #3472 п.3: комбо-резка — не более maxWidths ширин и maxPositions заказов.
+            // #3472 п.3: комбо-резка — не более maxWidths ШИРИН и maxOrders ЗАКАЗОВ. Проверки
+            // независимы: набор ножей судится по ширинам, разборка упаковщиком — по заказам.
             if (maxWidths > 0 && Object.keys(merged.demandByWidth).length > maxWidths) continue;
-            if (maxPositions > 0 && merged.positionsCovered.length > maxPositions) continue;
+            if (maxOrders > 0 && ordersInCombo(merged.positionsCovered) > maxOrders) continue;
             var dr = merged.runs - (gi.runs + gj.runs);
             var ds = round3(merged.scrap - (gi.scrap + gj.scrap));
             var dw = round3(merged.waste - (gi.waste + gj.waste));   // #3706: отход (трим)
