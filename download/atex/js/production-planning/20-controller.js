@@ -12242,14 +12242,17 @@
     // минуты перебора и задание, которым день кончается.
     // #4531: принимает ОДИН станок (ручные пути ↑↓ и «↻ Пересчитать наладку») или СПИСОК станков
     // (шлюз записи плана) и в обоих случаях говорит ОДНИМ сообщением.
+    // #4765: `opts` — та же рамка, которой день назвали переполненным (дни ручного действия
+    // `dayKeys` + его права `manual`). Предупреждение обязано смотреть на ТОТ ЖЕ набор заданий:
+    // иначе про день за пределами окна [С;По] сказать нечего, хотя чинить его только что ходили.
     // → массив [{ slitterId, dayOffset, endMin, overMin, capMin, cutId, seq }] (он же уходит в тост).
-    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterIds) {
+    AtexProductionPlanning.prototype.warnOverfilledDays = function(slitterIds, opts) {
         var self = this;
         var ids = (Array.isArray(slitterIds) ? slitterIds : [slitterIds])
             .map(function(v) { return String(v == null ? '' : v); });
         var days = [];
         ids.forEach(function(sid) {
-            (self.overfilledDaysOf(sid) || []).forEach(function(d) {
+            (self.overfilledDaysOf(sid, opts) || []).forEach(function(d) {
                 var row = {};
                 Object.keys(d).forEach(function(k) { if (k !== 'cut') row[k] = d[k]; });
                 row.slitterId = sid;
@@ -12357,11 +12360,21 @@
         if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
+                // #4765 (ТЗ §15, «одна арифметика» — #4499): ИТОГ МЕРЯЕМ ТОЙ ЖЕ МЕРКОЙ, ЧТО И ЗАДАЧУ.
+                // Выше день назван переполненным по `overfilledDaysOf(sid, opts)`: `opts` несёт дни
+                // ручного действия (`dayKeys`, #4582) и его права (`manual`, #4574) — без них состав
+                // дня берётся из окна фильтра [С;По] и без замороженных дней. Здесь же итог
+                // проверялся БЕЗ `opts` — другой мерой на том же станке, и она о тех днях не знала
+                // вовсе. Оператор получал «День выровнен по смене» про день, оставшийся за потолком,
+                // а `warnOverfilledDays` не звучал ни разу (боевая ateh1 16.08.2026: окно [12.08;16.08],
+                // Станок 1, Пн 17.08 — 497 мин при потолке 455, вход мерки «+42», выход «чисто»;
+                // в журнале «⚖️ #4751: выравнивание сошлось на долге 15» и НИ ОДНОЙ строки #4408,
+                // issue #4765).
                 var left = [];
                 sids.forEach(function(sid) {
-                    if (self.overfilledDaysOf(sid).length) left.push(sid);
+                    if (self.overfilledDaysOf(sid, opts).length) left.push(sid);
                 });
-                if (left.length) { left.forEach(function(sid) { self.warnOverfilledDays(sid); }); return !!changed; }
+                if (left.length) { left.forEach(function(sid) { self.warnOverfilledDays(sid, opts); }); return !!changed; }
                 self.notify('День выровнен по смене: ' + label
                     + ' — лишнее разбито по потолку и уехало вперёд, недобранное добрано, порядок сохранён', 'success');
                 return !!changed;
