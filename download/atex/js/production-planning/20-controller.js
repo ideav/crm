@@ -11028,6 +11028,33 @@
             if (moveScope && moveScope.manualShift) {
                 (levelOpts = levelOpts || {}).manualShift = moveScope.manualShift;
             }
+            // #4768 (ТЗ §15): В ВЫРАВНИВАНИЕ ЕДЕТ И ЦЕЛЬ РУЧНОГО ДЕЙСТВИЯ, ОДНО ПРАВО ЕЁ ОТМЕНЯЕТ.
+            // `manualShift` (#4736) снимает якорь дня со ВСЕГО хвоста очереди, и удерживает
+            // перенесённое задание в выбранном дне единственная вещь — исключение «задание, которое
+            // действие несёт САМО» в `buildSequenceOps`. Читает оно поля цели (`pinCutIds` /
+            // `weightPositionCutIds` → `carriedNow`), а сюда эти поля не ехали: выравнивание строит
+            // свой scope заново, перенесённое попадает в собственный хвост, теряет якорь и падает на
+            // пол паровоза — первый день после последнего отработанного (#4743). Боевое 14.08.2026,
+            // ateh: заказ 4752 (задание 695159) положен в 17.08 записью 14:10:41, а запись
+            // выравнивания 14:10:50 увела его в 14.08 («Журнал» 665850: «PLAN_MOVE 695159 — день
+            // 17.08.2026 → 14.08.2026», creates 0 / deletes 0).
+            //
+            // РЕЗЕРВ «ЦЕЛИКОМ» (#4488, `wholeDayCutIds`) сюда по-прежнему не едет: день обязан уметь
+            // разорвать перенесённое задание по потолку и увезти остаток продолжением (#4693), а
+            // резерв требует ПОЛНОГО места в дне. Едет ровно выбранный день — якорь (`pinCutIds` →
+            // временный c.fixed → effAnchor) и место в дне (`pinDayPosByCut`), либо замок дня
+            // «по весу» (`weightPositionCutIds` → dayLockByCut), которым выражен тот же выбор.
+            if (moveScope) {
+                if (moveScope.pinCutIds && moveScope.pinCutIds.length) {
+                    (levelOpts = levelOpts || {}).pinCutIds = moveScope.pinCutIds.slice();
+                }
+                if (moveScope.pinDayPosByCut) {
+                    (levelOpts = levelOpts || {}).pinDayPosByCut = moveScope.pinDayPosByCut;
+                }
+                if (moveScope.weightPositionCutIds && moveScope.weightPositionCutIds.length) {
+                    (levelOpts = levelOpts || {}).weightPositionCutIds = moveScope.weightPositionCutIds.slice();
+                }
+            }
             // #4555: «отсюда и до конца» — прошлое станка не трогаем и при выравнивании.
             if (moveScope && moveScope.fromCutId != null && String(moveScope.fromCutId) !== '') {
                 (levelOpts = levelOpts || {}).fromCutId = String(moveScope.fromCutId);
@@ -12358,6 +12385,18 @@
         // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
         // задания по потолку (#4467/#4512), а не вытеснением зафиксированного.
         if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
+        // #4768 (ТЗ §15): ДЕНЬ, ВЫБРАННЫЙ ОПЕРАТОРОМ, ДЕРЖИТСЯ И ЗДЕСЬ. Тот же признак, которым его
+        // держит сама запись действия (`pinCutIds` → временный c.fixed → effAnchor в
+        // `buildSequenceOps`; `weightPositionCutIds` → замок дня «по весу», #4221/#4506). Без него
+        // `manualShift` снимал якорь и с перенесённого задания тоже — и выравнивание уносило его
+        // из выбранного дня в первый день после отработанного (#4743, боевое 14.08.2026: заказ
+        // 4752 из 17.08 в 14.08). Резерв «целиком» (#4488) сюда не едет: разрыв по потолку
+        // остаётся у дня (#4693).
+        if (opts && opts.pinCutIds && opts.pinCutIds.length) scope.pinCutIds = opts.pinCutIds.slice();
+        if (opts && opts.pinDayPosByCut) scope.pinDayPosByCut = opts.pinDayPosByCut;
+        if (opts && opts.weightPositionCutIds && opts.weightPositionCutIds.length) {
+            scope.weightPositionCutIds = opts.weightPositionCutIds.slice();
+        }
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
                 // #4765 (ТЗ §15, «одна арифметика» — #4499): ИТОГ МЕРЯЕМ ТОЙ ЖЕ МЕРКОЙ, ЧТО И ЗАДАЧУ.
