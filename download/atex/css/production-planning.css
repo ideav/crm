@@ -1290,6 +1290,13 @@
 .atex-pp-dev-shift-closed .atex-pp-dev-group-title { color: var(--pp-warn); }
 /* #4596: события смен не прочитались — предупреждение, а не обычная подсказка. */
 .atex-pp-dev-warn { color: var(--pp-danger, #c0392b); }
+/* #4774: «Дэшборд N/M» стоит в одном ряду с красными «Отклонениями», а говорит о другом —
+   о расхождениях, которые видно по соседним рабочим местам (упаковка, втулкорез). Поэтому он
+   не красный: сигнал информационный, чинят его не здесь. */
+.atex-pp-dash-btn { background: var(--pp-info-bg); border-color: var(--pp-info-text); color: var(--pp-info-text); }
+.atex-pp-dash-btn:hover { background: var(--pp-info-text); color: var(--pp-bg); }
+.atex-pp-dash-pack .atex-pp-dev-group-title,
+.atex-pp-dash-sleeve .atex-pp-dev-group-title { color: var(--pp-info-text); }
 .atex-pp-dev-list {
     margin: 0;
     padding: 0 0 0 18px;
