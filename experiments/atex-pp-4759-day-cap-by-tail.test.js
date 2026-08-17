@@ -1,4 +1,4 @@
-// #4759 — ПОТОЛОК ДНЯ ВЫБИРАЕТ ЕГО ХВОСТ.
+// #4759 — ПОТОЛОК ДНЯ ВЫБИРАЕТ ЕГО ХВОСТ (п.1) · ПЕРЕБОР РАДИ 🔒 ОБЪЯВЛЯЕТ РАСКЛАДКА (п.2).
 //
 // РЕШЕНИЕ ЗАКАЗЧИКА (17.08.2026, дословно): «Если на конец дня приходится наладка ножей или смена
 // сырья, то потолок 450+MAX_OVERWORK_TUNE_MN. Если же на конец дня приходится резка, то потолок
@@ -9,7 +9,9 @@
 // (`availFor(day,'cuts')` для проходов, `availFor(day,'tune')` для хвоста настройки, #3743/#3805/
 // #3847), а судили его ВСЕ мерки потолком резки: законный день, кончающийся наладкой, объявлялся
 // нарушением на 1…5 минут. На корпусе фаззера (120 планов × 5 входов) это давало 70 срабатываний
-// DAY_CAPACITY; после правила осталось 8 — и все они про ДРУГОЕ (перебор при 🔒 в дне, #4759 п.2).
+// DAY_CAPACITY; после правила осталось 8 — все они про ДРУГОЕ: день уходил за потолок РАДИ 🔒,
+// которую вытеснять нельзя (#4512), а вердикта об этом наружу не выходило. П.2 закрыл и их (8 → 0):
+// объявляет перебор законным та самая строка упаковщика, которая его создаёт (§5 ниже).
 //
 // Run with: node experiments/atex-pp-4759-day-cap-by-tail.test.js
 
@@ -115,6 +117,88 @@ eq(vCuts.filter(function(v) { return v.rule === 'DAY_CAPACITY'; }).length, 1,
     var tails = Object.keys(ops.dayTail).map(function(k) { return ops.dayTail[k]; });
     assert(tails.every(function(t) { return t === 'cuts' || t === 'tune'; }),
         '#4759: значения dayTail — только «cuts» или «tune»');
+})();
+
+// ── 5) п.2: ПЕРЕБОР РАДИ 🔒 ОБЪЯВЛЯЕТ САМА РАСКЛАДКА ──────────────────────────────────────────
+// Замок из дня не выкидываем (#4512): когда в остаток дня не влезает ни одного прохода, голова 🔒
+// всё равно остаётся в нём — одним проходом, — и день законно длиннее смены. Кто так решил, тот и
+// обязан сказать: раскладка отдаёт `ops.fixedDayHeld` со своим станком и днём, а страж по этому
+// вердикту молчит. Раньше вердикт не выходил наружу вовсе, и восемь оставшихся срабатываний
+// фаззера #4759 были именно эти дни.
+//
+// Сцена: две 🔒 на один день. Первая занимает почти всю смену, второй остаётся 10 минут при
+// настройке 45 — уехать ей нельзя, поэтому день уходит за потолок.
+(function () {
+    var D0 = Math.floor(BASE / 1000) + 8 * 3600;
+    function pair(lockSecond) {
+        return [
+            { id: 'a', slitter: { id: 'm1' }, materialId: 'MW308', winding: 'IN', batchId: 'B1',
+              knifeWidths: [59, 59], knifeCount: 2, rollerWidth: 59, plannedRuns: 40,
+              planDate: String(D0), storedKnifeSetupMin: 30, storedMaterialWindingMin: 15,
+              storedCutAndLeaderMin: 400, firstPartId: 'a', orderId: 'O1', fixed: true },
+            { id: 'b', slitter: { id: 'm1' }, materialId: 'MR194', winding: 'OUT', batchId: 'B2',
+              knifeWidths: [33, 33], knifeCount: 2, rollerWidth: 33, plannedRuns: 13,
+              planDate: String(D0), storedKnifeSetupMin: 30, storedMaterialWindingMin: 15,
+              storedCutAndLeaderMin: 65, firstPartId: 'b', orderId: 'O2', fixed: !!lockSecond }
+        ];
+    }
+    function layout(lockSecond) {
+        return planning.planCutOperations(pair(lockSecond), {
+            planBaseMidnightMs: BASE, weights: {}, times: { KNIFE: 30, MATERIAL_WINDING: 15, BETWEEN_CUTS: 0 },
+            dayStartMin: 480, dayEndMin: 970, dayEndHourMin: 990,
+            maxOverworkCutsMin: 5, maxOverworkTuneMin: 10, lunchStartMin: 740, lunchDurationMin: 40,
+            firstCutSetup: true, prevSetupBySlitter: {}, perPassByCut: { a: 10, b: 5 },
+            slitterIds: ['m1'], dueDayByCut: {}, dueKeyByCut: {},
+            dayAnchorByCut: lockSecond ? { a: 0, b: 0 } : { a: 0 },
+            preserveOrder: true, gapFill: true, intraDayResequence: true
+        });
+    }
+    // Ключ станко-дня стража — «станок|ГГГГММДД»; у раскладки — «станок|смещение дня».
+    var DAY0 = 20260818;
+    function guardCtx(ops, held) {
+        var load = {}, caps = {};
+        Object.keys(ops.dayLoad || {}).forEach(function(k) {
+            var sid = k.split('|')[0], off = Number(k.split('|')[1]);
+            if (off !== 0) return;                       // судим первый день — тот, где стои́т 🔒
+            load[sid + '|' + DAY0] = ops.dayLoad[k];
+            caps[sid + '|' + DAY0] = (ops.dayCapMin || {})[k];
+        });
+        return {
+            dayLoadMinutes: function() { return load; },
+            dayCapacityMin: function(key) { return key != null && caps[key] != null ? caps[key] : 455; },
+            fixedHeldDays: function() { return held; },
+            dayKeyOfTs: function() { return null; }
+        };
+    }
+    function capViolations(ops, held) {
+        return (planning.checkPlanInvariants({ updates: [], creates: [], deletes: [] },
+            guardCtx(ops, held), 'auto') || []).filter(function(v) { return v.rule === 'DAY_CAPACITY'; });
+    }
+
+    var withLock = layout(true);
+    var heldRows = withLock.fixedDayHeld || [];
+    eq(heldRows.length, 1, '#4759 п.2: раскладка объявила ОДИН станко-день, ушедший за потолок ради 🔒');
+    eq([heldRows[0] && heldRows[0].slitterId, heldRows[0] && heldRows[0].fixedDay, heldRows[0] && heldRows[0].cutId],
+        ['m1', 0, 'b'],
+        '#4759 п.2: в вердикте СВОЙ станок раскладки, день и задание — стражу больше нечего домысливать');
+    assert(withLock.dayLoad['m1|0'] > withLock.dayCapMin['m1|0'],
+        '#4759 п.2: день правда за потолком (' + withLock.dayLoad['m1|0'] + ' при ' + withLock.dayCapMin['m1|0'] + ')');
+
+    // Вердикт объявлен → страж молчит; тот же день без вердикта — нарушение. Значит молчание даёт
+    // именно исключение #4512, а не случайно сошедшаяся арифметика.
+    var heldKeys = heldRows.map(function(h) { return String(h.slitterId) + '|' + DAY0; });
+    eq(capViolations(withLock, heldKeys).length, 0,
+        '#4759 п.2: страж DAY_CAPACITY молчит о дне, который держит 🔒');
+    eq(capViolations(withLock, []).length, 1,
+        '#4759 п.2: тот же день без вердикта раскладки страж называет переполненным');
+
+    // Контроль: та же пара, но второе задание НЕ зафиксировано — уезжает само, дню перебора нет,
+    // и объявлять нечего. Индульгенция не выдаётся «на всякий случай».
+    var noLock = layout(false);
+    eq((noLock.fixedDayHeld || []).length, 0,
+        '#4759 п.2: без 🔒 задание уехало само — вердикта о законном переборе нет');
+    assert(noLock.dayLoad['m1|0'] <= noLock.dayCapMin['m1|0'],
+        '#4759 п.2: и сам день остался в своём потолке (' + noLock.dayLoad['m1|0'] + ' при ' + noLock.dayCapMin['m1|0'] + ')');
 })();
 
 console.log('\n' + passed + '/' + total + ' проверок пройдено');

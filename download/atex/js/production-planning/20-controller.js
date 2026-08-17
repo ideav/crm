@@ -10495,7 +10495,6 @@
               }
             : null;
         var fixedDayLost = [];   // #4434 п.1: 🔒, которым не удалось удержать свой день (день нерабочий)
-        var fixedDayHeld = [];   // #4512: 🔒, УДЕРЖАННЫЕ в своём дне — их день вправе уйти за потолок
         // #4434 п.2: задание, которое ВИДНО в очереди, но НЕ попало во вход планировщика (цепочка
         // прошлых дней #4294, чужой станок при переносе «в пределах станка»), стои́т своим сегментом
         // внутри окна и физически занимает станок. Без резерва упаковщик набивал тот же день с 08:00
@@ -10547,12 +10546,6 @@
             onFixedDayLost: function(cutId, fixedDay, placedDay) {
                 fixedDayLost.push({ cutId: String(cutId), fixedDay: fixedDay, placedDay: placedDay });
             },
-            // #4512 (решение заказчика 30.07.2026): 🔒 УДЕРЖАНА в своём дне — вытеснять её нельзя,
-            // поэтому день вправе уйти за потолок. Вердикт нужен стражу DAY_CAPACITY, чтобы не
-            // объявлять такой перебор нарушением (его сообщения видит оператор, #4475).
-            onFixedDayHeld: function(cutId, fixedDay) {
-                fixedDayHeld.push({ cutId: String(cutId), fixedDay: fixedDay });
-            },
             firstCutSetup: true,   // #3669 п.2: первая задача очереди резервирует настройку ножей
             prevSetupBySlitter: prevSetupBySlitter,   // #3876: станок в отпуске обнулён; #4300/#4312: заправка из заданий прошлых дней
             gapFill: true,   // #3739: не оставлять простоев в смене — тянуть будущие резки в хвост, нахлёст разрешён
@@ -10583,7 +10576,11 @@
         }
         // #4434 п.1: замок дня не соблюдён — говорим оператору (в консоли уже кричит движок).
         if (fixedDayLost.length && ops) ops.fixedDayLost = fixedDayLost;
-        if (fixedDayHeld.length && ops) ops.fixedDayHeld = fixedDayHeld;   // #4512
+        // #4512/#4759 п.2: «🔒 удержана, перебор дня законен» приходит в ops.fixedDayHeld от САМОЙ
+        // раскладки — со станком и ключом дня. Сюда этот вердикт больше не переписывается: колбэк
+        // срабатывал и в ПРОБНЫХ раскладках (рескью просрочки перебирает станки-кандидаты,
+        // #4118/#4203), и день, законный лишь в отвергнутом варианте, освобождался от суда в
+        // записанном. Тот же разбор двух потребителей — у fixedDayLost ниже (#4525).
         // #4525: у записей о снятом замке ДВА потребителя, и вопросы у них разные.
         //   • СТРАЖ (#4512, `isFixedReleasedCut`) спрашивает «законно ли упаковщик отпустил этот
         //     замок» — ему нужен ПОЛНЫЙ список движка, включая пробные раскладки: сузив его, мы
@@ -10665,18 +10662,15 @@
                     for (var i = 0; i < lost.length; i++) if (String(lost[i].cutId) === String(id)) return true;
                     return false;
                 },
-                // #4512: станко-дни, где 🔒 УДЕРЖАНА (вытеснять нельзя) — их перебор законен.
-                // Ключ — как у dayLoadMinutes («станок|ГГГГММДД»): станок берём по самому заданию,
-                // упаковщик его не знает.
+                // #4512/#4759 п.2: станко-дни, где 🔒 УДЕРЖАНА за счёт потолка (вытеснять нельзя) —
+                // их перебор законен. Ключ («станок|ГГГГММДД») собираем из вердикта раскладки тем же
+                // переводом смещения дня, что и занятость: станок в вердикте её собственный, а не
+                // взятый по заданию, — при переназначении станка (#4001) это разные станки.
                 fixedHeldDays: function(){
-                    var heldRows = (ops && ops.fixedDayHeld) || [];
-                    if (!heldRows.length) return [];
-                    var sidByCut = {};
-                    (cuts || []).forEach(function(c){ if (c && c.id != null) sidByCut[String(c.id)] = String(c.slitterId == null ? '' : c.slitterId); });
                     var out = [];
-                    heldRows.forEach(function(h){
-                        var sid = sidByCut[String(h.cutId)];
-                        if (sid == null) return;
+                    ((ops && ops.fixedDayHeld) || []).forEach(function(h){
+                        var sid = String(h.slitterId == null ? '' : h.slitterId);
+                        if (sid === '') return;
                         var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(h.fixedDay) * 86400000) / 1000)));
                         if (dayKey == null || dayKey === Infinity) return;
                         var key = sid + '|' + dayKey;
