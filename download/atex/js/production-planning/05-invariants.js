@@ -613,8 +613,13 @@
                 var loadFn = (ctx && typeof ctx.dayLoadMinutes === 'function') ? ctx.dayLoadMinutes : null;
                 var capFn = (ctx && typeof ctx.dayCapacityMin === 'function') ? ctx.dayCapacityMin : null;
                 if (!loadFn || !capFn) return [];
-                var cap = Number(capFn());
-                if (!isFinite(cap) || cap <= 0) return [];
+                // #4759 (решение заказчика 17.08.2026): ПОТОЛОК У КАЖДОГО ДНЯ СВОЙ — его выбирает
+                // хвост дня: наладка ножей или смена сырья на конце → 450+MAX_OVERWORK_TUNE_MN,
+                // резка → 450+MAX_OVERWORK_CUTS_MN. Прежде страж судил все дни потолком РЕЗКИ и
+                // потому объявлял нарушением законный день, кончающийся наладкой (14 из 18 выживших
+                // срабатываний фаззера лежали в зазоре 456…460). Потолок спрашиваем ПО СТАНКО-ДНЮ;
+                // ответ даёт контроллер по `ops.dayTail` — раскладке того же упаковщика.
+                if (!isFinite(Number(capFn(null))) || Number(capFn(null)) <= 0) return [];
                 var load = loadFn() || {};
                 var heldFn = (ctx && typeof ctx.fixedHeldDays === 'function') ? ctx.fixedHeldDays : null;
                 var held = {};
@@ -646,6 +651,8 @@
                 var out = [];
                 Object.keys(load).forEach(function(key) {
                     var min = Number(load[key]);
+                    var cap = Number(capFn(key));    // #4759: потолок ЭТОГО дня — по тому, чем он кончается
+                    if (!isFinite(cap) || cap <= 0) return;
                     if (!isFinite(min) || min <= cap + 1e-6) return;
                     if (held[String(key)]) return;   // #4512: перебор из-за неснимаемой 🔒 — законен
                     if (stale[String(key)]) return;  // #4759: операции дня сняты — число уже не про него

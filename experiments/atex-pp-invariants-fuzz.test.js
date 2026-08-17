@@ -208,7 +208,19 @@ function ruleCtx(c, ops) {
             });
             return out;
         },
-        dayCapacityMin: function() { return 455; },
+        // #4759 (решение заказчика 17.08.2026): потолок дня выбирает ЕГО ХВОСТ — наладка ножей или
+        // смена сырья на конце → 450+MAX_OVERWORK_TUNE_MN, резка → 450+MAX_OVERWORK_CUTS_MN. Число
+        // считает САМА РАСКЛАДКА (`ops.dayCapMin`) — здесь его только переводят в ключ дня, ровно
+        // как в контроллере: харнесс обязан судить правило тем же числом, что и боевой путь записи.
+        dayCapacityMin: function(key) {
+            var caps = (ops && ops.dayCapMin) || {};
+            var out = null;
+            Object.keys(caps).forEach(function(k) {
+                var p = k.split('|');
+                if (p[0] + '|' + dayKeyOfOffset(Number(p[1])) === String(key)) out = caps[k];
+            });
+            return out != null ? out : 455;
+        },
         fixedHeldDays: function() { return Object.keys(held); }
     };
 }

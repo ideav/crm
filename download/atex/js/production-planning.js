@@ -4012,8 +4012,13 @@
                 var loadFn = (ctx && typeof ctx.dayLoadMinutes === 'function') ? ctx.dayLoadMinutes : null;
                 var capFn = (ctx && typeof ctx.dayCapacityMin === 'function') ? ctx.dayCapacityMin : null;
                 if (!loadFn || !capFn) return [];
-                var cap = Number(capFn());
-                if (!isFinite(cap) || cap <= 0) return [];
+                // #4759 (решение заказчика 17.08.2026): ПОТОЛОК У КАЖДОГО ДНЯ СВОЙ — его выбирает
+                // хвост дня: наладка ножей или смена сырья на конце → 450+MAX_OVERWORK_TUNE_MN,
+                // резка → 450+MAX_OVERWORK_CUTS_MN. Прежде страж судил все дни потолком РЕЗКИ и
+                // потому объявлял нарушением законный день, кончающийся наладкой (14 из 18 выживших
+                // срабатываний фаззера лежали в зазоре 456…460). Потолок спрашиваем ПО СТАНКО-ДНЮ;
+                // ответ даёт контроллер по `ops.dayTail` — раскладке того же упаковщика.
+                if (!isFinite(Number(capFn(null))) || Number(capFn(null)) <= 0) return [];
                 var load = loadFn() || {};
                 var heldFn = (ctx && typeof ctx.fixedHeldDays === 'function') ? ctx.fixedHeldDays : null;
                 var held = {};
@@ -4045,6 +4050,8 @@
                 var out = [];
                 Object.keys(load).forEach(function(key) {
                     var min = Number(load[key]);
+                    var cap = Number(capFn(key));    // #4759: потолок ЭТОГО дня — по тому, чем он кончается
+                    if (!isFinite(cap) || cap <= 0) return;
                     if (!isFinite(min) || min <= cap + 1e-6) return;
                     if (held[String(key)]) return;   // #4512: перебор из-за неснимаемой 🔒 — законен
                     if (stale[String(key)]) return;  // #4759: операции дня сняты — число уже не про него
@@ -7015,6 +7022,34 @@
         if (!isFinite(ceil)) return 0;
         var cap = ceil - (Number(win && win.startMin) || 0) - (Number(win && win.lunchDurationMin) || 0);
         return cap > 0 ? round3(cap) : 0;
+    }
+
+    // #4759 (решение заказчика 17.08.2026, дословно): «Если на конец дня приходится наладка ножей
+    // или смена сырья, то потолок 450+MAX_OVERWORK_TUNE_MN. Если же на конец дня приходится резка,
+    // то потолок 450+MAX_OVERWORK_CUTS_MN».
+    //
+    // ПОТОЛОК У ДНЯ ОДИН, НО ЗАВИСИТ ОТ ЕГО ХВОСТА. Спор «455 или 460» был поставлен неверно: оба
+    // числа правильные, и выбор между ними делает не потребитель мерки, а САМ ДЕНЬ — тем, что
+    // пришлось на его конец. Упаковщик так и паковал (`availFor(day,'cuts')` для проходов,
+    // `availFor(day,'tune')` для хвоста настройки, #3743/#3805/#3847), а судили его ВСЕ мерки по
+    // 'cuts': законный день, кончающийся наладкой, объявлялся нарушением на 1…5 минут (14 из 18
+    // выживших срабатываний фаззера #4759 лежали ровно в зазоре 456…460).
+    //
+    // ХВОСТ ДНЯ — ПОСЛЕДНЯЯ РАБОТА В НЁМ. Несёт минуты РЕЗКИ («Резка и Лидер» / durationMin
+    // сегмента) — день кончается резкой; не несёт (сегмент-огрызок из одной наладки, 0 проходов,
+    // #4021/#4179) — настройкой. Мерок, спрашивающих про день, три (страж `DAY_CAPACITY`, мерка
+    // перебора по хранимым колонкам, мерка недобора), и хвост они определяют по своим данным —
+    // но ЧЕРЕЗ ЭТУ ФУНКЦИЮ, чтобы правило осталось одним (ТЗ §15).
+    //   tailCutMinutes — минуты РЕЗКИ последней работы дня. → 'cuts' | 'tune'
+    function dayTailKind(tailCutMinutes) {
+        return (Number(tailCutMinutes) || 0) > 0 ? 'cuts' : 'tune';
+    }
+    // #4759: ПОТОЛОК ЭТОГО ДНЯ — одной строкой из его хвоста. Мерок, спрашивающих про день, три
+    // (страж, перебор по хранимым колонкам, недобор), и ни одна не должна выбирать вид нахлёста
+    // сама: разойдись выбор — вернётся ровно тот спор «455 против 460», из-за которого заведён
+    // #4759. Раскладка отдаёт готовое число в `ops.dayCapMin`, хранимая мерка зовёт эту функцию.
+    function dayCapacityForTail(win, tailCutMinutes) {
+        return dayCapacityMinutes(win, dayTailKind(tailCutMinutes));
     }
     // Окно из опций планировщика (dayStartMin/dayEndMin/…) в вид `resolveWorkingWindow`: у движка
     // `dayEndMin` — это и есть `cutEndMin` (потолок резки, см. planCutOperations), поля называются
@@ -10791,6 +10826,11 @@
         // DAY_CAPACITY) сверяет её с потолком дня, а считать её заново в контроллере нечем — окна и
         // разбиение по дням знает только упаковщик. Ключ — «станок|смещение дня».
         var dayLoad = {};
+        // #4759: ПОТОЛОК КАЖДОГО СТАНКО-ДНЯ — рядом с его занятостью, тем же ключом. Считает его
+        // раскладка (только она знает, чем день кончается: резкой или наладкой), а мерки читают
+        // ГОТОВОЕ ЧИСЛО и не выбирают вид нахлёста сами — иначе выбор снова разъедется.
+        var dayCapMin = {};
+        var dayTail = {};   // 'cuts' | 'tune' — чем кончается день (для трассы и объяснений)
         // #4469: недоупакованные станко-дни этой раскладки (для стража DAY_FILL) — считает сам
         // упаковщик своим гейтом потолка (underfilledLayoutDays в splitMachineQueue).
         var dayFill = [];
@@ -10805,6 +10845,12 @@
             segs.forEach(function(seg){
                 var dk = String(key) + '|' + Number(seg.dayOffset);
                 dayLoad[dk] = round3((dayLoad[dk] || 0) + (Number(seg.setupMin) || 0) + (Number(seg.durationMin) || 0));
+                // #4759: ЧЕМ КОНЧАЕТСЯ ДЕНЬ — от этого зависит его потолок (наладка → нахлёст
+                // настройки, резка → нахлёст резки). Сегменты идут по возрастанию времени, поэтому
+                // хвост дня — последний записанный сюда. Судить упаковщика можно только его же
+                // раскладкой: снаружи хвост дня не восстановить.
+                dayTail[dk] = dayTailKind(seg.durationMin);
+                dayCapMin[dk] = dayCapacityForTail(windowFromOpts(opts), seg.durationMin);
             });
             (segs.unplaced || []).forEach(function(u){
                 unplaced.push({ cutId: String(u.cutId), runs: Number(u.runs) || 0, slitterId: String(key) });
@@ -10885,6 +10931,8 @@
         // #4645: unplaced — проходы, которых раскладка не разместила НИГДЕ (работа исчезла бы молча).
         return { updates: updates, creates: creates, deletes: deletes, overdue: overdueResidual,
                  placement: slotPlan ? (slotPlan.trace || null) : null, dayLoad: dayLoad, dayFill: dayFill,
+                 // #4759: потолок каждого станко-дня (и чем он кончается) — считает раскладка, мерки читают.
+                 dayCapMin: dayCapMin, dayTail: dayTail,
                  unplaced: unplaced };
     }
 
@@ -14597,6 +14645,7 @@
         workingWindowLabel: workingWindowLabel,           // #4696: окно дня одной строкой (лог/тост)
         dayCeilingMin: dayCeilingMin,                   // #4563: ЕДИНСТВЕННЫЙ потолок дня (cutEnd + нахлёст по виду)
         dayCapacityMinutes: dayCapacityMinutes,         // #4563: и ёмкость дня из него же
+        dayTailKind: dayTailKind,                       // #4759: чем кончается день — тем и меряем его потолок
         resolveOverworkLimits: resolveOverworkLimits,     // #3992: лимиты захлёста (ключи _MN)
         resolveDayDurationMin: resolveDayDurationMin,     // #3989 Фаза 2: DAY_DURATION_MN
         intraDayBreaks: intraDayBreaks,                   // #3989 Фаза 2: обед + два перерыва (ТЗ §5)
@@ -19322,8 +19371,17 @@
             rows.forEach(function(u) { seen[String(u && u.key)] = true; });
             var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
             var win = (typeof this.workingWindow === 'function') ? (this.workingWindow() || {}) : {};
+            // #4759: потолок дня НЕ ВЫБИРАЕМ — берём готовый у раскладки (`ops.dayCapMin`, ключ
+            // «станок|смещение дня», как и у мерки недобора). Дня в раскладке нет → потолок резки:
+            // он строже, и молчание не должно разрешать больше, чем разрешено.
+            var capByDay = (ops && ops.dayCapMin) || {};
+            var capCuts = dayCapacityMinutes(win, 'cuts');
             underfilledDaysFromPlan(this.cuts || [], ops,
-                { baseMidnightMs: base, capMin: dayCapacityMinutes(win, 'cuts') }).forEach(function(u) {
+                { baseMidnightMs: base,
+                  capMinFor: function(key) {
+                      var v = capByDay[String(key)];
+                      return v != null ? v : capCuts;
+                  } }).forEach(function(u) {
                 if (!seen[String(u.key)]) { seen[String(u.key)] = true; rows.push(u); }
             });
             return rows;
@@ -24891,6 +24949,20 @@
              (moveScope && moveScope.weightPositionCutIds) || []].forEach(function(list){
                 list.forEach(function(id){ manualMoveNow[String(id)] = true; });
             });
+            // #4467/#4759: карты станко-дней раскладки («станок|смещение дня») в ключи стража
+            // («станок|ГГГГММДД») — ОДНО преобразование на все такие карты (занятость и потолок),
+            // чтобы они не разъехались ключами.
+            function byDayKey(raw){
+                if (!raw) return null;
+                var out = {};
+                Object.keys(raw).forEach(function(k){
+                    var parts = String(k).split('|');
+                    var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(parts[1]) * 86400000) / 1000)));
+                    out[parts[0] + '|' + dayKey] = raw[k];
+                });
+                return out;
+            }
+            function dayCapMinByKey(){ return byDayKey((ops && ops.dayCapMin) || null) || {}; }
             var guard = guardPlanOps(ops, {
                 isFrozenCut: function(id){ return !!frozenNow[String(id)]; },
                 isFrozenTs: function(ts){ return freezeOn && !manualUnfrozen(String(ts)) && self.dayIsFrozen(String(ts)); },
@@ -24932,18 +25004,18 @@
                 // и потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст настройки. Ровно
                 // та арифметика, что стои́т в бейдже «(N мин)» у даты.
                 dayLoadMinutes: function(){
-                    var raw = (ops && ops.dayLoad) || null;
-                    if (!raw) return null;
-                    var out = {};
-                    Object.keys(raw).forEach(function(k){
-                        var parts = String(k).split('|');
-                        var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(parts[1]) * 86400000) / 1000)));
-                        out[parts[0] + '|' + dayKey] = raw[k];
-                    });
-                    return out;
+                    return byDayKey((ops && ops.dayLoad) || null);
                 },
-                dayCapacityMin: function(){
-                    var cap = dayCapacityMinutes(dayWindow, 'cuts');   // #4563: один потолок на всех
+                // #4759 (решение заказчика 17.08.2026): потолок дня выбирает ЕГО ХВОСТ — наладка
+                // ножей или смена сырья на конце → нахлёст НАСТРОЙКИ, резка → нахлёст РЕЗКИ. Число
+                // считает РАСКЛАДКА (`ops.dayCapMin`, ключ «станок|смещение дня») — только она знает,
+                // чем день кончился. Здесь ничего не выбирают: берут готовое, переведя ключ дня той
+                // же функцией, что и занятость. Раскладка молчит (стаб в тестах) — потолок РЕЗКИ:
+                // он строже, и молчание не должно разрешать больше, чем разрешено.
+                dayCapacityMin: function(key){
+                    var caps = dayCapMinByKey();
+                    var own = key != null ? caps[String(key)] : null;
+                    var cap = own != null ? own : dayCapacityMinutes(dayWindow, 'cuts');
                     return cap > 0 ? cap : 0;
                 },
                 // #4469: недоупакованные станко-дни раскладки (ops.dayFill: остаток дня и цена одного
@@ -26348,9 +26420,12 @@
                     maxOverworkCutsMin: Number(o.maxOverworkCutsMin) || 0,
                     maxOverworkTuneMin: Number(o.maxOverworkTuneMin) || 0 };
         if (!isFinite(win.cutEndMin) || !isFinite(base)) return [];
-        var cap = dayCapacityMinutes(win, 'cuts');          // #4563: одна функция потолка на всю систему
-        var ceil = dayCeilingMin(win, 'cuts');
-        if (!(cap > 0)) return [];
+        // #4759 (решение заказчика 17.08.2026): потолок дня выбирает ЕГО ХВОСТ. Здесь хвост читается
+        // по хранимым колонкам: последнее задание дня несёт минуты «Резка и Лидер» — день кончается
+        // резкой (потолок 450+MAX_OVERWORK_CUTS_MN); не несёт (огрызок из одной наладки, 0 проходов,
+        // #4021/#4179) — настройкой (450+MAX_OVERWORK_TUNE_MN). Правило одно на все мерки — функция
+        // `dayTailKind` движка.
+        if (!(dayCapacityMinutes(win, 'cuts') > 0)) return [];
         var byDay = {};
         (cuts || []).forEach(function(c) {
             if (!c) return;
@@ -26370,7 +26445,11 @@
                 var load = 0;
                 items.forEach(function(it) { load += it.occ; });
                 var last = items[items.length - 1];
-                return { dayOffset: d, loadMin: load,
+                // #4759: чем кончается ЭТОТ день — тем и меряем его потолок.
+                var kind = dayTailKind(stripNum(last.cut.storedCutAndLeaderMin));
+                var cap = dayCapacityMinutes(win, kind);
+                var ceil = dayCeilingMin(win, kind);
+                return { dayOffset: d, loadMin: load, tail: kind,
                          endMin: round3(win.startMin + load + win.lunchDurationMin),
                          overMin: Math.round(load - cap), capMin: ceil,
                          cutId: last.cut.id, seq: items.length, cut: last.cut,
@@ -26427,7 +26506,12 @@
     // → [{ key, slitterId, day, addRuns, addMin, donorCutId }] по возрастанию дня. Чистая.
     function underfilledDaysFromPlan(cuts, ops, opts) {
         var base = Number((opts || {}).baseMidnightMs);
-        var cap = Number((opts || {}).capMin) || 0;   // потолок дня — тот же, что у мерки перебора (#4563)
+        // #4563/#4759: потолок дня — тот же, что у мерки перебора, и у каждого дня СВОЙ: его выбирает
+        // хвост дня (наладка на конце → нахлёст настройки, резка → нахлёст резки). Вызывающий даёт
+        // `capMinFor(ключ)`; скалярный `capMin` остаётся для стаб-вызовов из тестов.
+        var capFor = typeof (opts || {}).capMinFor === 'function' ? opts.capMinFor : null;
+        var capFlat = Number((opts || {}).capMin) || 0;
+        var capOf = function(key) { return capFor ? (Number(capFor(key)) || 0) : capFlat; };
         if (!ops || !isFinite(base)) return [];
         var dayOfTs = function(tsSec) {
             var t = Number(tsSec);
@@ -26513,6 +26597,7 @@
                 // из-за которой мерку меняли в #4745.
                 var gainMin = cumPlanMin - cumStoredMin;
                 if (gainMin < 1) return;
+                var cap = capOf(k);
                 if (cap > 0 && (cap - (fullMin[k] || 0)) < gainMin) return;
                 // ДОНОР — задание, чья работа стои́т ПОЗЖЕ этого дня и потому спускается в него:
                 // первое такое по хранимому дню (в очереди это первое задание следующего дня).
