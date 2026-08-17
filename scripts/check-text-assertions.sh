@@ -63,9 +63,13 @@ done
 
 if [[ ${#hits[@]} -eq 0 ]]; then echo "новых проверок по тексту исходника нет ✓"; exit 0; fi
 
-DECL="${TEXT_ASSERT_DECLARATION:-}"
+# Разрешение ищется ТОЛЬКО по строке `TEXT-ASSERT-OK:` — в сообщениях коммитов PR либо в его теле.
+# Раньше в `DECL` сперва клали ТЕЛО PR целиком, а ниже проверяли его на непустоту: любой PR с
+# непустым описанием проходил проверку молча (боевое — PR #4771: «TEXT-ASSERT-OK найдено (<всё тело
+# PR>) — исключение заявлено, пропускаю»). Проверка была выключена для всех PR, у которых есть текст.
+DECL=""
 if git log "$MERGE_BASE"..HEAD --format='%B' 2>/dev/null | grep -q 'TEXT-ASSERT-OK:'; then DECL="объявлено в коммите"; fi
-if grep -q 'TEXT-ASSERT-OK:' <<<"$DECL"; then DECL="объявлено в PR"; fi
+if grep -q 'TEXT-ASSERT-OK:' <<<"${TEXT_ASSERT_DECLARATION:-}"; then DECL="объявлено в PR"; fi
 
 echo "НОВЫЕ проверки по ТЕКСТУ ИСХОДНИКА (${#hits[@]}):"
 printf '  %s\n' "${hits[@]}"

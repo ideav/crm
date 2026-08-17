@@ -105,6 +105,15 @@
         dayIsOverForSlitter: dayIsOverForSlitter, // #4596: день для станка кончился (прошёл или смена закрыта)
         cutDoneRuns: cutDoneRuns,               // #4564: сделано проходов («Кол-во резок факт»); null = не знаем
         settleMoveScope: settleMoveScope,       // #4574: рамки пересборки после «Урегулировать»
+        // #4770: РАМКА ДЕЙСТВИЯ — таблица полей и перенос из фазы записи в фазу выравнивания.
+        // Проверяется `experiments/atex-pp-4770-action-frame.test.js`: поле рамки, не объявленное в
+        // таблице, роняет гейт, а перенос сверяется по ней же.
+        actionFrameFields: ppActionFrameFields,
+        actionFrameIsManual: ppFrameIsManual,
+        actionFrameUndeclared: ppFrameUndeclared,
+        actionFrameDayKeys: ppFrameDayKeys,
+        levelingOptsFrom: ppLevelingOptsFrom,
+        levelingScopeFrom: ppLevelingScopeFrom,
         dayOffsetFromBase: dayOffsetFromBase,   // #3652
         dayKeyFromOffset: dayKeyFromOffset,     // #4085: индекс дня → YYYYMMDD (placementDayKey слоя размещения)
         formatPlanDayHeading: formatPlanDayHeading,
@@ -5020,20 +5029,24 @@
     // снимал #4536 — и раскладка, по которой мерили, оказывалась беднее той, которую записали бы.
     // Боевое 13.08.2026: Станок 1, Чт 13.08 — 306 мин при потолке 455, донор 684571 (🔒-продолжение
     // цепочки 678349, которой день кончается), в трассе «under: []» (issue #4749).
-    //   opts.manualShift — точка сдвига текущего ручного действия (`manualShiftFrom`).
+    // #4770: ПРАВА — ЭТО ВСЯ РАМКА, А НЕ ОДНО ПОЛЕ. Мерка строит scope тем же переносом
+    // (`ppLevelingScopeFrom`), что и запись выравнивания: цель действия (#4768) держит перенесённое
+    // задание в выбранном дне и у мерки тоже, иначе она отпускает его и объявляет недобор, которого
+    // запись не сделает. Отличие ровно одно и объявлено ниже — замок станков.
+    //   opts — рамка действия (см. `PP_ACTION_FRAME`).
     AtexProductionPlanning.prototype.plannerUnderfilledDays = function(opts) {
         if (typeof this.buildSequenceOps !== 'function') return [];
         try {
-            var scope = { trainOnly: true };
-            if (opts && opts.manualShift) scope.manualShift = opts.manualShift;
-            // #4749: и с ЗАМКОМ СТАНКОВ (#4225), как у выравнивания: паровоз задания между станками
+            // #4749: ЗАМОК СТАНКОВ (#4225), как у выравнивания: паровоз задания между станками
             // не перекидывает. Без замка раскладка мерки переносила резку на соседний станок, и на
             // том станке появлялся «недобор» из чужой работы, которого запись никогда не сделает
             // (боевое 13.08.2026: 678732 уезжала со Станка 2 на Станок 3, и день 17.08 Станка 3
-            // объявлялся недобранным на 4 прохода).
+            // объявлялся недобранным на 4 прохода). Мерка спрашивает про ВСЕ станки сразу, поэтому
+            // список здесь свой — полный, а не станки одного действия.
             var lockSids = (this.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); })
                 .filter(function(id) { return id !== ''; });
-            if (lockSids.length) scope.withinSlitterIds = lockSids;
+            var scope = ppLevelingScopeFrom(opts, lockSids);
+            if (!lockSids.length) delete scope.withinSlitterIds;
             var built = this.buildSequenceOps(this.cuts || [], PLANNING_STRATEGY_SETUP, true, scope);
             var ops = (built && built.ops) || null;
             var rows = ((ops && ops.dayFill) || []).slice();
@@ -8553,6 +8566,14 @@
             self.notify('Не удаётся переставить: у соседних заданий одно время старта — нажмите «Упорядочить»', 'info');
             return Promise.resolve(false);
         }
+        // #4772 (#4736, ТЗ §15): ↑↓ — ТА ЖЕ ПЕРЕСТАНОВКА, ЧТО И ПЕРЕТАСКИВАНИЕ, И РАМКА У НЕЁ ТА ЖЕ.
+        // Обмен местами меняет переналадку соседей, а с ней длину дня, поэтому хвост очереди за
+        // перестановкой обязан подвинуться — включая зафиксированные (🔒). Без точки сдвига
+        // выравнивание упиралось в 🔒 (день оставался за потолком, разгружать нечем), а сдвиг,
+        // упершийся в замороженный день впереди, шёл наполовину вместо честного отказа: у
+        // перетаскивания эта рамка есть с #4736, у ↑↓ её не было вовсе (issue #4772).
+        var swapShift = manualShiftFrom(this.cuts || [], [String(a.id), String(b.id)], null);
+        if (refuseManualShift(self, swapShift, 'Перестановка задания')) return Promise.resolve(false);
         this.setBusy(true);
         // #4477: обмен — две независимые записи, пишем пулом через шлюз (было — одна за другой).
         return postCutStarts(self, [{ cutId: a.id, ts: tsB, wasTs: tsA }, { cutId: b.id, ts: tsA, wasTs: tsB }])
@@ -8569,7 +8590,11 @@
                 self.render();   // обмен planStart виден сразу, дальше — авто-пересчёт
                 // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
                 if (typeof self.recalcSetupTiming !== 'function') return true;
-                return self.recalcSetupTiming(moveSid, { auto: true }).then(function() { return true; });
+                // #4772: признак ручного сдвига идёт дальше — до выравнивания дня, которому и
+                // приходится двигать хвост (в том числе 🔒), если день вырос за потолок. Ровно как у
+                // перетаскивания (`reorderCutInDay`).
+                return self.recalcSetupTiming(moveSid, { auto: true, manualShift: swapShift })
+                    .then(function() { return true; });
             })
             .catch(function(err) {
                 self.setBusy(false);
@@ -10143,8 +10168,11 @@
         var days = manualShiftFrozenDaysAhead(this.cuts || [], shift, function(ts){ return self.dayIsFrozen(ts); });
         if (!days.length) return false;
         var label = days.map(formatDayKey).filter(function(s){ return s !== ''; }).join(', ');
-        this.notify((actionLabel || 'Действие') + ' не выполнено: впереди замороженные дни (' + label
-            + ') — сдвиг очереди через них не пройдёт. Снимите заморозку этих дней и повторите', 'error');
+        // Название действия берём в кавычки: «Перенос задания не выполнено» — согласование ломается
+        // на каждом втором названии («Перестановка … не выполнено»), а форма «Действие «X» не
+        // выполнено» верна для любого.
+        this.notify('Действие «' + (actionLabel || 'Действие') + '» не выполнено: впереди замороженные дни ('
+            + label + ') — сдвиг очереди через них не пройдёт. Снимите заморозку этих дней и повторите', 'error');
         return true;
     };
 
@@ -10985,13 +11013,156 @@
     // второй круг не запускается, и «разгрузить нечем» (в дне одни 🔒 по одному проходу, проход
     // неделим) заканчивается честным предупреждением `warnOverfilledDays`, а не циклом.
     // → Promise<результат исходной операции> (значение не подменяем: вызывающие смотрят на него).
-    // #4577: у РУЧНОГО действия выравнивание дня обязано видеть переполнение и в замороженных днях,
-    // которых это действие коснулось, и уметь их переложить — иначе работу туда положили, а вынести
-    // лишнее некому (боевое: 95 мин остатка + 425 мин 🔒 = 520 при потолке 455).
-    function manualScopeDays(moveScope) {
-        return (moveScope && moveScope.unfrozenDayKeys && moveScope.unfrozenDayKeys.length)
-            ? moveScope.unfrozenDayKeys.slice() : null;
+    // ── РАМКА ДЕЙСТВИЯ: ОДИН СПИСОК ПОЛЕЙ НА ВЕСЬ ПУТЬ (#4770) ──────────────────────────────────
+    //
+    // ЗАЧЕМ. Одно нажатие оператора даёт ДВА расчёта плана: запись самого действия и выравнивание
+    // дня следом за ней. Второй обязан знать про первый всё — кого действие несёт, какие у него
+    // права и каких дней оно коснулось. Контекст между фазами передавался ПОЛЕМ ЗА ПОЛЕМ, и каждое
+    // поле стоило отдельного тикета: `manual`/`dayKeys` (#4574/#4582), `unfrozenDayKeys` (#4577),
+    // `fromCutId` (#4555), `manualShift` (#4736), права мерки (#4749), сама мерка (#4765), цель
+    // действия (#4768). Симптом всегда один: «фаза 2 не знала того, что знала фаза 1» — задание
+    // уезжало из выбранного оператором дня, день оставался за потолком, недобор мерился планом,
+    // которого никто не запишет.
+    //
+    // ТЕПЕРЬ поля объявлены ЗДЕСЬ, одной таблицей, и переносятся ПО НЕЙ:
+    //   `carry: true`  — поле едет в фазу 2; `scope` — как оно называется в раскладке выравнивания;
+    //   `carry: false` — поле остаётся в фазе записи, и рядом сказано ПОЧЕМУ.
+    // Новое поле рамки, не объявленное в таблице, роняет гейт
+    // (`experiments/atex-pp-4770-action-frame.test.js`): решение «едет или нет» принимается ОДИН раз
+    // и вместе с причиной. Свод «кому что разрешено» — docs/atex_planning_rule_matrix.md.
+    //
+    //   kind: 'ids' — список id/ключей (пусто = нет поля); 'map' — объект; 'id' — одно значение;
+    //         'flag' — булев признак.
+    var PP_ACTION_FRAME = [
+        { name: 'manualShift', kind: 'map', carry: true, scope: 'manualShift',
+          why: '#4736: право снимать якорь дня со всего хвоста очереди, включая 🔒' },
+        { name: 'pinCutIds', kind: 'ids', carry: true, scope: 'pinCutIds',
+          why: '#4768: цель действия — день, выбранный оператором (якорь через временный c.fixed)' },
+        { name: 'pinDayPosByCut', kind: 'map', carry: true, scope: 'pinDayPosByCut',
+          why: '#4464: место в дне выбирает оператор («в начало» / «в конец»)' },
+        { name: 'weightPositionCutIds', kind: 'ids', carry: true, scope: 'weightPositionCutIds',
+          why: '#4221/#4506: тот же выбранный день, позиция внутри него — по весу' },
+        { name: 'unfrozenDayKeys', kind: 'ids', carry: true, scope: 'unfrozenDayKeys',
+          why: '#4577/#4582: дни действия разморожены и видимы — иначе переполнение в них не найти' },
+        { name: 'withinSlitterIds', kind: 'ids', carry: true, scope: 'withinSlitterIds',
+          why: '#4225: станки действия; выравнивание идёт по ним ОДНИМ проходом (#4732)' },
+        { name: 'fromCutId', kind: 'id', carry: true, scope: 'keepBeforeCutId',
+          why: '#4555: «отсюда и до конца» — прошлое станка закреплено и при выравнивании' },
+        { name: 'wholeDayCutIds', kind: 'ids', carry: false,
+          why: '#4693: резерв «целиком» требует ПОЛНОГО места в дне, а выравнивание обязано рвать '
+             + 'перенесённое задание по потолку и увозить остаток продолжением' },
+        { name: 'keepBeforeCutId', kind: 'id', carry: false,
+          why: 'имя того же поля в раскладке: фазу 2 оно получает из `fromCutId`' },
+        { name: 'trainOnly', kind: 'flag', carry: false,
+          why: '#4732: свойство самого выравнивания (порядок авторитетен, пол — отработанный день)' }
+    ];
+
+    // Объявленные поля рамки — наружу для теста-храповика. Функцией, а не значением: объект
+    // экспорта собирается раньше, чем присваивается таблица (порядок модулей в сборке).
+    function ppActionFrameFields() { return PP_ACTION_FRAME.slice(); }
+
+    // Значение поля рамки или null, если поля нет. Пустота считается ПО ВИДУ поля: пустой список
+    // и пустая строка — это «поля нет», иначе фаза 2 получила бы `pinCutIds: []` и решила, что цель
+    // у действия есть.
+    function ppFrameValue(entry, raw) {
+        if (raw == null) return null;
+        if (entry.kind === 'ids') return raw.length ? raw.slice() : null;
+        if (entry.kind === 'id') return String(raw) === '' ? null : String(raw);
+        return raw ? raw : null;   // 'map' | 'flag' — как проверяли всегда: по истинности
     }
+
+    // Действие РУЧНОЕ, когда у него есть право сдвига или названа цель. Один предикат на всех: по
+    // нему решается и «размораживать ли дни действия», и «мерить ли переполнение ручной меркой».
+    // Автоматика (`Сгенерировать`, `Упорядочить`) ни того, ни другого не ставит.
+    function ppFrameIsManual(frame) {
+        if (!frame) return false;
+        return !!(frame.manualShift
+            || (frame.wholeDayCutIds && frame.wholeDayCutIds.length)
+            || (frame.pinCutIds && frame.pinCutIds.length)
+            || (frame.weightPositionCutIds && frame.weightPositionCutIds.length)
+            || (frame.unfrozenDayKeys && frame.unfrozenDayKeys.length));
+    }
+
+    // #4770: РАМКА САМА НАЗЫВАЕТ СВОИ ДНИ. Раньше день действия приезжал в фазу 2 отдельным полем
+    // (`unfrozenDayKeys`), и ставили его только там, где о нём вспомнили: «Урегулировать» (#4577) и
+    // пересчёт наладки (#4582). Ручной перенос 🗓, удаление и перетаскивание его не ставили — и
+    // выравнивание меряло их дни БЕЗ ручных прав: замороженный день (куда перенос вправе положить
+    // работу, #4494) в мерку не попадал вовсе, и переполнение в нём оставалось невидимым — тот же
+    // симптом, что в боевом #4582 (621 мин при потолке 455 и ни строки о выравнивании).
+    //
+    // Дни берём из самой рамки: дни заданий, которые действие несёт, плюс день точки сдвига на
+    // каждом станке (у удаления записи уже нет — точка сдвига остаётся единственным следом). Дальше
+    // этой точки замороженных дней быть не может: сдвиг, упирающийся в такой день, до записи не
+    // доходит (`manualShiftRefused`, #4736).
+    function ppFrameDayKeys(self, frame) {
+        var keys = {};
+        function add(k) { if (k != null && k !== Infinity && k !== '') keys[String(k)] = true; }
+        ((frame && frame.unfrozenDayKeys) || []).forEach(add);
+        if (!ppFrameIsManual(frame)) return Object.keys(keys);
+        var want = {};
+        [(frame.wholeDayCutIds) || [], (frame.pinCutIds) || [], (frame.weightPositionCutIds) || []]
+            .forEach(function(list) { list.forEach(function(id) { want[String(id)] = true; }); });
+        ((self && self.cuts) || []).forEach(function(c) {
+            if (c && c.id != null && want[String(c.id)]) add(planDateDayKey(c.planDate));
+        });
+        var from = (frame.manualShift && frame.manualShift.fromBySlitter) || null;
+        if (from) Object.keys(from).forEach(function(sid) { add(planDateDayKey(String(from[sid]))); });
+        return Object.keys(keys);
+    }
+
+    // Поле рамки, которого нет в таблице, — не «лишний ключ», а решение, которое никто не принял:
+    // фаза 2 его молча не получит, и это ровно тот класс дефектов, ради которого таблица заведена
+    // (18 тикетов, по одному на поле). Поэтому такое поле называется вслух.
+    //   `manual` / `dayKeys` — не поля рамки, а ПРАВА МЕРКИ, выведенные из неё ниже.
+    function ppFrameUndeclared(frame) {
+        if (!frame) return [];
+        var known = { manual: true, dayKeys: true };
+        PP_ACTION_FRAME.forEach(function(entry) { known[entry.name] = true; });
+        return Object.keys(frame).filter(function(k) { return !known[k]; });
+    }
+
+    // Рамка фазы записи → опции фазы 2 (выравнивание). Единственное место переноса: поля идут по
+    // таблице, дни действия называет `ppFrameDayKeys`, права мерки (`manual`) следуют из того же
+    // предиката, что и они. Нечего переносить → null (автоматический путь мерит как прежде).
+    function ppLevelingOptsFrom(self, frame) {
+        var opts = null;
+        var undeclared = ppFrameUndeclared(frame);
+        if (undeclared.length && typeof console !== 'undefined' && console.error) {
+            console.error('[pp] ❌ #4770: поле рамки действия не объявлено в PP_ACTION_FRAME — '
+                + 'в выравнивание оно не поедет', undeclared);
+        }
+        PP_ACTION_FRAME.forEach(function(entry) {
+            if (!entry.carry) return;
+            var v = ppFrameValue(entry, frame ? frame[entry.name] : null);
+            if (v == null) return;
+            (opts = opts || {})[entry.name] = v;
+        });
+        var days = ppFrameDayKeys(self, frame);
+        if (days.length) {
+            opts = opts || {};
+            // #4582: дни действия надо не только РАЗМОРОЗИТЬ, но и внести в область видимости: состав
+            // дня берётся через `recalcScopeCutIds`, а он ограничен окном фильтра [С;По]. Оператор
+            // жмёт кнопку на одном дне, а работа уезжает в другой — переполнение там было НЕВИДИМЫМ.
+            opts.manual = true;
+            opts.dayKeys = days.slice();
+            opts.unfrozenDayKeys = days.slice();
+        }
+        return opts;
+    }
+
+    // Опции фазы 2 → scope раскладки выравнивания. Та же таблица, поле называется так, как его ждёт
+    // `buildSequenceOps` (`fromCutId` → `keepBeforeCutId`). Станки приходят отдельно: их выбирает
+    // сам вызывающий (#4732 — один проход на все станки действия).
+    function ppLevelingScopeFrom(opts, sids) {
+        var scope = { withinSlitterIds: (sids || []).slice(), trainOnly: true };
+        PP_ACTION_FRAME.forEach(function(entry) {
+            if (!entry.carry || !entry.scope || entry.name === 'withinSlitterIds') return;
+            var v = ppFrameValue(entry, opts ? opts[entry.name] : null);
+            if (v != null) scope[entry.scope] = v;
+        });
+        return scope;
+    }
+
 
     // #4751: сколько проходов выравнивания вправе сделать ОДНО нажатие оператора. Схождение обычно
     // наступает за два (вывезли лишнее → добрали освободившееся); предел держит обещание «одно
@@ -11015,50 +11186,13 @@
             var ids = (moveScope && moveScope.withinSlitterIds && moveScope.withinSlitterIds.length)
                 ? moveScope.withinSlitterIds.map(String)
                 : (self.slitters || []).map(function(s) { return String(s && s.id == null ? '' : s.id); });
-            var manualDays = manualScopeDays(moveScope);
-            // #4582: дни действия надо не только РАЗМОРОЗИТЬ, но и внести в область видимости: состав дня
-            // берётся через recalcScopeCutIds, а он ограничен окном фильтра [С;По]. Оператор жмёт кнопку
-            // на одном дне, а работа уезжает в другой — и переполнение там оставалось НЕВИДИМЫМ
-            // (боевое #4582: 621 мин при потолке 455, и ни одной строки о выравнивании в логе).
-            var levelOpts = manualDays
-                ? { manual: true, dayKeys: manualDays, unfrozenDayKeys: manualDays } : null;
-            // #4736: выравнивание — ХВОСТ того же ручного действия, поэтому и признак сдвига тот
-            // же. Без него последний шаг снова упирался бы в 🔒: работу в день положили, а вынести
-            // лишнее некому — ровно та половинчатость, из-за которой заведено правило.
-            if (moveScope && moveScope.manualShift) {
-                (levelOpts = levelOpts || {}).manualShift = moveScope.manualShift;
-            }
-            // #4768 (ТЗ §15): В ВЫРАВНИВАНИЕ ЕДЕТ И ЦЕЛЬ РУЧНОГО ДЕЙСТВИЯ, ОДНО ПРАВО ЕЁ ОТМЕНЯЕТ.
-            // `manualShift` (#4736) снимает якорь дня со ВСЕГО хвоста очереди, и удерживает
-            // перенесённое задание в выбранном дне единственная вещь — исключение «задание, которое
-            // действие несёт САМО» в `buildSequenceOps`. Читает оно поля цели (`pinCutIds` /
-            // `weightPositionCutIds` → `carriedNow`), а сюда эти поля не ехали: выравнивание строит
-            // свой scope заново, перенесённое попадает в собственный хвост, теряет якорь и падает на
-            // пол паровоза — первый день после последнего отработанного (#4743). Боевое 14.08.2026,
-            // ateh: заказ 4752 (задание 695159) положен в 17.08 записью 14:10:41, а запись
-            // выравнивания 14:10:50 увела его в 14.08 («Журнал» 665850: «PLAN_MOVE 695159 — день
-            // 17.08.2026 → 14.08.2026», creates 0 / deletes 0).
-            //
-            // РЕЗЕРВ «ЦЕЛИКОМ» (#4488, `wholeDayCutIds`) сюда по-прежнему не едет: день обязан уметь
-            // разорвать перенесённое задание по потолку и увезти остаток продолжением (#4693), а
-            // резерв требует ПОЛНОГО места в дне. Едет ровно выбранный день — якорь (`pinCutIds` →
-            // временный c.fixed → effAnchor) и место в дне (`pinDayPosByCut`), либо замок дня
-            // «по весу» (`weightPositionCutIds` → dayLockByCut), которым выражен тот же выбор.
-            if (moveScope) {
-                if (moveScope.pinCutIds && moveScope.pinCutIds.length) {
-                    (levelOpts = levelOpts || {}).pinCutIds = moveScope.pinCutIds.slice();
-                }
-                if (moveScope.pinDayPosByCut) {
-                    (levelOpts = levelOpts || {}).pinDayPosByCut = moveScope.pinDayPosByCut;
-                }
-                if (moveScope.weightPositionCutIds && moveScope.weightPositionCutIds.length) {
-                    (levelOpts = levelOpts || {}).weightPositionCutIds = moveScope.weightPositionCutIds.slice();
-                }
-            }
-            // #4555: «отсюда и до конца» — прошлое станка не трогаем и при выравнивании.
-            if (moveScope && moveScope.fromCutId != null && String(moveScope.fromCutId) !== '') {
-                (levelOpts = levelOpts || {}).fromCutId = String(moveScope.fromCutId);
-            }
+            // #4770: РАМКА ДЕЙСТВИЯ ЕДЕТ В ФАЗУ 2 ЦЕЛИКОМ, ОДНИМ ПЕРЕНОСОМ ПО ТАБЛИЦЕ
+            // `PP_ACTION_FRAME`. Право сдвига (#4736), цель — выбранный день и место в нём
+            // (#4768/#4464/#4221), нижняя граница «отсюда и до конца» (#4555) и дни действия
+            // (#4577/#4582) больше не докладываются сюда поштучно: каждое такое поле стоило
+            // отдельного тикета, и следующее забыли бы так же. Резерв «целиком» (#4488) остаётся в
+            // фазе записи — причина объявлена в самой таблице (#4693).
+            var levelOpts = ppLevelingOptsFrom(self, moveScope);
             // #4743 (ТЗ §15): ПОТОЛОК ДНЯ РАБОТАЕТ В ОБЕ СТОРОНЫ. Прежде хвост запускался только на
             // ПЕРЕПОЛНЕННОМ дне: недобранный день не трогал никто, и «Урегулировать» заканчивалось
             // словами «День не набит до конца — нажмите „Упорядочить“». Но правило DAY_FILL (#4469)
@@ -11083,7 +11217,8 @@
                     // #4745: вердикт УПАКОВЩИКА (`ops.dayFill`), а не второй расчёт: чиним ровно то, о
                     // чём говорим, и не гоняем выравнивание по дням, которые он считает полными.
                     // #4749: с ПРАВАМИ этого действия — иначе мерка меряет план, который записать нельзя.
-                    (self.plannerUnderfilledDays({ manualShift: moveScope && moveScope.manualShift }) || [])
+                    // #4770: и с ЦЕЛЬЮ действия: рамка уходит в мерку той же, какой уйдёт в запись.
+                    (self.plannerUnderfilledDays(levelOpts) || [])
                         .forEach(function(u) {
                             var k = String(u && u.slitterId);
                             underDays[k] = (underDays[k] || 0) + 1;
@@ -12357,8 +12492,8 @@
             var wantSid = {};
             sids.forEach(function(sid) { wantSid[sid] = true; });
             // #4745: недобор берём у УПАКОВЩИКА — одна арифметика на «что чиним» и «о чём говорим».
-            // #4749: и с ТЕМИ ЖЕ ПРАВАМИ, с какими будем писать (`opts.manualShift` уходит в scope ниже).
-            self.plannerUnderfilledDays({ manualShift: opts && opts.manualShift }).forEach(function(u) {
+            // #4749/#4770: и с ТОЙ ЖЕ РАМКОЙ, с какой будем писать (она же уходит в scope ниже).
+            self.plannerUnderfilledDays(opts).forEach(function(u) {
                 if (wantSid[String(u.slitterId)]) under.push({ sid: String(u.slitterId), day: u.day });
             });
         }
@@ -12373,30 +12508,11 @@
         }
         // typeof-гард — как у slotPlacementOn: в юнит-тестах метод зовут на стаб-self без прототипа.
         if (typeof this.autoSequenceQueueAfterMerge !== 'function') return Promise.resolve(false);
-        // #4555: выравнивание «отсюда и до конца» — прошлое станка закрепляем (keepBeforeCutId),
-        // трогаем только выбранное задание и то, что за ним. Без opts — прежнее поведение.
-        var scope = { withinSlitterIds: sids.slice(), trainOnly: true };
-        if (opts && opts.fromCutId != null && String(opts.fromCutId) !== '') scope.keepBeforeCutId = String(opts.fromCutId);
-        // #4736: выравнивание, вызванное РУЧНЫМ действием, двигает хвост очереди и через 🔒 — иначе
-        // день остаётся за потолком, потому что разгружать его нечем (все соседи зафиксированы).
-        // Автоматическое выравнивание признака не получает, и для него замок дня прежний.
-        if (opts && opts.manualShift) scope.manualShift = opts.manualShift;
-        // #4577: те же дни, что разморозило вызвавшее ручное действие — иначе переложить переполненный
-        // замороженный день нечем. Замок 🔒 при этом цел: день выравнивается РАЗРЫВОМ последнего
-        // задания по потолку (#4467/#4512), а не вытеснением зафиксированного.
-        if (opts && opts.unfrozenDayKeys && opts.unfrozenDayKeys.length) scope.unfrozenDayKeys = opts.unfrozenDayKeys.slice();
-        // #4768 (ТЗ §15): ДЕНЬ, ВЫБРАННЫЙ ОПЕРАТОРОМ, ДЕРЖИТСЯ И ЗДЕСЬ. Тот же признак, которым его
-        // держит сама запись действия (`pinCutIds` → временный c.fixed → effAnchor в
-        // `buildSequenceOps`; `weightPositionCutIds` → замок дня «по весу», #4221/#4506). Без него
-        // `manualShift` снимал якорь и с перенесённого задания тоже — и выравнивание уносило его
-        // из выбранного дня в первый день после отработанного (#4743, боевое 14.08.2026: заказ
-        // 4752 из 17.08 в 14.08). Резерв «целиком» (#4488) сюда не едет: разрыв по потолку
-        // остаётся у дня (#4693).
-        if (opts && opts.pinCutIds && opts.pinCutIds.length) scope.pinCutIds = opts.pinCutIds.slice();
-        if (opts && opts.pinDayPosByCut) scope.pinDayPosByCut = opts.pinDayPosByCut;
-        if (opts && opts.weightPositionCutIds && opts.weightPositionCutIds.length) {
-            scope.weightPositionCutIds = opts.weightPositionCutIds.slice();
-        }
+        // #4770: SCOPE РАСКЛАДКИ — ТА ЖЕ РАМКА, ОДИН ПЕРЕНОС ПО ТАБЛИЦЕ. Право сдвига (#4736),
+        // цель действия (#4768: выбранный день и место в нём), дни, которые действие разморозило
+        // (#4577), и нижняя граница «отсюда и до конца» (#4555 — здесь она зовётся
+        // `keepBeforeCutId`) приезжают вместе; станки выбраны выше одним списком (#4732).
+        var scope = ppLevelingScopeFrom(opts, sids);
         return this.autoSequenceQueueAfterMerge(PLANNING_STRATEGY_SETUP, true, scope)
             .then(function(changed) {
                 // #4765 (ТЗ §15, «одна арифметика» — #4499): ИТОГ МЕРЯЕМ ТОЙ ЖЕ МЕРКОЙ, ЧТО И ЗАДАЧУ.
