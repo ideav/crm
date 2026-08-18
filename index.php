@@ -363,9 +363,21 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         if(strlen($msg))
         	my_die($msg);
         
-        if($row = mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE val='$email' AND t=".EMAIL, "Check user name uniquity")))
-        	if($row[0])	# Inform of the errors, if any, and let him try again
+        # Адрес уже в базе. Развилка по тому, ПОДТВЕРЖДЁН ли владелец: подтверждение
+        # создаёт пользователю базу (запись t=DATABASE, см. createDb). Есть база —
+        # аккаунт настоящий, отвечаем "уже зарегистрирован". Базы нет — регистрация
+        # прошла, но подтверждение не завершено: письмо со ссылкой отправлено и, судя
+        # по #4639, могло осесть в спаме. Прежний errMailExists загонял такого
+        # пользователя в тупик (письма нет, повторно запросить нельзя); вместо него —
+        # понятное сообщение, куда смотреть (#4794).
+        if($row = mysqli_fetch_array(Exec_sql("SELECT db.id dbid FROM $z email"
+        		." LEFT JOIN $z db ON db.up=email.up AND db.t=".DATABASE
+        		." WHERE email.val='$email' AND email.t=".EMAIL." LIMIT 1", "Check user name uniquity"))){
+        	if($row["dbid"])	# Подтверждённый аккаунт с базой — адрес действительно занят
         		my_die(t9n("[RU]Этот email уже зарегистрирован.[EN]This email is already registered")." [errMailExists]");
+        	else			# Регистрация есть, но не подтверждена — письмо не дошло
+        		my_die(t9n("[RU]Этот адрес уже зарегистрирован, но регистрация не подтверждена. Письмо со ссылкой мы отправили на него — проверьте почту и папку «Спам». Если письма нет, напишите нам.[EN]This address is already registered but not yet confirmed. We emailed a confirmation link to it — check your inbox and Spam folder. If there is no email, contact us.")." [errMailPending]");
+        }
 
         # Insert new user and its data into CRM
         $id = newUser($email, $email, "115", "", "");
