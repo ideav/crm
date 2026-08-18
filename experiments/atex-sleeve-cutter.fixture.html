@@ -45,23 +45,24 @@ function dayUnix(offsetDays, hh, mm){
 
 // Заглушка-«база» отчёта: строки sleeve_tasks (JSON_KV-объекты).
 // #4786: колонки «что режем» — order_no (Заказ), sleeve (Позиция → Диаметр втулки),
-// position_width (Позиция → Ширина, мм) и sleeve_ready (Диаметр втулки → Готовые, X/пусто).
-// Втулка без галки «Готовые» режется из метровых палок: их число — на карточке.
+// position_width (Позиция → Ширина, мм), sleeve_ready (Диаметр втулки → Готовые, X/пусто)
+// и add_sleeve (Позиция → Доп. втулка). Втулка без галки «Готовые» режется из метровых
+// палок: их число — на карточке; доп. втулка удваивает счёт («56+56 шт»).
 var ROWS = [
     { task_id: '401', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '100', fact: '100', started: String(dayUnix(0, 7, 5)), finished: String(dayUnix(0, 7, 40)),
-      order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '60.00', sleeve_ready: '' },   // сегодня, Готово
+      order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '60.00', sleeve_ready: '', add_sleeve: '' },   // сегодня, Готово
     { task_id: '402', task_date: String(dayUnix(0, 8, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '45',  fact: '',    started: '',                       finished: '',
-      order_no: '730', sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', position_width: '105.00', sleeve_ready: '' },   // Ожидает, палок 6
+      order_no: '730', sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', position_width: '105.00', sleeve_ready: '', add_sleeve: 'Приклеить' },   // Ожидает, доп. втулка: 45+45
     { task_id: '403', task_date: String(dayUnix(0, 9, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '30',  fact: '',    started: String(dayUnix(0, 9, 35)), finished: '',
-      order_no: '730', sleeve: 'Втулка пластиковая фиолетовая 1" ширина 55 мм', position_width: '55.00', sleeve_ready: 'X' },         // В работе, втулка ГОТОВАЯ — палок нет
+      order_no: '730', sleeve: 'Втулка пластиковая фиолетовая 1" ширина 55 мм', position_width: '55.00', sleeve_ready: 'X', add_sleeve: '' },         // В работе, втулка ГОТОВАЯ — заготовок нет
     { task_id: '404', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-20/25', cutter_id: '201', qty: '12',  fact: '',    started: '',                       finished: '',
-      order_no: '731', sleeve: 'втулка пластик серая для Videojet', position_width: '40.00', sleeve_ready: '' },  // другой втулкорез
+      order_no: '731', sleeve: 'втулка пластик серая для Videojet', position_width: '40.00', sleeve_ready: '', add_sleeve: '' },  // другой втулкорез
     { task_id: '405', task_date: String(dayUnix(-1, 8, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '70',  fact: '',    started: '',                       finished: '',
-      order_no: '712', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '80.00', sleeve_ready: '' },   // вчера
+      order_no: '712', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '80.00', sleeve_ready: '', add_sleeve: '' },   // вчера
     { task_id: '406', task_date: String(dayUnix(0, 10, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '25', fact: '',    started: '',                       finished: String(dayUnix(0, 10, 35)),
-      order_no: '733', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '76.00', sleeve_ready: '' },   // Пропущена
+      order_no: '733', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '76.00', sleeve_ready: '', add_sleeve: '' },   // Пропущена
     { task_id: '407', task_date: String(dayUnix(0, 11, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '60',  fact: '',    started: '',                       finished: '',
-      order_no: '734', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '150.00', sleeve_ready: '' }   // Ожидает, палок 10
+      order_no: '734', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '150.00', sleeve_ready: '', add_sleeve: 'Вложить' }   // Ожидает, доп. втулка: 60+60
 ];
 
 var CUTTERS = [

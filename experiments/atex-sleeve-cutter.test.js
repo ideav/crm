@@ -98,6 +98,7 @@ assertEqual(core.taskFromReportRow(row), {
     sleeve: '',
     widthMm: 0,
     sleeveReady: false,
+    addSleeve: '',
     hasSleeveReadyCol: false,
     status: 'Ожидает'
 }, 'taskFromReportRow: маппинг полей + статус Ожидает');
@@ -297,7 +298,7 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
         var r = { task_id: '625931', task_date: '1784610000', cutter: 'TC-20', cutter_id: '2257',
                   qty: '900', fact: '', started: '', finished: '', position_id: '625796',
                   order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр',
-                  position_width: '60.00', sleeve_ready: '' };
+                  position_width: '60.00', sleeve_ready: '', add_sleeve: '' };
         Object.keys(over || {}).forEach(function(k) {
             if (over[k] === undefined) delete r[k]; else r[k] = over[k];
         });
@@ -333,50 +334,54 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
 
     // Колонки в отчёте НЕТ — это не «галка снята». Пульт молчит о палках и говорит о колонке.
     var old = core.taskFromReportRow(row({ order_no: undefined, sleeve: undefined,
-        position_width: undefined, sleeve_ready: undefined }));
+        position_width: undefined, sleeve_ready: undefined, add_sleeve: undefined }));
     assertEqual(core.needsCutting(old), null, 'needsCutting: колонки нет → «не знаю», а не «резать»');
     assertEqual(core.taskSticks(old), null, 'taskSticks: без колонки палки не считаем');
     assertEqual(core.missingReportColumns([row({ order_no: undefined, sleeve_ready: undefined })]),
         ['order_no', 'sleeve_ready'], 'missingReportColumns: называет ровно недостающие колонки');
+    assertEqual(core.missingReportColumns([row({ add_sleeve: undefined })]), ['add_sleeve'],
+        'missingReportColumns: «Доп. втулка» тоже в списке — без неё удвоение не посчитать');
     assertEqual(core.missingReportColumns([row()]), [],
         'missingReportColumns: полный отчёт — жаловаться не на что');
     assertEqual(core.missingReportColumns([]), [],
         'missingReportColumns: пустая выдача — колонок не видно, молчим');
 })();
 
+// Стаб DOM для карточек: createElement + className/textContent + querySelector.
+// Общий на все DOM-блоки файла — иначе каждый новый заводил бы свою копию.
+function DomNode(tag) {
+    this.tagName = String(tag || '').toUpperCase();
+    this.childNodes = []; this.attributes = {}; this.dataset = {}; this._className = ''; this._text = '';
+    var self = this;
+    this.classList = {
+        add: function(c) { if (self._cls().indexOf(c) === -1) self._className = (self._className + ' ' + c).trim(); },
+        contains: function(c) { return self._cls().indexOf(c) !== -1; }
+    };
+}
+DomNode.prototype._cls = function() { return this._className.split(/\s+/).filter(Boolean); };
+Object.defineProperty(DomNode.prototype, 'className', {
+    get: function() { return this._className; }, set: function(v) { this._className = String(v || ''); } });
+Object.defineProperty(DomNode.prototype, 'textContent', {
+    get: function() { return this.childNodes.length
+        ? this.childNodes.map(function(c) { return c.textContent; }).join(' ') : this._text; },
+    set: function(v) { this._text = String(v == null ? '' : v); this.childNodes = []; } });
+DomNode.prototype.appendChild = function(n) { this.childNodes.push(n); return n; };
+DomNode.prototype.setAttribute = function(k, v) { this.attributes[k] = String(v); };
+DomNode.prototype.addEventListener = function() {};
+DomNode.prototype._all = function(acc) {
+    this.childNodes.forEach(function(c) { acc.push(c); c._all(acc); }); return acc; };
+DomNode.prototype.querySelectorAll = function(sel) {
+    var cls = sel.replace(/^\./, '');
+    return this._all([]).filter(function(n) { return n.classList.contains(cls); }); };
+DomNode.prototype.querySelector = function(sel) { return this.querySelectorAll(sel)[0] || null; };
+
 // ── #4786: КАРТОЧКА ЗАДАНИЯ (DOM) ────────────────────────────────────────────────────
 // Пункты тикета проверяем там, где их видит втулкорез: в разметке карточки. Бейдж
-// «В работе» снят (п.2), на его месте — палки (п.3), в главной строке — заказ, втулка,
-// план (п.1). Стаб DOM минимальный: createElement + className/textContent + querySelector.
+// «В работе» снят (п.2), справа плановое количество (п.3), в главной строке — заказ,
+// втулка и метровые заготовки (п.1).
 (function() {
-    function Node(tag) {
-        this.tagName = String(tag || '').toUpperCase();
-        this.childNodes = []; this.attributes = {}; this.dataset = {}; this._className = ''; this._text = '';
-        var self = this;
-        this.classList = {
-            add: function(c) { if (self._cls().indexOf(c) === -1) self._className = (self._className + ' ' + c).trim(); },
-            contains: function(c) { return self._cls().indexOf(c) !== -1; }
-        };
-    }
-    Node.prototype._cls = function() { return this._className.split(/\s+/).filter(Boolean); };
-    Object.defineProperty(Node.prototype, 'className', {
-        get: function() { return this._className; }, set: function(v) { this._className = String(v || ''); } });
-    Object.defineProperty(Node.prototype, 'textContent', {
-        get: function() { return this.childNodes.length
-            ? this.childNodes.map(function(c) { return c.textContent; }).join(' ') : this._text; },
-        set: function(v) { this._text = String(v == null ? '' : v); this.childNodes = []; } });
-    Node.prototype.appendChild = function(n) { this.childNodes.push(n); return n; };
-    Node.prototype.setAttribute = function(k, v) { this.attributes[k] = String(v); };
-    Node.prototype.addEventListener = function() {};
-    Node.prototype._all = function(acc) {
-        this.childNodes.forEach(function(c) { acc.push(c); c._all(acc); }); return acc; };
-    Node.prototype.querySelectorAll = function(sel) {
-        var cls = sel.replace(/^\./, '');
-        return this._all([]).filter(function(n) { return n.classList.contains(cls); }); };
-    Node.prototype.querySelector = function(sel) { return this.querySelectorAll(sel)[0] || null; };
-
     var savedDoc = global.document, savedWin = global.window;
-    global.document = { createElement: function(t) { return new Node(t); } };
+    global.document = { createElement: function(t) { return new DomNode(t); } };
     global.window = savedWin || {};
 
     var Controller = mod.Controller;
@@ -385,7 +390,7 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
         var r = { task_id: '625931', task_date: '1784610000', cutter: 'TC-20', cutter_id: '2257',
                   qty: '900', fact: '', started: '', finished: '', position_id: '625796',
                   order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр',
-                  position_width: '60.00', sleeve_ready: '' };
+                  position_width: '60.00', sleeve_ready: '', add_sleeve: '' };
         Object.keys(over || {}).forEach(function(k) { r[k] = over[k]; });
         var t = core.taskFromReportRow(r); t.seq = 1; return t;
     }
@@ -452,6 +457,56 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
         '#4786: и у пары бейджей (статус + количество) в правой колонке');
     assertEqual(/\.atex-sc-card-sub\s*\{/.test(css), true, '#4786: и у служебной строки карточки');
     assertEqual(/\.atex-sc-note\s*\{/.test(css), true, '#4786: и у плашки о недостающих колонках');
+})();
+
+// ── #4786: ДОП. ВТУЛКА — вторая втулка на каждый рулон ───────────────────────────────
+// Позиция с заполненной «Доп. втулкой» («Приклеить»/«Вложить»/…) требует ВТОРУЮ втулку на
+// рулон, а план задачи этого не учитывает: на бою (ateh1, 18.08.2026) позиция 626963 — 56 шт,
+// и задача на втулки — те же 56. Удвоение считает пульт и показывает слагаемыми «56+56»
+// (решение заказчика 18.08.2026), заготовки — под ОБЕ втулки.
+(function() {
+    function task(over) {
+        var r = { task_id: '627013', task_date: '1784610000', cutter: 'TC-20', cutter_id: '2257',
+                  qty: '56', fact: '', started: '', finished: '', position_id: '626963',
+                  order_no: '730', sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр',
+                  position_width: '105.00', sleeve_ready: '', add_sleeve: 'Приклеить' };
+        Object.keys(over || {}).forEach(function(k) { r[k] = over[k]; });
+        var t = core.taskFromReportRow(r); t.seq = 1; return t;
+    }
+
+    assertEqual(core.plannedSleeves(task()), { plan: 56, extra: 56, total: 112 },
+        '#4786: доп. втулка «Приклеить» → 56 + 56 = 112 втулок');
+    assertEqual(core.plannedSleeves(task({ add_sleeve: '' })), { plan: 56, extra: 0, total: 56 },
+        '#4786: без доп. втулки удвоения нет');
+    assertEqual(core.plannedSleeves(task({ add_sleeve: 'Вложить' })).total, 112,
+        '#4786: удваивает ЛЮБОЕ заполненное значение, а не только «Приклеить»');
+    // Заготовки — под ОБЕ втулки: 112 шт × 105 мм × 1.1 / 1000 = 12.9 → 13.
+    assertEqual(core.taskSticks(task()), 13,
+        '#4786: заготовки считаются от удвоенного количества (112 × 105 × 1.1 / 1000 → 13)');
+    assertEqual(core.taskSticks(task({ add_sleeve: '' })), 7,
+        '#4786: без доп. втулки — от плана (56 × 105 × 1.1 / 1000 → 7)');
+
+    var savedDoc = global.document;
+    global.document = { createElement: function(t) { return new DomNode(t); } };
+    var inst = Object.create(mod.Controller.prototype);
+
+    var card = inst.renderTaskRow(task());
+    assertEqual(/доп\. втулка: Приклеить/.test(card.querySelector('.atex-sc-card-info').textContent), true,
+        '#4786: доп. втулка названа в главной строке карточки');
+    assertEqual(card.querySelector('.atex-sc-badge-qty').textContent, '56+56 шт',
+        '#4786: количество показано слагаемыми — видно, что удвоено');
+    assertEqual(/заготовок: 13/.test(card.querySelector('.atex-sc-card-info').textContent), true,
+        '#4786: и заготовки — под обе втулки');
+    assertEqual(/по «Доп\. втулке»/.test(card.querySelector('.atex-sc-badge-qty').attributes.title || ''), true,
+        '#4786: в подсказке сказано, откуда вторая половина');
+
+    var plain = inst.renderTaskRow(task({ add_sleeve: '' }));
+    assertEqual(/доп\. втулка/.test(plain.querySelector('.atex-sc-card-info').textContent), false,
+        '#4786: без доп. втулки строки о ней НЕТ — она есть у меньшинства заданий');
+    assertEqual(plain.querySelector('.atex-sc-badge-qty').textContent, '56 шт',
+        '#4786: и количество остаётся одним числом');
+
+    global.document = savedDoc;
 })();
 
 console.log('\n' + passed + ' assertions passed');

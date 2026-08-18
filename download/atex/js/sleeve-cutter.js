@@ -81,7 +81,8 @@
         orderNo: 'order_no',            // 1075 Заказ (главное значение) — номер заказа
         sleeve: 'sleeve',               // 8194 Позиция → Диаметр втулки — название втулки
         width: 'position_width',        // 1141 Позиция → Ширина, мм — ширина рулона (по ней режут палку)
-        sleeveReady: 'sleeve_ready'     // 35567 Диаметр втулки → Готовые (X/пусто)
+        sleeveReady: 'sleeve_ready',    // 35567 Диаметр втулки → Готовые (X/пусто)
+        addSleeve: 'add_sleeve'         // 66418 Позиция → Доп. втулка («Приклеить»/«Вложить»/…)
     };
 
     // Статусы задания (выводятся из полей; отдельного поля «Статус» на бою нет).
@@ -200,11 +201,24 @@
         return !task.sleeveReady;
     }
 
-    // #4786: сколько палок нужно ПОКАЗАТЬ на карточке. Втулка готовая (или неизвестно) →
-    // null, палки не считаем.
+    // #4786: СКОЛЬКО ВТУЛОК РЕЖЕМ ПО ЗАДАНИЮ. Позиция с заполненной «Доп. втулкой»
+    // («Приклеить», «Вложить», …) берёт ВТОРУЮ втулку на каждый рулон, а план задачи этого
+    // не учитывает — на бою «Кол-во» задачи равно количеству позиции и при «Приклеить»
+    // (ateh1, 18.08.2026: позиция 626963 — 56 шт, задача — 56 шт). Поэтому удвоение считает
+    // пульт и показывает его как «56+56» (решение заказчика 18.08.2026): втулкорезу видно,
+    // откуда взялось число, а не готовая сумма.
+    //   → { plan, extra, total }
+    function plannedSleeves(task) {
+        var plan = toNumber(task && task.planQty);
+        var extra = (task && str(task.addSleeve).trim() !== '') ? plan : 0;
+        return { plan: plan, extra: extra, total: plan + extra };
+    }
+
+    // #4786: сколько палок нужно ПОКАЗАТЬ на карточке — под ВСЕ втулки задания, включая
+    // вторую втулку «Доп. втулки». Втулка готовая (или неизвестно) → null, палки не считаем.
     function taskSticks(task) {
         if (!task || needsCutting(task) !== true) return null;
-        return sticksNeeded(task.planQty, task.widthMm);
+        return sticksNeeded(plannedSleeves(task).total, task.widthMm);
     }
 
     function taskFromReportRow(row) {
@@ -226,6 +240,8 @@
             sleeve: str(kvVal(r[COL.sleeve])),
             widthMm: toNumber(kvVal(r[COL.width])),
             sleeveReady: isChecked(kvVal(r[COL.sleeveReady])),
+            // #4786: «Доп. втулка» позиции («Приклеить»/«Вложить»/…). Пусто — обычная позиция.
+            addSleeve: str(kvVal(r[COL.addSleeve])).trim(),
             // Колонка есть в отчёте? Пустое значение — это «галка снята», отсутствие
             // колонки — «отчёт старый»; путать их нельзя (#4774).
             hasSleeveReadyCol: has(COL.sleeveReady)
@@ -240,7 +256,7 @@
     function missingReportColumns(rows) {
         var first = (rows || [])[0];
         if (!first) return [];
-        return [COL.orderNo, COL.sleeve, COL.width, COL.sleeveReady].filter(function(key) {
+        return [COL.orderNo, COL.sleeve, COL.width, COL.sleeveReady, COL.addSleeve].filter(function(key) {
             return !Object.prototype.hasOwnProperty.call(first, key);
         });
     }
@@ -377,6 +393,7 @@
         isChecked: isChecked,                     // #4786
         sticksNeeded: sticksNeeded,               // #4786
         needsCutting: needsCutting,               // #4786
+        plannedSleeves: plannedSleeves,           // #4786
         taskSticks: taskSticks,                   // #4786
         missingReportColumns: missingReportColumns,   // #4786
         numberTasks: numberTasks,
@@ -756,8 +773,12 @@
         var head = [];
         if (task.orderNo) head.push('заказ ' + task.orderNo);
         if (task.sleeve) head.push(task.sleeve);
+        // #4786: «Доп. втулка» — только когда она ЗАДАНА (решение заказчика 18.08.2026):
+        // заполнена она у меньшинства позиций (на ateh1 — 97 задач из 476), и строка «нет»
+        // на всех остальных карточках была бы шумом.
+        if (task.addSleeve) head.push('доп. втулка: ' + task.addSleeve);
         // Метровые заготовки — в той же строке, что и «что режем»: их считают со склада
-        // ДО начала работы. Плановое количество втулок стои́т бейджем справа («К-во»).
+        // ДО начала работы. Плановое количество втулок стои́т бейджем справа.
         var sticks = core.taskSticks(task);
         if (sticks != null) head.push('заготовок: ' + sticks);
 
@@ -796,13 +817,20 @@
                 text: task.status
             }));
         }
-        var plan = core.toNumber(task.planQty);
-        if (plan > 0) {
+        var planned = core.plannedSleeves(task);
+        if (planned.plan > 0) {
+            // #4786: доп. втулка удваивает счёт — показываем слагаемыми («56+56 шт»), чтобы
+            // видно было, откуда взялось число.
+            var qtyText = planned.extra > 0
+                ? planned.plan + '+' + planned.extra + ' шт'
+                : planned.plan + ' шт';
             badges.appendChild(el('span', {
                 class: 'atex-sc-badge atex-sc-badge-qty',
-                title: 'Запланировано втулок: ' + plan + ' шт'
+                title: 'Запланировано втулок: ' + planned.plan + ' шт'
+                    + (planned.extra > 0 ? ' + ' + planned.extra + ' шт по «Доп. втулке» («'
+                        + task.addSleeve + '») = ' + planned.total + ' шт' : '')
                     + (sticks != null ? ' (метровых заготовок под них: ' + sticks + ')' : ''),
-                text: plan + ' шт'
+                text: qtyText
             }));
         }
         if (badges.childNodes.length) card.appendChild(badges);
