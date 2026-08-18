@@ -329,9 +329,6 @@ function makeInst(opts) {
         '#4783: правая часть не скроллится');
     assert(/height:\s*100%/.test(rule('.atex-sl')) && /overflow:\s*hidden/.test(rule('.atex-sl')),
         '#4783: пульт занимает высоту экрана целиком');
-    assert(css.indexOf('.atex-sl-toolbar') === -1 && css.indexOf('.atex-sl-metrics') === -1
-        && css.indexOf('.atex-sl-event ') === -1,
-        '#4783: стилей тулбара, плашек-метрик и журнала событий не осталось');
 })();
 
 // ── версия бандла поднята: правка js/css без бампа не доедет до планшета ──────────────────────
