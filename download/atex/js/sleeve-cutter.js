@@ -73,7 +73,15 @@
         qty: 'qty',
         fact: 'fact',
         started: 'started',
-        finished: 'finished'
+        finished: 'finished',
+        // #4786: ЧТО ИМЕННО РЕЖЕТ ВТУЛКОРЕЗ. Прежде карточка несла только «старт · план ·
+        // факт»: по ней нельзя ни найти заказ, ни понять, какая это втулка, ни прикинуть,
+        // сколько метровых палок брать со склада. Четыре колонки отчёта (добавлены в `ateh`
+        // и `ateh1` 18.08.2026, см. docs/integram-reports.md §14) дают ровно это.
+        orderNo: 'order_no',            // 1075 Заказ (главное значение) — номер заказа
+        sleeve: 'sleeve',               // 8194 Позиция → Диаметр втулки — название втулки
+        width: 'position_width',        // 1141 Позиция → Ширина, мм — ширина рулона (по ней режут палку)
+        sleeveReady: 'sleeve_ready'     // 35567 Диаметр втулки → Готовые (X/пусто)
     };
 
     // Статусы задания (выводятся из полей; отдельного поля «Статус» на бою нет).
@@ -165,9 +173,44 @@
 
     // ── Разбор строк отчёта sleeve_tasks → задания ──
 
+    // #4786: булев реквизит в JSON_KV приходит буквой «X» (пусто = снят). Терпим к
+    // другим написаниям — база могла бы отдать 1/да/true, и молчаливое «не готовые»
+    // отправило бы втулкореза резать то, что и так лежит готовым.
+    function isChecked(value) {
+        var v = str(value).trim().toLowerCase();
+        return v === 'x' || v === '1' || v === 'да' || v === 'true' || v === '+';
+    }
+
+    // #4786: СКОЛЬКО МЕТРОВЫХ ПАЛОК НУЖНО НА ЗАДАНИЕ (решение заказчика 18.08.2026):
+    // план × ширина рулона × 1.1 / 1000, вверх до целой палки. Ширина — «Ширина, мм»
+    // ПОЗИЦИИ: палку длиной 1000 мм режут именно по ней, а 1.1 — десятипроцентный запас
+    // на рез и брак. Плана или ширины нет → null: выдуманное число хуже пустого места.
+    function sticksNeeded(planQty, widthMm) {
+        var plan = toNumber(planQty), width = toNumber(widthMm);
+        if (!(plan > 0) || !(width > 0)) return null;
+        return Math.ceil(plan * width * 1.1 / 1000);
+    }
+
+    // #4786: втулку надо НАРЕЗАТЬ из метровых палок, если у её записи «Диаметр втулки»
+    // снята галка «Готовые». Колонки в отчёте нет вовсе (старая сборка отчёта) → null:
+    // «не знаю» отличается от «не готовые», и пульт об этом говорит вслух, а не считает
+    // палки по умолчанию для всего подряд.
+    function needsCutting(task) {
+        if (!task || !task.hasSleeveReadyCol) return null;
+        return !task.sleeveReady;
+    }
+
+    // #4786: сколько палок нужно ПОКАЗАТЬ на карточке. Втулка готовая (или неизвестно) →
+    // null, палки не считаем.
+    function taskSticks(task) {
+        if (!task || needsCutting(task) !== true) return null;
+        return sticksNeeded(task.planQty, task.widthMm);
+    }
+
     function taskFromReportRow(row) {
         var r = row || {};
         var dateUnix = toNumber(kvVal(r[COL.date]));
+        var has = function(key) { return Object.prototype.hasOwnProperty.call(r, key); };
         var task = {
             id: str(kvVal(r[COL.id])) || null,
             dateUnix: dateUnix,
@@ -177,10 +220,29 @@
             planQty: kvVal(r[COL.qty]),
             factQty: kvVal(r[COL.fact]),
             started: kvVal(r[COL.started]),
-            finished: kvVal(r[COL.finished])
+            finished: kvVal(r[COL.finished]),
+            // #4786: что режем — заказ, втулка, ширина рулона и признак «Готовые».
+            orderNo: str(kvVal(r[COL.orderNo])),
+            sleeve: str(kvVal(r[COL.sleeve])),
+            widthMm: toNumber(kvVal(r[COL.width])),
+            sleeveReady: isChecked(kvVal(r[COL.sleeveReady])),
+            // Колонка есть в отчёте? Пустое значение — это «галка снята», отсутствие
+            // колонки — «отчёт старый»; путать их нельзя (#4774).
+            hasSleeveReadyCol: has(COL.sleeveReady)
         };
         task.status = statusFromFields(task);
         return task;
+    }
+
+    // #4786: каких колонок «что режем» в отчёте нет — по ПЕРВОЙ строке (набор ключей у
+    // всех строк один). Пульт называет их вслух: молчаливая карточка без заказа читается
+    // как «данных нет в базе», хотя дело в сборке отчёта (грабли #4774).
+    function missingReportColumns(rows) {
+        var first = (rows || [])[0];
+        if (!first) return [];
+        return [COL.orderNo, COL.sleeve, COL.width, COL.sleeveReady].filter(function(key) {
+            return !Object.prototype.hasOwnProperty.call(first, key);
+        });
     }
 
     // Порядок дня — ПЛАНОВЫЙ: по времени планового старта, раньше — выше. Он же даёт
@@ -312,6 +374,11 @@
         dayBoundsUnix: dayBoundsUnix,
         formatRuDate: formatRuDate,
         taskFromReportRow: taskFromReportRow,
+        isChecked: isChecked,                     // #4786
+        sticksNeeded: sticksNeeded,               // #4786
+        needsCutting: needsCutting,               // #4786
+        taskSticks: taskSticks,                   // #4786
+        missingReportColumns: missingReportColumns,   // #4786
         numberTasks: numberTasks,
         dayTasks: dayTasks,
         visibleTasks: visibleTasks,
@@ -354,6 +421,7 @@
         this.selectedCutterId = null;  // выбранный втулкорез (localStorage)
         this.selectedDate = core.todayLocalIso(); // выбранная дата (localStorage), по умолчанию сегодня
         this.showDone = false;         // показывать выполненные/пропущенные (localStorage)
+        this.missingCols = [];         // #4786: колонки «что режем», которых нет в отчёте
         this.busy = false;
     }
 
@@ -449,6 +517,14 @@
         return this.getJson(path).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
             self.tasks = list.map(function(row) { return core.taskFromReportRow(row); });
+            // #4786: отчёт старой сборки — карточки останутся без заказа/втулки, а палки
+            // не посчитаются. Говорим об этом вслух (и в консоль, и плашкой в списке):
+            // молчание читалось бы как «в базе пусто».
+            self.missingCols = core.missingReportColumns(list);
+            if (self.missingCols.length) {
+                console.error('[sc] #4786: в отчёте «' + REPORT + '» нет колонок: '
+                    + self.missingCols.join(', ') + ' — карточка покажет меньше, чем должна.');
+            }
         });
     };
 
@@ -571,6 +647,16 @@
 
         host.appendChild(el('div', { class: 'atex-sc-caption', text: 'Задания на ' + core.formatRuDate(this.selectedDate) }));
 
+        // #4786: отчёт без колонок «что режем» — пульт показывает меньше, чем должен, и
+        // называет причину. Иначе пустая карточка выглядит как «в базе ничего нет».
+        if ((this.missingCols || []).length) {
+            host.appendChild(el('div', {
+                class: 'atex-sc-note',
+                text: 'В отчёте «' + REPORT + '» нет колонок: ' + this.missingCols.join(', ')
+                    + '. Карточки показаны без заказа/втулки, метровые палки не посчитаны.'
+            }));
+        }
+
         // Сводка и номера — по ВСЕМ заданиям дня, независимо от того, что скрыто.
         var tasks = this.dayTasks();
         if (!tasks.length) {
@@ -629,20 +715,30 @@
         var self = this;
         var terminal = core.isTerminal(task.status);
         var skipped = core.isSkipped(task.status);
-        var badgeMod = core.isDone(task.status) ? ' atex-sc-badge-done' : (skipped ? '' : ' atex-sc-badge-wip');
         var card = el('div', { class: 'atex-sc-card' + (terminal ? ' is-done' : '') + (skipped ? ' is-skipped' : '') });
 
         var startTime = core.unixToLocalTime(task.dateUnix);
         var fact = core.toNumber(task.factQty);
-        var parts = [];
-        if (startTime) parts.push('старт ' + startTime);
-        parts.push('план ' + core.toNumber(task.planQty) + ' шт');
-        if (fact) parts.push('факт ' + fact + ' шт');
+        // #4786: ГЛАВНАЯ СТРОКА КАРТОЧКИ — ЧТО РЕЖЕМ: номер заказа, втулка, план. Их
+        // втулкорез читает с планшета стоя, поэтому они идут крупно и первыми; служебное
+        // (старт смены, уже набранный факт) уходит второй строкой помельче.
+        var head = [];
+        if (task.orderNo) head.push('заказ ' + task.orderNo);
+        if (task.sleeve) head.push(task.sleeve);
+        head.push('план ' + core.toNumber(task.planQty) + ' шт');
 
-        card.appendChild(el('div', { class: 'atex-sc-card-main' }, [
+        var sub = [];
+        if (startTime) sub.push('старт ' + startTime);
+        if (fact) sub.push('факт ' + fact + ' шт');
+        if (core.toNumber(task.widthMm) > 0) sub.push('ширина ' + core.toNumber(task.widthMm) + ' мм');
+
+        var main = el('div', { class: 'atex-sc-card-main' }, [
             el('span', { class: 'atex-sc-card-num', text: '№ ' + task.seq }),
-            el('span', { class: 'atex-sc-card-info', text: parts.join(' · ') })
-        ]));
+            el('div', { class: 'atex-sc-card-text' }, [
+                el('span', { class: 'atex-sc-card-info', text: head.join(' · ') })
+            ].concat(sub.length ? [el('span', { class: 'atex-sc-card-sub', text: sub.join(' · ') })] : []))
+        ]);
+        card.appendChild(main);
 
         var actions = el('div', { class: 'atex-sc-card-actions' });
         if (!terminal) {
@@ -654,7 +750,27 @@
             actions.appendChild(skipBtn);
         }
         card.appendChild(actions);
-        card.appendChild(el('span', { class: 'atex-sc-badge' + badgeMod, text: task.status }));
+        // #4786 п.2/п.3: у ЖИВОГО задания бейджа статуса больше нет — статус и так виден
+        // по кнопкам «Готово»/«Пропустить». Его место занимает то, чего на пульте не
+        // хватало: сколько метровых палок брать под это задание (втулки без галки
+        // «Готовые» режут из палок). Закрытое задание кнопок не имеет — там остаётся
+        // бейдж «Готово»/«Пропущена», иначе непонятно, чем оно кончилось.
+        if (terminal) {
+            card.appendChild(el('span', {
+                class: 'atex-sc-badge' + (core.isDone(task.status) ? ' atex-sc-badge-done' : ''),
+                text: task.status
+            }));
+        } else {
+            var sticks = core.taskSticks(task);
+            if (sticks != null) {
+                card.appendChild(el('span', {
+                    class: 'atex-sc-badge atex-sc-badge-sticks',
+                    title: 'Метровых заготовок под это задание: план ' + core.toNumber(task.planQty)
+                        + ' шт × ширина ' + core.toNumber(task.widthMm) + ' мм × 1.1 / 1000 → ' + sticks,
+                    text: 'палок: ' + sticks
+                }));
+            }
+        }
         return card;
     };
 

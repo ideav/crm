@@ -44,14 +44,24 @@ function dayUnix(offsetDays, hh, mm){
 }
 
 // Заглушка-«база» отчёта: строки sleeve_tasks (JSON_KV-объекты).
+// #4786: колонки «что режем» — order_no (Заказ), sleeve (Позиция → Диаметр втулки),
+// position_width (Позиция → Ширина, мм) и sleeve_ready (Диаметр втулки → Готовые, X/пусто).
+// Втулка без галки «Готовые» режется из метровых палок: их число — на карточке.
 var ROWS = [
-    { task_id: '401', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '100', fact: '100', started: String(dayUnix(0, 7, 5)), finished: String(dayUnix(0, 7, 40)) }, // сегодня, Готово
-    { task_id: '402', task_date: String(dayUnix(0, 8, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '45',  fact: '',    started: '',                       finished: '' },                       // сегодня, Ожидает
-    { task_id: '403', task_date: String(dayUnix(0, 9, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '30',  fact: '',    started: String(dayUnix(0, 9, 35)), finished: '' },                       // сегодня, В работе
-    { task_id: '404', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-20/25', cutter_id: '201', qty: '12',  fact: '',    started: '',                       finished: '' },                       // сегодня, другой втулкорез
-    { task_id: '405', task_date: String(dayUnix(-1, 8, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '70',  fact: '',    started: '',                       finished: '' },                       // вчера
-    { task_id: '406', task_date: String(dayUnix(0, 10, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '25', fact: '',    started: '',                       finished: String(dayUnix(0, 10, 35)) },// сегодня, Пропущена
-    { task_id: '407', task_date: String(dayUnix(0, 11, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '60',  fact: '',    started: '',                       finished: '' }                        // сегодня, Ожидает
+    { task_id: '401', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '100', fact: '100', started: String(dayUnix(0, 7, 5)), finished: String(dayUnix(0, 7, 40)),
+      order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '60.00', sleeve_ready: '' },   // сегодня, Готово
+    { task_id: '402', task_date: String(dayUnix(0, 8, 0)),  cutter: 'ВР-41/76', cutter_id: '203', qty: '45',  fact: '',    started: '',                       finished: '',
+      order_no: '730', sleeve: 'Втулка пластиковая PPC-CORES черная 1" длина 1 метр', position_width: '105.00', sleeve_ready: '' },   // Ожидает, палок 6
+    { task_id: '403', task_date: String(dayUnix(0, 9, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '30',  fact: '',    started: String(dayUnix(0, 9, 35)), finished: '',
+      order_no: '730', sleeve: 'Втулка пластиковая фиолетовая 1" ширина 55 мм', position_width: '55.00', sleeve_ready: 'X' },         // В работе, втулка ГОТОВАЯ — палок нет
+    { task_id: '404', task_date: String(dayUnix(0, 7, 0)),  cutter: 'ВР-20/25', cutter_id: '201', qty: '12',  fact: '',    started: '',                       finished: '',
+      order_no: '731', sleeve: 'втулка пластик серая для Videojet', position_width: '40.00', sleeve_ready: '' },  // другой втулкорез
+    { task_id: '405', task_date: String(dayUnix(-1, 8, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '70',  fact: '',    started: '',                       finished: '',
+      order_no: '712', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '80.00', sleeve_ready: '' },   // вчера
+    { task_id: '406', task_date: String(dayUnix(0, 10, 30)), cutter: 'ВР-41/76', cutter_id: '203', qty: '25', fact: '',    started: '',                       finished: String(dayUnix(0, 10, 35)),
+      order_no: '733', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '76.00', sleeve_ready: '' },   // Пропущена
+    { task_id: '407', task_date: String(dayUnix(0, 11, 0)), cutter: 'ВР-41/76', cutter_id: '203', qty: '60',  fact: '',    started: '',                       finished: '',
+      order_no: '734', sleeve: 'Втулка картонная 1" длина 1 метр', position_width: '150.00', sleeve_ready: '' }   // Ожидает, палок 10
 ];
 
 var CUTTERS = [

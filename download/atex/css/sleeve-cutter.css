@@ -111,7 +111,15 @@
     white-space: nowrap;
 }
 .atex-sc-badge-done { background: var(--sc-success-bg); color: var(--sc-ok); }
-.atex-sc-badge-wip { background: var(--sc-info-bg); color: var(--sc-info-text); }
+/* #4786: бейдж «В работе»/«Ожидает» снят — статус живого задания и так виден по кнопкам
+   «Готово»/«Пропустить». Его место занял счёт метровых заготовок: втулку без галки
+   «Готовые» режут из палок, и оператору нужно знать, сколько их взять. */
+.atex-sc-badge-sticks {
+    background: var(--sc-info-bg);
+    color: var(--sc-info-text);
+    font-size: 15px;
+    padding: 4px 12px;
+}
 
 /* Сводка */
 .atex-sc-summary {
@@ -148,7 +156,10 @@
 .atex-sc-tasks { display: flex; flex-direction: column; gap: 8px; }
 .atex-sc-card {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    /* #4786: текст карточки забирает всю ширину, кроме кнопок и бейджа. Прежняя третья
+       колонка `minmax(0, 1fr)` держала под бейдж половину строки, и «что режем» уезжало
+       в многоточие: «заказ 730 · Втулка п…» — ни втулки, ни плана. */
+    grid-template-columns: minmax(0, 1fr) auto minmax(96px, auto);
     align-items: center;
     gap: 8px 14px;
     border: 1px solid var(--sc-border);
@@ -160,6 +171,8 @@
 .atex-sc-card.is-skipped { background: var(--sc-surface); border-color: var(--sc-border); }
 .atex-sc-card-main { grid-column: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .atex-sc-card-num { font-weight: 700; flex: none; }
+/* #4786: две строки — «что режем» крупно, служебное мельче. */
+.atex-sc-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .atex-sc-card > .atex-sc-badge { grid-column: 3; justify-self: end; }
 
 .atex-sc-card-grid {
@@ -254,13 +267,34 @@
 .atex-sc-toolbar .atex-sc-field-date { min-width: 170px; }
 .atex-sc-toolbar-all { margin-left: auto; align-self: center; }
 .atex-sc-caption { font-size: 15px; font-weight: 600; color: var(--text-primary, #374151); margin: 2px 0 12px; }
+/* #4786: номер заказа, втулка и план — то, ради чего оператор смотрит на планшет:
+   основной цвет текста, 16px, полужирный. Прежние 14px приглушённым серым читались
+   с рабочего расстояния плохо. */
 .atex-sc-card-info {
-    color: var(--sc-muted);
-    font-size: 14px;
+    color: var(--text-primary, #1f2933);
+    font-size: 16px;
+    font-weight: 600;
     margin: 0;
+    /* Длинное название втулки переносится, а не обрезается: оператору нужно ЦЕЛОЕ имя. */
+    overflow-wrap: anywhere;
+}
+/* Служебная строка карточки: старт, факт, ширина рулона. */
+.atex-sc-card-sub {
+    color: var(--sc-muted);
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+/* #4786: отчёт без нужных колонок — пульт говорит об этом вслух. */
+.atex-sc-note {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--sc-danger-border);
+    border-radius: 8px;
+    background: var(--sc-surface);
+    color: var(--sc-warn);
+    font-size: 14px;
 }
 /* Кнопки в плашке задания — компактнее кнопок тулбара: карточка в одну строку. */
 .atex-sc-card .atex-sc-btn { padding: 7px 14px; }
@@ -274,6 +308,7 @@
     .atex-sc-card-actions .atex-sc-btn { flex: 1; }
     .atex-sc-card-main { flex-wrap: wrap; }
     .atex-sc-card-info { white-space: normal; overflow: visible; }
+    .atex-sc-card-sub { white-space: normal; overflow: visible; }
 }
 
 /* Модалка подтверждения «Закрыть все». */

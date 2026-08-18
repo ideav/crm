@@ -92,6 +92,13 @@ assertEqual(core.taskFromReportRow(row), {
     factQty: '',
     started: '',
     finished: '',
+    // #4786: строка ОТЧЁТА СТАРОЙ СБОРКИ (колонок «что режем» нет): поля пустые, а
+    // `hasSleeveReadyCol` = false — по нему пульт отличает «галка снята» от «колонки нет».
+    orderNo: '',
+    sleeve: '',
+    widthMm: 0,
+    sleeveReady: false,
+    hasSleeveReadyCol: false,
     status: 'Ожидает'
 }, 'taskFromReportRow: маппинг полей + статус Ожидает');
 
@@ -278,6 +285,162 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     virgin.restoreShowDone();
     assertEqual(virgin.showDone, false, 'restoreShowDone: без записи — выполненные скрыты');
     global.window = savedWindow;
+})();
+
+// ── #4786: ЧТО РЕЖЕМ + СКОЛЬКО МЕТРОВЫХ ПАЛОК ────────────────────────────────────────
+// Решение заказчика 18.08.2026: палок = план × ширина рулона × 1.1 / 1000, вверх до целой.
+// Ширина — «Ширина, мм» ПОЗИЦИИ (метровую палку режут по ней), 1.1 — запас на рез и брак.
+// Считаем только для втулок, у которых снята галка «Готовые» (их и режут из палок).
+(function() {
+    // Строка отчёта — как её отдаёт боевой ateh1 18.08.2026 (проверено живым прогоном).
+    function row(over) {
+        var r = { task_id: '625931', task_date: '1784610000', cutter: 'TC-20', cutter_id: '2257',
+                  qty: '900', fact: '', started: '', finished: '', position_id: '625796',
+                  order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр',
+                  position_width: '60.00', sleeve_ready: '' };
+        Object.keys(over || {}).forEach(function(k) {
+            if (over[k] === undefined) delete r[k]; else r[k] = over[k];
+        });
+        return r;
+    }
+
+    // Арифметика палок (та самая, из тикета).
+    assertEqual(core.sticksNeeded(100, 76), 9, 'sticksNeeded: план 100 × 76 мм × 1.1 / 1000 → 9 палок');
+    assertEqual(core.sticksNeeded(200, 55), 13, 'sticksNeeded: план 200 × 55 мм × 1.1 / 1000 → 13 палок');
+    assertEqual(core.sticksNeeded(900, 60), 60, 'sticksNeeded: боевая строка 900 шт × 60 мм → 60 палок');
+    assertEqual(core.sticksNeeded(1, 60), 1, 'sticksNeeded: округляем ВВЕРХ — на один рулон нужна палка');
+    assertEqual(core.sticksNeeded(0, 60), null, 'sticksNeeded: без плана числа нет (не выдумываем)');
+    assertEqual(core.sticksNeeded(100, 0), null, 'sticksNeeded: без ширины позиции числа нет');
+
+    // Признак «Готовые» из отчёта: X = галка стоит, пусто = резать из палок.
+    assertEqual(core.isChecked('X'), true, 'isChecked: булев реквизит приходит буквой X');
+    assertEqual(core.isChecked(''), false, 'isChecked: пусто → галка снята');
+    assertEqual(core.isChecked('1'), true, 'isChecked: терпим к 1/да/true');
+
+    // Разбор строки: что режем.
+    var t = core.taskFromReportRow(row());
+    assertEqual([t.orderNo, t.sleeve, t.widthMm, t.sleeveReady],
+        ['287', 'Втулка картонная 1" длина 1 метр', 60, false],
+        'taskFromReportRow: заказ, втулка, ширина рулона и снятая галка «Готовые»');
+    assertEqual(core.needsCutting(t), true, 'needsCutting: «Готовые» снята → втулку режем из палок');
+    assertEqual(core.taskSticks(t), 60, 'taskSticks: 900 шт по 60 мм → 60 метровых палок');
+
+    // Готовая втулка: палки не считаем вовсе.
+    var ready = core.taskFromReportRow(row({ sleeve_ready: 'X', qty: '16', position_width: '55.00',
+        sleeve: 'Втулка пластиковая фиолетовая 1" ширина 55 мм' }));
+    assertEqual(core.needsCutting(ready), false, 'needsCutting: галка «Готовые» стоит → резать нечего');
+    assertEqual(core.taskSticks(ready), null, 'taskSticks: у готовой втулки бейджа палок нет');
+
+    // Колонки в отчёте НЕТ — это не «галка снята». Пульт молчит о палках и говорит о колонке.
+    var old = core.taskFromReportRow(row({ order_no: undefined, sleeve: undefined,
+        position_width: undefined, sleeve_ready: undefined }));
+    assertEqual(core.needsCutting(old), null, 'needsCutting: колонки нет → «не знаю», а не «резать»');
+    assertEqual(core.taskSticks(old), null, 'taskSticks: без колонки палки не считаем');
+    assertEqual(core.missingReportColumns([row({ order_no: undefined, sleeve_ready: undefined })]),
+        ['order_no', 'sleeve_ready'], 'missingReportColumns: называет ровно недостающие колонки');
+    assertEqual(core.missingReportColumns([row()]), [],
+        'missingReportColumns: полный отчёт — жаловаться не на что');
+    assertEqual(core.missingReportColumns([]), [],
+        'missingReportColumns: пустая выдача — колонок не видно, молчим');
+})();
+
+// ── #4786: КАРТОЧКА ЗАДАНИЯ (DOM) ────────────────────────────────────────────────────
+// Пункты тикета проверяем там, где их видит втулкорез: в разметке карточки. Бейдж
+// «В работе» снят (п.2), на его месте — палки (п.3), в главной строке — заказ, втулка,
+// план (п.1). Стаб DOM минимальный: createElement + className/textContent + querySelector.
+(function() {
+    function Node(tag) {
+        this.tagName = String(tag || '').toUpperCase();
+        this.childNodes = []; this.attributes = {}; this.dataset = {}; this._className = ''; this._text = '';
+        var self = this;
+        this.classList = {
+            add: function(c) { if (self._cls().indexOf(c) === -1) self._className = (self._className + ' ' + c).trim(); },
+            contains: function(c) { return self._cls().indexOf(c) !== -1; }
+        };
+    }
+    Node.prototype._cls = function() { return this._className.split(/\s+/).filter(Boolean); };
+    Object.defineProperty(Node.prototype, 'className', {
+        get: function() { return this._className; }, set: function(v) { this._className = String(v || ''); } });
+    Object.defineProperty(Node.prototype, 'textContent', {
+        get: function() { return this.childNodes.length
+            ? this.childNodes.map(function(c) { return c.textContent; }).join(' ') : this._text; },
+        set: function(v) { this._text = String(v == null ? '' : v); this.childNodes = []; } });
+    Node.prototype.appendChild = function(n) { this.childNodes.push(n); return n; };
+    Node.prototype.setAttribute = function(k, v) { this.attributes[k] = String(v); };
+    Node.prototype.addEventListener = function() {};
+    Node.prototype._all = function(acc) {
+        this.childNodes.forEach(function(c) { acc.push(c); c._all(acc); }); return acc; };
+    Node.prototype.querySelectorAll = function(sel) {
+        var cls = sel.replace(/^\./, '');
+        return this._all([]).filter(function(n) { return n.classList.contains(cls); }); };
+    Node.prototype.querySelector = function(sel) { return this.querySelectorAll(sel)[0] || null; };
+
+    var savedDoc = global.document, savedWin = global.window;
+    global.document = { createElement: function(t) { return new Node(t); } };
+    global.window = savedWin || {};
+
+    var Controller = mod.Controller;
+    var inst = Object.create(Controller.prototype);
+    function rowTask(over) {
+        var r = { task_id: '625931', task_date: '1784610000', cutter: 'TC-20', cutter_id: '2257',
+                  qty: '900', fact: '', started: '', finished: '', position_id: '625796',
+                  order_no: '287', sleeve: 'Втулка картонная 1" длина 1 метр',
+                  position_width: '60.00', sleeve_ready: '' };
+        Object.keys(over || {}).forEach(function(k) { r[k] = over[k]; });
+        var t = core.taskFromReportRow(r); t.seq = 1; return t;
+    }
+
+    // п.1: заказ, втулка и план — в главной строке карточки.
+    var card = inst.renderTaskRow(rowTask());
+    var info = card.querySelector('.atex-sc-card-info');
+    assertEqual(!!info && /заказ 287/.test(info.textContent), true,
+        '#4786-1: в главной строке карточки — номер заказа');
+    assertEqual(!!info && info.textContent.indexOf('Втулка картонная 1" длина 1 метр') >= 0, true,
+        '#4786-1: и название втулки');
+    assertEqual(!!info && /план 900 шт/.test(info.textContent), true, '#4786-1: и план');
+
+    // п.2: бейджа «В работе» у живого задания больше нет.
+    assertEqual(card.querySelectorAll('.atex-sc-badge-wip').length, 0,
+        '#4786-2: бейдж .atex-sc-badge-wip убран — статус виден по кнопкам');
+
+    // п.3: вместо него — метровые палки.
+    var sticks = card.querySelector('.atex-sc-badge-sticks');
+    assertEqual(!!sticks && sticks.textContent, 'палок: 60',
+        '#4786-3: на месте бейджа — «палок: 60» (900 шт × 60 мм × 1.1 / 1000)');
+    assertEqual(!!sticks && /900/.test(sticks.attributes.title || ''), true,
+        '#4786-3: в подсказке — из чего число посчитано');
+
+    // Готовая втулка: палок нет, лишнего бейджа тоже.
+    var readyCard = inst.renderTaskRow(rowTask({ sleeve_ready: 'X' }));
+    assertEqual(readyCard.querySelectorAll('.atex-sc-badge').length, 0,
+        '#4786-3: у готовой втулки правая колонка карточки пуста');
+
+    // Закрытое задание: бейдж статуса остаётся — иначе непонятно, чем оно кончилось.
+    var doneCard = inst.renderTaskRow(rowTask({ finished: '1784620000', fact: '900' }));
+    var doneBadge = doneCard.querySelector('.atex-sc-badge');
+    assertEqual(!!doneBadge && doneBadge.textContent, 'Готово',
+        '#4786-2: у закрытого задания бейдж статуса на месте');
+    assertEqual(doneCard.querySelectorAll('.atex-sc-badge-sticks').length, 0,
+        '#4786-3: и палки у него не считаются — резать уже нечего');
+
+    global.document = savedDoc; global.window = savedWin;
+})();
+
+// ── #4786: СТОРОЖ ИСХОДНИКОВ — у новых классов есть стили, у снятого бейджа их нет ───
+// Пометка без вида — невидимая пометка (грабли #4409): бейдж «палок» без правила в CSS
+// сольётся с фоном, а забытое правило .atex-sc-badge-wip вернёт снятый бейдж, если
+// кто-то опять повесит этот класс.
+(function() {
+    var fs = require('fs'), path = require('path');
+    var cssPath = path.join(__dirname, '..', 'download', 'atex', 'css', 'sleeve-cutter.css');
+    var css = fs.readFileSync(cssPath, 'utf8');
+    var js = fs.readFileSync(path.join(__dirname, '..', 'download', 'atex', 'js', 'sleeve-cutter.js'), 'utf8');
+    assertEqual(/\.atex-sc-badge-sticks\s*\{/.test(css), true,
+        '#4786: у бейджа «палок» есть правило в sleeve-cutter.css');
+    assertEqual(/\.atex-sc-card-sub\s*\{/.test(css), true, '#4786: и у служебной строки карточки');
+    assertEqual(/\.atex-sc-note\s*\{/.test(css), true, '#4786: и у плашки о недостающих колонках');
+    assertEqual(css.indexOf('.atex-sc-badge-wip {') === -1 && js.indexOf('atex-sc-badge-wip') === -1, true,
+        '#4786-2: класс .atex-sc-badge-wip убран и из разметки, и из стилей');
 })();
 
 console.log('\n' + passed + ' assertions passed');
