@@ -123,25 +123,22 @@ function seamlessTexts(inst) {
     var inst = makeInst();
     assert(seamlessTexts(inst).length === 2,
         '#3609: у последней резки смены подсказка показана (сырьё + ножи)');
-    inst.renderToolbar();
-    var select = inst.toolbarEl.querySelectorAll('atex-sl-select')[0];
-    select.value = 'm2';
-    select.dispatch('change');
+    // #4783 п.3: станок выбирают в шапке пульта (selectSlitter), поля станка в форме нет.
+    inst.selectSlitter('m2');
     assert(inst.seamlessNotice === null, '#4370: смена станка ОЧИЩАЕТ подсказку о бесшовной смене');
     assert(inst.currentStrips.length === 0, '#4370: полосы прежней резки тоже сброшены');
     assert(seamlessTexts(inst).length === 0, '#4370: под списком нового станка предупреждений нет');
 })();
 
-// ── смена даты — то же самое ───────────────────────────────────────────────────────────────────
+// ── #4783 п.4: дату в пульте не выбирают — она всегда текущая календарная ─────────────────────
 (function() {
     var inst = makeInst();
-    inst.renderToolbar();
-    var dateInp = inst.toolbarEl.querySelectorAll('atex-sl-input')[0];
-    dateInp.value = D24;
-    dateInp.dispatch('change');
+    assert(inst.selectSlitter && !inst.renderToolbar,
+        '#4783 п.3: тулбара с датой и станком нет — станок выбирают в шапке пульта');
+    inst.selectSlitter('m2');
     assert(inst.seamlessNotice === null && inst.currentCut === null,
-        '#4370: смена даты очищает и выбранную резку, и её подсказку');
-    assert(seamlessTexts(inst).length === 0, '#4370: после смены даты подсказки нет');
+        '#4370: смена станка очищает и выбранную резку, и её подсказку');
+    assert(seamlessTexts(inst).length === 0, '#4370: под списком нового станка подсказки нет');
 })();
 
 // ── страховка рендера: подсказка живёт только вместе со «своей» резкой ─────────────────────────

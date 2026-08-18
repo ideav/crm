@@ -7,14 +7,25 @@
 <meta charset="utf-8">
 <title>atex · Пульт слиттера — стенд</title>
 <link rel="stylesheet" href="../download/atex/css/slitter.css">
-<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+<style>
+    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5;height:100vh;display:flex;flex-direction:column}
+    /* #4783: заглушка шапки main.html — пульт пишет в .navbar-workspace «планшет · дата · станок» */
+    .navbar{display:flex;align-items:center;height:48px;padding:0 14px;background:#fff;border-bottom:1px solid #d9dee5;flex:none}
+    .app-content{flex:1;min-height:0;overflow:hidden;padding:0}
+</style>
 </head>
 <body>
+<nav class="navbar"><div class="navbar-workspace">Планшет слиттера №1</div></nav>
+<div class="app-content">
 <div id="atex-slitter" class="atex-sl" data-db="atex" data-xsrf="test-token" data-user="operator" data-user-id="701">
     <div class="atex-sl-loading">Загрузка…</div>
 </div>
+</div>
 
 <script>
+// #4666/#4783: имя планшета в боевом пульте кладёт сторож pad-guard.js — здесь стенд
+// подставляет его сам (сторож в стенде не участвует).
+window.atexPad = { id: '1', name: 'Планшет слиттера №1' };
 // ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
 var META = [
     { id: 105, val: 'Вид сырья', reqs: [
@@ -62,6 +73,13 @@ var META = [
         // Без реквизита стенд ронял в консоль «проходы не сохраняются» и счёт проходов терялся.
         { id: 1121, val: 'Кол-во резок факт' }
     ]},
+    // #4783: «Партия ГП» — подчинённая заданию таблица полос (раскладка ножей). Без неё
+    // стенд рисовал «У резки нет полос» и по нему нельзя было проверить высоту правой части.
+    { id: 113, val: 'Партия ГП', reqs: [
+        { id: 1130, val: 'Ширина, мм' },
+        { id: 1132, val: 'Кол-во полос' },
+        { id: 1134, val: 'Назначение' }
+    ]},
     { id: 111, val: 'Расход сырья', reqs: [
         { id: 1112, val: 'Израсходовано, м²' },
         { id: 1114, val: 'Партия сырья' }
@@ -85,6 +103,14 @@ function planAt(hhmm) { return String(Math.floor(new Date(TODAY + 'T' + hhmm + '
 // #4362: плановый старт СЛЕДУЮЩЕГО дня — для секции «Следующее задание» (#4332 п.4).
 function planTomorrowAt(hhmm) { return String(Math.floor(new Date(TODAY + 'T' + hhmm + ':00').getTime() / 1000) + 86400); }
 var DB = {
+    // #4783: полосы заданий (подчинённые «Партии ГП»): [имя, ширина, кол-во полос, назначение]
+    strips: {
+        '301': [ { i: 9011, u: '301', r: ['Полоса 250', '250', '3', 'Заказ'] },
+                 { i: 9012, u: '301', r: ['Полоса 80', '80', '1', 'Склад'] } ],
+        '302': [ { i: 9021, u: '302', r: ['Полоса 250', '250', '3', 'Заказ'] },
+                 { i: 9022, u: '302', r: ['Полоса 150', '150', '1', 'Заказ'] } ],
+        '303': [ { i: 9031, u: '303', r: ['Полоса 400', '400', '2', 'Заказ'] } ]
+    },
     materials: [
         { i: 5, r: ['БОПП', '910'] },
         { i: 6, r: ['ПЭТ', '880'] }
@@ -206,6 +232,7 @@ window.fetch = function(url, opts) {
             if (fi) return json(DB.cuts.filter(function(c){ return String(c.i) === fi[1]; }));
             return json(DB.cuts);
         }
+        if (tid === '113') return json((fu && DB.strips[fu[1]]) || []);
         if (tid === '111') return json((fu && DB.consumptions[fu[1]]) || []);
         if (tid === '114') return json(DB.events);
     }

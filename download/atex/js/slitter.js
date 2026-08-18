@@ -712,6 +712,24 @@
         return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
     }
 
+    // #4783 п.3/п.4: «ГГГГ-ММ-ДД» (день пульта) → «ДД.ММ.ГГГГ». Не дата — как есть.
+    function formatDayISO(value) {
+        var s = String(value == null ? '' : value).trim();
+        var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? (m[3] + '.' + m[2] + '.' + m[1]) : s;
+    }
+
+    // #4783 п.3: подпись пульта в шапке страницы (.navbar-workspace) —
+    // «{имя планшета} · {дата} · {станок}». Дата и станок ушли из формы сюда, поэтому
+    // пустой станок называет себя сам («Станок не выбран») — иначе подпись молчит о том,
+    // почему список заданий пуст. Незаданные части (нет имени планшета) опускаются.
+    function workspaceTitleParts(padName, dateISO, slitterLabel) {
+        var pad = String(padName == null ? '' : padName).trim();
+        var day = formatDayISO(dateISO);
+        var slitter = String(slitterLabel == null ? '' : slitterLabel).trim() || 'Станок не выбран';
+        return [pad, day, slitter].filter(function(part) { return !!part; });
+    }
+
     // Заголовок резки: штамп показываем как «Резка ЧЧ:ММ», иначе «Резка №…»
     // (пустое значение → просто «Резка»).
     function cutTitle(value) {
@@ -1069,6 +1087,8 @@
         formatClock: formatClock,
         cutQueueTime: cutQueueTime,   // #3646
         formatDate: formatDate,
+        formatDayISO: formatDayISO,               // #4783
+        workspaceTitleParts: workspaceTitleParts, // #4783: подпись пульта в .navbar-workspace
         cutTitle: cutTitle,
         humanizeLabel: humanizeLabel,
         rowsToActiveBatches: rowsToActiveBatches,
@@ -1850,7 +1870,8 @@
     // ── Рендеринг ──
 
     AtexSlitter.prototype.render = function() {
-        this.renderToolbar();
+        this.renderWorkspaceTitle();   // #4783 п.3: планшет · дата · станок — в шапке страницы
+        this.renderShiftHead();        // #4783 п.5: «Открыть/Закрыть смену» — в шапке списка заданий
         this.renderCuts();
         this.renderSeamless();  // #3609: предупреждения о бесшовном продолжении смены
         this.renderMain();
@@ -1937,54 +1958,103 @@
         return !this.futureCut();
     };
 
-    AtexSlitter.prototype.renderToolbar = function() {
+    // #4783 п.3/п.4: дата и станок ушли из формы в шапку страницы (.navbar-workspace):
+    // «{имя планшета} · {дата} · {станок}». Имя планшета туда уже положил сторож
+    // pad-guard.js (#4666) — берём его из window.atexPad (сторож кладёт объект туда же).
+    // Дата — всегда текущая календарная (выбор дня убран), станок — кнопка: выбор станка
+    // единственное, что оператору тут нужно менять.
+    AtexSlitter.prototype.renderWorkspaceTitle = function() {
         var self = this;
-        var box = this.toolbarEl;
+        if (typeof document === 'undefined' || !document.querySelector) return;
+        var slot = document.querySelector('.navbar-workspace');
+        if (!slot) return;
+        slot.innerHTML = '';
+        slot.classList.add('atex-sl-nav');
+        var parts = core.workspaceTitleParts(this.padName(), this.selectedDate, this.selectedSlitterLabel());
+        parts.forEach(function(part, idx) {
+            var last = idx === parts.length - 1;   // станок — всегда последняя часть
+            if (idx) slot.appendChild(el('span', { class: 'atex-sl-nav-sep', text: '·' }));
+            if (!last) { slot.appendChild(el('span', { class: 'atex-sl-nav-part', text: part })); return; }
+            var btn = el('button', { class: 'atex-sl-nav-slitter', type: 'button', text: part,
+                title: 'Выбрать станок' });
+            btn.addEventListener('click', function() { self.chooseSlitter(); });
+            slot.appendChild(btn);
+        });
+    };
+
+    // Имя планшета кладёт сторож pad-guard.js (#4666) — сначала в window.atexPad, а в
+    // шапку страницы текстом. Пульт открыт мимо сторожа (стенд/тест) — имени нет.
+    AtexSlitter.prototype.padName = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        return (pad && pad.name) ? String(pad.name) : '';
+    };
+
+    // #4783 п.5: в шапке списка заданий — «Открыть смену»/«Закрыть смену» (заголовок
+    // «Задание в производство (N)» убран: счёт заданий виден по самому списку). Станок
+    // не выбран — там же кнопка выбора станка, иначе смену открывать не для чего.
+    AtexSlitter.prototype.renderShiftHead = function() {
+        var self = this;
+        var box = this.shiftHeadEl;
         if (!box) return;
         box.innerHTML = '';
-
-        var dateInp = el('input', { class: 'atex-sl-input', type: 'date' });
-        dateInp.value = this.selectedDate || core.todayISO();
-        dateInp.addEventListener('change', function() {
-            self.selectedDate = dateInp.value || core.todayISO();
-            self.clearCutSelection();   // #4370: вместе с резкой уходит и её подсказка о бесшовной смене
-            self.loadShiftEvents().then(function() { self.render(); });
-        });
-
-        var select = el('select', { class: 'atex-sl-input atex-sl-select' });
-        select.appendChild(el('option', { value: '', text: 'Выберите станок' }));
-        this.slitterOptions().forEach(function(item) {
-            var opt = el('option', { value: item.id, text: item.label });
-            if (String(item.id) === String(self.selectedSlitterId)) opt.selected = true;
-            select.appendChild(opt);
-        });
-        select.addEventListener('change', function() {
-            self.selectedSlitterId = select.value;
-            self.storeSelectedSlitter(); // #3460: запоминаем выбор станка
-            self.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
-            // #3674: report/slitter_cuts фильтруется по станку → при смене станка
-            // перезагружаем резки (раньше грузились один раз, фильтровал visibleCuts).
-            self.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
-        });
-
-        box.appendChild(field('Дата', dateInp));
-        box.appendChild(field('Станок', select));
-
-        // #4332 п.1/п.3: смена управляется из тулбара и всегда доступна при выбранном станке.
-        // Смена закрыта → «Открыть смену»; открыта → «Закрыть смену» (пишет «Конец смены»).
-        // Список заданий и детали резки видны всегда (в т.ч. при закрытой смене, только просмотр);
-        // управляющие кнопки гейтятся отдельно (renderCutControls/renderPassButtons).
-        if (this.selectedSlitterId) {
-            if (this.isShiftOpen()) {
-                var closeBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-toolbar-close', type: 'button', text: 'Закрыть смену' });
-                closeBtn.addEventListener('click', function() { self.closeShift(); });
-                box.appendChild(closeBtn);
-            } else {
-                var openBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-toolbar-open', type: 'button', text: 'Открыть смену' });
-                openBtn.addEventListener('click', function() { self.openShift(); });
-                box.appendChild(openBtn);
-            }
+        if (!this.selectedSlitterId) {
+            var pick = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-shift-btn', type: 'button', text: 'Выбрать станок' });
+            pick.addEventListener('click', function() { self.chooseSlitter(); });
+            box.appendChild(pick);
+            return;
         }
+        // #4332 п.1/п.3: смена доступна всегда при выбранном станке. Список заданий и детали
+        // резки видны и при закрытой смене (просмотр); управляющие кнопки гейтятся отдельно
+        // (renderCutControls/renderPassButtons).
+        var btn = this.isShiftOpen()
+            ? el('button', { class: 'atex-sl-btn atex-sl-btn-secondary atex-sl-shift-btn atex-sl-toolbar-close', type: 'button', text: 'Закрыть смену' })
+            : el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-shift-btn atex-sl-toolbar-open', type: 'button', text: 'Открыть смену' });
+        btn.addEventListener('click', function() {
+            if (self.isShiftOpen()) self.closeShift(); else self.openShift();
+        });
+        box.appendChild(btn);
+    };
+
+    // #4783 п.3: выбор станка — модалкой из шапки (в форме поля станка больше нет).
+    // Выбор запоминается в localStorage (#3460), поэтому на планшете его делают один раз.
+    AtexSlitter.prototype.chooseSlitter = function() {
+        var self = this;
+        var options = this.slitterOptions();
+        var overlay = el('div', { class: 'atex-sl-confirm-overlay' });
+        var list = el('div', { class: 'atex-sl-slitter-list' });
+        if (!options.length) {
+            list.appendChild(el('div', { class: 'atex-sl-empty', text: 'Станков в справочнике нет.' }));
+        }
+        options.forEach(function(item) {
+            var active = String(item.id) === String(self.selectedSlitterId);
+            var btn = el('button', { class: 'atex-sl-slitter-item' + (active ? ' is-active' : ''), type: 'button', text: item.label });
+            btn.addEventListener('click', function() {
+                close();
+                if (active) return;
+                self.selectSlitter(item.id);
+            });
+            list.appendChild(btn);
+        });
+        var cancel = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Отмена' });
+        cancel.addEventListener('click', function() { close(); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        overlay.appendChild(el('div', { class: 'atex-sl-confirm' }, [
+            el('div', { class: 'atex-sl-confirm-msg', text: 'Станок' }),
+            list,
+            el('div', { class: 'atex-sl-confirm-actions' }, [cancel])
+        ]));
+        (this.root || document.body).appendChild(overlay);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    };
+
+    AtexSlitter.prototype.selectSlitter = function(id) {
+        var self = this;
+        this.selectedSlitterId = String(id || '');
+        this.storeSelectedSlitter(); // #3460: запоминаем выбор станка
+        this.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
+        // #3674: report/slitter_cuts фильтруется по станку → при смене станка перезагружаем резки.
+        this.render();
+        return this.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
     };
 
     AtexSlitter.prototype.renderCuts = function() {
@@ -1993,14 +2063,12 @@
         if (!box) return;
         box.innerHTML = '';
         if (!this.selectedSlitterId) {
-            this.updateSidebarTitle(null);
-            box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Сначала выберите станок.' }));
+            box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Станок не выбран — выберите его в шапке пульта.' }));
             return;
         }
         // #4332 п.1: список заданий виден ВСЕГДА — в т.ч. при закрытой смене (только просмотр);
         // управляющие кнопки гейтятся отдельно (renderCutControls/renderPassButtons).
         var list = this.visibleCuts();
-        this.updateSidebarTitle(list.length);
         if (!list.length) {
             box.appendChild(el('div', { class: 'atex-sl-empty', text: 'Резок пока нет' }));
             this.renderFutureCuts(box);   // #4332 п.4 / #4365: задания будущих дней
@@ -2128,12 +2196,6 @@
         return card;
     };
 
-    // #3565 #1: «Задание в производство (N)» — N резок в списке; null → без счётчика.
-    AtexSlitter.prototype.updateSidebarTitle = function(count) {
-        if (!this.sidebarTitleEl) return;
-        this.sidebarTitleEl.textContent = 'Задание в производство' + (count == null ? '' : ' (' + count + ')');
-    };
-
     // #3557: резка заблокирована очередью, если она «Ожидает» и НЕ первая открытая
     // в очереди станка. Такую можно открыть для просмотра, но не управлять (#8).
     AtexSlitter.prototype.isCutLocked = function(cut) {
@@ -2165,32 +2227,27 @@
         host.innerHTML = '';
 
         if (!this.selectedSlitterId) {
-            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Выберите станок и дату.' }));
+            host.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Станок не выбран — выберите его в шапке пульта.' }));
             return;
         }
 
         // #4332 п.1: детали резки видны ВСЕГДА (в т.ч. при закрытой смене — просмотр). Управление
         // (Наладка/Перерыв/Прекратить/Пропуск, отметки проходов) гейтится по открытости смены
         // в renderCutControls/renderPassButtons; открыть смену — из тулбара («Открыть смену»).
-        // #4610: «События смены» — секция станка и даты, а не задания: показываем её и
-        // до выбора резки. Раньше без выбранной резки главная область схлопывалась в
-        // одну строку-подсказку, и журнал смены пропадал вместе с ней — хотя открытие
-        // смены, перерывы и отметки прошлых заданий оператору видеть нужно всегда.
-        // Секции самой резки (раскладка, партии, показания) остаются привязанными к
-        // выбранному заданию — без него им нечего показывать.
+        // #4783 п.1: секции «События смены» в пульте больше нет — правая часть должна
+        // влезать в экран целиком. Журнал событий смотрят в «Журнале» (docs/atex_workplaces.md).
         if (!this.currentCutId || !this.currentCut) {
             host.appendChild(el('div', { class: 'atex-sl-placeholder',
                 text: this.isShiftOpen() ? 'Выберите производственную резку слева.' : 'Откройте смену и выберите резку. Задания можно просматривать и при закрытой смене.' }));
-            host.appendChild(this.renderEvents());
             return;
         }
 
-        // #3557: статус и кнопки управления — в шапке (renderHead); секции «Статус резки» больше нет.
+        // #4783 п.9: порядок правой части — заказ и «Резка N из M», спецификация задания,
+        // кнопки управления, раскладка ножей, показания, партия сырья строкой.
         host.appendChild(this.renderHead());
         host.appendChild(this.renderCutMap());
-        host.appendChild(this.renderBatchSelection());
         host.appendChild(this.renderReadings());
-        host.appendChild(this.renderEvents());
+        host.appendChild(this.renderBatchLine());
     };
 
 
@@ -2208,30 +2265,26 @@
         var pass = Math.min(this.donePassCount(cut) + 1, total);
         if (pass < 1) pass = 1;
         var title = setup ? '⚙ Настройка ножей и сырья' : ('Резка ' + pass + ' из ' + total);
-        // #3557 #5: строку .atex-sl-head-meta убрали (Слиттер/Партия/План видно в тулбаре/метриках).
-        var head = el('div', { class: 'atex-sl-head' }, [
-            el('div', { class: 'atex-sl-head-main' }, [
-                el('h2', { class: 'atex-sl-head-title', text: title }),
-                this.renderPassButtons(cut),  // #3583: «Готово» / «Готовы все» правее заголовка
-                el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
-            ]),
-            this.renderCutControls(cut)
-        ]);
-        var wrap = el('div');
-        // #4606: номер заказа текущего задания — над заголовком и самым крупным
-        // кеглем на пульте: его оператор сверяет с бумагой у станка.
+        var wrap = el('div', { class: 'atex-sl-headwrap' });
+        // #4783 п.9: верхняя строчка — номер заказа и «Резка N из M» рядом. #4606: номер
+        // заказа — самый крупный кегль пульта, его оператор сверяет с бумагой у станка.
+        // #4783 п.8: бейджа статуса в шапке нет — статус виден на карточке задания слева.
+        var headMain = el('div', { class: 'atex-sl-head-main' });
         var orderText = this.cutOrderText(cut);
-        if (orderText) {
-            wrap.appendChild(el('div', { class: 'atex-sl-head-order' }, [
-                el('span', { class: 'atex-sl-head-order-no', text: orderText })
-            ]));
-        }
-        wrap.appendChild(head);
+        if (orderText) headMain.appendChild(el('span', { class: 'atex-sl-head-order-no', text: orderText }));
+        headMain.appendChild(el('h2', { class: 'atex-sl-head-title', text: title }));
+        wrap.appendChild(el('div', { class: 'atex-sl-head' }, [headMain]));
+        // #4783 п.7/п.9: вместо плашек-метрик — одна строка «Вид сырья / Метраж, м / Намотка / Лидер».
+        wrap.appendChild(this.renderCutSpec());
         // #3889: задание-«настройка» (последняя резка смены, не успевшая начаться) — поясняем
         // оператору последовательность: сейчас только ПОЛНАЯ настройка (ножи + сырьё), без
         // намотки; намотку начнёт следующая смена как продолжение того же задания.
         if (setup) wrap.appendChild(this.renderSetupOnlyNote());
-        wrap.appendChild(this.renderCutMetrics());
+        // #4783 п.9: кнопки управления одним рядом — отметки проходов и статус задания.
+        wrap.appendChild(el('div', { class: 'atex-sl-actions' }, [
+            this.renderPassButtons(cut),
+            this.renderCutControls(cut)
+        ]));
         return wrap;
     };
 
@@ -2276,18 +2329,19 @@
         // Кнопка нужна, только когда есть что отмечать пачкой: осталось ≥ 2 прохода.
         var done = this.donePassCount(cut);
         var total = core.plannedRunsForCut(cut);
+        // #4783 п.6: кнопки «✓✓ Готовы все» больше нет — весь остаток проходов отмечает
+        // «✓N Готовы несколько»: в её модалке уже предложен ВЕСЬ план (askPassCount), то есть
+        // «все» это одно подтверждение. Кнопка нужна, только когда есть что отмечать пачкой:
+        // осталось ≥ 2 прохода (#4604), при одном оставшемся это «✓ Готово».
         var some = (total - done >= 2)
             ? el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-some', type: 'button', text: '✓N Готовы несколько',
-                title: 'Отметить сразу несколько выполненных проходов — ввести, сколько сделано (например 99 из 100)' })
+                title: 'Отметить сразу несколько выполненных проходов — по умолчанию предложен весь план (например 99 или 100 из 100)' })
             : null;
-        var all = el('button', { class: 'atex-sl-btn atex-sl-btn-pass atex-sl-btn-pass-all', type: 'button', text: '✓✓ Готовы все',
-            title: 'Отметить все проходы выполненными и завершить задание (с подтверждением)' });
         if (canMark) {
             one.addEventListener('click', function() { self.markPassDone(false); });
             if (some) some.addEventListener('click', function() { self.askPassCount(cut); });
-            all.addEventListener('click', function() { self.markPassDone(true); });
-        } else { one.disabled = true; all.disabled = true; if (some) some.disabled = true; }
-        return el('div', { class: 'atex-sl-head-pass' }, [one, some, all]);
+        } else { one.disabled = true; if (some) some.disabled = true; }
+        return el('div', { class: 'atex-sl-head-pass' }, [one, some]);
     };
 
     // #4604: спросить, сколько проходов выполнено, и отметить их одним действием.
@@ -2393,29 +2447,19 @@
     };
 
 
-    // #3460: сводка резки — вид сырья, метраж, число резок (проходов) и направление
-    // намотки. #3566 #3: метрики «Полос»/«Полос всего» убраны — число полос теперь
-    // в заголовке секции «Раскладка ножей». #3566 #2: добавлено направление намотки.
-    AtexSlitter.prototype.renderCutMetrics = function() {
+    // #4783 п.7/п.9: сводка задания — ОДНА строка «Вид сырья / Метраж, м / Намотка / Лидер»
+    // (плашек-метрик больше нет: правая часть должна влезать в экран целиком). Число
+    // проходов не дублируем — оно в заголовке «Резка N из M».
+    AtexSlitter.prototype.renderCutSpec = function() {
         var cut = this.currentCut;
-        var runs = core.plannedRunsForCut(cut);
         var runLength = core.runLengthForCut(cut);
-        var material = cut.material || cut.materialLabel || cut.batch || '—';
-        var cells = [
-            ['Вид сырья', material || '—'],
-            ['Метраж, м', runLength > 0 ? String(core.round3(runLength)) : '—'],
-            ['Резок', String(runs)],
-            ['Намотка', cut.winding || '—'],
-            ['Лидер', cut.leader || '—']
+        var parts = [
+            cut.material || cut.materialLabel || cut.batch || '—',
+            runLength > 0 ? (core.round3(runLength) + ' м') : '—',
+            cut.winding || '—',
+            cut.leader || '—'
         ];
-        var grid = el('div', { class: 'atex-sl-metrics' });
-        cells.forEach(function(pair) {
-            grid.appendChild(el('div', { class: 'atex-sl-metric' }, [
-                el('span', { class: 'atex-sl-metric-label', text: pair[0] }),
-                el('span', { class: 'atex-sl-metric-value', text: String(pair[1]) })
-            ]));
-        });
-        return grid;
+        return el('div', { class: 'atex-sl-spec', text: parts.join(' / ') });
     };
 
     // #3460: цветная карта раскроя ножей с подписями ширин прямо на полосах
@@ -2517,61 +2561,41 @@
         if (!cut.counterStart && first.remainderM > 0) cut.counterStart = String(core.round3(first.remainderM));
     };
 
-    AtexSlitter.prototype.renderBatchSelection = function() {
+    // #4783 п.9: партия сырья — одной строкой и БЕЗ выбора. Партию подбирает
+    // syncInitialBatchSelection (плановая партия задания, иначе первая доступная) — та же,
+    // с которой списывается расход при отметке проходов (applyBatchConsumption). Партий у
+    // задания может быть несколько (оператор домотал вторую) — тогда строк столько же.
+    AtexSlitter.prototype.renderBatchLine = function() {
         var self = this;
         var cut = this.currentCut;
-        var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Партии сырья' })
-        ]);
-        var available = core.availableBatchesForCut(this.batches, cut);
-        // #3609: блок «Покрыто … м · проходов» (.atex-sl-coverage) убран по требованию.
-
-        if (!available.length) {
-            section.appendChild(el('div', { class: 'atex-sl-empty', text: 'Нет партий в работе с остатком минимум на один проход.' }));
-            return section;
+        var wrap = el('div', { class: 'atex-sl-batch-line' });
+        var ids = this.selectedBatchIds.length
+            ? this.selectedBatchIds.slice()
+            : (cut && cut.batchId ? [String(cut.batchId)] : []);
+        var list = ids.map(function(id) { return self.findBatch(id); }).filter(Boolean);
+        if (!list.length) {
+            wrap.appendChild(el('span', { class: 'atex-sl-muted',
+                text: 'Партия сырья не подобрана — нет партий в работе с остатком хотя бы на один проход.' }));
+            return wrap;
         }
-
-        var selected = {};
-        this.selectedBatchIds.forEach(function(id) { selected[String(id)] = true; });
-        var grid = el('div', { class: 'atex-sl-batch-grid' });
-        available.forEach(function(batch) {
+        list.forEach(function(batch) {
             var passes = core.batchPasses(batch, cut);
-            // #3460: партии со склада «Атех» — на другом складе; показываем, но
-            // выбрать нельзя (карточка неактивна).
-            var foreign = !!batch.foreign;
-            var cls = 'atex-sl-batch-card' +
-                (selected[String(batch.id)] ? ' is-selected' : '') +
-                (foreign ? ' is-disabled' : '');
             var cells = [
-                // Заголовок партии = «Дата прихода» (DATETIME-штамп) → «ДД.ММ.ГГГГ ЧЧ:ММ»,
-                // а не сырой таймштамп. Не-штамп (штрих-код/имя) остаётся как есть.
-                el('span', { class: 'atex-sl-batch-title', text: core.formatEventWhen(batch.label) }),
-                el('span', { class: 'atex-sl-batch-meta', text: 'Приход: ' + (batch.date || '—') }),
-                el('span', { class: 'atex-sl-batch-metric', text: 'Остаток, м: ' + core.round3(batch.remainderM || 0) }),
-                el('span', { class: 'atex-sl-batch-meta', text: 'Штрих-код: ' + (batch.barcode || '—') }),
-                el('span', { class: 'atex-sl-batch-meta', text: 'Проходов: ' + passes })
+                'Партия: ' + core.formatEventWhen(batch.label),
+                'Приход: ' + (batch.date || '—'),
+                'Остаток, м: ' + core.round3(batch.remainderM || 0),
+                'Штрих-код: ' + (batch.barcode || '—'),
+                'Проходов: ' + passes
             ];
-            if (foreign) {
-                cells.push(el('span', { class: 'atex-sl-batch-warn', text: 'Склад «' + (batch.warehouse || 'Атех') + '» — другой склад' }));
-            }
-            var card = el('button', { class: cls, type: 'button' }, cells);
-            if (foreign) {
-                card.disabled = true;
-            } else {
-                card.addEventListener('click', function() {
-                    var id = String(batch.id);
-                    var idx = self.selectedBatchIds.indexOf(id);
-                    if (idx >= 0) self.selectedBatchIds.splice(idx, 1);
-                    else self.selectedBatchIds.push(id);
-                    if (!cut.counterStart && batch.remainderM > 0) cut.counterStart = String(core.round3(batch.remainderM));
-                    if (!cut.batchId) cut.batchId = id;
-                    self.renderMain();
-                });
-            }
-            grid.appendChild(card);
+            if (batch.foreign) cells.push('Склад «' + (batch.warehouse || 'Атех') + '» — другой склад');
+            var row = el('div', { class: 'atex-sl-batch-row' });
+            cells.forEach(function(text, idx) {
+                if (idx) row.appendChild(el('span', { class: 'atex-sl-batch-sep', text: '·' }));
+                row.appendChild(el('span', { class: 'atex-sl-batch-cell', text: text }));
+            });
+            wrap.appendChild(row);
         });
-        section.appendChild(grid);
-        return section;
+        return wrap;
     };
 
     // #3459: Показания счётчика, погонаж (read-only, вычисляемый), брак, примечания.
@@ -2580,15 +2604,29 @@
     AtexSlitter.prototype.renderReadings = function() {
         var self = this;
         var cut = this.currentCut;
+        // #4783 п.10: кнопки «Сохранить показания» нет — запись уходит при выходе из ячейки
+        // (autosave ниже). Что записано, видно по статусу рядом с заголовком секции.
+        this.readingsStatusEl = el('span', { class: 'atex-sl-save-status', text: '' });
+        this.markReadingsSaved();
         var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Показания и выработка' })
+            el('div', { class: 'atex-sl-section-head' }, [
+                el('h3', { class: 'atex-sl-section-title', text: 'Показания и выработка' }),
+                this.readingsStatusEl
+            ])
         ]);
 
         var grid = el('div', { class: 'atex-sl-grid' });
+        // Выход из ячейки (blur) и подтверждённый ввод (change) — одна и та же запись;
+        // повторов нет: saveReadingsIfChanged сверяет подпись показаний с сохранённой.
+        function autosave(input) {
+            input.addEventListener('change', function() { self.saveReadingsIfChanged(); });
+            input.addEventListener('blur', function() { self.saveReadingsIfChanged(); });
+        }
 
         // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки
         var cStart = numInput(cut.counterStart, '0');
         cStart.addEventListener('input', function() { cut.counterStart = cStart.value; refreshMeterage(); });
+        autosave(cStart);
         var cStartField = field('Счётчик нач.', cStart);
         var cStartHint = el('span', { class: 'atex-sl-hint', text: '' });
         cStartField.appendChild(cStartHint);
@@ -2596,6 +2634,7 @@
 
         var cEnd = numInput(cut.counterEnd, '0');
         cEnd.addEventListener('input', function() { cut.counterEnd = cEnd.value; refreshMeterage(); });
+        autosave(cEnd);
         grid.appendChild(field('Счётчик кон.', cEnd));
 
         // #3459: Погонаж факт — вычисляемый (read-only), не сохраняется в БД отдельно
@@ -2617,6 +2656,7 @@
                 : (cut.materialWidthMm > 0 ? '' : 'ширина сырья не определена — м² не посчитать');
         }
         defectM.addEventListener('input', function() { cut.defectM = defectM.value; refreshDefectM2(); });
+        autosave(defectM);
         refreshDefectM2();
         var defectField = field('Брак, м', defectM);
         defectField.appendChild(defectHint);
@@ -2638,13 +2678,8 @@
         var notes = el('textarea', { class: 'atex-sl-input atex-sl-textarea', rows: '2', placeholder: 'Примечания' });
         notes.value = cut.notes || '';
         notes.addEventListener('input', function() { cut.notes = notes.value; });
+        autosave(notes);
         section.appendChild(field('Примечания', notes));
-
-        var actions = el('div', { class: 'atex-sl-section-actions' });
-        var saveBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary', type: 'button', text: 'Сохранить показания' });
-        saveBtn.addEventListener('click', function() { self.saveReadings(); });
-        actions.appendChild(saveBtn);
-        section.appendChild(actions);
 
         refreshMeterage();
         return section;
@@ -2663,7 +2698,9 @@
     };
 
     // #3557 #2: события смены выбранного станка. Возвращает по убыванию времени, с
-    // длительностью до следующего (более позднего) события этого станка.
+    // длительностью до следующего (более позднего) события этого станка. #4783 п.1: секции
+    // «События смены» в пульте больше нет — выборка осталась единственным местом, где
+    // событие сводится со станком (по ссылке «Слиттер», #4359), и покрыта тестом #4359.
     // #4359: станок события — из его ссылки «Слиттер». У событий без ссылки (записаны до
     // появления реквизита) остаются прежние пути: событие резки — через слиттер резки,
     // событие смены — через метку станка в «Примечаниях».
@@ -2687,33 +2724,6 @@
         return list.slice()
             .sort(function(a, b) { return core.eventWhenSeconds(b.when) - core.eventWhenSeconds(a.when); })
             .map(function(ev) { return { ev: ev, durationSec: durById[ev.id] }; });
-    };
-
-    // #3557 #1: только список событий (быстрые кнопки и «Закрыть смену» убраны —
-    // закрытие смены перенесено в тулбар). #2: время — дата+время; примечание —
-    // длительность до следующего события станка (без дублирования даты/станка).
-    AtexSlitter.prototype.renderEvents = function() {
-        var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'События смены' })
-        ]);
-        var rows = this.eventsForSelectedSlitter();
-        var list = el('div', { class: 'atex-sl-events' });
-        if (!rows.length) {
-            list.appendChild(el('div', { class: 'atex-sl-empty', text: 'Событий смены ещё нет.' }));
-        } else {
-            rows.slice(0, 16).forEach(function(row) {
-                var ev = row.ev;
-                var dur = core.formatDuration(row.durationSec);
-                list.appendChild(el('div', { class: 'atex-sl-event' }, [
-                    el('span', { class: 'atex-sl-event-when', text: core.formatEventWhen(ev.when) }),
-                    el('span', { class: 'atex-sl-event-type', text: ev.type }),
-                    el('span', { class: 'atex-sl-event-val', text: ev.value !== '' && ev.value != null ? String(ev.value) : '' }),
-                    el('span', { class: 'atex-sl-event-note', text: dur ? ('длительность: ' + dur) : 'идёт' })
-                ]));
-            });
-        }
-        section.appendChild(list);
-        return section;
     };
 
     // ── Действия / сохранение ──
@@ -3111,17 +3121,55 @@
 
     // #3459: Сохраняет показания (счётчики, брак, примечания) в резку. Погонаж вычисляемый,
     // в БД не пишется. Остаток партии обновляется только при завершении резки (finishCut).
-    AtexSlitter.prototype.saveReadings = function() {
+    // #4783 п.10: подпись показаний — что именно ушло бы в запись. По ней отметка
+    // «уже сохранено» отличает выход из нетронутой ячейки от настоящей правки.
+    AtexSlitter.prototype.readingsSignature = function(cut) {
+        if (!cut) return '';
+        return [cut.counterStart, cut.counterEnd, cut.defectM, cut.defect, cut.notes]
+            .map(function(v) { return String(v == null ? '' : v); }).join('|');
+    };
+
+    AtexSlitter.prototype.markReadingsSaved = function() {
+        this.savedReadings = this.readingsSignature(this.currentCut);
+    };
+
+    // #4783 п.10: выход из ячейки .atex-sl-grid сохраняет показания. Ячейку не трогали —
+    // записи нет. Пульт занят предыдущей записью — правку не теряем: ставим отметку
+    // readingsRetry, и сохранение повторится, как только текущая запись доедет.
+    AtexSlitter.prototype.saveReadingsIfChanged = function() {
+        var cut = this.currentCut;
+        if (!cut) return;
+        if (this.readingsSignature(cut) === this.savedReadings) return;
+        if (this.busy) { this.readingsRetry = true; return; }
+        this.saveReadings(true);
+    };
+
+    AtexSlitter.prototype.setReadingsStatus = function(text) {
+        if (this.readingsStatusEl) this.readingsStatusEl.textContent = text || '';
+    };
+
+    // quiet — автосохранение по выходу из ячейки (#4783 п.10): успех показываем строкой
+    // у заголовка секции, а не тостом; ошибку — тостом в любом случае.
+    AtexSlitter.prototype.saveReadings = function(quiet) {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         this.setBusy(true);
+        this.setReadingsStatus('сохраняем…');
+        // Подпись снимаем ДО запроса: правку, сделанную пока запрос летел, эта запись не
+        // увезла — иначе она молча считалась бы сохранённой и пропадала (#4783 п.10).
+        var sent = this.readingsSignature(cut);
         // Сохраняем поля резки (без meterage — он вычисляемый)
         this.post('_m_set/' + cut.id + '?JSON', this.cutFields(cut)).then(function() {
             self.setBusy(false);
-            self.notify('Показания сохранены', 'success');
+            self.savedReadings = sent;
+            self.setReadingsStatus('сохранено');
+            if (!quiet) self.notify('Показания сохранены', 'success');
+            if (self.readingsRetry) { self.readingsRetry = false; self.saveReadingsIfChanged(); }
         }).catch(function(err) {
             self.setBusy(false);
+            self.readingsRetry = false;   // повтор — по следующему выходу из ячейки, а не циклом
+            self.setReadingsStatus('не сохранено');
             self.notify('Ошибка сохранения: ' + err.message, 'error');
         });
     };
@@ -3293,17 +3341,15 @@
     AtexSlitter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
-        this.toolbarEl = el('div', { class: 'atex-sl-toolbar' });
-        this.root.appendChild(this.toolbarEl);
+        // #4783: тулбара с датой и станком нет — дата (всегда текущая) и станок ушли в шапку
+        // страницы (.navbar-workspace, renderWorkspaceTitle), кнопка смены — в шапку списка.
         var layout = el('div', { class: 'atex-sl-layout' });
 
         var aside = el('aside', { class: 'atex-sl-sidebar' });
-        // #3565 #1: счётчик резок в заголовке обновляется в renderCuts (updateSidebarTitle).
-        this.sidebarTitleEl = el('h2', { text: 'Задание в производство' });
-        // #3646: галка «Отобразить завершённые» убрана — завершённые видны всегда,
-        // на своих местах по очереди.
-        var head = el('div', { class: 'atex-sl-sidebar-head' }, [ this.sidebarTitleEl ]);
-        aside.appendChild(head);
+        // #4783 п.5: в шапке списка заданий — «Открыть смену»/«Закрыть смену» вместо
+        // заголовка «Задание в производство (N)».
+        this.shiftHeadEl = el('div', { class: 'atex-sl-sidebar-head' });
+        aside.appendChild(this.shiftHeadEl);
         this.cutsEl = el('div', { class: 'atex-sl-cuts' });
         aside.appendChild(this.cutsEl);
         this.seamlessEl = el('div', { class: 'atex-sl-seamless' }); // #3609: предупреждения «бесшовная смена» под списком резок
@@ -3324,7 +3370,12 @@
             // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем
             // досчёт, когда справочник ширин уже загружен (fillBatchRemainderM идемпотентен).
             .then(function() { self.fillBatchRemainderM(); self.validateStoredSlitter(); return self.loadShiftEvents(); })
-            .then(function() { self.render(); })
+            .then(function() {
+                self.render();
+                // #4783 п.3: поля станка в форме больше нет — на новом планшете выбирать его
+                // нечем, поэтому при пустом выборе сразу открываем список станков.
+                if (!self.selectedSlitterId && self.slitterOptions().length) self.chooseSlitter();
+            })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 

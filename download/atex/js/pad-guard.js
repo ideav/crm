@@ -314,8 +314,12 @@
         });
     }
 
-    // Имя планшета — в шапку рабочего места.
-    function showPadName(name) {
+    // Имя планшета — в шапку рабочего места. #4783: пульт слиттера дописывает к нему дату
+    // и станок, поэтому опознанный планшет кладётся и в `window.atexPad` — из шапки его уже
+    // не вычитать, когда пульт перерисует её своей подписью.
+    function showPadName(pad) {
+        var name = trimText(pad && pad.name);
+        root.atexPad = pad || null;
         if (!name) return;
         var slot = root.document.querySelector('.navbar-workspace');
         if (slot) slot.textContent = name;
@@ -365,7 +369,7 @@
                             : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.');
                     return;
                 }
-                showPadName(pad.name);
+                showPadName(pad);
                 loadApp(appSrc);
             })
             .catch(function(err) {

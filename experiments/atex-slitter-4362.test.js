@@ -112,11 +112,12 @@ var inst = makeInst();
 assert(inst.allCutsDone() === false,
     '#4362: задания дня выполнены, но ждёт задание 24.07 → работа смены НЕ окончена');
 var btns = passButtons(inst);
-// #4604: кнопок проходов три — «✓ Готово» (один), «✓N Готовы несколько» (пачкой), «✓✓ Готовы все».
-assert(btns.length === 3, '#4362/#4604: у задания следующего дня — все кнопки проходов');
-assert(btns.length === 3 && btns[0].textContent === '✓ Готово'
-    && btns[1].textContent === '✓N Готовы несколько' && btns[2].textContent === '✓✓ Готовы все',
-    '#4362/#4604: подписи кнопок — «✓ Готово» / «✓N Готовы несколько» / «✓✓ Готовы все»');
+// #4783 п.6: кнопок проходов ДВЕ — «✓ Готово» (один проход) и «✓N Готовы несколько» (пачкой,
+// по умолчанию предложен весь план). Кнопку «✓✓ Готовы все» заказчик убрал.
+assert(btns.length === 2, '#4362/#4783: у задания следующего дня — все кнопки проходов');
+assert(btns.length === 2 && btns[0].textContent === '✓ Готово'
+    && btns[1].textContent === '✓N Готовы несколько',
+    '#4362/#4783: подписи кнопок — «✓ Готово» / «✓N Готовы несколько»');
 assert(btns.every(function(b) { return b.disabled === false; }),
     '#4362: кнопки активны (задание «Ожидает», не завершено)');
 
@@ -125,14 +126,14 @@ var marked = [], asked = 0;
 inst.markPassDone = function(all) { marked.push(all); };
 inst.askPassCount = function() { asked++; };   // #4604: середина спрашивает число проходов
 passButtons(inst).forEach(function(b) { b.click(); });
-assert(JSON.stringify(marked) === '[false,true]',
-    '#4362: клики вызывают markPassDone(false) и markPassDone(true)');
+assert(JSON.stringify(marked) === '[false]',
+    '#4362: клик по «✓ Готово» вызывает markPassDone(false)');
 assert(asked === 1, '#4604: клик по «✓N Готовы несколько» открывает ввод числа проходов');
 
 // начатое задание будущего дня («Наладка» → «В работе») кнопки сохраняет
 ['Наладка', 'В работе', 'Перерыв'].forEach(function(st) {
     var i = makeInst({ futureStatus: st });
-    assert(passButtons(i).length === 3, '#4362: задание следующего дня в статусе «' + st + '» — кнопки проходов на месте');
+    assert(passButtons(i).length === 2, '#4362: задание следующего дня в статусе «' + st + '» — кнопки проходов на месте');
 });
 
 // ── #3861 сохранён: заданий больше нет → кнопки убраны вовсе ───────────────────────────────────
@@ -156,7 +157,7 @@ var doneDayCut = makeInst({ currentCut: null });
 doneDayCut.currentCut = doneDayCut.cuts[0];
 doneDayCut.currentCutId = '1';
 var doneBtns = passButtons(doneDayCut);
-assert(doneBtns.length === 3 && doneBtns.every(function(b) { return b.disabled === true; }),
+assert(doneBtns.length === 2 && doneBtns.every(function(b) { return b.disabled === true; }),
     '#4362: у ЗАВЕРШЁННОГО задания дня кнопки проходов неактивны');
 
 // задание дня, заблокированное очередью, кнопок не получает (#3670/#4353)

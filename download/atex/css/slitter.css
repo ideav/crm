@@ -34,6 +34,13 @@
     color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
+    /* #4783: пульт занимает высоту рабочей области целиком; прокручивается только
+       список заданий (.atex-sl-cuts), правая часть влезает в экран без прокрутки. */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 [data-theme="dark"] .atex-sl {
@@ -61,31 +68,54 @@
 .atex-sl-placeholder { padding: 28px; color: var(--sl-muted); }
 .atex-sl-muted { color: var(--sl-muted); font-size: 13px; }
 
-.atex-sl-toolbar {
-    display: grid;
-    grid-template-columns: minmax(160px, 220px) minmax(220px, 360px) 1fr;
-    gap: 12px;
-    padding: 16px 16px 0;
-    align-items: end;
-}
-.atex-sl-toolbar-close,
-.atex-sl-toolbar-open { justify-self: end; }  /* #3557/#4332: «Открыть/Закрыть смену» в тулбаре */
-@media (max-width: 640px) {
-    .atex-sl-toolbar { grid-template-columns: 1fr; }
-    .atex-sl-toolbar-close,
-    .atex-sl-toolbar-open { justify-self: stretch; }
-}
-
 .atex-sl-layout {
     display: grid;
-    grid-template-columns: 300px 1fr;
-    gap: 16px;
-    padding: 16px;
-    align-items: start;
+    grid-template-columns: 280px 1fr;
+    gap: 10px;
+    padding: 10px;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;   /* #4783: иначе grid-строка растягивается по содержимому и экран скроллится */
 }
+/* Узкий экран (планшет портретом): колонки складываются в одну — тогда правой части
+   отведённой высоты может не хватить, поэтому прокрутка возвращается странице целиком,
+   а список заданий занимает не больше трети экрана (#4783). */
 @media (max-width: 820px) {
-    .atex-sl-layout { grid-template-columns: 1fr; }
+    .atex-sl-layout { grid-template-columns: 1fr; overflow: auto; }
+    .atex-sl-cuts { max-height: 38vh; }
+    .atex-sl-main { overflow: visible; }
 }
+
+/* #4783 п.3: подпись пульта в шапке страницы — «планшет · дата · станок».
+   Станок — кнопка: единственное, что оператор здесь меняет. */
+.navbar-workspace.atex-sl-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atex-sl-nav-sep { opacity: .5; }
+.atex-sl-nav-slitter {
+    border: 1px solid var(--input-border, #d9dee5);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    padding: 2px 10px;
+    cursor: pointer;
+}
+.atex-sl-nav-slitter:hover { background: rgba(19, 65, 116, .1); }
+
+/* #4783 п.3: выбор станка — модалкой (список станков поверх пульта). */
+.atex-sl-slitter-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 4px; max-height: 50vh; overflow: auto; }
+.atex-sl-slitter-item {
+    padding: 12px 14px;
+    border: 1px solid var(--sl-border);
+    border-radius: 8px;
+    background: var(--sl-bg);
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.atex-sl-slitter-item:hover { background: var(--sl-surface); }
+.atex-sl-slitter-item.is-active { border-color: var(--sl-accent); background: var(--sl-active-bg); font-weight: 600; }
 
 /* Боковой список «мои резки» */
 .atex-sl-sidebar {
@@ -93,15 +123,21 @@
     border-radius: 8px;
     background: var(--sl-bg);
     overflow: hidden;
+    /* #4783: единственная прокручиваемая секция пульта — список заданий внутри. */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
+/* #4783 п.5: в шапке списка — кнопка смены («Открыть смену»/«Закрыть смену»). */
 .atex-sl-sidebar-head {
-    padding: 12px 14px;
+    padding: 8px 10px;
     border-bottom: 1px solid var(--sl-border);
     background: var(--sl-surface);
+    flex: none;
 }
-.atex-sl-sidebar-head h2 { margin: 0 0 8px; font-size: 15px; }
+.atex-sl-shift-btn { width: 100%; }
 .atex-sl-filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sl-muted); cursor: pointer; }
-.atex-sl-cuts { display: flex; flex-direction: column; max-height: 76vh; overflow: auto; }
+.atex-sl-cuts { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .atex-sl-cut-item {
     display: flex;
     align-items: center;
@@ -159,23 +195,33 @@
 .atex-sl-cut-future.is-past .atex-sl-cut-num { color: var(--sl-muted); }
 
 /* Главная область */
+/* #4783: правая часть влезает в экран и НЕ скроллится — содержимое компактное,
+   лишнее (плашки-метрики, карточки партий, журнал событий) убрано. */
 .atex-sl-main {
     border: 1px solid var(--sl-border);
     border-radius: 8px;
     background: var(--sl-bg);
-    padding: 18px 20px;
-    min-height: 200px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
 }
-/* #3557 #4/#5: в шапке — «Резка N из M» + бейдж статуса и кнопки управления (без строки-меты). */
-.atex-sl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; }
-.atex-sl-head-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.atex-sl-head-title { margin: 0; font-size: 20px; }
-/* #4606: номер заказа текущего задания — строкой над заголовком, самый крупный
-   кегль пульта (планшет стоит у станка, номер читается издалека), без подписи. */
-.atex-sl-head-order { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-.atex-sl-head-order-no { font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.atex-sl-head-meta { font-size: 13px; color: var(--sl-muted); }
-.atex-sl-head .atex-sl-life-actions { margin-top: 0; justify-content: flex-end; }
+/* #4783 п.9: верхняя строчка правой части — номер заказа и «Резка N из M» рядом
+   (бейджа статуса тут нет, п.8: статус виден на карточке задания слева). */
+.atex-sl-headwrap { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.atex-sl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.atex-sl-head-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.atex-sl-head-title { margin: 0; font-size: 18px; }
+/* #4606: номер заказа — самый крупный кегль пульта (планшет стоит у станка, номер
+   читается издалека), без подписи «Заказ». */
+.atex-sl-head-order-no { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+/* #4783 п.7: спецификация задания одной строкой — «Вид сырья / Метраж / Намотка / Лидер». */
+.atex-sl-spec { font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
+/* #4783 п.9: все кнопки управления заданием — одним рядом. */
+.atex-sl-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atex-sl-actions .atex-sl-life-actions { margin-top: 0; }
 
 /* #3583: кнопки отметки проходов правее .atex-sl-head-title. */
 .atex-sl-head-pass { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -224,11 +270,15 @@
 .atex-sl-section {
     border: 1px solid var(--sl-border);
     border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 14px;
+    padding: 8px 10px;
     background: var(--sl-bg);
+    flex: none;
 }
-.atex-sl-section-title { margin: 0 0 12px; font-size: 15px; }
+.atex-sl-section-title { margin: 0 0 8px; font-size: 14px; }
+/* #4783 п.10: у «Показаний» рядом с заголовком — что записано (кнопки сохранения нет). */
+.atex-sl-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.atex-sl-section-head .atex-sl-section-title { margin-bottom: 8px; }
+.atex-sl-save-status { font-size: 12px; color: var(--sl-muted); }
 .atex-sl-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .atex-sl-shift-gate { max-width: 520px; }
 
@@ -250,14 +300,14 @@
 /* Сетка полей */
 .atex-sl-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px 10px;
 }
 .atex-sl-field { display: flex; flex-direction: column; gap: 5px; position: relative; }
 .atex-sl-label { font-weight: 600; color: var(--text-primary, #374151); font-size: 13px; }
 .atex-sl-input {
     width: 100%;
-    padding: 10px 11px;
+    padding: 7px 10px;
     border: 1px solid var(--sl-border);
     border-radius: 6px;
     font: inherit;
@@ -284,8 +334,8 @@
 
 /* Партии сырья */
 /* #3609: предупреждения о бесшовном продолжении смены (под списком резок) */
-.atex-sl-seamless { display: flex; flex-direction: column; gap: 8px; }
-.atex-sl-seamless:not(:empty) { margin: 10px 0 4px; }
+.atex-sl-seamless { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.atex-sl-seamless:not(:empty) { padding: 8px 10px; border-top: 1px solid var(--sl-border-soft); }
 .atex-sl-warn-note {
     padding: 9px 11px;
     border: 1px solid var(--sl-warning-text);
@@ -308,78 +358,28 @@
     font-weight: 600;
     line-height: 1.4;
 }
-.atex-sl-batch-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 10px;
-}
-.atex-sl-batch-card {
+/* #4783 п.9: партия сырья — строкой, без выбора (карточек с выбором больше нет). */
+.atex-sl-batch-line {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-height: 134px;
-    padding: 12px;
+    flex: none;
+    padding: 8px 10px;
     border: 1px solid var(--sl-border);
     border-radius: 8px;
-    background: var(--sl-bg);
-    text-align: left;
-    color: inherit;
-    cursor: pointer;
-    font: inherit;
-}
-.atex-sl-batch-card:hover { background: var(--sl-surface); }
-.atex-sl-batch-card.is-selected {
-    border-color: var(--sl-accent);
-    box-shadow: 0 0 0 2px rgba(19, 65, 116, .12);
-}
-.atex-sl-batch-card.is-disabled {
-    cursor: not-allowed;
-    opacity: .55;
     background: var(--sl-surface);
-}
-.atex-sl-batch-card.is-disabled:hover { background: var(--sl-surface); }
-.atex-sl-batch-title { font-weight: 700; }
-.atex-sl-batch-meta { color: var(--sl-muted); font-size: 12px; }
-.atex-sl-batch-metric { font-weight: 700; color: var(--sl-accent-d); }
-.atex-sl-batch-warn { color: var(--sl-warn); font-size: 12px; font-weight: 600; }
-
-/* События смены */
-.atex-sl-event-form {
-    display: grid;
-    grid-template-columns: minmax(120px, .7fr) minmax(180px, 1fr) auto;
-    gap: 12px;
-    align-items: end;
-    margin-bottom: 12px;
-}
-@media (max-width: 680px) {
-    .atex-sl-event-form { grid-template-columns: 1fr; }
-}
-.atex-sl-event-add { display: flex; align-items: end; }
-.atex-sl-event-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
-.atex-sl-events { display: flex; flex-direction: column; gap: 4px; }
-.atex-sl-event {
-    display: grid;
-    grid-template-columns: 160px 130px 80px 1fr;
-    gap: 10px;
-    padding: 7px 10px;
-    border-radius: 6px;
     font-size: 13px;
 }
-.atex-sl-event:nth-child(odd) { background: var(--sl-surface); }
-.atex-sl-event-when { color: var(--sl-muted); white-space: nowrap; }
-.atex-sl-event-type { font-weight: 600; }
-.atex-sl-event-val { color: var(--sl-accent-d); }
-.atex-sl-event-note { color: var(--text-secondary, #475569); overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 680px) {
-    .atex-sl-event { grid-template-columns: 1fr 1fr; }
-}
+.atex-sl-batch-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.atex-sl-batch-cell { white-space: nowrap; }
+.atex-sl-batch-sep { color: var(--sl-muted); }
 
 /* Кнопки */
 .atex-sl-btn {
     border: 1px solid var(--sl-border);
     border-radius: 6px;
     background: var(--sl-bg);
-    padding: 10px 16px;
+    padding: 8px 12px;
     cursor: pointer;
     font: inherit;
     color: inherit;
@@ -410,30 +410,6 @@
 .atex-sl-toast-error { background: #b91c1c; }
 .atex-sl-toast-info { background: #334155; }
 
-/* #3460: сводка резки (вид сырья, метраж, ножи, резки, полосы) */
-.atex-sl-metrics {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 10px;
-    margin-bottom: 16px;
-}
-.atex-sl-metric {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 10px 12px;
-    border: 1px solid var(--sl-border-soft);
-    border-radius: 8px;
-    background: var(--sl-surface);
-}
-.atex-sl-metric-label {
-    font-size: 11px;
-    color: var(--sl-muted);
-    text-transform: uppercase;
-    letter-spacing: .03em;
-}
-.atex-sl-metric-value { font-size: 18px; font-weight: 700; color: var(--sl-accent-d); }
-
 /* #3460: цветная раскладка ножей (как cut-map, но в цвете и с подписями) */
 .atex-sl-cm-caption {
     display: flex;
@@ -446,7 +422,7 @@
 .atex-sl-cm-bar {
     display: flex;
     width: 100%;
-    height: 64px;
+    height: 48px;
     border: 1px solid var(--sl-border);
     border-radius: 8px;
     overflow: hidden;
@@ -487,9 +463,9 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 8px 18px;
+    gap: 6px 18px;
     flex-wrap: wrap;
-    margin-top: 12px;
+    margin-top: 8px;
 }
 /* #3639: остаток (обрезь) в мм — справа в ряду «Раскладка ножей». */
 .atex-sl-cm-waste {

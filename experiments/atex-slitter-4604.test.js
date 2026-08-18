@@ -206,17 +206,19 @@ function passButtons(inst) {
 (function() {
     var inst = makeInst();
     var btns = passButtons(inst);
-    assert(btns.length === 3 && btns[1].textContent === '✓N Готовы несколько',
-        '#4604: между «✓ Готово» и «✓✓ Готовы все» — кнопка отметки нескольких проходов');
+    // #4783 п.6: «✓✓ Готовы все» убрана — весь остаток отмечает эта же кнопка (в её модалке
+    // по умолчанию предложен ВЕСЬ план), поэтому кнопок проходов две.
+    assert(btns.length === 2 && btns[1].textContent === '✓N Готовы несколько',
+        '#4604: рядом с «✓ Готово» — кнопка отметки нескольких проходов');
 
     // остался один проход — пачку набирать не из чего, кнопки нет
     var lastOne = makeInst({ actualRuns: '99' });
-    assert(passButtons(lastOne).length === 2,
+    assert(passButtons(lastOne).length === 1,
         '#4604: остался 1 проход — «✓N Готовы несколько» не показываем (это «✓ Готово»)');
 
     // задание-«настройка» (#3635 п.5, «Кол-во резок план» = 0) — проходов нет вовсе
     var setup = makeInst({ plannedRuns: 0 });
-    assert(passButtons(setup).length === 2, '#3635 п.5: у задания-«настройки» кнопки пачки нет');
+    assert(passButtons(setup).length === 1, '#3635 п.5: у задания-«настройки» кнопки пачки нет');
 })();
 
 (function() {

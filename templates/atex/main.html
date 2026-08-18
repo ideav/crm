@@ -200,6 +200,21 @@
     </script>
     <script>
         (function() {
+            // #4783 п.2: пульт оператора занимает экран целиком — левого меню в нём нет.
+            // Решение принимается в head, до отрисовки body: иначе меню успевает мелькнуть
+            // и «прыгнуть» (та же причина, что у единственного пункта меню, #4690).
+            // Новый полноэкранный пульт добавляется одним словом в этот список.
+            var FULLSCREEN_ACTIONS = ['slitter'];
+            if (FULLSCREEN_ACTIONS.indexOf(String(action || '').trim().toLowerCase()) === -1) return;
+            var css = document.createElement('style');
+            css.id = 'fullscreen-workspace-style';
+            css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}'
+                + '.app-content{padding:0!important;overflow:hidden!important;}';
+            document.head.appendChild(css);
+        })();
+    </script>
+    <script>
+        (function() {
             // #4690: пункт меню всего один — левое меню не показываем совсем,
             // а с корня базы сразу уходим в этот единственный пункт.
             if (typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
