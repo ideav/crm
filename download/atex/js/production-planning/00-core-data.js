@@ -202,6 +202,11 @@
     // столько же берёт пульт слиттера). Ответ РОВНО такой длины считаем усечённым и говорим об
     // этом вслух (#4371: лимит самого отчёта режет запрос клиента молча).
     var SHIFT_EVENTS_LIMIT = 5000;
+    // #4774: сколько строк читаем для «Дэшборда». `packer` — строка на «Партию ГП» задания,
+    // `sleeve_tasks` — строка на «Задачу на втулки» позиции; обе выборки растут вместе с архивом
+    // заданий, поэтому ответ РОВНО в лимит считаем усечением и говорим об этом (#4371).
+    var PACK_STATE_LIMIT = 5000;
+    var SLEEVE_TASKS_LIMIT = 5000;
     // #3898: отпуск станка длиной НЕ БОЛЕЕ этого числа КАЛЕНДАРНЫХ дней НЕ сбрасывает заправку
     // (сырьё/ножи) — первая резка после такого короткого простоя наследует прежнюю настройку,
     // а не пересчитывает её с нуля (#3876). Длиннее порога → заправка обнуляется (полная
@@ -2581,6 +2586,19 @@
         return cutIsStarted(cut) || planTsSeconds(cut && cut.endDate) != null;
     }
 
+    // #4572/#4776: ЗАДАНИЕ ВЫПОЛНЕНО — упаковщик его НЕ РАСКЛАДЫВАЕТ. Ровно этим признаком
+    // `buildSequenceOps` отбирает вход планировщика (`planInput`), и ровно им же `prevSetupBeforeWindow`
+    // отличает работу, которую станок УЖЕ сделал, от той, которую ему предстоит разложить: заправка
+    // станка на входе в окно — от последней СДЕЛАННОЙ работы, а не от последнего задания раньше «С»
+    // (#4776). Признак двойной: статус «Завершён» и заполненное «Закончено». Одного статуса мало —
+    // отчёт `cut_planning` его не отдаёт вовсе (в боевой ateh у всех заданий ''/'X', #4572).
+    // Правило живёт в ОДНОМ месте: разойдись эти два фильтра — упаковщик снова считал бы заправку
+    // не от той работы, которую он же исключил из раскладки.
+    function cutIsFinishedWork(cut) {
+        if (String((cut && cut.status) || '').trim() === 'Завершён') return true;
+        return planTsSeconds(cut && cut.endDate) != null;
+    }
+
     // #4736 (ТЗ §15): КОГО ДВИГАЕТ РУЧНОЕ ДЕЙСТВИЕ. Удаление, перетаскивание внутри дня, перенос 🗓
     // и «Урегулировать» двигают не одно задание, а ВЕСЬ ХВОСТ ОЧЕРЕДИ за ним: освободившееся место
     // схлопывается, лишнее уезжает вперёд. Хвост считаем по ХРАНИМОМУ плану — задания затронутых
@@ -2817,6 +2835,148 @@
         res.early.sort(byPlan);
         res.earlyRun.sort(byPlan);
         res.shiftClosed.sort(byPlan);
+        return res;
+    }
+
+    // #4774: строки отчёта `packer` → СОСТОЯНИЕ УПАКОВКИ ПО ЗАДАНИЯМ. Строка отчёта — одна
+    // «Партия ГП» задания, то есть один ролик в руках упаковщика: `qty_fact` — сколько рулонов
+    // СДЕЛАНО (пишет пульт слиттера при завершении), `packed` — сколько УПАКОВАНО (пишет РМ
+    // «Упаковка», #4658). Задания в отчёте только те, по которым уже была резка (скрытый фильтр
+    // «есть событие Резка»), поэтому его молчание о задании — это «ещё не резали», а не ноль.
+    //
+    // НЕТ КОЛОНКИ — НЕ ЗНАЕМ, А НЕ НОЛЬ (#4536). Отсутствующую колонку читаем по наличию КЛЮЧА в
+    // строке: без неё разница «сделано минус упаковано» была бы выдумкой (0 − 0), и дэшборд
+    // молчал бы ровно там, где обязан кричать.
+    // → { byCut: { cutId: { fact, packed, batches } }, hasFact, hasPacked, rows }
+    function rowsToPackState(rows) {
+        var list = rows || [];
+        var first = list.length ? list[0] : null;
+        var hasFact = !!(first && hasOwn(first, 'qty_fact'));
+        var hasPacked = !!(first && hasOwn(first, 'packed'));
+        var byCut = {};
+        if (hasFact && hasPacked) {
+            list.forEach(function(row) {
+                var cutId = String(row && row.task_id == null ? '' : row.task_id).trim();
+                if (cutId === '') return;
+                var rec = byCut[cutId] || (byCut[cutId] = { fact: 0, packed: 0, batches: [] });
+                var fact = stripNum(row.qty_fact), packed = stripNum(row.packed);
+                rec.fact = round3(rec.fact + fact);
+                rec.packed = round3(rec.packed + packed);
+                rec.batches.push({
+                    id: String(row.gp_id == null ? '' : row.gp_id),
+                    orderNo: String(row.order_no == null ? '' : row.order_no).trim(),
+                    width: String(row.cut_width == null ? '' : row.cut_width).trim(),
+                    length: String(row.cut_length == null ? '' : row.cut_length).trim(),
+                    fact: fact, packed: packed
+                });
+            });
+        }
+        return { byCut: byCut, hasFact: hasFact, hasPacked: hasPacked, rows: list.length };
+    }
+
+    // #4774: строки отчёта `sleeve_tasks` → ЗАДАЧИ НА ВТУЛКИ ПО ПОЗИЦИЯМ. «Задача на втулки»
+    // (1080) подчинена ПОЗИЦИИ, ссылки «задача ↔ задание» в схеме нет (#4631), поэтому готовность
+    // втулок к заданию читается через его позиции — и колонка `position_id` в отчёте обязательна.
+    // Её нет (старое определение отчёта) — говорим `linked: false`: группа не показывается, а РМ
+    // об этом сообщает вслух (молчаливое «втулки готовы» было бы враньём).
+    // → { byPosition: { positionId: [{ id, qty, fact, finished, plannedTs }] }, linked, rows }
+    function rowsToSleeveTasks(rows) {
+        var list = rows || [];
+        var first = list.length ? list[0] : null;
+        var linked = !list.length || !!(first && hasOwn(first, 'position_id'));
+        var byPosition = {};
+        if (linked) {
+            list.forEach(function(row) {
+                var pid = String(row && row.position_id == null ? '' : row.position_id).trim();
+                if (pid === '') return;
+                (byPosition[pid] || (byPosition[pid] = [])).push({
+                    id: String(row.task_id == null ? '' : row.task_id),
+                    qty: stripNum(row.qty),
+                    fact: stripNum(row.fact),
+                    finished: String(row.finished == null ? '' : row.finished).trim(),
+                    plannedTs: Number(row.task_date) || 0
+                });
+            });
+        }
+        return { byPosition: byPosition, linked: linked, rows: list.length };
+    }
+
+    // #4774: ГОТОВЫ ЛИ ВТУЛКИ ПОЗИЦИИ. Готово = у ВСЕХ её «Задач на втулки» проставлено
+    // «Закончено» (решение заказчика 17.08.2026) либо позиция помечена «втулка уже нарезана»
+    // (`sleeveReady` отчёта positions_list, #3340 — таким позициям задачи не заводят вовсе).
+    // Отдельный случай — позиция С ТИПОМ ВТУЛКИ И БЕЗ ЕДИНОЙ ЗАДАЧИ: втулки никто не заказывал,
+    // и это то же самое «резать будет не на что».
+    // Позиции нет в справочнике (выпала из активного positions_list) и задач нет — НЕ ЗНАЕМ,
+    // и не выдумываем: молчим.
+    // → null (готово/не знаем) | { kind: 'pending'|'none', pending, total, pendingQty }
+    function sleeveReadiness(tasks, position) {
+        if (position && position.sleeveReady) return null;
+        var list = tasks || [];
+        if (!list.length) {
+            var sleeveId = position && position.sleeveId != null ? String(position.sleeveId).trim() : '';
+            if (sleeveId === '') return null;
+            return { kind: 'none', pending: 0, total: 0, pendingQty: 0 };
+        }
+        var pending = list.filter(function(t) { return !t.finished; });
+        if (!pending.length) return null;
+        return {
+            kind: 'pending', pending: pending.length, total: list.length,
+            pendingQty: round3(pending.reduce(function(s, t) { return s + (Number(t.qty) || 0); }, 0))
+        };
+    }
+
+    // #4774: ДЭШБОРД — вход одноимённой кнопки. «Отклонения N/M/K» говорят о расхождении ФАКТА С
+    // ПЛАНОМ РАСПИСАНИЯ (сделали не в свой день); «Дэшборд» — о двух расхождениях, которые видно
+    // только по соседним рабочим местам и которые расписание не двигают:
+    //   pack   — РАЗНИЦА СДЕЛАНО/УПАКОВАНО: Σ «Кол-во факт» Партий ГП задания против
+    //            Σ «Упаковано шт». Разошлись — сделанное лежит неупакованным (или упаковали не
+    //            столько, сколько сделали);
+    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки».
+    //
+    // ОДНО ОКНО НА ОБЕ ГРУППЫ (решение заказчика 17.08.2026): видимый диапазон очереди [С; По] И
+    // плановый день НЕ ПОЗЖЕ СЕГОДНЯ. У завтрашнего задания «не упаковано» и «втулки не нарезаны»
+    // — норма: работа ещё не начиналась, и сигналом это быть не может.
+    //   opts: { todayKey, dateFrom, dateTo, packByCut, sleeveByPosition, positionsByCut, positionsById }
+    //   positionsByCut — { cutId: [{ id, orderNo }] } (из «Обеспечений» задания).
+    // Чистая (DOM не трогает) — покрыта тестом.
+    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }] }
+    function dashboardGroups(cuts, opts) {
+        var o = opts || {};
+        var today = Number(o.todayKey);
+        var res = { pack: [], sleeve: [] };
+        if (!isFinite(today)) return res;
+        var packByCut = o.packByCut || {};
+        var sleeveByPosition = o.sleeveByPosition || {};
+        var positionsByCut = o.positionsByCut || {};
+        var positionsById = o.positionsById || {};
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            if (!isCutVisible(c, o.dateFrom, o.dateTo)) return;
+            var pk = planDateDayKey(c.planDate);
+            if (!isFinite(pk) || pk > today) return;
+            var pack = packByCut[String(c.id)];
+            if (pack) {
+                var fact = Number(pack.fact) || 0, packed = Number(pack.packed) || 0;
+                var diff = round3(fact - packed);
+                if (diff !== 0) res.pack.push({ cut: c, fact: fact, packed: packed, diff: diff });
+            }
+            var notReady = [];
+            (positionsByCut[String(c.id)] || []).forEach(function(p) {
+                var pid = String(p && p.id != null ? p.id : p);
+                var state = sleeveReadiness(sleeveByPosition[pid], positionsById[pid]);
+                if (!state) return;
+                state.id = pid;
+                state.orderNo = String((p && p.orderNo) || (positionsById[pid] && positionsById[pid].orderNo) || '').trim();
+                notReady.push(state);
+            });
+            if (notReady.length) res.sleeve.push({ cut: c, positions: notReady });
+        });
+        function byPlan(a, b) {
+            var av = planTsSeconds(a && a.cut && a.cut.planDate), bv = planTsSeconds(b && b.cut && b.cut.planDate);
+            return (av == null ? Infinity : av) - (bv == null ? Infinity : bv);
+        }
+        res.pack.sort(byPlan);
+        res.sleeve.sort(byPlan);
         return res;
     }
 
