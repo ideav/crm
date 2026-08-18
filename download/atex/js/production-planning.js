@@ -203,6 +203,11 @@
     // столько же берёт пульт слиттера). Ответ РОВНО такой длины считаем усечённым и говорим об
     // этом вслух (#4371: лимит самого отчёта режет запрос клиента молча).
     var SHIFT_EVENTS_LIMIT = 5000;
+    // #4774: сколько строк читаем для «Дэшборда». `packer` — строка на «Партию ГП» задания,
+    // `sleeve_tasks` — строка на «Задачу на втулки» позиции; обе выборки растут вместе с архивом
+    // заданий, поэтому ответ РОВНО в лимит считаем усечением и говорим об этом (#4371).
+    var PACK_STATE_LIMIT = 5000;
+    var SLEEVE_TASKS_LIMIT = 5000;
     // #3898: отпуск станка длиной НЕ БОЛЕЕ этого числа КАЛЕНДАРНЫХ дней НЕ сбрасывает заправку
     // (сырьё/ножи) — первая резка после такого короткого простоя наследует прежнюю настройку,
     // а не пересчитывает её с нуля (#3876). Длиннее порога → заправка обнуляется (полная
@@ -2831,6 +2836,148 @@
         res.early.sort(byPlan);
         res.earlyRun.sort(byPlan);
         res.shiftClosed.sort(byPlan);
+        return res;
+    }
+
+    // #4774: строки отчёта `packer` → СОСТОЯНИЕ УПАКОВКИ ПО ЗАДАНИЯМ. Строка отчёта — одна
+    // «Партия ГП» задания, то есть один ролик в руках упаковщика: `qty_fact` — сколько рулонов
+    // СДЕЛАНО (пишет пульт слиттера при завершении), `packed` — сколько УПАКОВАНО (пишет РМ
+    // «Упаковка», #4658). Задания в отчёте только те, по которым уже была резка (скрытый фильтр
+    // «есть событие Резка»), поэтому его молчание о задании — это «ещё не резали», а не ноль.
+    //
+    // НЕТ КОЛОНКИ — НЕ ЗНАЕМ, А НЕ НОЛЬ (#4536). Отсутствующую колонку читаем по наличию КЛЮЧА в
+    // строке: без неё разница «сделано минус упаковано» была бы выдумкой (0 − 0), и дэшборд
+    // молчал бы ровно там, где обязан кричать.
+    // → { byCut: { cutId: { fact, packed, batches } }, hasFact, hasPacked, rows }
+    function rowsToPackState(rows) {
+        var list = rows || [];
+        var first = list.length ? list[0] : null;
+        var hasFact = !!(first && hasOwn(first, 'qty_fact'));
+        var hasPacked = !!(first && hasOwn(first, 'packed'));
+        var byCut = {};
+        if (hasFact && hasPacked) {
+            list.forEach(function(row) {
+                var cutId = String(row && row.task_id == null ? '' : row.task_id).trim();
+                if (cutId === '') return;
+                var rec = byCut[cutId] || (byCut[cutId] = { fact: 0, packed: 0, batches: [] });
+                var fact = stripNum(row.qty_fact), packed = stripNum(row.packed);
+                rec.fact = round3(rec.fact + fact);
+                rec.packed = round3(rec.packed + packed);
+                rec.batches.push({
+                    id: String(row.gp_id == null ? '' : row.gp_id),
+                    orderNo: String(row.order_no == null ? '' : row.order_no).trim(),
+                    width: String(row.cut_width == null ? '' : row.cut_width).trim(),
+                    length: String(row.cut_length == null ? '' : row.cut_length).trim(),
+                    fact: fact, packed: packed
+                });
+            });
+        }
+        return { byCut: byCut, hasFact: hasFact, hasPacked: hasPacked, rows: list.length };
+    }
+
+    // #4774: строки отчёта `sleeve_tasks` → ЗАДАЧИ НА ВТУЛКИ ПО ПОЗИЦИЯМ. «Задача на втулки»
+    // (1080) подчинена ПОЗИЦИИ, ссылки «задача ↔ задание» в схеме нет (#4631), поэтому готовность
+    // втулок к заданию читается через его позиции — и колонка `position_id` в отчёте обязательна.
+    // Её нет (старое определение отчёта) — говорим `linked: false`: группа не показывается, а РМ
+    // об этом сообщает вслух (молчаливое «втулки готовы» было бы враньём).
+    // → { byPosition: { positionId: [{ id, qty, fact, finished, plannedTs }] }, linked, rows }
+    function rowsToSleeveTasks(rows) {
+        var list = rows || [];
+        var first = list.length ? list[0] : null;
+        var linked = !list.length || !!(first && hasOwn(first, 'position_id'));
+        var byPosition = {};
+        if (linked) {
+            list.forEach(function(row) {
+                var pid = String(row && row.position_id == null ? '' : row.position_id).trim();
+                if (pid === '') return;
+                (byPosition[pid] || (byPosition[pid] = [])).push({
+                    id: String(row.task_id == null ? '' : row.task_id),
+                    qty: stripNum(row.qty),
+                    fact: stripNum(row.fact),
+                    finished: String(row.finished == null ? '' : row.finished).trim(),
+                    plannedTs: Number(row.task_date) || 0
+                });
+            });
+        }
+        return { byPosition: byPosition, linked: linked, rows: list.length };
+    }
+
+    // #4774: ГОТОВЫ ЛИ ВТУЛКИ ПОЗИЦИИ. Готово = у ВСЕХ её «Задач на втулки» проставлено
+    // «Закончено» (решение заказчика 17.08.2026) либо позиция помечена «втулка уже нарезана»
+    // (`sleeveReady` отчёта positions_list, #3340 — таким позициям задачи не заводят вовсе).
+    // Отдельный случай — позиция С ТИПОМ ВТУЛКИ И БЕЗ ЕДИНОЙ ЗАДАЧИ: втулки никто не заказывал,
+    // и это то же самое «резать будет не на что».
+    // Позиции нет в справочнике (выпала из активного positions_list) и задач нет — НЕ ЗНАЕМ,
+    // и не выдумываем: молчим.
+    // → null (готово/не знаем) | { kind: 'pending'|'none', pending, total, pendingQty }
+    function sleeveReadiness(tasks, position) {
+        if (position && position.sleeveReady) return null;
+        var list = tasks || [];
+        if (!list.length) {
+            var sleeveId = position && position.sleeveId != null ? String(position.sleeveId).trim() : '';
+            if (sleeveId === '') return null;
+            return { kind: 'none', pending: 0, total: 0, pendingQty: 0 };
+        }
+        var pending = list.filter(function(t) { return !t.finished; });
+        if (!pending.length) return null;
+        return {
+            kind: 'pending', pending: pending.length, total: list.length,
+            pendingQty: round3(pending.reduce(function(s, t) { return s + (Number(t.qty) || 0); }, 0))
+        };
+    }
+
+    // #4774: ДЭШБОРД — вход одноимённой кнопки. «Отклонения N/M/K» говорят о расхождении ФАКТА С
+    // ПЛАНОМ РАСПИСАНИЯ (сделали не в свой день); «Дэшборд» — о двух расхождениях, которые видно
+    // только по соседним рабочим местам и которые расписание не двигают:
+    //   pack   — РАЗНИЦА СДЕЛАНО/УПАКОВАНО: Σ «Кол-во факт» Партий ГП задания против
+    //            Σ «Упаковано шт». Разошлись — сделанное лежит неупакованным (или упаковали не
+    //            столько, сколько сделали);
+    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки».
+    //
+    // ОДНО ОКНО НА ОБЕ ГРУППЫ (решение заказчика 17.08.2026): видимый диапазон очереди [С; По] И
+    // плановый день НЕ ПОЗЖЕ СЕГОДНЯ. У завтрашнего задания «не упаковано» и «втулки не нарезаны»
+    // — норма: работа ещё не начиналась, и сигналом это быть не может.
+    //   opts: { todayKey, dateFrom, dateTo, packByCut, sleeveByPosition, positionsByCut, positionsById }
+    //   positionsByCut — { cutId: [{ id, orderNo }] } (из «Обеспечений» задания).
+    // Чистая (DOM не трогает) — покрыта тестом.
+    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }] }
+    function dashboardGroups(cuts, opts) {
+        var o = opts || {};
+        var today = Number(o.todayKey);
+        var res = { pack: [], sleeve: [] };
+        if (!isFinite(today)) return res;
+        var packByCut = o.packByCut || {};
+        var sleeveByPosition = o.sleeveByPosition || {};
+        var positionsByCut = o.positionsByCut || {};
+        var positionsById = o.positionsById || {};
+        (cuts || []).forEach(function(c) {
+            if (!c || c.id == null) return;
+            if (!isCutVisible(c, o.dateFrom, o.dateTo)) return;
+            var pk = planDateDayKey(c.planDate);
+            if (!isFinite(pk) || pk > today) return;
+            var pack = packByCut[String(c.id)];
+            if (pack) {
+                var fact = Number(pack.fact) || 0, packed = Number(pack.packed) || 0;
+                var diff = round3(fact - packed);
+                if (diff !== 0) res.pack.push({ cut: c, fact: fact, packed: packed, diff: diff });
+            }
+            var notReady = [];
+            (positionsByCut[String(c.id)] || []).forEach(function(p) {
+                var pid = String(p && p.id != null ? p.id : p);
+                var state = sleeveReadiness(sleeveByPosition[pid], positionsById[pid]);
+                if (!state) return;
+                state.id = pid;
+                state.orderNo = String((p && p.orderNo) || (positionsById[pid] && positionsById[pid].orderNo) || '').trim();
+                notReady.push(state);
+            });
+            if (notReady.length) res.sleeve.push({ cut: c, positions: notReady });
+        });
+        function byPlan(a, b) {
+            var av = planTsSeconds(a && a.cut && a.cut.planDate), bv = planTsSeconds(b && b.cut && b.cut.planDate);
+            return (av == null ? Infinity : av) - (bv == null ? Infinity : bv);
+        }
+        res.pack.sort(byPlan);
+        res.sleeve.sort(byPlan);
         return res;
     }
 
@@ -14409,6 +14556,12 @@
         cutIsStarted: cutIsStarted,             // #4381: задание начато («Начато» заполнено) — неприкосновенно
         cutIsFinishedWork: cutIsFinishedWork,   // #4572/#4776: работа сделана — упаковщик её не раскладывает, но заправку станка берёт от неё
         deviationGroups: deviationGroups,       // #4346: отклонения факта от плана (кнопка «Отклонения N/M»)
+        // #4774: «Дэшборд N/M» — разница Сделано/Упаковано и готовность втулок к заданиям окна.
+        // Проверяется `experiments/atex-pp-4774-dashboard.test.js`.
+        rowsToPackState: rowsToPackState,       // строки отчёта packer → «сделано/упаковано» по заданиям
+        rowsToSleeveTasks: rowsToSleeveTasks,   // строки отчёта sleeve_tasks → задачи на втулки по позициям
+        sleeveReadiness: sleeveReadiness,       // готовы ли втулки позиции (null = готовы / не знаем)
+        dashboardGroups: dashboardGroups,       // две группы дэшборда по одному окну [С; По] ≤ сегодня
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
         // #4736 (ТЗ §15): ручной сдвиг — кого он двигает, откуда считается и что его останавливает.
         // Проверяется `experiments/atex-pp-4736-manual-shift-over-fixed.test.js`.
@@ -15510,6 +15663,82 @@
             self.positionLengthById = positionLengthMap(self.genPositions);   // #4301: длина прогона резки берётся из «Длина, м» позиции заказа
             var approvedCnt = self.genPositions.filter(function(p) { return p.approved; }).length;
             console.log('[pp] 📋 loadPositions: загружено позиций для дропдауна:', self.positions.length, ', для генерации:', self.genPositions.length, ', согласованных:', approvedCnt);
+        });
+    };
+
+    // #4774: СОСТОЯНИЕ УПАКОВКИ ЗАДАНИЙ — отчётом `packer` (673812), тем же, что читает РМ
+    // «Упаковка». Без внешнего фильтра `FR_packer_no` он отдаёт все упаковочные места: дэшборду
+    // нужны все станки диспетчера, а не одно место упаковщика. Строка — одна «Партия ГП»
+    // задания, поэтому «Сделано»/«Упаковано» задания складываются из её строк (rowsToPackState).
+    // Чтение `report/` авторизуется грантом на объект «Запрос» (22), который у Диспетчера уже
+    // есть (им же читается `cut_planning`), — отдельного гранта на «Партию ГП» не нужно.
+    // ОТЧЁТ НЕ ПРОЧИТАЛСЯ — ГРУППА МОЛЧИТ, НО НЕ МОЛЧА (#4359): пустое состояние упаковки не
+    // должно читаться как «всё упаковано», поэтому об отказе говорим в консоль и в самой форме.
+    AtexProductionPlanning.prototype.loadPackState = function() {
+        var self = this;
+        this.packState = { byCut: {}, hasFact: false, hasPacked: false, rows: 0 };
+        this.packStateError = '';
+        return this.getJson('report/packer?JSON_KV&LIMIT=0,' + PACK_STATE_LIMIT).then(function(rows) {
+            self.packState = rowsToPackState(rows || []);
+            // #4371: ответ РОВНО в лимит — выборка усечена, часть заданий до нас не доехала.
+            if (self.packState.rows >= PACK_STATE_LIMIT) {
+                console.error('[pp] 📦 loadPackState: отчёт отдал ровно лимит строк ('
+                    + self.packState.rows + ') — состояние упаковки пришло усечённым (#4371)');
+                self.packStateError = 'список упаковки усечён (' + self.packState.rows
+                    + ' строк = лимит запроса)';
+            }
+            // #4536: нет колонки — «не знаем», а не ноль. Разница «сделано минус упаковано» без
+            // одной из колонок была бы выдумкой, поэтому группу выключаем и называем причину.
+            if (self.packState.rows && (!self.packState.hasFact || !self.packState.hasPacked)) {
+                var missing = (self.packState.hasFact ? '' : '«Кол-во факт» ')
+                    + (self.packState.hasPacked ? '' : '«Упаковано шт»');
+                console.error('[pp] 📦 loadPackState: в отчёте «packer» нет колонки ' + missing
+                    + ' — разницу Сделано/Упаковано считать не из чего');
+                self.packStateError = 'в отчёте «packer» нет колонки ' + missing;
+            }
+            console.log('[pp] 📦 loadPackState: строк отчёта «packer»:', self.packState.rows,
+                ', заданий с упаковкой:', Object.keys(self.packState.byCut).length);
+        }).catch(function(err) {
+            var msg = (err && err.message) || 'ошибка чтения';
+            console.error('[pp] 📦 loadPackState: не удалось прочитать «report/packer» — разницы '
+                + 'Сделано/Упаковано в «Дэшборде» НЕ БУДЕТ:', msg);
+            self.packState = { byCut: {}, hasFact: false, hasPacked: false, rows: 0 };
+            self.packStateError = msg;
+        });
+    };
+
+    // #4774: ЗАДАЧИ НА ВТУЛКИ — отчётом `sleeve_tasks` (184151), тем же, что читает пульт
+    // втулкореза. Без фильтров: готовность нужна по позициям ВСЕХ заданий окна, а плановое время
+    // задачи — это старт резки на момент её создания и после переносов плана оно расходится с
+    // текущим днём задания, поэтому отбирать задачи по дате нельзя (отберётся не то).
+    // Связь с заданием — только через ПОЗИЦИЮ (колонка `position_id`, #4774): «Задача на втулки»
+    // подчинена позиции, ссылки на задание в схеме нет (#4631). Колонки нет — группа не
+    // показывается, и РМ говорит об этом вслух: «втулки готовы» без проверки было бы враньём.
+    AtexProductionPlanning.prototype.loadSleeveTasks = function() {
+        var self = this;
+        this.sleeveTasks = { byPosition: {}, linked: false, rows: 0 };
+        this.sleeveTasksError = '';
+        return this.getJson('report/sleeve_tasks?JSON_KV&LIMIT=0,' + SLEEVE_TASKS_LIMIT).then(function(rows) {
+            self.sleeveTasks = rowsToSleeveTasks(rows || []);
+            if (self.sleeveTasks.rows >= SLEEVE_TASKS_LIMIT) {
+                // #4371: ответ РОВНО в лимит — выборка усечена, и часть задач до нас не доехала.
+                console.error('[pp] 🧵 loadSleeveTasks: отчёт отдал ровно лимит строк ('
+                    + self.sleeveTasks.rows + ') — задачи на втулки пришли усечёнными (#4371)');
+                self.sleeveTasksError = 'список задач на втулки усечён (' + self.sleeveTasks.rows
+                    + ' строк = лимит запроса)';
+            } else if (!self.sleeveTasks.linked) {
+                console.error('[pp] 🧵 loadSleeveTasks: в отчёте «sleeve_tasks» нет колонки '
+                    + '«position_id» — готовность втулок к заданиям не проверить');
+                self.sleeveTasksError = 'в отчёте «sleeve_tasks» нет колонки «position_id»';
+            }
+            console.log('[pp] 🧵 loadSleeveTasks: задач на втулки:', self.sleeveTasks.rows,
+                ', позиций с задачами:', Object.keys(self.sleeveTasks.byPosition).length);
+        }).catch(function(err) {
+            var msg = (err && err.message) || 'ошибка чтения';
+            console.error('[pp] 🧵 loadSleeveTasks: не удалось прочитать «report/sleeve_tasks» — '
+                + 'готовность втулок в «Дэшборде» проверяться НЕ БУДЕТ:', msg);
+            self.sleeveTasks = { byPosition: {}, linked: false, rows: 0 };
+            self.sleeveTasksError = msg;
         });
     };
 
@@ -19139,6 +19368,161 @@
         this.root.appendChild(overlay);
     };
 
+    // #4774: ДЭШБОРД — состояние одноимённой кнопки. Окно у обеих групп одно: видимый диапазон
+    // очереди [С; По] и плановый день не позже сегодня (dashboardGroups). Позиции задания берём
+    // из уже загруженных «Обеспечений» (this.supplies) — доп. запроса не нужно, а номер заказа у
+    // них есть даже для позиций, выпавших из активного positions_list (#3624).
+    AtexProductionPlanning.prototype.dashboardState = function() {
+        var positionsByCut = {};
+        (this.supplies || []).forEach(function(s) {
+            if (!s || !s.cutId || !s.positionId) return;
+            var key = String(s.cutId);
+            var list = positionsByCut[key] || (positionsByCut[key] = []);
+            var pid = String(s.positionId);
+            for (var i = 0; i < list.length; i++) if (list[i].id === pid) return;
+            list.push({ id: pid, orderNo: String(s.orderNo || '').trim() });
+        });
+        var positionsById = {};
+        (this.genPositions || []).forEach(function(p) {
+            if (p && p.id) positionsById[String(p.id)] = p;
+        });
+        var packState = this.packState || { byCut: {}, hasFact: false, hasPacked: false };
+        var sleeveTasks = this.sleeveTasks || { byPosition: {}, linked: false };
+        var groups = dashboardGroups(this.cuts || [], {
+            todayKey: planDateDayKey(controllerNowMs(this)),
+            dateFrom: this.filter && this.filter.date,
+            dateTo: this.filter && this.filter.dateTo,
+            // Колонки нет / отчёт не прочитался — группу не считаем вовсе: пустой список тут
+            // означал бы «всё упаковано» и «втулки готовы», а мы этого не знаем (#4359).
+            packByCut: (packState.hasFact && packState.hasPacked) ? packState.byCut : {},
+            sleeveByPosition: sleeveTasks.linked ? sleeveTasks.byPosition : {},
+            positionsByCut: positionsByCut,
+            positionsById: positionsById
+        });
+        return {
+            groups: groups,
+            n: groups.pack.length,      // разница Сделано/Упаковано
+            m: groups.sleeve.length,    // втулки не готовы
+            total: groups.pack.length + groups.sleeve.length
+        };
+    };
+
+    // #4774: подпись/видимость кнопки «Дэшборд N/M» (зовётся из renderQueue). Отклонений нет —
+    // кнопки нет: в норме панель лишнего сигнала не несёт (то же правило, что у «Отклонений»).
+    AtexProductionPlanning.prototype.updateDashboardButton = function() {
+        if (!this.dashBtn) return;
+        var st = this.dashboardState();
+        this.dashBtn.style.display = st.total ? '' : 'none';
+        this.dashBtn.textContent = 'Дэшборд ' + st.n + '/' + st.m;
+        this.dashBtn.title = 'Сделано ≠ упаковано — ' + st.n + ': рулоны сделаны, а упаковано другое число.\n'
+            + 'Втулки не готовы — ' + st.m + ': у позиции задания есть незакрытые задачи на втулки.\n'
+            + 'Считаем по видимому диапазону дат, по сегодняшний день включительно.';
+    };
+
+    // #4774: строка задания в списке «Дэшборда» — номер задания (плановые дата-время старта,
+    // #3242), станок, сырьё и суть расхождения. Подпись одна на обе группы: диспетчер узнаёт
+    // задание по тем же приметам, что и в «Отклонениях».
+    AtexProductionPlanning.prototype.dashboardItemText = function(cut, tail) {
+        var parts = [formatCutNumber(cut && cut.number) || ('#' + (cut && cut.id))];
+        var label = cut && cut.slitter && cut.slitter.label;
+        if (label) parts.push(label);
+        if (cut && cut.materialName) parts.push(cut.materialName);
+        if (tail) parts.push(tail);
+        return parts.join(' · ');
+    };
+
+    // #4774: форма «Дэшборд» — две группы + «Закрыть». Действий у формы нет: она НАЗЫВАЕТ
+    // расхождение, а исправляют его в своих рабочих местах («Упаковка» и пульт втулкореза).
+    AtexProductionPlanning.prototype.openDashboard = function() {
+        var self = this;
+        var st = this.dashboardState();
+        if (!st.total) { this.notify('Отклонений для дэшборда нет', 'info'); return; }
+
+        var dialog = el('div', { class: 'atex-pp-modal-dialog atex-pp-dev-dialog' });
+        var overlay = el('div', { class: 'atex-pp-modal atex-pp-dev-modal is-open' }, [dialog]);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        var closeX = el('button', { class: 'atex-pp-modal-close', type: 'button', text: '×', title: 'Закрыть' });
+        closeX.addEventListener('click', close);
+        dialog.appendChild(closeX);
+
+        var content = el('div', { class: 'atex-pp-dev-content' });
+        dialog.appendChild(content);
+        content.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Дэшборд отклонений' }));
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Диапазон: ' + (formatPlanDayRangeLabel(this.filter.date, this.filter.dateTo) || 'все дни')
+            + ', по сегодняшний день включительно.' }));
+
+        // 1) Разница Сделано/Упаковано: «Кол-во факт» Партий ГП задания против «Упаковано шт».
+        var packBox = el('div', { class: 'atex-pp-dev-group atex-pp-dash-pack' });
+        packBox.appendChild(el('h3', { class: 'atex-pp-dev-group-title',
+            text: 'Сделано ≠ упаковано — ' + st.groups.pack.length }));
+        if (this.packStateError) {
+            packBox.appendChild(el('p', { class: 'atex-pp-hint atex-pp-dev-warn', text:
+                'Состояние упаковки прочитать не удалось (' + this.packStateError + ') — эта группа '
+                + 'пуста не потому, что всё упаковано. Проверьте отчёт packer.' }));
+        }
+        if (!st.groups.pack.length) {
+            packBox.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
+        } else {
+            var packList = el('ul', { class: 'atex-pp-dev-list' });
+            st.groups.pack.forEach(function(item) {
+                packList.appendChild(el('li', {
+                    class: 'atex-pp-dev-item', title: 'id ' + item.cut.id,
+                    text: self.dashboardItemText(item.cut, 'сделано ' + item.fact + ', упаковано '
+                        + item.packed + ' — разница ' + (item.diff > 0 ? '+' : '') + item.diff)
+                }));
+            });
+            packBox.appendChild(packList);
+        }
+        content.appendChild(packBox);
+
+        // 2) Втулки не готовы: у позиции задания есть незакрытые «Задачи на втулки».
+        var sleeveBox = el('div', { class: 'atex-pp-dev-group atex-pp-dash-sleeve' });
+        sleeveBox.appendChild(el('h3', { class: 'atex-pp-dev-group-title',
+            text: 'Втулки не готовы — ' + st.groups.sleeve.length }));
+        if (this.sleeveTasksError) {
+            sleeveBox.appendChild(el('p', { class: 'atex-pp-hint atex-pp-dev-warn', text:
+                'Задачи на втулки прочитать не удалось (' + this.sleeveTasksError + ') — эта группа '
+                + 'пуста не потому, что втулки нарезаны. Проверьте отчёт sleeve_tasks.' }));
+        }
+        if (!st.groups.sleeve.length) {
+            sleeveBox.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
+        } else {
+            var sleeveList = el('ul', { class: 'atex-pp-dev-list' });
+            st.groups.sleeve.forEach(function(item) {
+                var tail = item.positions.map(function(p) {
+                    var who = p.orderNo ? ('заказ ' + p.orderNo) : ('позиция ' + p.id);
+                    return p.kind === 'none'
+                        ? (who + ': задач на втулки нет')
+                        : (who + ': не нарезано ' + p.pendingQty + ' втулок (задач '
+                           + p.pending + ' из ' + p.total + ')');
+                }).join('; ');
+                sleeveList.appendChild(el('li', {
+                    class: 'atex-pp-dev-item', title: 'id ' + item.cut.id,
+                    text: self.dashboardItemText(item.cut, tail)
+                }));
+            });
+            sleeveBox.appendChild(sleeveList);
+        }
+        content.appendChild(sleeveBox);
+
+        content.appendChild(el('p', { class: 'atex-pp-hint', text:
+            'Разница Сделано/Упаковано: «Кол-во факт» Партий ГП задания против «Упаковано шт» — '
+            + 'первое пишет пульт слиттера, второе рабочее место «Упаковка». Втулки: задание '
+            + 'считается обеспеченным, когда у всех «Задач на втулки» его позиций проставлено '
+            + '«Закончено» (пульт втулкореза) либо позиция помечена как уже нарезанная. '
+            + 'Дэшборд ничего не меняет — он только называет расхождение.' }));
+
+        var actions = el('div', { class: 'atex-pp-supply-actions' });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', close);
+        actions.appendChild(closeBtn);
+        content.appendChild(actions);
+
+        this.root.appendChild(overlay);
+    };
+
     // #4346: «Урегулировать» — одной операцией по обеим группам. Пишем только «Дату план»
     // (главное значение резки → _m_save с t{tableId}, как moveCutToDay: _m_set её не задаёт,
     // issue #775), значения даёт чистый deviationSettlePlan. Затем ОДНА пересборка очереди
@@ -20695,6 +21079,9 @@
             // #4596: смены закрываются В ТЕЧЕНИЕ дня — событие могло появиться уже после загрузки
             // страницы, поэтому карту закрытых смен обновляем вместе с очередью (⟳ и после записи).
             .then(function() { return self.loadShiftEvents(); })
+            // #4774: упаковка и втулки живут в соседних рабочих местах и меняются в течение дня —
+            // сигнал «Дэшборда» обновляем вместе с очередью (⟳ и после любой записи).
+            .then(function() { return Promise.all([self.loadPackState(), self.loadSleeveTasks()]); })
             .then(function() { self.resolveCutMaterials(); });
     };
 
@@ -27629,6 +28016,8 @@
         // #4346: «Отклонения N/M» — до любых ранних выходов ниже: счёт идёт по ВСЕЙ очереди,
         // а не по видимому диапазону, поэтому от состава вкладок он не зависит.
         this.updateDeviationsButton();
+        // #4774: «Дэшборд N/M» — тут же: его окно задаётся фильтром дат, а не вкладкой станка.
+        this.updateDashboardButton();
         var t0 = Date.now();
         var box = this.queueEl;
         // #3429: фокус и каретку поля поиска запоминаем ДО очистки DOM. box.innerHTML=''
@@ -29083,6 +29472,13 @@
         devBtn.style.display = 'none';
         devBtn.addEventListener('click', function() { self.openDeviations(); });
         this.devBtn = devBtn;
+        // #4774: «Дэшборд N/M» — второй сигнал расхождения, о котором знают соседние рабочие
+        // места: N заданий, где сделано ≠ упаковано, M заданий, к которым не готовы втулки.
+        // Подпись и видимость проставляет renderQueue: расхождений нет — кнопки нет.
+        var dashBtn = el('button', { class: 'atex-pp-btn atex-pp-dash-btn', type: 'button', text: 'Дэшборд' });
+        dashBtn.style.display = 'none';
+        dashBtn.addEventListener('click', function() { self.openDashboard(); });
+        this.dashBtn = dashBtn;
         queueActions.appendChild(genSpinner);
         queueActions.appendChild(genBtn);
         queueActions.appendChild(addBtn);
@@ -29091,6 +29487,7 @@
         queueActions.appendChild(delBtn);
         queueActions.appendChild(downtimeBtn);
         queueActions.appendChild(devBtn);   // #4346
+        queueActions.appendChild(dashBtn);  // #4774
         var queueHead = el('div', { class: 'atex-pp-panel-head' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь заданий по станкам' }),
             queueActions
@@ -29175,6 +29572,8 @@
                     self.loadSupplyFootage(),  // метраж обеспечений (длительность/расписание)
                     self.loadConsumption(),    // расход сырья (FIFO-резерв, Фаза 1b)
                     self.loadSleeveBatches(),  // #3340: партии втулок «в работе» (FIFO) + втулкорез TC-20
+                    self.loadPackState(),      // #4774: «Кол-во факт» / «Упаковано шт» Партий ГП — группа дэшборда
+                    self.loadSleeveTasks(),    // #4774: «Задачи на втулки» позиций — готовность втулок к заданиям
                     self.loadActualWidths(),   // #3372: справочник фактической ширины резки (66190)
                     self.loadSleeveInches(),   // #3372: дюймы втулки по записи 8188 (контекст условия)
                     self.loadSleeveWidths(),   // #3812: ширина втулки (мм) по записи (57/110) — втулочные полосы
