@@ -235,10 +235,10 @@ var pending = [];
     var env = makeEnv({ token: TOKEN, rows: [] });
     bootHome(env, { 'data-pad-roles': '1621', 'data-pad-db': 'ateh', 'data-pad-action': '', 'data-pad-role-id': '1621' });
     pending.push(flush().then(flush).then(function() {
-        var text = env.screenText();
-        assert(env.replaced.length === 0 && text.indexOf('не настроено') >= 0,
+        var screen = env.screenText();   // это НАРИСОВАННЫЙ экран, а не текст исходника
+        assert(env.replaced.length === 0 && screen.indexOf('не настроено') >= 0,
             '#4789: незнакомого планшета никуда не уводим — показываем «рабочее место не настроено»');
-        assert(text.indexOf(TOKEN) >= 0,
+        assert(screen.indexOf(TOKEN) >= 0,
             '#4789: на экране виден код устройства для первой колонки «Планшета»');
     }));
 })();
@@ -248,8 +248,8 @@ var pending = [];
     var env = makeEnv({ token: TOKEN, rows: [row([TOKEN, 'Станок 1', '', '', '', ''])] });
     bootHome(env, { 'data-pad-roles': '1621', 'data-pad-db': 'ateh', 'data-pad-action': '', 'data-pad-role-id': '1621' });
     pending.push(flush().then(flush).then(function() {
-        var text = env.screenText();
-        assert(env.replaced.length === 0 && text.indexOf('Станок 1') >= 0 && text.indexOf('не заполнены') >= 0,
+        var screen = env.screenText();
+        assert(env.replaced.length === 0 && screen.indexOf('Станок 1') >= 0 && screen.indexOf('не заполнены') >= 0,
             '#4789: планшет без объекта — экран называет планшет и говорит, чего не хватает');
     }));
 })();
