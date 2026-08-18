@@ -1211,7 +1211,12 @@
         this.cutOrders = {};      // #4606: { cutId: [номера заказов] } из report/cut_planning
         this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
-        this.selectedSlitterId = this.loadStoredSlitter();
+        // #4789: станок планшета (таблица «Планшет») сильнее памяти браузера. Ссылкой он
+        // известен сразу — до загрузки справочника: тогда и первый запрос заданий уходит
+        // уже по своему станку (отчёт slitter_cuts фильтруется по нему, #3674). Если в
+        // «Планшете» станок записан НАЗВАНИЕМ, его сведёт validateStoredSlitter, когда
+        // справочник загрузится.
+        this.selectedSlitterId = this.padSlitterRefId() || this.loadStoredSlitter();
         this.selectedDate = core.todayISO();
         // #3646: this.includeDone убран — завершённые задания видны всегда.
         this.currentCutId = null; // выбранная резка
@@ -2078,10 +2083,27 @@
         var self = this;
         this.selectedSlitterId = String(id || '');
         this.storeSelectedSlitter(); // #3460: запоминаем выбор станка
+        this.savePadSlitter();      // #4789: и настраиваем сам планшет (таблица «Планшет»)
         this.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
         // #3674: report/slitter_cuts фильтруется по станку → при смене станка перезагружаем резки.
         this.render();
         return this.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
+    };
+
+    // #4789: выбранный станок уходит в запись планшета — так диспетчер настраивает
+    // планшет прямо из пульта, а оператор потом попадает сюда с логина. Прав на запись
+    // нет (оператор) — тихо ничего не пишем: выбор всё равно живёт в localStorage.
+    AtexSlitter.prototype.savePadSlitter = function() {
+        var self = this;
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        if (!pad || typeof pad.setObject !== 'function' || !this.selectedSlitterId) return;
+        var id = String(this.selectedSlitterId);
+        var option = this.slitterOptions().filter(function(item) { return String(item.id) === id; })[0];
+        pad.setObject('slitter', { id: id, label: (option && option.label) || '' }).then(function(res) {
+            if (res && res.saved) self.notify('Планшет настроен на станок ' + ((option && option.label) || id), 'success');
+        }).catch(function(err) {
+            self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
+        });
     };
 
     AtexSlitter.prototype.renderCuts = function() {
@@ -3359,10 +3381,38 @@
     // #3460: восстановленный из localStorage станок мог исчезнуть из справочника —
     // тогда сбрасываем выбор, чтобы не показывать пустую очередь без объяснения.
     AtexSlitter.prototype.validateStoredSlitter = function() {
-        if (!this.selectedSlitterId) return;
+        // #4789: станок, на который настроен ПЛАНШЕТ (таблица «Планшет»), сильнее памяти
+        // браузера: пульт открывается сразу на своём станке, даже если в localStorage
+        // остался прежний. Планшет не настроен — работает прежний выбор.
+        var padId = this.padSlitterId();
+        if (padId && padId !== String(this.selectedSlitterId || '')) {
+            this.selectedSlitterId = padId;
+            this.storeSelectedSlitter();
+            return true;   // станок сменился — задания надо перечитать по нему
+        }
+        if (!this.selectedSlitterId) return false;
         var id = String(this.selectedSlitterId);
         var exists = this.slitterOptions().some(function(item) { return String(item.id) === id; });
-        if (!exists) { this.selectedSlitterId = ''; this.storeSelectedSlitter(); }
+        if (!exists) { this.selectedSlitterId = ''; this.storeSelectedSlitter(); return true; }
+        return false;
+    };
+
+    // #4789: станок планшета, записанный ССЫЛКОЙ (id известен без справочника).
+    AtexSlitter.prototype.padSlitterRefId = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        var obj = pad && pad.config && pad.config.slitter;
+        return (obj && obj.id) ? String(obj.id) : '';
+    };
+
+    // #4789: станок из настройки планшета, сведённый со справочником станков пульта
+    // (в «Планшете» он может лежать ссылкой или названием). Нет настройки или станка
+    // с таким названием — пусто, и выбор остаётся за оператором.
+    AtexSlitter.prototype.padSlitterId = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        var guard = (typeof window !== 'undefined' && window.AtexPadGuard) || null;
+        var obj = pad && pad.config && pad.config.slitter;
+        if (!obj || !guard || typeof guard.matchPadObject !== 'function') return '';
+        return guard.matchPadObject(this.slitterOptions(), obj);
     };
 
     AtexSlitter.prototype.start = function() {
@@ -3396,7 +3446,13 @@
             // #4317: loadBatches досчитывает остаток сам, но здесь он идёт ПАРАЛЛЕЛЬНО с
             // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем
             // досчёт, когда справочник ширин уже загружен (fillBatchRemainderM идемпотентен).
-            .then(function() { self.fillBatchRemainderM(); self.validateStoredSlitter(); return self.loadShiftEvents(); })
+            .then(function() {
+                self.fillBatchRemainderM();
+                // #4789: сведение станка планшета по названию могло сменить станок уже ПОСЛЕ
+                // первого запроса заданий — тогда перечитываем их по своему станку.
+                var changed = self.validateStoredSlitter();
+                return (changed ? self.loadCuts() : Promise.resolve()).then(function() { return self.loadShiftEvents(); });
+            })
             .then(function() {
                 self.render();
                 // #4783 п.3: поля станка в форме больше нет — на новом планшете выбирать его

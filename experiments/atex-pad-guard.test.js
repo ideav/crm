@@ -81,8 +81,11 @@ assertEqual(guard.buildLookupPath('673803', 'abc123'),
 
 // ── Разбор ответа ──
 var ROWS = [{ i: '673900', r: ['9f86d081884c7d65', 'Планшет слиттера №1'] }];
+// #4789: в разобранном планшете есть и настройка (config) — колонок в этой строке нет,
+// поэтому она пустая.
 assertEqual(guard.padFromRows(ROWS, '9f86d081884c7d65', 1),
-    { id: '673900', token: '9f86d081884c7d65', name: 'Планшет слиттера №1' },
+    { id: '673900', token: '9f86d081884c7d65', name: 'Планшет слиттера №1',
+      config: { slitter: null, cutter: null, place: null, workspace: '' } },
     'запись с токеном разбирается в планшет');
 assertEqual(guard.padFromRows({ object: ROWS }, '9f86d081884c7d65', 1).id, '673900',
     'формат {object:[…]} тоже понимается');

@@ -161,6 +161,10 @@
             roleId = '{_global_.role_id}',
             grants=JSON.parse(atob('{_global_.grants}')),
             action = '{_global_.action}';
+        // #4789: роли, которые работают с цехового планшета. Такой пользователь с корня
+        // базы уходит не в меню, а в рабочее место СВОЕГО планшета (таблица «Планшет»).
+        var PAD_ROLE_IDS = ['1621'];
+        var isPadRole = PAD_ROLE_IDS.indexOf(String(roleId)) !== -1;
     </script>
     <script>
         (function() {
@@ -229,7 +233,32 @@
             css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}';
             document.head.appendChild(css);
             var target = '/' + db + '/' + href;
-            if (action === '' && location.pathname !== target) location.replace(target);
+            // #4789: у роли планшета корень уводит в рабочее место ЭТОГО планшета —
+            // решает pad-home.js; единственный пункт меню тут не главный.
+            if (action === '' && !isPadRole && location.pathname !== target) location.replace(target);
+        })();
+    </script>
+    <script>
+        (function() {
+            // #4789: оператор вошёл с планшета и стоит на корне базы — уводим его в
+            // рабочее место, на которое планшет настроен (таблица «Планшет»). Скрипты
+            // грузим ТОЛЬКО в этом случае: остальным ролям и страницам они не нужны.
+            // Сторож планшета идёт первым — pad-home.js пользуется его разбором таблицы.
+            if (!isPadRole || action !== '') return;
+            var base = '/download/' + db + '/js/';
+            var guard = document.createElement('script');
+            guard.src = base + 'pad-guard.js?{_global_.version}.2';
+            guard.onload = function() {
+                var home = document.createElement('script');
+                home.src = base + 'pad-home.js?{_global_.version}.1';
+                home.setAttribute('data-pad-roles', PAD_ROLE_IDS.join(','));
+                home.setAttribute('data-pad-db', db);
+                home.setAttribute('data-pad-action', action);
+                home.setAttribute('data-pad-role-id', roleId);
+                home.setAttribute('data-pad-css', '/download/' + db + '/css/atex-brand.css?{_global_.version}.2');
+                document.head.appendChild(home);
+            };
+            document.head.appendChild(guard);
         })();
     </script>
 </head>

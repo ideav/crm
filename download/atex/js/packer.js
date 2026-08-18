@@ -585,6 +585,33 @@
             var label = store.getItem(STORE_PLACE_LABEL);
             if (id) this.place = { id: String(id), label: String(label || id) };
         } catch (e) { /* приватный режим — считаем, что места нет */ }
+        // #4789: упаковочное место планшета (таблица «Планшет») сильнее памяти браузера —
+        // упаковка открывается сразу на своём месте, справочник мест для этого не нужен.
+        var padPlace = this.padPlace();
+        if (padPlace) { this.place = padPlace; this.storePlace(); }
+    };
+
+    // #4789: место из настройки планшета. В «Планшете» оно лежит ссылкой («id:Номер»)
+    // или просто номером — берём и то, и другое: отчёт фильтруется по НОМЕРУ места.
+    AtexPacker.prototype.padPlace = function() {
+        var obj = window.atexPad && window.atexPad.config && window.atexPad.config.place;
+        var id = str(obj && obj.id).trim();
+        var label = str(obj && obj.label).trim();
+        if (!id && !label) return null;
+        return { id: id || label, label: label || id };
+    };
+
+    // #4789: выбранное место уходит в запись планшета — так диспетчер настраивает планшет
+    // прямо из пульта. Прав на запись нет (упаковщик) — тихо ничего не пишем.
+    AtexPacker.prototype.savePadPlace = function() {
+        var self = this;
+        var pad = window.atexPad || null;
+        if (!pad || typeof pad.setObject !== 'function' || !this.place) return;
+        pad.setObject('place', { id: this.place.id, label: this.place.label }).then(function(res) {
+            if (res && res.saved) self.notify('Планшет настроен на упаковочное место ' + self.place.label, 'success');
+        }).catch(function(err) {
+            self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
+        });
     };
     // Нужен ли поход в таблицу «Упаковочное место»: место из localStorage избавляет от запроса.
     AtexPacker.prototype.needsPlacePick = function() {
@@ -789,6 +816,7 @@
             btn.addEventListener('click', function() {
                 self.place = { id: place.id, label: place.label };
                 self.storePlace();
+                self.savePadPlace();   // #4789: и настраиваем сам планшет
                 close();
                 self.renderHead();
                 self.refresh();
