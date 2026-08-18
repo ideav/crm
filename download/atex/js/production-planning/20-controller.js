@@ -25,6 +25,7 @@
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
+        overfillMeasureOpts: overfillMeasureOpts,         // #4780: её опции — из окна дня, в одном месте
         // #4749: мерка НЕДОБОРА дня — разница раскладки с хранимым планом (проверяется
         // `experiments/atex-pp-4749-underfill-vs-stored.test.js`).
         underfilledDaysFromPlan: underfilledDaysFromPlan,
@@ -12302,6 +12303,31 @@
         });
     };
 
+    // #4780: ОПЦИИ МЕРКИ СОБИРАЮТСЯ ИЗ ОКНА ДНЯ В ОДНОМ МЕСТЕ. Мерку зовут три потребителя —
+    // шапка дня в очереди (#4531), `overfilledDaysOf` (тост #4497 и вход в выравнивание) и счётчик
+    // `capacityBreaksStored` (страж записи), — и каждый перекладывал поля окна в опции вручную.
+    // Поле `maxOverworkTuneMin`, которого потребовало правило #4759 («потолок дня выбирает его
+    // хвост»), не доехало НИ ДО ОДНОГО из трёх: у мерки нахлёст настройки оказывался нулевым, и
+    // день, кончающийся наладкой, судился потолком 450 вместо 460 при точно таком же плане у
+    // упаковщика (тот всегда пакует хвост настройки до `availFor(day,'tune')`). Боевая ateh
+    // 18.08.2026, Станок 1, Вт 18.08: «(453 мин)» и красное «+3 мин сверх смены» на дне, который
+    // кончается наладкой ножей в 16:33 при потолке 16:20 — план законный, метка врёт (issue #4780).
+    //
+    // Разъехаться перекладке больше негде: новое поле окна добавляется ровно сюда, а сторож
+    // `atex-pp-4780-over-badge-tune-tail.test.js` краснеет, если опции снова соберут на месте.
+    //   win — результат `resolveWorkingWindow` (`workingWindow()`); baseMidnightMs — полночь дня 0.
+    function overfillMeasureOpts(win, baseMidnightMs) {
+        var w = win || {};
+        return {
+            baseMidnightMs: baseMidnightMs,
+            dayStartMin: w.startMin, cutEndMin: w.cutEndMin,
+            // #4559: обед — часть смены, а не свободные минуты: «сквозное» задание паузит на него (#3816).
+            lunchStartMin: w.lunchStartMin, lunchDurationMin: w.lunchDurationMin,
+            // #4759: нахлёст ОБОИХ видов — какой из них применить, решает хвост дня, а не зовущий.
+            maxOverworkCutsMin: w.maxOverworkCutsMin, maxOverworkTuneMin: w.maxOverworkTuneMin
+        };
+    }
+
     // #4408/#4473/#4531: дни, где работа уходит ЗА конец смены, — ЧИСТАЯ мерка над набором заданий
     // ОДНОГО станка. Меряет ХРАНИМЫЙ план (тот, что на экране).
     //
@@ -12329,7 +12355,7 @@
     // пересчёта, у очереди — то, что нарисовано), поэтому набор передаётся параметром; арифметика
     // при этом одна и разъехаться не может.
     //   cuts — задания одного станка; opts: { baseMidnightMs, dayStartMin, cutEndMin,
-    //   lunchDurationMin, maxOverworkCutsMin }.
+    //   lunchDurationMin, maxOverworkCutsMin, maxOverworkTuneMin } — собираются `overfillMeasureOpts`.
     // → массив [{ dayOffset, endMin, overMin, capMin, loadMin, cutId, seq, cut }], по возрастанию дня.
     function overfilledDaysFromCuts(cuts, opts) {
         var o = opts || {};
@@ -12556,10 +12582,7 @@
         });
         var n = 0, self = this;
         Object.keys(bySlitter).forEach(function(sid) {
-            n += overfilledDaysFromCuts(bySlitter[sid], {
-                baseMidnightMs: base, cutEndMin: win.cutEndMin, maxOverworkCutsMin: win.maxOverworkCutsMin,
-                dayStartMin: win.startMin, lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin
-            }).length;
+            n += overfilledDaysFromCuts(bySlitter[sid], overfillMeasureOpts(win, base)).length;
         });
         return n;
     };
@@ -12603,13 +12626,8 @@
         scopeIds.forEach(function(id) { inScope[String(id)] = true; });
         var win = this.workingWindow() || {};
         var base = planBaseMidnightFrom(this.filter && this.filter.date, controllerNowMs(this));
-        return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }), {
-            baseMidnightMs: base,
-            cutEndMin: win.cutEndMin,
-            maxOverworkCutsMin: win.maxOverworkCutsMin,
-            // #4559: обед — часть смены, а не свободные минуты: «сквозное» задание паузит на него (#3816).
-            dayStartMin: win.startMin, lunchStartMin: win.lunchStartMin, lunchDurationMin: win.lunchDurationMin
-        });
+        return overfilledDaysFromCuts((this.cuts || []).filter(function(c) { return c && inScope[String(c.id)]; }),
+            overfillMeasureOpts(win, base));
     };
 
     // #4531: ПЕРЕПОЛНЕННЫЙ СТАНКО-ДЕНЬ → ФРАЗА ОПЕРАТОРУ. Прежний текст называл дату и минуты
@@ -13921,14 +13939,8 @@
         // бейджем «(N мин)», рядом с которым стои́т. Замороженный день (#4326) тоже помечаем: он
         // виден в очереди, и его перебор оператор должен видеть так же, как любой другой.
         var overByDay = {};
-        overfilledDaysFromCuts(activeGroup.cuts, {
-            baseMidnightMs: planBaseMidnightMs,
-            cutEndMin: dayWindow.cutEndMin,
-            maxOverworkCutsMin: dayWindow.maxOverworkCutsMin,
-            // #4559: обед «сквозного» задания (#3816) в хранимых стартах не лежит — мерка добавляет его сама.
-            dayStartMin: dayWindow.startMin, lunchStartMin: dayWindow.lunchStartMin,
-            lunchDurationMin: dayWindow.lunchDurationMin
-        }).forEach(function(d) { overByDay[d.dayOffset] = d; });
+        overfilledDaysFromCuts(activeGroup.cuts, overfillMeasureOpts(dayWindow, planBaseMidnightMs))
+            .forEach(function(d) { overByDay[d.dayOffset] = d; });
         // #3914: печать бейджа «(N мин)» по дням активного станка — из чего складывается сумма и
         // какой день превысил бюджет (cutEnd−dayStart−обед+нахлёст). Источник — сохранённые planStart
         // (то, что реально записала последняя генерация), поэтому число совпадает с бейджем на экране.
