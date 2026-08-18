@@ -548,6 +548,36 @@
             var id = window.localStorage && window.localStorage.getItem('atex-sc-cutter');
             if (id && (this.cutters || []).some(function(c) { return String(c.id) === String(id); })) this.selectedCutterId = String(id);
         } catch (e) {}
+        // #4789: втулкорез, на который настроен ПЛАНШЕТ (таблица «Планшет»), сильнее
+        // памяти браузера — пульт открывается сразу на своём станке.
+        var padId = this.padCutterId();
+        if (padId) { this.selectedCutterId = padId; this.storeCutter(); }
+    };
+
+    // #4789: втулкорез из настройки планшета, сведённый со справочником пульта (в
+    // «Планшете» он лежит ссылкой или названием). Сводим по СЫРОМУ справочнику: в
+    // cutterOptions к названию приписан диапазон диаметров, по нему совпадения не будет.
+    AtexSleeveCutter.prototype.padCutterId = function() {
+        var pad = window.atexPad || null;
+        var guard = window.AtexPadGuard || null;
+        var obj = pad && pad.config && pad.config.cutter;
+        if (!obj || !guard || typeof guard.matchPadObject !== 'function') return '';
+        return guard.matchPadObject(this.cutters || [], obj);
+    };
+
+    // #4789: выбранный втулкорез уходит в запись планшета — так диспетчер настраивает
+    // планшет прямо из пульта. Прав на запись нет (оператор) — тихо ничего не пишем.
+    AtexSleeveCutter.prototype.savePadCutter = function() {
+        var self = this;
+        var pad = window.atexPad || null;
+        if (!pad || typeof pad.setObject !== 'function' || !this.selectedCutterId) return;
+        var id = String(this.selectedCutterId);
+        var cutter = (this.cutters || []).filter(function(c) { return String(c.id) === id; })[0];
+        pad.setObject('cutter', { id: id, label: (cutter && cutter.label) || '' }).then(function(res) {
+            if (res && res.saved) self.notify('Планшет настроен на втулкорез ' + ((cutter && cutter.label) || id), 'success');
+        }).catch(function(err) {
+            self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
+        });
     };
     AtexSleeveCutter.prototype.storeDate = function() {
         try { if (window.localStorage) window.localStorage.setItem('atex-sc-date', this.selectedDate || ''); } catch (e) {}
@@ -607,6 +637,7 @@
         select.addEventListener('change', function() {
             self.selectedCutterId = select.value || null;
             self.storeCutter();
+            self.savePadCutter();   // #4789: и настраиваем сам планшет
             self.refresh();
         });
         box.appendChild(this.field('Втулкорез', select));

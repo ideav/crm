@@ -824,6 +824,31 @@
     }
 
     // Класс назначения полосы → CSS-модификатор сегмента (цвет).
+    // #4785 п.2: цвет полосы на раскладке — по ЕЁ ШИРИНЕ. Раньше цвет означал назначение
+    // (Заказ/Склад/Отходы), и карта задания, где все полосы заказные, была одноцветной —
+    // сверить её с легендой ширин было нельзя. Теперь одинаковая ширина = один цвет, и
+    // легенда ширин под картой читается напрямую. Порядок цветов стабилен: ширины
+    // сортируются по возрастанию, поэтому карта не перекрашивается от порядка полос.
+    var CM_WIDTH_COLORS = 8;   // столько цветов в палитре (.atex-sl-cm-seg-w0 … w7)
+
+    function widthColorIndex(widths) {
+        var uniq = [];
+        (widths || []).forEach(function(w) {
+            var v = round3(toNumber(w != null && typeof w === 'object' ? w.width : w));
+            if (v > 0 && uniq.indexOf(v) === -1) uniq.push(v);
+        });
+        uniq.sort(function(a, b) { return a - b; });
+        var map = {};
+        uniq.forEach(function(w, i) { map[String(w)] = i % CM_WIDTH_COLORS; });
+        return map;
+    }
+
+    // Класс цвета полосы по ширине. Ширины нет в карте (пустая/нулевая) → первый цвет.
+    function widthColorClass(map, width) {
+        var idx = map ? map[String(round3(toNumber(width)))] : null;
+        return 'atex-sl-cm-seg-w' + (idx == null ? 0 : idx);
+    }
+
     function purposeKind(purpose) {
         var p = String(purpose || '').trim().toLowerCase();
         if (p.indexOf('заказ') === 0) return 'order';
@@ -1104,6 +1129,8 @@
         expandSegments: expandSegments,
         computeLayout: computeLayout,
         widthPercent: widthPercent,
+        widthColorIndex: widthColorIndex,   // #4785: цвет полосы по её ширине
+        widthColorClass: widthColorClass,   // #4785
         purposeKind: purposeKind
     };
 
@@ -1184,7 +1211,12 @@
         this.cutOrders = {};      // #4606: { cutId: [номера заказов] } из report/cut_planning
         this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
-        this.selectedSlitterId = this.loadStoredSlitter();
+        // #4789: станок планшета (таблица «Планшет») сильнее памяти браузера. Ссылкой он
+        // известен сразу — до загрузки справочника: тогда и первый запрос заданий уходит
+        // уже по своему станку (отчёт slitter_cuts фильтруется по нему, #3674). Если в
+        // «Планшете» станок записан НАЗВАНИЕМ, его сведёт validateStoredSlitter, когда
+        // справочник загрузится.
+        this.selectedSlitterId = this.padSlitterRefId() || this.loadStoredSlitter();
         this.selectedDate = core.todayISO();
         // #3646: this.includeDone убран — завершённые задания видны всегда.
         this.currentCutId = null; // выбранная резка
@@ -2051,10 +2083,27 @@
         var self = this;
         this.selectedSlitterId = String(id || '');
         this.storeSelectedSlitter(); // #3460: запоминаем выбор станка
+        this.savePadSlitter();      // #4789: и настраиваем сам планшет (таблица «Планшет»)
         this.clearCutSelection();   // #4370: подсказка о бесшовной смене принадлежит резке прежнего станка
         // #3674: report/slitter_cuts фильтруется по станку → при смене станка перезагружаем резки.
         this.render();
         return this.loadCuts().then(function() { return self.loadShiftEvents(); }).then(function() { self.render(); });
+    };
+
+    // #4789: выбранный станок уходит в запись планшета — так диспетчер настраивает
+    // планшет прямо из пульта, а оператор потом попадает сюда с логина. Прав на запись
+    // нет (оператор) — тихо ничего не пишем: выбор всё равно живёт в localStorage.
+    AtexSlitter.prototype.savePadSlitter = function() {
+        var self = this;
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        if (!pad || typeof pad.setObject !== 'function' || !this.selectedSlitterId) return;
+        var id = String(this.selectedSlitterId);
+        var option = this.slitterOptions().filter(function(item) { return String(item.id) === id; })[0];
+        pad.setObject('slitter', { id: id, label: (option && option.label) || '' }).then(function(res) {
+            if (res && res.saved) self.notify('Планшет настроен на станок ' + ((option && option.label) || id), 'success');
+        }).catch(function(err) {
+            self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
+        });
     };
 
     AtexSlitter.prototype.renderCuts = function() {
@@ -2468,11 +2517,10 @@
     AtexSlitter.prototype.renderCutMap = function() {
         var cut = this.currentCut;
         var strips = this.currentStrips || [];
-        // #3566 #4: число полос (Σ кол-во) — в заголовке «Раскладка ножей (K полос)».
+        // #4785 п.1: заголовка секции нет — то же говорят строка «Ширина входа / Полос /
+        // Занято» над картой и легенда ширин под ней.
         var knives = core.totalKnives(strips);
-        var section = el('section', { class: 'atex-sl-section' }, [
-            el('h3', { class: 'atex-sl-section-title', text: 'Раскладка ножей' + (knives > 0 ? ' (' + knives + ' полос)' : '') })
-        ]);
+        var section = el('section', { class: 'atex-sl-section' });
         if (!strips.length) {
             section.appendChild(el('div', { class: 'atex-sl-empty', text: 'У резки нет полос — раскраивать нечего.' }));
             return section;
@@ -2482,17 +2530,19 @@
         var lay = core.computeLayout(inputWidth, strips, null);
 
         section.appendChild(el('div', { class: 'atex-sl-cm-caption' }, [
-            el('span', { text: 'Ширина входа: ' + lay.inputWidth + ' мм' }),
+            el('span', { text: 'Ширина входа: ' + lay.inputWidth + ' мм'
+                + (knives > 0 ? ' · полос: ' + knives : '') }),
             el('span', { class: 'atex-sl-cm-caption-used', text: 'Занято: ' + lay.usedWidth + ' мм' })
         ]));
 
+        // #4785 п.2: цвет полосы — по её ШИРИНЕ; та же карта цветов у легенды ширин ниже.
+        var colors = core.widthColorIndex(strips);
         var bar = el('div', { class: 'atex-sl-cm-bar' + (lay.overflow ? ' is-overflow' : '') });
         lay.segments.forEach(function(seg) {
             var pct = core.widthPercent(seg.width, lay);
-            var kind = core.purposeKind(seg.purpose);
             var title = (seg.label ? seg.label + ' · ' : '') + seg.width + ' мм' + (seg.purpose ? ' · ' + seg.purpose : '');
             var segNode = el('div', {
-                class: 'atex-sl-cm-seg atex-sl-cm-seg-' + kind,
+                class: 'atex-sl-cm-seg ' + core.widthColorClass(colors, seg.width),
                 title: title,
                 dataset: { width: String(seg.width) }
             });
@@ -2516,14 +2566,17 @@
             section.appendChild(el('div', { class: 'atex-sl-cm-warn', text: 'Полосы превышают ширину входа на ' + Math.abs(lay.remainder) + ' мм.' }));
         }
 
-        // Легенда по видам полос (ширина · кол-во · назначение) с цветом.
+        // #4785 п.2: легенда ШИРИН под картой — тот же цвет, что у полос этой ширины,
+        // подпись «ширина мм × полос» крупно и без приглушения (её читают у станка),
+        // назначение — приписка обычным весом.
         var legend = el('div', { class: 'atex-sl-cm-legend' });
         strips.forEach(function(s) {
-            var kind = core.purposeKind(s.purpose);
+            var width = core.round3(core.toNumber(s.width));
             legend.appendChild(el('div', { class: 'atex-sl-cm-legend-item' }, [
-                el('span', { class: 'atex-sl-cm-swatch atex-sl-cm-seg-' + kind }),
-                el('span', { text: core.round3(core.toNumber(s.width)) + ' мм × ' + core.round3(core.toNumber(s.qty)) +
-                    (s.purpose ? ' · ' + s.purpose : '') })
+                el('span', { class: 'atex-sl-cm-swatch ' + core.widthColorClass(colors, s.width) }),
+                el('span', { class: 'atex-sl-cm-legend-width',
+                    text: width + ' мм × ' + core.round3(core.toNumber(s.qty)) }),
+                s.purpose ? el('span', { class: 'atex-sl-cm-legend-purpose', text: s.purpose }) : null
             ]));
         });
 
@@ -2605,14 +2658,12 @@
         var self = this;
         var cut = this.currentCut;
         // #4783 п.10: кнопки «Сохранить показания» нет — запись уходит при выходе из ячейки
-        // (autosave ниже). Что записано, видно по статусу рядом с заголовком секции.
+        // (autosave ниже). Что записано, видно по статусу над полями.
+        // #4785 п.1: заголовка секции нет — поля названы своими подписями.
         this.readingsStatusEl = el('span', { class: 'atex-sl-save-status', text: '' });
         this.markReadingsSaved();
         var section = el('section', { class: 'atex-sl-section' }, [
-            el('div', { class: 'atex-sl-section-head' }, [
-                el('h3', { class: 'atex-sl-section-title', text: 'Показания и выработка' }),
-                this.readingsStatusEl
-            ])
+            el('div', { class: 'atex-sl-section-head' }, [this.readingsStatusEl])
         ]);
 
         var grid = el('div', { class: 'atex-sl-grid' });
@@ -2627,10 +2678,9 @@
         var cStart = numInput(cut.counterStart, '0');
         cStart.addEventListener('input', function() { cut.counterStart = cStart.value; refreshMeterage(); });
         autosave(cStart);
-        var cStartField = field('Счётчик нач.', cStart);
-        var cStartHint = el('span', { class: 'atex-sl-hint', text: '' });
-        cStartField.appendChild(cStartHint);
-        grid.appendChild(cStartField);
+        // #4785 п.3: подсказки «(остаток партии: N м)» под полем нет — остаток партии
+        // виден строкой партии внизу; значение поля по-прежнему подставляется из неё.
+        grid.appendChild(field('Счётчик нач.', cStart));
 
         var cEnd = numInput(cut.counterEnd, '0');
         cEnd.addEventListener('input', function() { cut.counterEnd = cEnd.value; refreshMeterage(); });
@@ -2647,13 +2697,15 @@
         grid.appendChild(meterField);
 
         var defectM = numInput(cut.defectM, '0');
-        var defectHint = el('div', { class: 'atex-sl-hint', text: '' });
+        // #4785 п.3: пересчёт «= N м²» под полем убран (оператору он не нужен, «Брак, м²»
+        // считается при записи). Осталось единственное сообщение — когда ширины сырья нет
+        // и посчитать м² НЕЧЕМ: молча терять брак в м² нельзя.
+        var defectHint = el('div', { class: 'atex-sl-cm-warn atex-sl-defect-warn', text: '' });
         function refreshDefectM2() {
             var m2 = core.defectM2(cut.defectM, cut.materialWidthMm);
             cut.defect = m2 ? String(m2) : '';
-            defectHint.textContent = (core.toNumber(cut.defectM) > 0 && cut.materialWidthMm > 0)
-                ? ('= ' + m2 + ' м² (ширина ' + cut.materialWidthMm + ' мм)')
-                : (cut.materialWidthMm > 0 ? '' : 'ширина сырья не определена — м² не посчитать');
+            defectHint.textContent = core.toNumber(cut.materialWidthMm) > 0
+                ? '' : 'ширина сырья не определена — м² не посчитать';
         }
         defectM.addEventListener('input', function() { cut.defectM = defectM.value; refreshDefectM2(); });
         autosave(defectM);
@@ -2665,7 +2717,9 @@
         // Фото брака
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
         var photoBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Фото брака' });
-        var photoStatus = el('span', { class: 'atex-sl-hint', text: cut.defectPhoto ? 'фото загружено' : '' });
+        // #4785 п.3: это не подсказка, а ответ на действие («фото загружено») — остаётся,
+        // иначе оператор не знает, доехал ли снимок.
+        var photoStatus = el('span', { class: 'atex-sl-photo-status', text: cut.defectPhoto ? 'фото загружено' : '' });
         photoBtn.addEventListener('click', function() { photoInput.click(); });
         photoInput.addEventListener('change', function() {
             var file = photoInput.files && photoInput.files[0];
@@ -2684,16 +2738,11 @@
         refreshMeterage();
         return section;
 
-        // Обновление подсказок: погонаж = нач. − кон. (#4321); остаток партии → счётчик нач.
+        // Погонаж факт = «Счётчик нач.» − «Счётчик кон.» (#4321: счётчик мотает назад).
         function refreshMeterage() {
             var suggested = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
             cut.meterage = String(suggested);
             meterageDisplay.value = suggested;
-            // Подсказка к счётчику нач.: откуда взято значение
-            var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
-            cStartHint.textContent = batch && batch.remainderM > 0
-                ? ' (остаток партии: ' + core.round3(batch.remainderM) + ' м)'
-                : '';
         }
     };
 
@@ -3332,10 +3381,38 @@
     // #3460: восстановленный из localStorage станок мог исчезнуть из справочника —
     // тогда сбрасываем выбор, чтобы не показывать пустую очередь без объяснения.
     AtexSlitter.prototype.validateStoredSlitter = function() {
-        if (!this.selectedSlitterId) return;
+        // #4789: станок, на который настроен ПЛАНШЕТ (таблица «Планшет»), сильнее памяти
+        // браузера: пульт открывается сразу на своём станке, даже если в localStorage
+        // остался прежний. Планшет не настроен — работает прежний выбор.
+        var padId = this.padSlitterId();
+        if (padId && padId !== String(this.selectedSlitterId || '')) {
+            this.selectedSlitterId = padId;
+            this.storeSelectedSlitter();
+            return true;   // станок сменился — задания надо перечитать по нему
+        }
+        if (!this.selectedSlitterId) return false;
         var id = String(this.selectedSlitterId);
         var exists = this.slitterOptions().some(function(item) { return String(item.id) === id; });
-        if (!exists) { this.selectedSlitterId = ''; this.storeSelectedSlitter(); }
+        if (!exists) { this.selectedSlitterId = ''; this.storeSelectedSlitter(); return true; }
+        return false;
+    };
+
+    // #4789: станок планшета, записанный ССЫЛКОЙ (id известен без справочника).
+    AtexSlitter.prototype.padSlitterRefId = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        var obj = pad && pad.config && pad.config.slitter;
+        return (obj && obj.id) ? String(obj.id) : '';
+    };
+
+    // #4789: станок из настройки планшета, сведённый со справочником станков пульта
+    // (в «Планшете» он может лежать ссылкой или названием). Нет настройки или станка
+    // с таким названием — пусто, и выбор остаётся за оператором.
+    AtexSlitter.prototype.padSlitterId = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        var guard = (typeof window !== 'undefined' && window.AtexPadGuard) || null;
+        var obj = pad && pad.config && pad.config.slitter;
+        if (!obj || !guard || typeof guard.matchPadObject !== 'function') return '';
+        return guard.matchPadObject(this.slitterOptions(), obj);
     };
 
     AtexSlitter.prototype.start = function() {
@@ -3369,7 +3446,13 @@
             // #4317: loadBatches досчитывает остаток сам, но здесь он идёт ПАРАЛЛЕЛЬНО с
             // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем
             // досчёт, когда справочник ширин уже загружен (fillBatchRemainderM идемпотентен).
-            .then(function() { self.fillBatchRemainderM(); self.validateStoredSlitter(); return self.loadShiftEvents(); })
+            .then(function() {
+                self.fillBatchRemainderM();
+                // #4789: сведение станка планшета по названию могло сменить станок уже ПОСЛЕ
+                // первого запроса заданий — тогда перечитываем их по своему станку.
+                var changed = self.validateStoredSlitter();
+                return (changed ? self.loadCuts() : Promise.resolve()).then(function() { return self.loadShiftEvents(); });
+            })
             .then(function() {
                 self.render();
                 // #4783 п.3: поля станка в форме больше нет — на новом планшете выбирать его

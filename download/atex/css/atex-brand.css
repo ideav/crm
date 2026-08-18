@@ -151,3 +151,27 @@
     opacity: 0.6;
     cursor: default;
 }
+
+/* #4789: код устройства для записи в первую колонку «Планшета» — крупно и моноширинно,
+   его переписывают руками (и диктуют по телефону). */
+.atex-pad-token {
+    padding: 0.625rem 0.75rem;
+    border: 1px dashed var(--atex-steel);
+    border-radius: 8px;
+    background: var(--atex-steel-l, #f1f5f9);
+    color: var(--atex-navy);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1rem;
+    letter-spacing: 0.06em;
+    word-break: break-all;
+    user-select: all;
+}
+
+/* #4789: экран «рабочее место не настроено» ложится поверх страницы — оператор не
+   должен видеть за ним пустой корень базы. */
+#atex-pad-home {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: var(--atex-paper, #f8fafc);
+}

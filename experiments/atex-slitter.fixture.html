@@ -25,7 +25,24 @@
 <script>
 // #4666/#4783: имя планшета в боевом пульте кладёт сторож pad-guard.js — здесь стенд
 // подставляет его сам (сторож в стенде не участвует).
-window.atexPad = { id: '1', name: 'Планшет слиттера №1' };
+// #4789: планшет настроен на станок — пульт открывается сразу на нём, а выбор станка
+// пишется обратно в таблицу «Планшет» (в стенде запись только логируется).
+window.atexPad = {
+    id: '1', name: 'Планшет слиттера №1', canWrite: true,
+    config: { slitter: { id: '1', label: 'Слиттер-1' }, cutter: null, place: null, workspace: 'slitter' },
+    setObject: function(kind, obj) {
+        console.log('[mock] atexPad.setObject', kind, JSON.stringify(obj));
+        return Promise.resolve({ saved: true, reason: '' });
+    }
+};
+window.AtexPadGuard = {
+    matchPadObject: function(options, obj) {
+        var id = String((obj && obj.id) || ''), label = String((obj && obj.label) || '').toLowerCase();
+        var hit = (options || []).filter(function(o) { return String(o.id) === id; })[0]
+            || (options || []).filter(function(o) { return String(o.label).toLowerCase() === label; })[0];
+        return hit ? String(hit.id) : '';
+    }
+};
 // ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
 var META = [
     { id: 105, val: 'Вид сырья', reqs: [

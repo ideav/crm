@@ -26,6 +26,14 @@
  * Имя зарегистрированного планшета показывается в `.navbar-workspace` верхнего
  * меню (templates/atex/main.html).
  *
+ * #4789: в таблице «Планшет» появились колонки настройки — «Слиттер», «Втулкорез»,
+ * «Упаковочное место» и «Рабочее место». Ими планшет привязан к рабочему месту
+ * оператора и к его объекту (станку, втулкорезу, упаковочному месту): по ним
+ * `pad-home.js` уводит оператора прямо в это рабочее место, а сами пульты открываются
+ * с уже выбранным объектом. Настраивает планшет диспетчер — выбор объекта в пульте
+ * пишется в его запись (`setObject`), поэтому таблица заполняется сама собой; править
+ * её руками тоже можно, лишь бы в записи остались токен и имя.
+ *
  * Чистая часть (разбор метаданных, строк, сборка запросов, генерация токена)
  * экспортируется через module.exports для тестов
  * (experiments/atex-pad-guard.test.js).
@@ -48,6 +56,25 @@
     var TABLE_NAME = 'Планшет';
     var NAME_REQ = 'Наименование';
     var TOKEN_BYTES = 16;   // 32 hex-символа
+    // #4789: колонки настройки планшета. Имена — как в таблице «Планшет» (ateh).
+    var CONFIG_REQS = {
+        slitter: 'Слиттер',
+        cutter: 'Втулкорез',
+        place: 'Упаковочное место',
+        workspace: 'Рабочее место'
+    };
+    // Объект настройки → рабочее место оператора (хвост URL `/{db}/{action}`).
+    var WORKSPACE_ACTION = { slitter: 'slitter', cutter: 'sleeve-cutter', place: 'packer' };
+    // Обратная карта: по рабочему месту — какой колонкой задан его объект.
+    var ACTION_KIND = { slitter: 'slitter', 'sleeve-cutter': 'cutter', packer: 'place' };
+    // Как в колонке «Рабочее место» может быть записано само рабочее место. Пусто —
+    // не задано; неизвестное слово — тоже (тогда решает набор заполненных объектов).
+    var WORKSPACE_ALIASES = {
+        'slitter': 'slitter', 'слиттер': 'slitter', 'резка': 'slitter', 'пульт слиттера': 'slitter',
+        'sleeve-cutter': 'sleeve-cutter', 'sleevecutter': 'sleeve-cutter', 'втулкорез': 'sleeve-cutter',
+        'втулки': 'sleeve-cutter', 'пульт втулкореза': 'sleeve-cutter',
+        'packer': 'packer', 'упаковка': 'packer', 'упаковщик': 'packer', 'упаковочное место': 'packer'
+    };
 
     // ── Чистые функции ──
 
@@ -108,6 +135,92 @@
         return '';
     }
 
+    // #4789: реквизит по имени ТИПА или псевдониму в этой таблице (грабли #4655).
+    function reqByName(table, name) {
+        var reqs = (table && table.reqs) || [];
+        var wanted = trimText(name).toLowerCase();
+        for (var i = 0; i < reqs.length; i++) {
+            var req = reqs[i];
+            if (trimText(req.val).toLowerCase() === wanted || reqAlias(req).toLowerCase() === wanted)
+                return { req: req, index: i + 1 };   // +1: нулевая колонка строки — первая колонка таблицы
+        }
+        return null;
+    }
+
+    function configReqId(table, kind) {
+        var found = reqByName(table, CONFIG_REQS[kind]);
+        return found ? String(found.req.id) : '';
+    }
+
+    // Ссылочное значение JSON_OBJ («id:Подпись») → { id, label }. Не ссылка (число или
+    // текст) остаётся подписью без id — пульт сведёт такое значение по названию.
+    function parseRefValue(raw) {
+        var s = trimText(raw);
+        var m = s.match(/^(\d+):([\s\S]*)$/);
+        return m ? { id: m[1], label: trimText(m[2]) } : { id: '', label: s };
+    }
+
+    function hasObject(obj) {
+        return !!(obj && (obj.id || obj.label));
+    }
+
+    // Значение колонки «Рабочее место» → 'slitter' | 'sleeve-cutter' | 'packer' | ''.
+    function normalizeWorkspace(value) {
+        var s = parseRefValue(value).label.toLowerCase();
+        return WORKSPACE_ALIASES[s] || '';
+    }
+
+    // Настройка планшета из строки JSON_OBJ.
+    function padConfigFromRow(table, cols) {
+        var config = { slitter: null, cutter: null, place: null, workspace: '' };
+        Object.keys(CONFIG_REQS).forEach(function(kind) {
+            var found = reqByName(table, CONFIG_REQS[kind]);
+            if (!found) return;
+            var raw = (cols || [])[found.index];
+            if (kind === 'workspace') { config.workspace = normalizeWorkspace(raw); return; }
+            var obj = parseRefValue(raw);
+            config[kind] = hasObject(obj) ? obj : null;
+        });
+        return config;
+    }
+
+    // Куда планшет открывается. Рабочее место названо колонкой «Рабочее место» —
+    // берём его; иначе решает набор заполненных объектов: ровно один → его рабочее
+    // место, ни одного → планшет не настроен, больше одного → выбор неоднозначен.
+    // Объект может быть не задан (рабочее место названо, станок нет) — тогда пульт
+    // откроется и попросит выбрать объект сам.
+    function padWorkspace(pad) {
+        var config = (pad && pad.config) || {};
+        var filled = Object.keys(WORKSPACE_ACTION).filter(function(kind) { return hasObject(config[kind]); });
+        if (config.workspace) {
+            var kind = ACTION_KIND[config.workspace];
+            return { ok: true, action: config.workspace, kind: kind, object: config[kind] || null, reason: '' };
+        }
+        if (!filled.length) return { ok: false, action: '', kind: '', object: null, reason: 'none' };
+        if (filled.length > 1) return { ok: false, action: '', kind: '', object: null, reason: 'ambiguous' };
+        return { ok: true, action: WORKSPACE_ACTION[filled[0]], kind: filled[0], object: config[filled[0]], reason: '' };
+    }
+
+    // #4789: объект настройки планшета → id записи из справочника пульта. В «Планшете»
+    // объект лежит либо ссылкой (id известен), либо текстом (только название) — сводим и
+    // то, и другое: сперва по id, затем по названию (регистр и пробелы неважны).
+    // Не нашли — пусто: пульт попросит выбрать объект сам, а не подставит чужой.
+    function matchPadObject(options, obj) {
+        var list = options || [];
+        var id = trimText(obj && obj.id);
+        var label = trimText(obj && obj.label).toLowerCase();
+        var i;
+        if (id) {
+            for (i = 0; i < list.length; i++)
+                if (trimText(list[i] && list[i].id) === id) return id;
+        }
+        if (label) {
+            for (i = 0; i < list.length; i++)
+                if (trimText(list[i] && list[i].label).toLowerCase() === label) return trimText(list[i].id);
+        }
+        return '';
+    }
+
     // Токен — только hex: символы `%`, `@`, `!`, `<`, `>` меняют смысл фильтра
     // `F_{tableId}` на сервере (index.php, Construct_WHERE), а hex ищется точным
     // сравнением.
@@ -136,7 +249,7 @@
     // Строки JSON_OBJ: { i: id, r: [первая колонка, реквизит1, …] }. Запись
     // засчитывается только при ТОЧНОМ совпадении токена — сервер фильтрует точно,
     // но полагаться на это вслепую нельзя.
-    function padFromRows(rows, token, nameIdx) {
+    function padFromRows(rows, token, nameIdx, table) {
         var list = Array.isArray(rows) ? rows : ((rows && rows.object) || []);
         for (var i = 0; i < list.length; i++) {
             var row = list[i] || {};
@@ -145,7 +258,8 @@
             return {
                 id: String(row.i == null ? '' : row.i),
                 token: trimText(cols[0]),
-                name: trimText(cols[nameIdx > 0 ? nameIdx : 1])
+                name: trimText(cols[nameIdx > 0 ? nameIdx : 1]),
+                config: padConfigFromRow(table, cols)   // #4789: настройка планшета
             };
         }
         return null;
@@ -193,6 +307,19 @@
         catch (e) { return false; }
     }
 
+    // #4789: код устройства, который диспетчер вписывает в первую колонку «Планшета»
+    // руками. Токена ещё нет — генерируем и запоминаем: показанный код должен быть тем
+    // самым, с которым устройство потом придёт (иначе запись в таблице ни к чему не
+    // привяжется). Генератор недоступен (нет crypto) → пусто, и об этом скажет экран.
+    function ensureToken(storage, cryptoObj) {
+        var token = readToken(storage);
+        if (isToken(token)) return token;
+        try { token = makeToken(cryptoObj); }
+        catch (e) { return ''; }
+        writeToken(storage, token);
+        return token;
+    }
+
     // ── DOM ──
 
     function el(tag, attrs, children) {
@@ -225,6 +352,15 @@
             el('h2', { class: 'atex-pad-title', text: title }),
             el('p', { class: 'atex-pad-text', text: text })
         ]);
+        // #4789: код устройства виден всегда — по нему планшет заводят в таблице руками
+        // (первая колонка «Планшета»), даже если у вошедшего нет прав на запись.
+        var padToken = ensureToken(root.localStorage, root.crypto);
+        if (padToken) {
+            card.appendChild(el('div', { class: 'atex-pad-label', text: 'Код этого планшета (первая колонка таблицы «' + TABLE_NAME + '»)' }));
+            card.appendChild(el('div', { class: 'atex-pad-token', text: padToken }));
+        } else {
+            card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
+        }
         if (canRegister(ctx.table, ctx)) {
             var input = el('input', {
                 class: 'atex-pad-input', id: 'atex-pad-name', type: 'text',
@@ -254,7 +390,9 @@
         button.disabled = true;
         button.textContent = 'Регистрируем…';
         var token;
-        try { token = makeToken(root.crypto); }
+        // #4789: код устройства мог быть уже показан на этом экране (и записан диспетчером
+        // руками) — берём его, а не новый, иначе показанный код перестанет быть верным.
+        try { token = ensureToken(root.localStorage, root.crypto) || makeToken(root.crypto); }
         catch (e) {
             error.textContent = e.message;
             button.disabled = false;
@@ -274,6 +412,50 @@
             });
     }
 
+    // #4789: пульт сообщает планшету выбранный объект — станок, втулкорез или
+    // упаковочное место. Пишем ОДНОЙ записью: колонку объекта, ПУСТЫЕ остальные две
+    // (планшет стоит у одного рабочего места, и выбор должен остаться однозначным) —
+    // и следом, отдельной записью, колонку «Рабочее место». Отдельной потому, что тип
+    // этой колонки в базе может оказаться ссылкой: её отказ не должен отменять главное.
+    // Прав на запись нет (оператор) — молча не пишем: выбор всё равно живёт в
+    // localStorage пульта, а настраивает планшет диспетчер.
+    function makeSetObject(ctx, pad) {
+        return function(kind, obj) {
+            var action = WORKSPACE_ACTION[kind];
+            if (!action) return Promise.resolve({ saved: false, reason: 'unknown-kind' });
+            if (!pad || !pad.id) return Promise.resolve({ saved: false, reason: 'no-pad' });
+            if (!canRegister(ctx.table, ctx)) return Promise.resolve({ saved: false, reason: 'no-write' });
+            var objReq = configReqId(ctx.table, kind);
+            var value = trimText(obj && (obj.id || obj.label));
+            if (!objReq) return Promise.resolve({ saved: false, reason: 'no-column' });
+            if (!value) return Promise.resolve({ saved: false, reason: 'no-object' });
+            var params = {};
+            params['t' + objReq] = value;
+            Object.keys(WORKSPACE_ACTION).forEach(function(other) {
+                if (other === kind) return;
+                var rid = configReqId(ctx.table, other);
+                if (rid) params['t' + rid] = '';   // пустое значение стирает реквизит (#4366)
+            });
+            return post(ctx, '_m_set/' + pad.id + '?JSON', params, true).then(function() {
+                pad.config[kind] = { id: trimText(obj && obj.id), label: trimText(obj && obj.label) };
+                Object.keys(WORKSPACE_ACTION).forEach(function(other) {
+                    if (other !== kind) pad.config[other] = null;
+                });
+                var wsReq = configReqId(ctx.table, 'workspace');
+                if (!wsReq) return { saved: true, reason: '' };
+                var wsParams = {};
+                wsParams['t' + wsReq] = action;
+                return post(ctx, '_m_set/' + pad.id + '?JSON', wsParams)
+                    .then(function() { pad.config.workspace = action; return { saved: true, reason: '' }; })
+                    .catch(function(err) {
+                        // Объект записан — этого хватает, чтобы планшет открылся куда надо.
+                        if (root.console) root.console.warn('[pad] «' + CONFIG_REQS.workspace + '» не записано:', err && err.message);
+                        return { saved: true, reason: 'workspace-not-written' };
+                    });
+            });
+        };
+    }
+
     function url(ctx, path) {
         return '/' + encodeURIComponent(ctx.db) + '/' + path;
     }
@@ -291,11 +473,15 @@
         });
     }
 
-    function post(ctx, path, params) {
+    // keepEmpty — пустое значение уходит на сервер и СТИРАЕТ реквизит (#4366); без
+    // флага пустые поля просто не отправляются (регистрация нового планшета).
+    function post(ctx, path, params, keepEmpty) {
         var body = new root.URLSearchParams();
         body.set('_xsrf', ctx.xsrf);
         Object.keys(params || {}).forEach(function(k) {
-            if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
+            if (params[k] === undefined || params[k] === null) return;
+            if (params[k] === '' && !keepEmpty) return;
+            body.set(k, params[k]);
         });
         return root.fetch(url(ctx, path), {
             method: 'POST',
@@ -316,13 +502,16 @@
 
     // Имя планшета — в шапку рабочего места. #4783: пульт слиттера дописывает к нему дату
     // и станок, поэтому опознанный планшет кладётся и в `window.atexPad` — из шапки его уже
-    // не вычитать, когда пульт перерисует её своей подписью.
-    function showPadName(pad) {
-        var name = trimText(pad && pad.name);
-        root.atexPad = pad || null;
-        if (!name) return;
+    // не вычитать, когда пульт перерисует её своей подписью. #4789: там же настройка
+    // планшета (какое рабочее место и какой объект) и запись выбора обратно в таблицу.
+    function publishPad(ctx, pad) {
+        if (!pad) { root.atexPad = null; return; }
+        pad.canWrite = canRegister(ctx.table, ctx);
+        pad.workspace = padWorkspace(pad);
+        pad.setObject = makeSetObject(ctx, pad);
+        root.atexPad = pad;
         var slot = root.document.querySelector('.navbar-workspace');
-        if (slot) slot.textContent = name;
+        if (slot && pad.name) slot.textContent = pad.name;
     }
 
     // Скрипт рабочего места грузим только после успешной проверки.
@@ -358,7 +547,7 @@
                 var token = readToken(root.localStorage);
                 if (!isToken(token)) return null;
                 return getJson(ctx, buildLookupPath(ctx.table.id, token)).then(function(rows) {
-                    return padFromRows(rows, token, nameColIndex(ctx.table));
+                    return padFromRows(rows, token, nameColIndex(ctx.table), ctx.table);
                 });
             })
             .then(function(pad) {
@@ -369,7 +558,7 @@
                             : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.');
                     return;
                 }
-                showPadName(pad);
+                publishPad(ctx, pad);
                 loadApp(appSrc);
             })
             .catch(function(err) {
@@ -383,6 +572,15 @@
         NAME_REQ: NAME_REQ,
         trimText: trimText,
         findTable: findTable,
+        CONFIG_REQS: CONFIG_REQS,          // #4789
+        WORKSPACE_ACTION: WORKSPACE_ACTION, // #4789
+        reqByName: reqByName,               // #4789
+        configReqId: configReqId,           // #4789
+        parseRefValue: parseRefValue,       // #4789
+        normalizeWorkspace: normalizeWorkspace, // #4789
+        padConfigFromRow: padConfigFromRow, // #4789
+        padWorkspace: padWorkspace,         // #4789
+        matchPadObject: matchPadObject,     // #4789
         canRegister: canRegister,
         isOwner: isOwner,
         nameReqId: nameReqId,
@@ -395,6 +593,7 @@
         apiError: apiError,
         readToken: readToken,
         writeToken: writeToken,
+        ensureToken: ensureToken,   // #4789: код устройства для записи руками
         boot: boot
     };
 });
