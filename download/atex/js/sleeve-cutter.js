@@ -725,7 +725,10 @@
         var head = [];
         if (task.orderNo) head.push('заказ ' + task.orderNo);
         if (task.sleeve) head.push(task.sleeve);
-        head.push('план ' + core.toNumber(task.planQty) + ' шт');
+        // Метровые заготовки — в той же строке, что и «что режем»: их считают со склада
+        // ДО начала работы. Плановое количество втулок стои́т бейджем справа («К-во»).
+        var sticks = core.taskSticks(task);
+        if (sticks != null) head.push('заготовок: ' + sticks);
 
         var sub = [];
         if (startTime) sub.push('старт ' + startTime);
@@ -750,27 +753,27 @@
             actions.appendChild(skipBtn);
         }
         card.appendChild(actions);
-        // #4786 п.2/п.3: у ЖИВОГО задания бейджа статуса больше нет — статус и так виден
-        // по кнопкам «Готово»/«Пропустить». Его место занимает то, чего на пульте не
-        // хватало: сколько метровых палок брать под это задание (втулки без галки
-        // «Готовые» режут из палок). Закрытое задание кнопок не имеет — там остаётся
-        // бейдж «Готово»/«Пропущена», иначе непонятно, чем оно кончилось.
+        // #4786 п.2/п.3: у ЖИВОГО задания бейджа статуса больше нет — состояние и так видно
+        // по кнопкам «Готово»/«Пропустить». Справа стои́т ПЛАНОВОЕ количество втулок
+        // («К-во»), а у закрытого задания перед ним — бейдж «Готово»/«Пропущена»: кнопок
+        // там нет, и иначе непонятно, чем оно кончилось.
+        var badges = el('div', { class: 'atex-sc-card-badges' });
         if (terminal) {
-            card.appendChild(el('span', {
+            badges.appendChild(el('span', {
                 class: 'atex-sc-badge' + (core.isDone(task.status) ? ' atex-sc-badge-done' : ''),
                 text: task.status
             }));
-        } else {
-            var sticks = core.taskSticks(task);
-            if (sticks != null) {
-                card.appendChild(el('span', {
-                    class: 'atex-sc-badge atex-sc-badge-sticks',
-                    title: 'Метровых заготовок (палок) под это задание: план ' + core.toNumber(task.planQty)
-                        + ' шт × ширина ' + core.toNumber(task.widthMm) + ' мм × 1.1 / 1000 → ' + sticks,
-                    text: 'К-во: ' + sticks
-                }));
-            }
         }
+        var plan = core.toNumber(task.planQty);
+        if (plan > 0) {
+            badges.appendChild(el('span', {
+                class: 'atex-sc-badge atex-sc-badge-qty',
+                title: 'Запланировано втулок: ' + plan + ' шт'
+                    + (sticks != null ? ' (метровых заготовок под них: ' + sticks + ')' : ''),
+                text: 'К-во: ' + plan
+            }));
+        }
+        if (badges.childNodes.length) card.appendChild(badges);
         return card;
     };
 

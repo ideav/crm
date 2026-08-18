@@ -397,31 +397,39 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
         '#4786-1: в главной строке карточки — номер заказа');
     assertEqual(!!info && info.textContent.indexOf('Втулка картонная 1" длина 1 метр') >= 0, true,
         '#4786-1: и название втулки');
-    assertEqual(!!info && /план 900 шт/.test(info.textContent), true, '#4786-1: и план');
+    // Метровые заготовки — в той же строке (место прежнего «план N шт»).
+    assertEqual(!!info && /заготовок: 60/.test(info.textContent), true,
+        '#4786-3: и «заготовок: 60» (900 шт × 60 мм × 1.1 / 1000)');
+    assertEqual(!!info && /план 900 шт/.test(info.textContent), false,
+        '#4786-3: прежнего «план 900 шт» в строке нет — план ушёл в бейдж «К-во»');
 
     // п.2: бейджа «В работе» у живого задания больше нет.
     assertEqual(card.querySelectorAll('.atex-sc-badge-wip').length, 0,
         '#4786-2: бейдж .atex-sc-badge-wip убран — статус виден по кнопкам');
 
-    // п.3: вместо него — метровые палки.
-    var sticks = card.querySelector('.atex-sc-badge-sticks');
-    assertEqual(!!sticks && sticks.textContent, 'К-во: 60',
-        '#4786-3: на месте бейджа — «К-во: 60» (900 шт × 60 мм × 1.1 / 1000)');
-    assertEqual(!!sticks && /900/.test(sticks.attributes.title || ''), true,
-        '#4786-3: в подсказке — из чего число посчитано');
+    // Справа — ПЛАНОВОЕ количество втулок.
+    var qty = card.querySelector('.atex-sc-badge-qty');
+    assertEqual(!!qty && qty.textContent, 'К-во: 900',
+        '#4786-3: справа «К-во: 900» — запланированное количество втулок');
+    assertEqual(!!qty && /заготовок под них: 60/.test(qty.attributes.title || ''), true,
+        '#4786-3: в подсказке — сколько под них заготовок');
 
-    // Готовая втулка: палок нет, лишнего бейджа тоже.
+    // Готовая втулка: заготовок нет, плановое количество остаётся.
     var readyCard = inst.renderTaskRow(rowTask({ sleeve_ready: 'X' }));
-    assertEqual(readyCard.querySelectorAll('.atex-sc-badge').length, 0,
-        '#4786-3: у готовой втулки правая колонка карточки пуста');
+    assertEqual(/заготовок/.test(readyCard.querySelector('.atex-sc-card-info').textContent), false,
+        '#4786-3: у готовой втулки заготовок в строке нет — резать нечего');
+    assertEqual(readyCard.querySelector('.atex-sc-badge-qty').textContent, 'К-во: 900',
+        '#4786-3: а плановое количество у неё на месте');
 
-    // Закрытое задание: бейдж статуса остаётся — иначе непонятно, чем оно кончилось.
+    // Закрытое задание: бейдж статуса ПЕРЕД «К-во» (порядок — решение заказчика).
+    var skipCard = inst.renderTaskRow(rowTask({ finished: '1784620000' }));
+    assertEqual(skipCard.querySelector('.atex-sc-card-badges').childNodes.map(function(n) { return n.textContent; }),
+        ['Пропущена', 'К-во: 900'],
+        '#4786: у пропущенного задания бейдж статуса идёт ДО «К-во»');
     var doneCard = inst.renderTaskRow(rowTask({ finished: '1784620000', fact: '900' }));
-    var doneBadge = doneCard.querySelector('.atex-sc-badge');
-    assertEqual(!!doneBadge && doneBadge.textContent, 'Готово',
-        '#4786-2: у закрытого задания бейдж статуса на месте');
-    assertEqual(doneCard.querySelectorAll('.atex-sc-badge-sticks').length, 0,
-        '#4786-3: и палки у него не считаются — резать уже нечего');
+    assertEqual(doneCard.querySelector('.atex-sc-card-badges').childNodes.map(function(n) { return n.textContent; }),
+        ['Готово', 'К-во: 900'],
+        '#4786: у выполненного — тот же порядок');
 
     global.document = savedDoc; global.window = savedWin;
 })();
@@ -438,8 +446,10 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     var css = fs.readFileSync(cssPath, 'utf8');
     // Снятый бейдж `.atex-sc-badge-wip` здесь НЕ ищем: что его больше нет в разметке,
     // сказано поведением — DOM-тест выше рисует живое задание и не находит такого узла.
-    assertEqual(/\.atex-sc-badge-sticks\s*\{/.test(css), true,
+    assertEqual(/\.atex-sc-badge-qty\s*\{/.test(css), true,
         '#4786: у бейджа количества есть правило в sleeve-cutter.css');
+    assertEqual(/\.atex-sc-card-badges\s*\{/.test(css), true,
+        '#4786: и у пары бейджей (статус + К-во) в правой колонке');
     assertEqual(/\.atex-sc-card-sub\s*\{/.test(css), true, '#4786: и у служебной строки карточки');
     assertEqual(/\.atex-sc-note\s*\{/.test(css), true, '#4786: и у плашки о недостающих колонках');
 })();
