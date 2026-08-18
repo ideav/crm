@@ -765,9 +765,9 @@
             if (sticks != null) {
                 card.appendChild(el('span', {
                     class: 'atex-sc-badge atex-sc-badge-sticks',
-                    title: 'Метровых заготовок под это задание: план ' + core.toNumber(task.planQty)
+                    title: 'Метровых заготовок (палок) под это задание: план ' + core.toNumber(task.planQty)
                         + ' шт × ширина ' + core.toNumber(task.widthMm) + ' мм × 1.1 / 1000 → ' + sticks,
-                    text: 'палок: ' + sticks
+                    text: 'К-во: ' + sticks
                 }));
             }
         }

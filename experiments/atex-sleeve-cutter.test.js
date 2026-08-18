@@ -405,8 +405,8 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
 
     // п.3: вместо него — метровые палки.
     var sticks = card.querySelector('.atex-sc-badge-sticks');
-    assertEqual(!!sticks && sticks.textContent, 'палок: 60',
-        '#4786-3: на месте бейджа — «палок: 60» (900 шт × 60 мм × 1.1 / 1000)');
+    assertEqual(!!sticks && sticks.textContent, 'К-во: 60',
+        '#4786-3: на месте бейджа — «К-во: 60» (900 шт × 60 мм × 1.1 / 1000)');
     assertEqual(!!sticks && /900/.test(sticks.attributes.title || ''), true,
         '#4786-3: в подсказке — из чего число посчитано');
 
@@ -426,21 +426,22 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     global.document = savedDoc; global.window = savedWin;
 })();
 
-// ── #4786: СТОРОЖ ИСХОДНИКОВ — у новых классов есть стили, у снятого бейджа их нет ───
-// Пометка без вида — невидимая пометка (грабли #4409): бейдж «палок» без правила в CSS
-// сольётся с фоном, а забытое правило .atex-sc-badge-wip вернёт снятый бейдж, если
-// кто-то опять повесит этот класс.
+// ── #4786: СТОРОЖ СТИЛЕЙ — у новых классов карточки есть правила ─────────────────────
+// TEXT-ASSERT-OK (#4751): три проверки ниже утверждают о ТЕКСТЕ CSS-файла, и заменить их
+// поведением в Node нечем — правило стиля исполняет браузер, которого в гейте нет.
+// Ловят они реальную поломку: класс, переименованный ТОЛЬКО в css, оставляет бейдж без
+// вида, и оператор теряет сигнал молча (грабли #4409). Обратный случай — переименование
+// только в js — ловится DOM-тестом выше, он ищет узел по тому же имени класса.
 (function() {
     var fs = require('fs'), path = require('path');
     var cssPath = path.join(__dirname, '..', 'download', 'atex', 'css', 'sleeve-cutter.css');
     var css = fs.readFileSync(cssPath, 'utf8');
-    var js = fs.readFileSync(path.join(__dirname, '..', 'download', 'atex', 'js', 'sleeve-cutter.js'), 'utf8');
+    // Снятый бейдж `.atex-sc-badge-wip` здесь НЕ ищем: что его больше нет в разметке,
+    // сказано поведением — DOM-тест выше рисует живое задание и не находит такого узла.
     assertEqual(/\.atex-sc-badge-sticks\s*\{/.test(css), true,
-        '#4786: у бейджа «палок» есть правило в sleeve-cutter.css');
+        '#4786: у бейджа количества есть правило в sleeve-cutter.css');
     assertEqual(/\.atex-sc-card-sub\s*\{/.test(css), true, '#4786: и у служебной строки карточки');
     assertEqual(/\.atex-sc-note\s*\{/.test(css), true, '#4786: и у плашки о недостающих колонках');
-    assertEqual(css.indexOf('.atex-sc-badge-wip {') === -1 && js.indexOf('atex-sc-badge-wip') === -1, true,
-        '#4786-2: класс .atex-sc-badge-wip убран и из разметки, и из стилей');
 })();
 
 console.log('\n' + passed + ' assertions passed');
