@@ -129,13 +129,24 @@
 
 .atex-co-rows-head { margin: 6px 0 6px; }
 .atex-co-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
-/* #3749: одна ширина — строка из двух полей (ширина + количество), без кнопки удаления. */
+/* #4779: строка ширины — ширина + количество + кнопка удаления (ширин снова несколько). */
 .atex-co-row {
     display: grid;
-    grid-template-columns: 1fr 90px;
+    grid-template-columns: 1fr 90px 32px;
     gap: 8px;
     align-items: center;
 }
+.atex-co-row-del {
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    background: var(--co-surface);
+    color: var(--co-muted);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 6px 0;
+}
+.atex-co-row-del:hover { color: var(--co-warn); border-color: var(--co-warn); }
 
 .atex-co-btn {
     border: 1px solid var(--co-border);
@@ -162,6 +173,31 @@
 .atex-co-btn:disabled { opacity: .45; cursor: not-allowed; }
 .atex-co-btn:disabled:hover { filter: none; background: var(--co-bg); }
 .atex-co-btn-primary:disabled:hover { background: var(--co-accent); }
+
+/* #4779: подходящие точки запаса («Максимальный запас») — клик кладёт ширину в желаемые */
+.atex-co-stock { margin-top: 16px; border-top: 1px solid var(--co-border-soft); padding-top: 12px; }
+.atex-co-stock-hint { font-size: 12px; color: var(--co-muted); margin-top: 6px; }
+.atex-co-stock-point {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    border: 1px solid var(--co-border);
+    border-radius: 6px;
+    background: var(--co-bg);
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.atex-co-stock-point:hover { border-color: var(--co-accent); background: var(--co-surface); }
+.atex-co-stock-width { font-weight: 600; white-space: nowrap; }
+.atex-co-stock-nom { font-size: 12px; color: var(--co-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atex-co-stock-limit { font-size: 12px; color: var(--co-muted); white-space: nowrap; text-align: right; }
 
 /* Подходящие партии сырья (внизу формы) */
 .atex-co-batches { margin-top: 16px; border-top: 1px solid var(--co-border-soft); padding-top: 12px; }

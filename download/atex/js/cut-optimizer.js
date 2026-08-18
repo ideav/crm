@@ -23,6 +23,13 @@
 // заказа на каждую ширину — это единственная запись данных. Номер нового заказа
 // подсказывается запросом `report/nextOrder`.
 //
+// #4779: калькулятор снова считает НЕСКОЛЬКО ширин за раз (строки желаемых
+// рулонов добавляются и удаляются), а после длины рулона задаются Лидер, Диаметр
+// втулки и Тип намотки — по ним подбираются «точки запаса»: строки справочника
+// «Максимальный запас» (table 67113, docs/atex_data_schema.md §6.6), то есть
+// номенклатуры, которые целесообразно нарезать впрок. Клик по точке кладёт её
+// ширину в желаемые рулоны — так краем джамбо добирают запас вместо отхода.
+//
 // Чистое ядро расчёта вынесено в объект `core` и экспортируется через
 // module.exports для модульных тестов (experiments/atex-cut-optimizer.test.js).
 
@@ -54,12 +61,24 @@
         position: ['Заказанное количество', 'Позиция заказа'],
         sleeve: 'Диаметр втулки',
         client: 'Клиент',
-        leader: 'Лидер'   // #3592: справочник «Лидер» (table/1132) — список для поля формы «В заказ»
+        leader: 'Лидер',  // #3592: справочник «Лидер» (table/1132) — список для поля формы «В заказ»
+        maxStock: 'Максимальный запас'  // #4779: точки запаса (table/67113) — что целесообразно нарезать впрок
     };
     var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм' };
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
     // «Ширина в заказе» — номинал, «Код» — условие применения.
     var ACTUAL_WIDTH_REQ = { order: 'Ширина в заказе', code: 'Код' };
+    // #4779: реквизиты «Максимального запаса» (table 67113, docs/atex_data_schema.md §6.6).
+    // Главное значение записи — максимально допустимый запас (рулонов); реквизиты
+    // задают номенклатуру ГП. Те же имена читает production-planning.js (MAX_STOCK_REQ).
+    var MAX_STOCK_REQ = {
+        material: 'Вид сырья',
+        width: ['Ширина, мм', 'Ширина'],
+        length: ['Длина, м', 'Длина'],
+        winding: 'Тип намотки',
+        sleeve: 'Диаметр втулки',
+        leader: 'Лидер'
+    };
     // Реквизиты «Заказа» и «Заказанного количества» — резолвятся по любому из имён.
     var ORDER_REQ = {
         client: ['Клиент'], manager: ['Менеджер', 'Пользователь'],
@@ -79,7 +98,8 @@
     // свою). Список показывается целиком, без фильтрации по введённому значению,
     // и включает значение по умолчанию (#3482).
     var DEFAULT_LENGTH = 450;
-    var LENGTH_PRESETS = [300, 450, 600, 700, 900, 1000];
+    // #4779: заказчик добавил 360, 74 и 110 м; список держим по возрастанию.
+    var LENGTH_PRESETS = [74, 110, 300, 360, 450, 600, 700, 900, 1000];
     // #3573: допуск на отход по умолчанию (мм). Берётся из Вида сырья («Допуск, мм»),
     // а если у материала он не задан — действует это значение. По нему красится отход.
     var DEFAULT_TOLERANCE = 21;
@@ -469,6 +489,74 @@
         };
     }
 
+    // ── #4779: точки запаса («Максимальный запас», table 67113) ──
+    // Строка справочника — номенклатура ГП, которую целесообразно нарезать впрок,
+    // и её максимально допустимый запас. Планирование сводит излишек резки с этой
+    // таблицей по ключу «сырьё + ширина + длина + намотка», а «Диаметр втулки» и
+    // «Лидер» доуточняют совпадение, только если заданы у обеих сторон (#3391,
+    // docs/atex_data_schema.md §6.6). Здесь тот же ключ читается наоборот: ширина
+    // и есть ответ («какие ширины имеет смысл добрать»), поэтому она в сверку не
+    // идёт, а остальные параметры приходят из формы.
+
+    // «IN»/«OUT» (регистр и пробелы неважны); прочее — пусто, как в планировании.
+    function normWinding(value) {
+        var s = String(value == null ? '' : value).trim().toUpperCase();
+        return (s === 'IN' || s === 'OUT') ? s : '';
+    }
+
+    function normText(value) {
+        return String(value == null ? '' : value).trim().toLowerCase();
+    }
+
+    // Сверка ссылочного параметра (сырьё/втулка/лидер). Обе стороны — { id, label }.
+    // Не выбрано пользователем → не фильтруем; не задано в строке справочника →
+    // строка шире («любое») и подходит. Сверяем по id, а текстовое поле — по подписи.
+    function stockRefMatches(point, chosen) {
+        var pId = String((point && point.id) || '').trim(), pLabel = normText(point && point.label);
+        var cId = String((chosen && chosen.id) || '').trim(), cLabel = normText(chosen && chosen.label);
+        if (!cId && !cLabel) return true;
+        if (!pId && !pLabel) return true;
+        if (pId && cId) return pId === cId;
+        return pLabel === cLabel;
+    }
+
+    // Сверка числового параметра (длина): нуль/пусто с любой стороны → не фильтруем.
+    function stockNumberMatches(pointValue, chosenValue) {
+        var a = round3(toNumber(pointValue)), b = round3(toNumber(chosenValue));
+        if (!(a > 0) || !(b > 0)) return true;
+        return a === b;
+    }
+
+    // Сверка намотки: нераспознанная/пустая с любой стороны → не фильтруем.
+    function stockWindingMatches(pointValue, chosenValue) {
+        var a = normWinding(pointValue), b = normWinding(chosenValue);
+        if (!a || !b) return true;
+        return a === b;
+    }
+
+    // Совпадает ли точка запаса с выбранными в форме параметрами.
+    // ctx: { material: {id,label}, length, winding, sleeve: {id,label}, leader: {id,label} }.
+    function stockPointMatches(point, ctx) {
+        if (!point || !(toNumber(point.width) > 0)) return false;
+        ctx = ctx || {};
+        return stockRefMatches(point.material, ctx.material) &&
+            stockNumberMatches(point.length, ctx.length) &&
+            stockWindingMatches(point.winding, ctx.winding) &&
+            stockRefMatches(point.sleeve, ctx.sleeve) &&
+            stockRefMatches(point.leader, ctx.leader);
+    }
+
+    // Подходящие точки запаса по возрастанию ширины (при равной — по длине,
+    // затем по убыванию допустимого запаса: сверху то, чего можно нарезать больше).
+    function matchStockPoints(points, ctx) {
+        return (points || []).filter(function(p) { return stockPointMatches(p, ctx); })
+            .sort(function(a, b) {
+                return (toNumber(a.width) - toNumber(b.width)) ||
+                    (toNumber(a.length) - toNumber(b.length)) ||
+                    (toNumber(b.limit) - toNumber(a.limit));
+            });
+    }
+
     var core = {
         toNumber: toNumber,
         round3: round3,
@@ -487,7 +575,11 @@
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
         planningMinutes: planningMinutes,
-        planningTimeUnits: planningTimeUnits
+        planningTimeUnits: planningTimeUnits,
+        normWinding: normWinding,                 // #4779
+        stockPointMatches: stockPointMatches,     // #4779
+        matchStockPoints: matchStockPoints,       // #4779
+        lengthPresets: LENGTH_PRESETS             // #4779: стандартные длины рулона
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -526,6 +618,24 @@
         return idx >= 0 ? r[idx] : undefined;
     }
 
+    // #4779: то же по ЛЮБОМУ из имён (схемы баз расходятся: «Длина, м» / «Длина»).
+    function cellValueByNames(rec, meta, names) {
+        var list = Array.isArray(names) ? names : [names];
+        for (var i = 0; i < list.length; i++) {
+            var v = cellValue(rec, meta, list[i]);
+            if (v !== undefined) return v;
+        }
+        return undefined;
+    }
+
+    // #4779: ссылочное значение JSON_OBJ («id:Подпись») → { id, label }. Текстовое
+    // поле (лидер в части баз — строка) остаётся подписью без id.
+    function parseRef(raw) {
+        var s = String(raw == null ? '' : raw);
+        var m = s.match(/^(\d+):([\s\S]*)$/);
+        return m ? { id: m[1], label: m[2] } : { id: '', label: s };
+    }
+
     // Номер партии сырья (batch_no) = главное значение «Партии сырья», а это поле
     // DATETIME — приходит unix-штампом в СЕКУНДАХ (дата+время прихода), а не номером.
     // Форматируем «ДД.ММ.ГГГГ ЧЧ:ММ» (через AtexRefSearch.formatDateTime); не-штамп
@@ -559,7 +669,7 @@
         this.root = root;
         this.db = (typeof window !== 'undefined' && window.db) || root.getAttribute('data-db') || '';
         this.xsrf = root.getAttribute('data-xsrf') || (typeof window !== 'undefined' && window.xsrf) || '';
-        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null, opTimes: null };
+        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null, opTimes: null, maxStock: null };
         this.opTimes = {};        // #3744: нормы метража WIND_* из «Время операции, мин»
         this.materials = [];      // [{ id, label, width, length }]
         this.sleeves = [];        // [{ id, label }]
@@ -569,7 +679,13 @@
         this.actualWidthIndex = {};
         this.materialId = '';
         this.batches = [];        // [{ id, no, materialId, remainderM2, active, … }]
-        this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние)
+        this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние, #4779 — их снова несколько)
+        // #4779: параметры номенклатуры, по которым подбираются точки запаса.
+        this.leaderId = '';
+        this.sleeveId = '';
+        this.windingValue = '';
+        this.stockPoints = [];    // [{ id, width, length, winding, material, sleeve, leader, limit }]
+        this.stockLoadFailed = false;  // справочник не прочитался (нет доступа/сети) — говорим прямо
         this.lengthValue = String(DEFAULT_LENGTH); // длина рулона по умолчанию (#3474-fix)
         this.tolValue = String(DEFAULT_TOLERANCE); // допуск на отход по умолчанию 21 мм (#3573)
         this.plan = null;
@@ -634,6 +750,7 @@
             self.meta.client = byName(TABLE.client);
             self.meta.leader = byName(TABLE.leader);  // #3592
             self.meta.opTimes = byName(OP_TIMES_TABLE);  // #3744: нормы метража (необязательна)
+            self.meta.maxStock = byName(TABLE.maxStock);  // #4779: точки запаса (необязательна)
             if (!self.meta.material) throw new Error('В метаданных не найдена таблица «' + TABLE.material + '»');
         });
     };
@@ -672,6 +789,36 @@
             });
             self.actualWidthIndex = buildActualWidthIndex(list);
         }).catch(function() { self.actualWidthIndex = {}; });
+    };
+
+    // #4779: справочник «Максимальный запас» (67113) → точки запаса. Главное
+    // значение записи — максимально допустимый запас (рулонов). Нет таблицы или
+    // доступа → пустой список (панель честно скажет, что подбирать не из чего).
+    AtexCutOptimizer.prototype.loadStockPoints = function() {
+        var self = this;
+        this.stockPoints = [];
+        this.stockLoadFailed = false;
+        var meta = this.meta.maxStock;
+        if (!meta) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            self.stockPoints = (rows || []).map(function(rec) {
+                var r = (rec && rec.r) || [];
+                return {
+                    id: String(rec.i),
+                    limit: toNumber(r[0]),
+                    material: parseRef(cellValueByNames(rec, meta, MAX_STOCK_REQ.material)),
+                    width: toNumber(cellValueByNames(rec, meta, MAX_STOCK_REQ.width)),
+                    length: toNumber(cellValueByNames(rec, meta, MAX_STOCK_REQ.length)),
+                    winding: normWinding(cellValueByNames(rec, meta, MAX_STOCK_REQ.winding)),
+                    sleeve: parseRef(cellValueByNames(rec, meta, MAX_STOCK_REQ.sleeve)),
+                    leader: parseRef(cellValueByNames(rec, meta, MAX_STOCK_REQ.leader))
+                };
+            }).filter(function(p) { return p.width > 0; });
+        }).catch(function(err) {
+            self.stockPoints = [];
+            self.stockLoadFailed = true;
+            console.warn('[co] точки запаса: не удалось прочитать «Максимальный запас»:', err && err.message);
+        });
     };
 
     // Простой справочник [{id,label}] по таблице (для втулок/клиентов/заказов).
@@ -762,7 +909,8 @@
                         self.orders = l.map(function(o) { return { id: o.id, number: o.label }; });
                     }),
                     self.loadMaterialBatches(),
-                    self.loadOperationTimes()   // #3744: нормы метража для оценки времени резки
+                    self.loadOperationTimes(),  // #3744: нормы метража для оценки времени резки
+                    self.loadStockPoints()      // #4779: «Максимальный запас» — точки запаса
                 ]);
             })
             .then(function() { self.renderForm(); })
@@ -815,6 +963,37 @@
         ]));
         form.appendChild(dims);
 
+        // #4779: после длины — параметры номенклатуры (Лидер, Диаметр втулки, Тип
+        // намотки). На геометрию раскроя они не влияют: по ним подбираются точки
+        // запаса («Максимальный запас») — ширины, которые целесообразно нарезать впрок.
+        var leaderSel = this.refSelect('atex-co-nom-lead', this.leaders, 'Лидер', {
+            value: this.leaderId,
+            onChange: function(id) { self.leaderId = String(id || ''); self.renderStockPoints(); }
+        });
+        var sleeveSel = this.refSelect('atex-co-nom-sleeve', this.sleeves, 'Диаметр втулки', {
+            value: this.sleeveId,
+            onChange: function(id) { self.sleeveId = String(id || ''); self.renderStockPoints(); }
+        });
+        var windingSel = el('select', { class: 'atex-co-input' }, [
+            el('option', { value: '', text: '— не указано —' }),
+            el('option', { value: 'IN', text: 'IN (внутрь)' }),
+            el('option', { value: 'OUT', text: 'OUT (наружу)' })
+        ]);
+        windingSel.value = this.windingValue || '';
+        windingSel.addEventListener('change', function() {
+            self.windingValue = windingSel.value;
+            self.renderStockPoints();
+        });
+        form.appendChild(el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Лидер' }), leaderSel.node
+        ]));
+        form.appendChild(el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Диаметр втулки' }), sleeveSel.node
+        ]));
+        form.appendChild(el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Тип намотки' }), windingSel
+        ]));
+
         // #3597: «Допуск, мм» — только вывод значения (не редактируется). Берётся из
         // Вида сырья («Допуск, мм»); если не задан — 21 мм (#3573). По нему красится отход.
         this.tolDisplay = el('div', { class: 'atex-co-readonly', text: this.tolValue || String(DEFAULT_TOLERANCE) });
@@ -830,7 +1009,16 @@
         form.appendChild(this.rowsEl);
         this.renderRows();
 
-        // #3749: оптимизатор работает с ОДНОЙ шириной — добавление/удаление ширин убрано.
+        // #4779: ширин снова может быть несколько — кнопка добавления вернулась
+        // (снято ограничение одной ширины из #3749).
+        var addBtn = el('button', { class: 'atex-co-btn atex-co-btn-secondary', type: 'button', text: '+ Добавить ширину' });
+        addBtn.addEventListener('click', function() {
+            self.rows.push({ width: '', qty: '1' });
+            self.renderRows();
+            self.maybeRecalc();
+        });
+        form.appendChild(addBtn);
+
         var calcBtn = el('button', { class: 'atex-co-btn atex-co-btn-primary', type: 'button', text: 'Рассчитать' });
         calcBtn.addEventListener('click', function() { self.calculate(); });
         form.appendChild(calcBtn);
@@ -839,6 +1027,11 @@
         form.addEventListener('keydown', function(e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); self.calculate(); }
         });
+
+        // #4779: подходящие точки запаса (по выбранной номенклатуре).
+        this.stockEl = el('div', { class: 'atex-co-stock' });
+        form.appendChild(this.stockEl);
+        this.renderStockPoints();
 
         // Подходящие партии сырья (внизу формы).
         this.batchesEl = el('div', { class: 'atex-co-batches' });
@@ -888,21 +1081,122 @@
         }
     };
 
-    // #3749: одна ширина — единственная строка (ширина + количество), без кнопок
-    // добавления/удаления. this.rows всегда содержит ровно одну запись.
+    // #4779: строка на каждую желаемую ширину (ширина + количество + удаление);
+    // последнюю строку не удаляем — оставляем пустую, чтобы форму было чем заполнить.
     AtexCutOptimizer.prototype.renderRows = function() {
         var self = this;
         var box = this.rowsEl;
         box.innerHTML = '';
-        var row = this.rows[0] || (this.rows[0] = { width: '', qty: '1' });
-        var widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
-            placeholder: 'ширина, мм', value: row.width });
-        widthInput.addEventListener('input', function() { row.width = widthInput.value; self.maybeRecalc(); });
-        // Кол-во — целое, числовое, шаг 5 (#3478).
-        var qtyInput = el('input', { class: 'atex-co-input', type: 'number', inputmode: 'numeric',
-            min: '0', step: '5', placeholder: 'кол-во', value: row.qty });
-        qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; self.maybeRecalc(); });
-        box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput]));
+        if (!this.rows.length) this.rows.push({ width: '', qty: '1' });
+        this.rows.forEach(function(row, idx) {
+            var widthInput = el('input', { class: 'atex-co-input', type: 'text', inputmode: 'decimal',
+                placeholder: 'ширина, мм', value: row.width });
+            widthInput.addEventListener('input', function() { row.width = widthInput.value; self.maybeRecalc(); });
+            // Кол-во — целое, числовое, шаг 5 (#3478).
+            var qtyInput = el('input', { class: 'atex-co-input', type: 'number', inputmode: 'numeric',
+                min: '0', step: '5', placeholder: 'кол-во', value: row.qty });
+            qtyInput.addEventListener('input', function() { row.qty = qtyInput.value; self.maybeRecalc(); });
+            var del = el('button', { class: 'atex-co-row-del', type: 'button', title: 'Удалить ширину', text: '×' });
+            del.addEventListener('click', function() {
+                self.rows.splice(idx, 1);
+                if (!self.rows.length) self.rows.push({ width: '', qty: '1' });
+                self.renderRows();
+                self.maybeRecalc();
+            });
+            box.appendChild(el('div', { class: 'atex-co-row' }, [widthInput, qtyInput, del]));
+        });
+    };
+
+    // #4779: подходящие точки запаса — строки «Максимального запаса», совпавшие с
+    // выбранными Видом сырья, длиной, Лидером, Диаметром втулки и Типом намотки.
+    // Это ширины, которые целесообразно нарезать впрок: клик по точке кладёт её в
+    // желаемые рулоны — краем джамбо добирается запас вместо отхода.
+    AtexCutOptimizer.prototype.renderStockPoints = function() {
+        var self = this;
+        var box = this.stockEl;
+        if (!box) return;
+        box.innerHTML = '';
+        box.appendChild(el('div', { class: 'atex-co-rows-head' }, [
+            el('span', { class: 'atex-co-label', text: 'Подходящие точки запаса' })
+        ]));
+        function hint(text) { box.appendChild(el('div', { class: 'atex-co-stock-hint', text: text })); }
+        if (!this.meta.maxStock) {
+            hint('Справочник «Максимальный запас» недоступен — подбирать точки запаса не из чего.');
+            return;
+        }
+        if (this.stockLoadFailed) {
+            hint('Не удалось прочитать справочник «Максимальный запас» — точки запаса не подобрать.');
+            return;
+        }
+        if (!this.stockPoints.length) {
+            hint('Справочник «Максимальный запас» пуст — нарезать впрок нечего.');
+            return;
+        }
+        if (!this.materialId) {
+            hint('Выберите вид сырья, чтобы увидеть точки запаса.');
+            return;
+        }
+        var mat = this.materialById(this.materialId);
+        var points = matchStockPoints(this.stockPoints, {
+            material: { id: this.materialId, label: mat ? mat.label : '' },
+            length: this.lengthInput ? this.lengthInput.value : this.lengthValue,
+            winding: this.windingValue,
+            sleeve: refChoice(this.sleeves, this.sleeveId),
+            leader: refChoice(this.leaders, this.leaderId)
+        });
+        if (!points.length) {
+            hint('Нет точек запаса под выбранные параметры (сырьё, длина, лидер, втулка, намотка).');
+            return;
+        }
+        points.forEach(function(p) {
+            var details = stockPointDetails(p);
+            // Подпись номенклатуры в узкой колонке обрезается — полностью её видно в title.
+            var row = el('button', { class: 'atex-co-stock-point', type: 'button',
+                title: 'Добавить ' + p.width + ' мм в желаемые рулоны · ' + details });
+            row.appendChild(el('span', { class: 'atex-co-stock-width', text: p.width + ' мм' }));
+            row.appendChild(el('span', { class: 'atex-co-stock-nom', text: details }));
+            row.appendChild(el('span', { class: 'atex-co-stock-limit',
+                text: p.limit > 0 ? ('до ' + round3(p.limit) + ' рул.') : '—' }));
+            row.addEventListener('click', function() { self.addWidthFromStock(p); });
+            box.appendChild(row);
+        });
+        hint('Клик по точке добавляет её ширину в желаемые рулоны (количество — максимальный запас).');
+
+        // Выбор пользователя как { id, label } — точка запаса может хранить и ссылку, и текст.
+        function refChoice(list, id) {
+            var wanted = String(id || '');
+            if (!wanted) return { id: '', label: '' };
+            var found = (list || []).filter(function(o) { return String(o.id) === wanted; })[0];
+            return { id: wanted, label: found ? found.label : '' };
+        }
+
+        // Подпись номенклатуры точки: длина · намотка · втулка · лидер (что задано).
+        function stockPointDetails(p) {
+            var parts = [];
+            if (p.length > 0) parts.push(round3(p.length) + ' м');
+            if (p.winding) parts.push(p.winding);
+            if (p.sleeve && p.sleeve.label) parts.push('втулка ' + p.sleeve.label);
+            if (p.leader && p.leader.label) parts.push('лидер ' + p.leader.label);
+            return parts.join(' · ') || 'любая номенклатура';
+        }
+    };
+
+    // #4779: положить ширину точки запаса в желаемые рулоны. Количество — её
+    // максимально допустимый запас; ширина уже в списке → не плодим строку-дубль.
+    AtexCutOptimizer.prototype.addWidthFromStock = function(point) {
+        var width = toNumber(point && point.width);
+        if (!(width > 0)) return;
+        var same = this.rows.filter(function(r) { return toNumber(r.width) === width; })[0];
+        if (same) {
+            this.notify('Ширина ' + width + ' мм уже в списке желаемых рулонов.');
+            return;
+        }
+        var qty = toNumber(point.limit) > 0 ? String(Math.round(toNumber(point.limit))) : '1';
+        var empty = this.rows.filter(function(r) { return String(r.width).trim() === ''; })[0];
+        if (empty) { empty.width = String(width); empty.qty = qty; }
+        else { this.rows.push({ width: String(width), qty: qty }); }
+        this.renderRows();
+        this.maybeRecalc();
     };
 
     // Комбобокс «Длина рулона»: текстовое поле (свой ввод) + кнопка-стрелка,
@@ -928,6 +1222,7 @@
                     input.value = String(v);
                     self.lengthValue = String(v);
                     closeList();
+                    self.renderStockPoints();   // #4779: длина входит в номенклатуру запаса
                     self.maybeRecalc();
                 });
                 listEl.appendChild(item);
@@ -941,7 +1236,12 @@
         input.addEventListener('focus', openList);
         // Ввод своей длины: список НЕ фильтруем — показываем целиком (только
         // подсвечиваем совпадение), значение пересчитывает раскладку.
-        input.addEventListener('input', function() { self.lengthValue = input.value; rebuild(); self.maybeRecalc(); });
+        input.addEventListener('input', function() {
+            self.lengthValue = input.value;
+            rebuild();
+            self.renderStockPoints();   // #4779: длина входит в номенклатуру запаса
+            self.maybeRecalc();
+        });
         input.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeList(); });
         document.addEventListener('mousedown', function(e) { if (!wrap.contains(e.target)) closeList(); });
 
@@ -962,6 +1262,7 @@
             if (this.tolDisplay) this.tolDisplay.textContent = matTol;  // #3597: только вывод
         }
         this.renderBatches();
+        this.renderStockPoints();   // #4779: точки запаса — по выбранному сырью
         this.maybeRecalc();
     };
 
@@ -1219,7 +1520,8 @@
         // Поля нового заказа (показываются, если номер не из списка).
         var clientSel = this.refSelect('atex-co-client', this.clients, 'Клиент (для нового заказа)');
         // #3592: «Лидер» — выбор из справочника «Лидер» (table/1132), а не свободный текст.
-        var leadSel = this.refSelect('atex-co-lead', this.leaders, 'Лидер');
+        // #4779: значения номенклатуры (лидер/втулка/намотка) подставляются из формы.
+        var leadSel = this.refSelect('atex-co-lead', this.leaders, 'Лидер', { value: this.leaderId });
         var newOrderBox = el('div', { class: 'atex-co-modal-neworder' }, [
             field('Клиент', clientSel.node),
             field('Лидер', leadSel.node)
@@ -1227,12 +1529,13 @@
         modal.appendChild(newOrderBox);
 
         // Поля позиций (нужны всегда — их нет в калькуляторе).
-        var sleeveSel = this.refSelect('atex-co-sleeve', this.sleeves, 'Диаметр втулки');
+        var sleeveSel = this.refSelect('atex-co-sleeve', this.sleeves, 'Диаметр втулки', { value: this.sleeveId });
         var windingSel = el('select', { class: 'atex-co-input' }, [
             el('option', { value: '', text: '— не указано —' }),
             el('option', { value: 'IN', text: 'IN (внутрь)' }),
             el('option', { value: 'OUT', text: 'OUT (наружу)' })
         ]);
+        windingSel.value = this.windingValue || '';
         modal.appendChild(field('Диаметр втулки', sleeveSel.node));
         modal.appendChild(field('Тип намотки', windingSel));
 
@@ -1302,21 +1605,29 @@
     };
 
     // Простой ref-select [{id,label}] поверх AtexRefSearch (или нативный select).
-    AtexCutOptimizer.prototype.refSelect = function(idPrefix, options, placeholder) {
+    // #4779: opts = { value, onChange } — начальное значение и подписка на выбор
+    // (поля номенклатуры в форме пересобирают список точек запаса).
+    AtexCutOptimizer.prototype.refSelect = function(idPrefix, options, placeholder, opts) {
+        opts = opts || {};
+        var initial = String(opts.value || '');
+        function notify(id) { if (typeof opts.onChange === 'function') opts.onChange(id); }
         if (typeof window !== 'undefined' && window.AtexRefSearch && window.AtexRefSearch.createSelect) {
-            var value = '';
+            var value = initial;
             var node = window.AtexRefSearch.createSelect({
                 classPrefix: 'atex-co',
                 inputClass: 'atex-co-input',
                 cacheKey: idPrefix,
                 options: (options || []).map(function(o) { return { id: o.id, label: o.label }; }),
+                value: initial,
                 placeholder: placeholder || '',
-                onChange: function(id) { value = String(id || ''); }
+                onChange: function(id) { value = String(id || ''); notify(value); }
             });
             return { node: node, value: function() { return value; } };
         }
         var sel = el('select', { class: 'atex-co-input' }, [el('option', { value: '', text: '— не выбрано —' })]
             .concat((options || []).map(function(o) { return el('option', { value: o.id, text: o.label }); })));
+        sel.value = initial;
+        sel.addEventListener('change', function() { notify(sel.value); });
         return { node: sel, value: function() { return sel.value; } };
     };
 

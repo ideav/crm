@@ -190,4 +190,54 @@ assertEqual(core.planningTimeUnits(66), { minutes: 66, hours: 1.1, days: 0.1 },
 assertEqual(core.planningTimeUnits(900), { minutes: 900, hours: 15, days: 2 },
     'planningTimeUnits: 900 мин = 15 ч = 2 дня');
 
+// ── #4779: стандартные длины рулона (заказчик добавил 360, 74, 110) ──
+assertEqual(core.lengthPresets, [74, 110, 300, 360, 450, 600, 700, 900, 1000],
+    'lengthPresets keeps the standard lengths and adds 74/110/360 (#4779)');
+
+// ── #4779: точки запаса («Максимальный запас», table 67113) ──
+assertEqual(core.normWinding(' out '), 'OUT', 'normWinding trims and upper-cases');
+assertEqual(core.normWinding('Наружу'), '', 'normWinding of an unknown value is empty');
+
+var AL = { id: '202', label: 'Алюминий 1.0мм' };
+var STEEL = { id: '201', label: 'Сталь 0.5мм' };
+var S76 = { id: '401', label: '76 мм' };
+var S152 = { id: '402', label: '152 мм' };
+var LEAD = { id: '801', label: 'Лидер 40 мкм' };
+var NONE = { id: '', label: '' };
+function point(width, over) {
+    var p = { width: width, length: 450, winding: 'OUT', material: AL, sleeve: S76, leader: LEAD, limit: 10 };
+    Object.keys(over || {}).forEach(function(k) { p[k] = over[k]; });
+    return p;
+}
+var CTX = { material: AL, length: 450, winding: 'OUT', sleeve: S76, leader: LEAD };
+
+assertEqual(core.stockPointMatches(point(100), CTX), true, 'stockPointMatches accepts a fully matching point');
+assertEqual(core.stockPointMatches(point(100, { material: STEEL }), CTX), false,
+    'stockPointMatches rejects another вид сырья');
+assertEqual(core.stockPointMatches(point(100, { length: 900 }), CTX), false,
+    'stockPointMatches rejects another длина');
+assertEqual(core.stockPointMatches(point(100, { winding: 'IN' }), CTX), false,
+    'stockPointMatches rejects another тип намотки');
+assertEqual(core.stockPointMatches(point(100, { sleeve: S152 }), CTX), false,
+    'stockPointMatches rejects another диаметр втулки');
+// Пустое поле справочника — доуточнения нет, строка шире и подходит (#3391).
+assertEqual(core.stockPointMatches(point(100, { sleeve: NONE, leader: NONE }), CTX), true,
+    'stockPointMatches treats an empty справочник field as «любое»');
+// Пустой выбор пользователя — по этому параметру не фильтруем.
+assertEqual(core.stockPointMatches(point(100, { leader: LEAD }),
+    { material: AL, length: 450, winding: '', sleeve: NONE, leader: NONE }), true,
+    'stockPointMatches does not filter by a parameter the user left empty');
+// Лидер текстом (без id) сверяется по подписи.
+assertEqual(core.stockPointMatches(point(100, { leader: { id: '', label: 'Лидер 40 мкм' } }), CTX), true,
+    'stockPointMatches compares a text-only лидер by label');
+assertEqual(core.stockPointMatches(point(0), CTX), false, 'stockPointMatches drops a point without a ширина');
+
+var matched = core.matchStockPoints([
+    point(200), point(100), point(150, { limit: 5 }), point(150, { limit: 50 }),
+    point(120, { material: STEEL }), point(250, { length: 900 })
+], CTX);
+assertEqual(matched.map(function(p) { return [p.width, p.limit]; }),
+    [[100, 10], [150, 50], [150, 5], [200, 10]],
+    'matchStockPoints sorts by ширина, then by допустимый запас (desc), dropping mismatches');
+
 console.log('\n' + passed + ' assertions passed');
