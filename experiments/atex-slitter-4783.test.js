@@ -242,8 +242,8 @@ function makeInst(opts) {
     var inst = makeInst();
     inst.cutOrderText = function() { return '3738'; };
     inst.renderMain();
-    var titles = inst.mainEl.querySelectorAll('.atex-sl-section-title').map(function(n) { return n.textContent; });
-    assertEqual(titles, ['Раскладка ножей', 'Показания и выработка'],
+    // #4785 п.1: заголовков у секций нет — секции опознаются составом (порядок ниже).
+    assertEqual(inst.mainEl.querySelectorAll('.atex-sl-section').length, 2,
         '#4783 п.1: секций две — раскладка и показания; «События смены» убраны');
     var order = inst.mainEl.childNodes.map(function(n) { return n.className.split(' ')[0]; });
     assertEqual(order, ['atex-sl-headwrap', 'atex-sl-section', 'atex-sl-section', 'atex-sl-batch-line'],
@@ -334,10 +334,13 @@ function makeInst(opts) {
 // ── версия бандла поднята: правка js/css без бампа не доедет до планшета ──────────────────────
 (function() {
     var tpl = fs.readFileSync(path.join(ROOT, 'templates/atex/slitter.html'), 'utf8');
-    assert(/js\/slitter\.js\?\{_global_\.version\}\.12/.test(tpl),
-        '#4783: slitter.js подключён с поднятым счётчиком версии базы (.12)');
-    assert(/css\/slitter\.css\?\{_global_\.version\}\.3/.test(tpl),
-        '#4783: slitter.css подключён с поднятым счётчиком версии базы (.3)');
+    // Номер счётчика растёт с каждой правкой бандла (#4785 поднял его снова), поэтому
+    // сторожим МЕХАНИЗМ: ассеты пульта подключены через счётчик версии базы, а не через
+    // старую форму `?0{_global_.version}` (её сбрасывает только бамп ядра, #4058).
+    assert(/js\/slitter\.js\?\{_global_\.version\}\.\d+/.test(tpl),
+        '#4783: slitter.js подключён через счётчик версии базы');
+    assert(/css\/slitter\.css\?\{_global_\.version\}\.\d+/.test(tpl),
+        '#4783: slitter.css подключён через счётчик версии базы');
 })();
 
 Promise.all(pending).then(function() {

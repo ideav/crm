@@ -28,6 +28,16 @@
     --sl-cm-stock: #0d9488;
     --sl-cm-waste: #b45309;
     --sl-cm-other: var(--text-secondary, #6b7280);
+    /* #4785 п.2: цвет полосы — по её ШИРИНЕ. Восемь различимых тонов, все тёмные
+       настолько, чтобы подпись ширины белым читалась прямо на полосе. */
+    --sl-cm-w0: var(--atex-navy, #134174);
+    --sl-cm-w1: #0d9488;
+    --sl-cm-w2: #b45309;
+    --sl-cm-w3: #6d28d9;
+    --sl-cm-w4: #be123c;
+    --sl-cm-w5: #15803d;
+    --sl-cm-w6: #2563eb;
+    --sl-cm-w7: #7c2d12;
     --sl-cm-remainder: #cbd5e1;
     --sl-cm-stripe-a: #f1f5f9;
     --sl-cm-stripe-b: #e2e8f0;
@@ -274,10 +284,9 @@
     background: var(--sl-bg);
     flex: none;
 }
-.atex-sl-section-title { margin: 0 0 8px; font-size: 14px; }
-/* #4783 п.10: у «Показаний» рядом с заголовком — что записано (кнопки сохранения нет). */
-.atex-sl-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.atex-sl-section-head .atex-sl-section-title { margin-bottom: 8px; }
+/* #4785 п.1: заголовков секций в пульте нет — их место занимают сами данные.
+   #4783 п.10: строка «сохранено» у показаний осталась (кнопки сохранения нет). */
+.atex-sl-section-head { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; min-height: 14px; }
 .atex-sl-save-status { font-size: 12px; color: var(--sl-muted); }
 .atex-sl-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .atex-sl-shift-gate { max-width: 520px; }
@@ -320,17 +329,11 @@
     box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 .atex-sl-textarea { resize: vertical; min-height: 44px; }
-.atex-sl-hint {
-    align-self: flex-start;
-    margin-top: 2px;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--sl-accent);
-    font-size: 12px;
-    cursor: pointer;
-    text-decoration: underline dotted;
-}
+/* #4785 п.3: подсказок под полями («остаток партии», «= N м²») нет — остаток виден
+   строкой партии, а м² считаются при записи. Осталось предупреждение, когда ширины
+   сырья нет и м² посчитать нечем. */
+.atex-sl-defect-warn { font-size: 12px; margin-top: 4px; }
+.atex-sl-photo-status { font-size: 12px; color: var(--sl-muted); }
 
 /* Партии сырья */
 /* #3609: предупреждения о бесшовном продолжении смены (под списком резок) */
@@ -447,10 +450,15 @@
     text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
     pointer-events: none;
 }
-.atex-sl-cm-seg-order { background: var(--sl-cm-order); }
-.atex-sl-cm-seg-stock { background: var(--sl-cm-stock); }
-.atex-sl-cm-seg-waste { background: var(--sl-cm-waste); }
-.atex-sl-cm-seg-other { background: var(--sl-cm-other); }
+/* #4785 п.2: полоса и её значок в легенде красятся по ШИРИНЕ (одна ширина = один цвет). */
+.atex-sl-cm-seg-w0 { background: var(--sl-cm-w0); }
+.atex-sl-cm-seg-w1 { background: var(--sl-cm-w1); }
+.atex-sl-cm-seg-w2 { background: var(--sl-cm-w2); }
+.atex-sl-cm-seg-w3 { background: var(--sl-cm-w3); }
+.atex-sl-cm-seg-w4 { background: var(--sl-cm-w4); }
+.atex-sl-cm-seg-w5 { background: var(--sl-cm-w5); }
+.atex-sl-cm-seg-w6 { background: var(--sl-cm-w6); }
+.atex-sl-cm-seg-w7 { background: var(--sl-cm-w7); }
 .atex-sl-cm-seg-remainder {
     background: var(--sl-cm-remainder);
     color: var(--text-secondary, #475569);
@@ -483,16 +491,19 @@
     flex: 1 1 auto;
     min-width: 0;
 }
+/* #4785 п.2: легенда ширин — крупно и без приглушения, её читают у станка. */
 .atex-sl-cm-legend-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--sl-muted);
+    gap: 6px;
+    font-size: 15px;
+    color: var(--text-primary, #1f2933);
 }
+.atex-sl-cm-legend-width { font-weight: 700; font-variant-numeric: tabular-nums; }
+.atex-sl-cm-legend-purpose { font-size: 13px; color: var(--sl-muted); }
 .atex-sl-cm-swatch {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     border-radius: 3px;
     flex: none;
     display: inline-block;
