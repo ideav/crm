@@ -409,8 +409,8 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
 
     // Справа — ПЛАНОВОЕ количество втулок.
     var qty = card.querySelector('.atex-sc-badge-qty');
-    assertEqual(!!qty && qty.textContent, 'К-во: 900',
-        '#4786-3: справа «К-во: 900» — запланированное количество втулок');
+    assertEqual(!!qty && qty.textContent, '900 шт',
+        '#4786-3: справа «900 шт» — запланированное количество втулок');
     assertEqual(!!qty && /заготовок под них: 60/.test(qty.attributes.title || ''), true,
         '#4786-3: в подсказке — сколько под них заготовок');
 
@@ -418,17 +418,17 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     var readyCard = inst.renderTaskRow(rowTask({ sleeve_ready: 'X' }));
     assertEqual(/заготовок/.test(readyCard.querySelector('.atex-sc-card-info').textContent), false,
         '#4786-3: у готовой втулки заготовок в строке нет — резать нечего');
-    assertEqual(readyCard.querySelector('.atex-sc-badge-qty').textContent, 'К-во: 900',
+    assertEqual(readyCard.querySelector('.atex-sc-badge-qty').textContent, '900 шт',
         '#4786-3: а плановое количество у неё на месте');
 
     // Закрытое задание: бейдж статуса ПЕРЕД «К-во» (порядок — решение заказчика).
     var skipCard = inst.renderTaskRow(rowTask({ finished: '1784620000' }));
     assertEqual(skipCard.querySelector('.atex-sc-card-badges').childNodes.map(function(n) { return n.textContent; }),
-        ['Пропущена', 'К-во: 900'],
-        '#4786: у пропущенного задания бейдж статуса идёт ДО «К-во»');
+        ['Пропущена', '900 шт'],
+        '#4786: у пропущенного задания бейдж статуса идёт ДО количества');
     var doneCard = inst.renderTaskRow(rowTask({ finished: '1784620000', fact: '900' }));
     assertEqual(doneCard.querySelector('.atex-sc-card-badges').childNodes.map(function(n) { return n.textContent; }),
-        ['Готово', 'К-во: 900'],
+        ['Готово', '900 шт'],
         '#4786: у выполненного — тот же порядок');
 
     global.document = savedDoc; global.window = savedWin;
@@ -449,7 +449,7 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     assertEqual(/\.atex-sc-badge-qty\s*\{/.test(css), true,
         '#4786: у бейджа количества есть правило в sleeve-cutter.css');
     assertEqual(/\.atex-sc-card-badges\s*\{/.test(css), true,
-        '#4786: и у пары бейджей (статус + К-во) в правой колонке');
+        '#4786: и у пары бейджей (статус + количество) в правой колонке');
     assertEqual(/\.atex-sc-card-sub\s*\{/.test(css), true, '#4786: и у служебной строки карточки');
     assertEqual(/\.atex-sc-note\s*\{/.test(css), true, '#4786: и у плашки о недостающих колонках');
 })();
