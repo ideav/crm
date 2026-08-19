@@ -9,7 +9,6 @@ Frontend templates, components, and tooling for the [Integram](https://ideav.ru)
 | `js/` | JavaScript modules (main app controller, table component, cabinet, etc.) |
 | `css/` | Stylesheets for all UI components |
 | `templates/` | HTML workspace templates deployed to the Integram server |
-| `kanban/` | Kanban board template |
 | `crm/` | CRM-specific page templates |
 | `mcp-server/` | MCP server exposing Integram API to AI assistants (60+ tools) |
 | `experiments/` | Developer experiment scripts and prototypes |
