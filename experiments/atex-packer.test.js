@@ -320,4 +320,32 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     assertEqual(core.packingLabel(null, 10), '', 'packingLabel: без типоразмера — пусто');
 })();
 
+// ── #4799: артикул и лидер из отчёта ──
+(function() {
+    // Обе колонки добавлены в отчёт позже самого рабочего места, поэтому у старых
+    // строк их может не быть вовсе — разбор обязан пережить и это, и пустое значение.
+    var full = core.itemFromReportRow(row({ art: '0011332', leader: 'Прозрачный' }));
+    assertEqual(full.art, '0011332', 'itemFromReportRow: артикул');
+    assertEqual(full.leader, 'Прозрачный', 'itemFromReportRow: лидер');
+
+    var blank = core.itemFromReportRow(row({ art: '', leader: '' }));
+    assertEqual(blank.art, '', 'itemFromReportRow: пустой артикул → пустая строка');
+    assertEqual(blank.leader, '', 'itemFromReportRow: пустой лидер → пустая строка');
+
+    var missing = core.itemFromReportRow(row());
+    assertEqual(missing.art, '', 'itemFromReportRow: колонки art нет в строке → пусто');
+    assertEqual(missing.leader, '', 'itemFromReportRow: колонки leader нет в строке → пусто');
+
+    // Лидер встаёт в подпись следом за втулкой, доп. втулка остаётся хвостом.
+    assertEqual(core.describeItem(full),
+        'MWR113L 110 х 600 IN втулка пластик серая для Videojet Прозрачный',
+        'describeItem: лидер идёт после втулки');
+    assertEqual(core.describeItem(core.itemFromReportRow(row({ leader: 'Прозрачный', add_sleeve: 'Приклеить' }))),
+        'MWR113L 110 х 600 IN втулка пластик серая для Videojet Прозрачный + доп. втулка: Приклеить',
+        'describeItem: лидер перед хвостом доп. втулки');
+    assertEqual(core.describeItem(blank),
+        'MWR113L 110 х 600 IN втулка пластик серая для Videojet',
+        'describeItem: пустой лидер не оставляет лишнего пробела');
+})();
+
 console.log('\n' + passed + ' assertions passed');

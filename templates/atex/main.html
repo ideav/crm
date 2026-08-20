@@ -208,7 +208,7 @@
             // Решение принимается в head, до отрисовки body: иначе меню успевает мелькнуть
             // и «прыгнуть» (та же причина, что у единственного пункта меню, #4690).
             // Новый полноэкранный пульт добавляется одним словом в этот список.
-            var FULLSCREEN_ACTIONS = ['slitter'];
+            var FULLSCREEN_ACTIONS = ['slitter', 'packer'];
             if (FULLSCREEN_ACTIONS.indexOf(String(action || '').trim().toLowerCase()) === -1) return;
             var css = document.createElement('style');
             css.id = 'fullscreen-workspace-style';

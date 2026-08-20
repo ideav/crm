@@ -9,7 +9,8 @@
 //   task/task_id — плановый старт задания (Unix) и его id;
 //   gp_id        — id Партии ГП, по нему и пишется отметка;
 //   order_no     — номер заказа, order — «Заказ клиента» (текст, может быть пуст);
-//   material, cut_width, cut_length, wind_direction, sleeve, add_sleeve — что за ролик;
+//   material, cut_width, cut_length, wind_direction, sleeve, add_sleeve, leader — что за ролик;
+//   art          — артикул (#4799), плашкой внизу карточки; бывает пустым;
 //   qty/qty_fact — «Кол-во рулонов» и «Кол-во факт» Партии ГП;
 //   packed/notes — «Упаковано шт» (673786) и «Примечание» (673789) Партии ГП;
 //   events       — счётчик событий смены задания.
@@ -97,7 +98,9 @@
         wind: 'wind_direction', sleeve: 'sleeve', addSleeve: 'add_sleeve',
         qty: 'qty', qtyFact: 'qty_fact', packed: 'packed', notes: 'notes', events: 'events',
         // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
-        tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type'
+        tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type',
+        // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
+        art: 'art', leader: 'leader'
     };
 
     var STORE_PLACE_ID = 'atex-pk-place-id';
@@ -184,7 +187,10 @@
             events: toNumber(kvVal(r[COL.events])),
             tipo: str(kvVal(r[COL.tipo])).trim(),
             tipoId: str(kvVal(r[COL.tipoId])),
-            materialType: str(kvVal(r[COL.materialType])).trim()
+            materialType: str(kvVal(r[COL.materialType])).trim(),
+            // #4799: обе колонки бывают пустыми — карточка тогда просто без них.
+            art: str(kvVal(r[COL.art])).trim(),
+            leader: str(kvVal(r[COL.leader])).trim()
         };
         return item;
     }
@@ -225,7 +231,8 @@
     function describeItem(item) {
         var it = item || {};
         var size = [it.width, it.length].filter(Boolean).join(' х ');
-        var parts = [it.material, size, it.wind, it.sleeve].filter(Boolean);
+        // #4799: лидер идёт в ту же строку, следом за втулкой.
+        var parts = [it.material, size, it.wind, it.sleeve, it.leader].filter(Boolean);
         var text = parts.join(' ');
         if (it.addSleeve) text += (text ? ' ' : '') + '+ доп. втулка: ' + it.addSleeve;
         return text;
@@ -758,6 +765,13 @@
         var packLabel = core.packingLabel(size, packed ? item.packedQty : core.packQtyFor(item));
         if (packLabel) {
             body.push(el('div', { class: 'atex-pk-pack', title: size.name, text: packLabel }));
+        }
+        // #4799: артикул — последним в теле карточки, перед колонкой управления.
+        if (item.art) {
+            body.push(el('div', { class: 'atex-pk-art' }, [
+                el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
+                el('span', { class: 'atex-pk-art-value', text: item.art })
+            ]));
         }
         card.appendChild(el('div', { class: 'atex-pk-body' }, body));
 
