@@ -305,7 +305,12 @@ function makeInst(opts) {
 (function() {
     var tpl = fs.readFileSync(path.join(ROOT, 'templates/atex/main.html'), 'utf8');
     var head = tpl.slice(0, tpl.indexOf('</head>'));
-    assert(/FULLSCREEN_ACTIONS\s*=\s*\['slitter'\]/.test(head),
+    // Список растёт: полноэкранные рабочие места добавляются в него по одному
+    // (§3.5, #4799 добавил упаковщика). Поэтому проверяем не точный состав, а то,
+    // ради чего проверка существует: список объявлен в head — до отрисовки body —
+    // и пульт слиттера в нём есть.
+    var fullscreen = head.match(/FULLSCREEN_ACTIONS\s*=\s*\[([^\]]*)\]/);
+    assert(!!fullscreen && /'slitter'/.test(fullscreen[1]),
         '#4783 п.2: список полноэкранных рабочих мест объявлен в head — до отрисовки body');
     assert(head.indexOf('.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}') > 0,
         '#4783 п.2: для пульта скрываются левое меню, подложка и кнопка-гамбургер');

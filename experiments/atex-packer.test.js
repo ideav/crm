@@ -320,6 +320,27 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     assertEqual(core.packingLabel(null, 10), '', 'packingLabel: без типоразмера — пусто');
 })();
 
+// ── #4799: рабочее место занимает экран целиком — левого меню нет ──
+(function() {
+    var fs = require('fs');
+    var path = require('path');
+    var tpl = fs.readFileSync(path.join(__dirname, '..', 'templates/atex/main.html'), 'utf8');
+    var head = tpl.slice(0, tpl.indexOf('</head>'));
+    var fullscreen = head.match(/FULLSCREEN_ACTIONS\s*=\s*\[([^\]]*)\]/);
+    assertEqual(!!fullscreen, true,
+        '#4799: список полноэкранных мест объявлен в head — до отрисовки body');
+    assertEqual(/'packer'/.test(fullscreen ? fullscreen[1] : ''), true,
+        '#4799: упаковщик в списке полноэкранных — левого меню на его странице нет');
+
+    // Шаблон рабочего места должен звать css и js через счётчик версии базы, иначе
+    // планшеты отдадут старые файлы из кэша и правки просто не доедут.
+    var pk = fs.readFileSync(path.join(__dirname, '..', 'templates/atex/packer.html'), 'utf8');
+    assertEqual(/css\/packer\.css\?\{_global_\.version\}\.\d+/.test(pk), true,
+        '#4799: packer.css подключён через счётчик версии базы');
+    assertEqual(/js\/packer\.js\?\{_global_\.version\}\.\d+/.test(pk), true,
+        '#4799: packer.js подключён через счётчик версии базы');
+})();
+
 // ── #4799: артикул и лидер из отчёта ──
 (function() {
     // Обе колонки добавлены в отчёт позже самого рабочего места, поэтому у старых
