@@ -1,8 +1,11 @@
 // Рабочее место atex «Пульт втулкореза» (роль Оператор, планшет).
 //
-// Оператор выбирает втулкорез и ДАТУ, на которую смотрит задания на втулки, и
-// ведёт их выполнение: ✓ Готово / Пропустить / ✓✓ Закрыть все. Задания
-// планируются на конкретную дату (плановый старт) и подчинены позиции заказа.
+// Оператор ведёт выполнение заданий на втулки: ✓ Готово / Пропустить / ✓✓ Закрыть все.
+// Задания планируются на конкретную дату (плановый старт) и подчинены позиции заказа.
+// #4798: пульт занимает экран целиком (левого меню нет — список FULLSCREEN_ACTIONS в
+// templates/atex/main.html), день — всегда текущий, а втулкорез и дата ушли из формы в
+// шапку страницы (.navbar-workspace); втулкорез выбирается оттуда кнопкой. Так же устроен
+// пульт слиттера (#4783).
 // В списке остаются только незакрытые задания; выполненные и пропущенные показывает
 // переключатель «показать выполненные» в сводке. № задания — его место в ПЛАНЕ дня:
 // оно не меняется ни от закрытия соседей, ни от скрытия выполненных (#4612).
@@ -154,6 +157,18 @@
     function formatRuDate(iso) {
         var p = isoParts(iso);
         return p ? pad2(p.d) + '.' + pad2(p.mo) + '.' + p.y : String(iso == null ? '' : iso);
+    }
+
+    // #4798: подпись пульта в шапке страницы (.navbar-workspace) —
+    // «{имя планшета} · {дата} · {втулкорез}». Дата и втулкорез ушли из формы сюда, поэтому
+    // пустой втулкорез называет себя сам («Втулкорез не выбран») — иначе подпись молчит о том,
+    // почему список заданий пуст. Незаданные части (нет имени планшета) опускаются.
+    // Тот же приём, что у пульта слиттера (#4783 п.3).
+    function workspaceTitleParts(padName, dateISO, cutterLabel) {
+        var pad = String(padName == null ? '' : padName).trim();
+        var day = formatRuDate(dateISO);
+        var cutter = String(cutterLabel == null ? '' : cutterLabel).trim() || 'Втулкорез не выбран';
+        return [pad, day, cutter].filter(function(part) { return !!part; });
     }
 
     // ── Статус задания из полей ──
@@ -389,6 +404,7 @@
         todayLocalIso: todayLocalIso,
         dayBoundsUnix: dayBoundsUnix,
         formatRuDate: formatRuDate,
+        workspaceTitleParts: workspaceTitleParts,   // #4798: подпись пульта в шапке страницы
         taskFromReportRow: taskFromReportRow,
         isChecked: isChecked,                     // #4786
         sticksNeeded: sticksNeeded,               // #4786
@@ -436,7 +452,7 @@
         this.cutters = [];             // справочник втулкорезов [{ id, label, diaMin, diaMax }]
         this.tasks = [];               // задания выбранного втулкореза на выбранную дату
         this.selectedCutterId = null;  // выбранный втулкорез (localStorage)
-        this.selectedDate = core.todayLocalIso(); // выбранная дата (localStorage), по умолчанию сегодня
+        this.selectedDate = core.todayLocalIso(); // #4798: день пульта — всегда текущий, выбора дня нет
         this.showDone = false;         // показывать выполненные/пропущенные (localStorage)
         this.missingCols = [];         // #4786: колонки «что режем», которых нет в отчёте
         this.busy = false;
@@ -596,15 +612,6 @@
             self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
         });
     };
-    AtexSleeveCutter.prototype.storeDate = function() {
-        try { if (window.localStorage) window.localStorage.setItem('atex-sc-date', this.selectedDate || ''); } catch (e) {}
-    };
-    AtexSleeveCutter.prototype.restoreDate = function() {
-        try {
-            var d = window.localStorage && window.localStorage.getItem('atex-sc-date');
-            if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) this.selectedDate = d;
-        } catch (e) {}
-    };
     AtexSleeveCutter.prototype.storeShowDone = function() {
         try { if (window.localStorage) window.localStorage.setItem('atex-sc-show-done', this.showDone ? '1' : '0'); } catch (e) {}
     };
@@ -630,56 +637,86 @@
         });
     };
 
-    // ── Рендеринг (втулкорез + дата → список заданий) ──
+    // ── Рендеринг (подпись пульта в шапке страницы + список заданий) ──
 
     AtexSleeveCutter.prototype.render = function() {
-        this.renderToolbar();
+        this.renderWorkspaceTitle();
         this.renderTasks();
     };
 
-    // Тулбар: выбор втулкореза + выбор даты + «Закрыть все» (если есть активные).
-    AtexSleeveCutter.prototype.renderToolbar = function() {
-        var self = this;
-        var box = this.toolbarEl;
-        if (!box) return;
-        box.innerHTML = '';
-
-        var select = el('select', { class: 'atex-sc-input' });
-        select.appendChild(el('option', { value: '', text: 'Выберите втулкорез' }));
-        this.cutterOptions().forEach(function(c) {
-            var opt = el('option', { value: c.id, text: c.label });
-            if (String(c.id) === String(self.selectedCutterId)) opt.selected = true;
-            select.appendChild(opt);
-        });
-        select.addEventListener('change', function() {
-            self.selectedCutterId = select.value || null;
-            self.storeCutter();
-            self.savePadCutter();   // #4789: и настраиваем сам планшет
-            self.refresh();
-        });
-        box.appendChild(this.field('Втулкорез', select));
-
-        var date = el('input', { type: 'date', class: 'atex-sc-input', value: this.selectedDate || '' });
-        date.addEventListener('change', function() {
-            self.selectedDate = date.value || core.todayLocalIso();
-            self.storeDate();
-            self.refresh();
-        });
-        box.appendChild(this.field('Дата', date, 'atex-sc-field-date'));
-
-        if (this.selectedCutterId && core.hasActiveTasks(this.tasks, this.selectedCutterId, this.selectedDate)) {
-            var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-toolbar-all', type: 'button', text: '✓✓ Закрыть все' });
-            allBtn.addEventListener('click', function() { self.closeAll(); });
-            box.appendChild(allBtn);
-        }
+    // #4798: имя планшета кладёт сторож pad-guard.js (#4666) — в window.atexPad. Пульт
+    // открыт мимо сторожа (стенд/тест) — имени нет, часть подписи опускается.
+    AtexSleeveCutter.prototype.padName = function() {
+        var pad = (typeof window !== 'undefined' && window.atexPad) || null;
+        return (pad && pad.name) ? String(pad.name) : '';
     };
 
-    // Обёртка «подпись + контрол» для тулбара.
-    AtexSleeveCutter.prototype.field = function(label, control, extraClass) {
-        return el('label', { class: 'atex-sc-field' + (extraClass ? ' ' + extraClass : '') }, [
-            el('span', { class: 'atex-sc-label', text: label }),
-            control
-        ]);
+    // Подпись выбранного втулкореза (с диапазоном диаметров, как в справочнике пульта).
+    AtexSleeveCutter.prototype.selectedCutterLabel = function() {
+        var id = String(this.selectedCutterId == null ? '' : this.selectedCutterId);
+        if (!id) return '';
+        var found = this.cutterOptions().filter(function(c) { return String(c.id) === id; })[0];
+        return found ? found.label : '';
+    };
+
+    // #4798: дата и втулкорез ушли из формы в шапку страницы (.navbar-workspace):
+    // «{имя планшета} · {дата} · {втулкорез}». Дата — всегда текущая календарная (выбор дня
+    // убран), втулкорез — кнопка: сменить станок оператору иногда нужно, менять день — нет.
+    AtexSleeveCutter.prototype.renderWorkspaceTitle = function() {
+        var self = this;
+        if (typeof document === 'undefined' || !document.querySelector) return;
+        var slot = document.querySelector('.navbar-workspace');
+        if (!slot) return;
+        slot.innerHTML = '';
+        slot.classList.add('atex-sc-nav');
+        var parts = core.workspaceTitleParts(this.padName(), this.selectedDate, this.selectedCutterLabel());
+        parts.forEach(function(part, idx) {
+            var last = idx === parts.length - 1;   // втулкорез — всегда последняя часть
+            if (idx) slot.appendChild(el('span', { class: 'atex-sc-nav-sep', text: '·' }));
+            if (!last) { slot.appendChild(el('span', { class: 'atex-sc-nav-part', text: part })); return; }
+            var btn = el('button', { class: 'atex-sc-nav-cutter', type: 'button', text: part,
+                title: 'Выбрать втулкорез' });
+            btn.addEventListener('click', function() { self.chooseCutter(); });
+            slot.appendChild(btn);
+        });
+    };
+
+    // #4798: выбор втулкореза — модалкой из шапки (в форме поля втулкореза больше нет).
+    AtexSleeveCutter.prototype.chooseCutter = function() {
+        var self = this;
+        var options = this.cutterOptions();
+        var overlay = el('div', { class: 'atex-sc-confirm-overlay' });
+        var list = el('div', { class: 'atex-sc-cutter-list' });
+        if (!options.length) {
+            list.appendChild(el('div', { class: 'atex-sc-empty', text: 'Втулкорезов в справочнике нет.' }));
+        }
+        options.forEach(function(item) {
+            var active = String(item.id) === String(self.selectedCutterId);
+            var btn = el('button', { class: 'atex-sc-cutter-item' + (active ? ' is-active' : ''), type: 'button', text: item.label });
+            btn.addEventListener('click', function() {
+                close();
+                if (active) return;
+                self.selectCutter(item.id);
+            });
+            list.appendChild(btn);
+        });
+        var cancel = el('button', { class: 'atex-sc-btn', type: 'button', text: 'Отмена' });
+        cancel.addEventListener('click', function() { close(); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+        overlay.appendChild(el('div', { class: 'atex-sc-confirm' }, [
+            el('div', { class: 'atex-sc-confirm-msg', text: 'Втулкорез' }),
+            list,
+            el('div', { class: 'atex-sc-confirm-actions' }, [cancel])
+        ]));
+        (this.root || document.body).appendChild(overlay);
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    };
+
+    AtexSleeveCutter.prototype.selectCutter = function(id) {
+        this.selectedCutterId = String(id || '') || null;
+        this.storeCutter();
+        this.savePadCutter();   // #4789: и настраиваем сам планшет
+        return this.refresh();
     };
 
     AtexSleeveCutter.prototype.renderTasks = function() {
@@ -693,7 +730,8 @@
             return;
         }
 
-        host.appendChild(el('div', { class: 'atex-sc-caption', text: 'Задания на ' + core.formatRuDate(this.selectedDate) }));
+        // #4798: подписи «Задания на ДД.ММ.ГГГГ» здесь нет — день пульта стои́т в шапке
+        // страницы (renderWorkspaceTitle), и повторять его над списком незачем.
 
         // #4786: отчёт без колонок «что режем» — пульт показывает меньше, чем должен, и
         // называет причину. Иначе пустая карточка выглядит как «в базе ничего нет».
@@ -714,12 +752,20 @@
 
         var s = core.summarize(tasks);
         var hidden = core.terminalCount(tasks);
-        host.appendChild(el('div', { class: 'atex-sc-summary' }, [
+        var summaryParts = [
             metric('Заданий', s.total),
             metric('Готово', s.done + ' / ' + s.total),
             metric('План, шт', s.planQty),
             this.showDoneToggle(hidden)
-        ]));
+        ];
+        // #4798: «✓✓ Закрыть все» — в сводке дня, а не в тулбаре (тулбара больше нет).
+        // Кнопка стои́т там, где написано, сколько заданий осталось: закрывают именно их.
+        if (core.hasActiveTasks(this.tasks, this.selectedCutterId, this.selectedDate)) {
+            var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-summary-all', type: 'button', text: '✓✓ Закрыть все' });
+            allBtn.addEventListener('click', function() { self.closeAll(); });
+            summaryParts.push(allBtn);
+        }
+        host.appendChild(el('div', { class: 'atex-sc-summary' }, summaryParts));
 
         var shown = this.visibleTasks();
         if (!shown.length) {
@@ -959,11 +1005,10 @@
     AtexSleeveCutter.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
-        // Сверху — тулбар (втулкорез + дата + «Закрыть все»), ниже — список заданий.
+        // #4798: тулбара нет — втулкорез и дата стоя́т в шапке страницы, «Закрыть все» ушла
+        // в сводку. На экране остаётся один список заданий, он же и прокручивается.
         var layout = el('div', { class: 'atex-sc-layout' });
-        this.toolbarEl = el('div', { class: 'atex-sc-toolbar' });
         this.tasksEl = el('section', { class: 'atex-sc-main' });
-        layout.appendChild(this.toolbarEl);
         layout.appendChild(this.tasksEl);
         this.root.appendChild(layout);
         this.toastHost = this.root;
@@ -974,7 +1019,6 @@
             .then(function() { return self.loadCutters(); })
             .then(function() {
                 self.restoreCutter();
-                self.restoreDate();
                 self.restoreShowDone();
                 return self.loadTasks();
             })

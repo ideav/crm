@@ -24,6 +24,13 @@
     color: var(--text-primary, #1f2933);
     font-size: 15px;
     box-sizing: border-box;
+    /* #4798: пульт занимает рабочую область целиком (левого меню на странице нет,
+       .app-content отдан ему без отступов) — прокручивается только список заданий. */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 [data-theme="dark"] .atex-sc {
@@ -46,14 +53,14 @@
 .atex-sc-placeholder { padding: 28px; color: var(--sc-muted); }
 
 .atex-sc-layout {
-    display: grid;
-    grid-template-columns: 280px 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 16px;
     padding: 16px;
-    align-items: start;
-}
-@media (max-width: 760px) {
-    .atex-sc-layout { grid-template-columns: 1fr; }
+    /* #4798: раскладка занимает остаток высоты; min-height нужен, иначе flex-элемент
+       растягивается по содержимому и прокручивается вся страница. */
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* Боковой список производственных резок */
@@ -96,6 +103,9 @@
     background: var(--sc-bg);
     padding: 18px 20px;
     min-height: 200px;
+    /* #4798: единственная прокручиваемая секция пульта — список заданий. */
+    flex: 1 1 auto;
+    overflow: auto;
 }
 .atex-sc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .atex-sc-head-title { margin: 0; font-size: 19px; }
@@ -133,6 +143,9 @@
     background: var(--sc-surface);
     border: 1px solid var(--sc-border);
 }
+/* #4798: «✓✓ Закрыть все» живёт в сводке, следом за переключателем «показать
+   выполненные» — тот уже прижат к правому краю своим margin-left:auto. */
+.atex-sc-summary-all { align-self: center; }
 .atex-sc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 96px; }
 .atex-sc-metric-label { font-size: 12px; color: var(--sc-muted); text-transform: uppercase; letter-spacing: .03em; }
 .atex-sc-metric-value { font-size: 22px; font-weight: 700; }
@@ -182,23 +195,6 @@
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 12px;
 }
-.atex-sc-field { display: flex; flex-direction: column; gap: 5px; }
-.atex-sc-label { font-weight: 600; color: var(--text-primary, #374151); font-size: 13px; }
-.atex-sc-input {
-    width: 100%;
-    padding: 9px 10px;
-    border: 1px solid var(--sc-border);
-    border-radius: 6px;
-    font: inherit;
-    background: var(--sc-bg);
-    color: var(--text-primary, #1f2933);
-}
-.atex-sc-input:focus {
-    outline: none;
-    border-color: var(--sc-accent);
-    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
-}
-
 .atex-sc-card-actions { grid-column: 2; display: flex; gap: 8px; margin: 0; justify-self: center; }
 
 .atex-sc-btn {
@@ -253,22 +249,37 @@
     color: #b45309;
 }
 
-/* #3869: РМ перестроено — тулбар (выбор втулкореза + «Закрыть все») и список заданий. */
-.atex-sc-layout { grid-template-columns: 1fr; }
-.atex-sc-toolbar {
-    display: flex;
-    align-items: flex-end;
-    flex-wrap: wrap;
-    gap: 12px;
+/* #4798: подпись пульта в шапке страницы — «планшет · дата · втулкорез».
+   Втулкорез — кнопка: это единственное, что оператору тут нужно менять. */
+.atex-sc-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.atex-sc-nav-part { white-space: nowrap; }
+.atex-sc-nav-sep { opacity: .5; }
+.atex-sc-nav-cutter {
     border: 1px solid var(--sc-border);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--sc-bg);
-    padding: 12px 16px;
+    padding: 2px 10px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    white-space: nowrap;
 }
-.atex-sc-toolbar .atex-sc-field { margin: 0; min-width: 240px; }
-.atex-sc-toolbar .atex-sc-field-date { min-width: 170px; }
-.atex-sc-toolbar-all { margin-left: auto; align-self: center; }
-.atex-sc-caption { font-size: 15px; font-weight: 600; color: var(--text-primary, #374151); margin: 2px 0 12px; }
+.atex-sc-nav-cutter:hover { background: var(--sc-surface); }
+
+/* #4798: выбор втулкореза модалкой из шапки. */
+.atex-sc-cutter-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.atex-sc-cutter-item {
+    text-align: left;
+    padding: 12px 14px;
+    border: 1px solid var(--sc-border);
+    border-radius: 6px;
+    background: var(--sc-bg);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-sc-cutter-item:hover { background: var(--sc-surface); }
+.atex-sc-cutter-item.is-active { background: var(--sc-active-bg); font-weight: 600; }
 /* #4786: номер заказа, втулка и план — то, ради чего оператор смотрит на планшет:
    основной цвет текста, 16px, полужирный. Прежние 14px приглушённым серым читались
    с рабочего расстояния плохо. */
