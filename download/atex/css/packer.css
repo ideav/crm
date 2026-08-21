@@ -117,22 +117,42 @@
    внутренний номер. Клиентский номер — свободный текст, поэтому переносится. */
 .atex-pk-order { display: flex; flex-direction: column; min-width: 0; }
 .atex-pk-order-main {
-    font-size: 30px;
+    font-size: 24px;
     font-weight: 700;
     line-height: 1.1;
     color: var(--pk-accent);
     word-break: break-word;
     overflow-wrap: anywhere;
 }
-.atex-pk-order-main.is-long { font-size: 22px; }
-.atex-pk-order-main.is-tiny { font-size: 17px; }
-.atex-pk-order-sub { font-size: 12px; color: var(--pk-muted); }
+.atex-pk-order-main.is-long { font-size: 19px; }
+.atex-pk-order-main.is-tiny { font-size: 16px; }
+/* #4799: подпись крупнее, главный номер мельче — разрыв между ними был
+   двукратным. Даже на самой мелкой ступени (is-tiny) главный остаётся больше. */
+.atex-pk-order-sub { font-size: 15px; color: var(--pk-muted); }
 
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
 /* #4665: в какой короб и по сколько штук укладывать */
 .atex-pk-pack { font-size: 13px; color: var(--pk-accent); margin-top: 2px; font-weight: 600; }
+/* #4799: артикул — плашка по ширине содержимого, а не во всю колонку.
+   inline-flex + align-self:start держат её узкой при любом гриде. */
+.atex-pk-art {
+    display: inline-flex;
+    align-items: baseline;
+    align-self: start;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--pk-border);
+    border-radius: 6px;
+    background: var(--pk-bg);
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.atex-pk-art-label { color: var(--pk-muted); }
+.atex-pk-art-value { font-weight: 700; }
 
 .atex-pk-side { display: flex; align-items: center; gap: 12px; }
 /* Количество — кнопка правки (#4680): выглядит как число, но нажимается пальцем. */
