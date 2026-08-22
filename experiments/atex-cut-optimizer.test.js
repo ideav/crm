@@ -66,22 +66,10 @@ assertEqual(core.normalizeItems([{ width: '60', qty: '14' }, { width: '', qty: '
     [{ width: 60, qty: 14 }, { width: 40, qty: 1 }],
     'normalizeItems coerces numbers, drops empty width, floors qty to ≥ 1');
 
-// ── packGroup: раскладка одной карты ──
-var pg = core.packGroup(880, [60, 40], [14, 1]);
-assertEqual({ knives: pg.knives, passes: pg.passes, used: pg.usedWidth, trim: pg.trimWidth },
-    { knives: [14, 1], passes: 1, used: 880, trim: 0 },
-    'packGroup packs the proportional set 60×14 + 40×1 with no trim');
-var pg2 = core.packGroup(910, [100], [4]);
-assertEqual({ knives: pg2.knives, passes: pg2.passes, trim: pg2.trimWidth, fits: pg2.fits },
-    { knives: [9], passes: 1, trim: 10, fits: true },
-    'packGroup fills a single width to minimise trim (9×100, trim 10)');
-// набор шире джамбо — одной картой группу не нарезать (её надо разбить).
-assertEqual(core.packGroup(880, [59, 39, 100], [14, 1, 4]).fits, false,
-    'packGroup reports fits=false when the proportional set is wider than the джамбо');
-
-// ── partitionsAtMost ──
-assertEqual(core.partitionsAtMost(1, 3), [[[0]]], 'partitionsAtMost(1) → single block');
-assertEqual(core.partitionsAtMost(2, 3), [[[0, 1]], [[0], [1]]], 'partitionsAtMost(2) → joined and split');
+// packGroup и partitionsAtMost сняты в #4804: карта раскроя одна, разбивать ширины
+// по картам и паковать каждую группу отдельно больше нечем. Раскладку одной карты
+// (пропорциональный набор + добивка остатка) проверяет
+// experiments/atex-cut-optimizer-4804.test.js через computePlan.
 
 // ── expandSegments: один сегмент на каждый нож, со смещением слева ──
 var segs = core.expandSegments([{ width: 60, knives: 2 }, { width: 40, knives: 1 }]);
@@ -116,16 +104,16 @@ assertEqual(planAW.results.map(function(r) { return r.actualWidth; }), [59, 40],
     'computePlan resolves nominal 60 → actual 59 before layout');
 assertEqual(planAW.results[0].nominalWidth, 60, 'computePlan keeps the nominal width for display');
 
-// ── computePlan: ближе к желаемому важнее отхода — ширину нельзя выкидывать ──
-// 59×14 + 39×1 ложатся в пару (карта 1), 100×4 — отдельная карта; ни одна ширина
-// не теряется ради нулевого отхода (регресс ideav/crm#3474).
+// ── computePlan: ширину нельзя выкидывать ──
+// Ни одна ширина не теряется ради нулевого отхода (регресс ideav/crm#3474). Карта при
+// этом ОДНА — с #4804 разбиения на карты больше нет.
 var planMix = core.computePlan(880, [{ width: 60, qty: 14 }, { width: 40, qty: 1 }, { width: 100, qty: 4 }],
     { actualWidthIndex: core.buildActualWidthIndex([{ actual: 59, order: 60, code: '' }, { actual: 39, order: 40, code: 'j=880' }]) });
 assertEqual({
     maps: planMix.mapCount,
-    got: planMix.results.map(function(r) { return r.produced; }),
-    allWidthsCut: planMix.results.every(function(r) { return r.produced > 0; })
-}, { maps: 2, got: [14, 1, 8], allWidthsCut: true },
+    allWidthsCut: planMix.results.every(function(r) { return r.produced > 0; }),
+    notLess: planMix.results.every(function(r) { return r.produced >= r.desiredQty; })
+}, { maps: 1, allWidthsCut: true, notLess: true },
     'computePlan keeps every width (demand-first), never drops one to chase zero waste');
 
 // ── computePlan: одиночная ширина заполняет джамбо, лишнее — это Δ (не склад) ──
@@ -200,16 +188,23 @@ assertEqual(core.normWinding('Наружу'), '', 'normWinding of an unknown val
 
 var AL = { id: '202', label: 'Алюминий 1.0мм' };
 var STEEL = { id: '201', label: 'Сталь 0.5мм' };
-var S76 = { id: '401', label: '76 мм' };
-var S152 = { id: '402', label: '152 мм' };
+var S76 = { id: '401', label: 'Втулка картонная 1"' };
+var S152 = { id: '402', label: 'Втулка пластиковая 1"' };
 var LEAD = { id: '801', label: 'Лидер 40 мкм' };
 var NONE = { id: '', label: '' };
+// #4804: втулка выбирается парой «диаметр + материал», поэтому точка запаса сверяется
+// не по id записи, а по диаметру и материалу той записи, на которую она ссылается.
+var SLEEVE_BY_ID = {
+    '401': { id: '401', label: S76.label, inches: 1, sleeveWidth: null, materialId: '740267', materialLabel: 'Картон' },
+    '402': { id: '402', label: S152.label, inches: 1, sleeveWidth: null, materialId: '740269', materialLabel: 'Пластик чёрная' }
+};
 function point(width, over) {
     var p = { width: width, length: 450, winding: 'OUT', material: AL, sleeve: S76, leader: LEAD, limit: 10 };
     Object.keys(over || {}).forEach(function(k) { p[k] = over[k]; });
     return p;
 }
-var CTX = { material: AL, length: 450, winding: 'OUT', sleeve: S76, leader: LEAD };
+var CTX = { material: AL, length: 450, winding: 'OUT', leader: LEAD,
+    sleeveChoice: { inches: '1', materialId: '740267' }, sleeveById: SLEEVE_BY_ID };
 
 assertEqual(core.stockPointMatches(point(100), CTX), true, 'stockPointMatches accepts a fully matching point');
 assertEqual(core.stockPointMatches(point(100, { material: STEEL }), CTX), false,
@@ -219,13 +214,13 @@ assertEqual(core.stockPointMatches(point(100, { length: 900 }), CTX), false,
 assertEqual(core.stockPointMatches(point(100, { winding: 'IN' }), CTX), false,
     'stockPointMatches rejects another тип намотки');
 assertEqual(core.stockPointMatches(point(100, { sleeve: S152 }), CTX), false,
-    'stockPointMatches rejects another диаметр втулки');
+    'stockPointMatches rejects another втулка (материал не тот)');
 // Пустое поле справочника — доуточнения нет, строка шире и подходит (#3391).
 assertEqual(core.stockPointMatches(point(100, { sleeve: NONE, leader: NONE }), CTX), true,
     'stockPointMatches treats an empty справочник field as «любое»');
 // Пустой выбор пользователя — по этому параметру не фильтруем.
 assertEqual(core.stockPointMatches(point(100, { leader: LEAD }),
-    { material: AL, length: 450, winding: '', sleeve: NONE, leader: NONE }), true,
+    { material: AL, length: 450, winding: '', sleeveChoice: { inches: '' }, sleeveById: SLEEVE_BY_ID, leader: NONE }), true,
     'stockPointMatches does not filter by a parameter the user left empty');
 // Лидер текстом (без id) сверяется по подписи.
 assertEqual(core.stockPointMatches(point(100, { leader: { id: '', label: 'Лидер 40 мкм' } }), CTX), true,

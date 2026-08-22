@@ -62,12 +62,17 @@
         sleeve: 'Диаметр втулки',
         client: 'Клиент',
         leader: 'Лидер',  // #3592: справочник «Лидер» (table/1132) — список для поля формы «В заказ»
-        maxStock: 'Максимальный запас'  // #4779: точки запаса (table/67113) — что целесообразно нарезать впрок
+        maxStock: 'Максимальный запас',  // #4779: точки запаса (table/67113) — что целесообразно нарезать впрок
+        sleeveMaterial: 'Материал втулки'  // #4804: справочник материалов втулки (table/740264)
     };
     var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм' };
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
     // «Ширина в заказе» — номинал, «Код» — условие применения.
     var ACTUAL_WIDTH_REQ = { order: 'Ширина в заказе', code: 'Код' };
+    // #4804: реквизиты справочника «Диаметр втулки» (8188). «Дюймы» — диаметр (1 / 0.5),
+    // «Ширина втулки, мм» — ширина ГОТОВОЙ втулки (пусто — метровая палка, режется под
+    // размер), «Материал втулки» — ссылка на справочник 740264.
+    var SLEEVE_REQ = { inches: 'Дюймы', width: 'Ширина втулки, мм', material: 'Материал втулки' };
     // #4779: реквизиты «Максимального запаса» (table 67113, docs/atex_data_schema.md §6.6).
     // Главное значение записи — максимально допустимый запас (рулонов); реквизиты
     // задают номенклатуру ГП. Те же имена читает production-planning.js (MAX_STOCK_REQ).
@@ -216,52 +221,111 @@
         }).filter(function(it) { return it.width > 0; });
     }
 
-    // Раскладка одной карты по группе ширин. Группа = подмножество заказанных
-    // ширин, режется на одном джамбо. Раскладка = пропорциональный спросу набор
-    // (через НОД), уложенный в W максимально плотно. НИЧЕГО НА СКЛАД: добора
-    // остатка нет — лишний край джамбо это «Отход», а не складские полосы (#3474).
-    // Если пропорциональный набор шире джамбо — группу одной картой не нарезать
-    // (fits=false), её следует разбить на отдельные карты. Возвращает:
-    //   { knives:[по индексу ширины], passes, usedWidth, trimWidth, fits }.
-    function packGroup(inputWidth, widths, qtys) {
+    // #4804 п.3: чем добить ОСТАТОК джамбо, чтобы отход был минимальным. Безграничный
+    // рюкзак по заданным ширинам: каждую можно доложить сколько угодно раз. Ширины
+    // бывают дробными (32.5 мм), поэтому считаем в десятых долях миллиметра.
+    // `prefer` — порядок предпочтения ширин при РАВНОМ заполнении (больше доля в
+    // пропорции — раньше): так добивка держится ближе к исходному распределению.
+    // → массив «сколько ножей доложить» по индексам widths.
+    function fillRemainder(remainder, widths, prefer) {
+        var add = widths.map(function() { return 0; });
+        var SCALE = 10;
+        var cap = Math.floor(round3(remainder) * SCALE + 1e-6);
+        if (!(cap > 0)) return add;
+        var ws = widths.map(function(w) { return Math.round(w * SCALE); });
+        // Заполнено при ёмкости c и каким ножом пришли (−1 — тем же, что при c−1).
+        var best = new Array(cap + 1);
+        var pick = new Array(cap + 1);
+        best[0] = 0; pick[0] = -1;
+        for (var c = 1; c <= cap; c++) {
+            best[c] = best[c - 1];
+            pick[c] = -1;
+            for (var pi = 0; pi < prefer.length; pi++) {
+                var i = prefer[pi];
+                if (ws[i] <= 0 || ws[i] > c) continue;
+                var cand = best[c - ws[i]] + ws[i];
+                // Строгое «>» — при равном заполнении побеждает более ранняя (более
+                // пропорциональная) ширина.
+                if (cand > best[c]) { best[c] = cand; pick[c] = i; }
+            }
+        }
+        var pos = cap;
+        while (pos > 0) {
+            var take = pick[pos];
+            if (take < 0) { pos--; continue; }
+            add[take]++;
+            pos -= ws[take];
+        }
+        return add;
+    }
+
+    // #4804 п.4: заданный набор шире джамбо — ужимаем пропорцию, пока не влезет.
+    // Каждой ширине оставляем хотя бы один нож (ширину из раскроя не выкидываем);
+    // вызывающий уже проверил, что по одному ножу на ширину в джамбо помещается.
+    function shrinkToFit(W, widths, ratio) {
+        function knivesAt(scale) {
+            return ratio.map(function(r) { return Math.max(1, Math.floor(r * scale)); });
+        }
+        function widthOf(knives) {
+            return round3(knives.reduce(function(s, k, i) { return s + k * widths[i]; }, 0));
+        }
+        var lo = 0, hi = 1;
+        for (var step = 0; step < 50; step++) {
+            var mid = (lo + hi) / 2;
+            if (widthOf(knivesAt(mid)) <= W) lo = mid; else hi = mid;
+        }
+        return knivesAt(lo);
+    }
+
+    // #4804 п.2/п.3/п.4: ЕДИНАЯ карта раскроя со всеми ширинами. Ножи подбираются так,
+    // чтобы джамбо было занято максимально плотно:
+    //   • сначала кладутся ЦЕЛЫЕ пропорциональные наборы (пропорция желаемых количеств
+    //     через НОД) — приоритет пропорции из тикета;
+    //   • остаток джамбо добивается любыми заданными ширинами по минимуму отхода (п.3);
+    //   • если даже ОДИН пропорциональный набор шире джамбо, пропорция ужимается (п.4),
+    //     и остаток добивается так же.
+    // Число проходов — минимальное, при котором выпуск по КАЖДОЙ ширине не меньше
+    // желаемого (ножи × проходы ≥ спрос).
+    // → { knives, passes, usedWidth, trimWidth, fits, proportionKept }.
+    function packSingleMap(inputWidth, widths, qtys) {
         var W = round3(inputWidth);
+        var zero = widths.map(function() { return 0; });
+        var minWidth = round3(widths.reduce(function(s, w) { return s + w; }, 0));
+        // По одному ножу на каждую ширину — уже шире джамбо: резать нечем.
+        if (minWidth > W) {
+            return { knives: zero, passes: 0, usedWidth: 0, trimWidth: W, fits: false, proportionKept: false };
+        }
         var g = gcdAll(qtys);
         var ratio = qtys.map(function(q) { return q / g; });
         var setWidth = round3(ratio.reduce(function(s, r, i) { return s + r * widths[i]; }, 0));
-        var sets = setWidth > 0 ? Math.floor(round3(W / setWidth)) : 0;
 
-        if (sets < 1) {
-            return { knives: widths.map(function() { return 0; }), passes: 0, usedWidth: 0, trimWidth: W, fits: false };
+        var knives, proportionKept;
+        if (setWidth > 0 && setWidth <= W) {
+            var sets = Math.floor(round3(W / setWidth));
+            knives = ratio.map(function(r) { return sets * r; });
+            proportionKept = true;
+        } else {
+            knives = shrinkToFit(W, widths, ratio);
+            proportionKept = false;
         }
-        var knives = ratio.map(function(r) { return sets * r; });
-        // Число проходов: sets·passes ≥ НОД (округление вверх), чтобы итог по
-        // рулонам был не меньше желаемого, а не просто ближайшим к нему (#3494).
-        var passes = Math.max(1, Math.ceil(g / sets));
-        var usedWidth = round3(knives.reduce(function(s, c, i) { return s + c * widths[i]; }, 0));
-        return { knives: knives, passes: passes, usedWidth: usedWidth, trimWidth: round3(W - usedWidth), fits: true };
-    }
 
-    // Разбиения индексов [0..n-1] на не более `maxBlocks` непустых групп.
-    // Для калькулятора ширин немного, поэтому полный перебор уместен; при большом
-    // числе ширин (> 8) возвращаем единственное разбиение «все вместе».
-    function partitionsAtMost(n, maxBlocks) {
-        if (n <= 0) return [[]];
-        if (n > 8) return [[Array.apply(null, { length: n }).map(function(_, i) { return i; })]];
-        var result = [];
-        (function rec(i, blocks) {
-            if (i === n) { result.push(blocks.map(function(b) { return b.slice(); })); return; }
-            for (var b = 0; b < blocks.length; b++) {
-                blocks[b].push(i);
-                rec(i + 1, blocks);
-                blocks[b].pop();
-            }
-            if (blocks.length < maxBlocks) {
-                blocks.push([i]);
-                rec(i + 1, blocks);
-                blocks.pop();
-            }
-        })(0, []);
-        return result;
+        // Приоритет добивки — ширины с большей долей в пропорции.
+        var prefer = widths.map(function(_, i) { return i; })
+            .sort(function(a, b) { return (ratio[b] - ratio[a]) || (widths[b] - widths[a]) || (a - b); });
+        var used = round3(knives.reduce(function(s, k, i) { return s + k * widths[i]; }, 0));
+        var add = fillRemainder(round3(W - used), widths, prefer);
+        knives = knives.map(function(k, i) { return k + add[i]; });
+
+        used = round3(knives.reduce(function(s, k, i) { return s + k * widths[i]; }, 0));
+        // Проходов ровно столько, чтобы не недодать ни по одной ширине.
+        var passes = 1;
+        knives.forEach(function(k, i) {
+            if (k > 0) passes = Math.max(passes, Math.ceil(qtys[i] / k));
+        });
+        return {
+            knives: knives, passes: passes, usedWidth: used,
+            trimWidth: round3(W - used), fits: true, proportionKept: proportionKept
+        };
     }
 
     // Развернуть ножи карты в отдельные сегменты со смещением слева (для рисунка).
@@ -330,30 +394,17 @@
         var widths = usable.map(function(it) { return it.actualWidth; });
         var qtys = usable.map(function(it) { return it.qty; });
 
-        // Выбираем разбиение ширин на ≤ maxMaps карт. По умолчанию — по одной карте
-        // на ширину; объединяем только когда это помогает делу. Критерии по
-        // приоритету: (1) все группы режутся одной картой; (2) ближе к желаемому
-        // (минимум суммарного отклонения |выпуск − спрос|, чтобы не недодать и не
-        // перепроизвести на склад); (3) меньше отход; (4) больше карт — ближе к
-        // идеалу «одна карта на ширину».
-        var partitions = partitionsAtMost(widths.length, maxMaps);
-        var bestChoice = null;
-        partitions.forEach(function(part) {
-            var packs = part.map(function(idxs) {
-                var gw = idxs.map(function(i) { return widths[i]; });
-                var gq = idxs.map(function(i) { return qtys[i]; });
-                return { idxs: idxs, pack: packGroup(W, gw, gq) };
-            });
-            var prod = {};
-            packs.forEach(function(p) {
-                p.idxs.forEach(function(i, j) { prod[i] = (prod[i] || 0) + p.pack.knives[j] * p.pack.passes; });
-            });
-            var deviation = qtys.reduce(function(s, q, i) { return s + Math.abs((prod[i] || 0) - q); }, 0);
-            var waste = packs.reduce(function(s, p) { return s + p.pack.trimWidth * p.pack.passes; }, 0);
-            var infeasible = packs.reduce(function(s, p) { return s + (p.pack.fits ? 0 : 1); }, 0);
-            var score = { infeasible: infeasible, deviation: deviation, waste: round3(waste), maps: part.length };
-            if (!bestChoice || better(score, bestChoice.score)) bestChoice = { packs: packs, score: score };
-        });
+        // #4804 п.2: карта раскроя ОДНА — все ширины лежат на ней. Разбиения на «Карту 1»
+        // и «Карту 2» больше нет: заказчику нужен один вариант со всеми ширинами.
+        var single = packSingleMap(W, widths, qtys);
+        if (!single.fits) {
+            base.reason = 'По одному ножу на каждую ширину — уже шире входа ('
+                + round3(widths.reduce(function(s, w) { return s + w; }, 0)) + ' мм при входе ' + W
+                + ' мм). Уберите часть ширин.';
+            base.items = all;
+            return base;
+        }
+        var bestChoice = { packs: [{ idxs: widths.map(function(_, i) { return i; }), pack: single }] };
 
         var maps = bestChoice.packs.map(function(p, mi) {
             var pattern = p.idxs.map(function(i, j) {
@@ -405,7 +456,9 @@
             : 0;
 
         base.feasible = true;
-        base.proportionKept = maps.every(function(m) { return m.fits; });
+        // #4804 п.4: пропорция желаемых количеств сохранена, либо её пришлось ужать,
+        // чтобы набор влез в джамбо.
+        base.proportionKept = single.proportionKept;
         base.maps = maps;
         base.results = results;
         base.mapCount = maps.length;
@@ -416,15 +469,74 @@
         base.wastePct = wastePct;
         base.totalWasteAreaM2 = totalWasteAreaM2;
         return base;
+    }
 
-        // Лучше: меньше нерезабельных групп; затем ближе к желаемому; затем меньше
-        // отход; затем больше карт (ближе к идеалу «одна карта на ширину»).
-        function better(a, b) {
-            if (a.infeasible !== b.infeasible) return a.infeasible < b.infeasible;
-            if (a.deviation !== b.deviation) return a.deviation < b.deviation;
-            if (a.waste !== b.waste) return a.waste < b.waste;
-            return a.maps > b.maps;
+    // ── #4804 п.1: втулка задаётся ДИАМЕТРОМ и МАТЕРИАЛОМ ────────────────────────────
+    // Раньше оператор выбирал запись справочника «Диаметр втулки» (8188) целиком —
+    // список длинных названий, в которых диаметр, материал и ширина смешаны. Теперь
+    // выбираются два понятных параметра: диаметр (1″ или 0,5″) и материал втулки
+    // (справочник «Материал втулки», table 740264). У 0,5″ материал не спрашивается —
+    // втулки этого диаметра бывают только картонными.
+    //
+    // Записи справочника пульт читает с реквизитами: `inches` («Дюймы»), `sleeveWidth`
+    // («Ширина втулки, мм»; пусто — метровая палка, режется под размер) и `materialId`
+    // /`materialLabel` (ссылка на 740264).
+
+    // Диаметры, между которыми выбирает оператор.
+    var SLEEVE_INCHES = [
+        { value: '1', label: '1″' },
+        { value: '0.5', label: '0,5″' }
+    ];
+    // Материал втулок диаметром 0,5″ — всегда картон (решение заказчика, #4804 п.1).
+    var CARDBOARD_LABEL = 'Картон';
+
+    function sleeveInchesOptions() {
+        return SLEEVE_INCHES.map(function(o) { return { value: o.value, label: o.label }; });
+    }
+    // Спрашивать ли материал втулки у этого диаметра. У 0,5″ — нет.
+    function sleeveNeedsMaterial(inches) {
+        return String(inches == null ? '' : inches).trim() === '1';
+    }
+    function sameInches(recInches, wanted) {
+        var w = toNumber(wanted);
+        return w > 0 && Math.abs(toNumber(recInches) - w) < 1e-6;
+    }
+    // Материал выбора: у 0,5″ он не спрашивается и всегда картонный, поэтому
+    // сравнение идёт по подписи, а не по переданному id.
+    function sleeveMaterialMatches(rec, choice) {
+        if (!sleeveNeedsMaterial(choice && choice.inches)) {
+            return normText(rec && rec.materialLabel) === normText(CARDBOARD_LABEL);
         }
+        var wanted = String((choice && choice.materialId) == null ? '' : choice.materialId).trim();
+        if (!wanted) return true;   // материал не выбран — по нему не отсекаем
+        return String(rec && rec.materialId == null ? '' : rec.materialId).trim() === wanted;
+    }
+    // Подходит ли запись справочника выбору «диаметр + материал». Диаметр не выбран —
+    // не отсекаем ничего (так же ведёт себя подбор точек запаса до выбора параметров).
+    function sleeveMatchesChoice(rec, choice) {
+        var inches = String((choice && choice.inches) == null ? '' : choice.inches).trim();
+        if (!inches) return true;
+        if (!rec) return false;
+        return sameInches(rec.inches, inches) && sleeveMaterialMatches(rec, choice);
+    }
+    // Конкретная запись «Диаметра втулки» под полосу: сначала ГОТОВАЯ втулка ровно на
+    // эту ширину, иначе МЕТРОВАЯ (ширина не задана — режется под размер). Ни той, ни
+    // другой нет → null: чужую втулку молча не подставляем.
+    //   choice: { inches, materialId, width }.
+    function resolveSleeve(sleeves, choice) {
+        var inches = String((choice && choice.inches) == null ? '' : choice.inches).trim();
+        if (!inches) return null;
+        var width = round3(choice && choice.width);
+        var fit = (sleeves || []).filter(function(rec) {
+            return rec && sameInches(rec.inches, inches) && sleeveMaterialMatches(rec, choice);
+        });
+        if (!fit.length) return null;
+        var exact = fit.filter(function(rec) {
+            return toNumber(rec.sleeveWidth) > 0 && Math.abs(round3(rec.sleeveWidth) - width) < 1e-6;
+        })[0];
+        if (exact) return exact;
+        var meter = fit.filter(function(rec) { return !(toNumber(rec.sleeveWidth) > 0); })[0];
+        return meter || null;
     }
 
     // Доля сегмента шириной `width` в шкале карты. Шкала — максимум из ширины
@@ -534,15 +646,31 @@
         return a === b;
     }
 
+    // #4804 п.1: сверка втулки точки запаса с выбором «диаметр + материал». Точка
+    // ссылается на КОНКРЕТНУЮ запись справочника «Диаметр втулки», а форма задаёт пару
+    // параметров, под которую подходит несколько записей — поэтому сверяем не id, а
+    // диаметр и материал той записи, на которую точка ссылается.
+    //   sleeveById — { id: запись справочника }; выбор пуст → не фильтруем.
+    function stockSleeveMatches(point, choice, sleeveById) {
+        var inches = String((choice && choice.inches) == null ? '' : choice.inches).trim();
+        if (!inches) return true;                       // диаметр не выбран — не фильтруем
+        var pId = String((point && point.id) || '').trim();
+        if (!pId) return true;                          // у точки втулка не задана — «любая»
+        var rec = (sleeveById || {})[pId];
+        if (!rec) return true;                          // запись не прочиталась — не отсекаем
+        return sleeveMatchesChoice(rec, choice);
+    }
+
     // Совпадает ли точка запаса с выбранными в форме параметрами.
-    // ctx: { material: {id,label}, length, winding, sleeve: {id,label}, leader: {id,label} }.
+    // ctx: { material: {id,label}, length, winding, leader: {id,label},
+    //        sleeveChoice: { inches, materialId }, sleeveById: { id: запись 8188 } }.
     function stockPointMatches(point, ctx) {
         if (!point || !(toNumber(point.width) > 0)) return false;
         ctx = ctx || {};
         return stockRefMatches(point.material, ctx.material) &&
             stockNumberMatches(point.length, ctx.length) &&
             stockWindingMatches(point.winding, ctx.winding) &&
-            stockRefMatches(point.sleeve, ctx.sleeve) &&
+            stockSleeveMatches(point.sleeve, ctx.sleeveChoice, ctx.sleeveById) &&
             stockRefMatches(point.leader, ctx.leader);
     }
 
@@ -567,8 +695,6 @@
         buildActualWidthIndex: buildActualWidthIndex,
         resolveCutWidth: resolveCutWidth,
         normalizeItems: normalizeItems,
-        packGroup: packGroup,
-        partitionsAtMost: partitionsAtMost,
         expandSegments: expandSegments,
         computePlan: computePlan,
         widthPercent: widthPercent,
@@ -579,7 +705,14 @@
         normWinding: normWinding,                 // #4779
         stockPointMatches: stockPointMatches,     // #4779
         matchStockPoints: matchStockPoints,       // #4779
-        lengthPresets: LENGTH_PRESETS             // #4779: стандартные длины рулона
+        lengthPresets: LENGTH_PRESETS,            // #4779: стандартные длины рулона
+        // #4804 п.1: втулка выбирается диаметром и материалом, запись справочника
+        // подбирается под ширину полосы.
+        CARDBOARD_LABEL: CARDBOARD_LABEL,
+        sleeveInchesOptions: sleeveInchesOptions,
+        sleeveNeedsMaterial: sleeveNeedsMaterial,
+        sleeveMatchesChoice: sleeveMatchesChoice,
+        resolveSleeve: resolveSleeve
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -669,10 +802,12 @@
         this.root = root;
         this.db = (typeof window !== 'undefined' && window.db) || root.getAttribute('data-db') || '';
         this.xsrf = root.getAttribute('data-xsrf') || (typeof window !== 'undefined' && window.xsrf) || '';
-        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null, opTimes: null, maxStock: null };
+        this.meta = { material: null, actualWidth: null, order: null, position: null, sleeve: null, client: null, leader: null, opTimes: null, maxStock: null, sleeveMaterial: null };
         this.opTimes = {};        // #3744: нормы метража WIND_* из «Время операции, мин»
         this.materials = [];      // [{ id, label, width, length }]
-        this.sleeves = [];        // [{ id, label }]
+        // #4804: записи «Диаметра втулки» с диаметром, шириной готовой втулки и материалом.
+        this.sleeves = [];        // [{ id, label, inches, sleeveWidth, materialId, materialLabel }]
+        this.sleeveMaterials = []; // #4804: справочник «Материал втулки» (740264) — [{ id, label }]
         this.clients = [];        // [{ id, label }]
         this.leaders = [];        // [{ id, label }] — справочник «Лидер» (table/1132), #3592
         this.orders = [];         // [{ id, number }]
@@ -682,7 +817,10 @@
         this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние, #4779 — их снова несколько)
         // #4779: параметры номенклатуры, по которым подбираются точки запаса.
         this.leaderId = '';
-        this.sleeveId = '';
+        // #4804: втулка задаётся диаметром и материалом; конкретная запись справочника
+        // подбирается под ширину полосы (core.resolveSleeve).
+        this.sleeveInches = '';
+        this.sleeveMaterialId = '';
         this.windingValue = '';
         this.stockPoints = [];    // [{ id, width, length, winding, material, sleeve, leader, limit }]
         this.stockLoadFailed = false;  // справочник не прочитался (нет доступа/сети) — говорим прямо
@@ -751,6 +889,7 @@
             self.meta.leader = byName(TABLE.leader);  // #3592
             self.meta.opTimes = byName(OP_TIMES_TABLE);  // #3744: нормы метража (необязательна)
             self.meta.maxStock = byName(TABLE.maxStock);  // #4779: точки запаса (необязательна)
+            self.meta.sleeveMaterial = byName(TABLE.sleeveMaterial);  // #4804: материалы втулки (необязательна)
             if (!self.meta.material) throw new Error('В метаданных не найдена таблица «' + TABLE.material + '»');
         });
     };
@@ -831,6 +970,30 @@
         }).catch(function() { return []; });
     };
 
+    // #4804: записи справочника «Диаметр втулки» (8188) с реквизитами, по которым
+    // втулка подбирается: диаметр («Дюймы»), ширина ГОТОВОЙ втулки («Ширина втулки, мм»;
+    // пусто — метровая палка, режется под размер) и материал (ссылка на 740264).
+    AtexCutOptimizer.prototype.loadSleeves = function() {
+        var self = this;
+        this.sleeves = [];
+        var meta = this.meta.sleeve;
+        if (!meta) return Promise.resolve();
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
+            self.sleeves = (rows || []).map(function(rec) {
+                var material = parseRef(cellValue(rec, meta, SLEEVE_REQ.material));
+                var width = toNumber(cellValue(rec, meta, SLEEVE_REQ.width));
+                return {
+                    id: String(rec.i),
+                    label: (rec.r && rec.r[0] != null && String(rec.r[0]) !== '') ? String(rec.r[0]) : ('#' + rec.i),
+                    inches: toNumber(cellValue(rec, meta, SLEEVE_REQ.inches)),
+                    sleeveWidth: width > 0 ? width : null,
+                    materialId: material.id,
+                    materialLabel: material.label
+                };
+            });
+        }).catch(function() { self.sleeves = []; });
+    };
+
     // Партии сырья — отчёт material_batches (JSON_KV): № партии, вид сырья (id+имя),
     // остаток (м²), флаг «В работе» (is_active). Нет отчёта/доступа → пустой список.
     AtexCutOptimizer.prototype.loadMaterialBatches = function() {
@@ -902,7 +1065,8 @@
                 return Promise.all([
                     self.loadMaterials(),
                     self.loadActualWidths(),
-                    self.loadRefList(self.meta.sleeve).then(function(l) { self.sleeves = l; }),
+                    self.loadSleeves(),   // #4804: втулки с диаметром/шириной/материалом
+                    self.loadRefList(self.meta.sleeveMaterial).then(function(l) { self.sleeveMaterials = l; }),  // #4804
                     self.loadRefList(self.meta.client).then(function(l) { self.clients = l; }),
                     self.loadRefList(self.meta.leader).then(function(l) { self.leaders = l; }),  // #3592
                     self.loadRefList(self.meta.order).then(function(l) {
@@ -970,9 +1134,40 @@
             value: this.leaderId,
             onChange: function(id) { self.leaderId = String(id || ''); self.renderStockPoints(); }
         });
-        var sleeveSel = this.refSelect('atex-co-nom-sleeve', this.sleeves, 'Диаметр втулки', {
-            value: this.sleeveId,
-            onChange: function(id) { self.sleeveId = String(id || ''); self.renderStockPoints(); }
+        // #4804 п.1: втулка задаётся ДИАМЕТРОМ и МАТЕРИАЛОМ, а не выбором одной из
+        // длинных записей справочника. У 0,5″ материал не спрашиваем — он всегда картон,
+        // и поле материала скрывается.
+        var inchesSel = el('select', { class: 'atex-co-input' }, [
+            el('option', { value: '', text: '— не указано —' })
+        ].concat(core.sleeveInchesOptions().map(function(o) {
+            return el('option', { value: o.value, text: o.label });
+        })));
+        inchesSel.value = this.sleeveInches || '';
+        var sleeveMatSel = this.refSelect('atex-co-nom-sleeve-mat', this.sleeveMaterials, 'Материал втулки', {
+            value: this.sleeveMaterialId,
+            onChange: function(id) { self.sleeveMaterialId = String(id || ''); self.renderStockPoints(); }
+        });
+        var sleeveMatField = el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Материал втулки' }), sleeveMatSel.node
+        ]);
+        // У 0,5″ материала не бывает выбора — показываем, что он картонный.
+        var cardboardNote = el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Материал втулки' }),
+            el('div', { class: 'atex-co-readonly', text: core.CARDBOARD_LABEL })
+        ]);
+        function syncSleeveMaterial() {
+            var needs = core.sleeveNeedsMaterial(self.sleeveInches);
+            var chosen = String(self.sleeveInches || '') !== '';
+            sleeveMatField.style.display = needs ? '' : 'none';
+            cardboardNote.style.display = (chosen && !needs) ? '' : 'none';
+        }
+        inchesSel.addEventListener('change', function() {
+            self.sleeveInches = inchesSel.value;
+            // Диаметр без выбора материала (0,5″) — прежний выбор материала не должен
+            // тихо участвовать в подборе.
+            if (!core.sleeveNeedsMaterial(self.sleeveInches)) self.sleeveMaterialId = '';
+            syncSleeveMaterial();
+            self.renderStockPoints();
         });
         var windingSel = el('select', { class: 'atex-co-input' }, [
             el('option', { value: '', text: '— не указано —' }),
@@ -988,8 +1183,11 @@
             el('label', { class: 'atex-co-label', text: 'Лидер' }), leaderSel.node
         ]));
         form.appendChild(el('div', { class: 'atex-co-field' }, [
-            el('label', { class: 'atex-co-label', text: 'Диаметр втулки' }), sleeveSel.node
+            el('label', { class: 'atex-co-label', text: 'Диаметр втулки' }), inchesSel
         ]));
+        form.appendChild(sleeveMatField);
+        form.appendChild(cardboardNote);
+        syncSleeveMaterial();
         form.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Тип намотки' }), windingSel
         ]));
@@ -1141,7 +1339,9 @@
             material: { id: this.materialId, label: mat ? mat.label : '' },
             length: this.lengthInput ? this.lengthInput.value : this.lengthValue,
             winding: this.windingValue,
-            sleeve: refChoice(this.sleeves, this.sleeveId),
+            // #4804 п.1: втулка сверяется парой «диаметр + материал» по записи справочника.
+            sleeveChoice: this.sleeveChoice(),
+            sleeveById: this.sleeveById(),
             leader: refChoice(this.leaders, this.leaderId)
         });
         if (!points.length) {
@@ -1179,6 +1379,37 @@
             if (p.leader && p.leader.label) parts.push('лидер ' + p.leader.label);
             return parts.join(' · ') || 'любая номенклатура';
         }
+    };
+
+    // #4804 п.1: выбор втулки как пара «диаметр + материал» — в этом виде его понимают
+    // и подбор точек запаса, и подстановка втулки в позицию заказа.
+    AtexCutOptimizer.prototype.sleeveChoice = function() {
+        return { inches: this.sleeveInches || '', materialId: this.sleeveMaterialId || '' };
+    };
+    // Выбор втулки строкой — «1″ · Пластик чёрная» / «0,5″ · Картон»; не выбран — прочерк.
+    AtexCutOptimizer.prototype.sleeveChoiceLabel = function() {
+        var inches = String(this.sleeveInches || '');
+        if (!inches) return '— не указана —';
+        var opt = core.sleeveInchesOptions().filter(function(o) { return o.value === inches; })[0];
+        var label = opt ? opt.label : inches;
+        if (!core.sleeveNeedsMaterial(inches)) return label + ' · ' + core.CARDBOARD_LABEL;
+        var mat = (this.sleeveMaterials || []).filter(function(m) {
+            return String(m.id) === String(this.sleeveMaterialId || '');
+        }, this)[0];
+        return label + (mat ? ' · ' + mat.label : ' · материал не выбран');
+    };
+    // Записи справочника «Диаметр втулки» по id — чтобы у точки запаса прочитать
+    // диаметр и материал той втулки, на которую она ссылается.
+    AtexCutOptimizer.prototype.sleeveById = function() {
+        var map = {};
+        (this.sleeves || []).forEach(function(rec) { map[String(rec.id)] = rec; });
+        return map;
+    };
+    // Запись справочника под ПОЛОСУ этой ширины (готовая на неё → метровая → нет).
+    AtexCutOptimizer.prototype.sleeveForWidth = function(width) {
+        var choice = this.sleeveChoice();
+        choice.width = width;
+        return core.resolveSleeve(this.sleeves, choice);
     };
 
     // #4779: положить ширину точки запаса в желаемые рулоны. Количество — её
@@ -1318,8 +1549,9 @@
         view.appendChild(head);
 
         if (!p.proportionKept) {
+            // #4804 п.4: набор шире джамбо — количества уменьшены, чтобы влезть.
             view.appendChild(el('div', { class: 'atex-co-note',
-                text: 'Заданный набор шире джамбо — пропорции желаемых количеств сохранить нельзя; ширина набита максимально плотно.' }));
+                text: 'Заданный набор шире входа — количества уменьшены, чтобы уместиться в ширину; пропорция желаемых количеств не сохранена.' }));
         }
         if (p.overflow && p.overflow.length) {
             view.appendChild(el('div', { class: 'atex-co-note',
@@ -1331,7 +1563,7 @@
         view.appendChild(this.renderTable(p));
     };
 
-    // Несколько карт раскроя (по одной на ширину, объединённые ради отхода).
+    // #4804 п.2: единственная карта раскроя — все ширины на ней.
     AtexCutOptimizer.prototype.renderMaps = function(p) {
         var wrap = el('div', { class: 'atex-co-maps' });
         // #3597: допуск только из Вида сырья (this.tolValue), не редактируется. Пусто/0 → 21 мм.
@@ -1341,7 +1573,8 @@
             var card = el('div', { class: 'atex-co-map' });
             var widthsLabel = m.pattern.map(function(s) { return s.width + '×' + s.knives; }).join(' + ');
             card.appendChild(el('div', { class: 'atex-co-bar-caption' }, [
-                el('span', { class: 'atex-co-map-title', text: 'Карта ' + m.index + ' · ' + widthsLabel }),
+                // #4804 п.2: карта одна — нумерации «Карта 1»/«Карта 2» больше нет.
+                el('span', { class: 'atex-co-map-title', text: 'Карта раскроя · ' + widthsLabel }),
                 el('span', { class: 'atex-co-bar-caption-used',
                     text: m.passes + (m.passes === 1 ? ' резка' : ' резок') + ' · занято ' + m.usedWidth + ' мм' })
             ]));
@@ -1431,7 +1664,7 @@
         ]);
         summary.appendChild(metric('Итого рулонов', rolls, true));
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
-        summary.appendChild(metric('Карт раскроя', p.mapCount));
+        // #4804 п.2: метрики «Карт раскроя» нет — карта всегда одна.
         summary.appendChild(metric('Всего резок', p.totalPasses));
         // #3744: общие минуты планирования резки в трёх единицах (минуты/часы/дни):
         // единожды настройка 45 мин + «Всего резок» × время намотки рулона (нормы
@@ -1529,14 +1762,16 @@
         modal.appendChild(newOrderBox);
 
         // Поля позиций (нужны всегда — их нет в калькуляторе).
-        var sleeveSel = this.refSelect('atex-co-sleeve', this.sleeves, 'Диаметр втулки', { value: this.sleeveId });
+        // #4804 п.1: втулка берётся парой «диаметр + материал» из формы; КАЖДОЙ позиции
+        // подбирается своя запись справочника — под ширину её полосы.
+        var sleeveNote = el('div', { class: 'atex-co-readonly', text: this.sleeveChoiceLabel() });
         var windingSel = el('select', { class: 'atex-co-input' }, [
             el('option', { value: '', text: '— не указано —' }),
             el('option', { value: 'IN', text: 'IN (внутрь)' }),
             el('option', { value: 'OUT', text: 'OUT (наружу)' })
         ]);
         windingSel.value = this.windingValue || '';
-        modal.appendChild(field('Диаметр втулки', sleeveSel.node));
+        modal.appendChild(field('Втулка', sleeveNote));
         modal.appendChild(field('Тип намотки', windingSel));
 
         var msg = el('div', { class: 'atex-co-modal-msg' });
@@ -1574,7 +1809,6 @@
         submitBtn.addEventListener('click', function() {
             var number = String(numberInput.value).trim();
             if (!number) { msg.textContent = 'Укажите номер заказа.'; msg.className = 'atex-co-modal-msg is-error'; return; }
-            var sleeveId = sleeveSel.value();
             submitBtn.disabled = cancelBtn.disabled = true;
             msg.className = 'atex-co-modal-msg';
             msg.textContent = 'Запись…';
@@ -1583,7 +1817,6 @@
                 existing: orderByNumber(number),
                 clientId: clientSel.value(),
                 lead: leadSel.value(),
-                sleeveId: sleeveId,
                 winding: windingSel.value
             }).then(function(res) {
                 close();
@@ -1675,7 +1908,10 @@
                     put(fields, posMeta, POSITION_REQ.raw, self.materialId);
                     put(fields, posMeta, POSITION_REQ.width, orderWidth);
                     if (rollLength > 0) put(fields, posMeta, POSITION_REQ.length, rollLength);
-                    put(fields, posMeta, POSITION_REQ.sleeve, opts.sleeveId);
+                    // #4804 п.1: втулка — под ширину ИМЕННО ЭТОЙ полосы (готовая на неё,
+                    // иначе метровая). Подходящей нет — поле оставляем пустым, чужую не пишем.
+                    var sleeve = self.sleeveForWidth(r.actualWidth);
+                    put(fields, posMeta, POSITION_REQ.sleeve, sleeve ? sleeve.id : '');
                     put(fields, posMeta, POSITION_REQ.winding, normalizeWinding(opts.winding));
                     put(fields, posMeta, POSITION_REQ.lead, opts.lead);  // #3592: лидер позиции (ссылка на «Лидер» 1132)
                     put(fields, posMeta, POSITION_REQ.status, DEFAULT_POSITION_STATUS);
