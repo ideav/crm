@@ -166,12 +166,12 @@ var todayISO = core.todayISO();
     inst.selectedSlitterId = '1277';
     navbarSlot.childNodes = [];
     inst.renderWorkspaceTitle();
-    var text = navbarSlot.textContent;
-    assert(text.indexOf('23.08.2026') !== -1, '#4808: шапка показывает день из адреса');
-    assert(text.indexOf('23.08.2026') !== -1 && text.replace('23.08.2026', '').indexOf('Станок 1') !== -1,
-        '#4808: станок в шапке остался на месте');
-    assert(text.length > ('Планшет №3' + '23.08.2026' + 'Станок 1').length + 4,
-        '#4808: в шапке есть пометка о подменённом дне');
+    // Отрисованная шапка (не исходник): что реально увидит оператор.
+    var rendered = navbarSlot.textContent;
+    assert(rendered.indexOf('23.08.2026') !== -1, '#4808: шапка показывает день из адреса');
+    assert(rendered.indexOf('Станок 1') !== -1, '#4808: станок в шапке остался на месте');
+    assert(rendered.indexOf('Планшет №3') !== -1, '#4808: имя планшета в шапке осталось');
+    assert(rendered.indexOf('из адреса') !== -1, '#4808: в шапке есть пометка о подменённом дне');
 })();
 
 console.log('\n' + passed + '/' + total + ' проверок прошли');
