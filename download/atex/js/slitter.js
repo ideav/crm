@@ -284,6 +284,43 @@
         return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
     }
 
+    // #4808: ВРЕМЕННЫЙ тестовый вход — день пульта из строки запроса, `slitter?date=20260823`.
+    // С #4783 п.4 выбора дня в пульте нет: он всегда показывает текущий календарный день, а на
+    // стенде нужно открыть тот день, на который разложены тестовые задания.
+    //
+    // Подменяется ТОЛЬКО показываемый день (какие задания видно). Отметки времени, уходящие в
+    // базу, по-прежнему берутся из реального «сейчас» (eventDateTime, #4348) — иначе параметр в
+    // адресе испортил бы «Начато»/«Закончено» и хронологию событий смены.
+    //
+    // Принимаем YYYYMMDD (формат из тикета) и ISO YYYY-MM-DD — тот же день, записанный иначе.
+    // Мусор и НЕСУЩЕСТВУЮЩАЯ дата (20260231) дают '' — пульт молча остаётся на сегодня, а не
+    // «переезжает» в соседний месяц, как это сделал бы конструктор Date.
+    // Вход — location.search или полный адрес. Чистая (покрыта тестом).
+    function dateFromQuery(search) {
+        var s = String(search == null ? '' : search);
+        var qm = s.indexOf('?');
+        if (qm >= 0) s = s.slice(qm + 1);
+        var raw = '';
+        s.split('&').forEach(function(pair) {
+            if (!pair) return;
+            var eq = pair.indexOf('=');
+            var key = eq >= 0 ? pair.slice(0, eq) : pair;
+            if (key !== 'date') return;
+            var val = eq >= 0 ? pair.slice(eq + 1) : '';
+            try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (e) {}
+            raw = String(val).trim();
+        });
+        if (!raw) return '';
+        var m = raw.match(/^(\d{4})-?(\d{2})-?(\d{2})$/);
+        if (!m) return '';
+        var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+        if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+        // Сверка с календарём: 31 февраля Date молча превратил бы в 3 марта.
+        var probe = new Date(y, mo - 1, d);
+        if (probe.getFullYear() !== y || probe.getMonth() !== mo - 1 || probe.getDate() !== d) return '';
+        return y + '-' + pad2(mo) + '-' + pad2(d);
+    }
+
     // Календарный ключ YYYYMMDD: ISO, ДД.ММ.ГГГГ/ДД/ММ/ГГГГ, unix seconds/ms.
     function dateKey(value) {
         var s = String(value == null ? '' : value).trim();
@@ -723,9 +760,13 @@
     // «{имя планшета} · {дата} · {станок}». Дата и станок ушли из формы сюда, поэтому
     // пустой станок называет себя сам («Станок не выбран») — иначе подпись молчит о том,
     // почему список заданий пуст. Незаданные части (нет имени планшета) опускаются.
-    function workspaceTitleParts(padName, dateISO, slitterLabel) {
+    // #4808: dateOverridden — день задан адресом (`?date=`), а не взят из календаря. Такой день
+    // ПОМЕЧАЕТСЯ прямо в шапке: пульт с чужим днём выглядит как обычный, и перепутать тестовый
+    // день с настоящим — значит вести смену не по тем заданиям.
+    function workspaceTitleParts(padName, dateISO, slitterLabel, dateOverridden) {
         var pad = String(padName == null ? '' : padName).trim();
         var day = formatDayISO(dateISO);
+        if (day && dateOverridden) day += ' (день из адреса)';
         var slitter = String(slitterLabel == null ? '' : slitterLabel).trim() || 'Станок не выбран';
         return [pad, day, slitter].filter(function(part) { return !!part; });
     }
@@ -1086,6 +1127,7 @@
         isPauseStatus: isPauseStatus,
         isActiveBatch: isActiveBatch,
         todayISO: todayISO,
+        dateFromQuery: dateFromQuery,      // #4808: день пульта из адреса (временный тестовый вход)
         dateKey: dateKey,
         prepareCutQueue: prepareCutQueue,
         nextFutureCut: nextFutureCut,   // #4332 п.4: следующее задание будущих дней
@@ -1217,7 +1259,12 @@
         // «Планшете» станок записан НАЗВАНИЕМ, его сведёт validateStoredSlitter, когда
         // справочник загрузится.
         this.selectedSlitterId = this.padSlitterRefId() || this.loadStoredSlitter();
-        this.selectedDate = core.todayISO();
+        // #4808: день пульта можно задать адресом — `slitter?date=20260823` (временный
+        // тестовый вход). Негодное значение подменой не считается: остаёмся на сегодня.
+        var queryDate = core.dateFromQuery(
+            (typeof window !== 'undefined' && window.location && window.location.search) || '');
+        this.dateFromQuery = !!queryDate;
+        this.selectedDate = queryDate || core.todayISO();
         // #3646: this.includeDone убран — завершённые задания видны всегда.
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
@@ -2002,7 +2049,8 @@
         if (!slot) return;
         slot.innerHTML = '';
         slot.classList.add('atex-sl-nav');
-        var parts = core.workspaceTitleParts(this.padName(), this.selectedDate, this.selectedSlitterLabel());
+        var parts = core.workspaceTitleParts(this.padName(), this.selectedDate, this.selectedSlitterLabel(),
+            this.dateFromQuery);   // #4808: день из адреса помечается в шапке
         parts.forEach(function(part, idx) {
             var last = idx === parts.length - 1;   // станок — всегда последняя часть
             if (idx) slot.appendChild(el('span', { class: 'atex-sl-nav-sep', text: '·' }));
