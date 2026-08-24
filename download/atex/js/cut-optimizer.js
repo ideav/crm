@@ -471,6 +471,39 @@
         return base;
     }
 
+    // ── #4811: лидеры калькулятора ───────────────────────────────────────────────────
+    // Справочник «Лидер» (1132) держит семь записей, но менеджеру в расчёте резки нужны
+    // ЧЕТЫРЕ (решение заказчика): три своих и клиентский. Список захардкожен, а вот ID
+    // записей — НЕТ: свои лидеры сводятся со справочником ПО ПОДПИСИ, как и все прочие
+    // сущности рабочего места (WORKSPACE_DEVELOPMENT_GUIDE.md, раздел 3). Пересборка базы
+    // такой код переживает, а появись в справочнике запись «Клиентский» — она подхватится
+    // сама, без правки кода.
+    var CLIENT_LEADER = 'Клиентский';
+    var OPTIMIZER_LEADERS = ['MONOCHROME', 'MONOCHROME ZNAK', 'Прозрачный', CLIENT_LEADER];
+
+    // Лидеры калькулятора как опции выбора: подпись — она же значение (id записи
+    // справочника у «Клиентского» отсутствует, поэтому ключом служит подпись).
+    function optimizerLeaders() {
+        return OPTIMIZER_LEADERS.map(function(label) {
+            return { id: label, label: label, client: label === CLIENT_LEADER };
+        });
+    }
+
+    // Клиентский лидер — лидер ЗАКАЗЧИКА: записи в справочнике у него нет, и точек запаса
+    // под него не бывает (нарезать впрок под чужой лидер нечего).
+    function isClientLeader(label) {
+        return normText(label) === normText(CLIENT_LEADER);
+    }
+
+    // Запись справочника «Лидер» под выбранную подпись; нет такой (или выбран клиентский)
+    // → null. Чужую запись молча не подставляем.
+    function resolveLeader(leaders, label) {
+        var wanted = normText(label);
+        if (!wanted || isClientLeader(label)) return null;
+        var found = (leaders || []).filter(function(rec) { return normText(rec && rec.label) === wanted; })[0];
+        return found || null;
+    }
+
     // ── #4804 п.1: втулка задаётся ДИАМЕТРОМ и МАТЕРИАЛОМ ────────────────────────────
     // Раньше оператор выбирал запись справочника «Диаметр втулки» (8188) целиком —
     // список длинных названий, в которых диаметр, материал и ширина смешаны. Теперь
@@ -708,6 +741,11 @@
         lengthPresets: LENGTH_PRESETS,            // #4779: стандартные длины рулона
         // #4804 п.1: втулка выбирается диаметром и материалом, запись справочника
         // подбирается под ширину полосы.
+        // #4811: четыре лидера калькулятора; свои сводятся со справочником по подписи.
+        CLIENT_LEADER: CLIENT_LEADER,
+        optimizerLeaders: optimizerLeaders,
+        isClientLeader: isClientLeader,
+        resolveLeader: resolveLeader,
         CARDBOARD_LABEL: CARDBOARD_LABEL,
         sleeveInchesOptions: sleeveInchesOptions,
         sleeveNeedsMaterial: sleeveNeedsMaterial,
@@ -816,7 +854,9 @@
         this.batches = [];        // [{ id, no, materialId, remainderM2, active, … }]
         this.rows = [{ width: '', qty: '1' }]; // желаемые полосы (UI-состояние, #4779 — их снова несколько)
         // #4779: параметры номенклатуры, по которым подбираются точки запаса.
-        this.leaderId = '';
+        // #4811: лидер выбирается из ЧЕТЫРЁХ захардкоженных, поэтому состояние — ПОДПИСЬ,
+        // а не id записи: у «Клиентского» записи в справочнике нет.
+        this.leaderLabel = '';
         // #4804: втулка задаётся диаметром и материалом; конкретная запись справочника
         // подбирается под ширину полосы (core.resolveSleeve).
         this.sleeveInches = '';
@@ -1130,9 +1170,10 @@
         // #4779: после длины — параметры номенклатуры (Лидер, Диаметр втулки, Тип
         // намотки). На геометрию раскроя они не влияют: по ним подбираются точки
         // запаса («Максимальный запас») — ширины, которые целесообразно нарезать впрок.
-        var leaderSel = this.refSelect('atex-co-nom-lead', this.leaders, 'Лидер', {
-            value: this.leaderId,
-            onChange: function(id) { self.leaderId = String(id || ''); self.renderStockPoints(); }
+        // #4811: не весь справочник, а четыре лидера менеджера. Значение опции — подпись.
+        var leaderSel = this.refSelect('atex-co-nom-lead', core.optimizerLeaders(), 'Лидер', {
+            value: this.leaderLabel,
+            onChange: function(label) { self.leaderLabel = String(label || ''); self.renderStockPoints(); }
         });
         // #4804 п.1: втулка задаётся ДИАМЕТРОМ и МАТЕРИАЛОМ, а не выбором одной из
         // длинных записей справочника. У 0,5″ материал не спрашиваем — он всегда картон,
@@ -1330,6 +1371,13 @@
             hint('Справочник «Максимальный запас» пуст — нарезать впрок нечего.');
             return;
         }
+        // #4811: у КЛИЕНТСКОГО лидера точек запаса не бывает — нарезать впрок под чужой
+        // лидер нечего. Не «ничего не нашлось», а «искать нечего»: говорим об этом прямо,
+        // иначе пустая панель читается как сбой подбора.
+        if (core.isClientLeader(this.leaderLabel)) {
+            hint('Лидер клиентский — точек запаса под него не бывает: впрок такое не режут.');
+            return;
+        }
         if (!this.materialId) {
             hint('Выберите вид сырья, чтобы увидеть точки запаса.');
             return;
@@ -1342,7 +1390,8 @@
             // #4804 п.1: втулка сверяется парой «диаметр + материал» по записи справочника.
             sleeveChoice: this.sleeveChoice(),
             sleeveById: this.sleeveById(),
-            leader: refChoice(this.leaders, this.leaderId)
+            // #4811: выбран лидер ПОДПИСЬЮ; сверяем записью справочника, если она есть.
+            leader: this.leaderChoice()
         });
         if (!points.length) {
             hint('Нет точек запаса под выбранные параметры (сырьё, длина, лидер, втулка, намотка).');
@@ -1379,6 +1428,21 @@
             if (p.leader && p.leader.label) parts.push('лидер ' + p.leader.label);
             return parts.join(' · ') || 'любая номенклатура';
         }
+    };
+
+    // #4811: выбранный лидер в виде { id, label } для сверки с точкой запаса. Своя запись
+    // справочника нашлась — сверка пойдёт по id (переживает переименование), не нашлась —
+    // по подписи. Лидер не выбран — пусто, и по нему не фильтруем (прежнее поведение #3391).
+    AtexCutOptimizer.prototype.leaderChoice = function() {
+        var label = String(this.leaderLabel || '');
+        if (!label) return { id: '', label: '' };
+        var rec = core.resolveLeader(this.leaders, label);
+        return { id: rec ? rec.id : '', label: label };
+    };
+    // Запись справочника «Лидер» под выбранную подпись; у «Клиентского» её нет → ''.
+    AtexCutOptimizer.prototype.leaderRefId = function() {
+        var rec = core.resolveLeader(this.leaders, this.leaderLabel);
+        return rec ? rec.id : '';
     };
 
     // #4804 п.1: выбор втулки как пара «диаметр + материал» — в этом виде его понимают
@@ -1754,7 +1818,7 @@
         var clientSel = this.refSelect('atex-co-client', this.clients, 'Клиент (для нового заказа)');
         // #3592: «Лидер» — выбор из справочника «Лидер» (table/1132), а не свободный текст.
         // #4779: значения номенклатуры (лидер/втулка/намотка) подставляются из формы.
-        var leadSel = this.refSelect('atex-co-lead', this.leaders, 'Лидер', { value: this.leaderId });
+        var leadSel = this.refSelect('atex-co-lead', core.optimizerLeaders(), 'Лидер', { value: this.leaderLabel });
         var newOrderBox = el('div', { class: 'atex-co-modal-neworder' }, [
             field('Клиент', clientSel.node),
             field('Лидер', leadSel.node)
@@ -1816,7 +1880,10 @@
                 number: number,
                 existing: orderByNumber(number),
                 clientId: clientSel.value(),
-                lead: leadSel.value(),
+                // #4811: в модалке лидер выбирается ПОДПИСЬЮ (их четыре), а «Лидер» заказа и
+                // позиции — ССЫЛКА на справочник 1132. Пишем id найденной записи; у
+                // «Клиентского» её нет — тогда поле остаётся пустым, чужую не подставляем.
+                lead: (core.resolveLeader(self.leaders, leadSel.value()) || {}).id || '',
                 winding: windingSel.value
             }).then(function(res) {
                 close();
