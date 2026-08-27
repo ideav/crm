@@ -39,6 +39,25 @@
     var DEFAULT_TOKENS_KEY = 'токены';            // совпавшие токены (числитель точности)
     var DEFAULT_TMA_KEY = 'ТММ';                  // флаг точного совпадения артикула
 
+    // --- Конфиг категории номенклатуры (issue #4817, ТЗ #4816 §3.8) ----------
+    //
+    // Что зависит от товарной категории (для картриджей обязательны марка+модель, для метизов —
+    // другой набор), вынесено из кода в явный конфиг. Приоритет источников (кто кого перекрывает):
+    //   встроенный дефолт (ниже) ← data-match-config в шаблоне РМ ← строка 'config' таблицы
+    //   «Настройка сопоставления» базы — её правит партнёр в РМ настроек, сеет инсталлятор.
+    // Формат — snake_case JSON, один и тот же в дефолт-файле репо, в data-атрибуте и в таблице:
+    //   tma_weight         число 0..1 — доля вклада точного совпадения артикула в точность;
+    //   required_attributes список {rfp_key, sku_key} — ключи КОЛОНОК отчёта mass_match;
+    //                      обе стороны заданы и различаются → кандидат отбрасывается ДО скоринга.
+    // Отчёты остаются категорийно-нейтральными: специфика гейтится здесь, в JS-слое поверх
+    // отчёта — партнёр в редактор запросов не заходит (требование ТЗ 3.8 и DoD §5).
+    var SETTINGS_TABLE_NAME = 'Настройка сопоставления';
+    var SETTINGS_CONFIG_KEY = 'config';
+    var MATCH_CONFIG_DEFAULTS = {
+        tma_weight: 0.5,          // прежняя константа TMA_WEIGHT — теперь дефолт конфига
+        required_attributes: []   // по умолчанию гейта нет — поведение до #4817 сохранено
+    };
+
     var state = {
         root: null,
         db: '',
@@ -54,6 +73,7 @@
         skuArticleKey: DEFAULT_SKU_ARTICLE_KEY,
         tokensKey: DEFAULT_TOKENS_KEY,
         tmaKey: DEFAULT_TMA_KEY,
+        matchConfig: { tma_weight: MATCH_CONFIG_DEFAULTS.tma_weight, required_attributes: MATCH_CONFIG_DEFAULTS.required_attributes },
         names: {},
         fields: {},          // { rfpName, our, candidates, accuracy } -> { id, index }
         columns: [],
@@ -130,17 +150,19 @@
         return matchedLength;
     }
 
-    // Вес флага TMA в оценке точности (≈50%); остальное — текстовое совпадение токенов.
+    // Вес флага TMA в оценке точности по умолчанию (≈50%); настраивается конфигом категории
+    // (tma_weight, issue #4817) и передаётся в computeAccuracy пятым аргументом.
     var TMA_WEIGHT = 0.5;
 
     // Точность подбора в процентах — взвешенная сумма двух составляющих:
     //   • текстовое совпадение: длина склеенных совпавших токенов, делённая на полусумму
     //     длин «Наименование SKU» и «Наименование из RFP» (длины — по склеенным токенам);
-    //   • флаг ТММ (точное совпадение артикула): вес ≈50%.
+    //   • флаг ТММ (точное совпадение артикула): вес tmaWeight (по умолчанию ≈50%).
     // 100% — полное совпадение токенов И ТММ=1. 50% — только одно из двух. 0% — ни того, ни другого.
     // matchedTokens — список совпавших токенов из отчёта (колонка «токены»); если пуст,
     // совпадение считается пересечением токенов «Наименование из RFP» и «Наименование SKU».
-    function computeAccuracy(rfpName, skuName, matchedTokens, tmaFlag) {
+    // tmaWeight — вес ТММ из конфига категории (#4817); без аргумента — прежний дефолт 0.5.
+    function computeAccuracy(rfpName, skuName, matchedTokens, tmaFlag, tmaWeight) {
         var denom = (alnumLength(skuName) + alnumLength(rfpName)) / 2;
         var matchedLength = trimValue(matchedTokens)
             ? alnumLength(matchedTokens)
@@ -148,8 +170,88 @@
         var lengthScore = denom > 0 ? Math.min(1, matchedLength / denom) : 0;
         var tmaScore = trimValue(tmaFlag) === '1' ? 1 : 0;
 
-        var accuracy = TMA_WEIGHT * tmaScore + (1 - TMA_WEIGHT) * lengthScore;
+        var w = (typeof tmaWeight === 'number' && isFinite(tmaWeight))
+            ? Math.max(0, Math.min(1, tmaWeight))
+            : TMA_WEIGHT;
+        var accuracy = w * tmaScore + (1 - w) * lengthScore;
         return Math.max(0, Math.min(100, Math.round(accuracy * 100)));
+    }
+
+    // --- Конфиг категории: валидация, слияние, гейт (#4817) ------------------
+
+    // Ошибки схемы конфига (пустой список = валиден). Неизвестное поле — ошибка, а не молчание:
+    // опечатка в ключе (reqired_attributes) иначе теряла бы настройку без следа — партнёр
+    // без доступа к коду не понял бы, почему «вес не применяется».
+    function validateMatchingConfig(config) {
+        if (!config || typeof config !== 'object' || Array.isArray(config)) {
+            return ['конфиг должен быть JSON-объектом'];
+        }
+        var errors = [];
+        var known = { tma_weight: true, required_attributes: true };
+        Object.keys(config).forEach(function(key) {
+            if (!known[key]) errors.push('неизвестное поле «' + key + '» (проверьте опечатки)');
+        });
+        if (Object.prototype.hasOwnProperty.call(config, 'tma_weight')) {
+            var w = config.tma_weight;
+            if (typeof w !== 'number' || !isFinite(w) || w < 0 || w > 1) {
+                errors.push('tma_weight должен быть числом 0..1 (доля вклада точного совпадения артикула)');
+            }
+        }
+        if (Object.prototype.hasOwnProperty.call(config, 'required_attributes')) {
+            var attrs = config.required_attributes;
+            if (!Array.isArray(attrs)) {
+                errors.push('required_attributes должен быть списком');
+            } else {
+                attrs.forEach(function(attr, index) {
+                    var ok = attr && typeof attr === 'object' && !Array.isArray(attr) &&
+                        typeof attr.rfp_key === 'string' && attr.rfp_key.trim() &&
+                        typeof attr.sku_key === 'string' && attr.sku_key.trim();
+                    if (!ok) {
+                        errors.push('required_attributes[' + index + ']: нужны непустые строки rfp_key и sku_key (ключи колонок отчёта mass_match)');
+                    }
+                });
+            }
+        }
+        return errors;
+    }
+
+    // База + переопределение (ключ не задан в override — остаётся от базы). Всегда свежий
+    // объект: state.matchConfig нельзя делить ссылкой с дефолтом.
+    function mergeMatchingConfig(base, override) {
+        return {
+            tma_weight: (override && typeof override.tma_weight === 'number' && isFinite(override.tma_weight))
+                ? override.tma_weight
+                : base.tma_weight,
+            required_attributes: (override && Array.isArray(override.required_attributes))
+                ? override.required_attributes
+                : base.required_attributes
+        };
+    }
+
+    // Применить источник конфига к дефолтам: невалидный источник целиком отклоняется
+    // (атомарно, без частичного применения) с перечнем ошибок в консоль.
+    function applyConfig(override) {
+        if (override == null) return mergeMatchingConfig(MATCH_CONFIG_DEFAULTS, null);
+        var errors = validateMatchingConfig(override);
+        if (errors.length) {
+            console.error('[xcom-mass] конфиг сопоставления отклонён, работаю на дефолтах:\n  ' + errors.join('\n  '));
+            return mergeMatchingConfig(MATCH_CONFIG_DEFAULTS, null);
+        }
+        return mergeMatchingConfig(MATCH_CONFIG_DEFAULTS, override);
+    }
+
+    // Гейт обязательных атрибутов: строка отчёта проходит, если НИ ОДИН из настроенных
+    // атрибутов не «опровергнут» — обе колонки заданы и значения (без регистра/пробелов)
+    // различаются. Отсутствующая колонка или пустая сторона — не повод отбрасывать: отчёт
+    // без атрибуции не должен ломать подбор (null ≠ mismatch, грабля #4536).
+    function passesRequiredAttributes(row, attrs) {
+        if (!attrs || !attrs.length) return true;
+        for (var i = 0; i < attrs.length; i++) {
+            var rfp = normalizeName(row && row[attrs[i].rfp_key]);
+            var sku = normalizeName(row && row[attrs[i].sku_key]);
+            if (rfp && sku && rfp !== sku) return false;
+        }
+        return true;
     }
 
     // --- Метаданные таблицы RFP ---------------------------------------------
@@ -367,9 +469,16 @@
 
     // Из строк запроса собрать первый артикул (Наш артикул) и кандидатов (остальные).
     function pickMatches(rows) {
-        if (!rows.length) return { our: null, candidates: [], tokens: '', tma: '' };
+        // Гейт обязательных атрибутов (#4817): опровергнутые строки отбрасываются ДО выбора
+        // «нашего» — независимо от скоринга (кандидат с чужим брендом не становится ни «нашим»,
+        // ни кандидатом). Колонок атрибуции в отчёте нет — фильтр прозрачен, поведение прежнее.
+        var attrs = state.matchConfig && state.matchConfig.required_attributes;
+        var gated = (attrs && attrs.length)
+            ? rows.filter(function(row) { return passesRequiredAttributes(row, attrs); })
+            : rows;
+        if (!gated.length) return { our: null, candidates: [], tokens: '', tma: '' };
 
-        var first = rows[0];
+        var first = gated[0];
         var idKey = detectKey(first, state.skuIdKey, function(key) {
             return /id$/i.test(key) && normalizeName(key) !== normalizeName(state.rfpFilter);
         });
@@ -403,7 +512,7 @@
         // требования RFP): раньше она становилась «Наш артикул», our → null, и в строку RFP
         // писалась заглушка «0», хотя кандидаты были (issue #3534). Теперь её пропускаем:
         // «Наш артикул» = первый настоящий SKU, точность считаем по ЕГО токенам, а не по служебной строке.
-        var items = rows.map(toItem).filter(function(item) {
+        var items = gated.map(toItem).filter(function(item) {
             return item.id;
         });
         if (!items.length) return { our: null, candidates: [], tokens: '', tma: '' };
@@ -696,7 +805,10 @@
             if (picked && picked.our) {
                 record.our = picked.our;
                 record.candidates = picked.candidates;
-                record.accuracy = computeAccuracy(record.rfpName || record.label, picked.our.label, picked.tokens, picked.tma);
+                // Вес ТММ — из конфига категории (#4817): партнёр настраивает долю вклада
+                // точного совпадения артикула, не трогая код и запросы.
+                record.accuracy = computeAccuracy(record.rfpName || record.label, picked.our.label, picked.tokens, picked.tma,
+                    state.matchConfig.tma_weight);
             } else {
                 // нет совпадений (picked.our пуст) или ошибка отчёта (picked === null) —
                 // пишем заглушку «Наш артикул», иначе строка зависнет в пустом состоянии
@@ -938,6 +1050,52 @@
 
     // --- Инициализация -------------------------------------------------------
 
+    // Рантайм-слой конфига категории (#4817): строка 'config' таблицы «Настройка сопоставления»
+    // (её правит партнёр в РМ настроек, сеет инсталлятор шаблона). Таблицы нет — работаем на
+    // дефолтах и ГОВОРИМ об этом (паттерн #4059 у atex «Настройка»): рабочее место обязано жить
+    // на свежей базе до инсталлятора. Таблица ищется в общем списке метаданных ПО ИМЕНИ —
+    // числовой id в разных базах разный; data-settings-table задаёт id напрямую при необходимости.
+    function loadMatchingConfig() {
+        var metaUrl = '/' + encodePathSegment(state.db) + '/metadata';
+        return fetchJson(metaUrl).then(function(payload) {
+            var list = Array.isArray(payload) ? payload : [payload];
+            var overrideId = trimValue(state.root.getAttribute('data-settings-table'));
+            var table = null;
+            list.some(function(item) {
+                var names = [item && item.val, item && item.name, item && item.value];
+                var byName = names.some(function(n) {
+                    return normalizeName(n) === normalizeName(SETTINGS_TABLE_NAME);
+                });
+                var byId = overrideId && item && String(item.id) === overrideId;
+                if (byName || byId) { table = item; return true; }
+                return false;
+            });
+            if (!table || !table.id) {
+                console.warn('[xcom-mass] таблица «' + SETTINGS_TABLE_NAME + '» не найдена — конфиг категории на дефолтах (#4817)');
+                return;
+            }
+            var rowsUrl = '/' + encodePathSegment(state.db) + '/object/' + encodePathSegment(table.id) + '/?JSON_OBJ&LIMIT=0,20';
+            return fetchJson(rowsUrl).then(function(rows) {
+                (Array.isArray(rows) ? rows : []).some(function(rec) {
+                    var key = normalizeName(rec && rec.r && rec.r[0]);
+                    if (key !== SETTINGS_CONFIG_KEY) return false;
+                    var raw = rec.r && rec.r[1] != null ? String(rec.r[1]) : '';
+                    if (!raw.trim()) return false;
+                    try {
+                        state.matchConfig = applyConfig(JSON.parse(raw));
+                    } catch (error) {
+                        console.error('[xcom-mass] строка «config» в «' + SETTINGS_TABLE_NAME + '» не JSON (' +
+                            error.message + ') — работаю на дефолтах');
+                    }
+                    return true;
+                });
+            });
+        }).catch(function(error) {
+            console.warn('[xcom-mass] конфиг категории не загружен (' +
+                (error && error.message ? error.message : error) + ') — работаю на дефолтах');
+        });
+    }
+
     function loadMetadata() {
         renderMessage('Загрузка метаданных таблицы RFP…', 'loading');
         return fetchJson(buildMetadataUrl()).then(function(payload) {
@@ -1060,6 +1218,17 @@
             candidates: str('data-candidates-name', DEFAULT_CANDIDATES_NAME),
             accuracy: str('data-accuracy-name', DEFAULT_ACCURACY_NAME)
         };
+
+        // Конфиг категории (#4817), слой шаблона: data-match-config (JSON) поверх дефолтов.
+        // Рантайм-слой таблицы «Настройка сопоставления» догружает loadMatchingConfig.
+        var inlineRaw = trimValue(root.getAttribute('data-match-config'));
+        if (inlineRaw) {
+            try {
+                state.matchConfig = applyConfig(JSON.parse(inlineRaw));
+            } catch (error) {
+                console.error('[xcom-mass] data-match-config не JSON (' + error.message + ') — дефолты');
+            }
+        }
     }
 
     function init() {
@@ -1074,13 +1243,17 @@
         if (auto) auto.checked = state.autoConcurrency;
         applyAutoConcurrency();   // селектор активен только в ручном режиме + плитка «потоков»
         updateBatchHint();
-        loadMetadata();
+        // Конфиг категории — до первой пачки: гейт и вес нужны processRecord'у (#4817).
+        loadMatchingConfig().then(loadMetadata);
     }
 
     window.XcomMassMatchWorkspace = {
         tokenize: tokenize,
         alnumLength: alnumLength,
         computeAccuracy: computeAccuracy,
+        validateMatchingConfig: validateMatchingConfig,
+        mergeMatchingConfig: mergeMatchingConfig,
+        passesRequiredAttributes: passesRequiredAttributes,
         buildColumns: buildColumns,
         resolveMetadata: resolveMetadata,
         normalizeRows: normalizeRows,

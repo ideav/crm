@@ -5,18 +5,20 @@ const assert = require('assert');
 
 const root = path.join(__dirname, '..');
 // #3588/PR#3590: рабочее место переименовано match.html → matching.html.
+// #4817: активы ручного места перенесены из глобальных /js//css/ под download/xcom/ —
+// шаблон самодостаточен для базы с любым именем (как у mass_match и atex).
 const templatePath = path.join(root, 'templates', 'xcom', 'matching.html');
-const scriptPath = path.join(root, 'js', 'xcom-match.js');
-const stylePath = path.join(root, 'css', 'xcom-match.css');
+const scriptPath = path.join(root, 'download', 'xcom', 'js', 'xcom-match.js');
+const stylePath = path.join(root, 'download', 'xcom', 'css', 'xcom-match.css');
 const updateConfPath = path.join(root, 'update.conf');
 
 assert(fs.existsSync(templatePath), 'templates/xcom/match.html exists');
-assert(fs.existsSync(scriptPath), 'js/xcom-match.js exists');
-assert(fs.existsSync(stylePath), 'css/xcom-match.css exists');
+assert(fs.existsSync(scriptPath), 'download/xcom/js/xcom-match.js exists');
+assert(fs.existsSync(stylePath), 'download/xcom/css/xcom-match.css exists');
 
 const template = fs.readFileSync(templatePath, 'utf8');
-assert(template.includes('/css/xcom-match.css?0{_global_.version}'), 'template loads versioned CSS');
-assert(template.includes('/js/xcom-match.js?0{_global_.version}'), 'template loads versioned JS');
+assert(template.includes('/download/{_global_.z}/css/xcom-match.css?1{_global_.version}'), 'template loads versioned CSS from download');
+assert(template.includes('/download/{_global_.z}/js/xcom-match.js?1{_global_.version}'), 'template loads versioned JS from download');
 assert(!/<script\b(?![^>]*\bsrc=)/i.test(template), 'template does not contain inline scripts');
 assert(!/<style\b/i.test(template), 'template does not contain inline styles');
 
