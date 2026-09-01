@@ -172,7 +172,7 @@ assertEqual({ passes: plan9.totalPasses, wasteMm: plan9.totalWasteWidth, areaM2:
 assertEqual(core.widthPercent(60, 880, 880), 6.818, 'widthPercent scales to input width');
 assertEqual(core.widthPercent(50, 0, 0), 0, 'widthPercent is 0 when scale is 0');
 
-// ── #3744: оценка времени планирования резки (нормы метража WIND_* + настройка 45 мин) ──
+// ── #3744: оценка времени резки (нормы метража WIND_*) ──
 var ot = { WIND_300: 1.2, WIND_600: 3, WIND_900: 5, KNIFE: 30, MATERIAL_WINDING: 15 };
 var wp = core.windingPointsFromTimes(ot);
 assertEqual(wp, [{ m: 300, min: 1.2 }, { m: 600, min: 3 }, { m: 900, min: 5 }],
@@ -181,10 +181,11 @@ assertEqual(core.windingMinutes(600, wp), 3, 'windingMinutes hits an exact norm 
 assertEqual(core.windingMinutes(450, wp), 2.1, 'windingMinutes interpolates between 300 and 600');
 assertEqual(core.windingMinutes(150, wp), 0.6, 'windingMinutes scales proportionally below the first point');
 assertEqual(core.windingMinutes(450, []), 0, 'windingMinutes with no norms → 0');
-// единожды настройка 45 + «Всего резок» × намотка рулона.
-assertEqual(core.planningMinutes(10, 450, wp), 66, 'planningMinutes = 45 + 10 × 2.1');
+// #4832: ТОЛЬКО намотка — «Всего резок» × намотка рулона, наладку (45 мин) в оценке нет.
+assertEqual(core.planningMinutes(10, 450, wp), 21, '#4832 planningMinutes = 10 × 2.1, без наладки');
+assertEqual(core.planningMinutes(1, 450, wp), 2.1, '#4832 одна резка 450 м → 2,1 мин (в тикете было 47 = 45 + 2)');
 assertEqual(core.planningMinutes(0, 450, wp), 0, 'planningMinutes is 0 when there are no cuts');
-assertEqual(core.planningMinutes(5, 450, []), 45, 'planningMinutes falls back to setup-only without norms');
+assertEqual(core.planningMinutes(5, 450, []), 0, '#4832 без норм → 0 (показчик честно покажет «—»), а не 45 мин наладки');
 // три единицы: минуты целые, часы/дни — 1 знак; день = 450 минут.
 assertEqual(core.planningTimeUnits(66), { minutes: 66, hours: 1.1, days: 0.1 },
     'planningTimeUnits splits minutes into minutes/hours/days (day = 450 min)');

@@ -112,13 +112,14 @@
     // #3573: допуск на отход по умолчанию (мм). Берётся из Вида сырья («Допуск, мм»),
     // а если у материала он не задан — действует это значение. По нему красится отход.
     var DEFAULT_TOLERANCE = 21;
-    // #3744: оценка времени планирования резки для менеджера. Таблица «Время операции,
+    // #3744: оценка времени резки для менеджера. Таблица «Время операции,
     // мин» — те же нормы метража WIND_<метры>, что использует production-planning.js
-    // (windingMinutes). Формула: единожды настройка SETUP_ONCE_MIN + «Всего резок» ×
-    // время намотки одного рулона. Перевод в дни — по MINUTES_PER_DAY рабочих минут.
+    // (windingMinutes). Формула: «Всего резок» × время намотки одного рулона.
+    // #4832: НАЛАДКУ/ПЕРЕНАЛАДКУ в оценке НЕ считаем («убирали это») — настройка
+    // станка забота плана, менеджеру важно время резки. Перевод в дни — по
+    // MINUTES_PER_DAY рабочих минут.
     var OP_TIMES_TABLE = 'Время операции, мин';
     var OP_TIMES_CODE_REQ = 'Код операции';
-    var SETUP_ONCE_MIN = 45;       // единожды: настройка/переналадка станка на резку
     var MINUTES_PER_DAY = 450;     // 1 рабочий день = 450 минут (для единицы «дни»)
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
@@ -624,13 +625,15 @@
         return round3(b.min + slope * (x - b.m));
     }
 
-    // #3744: общие минуты планирования резки = единожды настройка (SETUP_ONCE_MIN) + по
-    // каждой резке («Всего резок» = passes) время намотки одного рулона windingMinutes от
-    // длины рулона и норм WIND_*. Резок нет → 0. Норм нет → только настройка.
+    // #3744: общие минуты резки = по каждой резке («Всего резок» = passes) время намотки
+    // одного рулона windingMinutes от длины рулона и норм WIND_*. Резок нет → 0; норм
+    // нет → 0 (считать нечего — показчик покажет «—»). #4832: НАЛАДКУ в оценке не
+    // считаем (решение заказчика «убирали это»): 45 мин настройки станка — забота
+    // плана, в менеджерской оценке резки ей не место.
     function planningMinutes(passes, rollLength, windPoints) {
         var n = Math.max(0, Math.round(toNumber(passes)));
         if (n <= 0) return 0;
-        return round3(SETUP_ONCE_MIN + n * windingMinutes(rollLength, windPoints));
+        return round3(n * windingMinutes(rollLength, windPoints));
     }
 
     // #3744: минуты → три единицы для менеджера. Часы и дни — с одним знаком после
@@ -1744,15 +1747,22 @@
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
         // #4804 п.2: метрики «Карт раскроя» нет — карта всегда одна.
         summary.appendChild(metric('Всего резок', p.totalPasses));
-        // #3744: общие минуты планирования резки в трёх единицах (минуты/часы/дни):
-        // единожды настройка 45 мин + «Всего резок» × время намотки рулона (нормы
-        // метража WIND_* из «Время операции, мин», как в production-planning.js).
+        // #3744: общие минуты резки в трёх единицах (минуты/часы/дни): «Всего резок» ×
+        // время намотки рулона (нормы метража WIND_* из «Время операции, мин», как в
+        // production-planning.js). #4832: наладку в оценке не считаем (решение
+        // заказчика); норм нет или длина не задана — честное «—», а не «0 мин».
         var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(this.opTimes || {}));
-        var units = planningTimeUnits(planMins);
-        var timeVal = el('span', { class: 'atex-co-time' }, [
-            el('span', { class: 'atex-co-time-min', text: ruNum(units.minutes) + ' мин' }),
-            el('span', { class: 'atex-co-time-sub', text: ruNum(units.hours) + ' ч · ' + ruNum(units.days) + ' дн' })
-        ]);
+        var timeVal;
+        if (planMins > 0) {
+            var units = planningTimeUnits(planMins);
+            timeVal = el('span', { class: 'atex-co-time' }, [
+                el('span', { class: 'atex-co-time-min', text: ruNum(units.minutes) + ' мин' }),
+                el('span', { class: 'atex-co-time-sub', text: ruNum(units.hours) + ' ч · ' + ruNum(units.days) + ' дн' })
+            ]);
+        } else {
+            timeVal = el('span', { class: 'atex-co-time',
+                title: 'В «Время операции, мин» нет норм намотки WIND_* — время посчитать нельзя' }, ['—']);
+        }
         summary.appendChild(metric('Время на резку', timeVal, true));
         return summary;
 
