@@ -216,8 +216,10 @@ loaderCase(function() { return Promise.reject(new Error('403 Forbidden')); }).th
     assertEqual([c.shiftEventsError, c.notified, Object.keys(c.shiftClosedSlittersToday())],
         ['', [], ['2']],
         'нормальный ответ — ни ошибок, ни тостов, станок 2 закрыл смену');
-    assertEqual(c.paths.length === 1 && /FR_event_when=%3E03\.08\.2026/.test(c.paths[0]), true,
-        '#4596 журнал запрашивается ЗА СЕГОДНЯ (FR_event_when=>ДД.ММ.ГГГГ), одним запросом');
+    // #4833: окно журнала расширено до «сегодня + вчера» (станок, закрывший смену вчера
+    // вечером, для просроченных «не в смене»), по-прежнему ОДНИМ запросом.
+    assertEqual(c.paths.length === 1 && /FR_event_when=%3E02\.08\.2026/.test(c.paths[0]), true,
+        '#4596/#4833 журнал запрашивается ЗА СЕГОДНЯ И ВЧЕРА (FR_event_when=>ДД.ММ.ГГГГ), одним запросом');
     // Фильтр отдал пусто, а в журнале сегодняшние события ЕСТЬ — фильтр сломан, об этом орём
     // и работаем на полном списке (молчаливое «никто смену не закрывал» недопустимо).
     return loaderCase(function(path) {

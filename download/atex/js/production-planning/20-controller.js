@@ -110,6 +110,7 @@
         manualShiftFrozenDaysAhead: manualShiftFrozenDaysAhead,
         rowsToShiftEvents: rowsToShiftEvents,     // #4596: строки slitter_shift_events → события открытия/закрытия смены
         shiftClosedSlitters: shiftClosedSlitters, // #4596: станки, закрывшие смену в дне → { id: штамп закрытия }
+        shiftNotOpenSlitters: shiftNotOpenSlitters, // #4833: станки не в смене (последнее событие — «Конец смены»)
         dayIsOverForSlitter: dayIsOverForSlitter, // #4596: день для станка кончился (прошёл или смена закрыта)
         cutDoneRuns: cutDoneRuns,               // #4564: сделано проходов («Кол-во резок факт»); null = не знаем
         settleMoveScope: settleMoveScope,       // #4574: рамки пересборки после «Урегулировать»
@@ -875,15 +876,20 @@
     };
 
     // #4596: СОБЫТИЯ СМЕНЫ СТАНКОВ — из того же защищённого отчёта, что читает пульт слиттера
-    // (`report/slitter_shift_events`, #3674). Планированию из всего журнала нужен ровно один факт:
+    // (`report/slitter_shift_events`, #3674). Планированию из всего журнала нужны ровно два факта:
     // закрыл ли станок смену в текущем дне (`shiftClosedSlittersToday`) — тогда его недоделанные
-    // задания переносит «Урегулировать», не дожидаясь конца суток (issue #4596).
-    // БЕРЁМ ТОЛЬКО СЕГОДНЯШНИЙ ДЕНЬ — фильтром отчёта `FR_event_when=>ДД.ММ.ГГГГ` (открытый
-    // интервал: без оператора `>` фильтр по DATETIME понимается как точное совпадение и даёт 0
-    // строк). Иначе журнал качается целиком, а он растёт на сотню событий в день: у отчёта своего
-    // лимита нет и строки приходят СТАРЫМИ ВПЕРЁД, поэтому за лимитом запроса первым пропадёт
-    // именно сегодняшний день (#4371 — «нужен ЭКСТРЕМУМ, фильтруй до нужного среза»). Проверено на
-    // живой ateh 04.08.2026: `>03.08.2026` → 124 события того дня из 283 в журнале.
+    // задания переносит «Урегулировать», не дожидаясь конца суток (issue #4596); и не в смене ли
+    // станок сейчас — последнее событие «Конец смены» (`shiftNotOpenSlittersNow`, #4833), тогда
+    // начатое с неизвестным фактом у него можно двигать вслепую.
+    // БЕРЁМ СЕГОДНЯ И ВЧЕРА — фильтром отчёта `FR_event_when=>ДД.ММ.ГГГГ` (открытый интервал:
+    // без оператора `>` фильтр по DATETIME понимается как точное совпадение и даёт 0 строк).
+    // Иначе журнал качается целиком, а он растёт на сотню событий в день: у отчёта своего лимита
+    // нет и строки приходят СТАРЫМИ ВПЕРЁД, поэтому за лимитом запроса первым пропадёт именно
+    // сегодняшний день (#4371 — «нужен ЭКСТРЕМУМ, фильтруй до нужного среза»). Проверено на живой
+    // ateh 04.08.2026: `>03.08.2026` → 124 события того дня из 283 в журнале. Вчерашний день
+    // нужен для #4833: диспетчер разбирает просрочку утром, а смены станков закрылись вчера
+    // вечером — станок сейчас не в смене, работа не идёт. Простоявший закрытым дольше окна
+    // станок в карту не попадает — консервативно, «не двигаем».
     // Отчёт недоступен (ошибка сервера, у роли нет READ на объект «Запрос» — им авторизуется чтение
     // report/, грант на саму таблицу событий не нужен) — фича молчать не должна:
     // ЗАКРЫТИЕ СМЕН ПРОСТО НЕ БУДЕТ ВИДНО, и оператор об этом узнаёт (console.error + тост +
@@ -891,14 +897,15 @@
     AtexProductionPlanning.prototype.loadShiftEvents = function() {
         var self = this;
         var todayKey = planDateDayKey(controllerNowMs(this));
-        var today = formatDayKey(todayKey);   // ДД.ММ.ГГГГ — граница фильтра (сегодня 00:00)
+        var yesterday = formatDayKey(dayKeyFromOffset(controllerNowMs(this), -1));   // ДД.ММ.ГГГГ — граница фильтра (вчера 00:00)
         var base = 'report/slitter_shift_events?JSON_KV&LIMIT=0,' + SHIFT_EVENTS_LIMIT;
-        var path = today ? (base + '&FR_event_when=' + encodeURIComponent('>' + today)) : base;
+        var path = yesterday ? (base + '&FR_event_when=' + encodeURIComponent('>' + yesterday)) : base;
         this.shiftEvents = [];
         this.shiftEventsError = '';
         this._shiftClosedCache = null;
+        this._shiftNotOpenCache = null;
         return this.getJson(path).then(function(rows) {
-            self.applyShiftEventRows(rows, 'за сегодня');
+            self.applyShiftEventRows(rows, 'за сегодня и вчера');
             // ФИЛЬТР НЕ ДОЛЖЕН МОЛЧА СЪЕДАТЬ ЖУРНАЛ. Пусто бывает по делу (утром смен ещё не
             // открывали), но пусто бывает и от сломавшегося фильтра — а это уже «никто смену не
             // закрывал» сказанное как факт. Поэтому пустой ответ перепроверяем journalом целиком:
@@ -922,6 +929,7 @@
             self.shiftEvents = [];
             self.shiftEventsError = msg;
             self._shiftClosedCache = null;
+            self._shiftNotOpenCache = null;
             self.notify('Не удалось прочитать события смен — закрытые смены в «Отклонениях» учтены не будут', 'warning');
         });
     };
@@ -932,6 +940,7 @@
         var raw = (rows || []).length;
         this.shiftEvents = rowsToShiftEvents(rows || []);
         this._shiftClosedCache = null;
+        this._shiftNotOpenCache = null;
         // #4371: ответ РОВНО в лимит — журнал усечён, и свежих событий в нём может не быть вовсе.
         // Усечение обязано быть ВИДНЫМ, иначе «никто смену не закрывал» прозвучит как факт.
         if (raw >= SHIFT_EVENTS_LIMIT) {
@@ -966,6 +975,26 @@
         });
         var map = shiftClosedSlitters(this.shiftEvents || [], todayKey, { slitterIdByLabel: byLabel });
         this._shiftClosedCache = { key: todayKey, map: map };
+        return map;
+    };
+
+    // #4833: станки, НЕ В СМЕНЕ прямо сейчас → { slitterId: штамп последнего «Конца смены» }.
+    // Та же мерка «смена закрыта», что видит оператор в РМ Слиттер (#4332 п.2): последнее
+    // событие станка — «Конец смены», в каком дне оно записано — неважно (журнал читается за
+    // «сегодня + вчера», см. loadShiftEvents). Станка нет в карте — его смену никто не закрывал
+    // в окне журнала (или событий нет вовсе): работа может идти, начатое с неизвестным фактом
+    // не двигаем (#4381). Кэш на текущий день — как у shiftClosedSlittersToday.
+    AtexProductionPlanning.prototype.shiftNotOpenSlittersNow = function() {
+        var todayKey = planDateDayKey(controllerNowMs(this));
+        var cache = this._shiftNotOpenCache;
+        if (cache && cache.key === todayKey) return cache.map;
+        var byLabel = {};
+        (this.slitters || []).forEach(function(s) {
+            var label = String(s && s.label != null ? s.label : '').trim();
+            if (label !== '' && s.id != null) byLabel[label] = String(s.id);
+        });
+        var map = shiftNotOpenSlitters(this.shiftEvents || [], { slitterIdByLabel: byLabel });
+        this._shiftNotOpenCache = { key: todayKey, map: map };
         return map;
     };
 
@@ -4769,6 +4798,7 @@
     // #4596: note — строка под заголовком группы (для «Смена закрыта»: какие станки и когда её
     // закрыли). Показываем и у пустой группы: «смена закрыта, всё доделано» — тоже ответ.
     AtexProductionPlanning.prototype.renderDeviationGroup = function(title, list, kind, note) {
+        var self = this;
         var box = el('div', { class: 'atex-pp-dev-group atex-pp-dev-' + kind });
         box.appendChild(el('h3', { class: 'atex-pp-dev-group-title', text: title + ' — ' + list.length }));
         if (note) box.appendChild(el('p', { class: 'atex-pp-hint', text: note }));
@@ -4776,6 +4806,10 @@
             box.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
             return box;
         }
+        // #4833: у станка вне смены работа не идёт — начатое с неизвестным фактом уедет
+        // и из просрочки; это надо назвать в строке, а не молча поменять решение.
+        var closedNow = (typeof self.shiftNotOpenSlittersNow === 'function')
+            ? self.shiftNotOpenSlittersNow() : {};
         var listEl = el('ul', { class: 'atex-pp-dev-list' });
         list.forEach(function(c) {
             var parts = [formatCutNumber(c.number) || ('#' + c.id)];
@@ -4797,10 +4831,12 @@
                     : (done != null && planned > 0 && done >= planned ? 'проходы сделаны — закроем'
                         : (cutIsStarted(c)
                             ? (done == null
-                                // #4830: при закрытой смене неизвестный факт — не повод оставить
-                                // задание: работа не идёт, уедет целиком, факт считаем нулём.
-                                // У просроченного при открытых сменах работа может идти — не двигаем.
-                                ? (kind === 'shift-closed'
+                                // #4830/#4833: при закрытой смене станка неизвестный факт — не
+                                // повод оставить задание: работа не идёт, уедет целиком, факт
+                                // считаем нулём — из группы «Смена закрыта» (#4830) и из
+                                // просрочки (#4833). У станка с идущей сменой работа может
+                                // идти — там не двигаем (#4381).
+                                ? (kind === 'shift-closed' || closedNow[cutSlitterKey(c)] != null
                                     ? 'начато, факт проходов неизвестен — сдвинем, считаем 0 проходов'
                                     : 'начато, факт проходов неизвестен — не двигаем')
                                 : 'начато, проходов нет')
@@ -4864,9 +4900,11 @@
             + 'сделанные проходы останутся отдельным заданием в конце своего фактического дня, '
             + 'остаток уедет в план. Делающееся раньше плана режется так же, только в обратную '
             + 'сторону: выполненное уйдёт в день выполнения, остаток останется на своём времени, '
-            + 'а следующие за ним сдвинутся влево. У станка с закрытой сменой начатое с неизвестным '
-            + 'фактом проходов уедет целиком — считаем, что проходов 0 (#4830), а у просроченного '
-            + 'при идущих сменах работа может идти — его не трогаем. Порядок заданий сохраняется.' }));
+            + 'а следующие за ним сдвинутся влево. У станка, чья смена закрыта (последнее событие '
+            + 'журнала — «Конец смены»), начатое с неизвестным фактом проходов уедет целиком — '
+            + 'считаем, что проходов 0 (#4830/#4833): и из группы «Смена закрыта», и из просрочки. '
+            + 'У просроченного при идущей смене работа может идти — его не трогаем. Порядок '
+            + 'заданий сохраняется.' }));
         // #4596: почему сегодняшние задания попали в список (и почему попали не все).
         content.appendChild(el('p', { class: 'atex-pp-hint', text:
             'Сегодняшние задания попадают в список только у станков, закрывших смену: для них день '
@@ -5089,31 +5127,39 @@
             return Promise.resolve(false);
         }
         var win = this.workingWindow();
+        // #4833: карты смен нужны и решению (двигать начатое с неизвестным фактом у станка
+        // вне смены), и предупреждению о вслепую оставленных — читаем их ОДИН раз.
+        var closedSlittersNow = this.shiftClosedSlittersToday();
+        var notOpenSlittersNow = this.shiftNotOpenSlittersNow();
         var settle = deviationSettlePlan(this.cuts || [], groups, {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
             shiftEndMin: Number(win && win.cutEndMin) || 0,   // #4572: чем закрывать выполненную часть
             // #4596: у станка с закрытой сменой сегодняшний день кончился — ни якорем, ни
             // «ближайшим свободным днём» он больше быть не может.
-            shiftClosedSlitters: this.shiftClosedSlittersToday(),
+            shiftClosedSlitters: closedSlittersNow,
+            // #4833: у станка вне смены работа не идёт — начатое с неизвестным фактом едет.
+            shiftNotOpenSlitters: notOpenSlittersNow,
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
         });
         var plan = settle.moves || [];
         var splits = settle.splits || [];
-        // #4564: факт проходов не приходит из отчёта — начатое ПРОСРОЧЕННОЕ остаётся на месте, и
-        // об этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано ничего» и увёз бы со
-        // дня работу, которая может идти на станке с ещё открытой сменой.
-        // #4830: у «Смена закрыта» вопрос снят — смену закрыли, работа не идёт, такое задание
-        // уезжает целиком (0 проходов), поэтому в этом списке остались только просроченные.
+        // #4564: факт проходов не приходит из отчёта — начатое задание при ИДУЩЕЙ смене станка
+        // остаётся на месте, и об этом надо СКАЗАТЬ. Молчаливый ноль здесь означал бы «сделано
+        // ничего» и увёз бы со дня работу, которая может идти на станке.
+        // #4830/#4833: у станка ВНЕ СМЕНЫ вопрос снят — работа не идёт, начатое с неизвестным
+        // фактом уезжает целиком (0 проходов) и из группы «Смена закрыта», и из просрочки; в
+        // этом списке остались только просроченные у станков в смене.
         var blind = ((groups && groups.overdue) || []).filter(function(c) {
-            return cutIsStarted(c) && cutDoneRuns(c) == null;
+            return cutIsStarted(c) && cutDoneRuns(c) == null
+                && notOpenSlittersNow[cutSlitterKey(c)] == null;
         });
         if (blind.length) {
             console.error('[pp] ⛔ #4564: отчёт cut_planning не отдаёт «Кол-во резок факт» ('
                 + CUT_ACTUAL_RUNS_COLUMN + ') — начатые просроченные не разделяются и не двигаются: '
                 + blind.map(function(c) { return c.id; }).join(', '));
             this.notify('Не знаю, сколько проходов сделано (нет колонки в отчёте) — начатые '
-                + 'просроченные оставляю на месте: ' + blind.length, 'error');
+                + 'просроченные при идущих сменах оставляю на месте: ' + blind.length, 'error');
         }
         var byId = {};
         (this.cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
