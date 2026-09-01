@@ -113,13 +113,16 @@
     // а если у материала он не задан — действует это значение. По нему красится отход.
     var DEFAULT_TOLERANCE = 21;
     // #3744: оценка времени резки для менеджера. Таблица «Время операции,
-    // мин» — те же нормы метража WIND_<метры>, что использует production-planning.js
-    // (windingMinutes). Формула: «Всего резок» × время намотки одного рулона.
-    // #4832: НАЛАДКУ/ПЕРЕНАЛАДКУ в оценке НЕ считаем («убирали это») — настройка
-    // станка забота плана, менеджеру важно время резки. Перевод в дни — по
+    // мин» — те же нормы, что использует production-planning.js: метраж WIND_<метры>
+    // (windingMinutes) и лидер BETWEEN_CUTS (#4006 — заправляется после каждого прохода).
+    // #4832 (решение заказчика): формула = наладка SETUP_ONCE_MIN (единожды) + «Всего
+    // резок» × (намотка + лидер). Складываем БЕЗ промежуточных округлений — итог
+    // округляется до целых минут один раз, при показе. Перевод в дни — по
     // MINUTES_PER_DAY рабочих минут.
     var OP_TIMES_TABLE = 'Время операции, мин';
     var OP_TIMES_CODE_REQ = 'Код операции';
+    var SETUP_ONCE_MIN = 45;       // единожды: настройка/переналадка станка на резку
+    var DEFAULT_LEADER_MN = 2;     // лидер на проход (BETWEEN_CUTS), как в planning DEFAULT_OP_TIMES
     var MINUTES_PER_DAY = 450;     // 1 рабочий день = 450 минут (для единицы «дни»)
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
@@ -625,15 +628,24 @@
         return round3(b.min + slope * (x - b.m));
     }
 
-    // #3744: общие минуты резки = по каждой резке («Всего резок» = passes) время намотки
-    // одного рулона windingMinutes от длины рулона и норм WIND_*. Резок нет → 0; норм
-    // нет → 0 (считать нечего — показчик покажет «—»). #4832: НАЛАДКУ в оценке не
-    // считаем (решение заказчика «убирали это»): 45 мин настройки станка — забота
-    // плана, в менеджерской оценке резки ей не место.
-    function planningMinutes(passes, rollLength, windPoints) {
+    // Лидер на проход (#4006) — код BETWEEN_CUTS таблицы «Время операции, мин»; нет
+    // кода → 2 мин (DEFAULT_OP_TIMES.BETWEEN_CUTS планировщика). Явный 0 выключает
+    // компонент. Та же терпимая семантика, что в production-planning.
+    function leaderMinutesFromTimes(opTimes) {
+        var t = opTimes || {};
+        return round3(Number(t.BETWEEN_CUTS != null ? t.BETWEEN_CUTS : DEFAULT_LEADER_MN) || 0);
+    }
+
+    // #3744/#4832: общие минуты резки = наладка (SETUP_ONCE_MIN, единожды) + по каждой
+    // резке («Всего резок» = passes) намотка одного рулона windingMinutes (нормы WIND_*)
+    // плюс лидер leaderUnit (BETWEEN_CUTS, #4006). Компоненты НЕ округляются — сумма
+    // округляется до целых минут один раз, при показе: round((1.8 намотка + 2 лидер)
+    // × 25 проходов + 45 наладка). Резок нет → 0.
+    function planningMinutes(passes, rollLength, windPoints, leaderUnit) {
         var n = Math.max(0, Math.round(toNumber(passes)));
         if (n <= 0) return 0;
-        return round3(n * windingMinutes(rollLength, windPoints));
+        var per = windingMinutes(rollLength, windPoints) + (toNumber(leaderUnit) || 0);
+        return round3(SETUP_ONCE_MIN + n * per);
     }
 
     // #3744: минуты → три единицы для менеджера. Часы и дни — с одним знаком после
@@ -746,6 +758,7 @@
         widthPercent: widthPercent,
         windingPointsFromTimes: windingPointsFromTimes,
         windingMinutes: windingMinutes,
+        leaderMinutesFromTimes: leaderMinutesFromTimes,  // #4832: лидер на проход (BETWEEN_CUTS, дефолт 2)
         planningMinutes: planningMinutes,
         planningTimeUnits: planningTimeUnits,
         normWinding: normWinding,                 // #4779
@@ -1747,22 +1760,20 @@
         summary.appendChild(metric('Общий отход, м²', p.rollLength > 0 ? p.totalWasteAreaM2 : '—', true));
         // #4804 п.2: метрики «Карт раскроя» нет — карта всегда одна.
         summary.appendChild(metric('Всего резок', p.totalPasses));
-        // #3744: общие минуты резки в трёх единицах (минуты/часы/дни): «Всего резок» ×
-        // время намотки рулона (нормы метража WIND_* из «Время операции, мин», как в
-        // production-planning.js). #4832: наладку в оценке не считаем (решение
-        // заказчика); норм нет или длина не задана — честное «—», а не «0 мин».
-        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(this.opTimes || {}));
-        var timeVal;
-        if (planMins > 0) {
-            var units = planningTimeUnits(planMins);
-            timeVal = el('span', { class: 'atex-co-time' }, [
-                el('span', { class: 'atex-co-time-min', text: ruNum(units.minutes) + ' мин' }),
-                el('span', { class: 'atex-co-time-sub', text: ruNum(units.hours) + ' ч · ' + ruNum(units.days) + ' дн' })
-            ]);
-        } else {
-            timeVal = el('span', { class: 'atex-co-time',
-                title: 'В «Время операции, мин» нет норм намотки WIND_* — время посчитать нельзя' }, ['—']);
-        }
+        // #3744/#4832: общие минуты резки в трёх единицах (минуты/часы/дни) — наладка
+        // (единожды) + «Всего резок» × (намотка по норме WIND_* + лидер BETWEEN_CUTS),
+        // как в production-planning.js. Компоненты не округляются, итог округляется
+        // до целых минут один раз — во всплывающей подсказке формула целиком.
+        var times = this.opTimes || {};
+        var leaderUnit = leaderMinutesFromTimes(times);
+        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(times), leaderUnit);
+        var units = planningTimeUnits(planMins);
+        var timeVal = el('span', { class: 'atex-co-time', title: 'Наладка ' + SETUP_ONCE_MIN
+            + ' мин + «Всего резок» × (намотка по норме WIND_* + лидер ' + ruNum(leaderUnit)
+            + ' мин); итог округлён до минут' }, [
+            el('span', { class: 'atex-co-time-min', text: ruNum(units.minutes) + ' мин' }),
+            el('span', { class: 'atex-co-time-sub', text: ruNum(units.hours) + ' ч · ' + ruNum(units.days) + ' дн' })
+        ]);
         summary.appendChild(metric('Время на резку', timeVal, true));
         return summary;
 
