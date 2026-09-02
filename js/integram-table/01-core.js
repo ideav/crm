@@ -40,7 +40,7 @@
             this.visibleColumns = [];
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
-            this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
+            this.tableGranted = 'READ';  // 'WRITE' = модификация разрешена; READ/нет ключа — read-only (#1508, #4851)
             this.tableDeletable = false;  // True when metadata.delete === "1" — enables "Delete by filter" (issue #2749)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
@@ -212,12 +212,13 @@
         }
 
         /**
-         * Check if the table has WRITE access (issue #1508)
-         * Returns true when tableGranted is null (not set) or equals "WRITE"
-         * Returns false for any other granted value (e.g. "READ")
+         * Check if the table has WRITE access (issue #1508, уточнено #4851)
+         * Only an explicit granted "WRITE" allows modifying controls. Missing key
+         * means READ: справочники, доступные на чтение через ссылки родительской
+         * таблицы, не должны предлагать правку (issue #4851).
          */
         isTableWritable() {
-            return this.tableGranted === null || this.tableGranted === 'WRITE';
+            return this.tableGranted === 'WRITE';
         }
 
         /**
@@ -1162,7 +1163,7 @@
                 this.tableExportAllowed = metadata.export === '1' || metadata.export === 1;
 
                 // Store table-level granted value for access control (issue #1508)
-                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : 'READ';
 
                 // Store bulk delete-by-filter flag from metadata (issue #2749)
                 this.tableDeletable = metadata.delete === '1' || metadata.delete === 1;
@@ -1258,7 +1259,7 @@
                     if (refreshedTitle) this.options.title = refreshedTitle;
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
-                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : 'READ';
                 this.tableDeletable = refreshedMetadata.delete === '1' || refreshedMetadata.delete === 1;
 
                 const refreshedColumns = [];
