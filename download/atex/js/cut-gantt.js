@@ -1083,7 +1083,16 @@
         return req == null ? -1 : order.indexOf(String(req.id));
     }
 
-    function cutBarTitle(cut, tr, status) {
+    // #4847: есть ли у роли WRITE на таблицу по имени («Задание в производство»). Метаданные
+    // отдают поле granted; WRITE ищем подстрокой (бывает «WRITE, DELETE»). Таблицы нет в
+    // метаданных → true: ссылки прячем только когда доступ ЗАВЕДОМО отсутствует.
+    function hasTableWrite(metaList, name) {
+        var m = ganttTableByName(Array.isArray(metaList) ? metaList : [metaList], name);
+        if (!m) return true;
+        return String(m.granted || '').toUpperCase().indexOf('WRITE') >= 0;
+    }
+
+    function cutBarTitle(cut, tr, status, linkify) {
         var lines = [];
         // #4394: id задания в тултипе — «номер» с #3242 это плановые дата-время старта, по
         // нему запись в CRM не найти. Формат «id N» — как в очереди планирования. Когда номера
@@ -1092,6 +1101,8 @@
         var cutNum = formatCutNumber(cut && cut.number);
         lines.push('Задание ' + (cutNum || ('#' + cutId)) + (cutNum && cutId ? ' · id ' + cutId : ''));
         if (cut && cut.orderNo) lines.push('Заказ: ' + cut.orderNo);
+        // #4847: заказ клиента — отдельной строкой, если отчёт его отдал.
+        if (cut && cut.clientOrderNo) lines.push('Заказ клиента: ' + cut.clientOrderNo);
         if (cut && cut.slitter && cut.slitter.label) lines.push('Станок: ' + cut.slitter.label);
         if (cut && cut.materialName) lines.push('Сырьё: ' + cut.materialName);
         if (cut && cut.leader) lines.push('Лидер: ' + cut.leader);
@@ -1106,7 +1117,8 @@
         if (tr.actualEndMs != null) lines.push('Финиш факт: ' + formatDateTimeMinute(new Date(tr.actualEndMs)));
         if (tr.deadlineMs != null) lines.push('Дедлайн: ' + formatDateTimeMinute(new Date(tr.deadlineMs)));
         lines.push('Статус: ' + status.label);
-        lines.push('→ открыть в планировании');
+        // #4847: ссылки нет (нет WRITE на «Задание в производство») — и строки «открыть» нет.
+        if (linkify !== false) lines.push('→ открыть в планировании');
         return lines.join('\n');
     }
 
@@ -1119,13 +1131,16 @@
         return sp > 0 ? s.slice(0, sp) : s;
     }
 
-    // Подпись строки в одну строку без слова «Заказ»: «{заказ} / {сырьё} · {намотка} · {метраж} x {резок}»,
-    // например «3738 / MWR113L · OUT · 700 x 6» (#3668 п.2, #3675 п.1/п.2). Станок в подпись
+    // Подпись строки в одну строку без слова «Заказ»: «{заказ клиента} / {заказ} / {сырьё} ·
+    // {намотка} · {метраж} x {резок}», например «2550 / 5082 / MR192 · OUT · 300 x 1» (#4847).
+    // Номера заказа клиента нет — прочерк: «— / 5082 / …». Внутренний слот прежний: номер
+    // заказа, иначе «номер» резки (плановая дата-время), иначе «#id». Станок в подпись
     // не входит — он выводится заголовком группы. Сырьё обрезано до первого пробела; «x N» —
     // «Кол-во резок план» (cut_planned_runs), приписывается к метражу прохода.
     function cutRowLabel(cut) {
+        var client = (cut && cut.clientOrderNo) ? String(cut.clientOrderNo) : '—';   // #4847
         var head = (cut && cut.orderNo) ? String(cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
-        var s = head;
+        var s = client + ' / ' + head;
         if (cut && cut.materialName) s += ' / ' + shortMaterialName(cut.materialName);
         if (cut && cut.winding) s += ' · ' + cut.winding;
         if (cut && cut.length > 0) {
@@ -1178,6 +1193,7 @@
                 knifeCount: 0,
                 leader: str(row.cut_leader),
                 orderNo: str(row.order_no),
+                clientOrderNo: str(row.client_order_no),   // #4847: номер заказа клиента — первый слот подписи
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
                 winding: str(row.cut_winding),
@@ -1532,7 +1548,7 @@
                     segments: seg,
                     label: cutRowLabel(cut), barText: cutBarTime(cut, seg.setupMin, null, labelStartMs),
                     barMin: cutBarSpanMin(cut, seg.setupMin, null, labelStartMs),   // #3770: минуты подписи бара
-                    title: cutBarTitle(cut, tr, status)
+                    title: cutBarTitle(cut, tr, status, o.linkify !== false)
                 };
             });
             // #3770: суммарные минуты всех баров станка — для подписи «N (Σ мин)» в заголовке.
@@ -1753,6 +1769,7 @@
         hourTicks: hourTicks,
         pxPerMinForMode: pxPerMinForMode,
         planningLink: planningLink,
+        hasTableWrite: hasTableWrite,         // #4847: WRITE на таблицу по имени (ссылки Ганта)
         slittersFromCuts: slittersFromCuts,
         parseDeepLink: parseDeepLink,
         formatCutNumber: formatCutNumber,
@@ -1798,6 +1815,9 @@
         // Фича подсветки выходных включается наличием таблицы «Календарь» (calendarEnabled).
         this.calendarByDay = {};
         this.calendarEnabled = false;
+        // #4847: WRITE на «Задание в производство»? По умолчанию true (ссылки рисуем);
+        // loadCutWriteGrant() снимает флаг, если метаданные роли доступа не дают.
+        this.cutTableWrite = true;
         // #3683: дефолт — «День»; #3704: зум по горизонтали; #3713: fromIso/toIso — произвольный
         // диапазон из deep-link «Планирования» (если задан, период берётся из него, а не из mode).
         this.state = { mode: 'day', anchor: todayISO(), slitter: '', status: '', zoom: 1, fromIso: '', toIso: '' };
@@ -1989,6 +2009,16 @@
         }).catch(function() { self.downtimesBySlitter = {}; });
     };
 
+    // #4847: WRITE на «Задание в производство» по метаданным. Таблицы нет в метаданных или
+    // метаданные не прочитались → флаг не трогаем (true): ссылки прячем только при ЗАВЕДОМОМ
+    // отсутствии доступа.
+    AtexCutGantt.prototype.loadCutWriteGrant = function() {
+        var self = this;
+        return this.getJson('metadata').then(function(all) {
+            self.cutTableWrite = hasTableWrite(all, 'Задание в производство');
+        }).catch(function() { /* метаданные не читаются — ссылки остаются */ });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -1997,7 +2027,8 @@
             this.loadStrips(),
             this.loadOpTimes(),
             this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
-            this.loadCalendar()        // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
+            this.loadCalendar(),       // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
+            this.loadCutWriteGrant()   // #4847: WRITE на «Задание в производство» — рисовать ли ссылки
         ]).then(function(res) {
             var lunchCfg = res[4] || {};   // #3846/#3904/#4007: { durationMin, startMin, breaks } из «Настройки»
             self.lunchDurationMin = lunchCfg.durationMin || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
@@ -2164,7 +2195,8 @@
               lunchStartMin: this.lunchStartMin,   // #3904: время обеда — чтобы утренний зазор не помечался обедом
               breaks: this.breaks,   // #4007 (ТЗ §5): короткие перерывы 10:00/15:00 — рисуются на Ганте
               downtimesBySlitter: this.downtimesBySlitter,   // #4229: окна простоя («Отпуск») — серой строкой
-              slitterLabels: this.slitterLabels });          // #4229: метки станков для строк отпуска без резок
+              slitterLabels: this.slitterLabels,             // #4229: метки станков для строк отпуска без резок
+              linkify: this.cutTableWrite !== false });      // #4847: нет WRITE на задания — ссылки не рисуем
 
         var body = el('div', { class: 'atex-cg-body' });
         if (!data.groups.length) {
@@ -2345,15 +2377,28 @@
                 var cutSeg = el('span', { class: 'atex-cg-seg atex-cg-seg--cut' });
                 children.push(cutSeg);   // ширина резки — остаток (flex: 1)
                 children.push(el('span', { class: 'atex-cg-bar-main', text: t.barText }));
-                var barLink = el('a', {
-                    class: 'atex-cg-bar is-' + statusKey,
-                    href: planningLink(t.cut, self.planningUrl),
-                    title: t.title,
-                    dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
-                }, children);
-                barLink.style.left = t.leftPx + 'px';
-                barLink.style.width = t.widthPx + 'px';
-                track.appendChild(barLink);
+                // #4847: нет WRITE на «Задание в производство» — бар не ссылка, а plain span:
+                // роли без доступа не должны видеть ссылку на недоступное рабочее место.
+                if (self.cutTableWrite !== false) {
+                    var barLink = el('a', {
+                        class: 'atex-cg-bar is-' + statusKey,
+                        href: planningLink(t.cut, self.planningUrl),
+                        title: t.title,
+                        dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
+                    }, children);
+                    barLink.style.left = t.leftPx + 'px';
+                    barLink.style.width = t.widthPx + 'px';
+                    track.appendChild(barLink);
+                } else {
+                    var barSpan = el('span', {
+                        class: 'atex-cg-bar is-' + statusKey,
+                        title: t.title,
+                        dataset: { cutId: String(t.cut.id == null ? '' : t.cut.id) }
+                    }, children);
+                    barSpan.style.left = t.leftPx + 'px';
+                    barSpan.style.width = t.widthPx + 'px';
+                    track.appendChild(barSpan);
+                }
                 // #4052: накладки обеда/перерыва — поверх бара (после него в DOM → выше по z),
                 // на позиции их времени; подпись только в title.
                 (overlaysByTask[taskIdx] || []).forEach(function(band) { track.appendChild(band); });

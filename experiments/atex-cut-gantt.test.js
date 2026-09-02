@@ -50,28 +50,33 @@ var cuts = gantt.rowsToCuts([
 assertEqual(cuts, [
     { id: '10', number: '06.05.2026', planDate: '06.05.2026', status: 'В работе',
       startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', duration: 70, length: 600,
-      plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, leader: 'MONOCHROME', orderNo: '3700',
+      plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, leader: 'MONOCHROME', orderNo: '3700', clientOrderNo: '',
       materialId: '5', materialName: 'MR194', winding: 'OUT', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: '101', label: 'Станок 1' } },
     { id: '20', number: '27.05.2026', planDate: '27.05.2026', status: 'Ожидает',
       startDate: '', endDate: '', duration: 0, length: 0, plannedRuns: 0, rollerWidth: 0, knifeWidths: [], knifeCount: 0,
-      leader: '', orderNo: '3701',
+      leader: '', orderNo: '3701', clientOrderNo: '',
       materialId: '', materialName: '', winding: '', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: null, label: '' } }
 ], 'rowsToCuts: dedup, поля order/sequence/leader/намотка/length/резок/ролик, длительность');
 
-// ── cutRowLabel (#3668 п.2, #3675 п.1/п.2): «{заказ} / {сырьё} · {намотка} · {метраж} x {резок}» ──
+// ── cutRowLabel (#3668 п.2, #3675 п.1/п.2, #4847): «{заказ клиента} / {заказ} / {сырьё} · {намотка} · {метраж} x {резок}» ──
+// #4847: заказа клиента нет — прочерк «—».
+assertEqual(gantt.cutRowLabel({ clientOrderNo: '2550', orderNo: '5082', materialName: 'MR192', winding: 'OUT', length: 300 }),
+    '2550 / 5082 / MR192 · OUT · 300', '#4847 заказ клиента первым слотом');
+assertEqual(gantt.cutRowLabel({ orderNo: '5082', materialName: 'MR192', winding: 'OUT', length: 300 }),
+    '— / 5082 / MR192 · OUT · 300', '#4847 нет заказа клиента — прочерк');
 assertEqual(gantt.cutRowLabel({ orderNo: '3351', materialName: 'MWR116L', winding: 'OUT', length: 450 }),
-    '3351 / MWR116L · OUT · 450', 'cutRowLabel: заказ / сырьё · намотка · метраж');
+    '— / 3351 / MWR116L · OUT · 450', 'cutRowLabel: заказ / сырьё · намотка · метраж');
 assertEqual(gantt.cutRowLabel({ orderNo: '3700', materialName: 'MWR116L', length: 600 }),
-    '3700 / MWR116L · 600', 'cutRowLabel: без намотки');
-assertEqual(gantt.cutRowLabel({ orderNo: '3701' }), '3701', 'cutRowLabel: только заказ');
+    '— / 3700 / MWR116L · 600', 'cutRowLabel: без намотки');
+assertEqual(gantt.cutRowLabel({ orderNo: '3701' }), '— / 3701', 'cutRowLabel: только заказ');
 // #3675 п.1: «Кол-во резок план» → « x N» после метража
 assertEqual(gantt.cutRowLabel({ orderNo: '3738', materialName: 'MWR113L', winding: 'OUT', length: 700, plannedRuns: 6 }),
-    '3738 / MWR113L · OUT · 700 x 6', 'cutRowLabel: метраж × кол-во резок');
+    '— / 3738 / MWR113L · OUT · 700 x 6', 'cutRowLabel: метраж × кол-во резок');
 assertEqual(gantt.cutRowLabel({ orderNo: '3738', materialName: 'MWR113L', winding: 'OUT', length: 700, plannedRuns: 0 }),
-    '3738 / MWR113L · OUT · 700', 'cutRowLabel: без «x N», если резок нет');
+    '— / 3738 / MWR113L · OUT · 700', 'cutRowLabel: без «x N», если резок нет');
 // #3675 п.2: длинное имя сырья обрезаем до первого пробела
 assertEqual(gantt.cutRowLabel({ orderNo: '3310', materialName: 'Фольга горячего тиснения МВ 35', winding: 'OUT', length: 300 }),
-    '3310 / Фольга · OUT · 300', 'cutRowLabel: сырьё обрезано до первого пробела');
+    '— / 3310 / Фольга · OUT · 300', 'cutRowLabel: сырьё обрезано до первого пробела');
 
 // ── ganttRange: неделя с понедельника, 7 дней ──
 var weekRange = gantt.ganttRange('2026-06-11', 'week');
