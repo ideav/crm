@@ -103,9 +103,9 @@
         art: 'art', leader: 'leader'
     };
 
-    var STORE_PLACE_ID = 'atex-pk-place-id';
-    var STORE_PLACE_LABEL = 'atex-pk-place-label';
     var STORE_SHOW_PACKED = 'atex-pk-show-packed';
+    // #4852: упаковочное место задаёт планшет (таблица «Планшет») — прежнего выбора
+    // места из localStorage больше нет.
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -480,11 +480,10 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || (typeof window !== 'undefined' ? window.user_id : '') || '';
-        this.meta = { gp: null, event: null, place: null };
-        this.places = [];          // справочник упаковочных мест (грузится только по нужде)
+        this.meta = { gp: null, event: null };
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
-        this.place = null;         // { id, label } — выбранное упаковочное место
+        this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
         this.busy = false;
     }
@@ -533,22 +532,8 @@
             var list = Array.isArray(all) ? all : [all];
             self.meta.gp = core.tableByName(list, TABLE.gp);
             self.meta.event = core.tableByName(list, TABLE.event);
-            self.meta.place = core.tableByName(list, TABLE.place);
             if (!self.meta.event) throw new Error('В метаданных не найдена таблица «' + TABLE.event + '»');
             if (!self.meta.gp) throw new Error('В метаданных не найдена таблица «' + TABLE.gp + '»');
-        });
-    };
-
-    // Справочник упаковочных мест. Запрашивается ТОЛЬКО когда место не выбрано или
-    // упаковщик сам нажал на него, чтобы поменять (условие #4658).
-    AtexPacker.prototype.loadPlaces = function() {
-        var self = this;
-        var meta = this.meta.place;
-        if (!meta) return Promise.reject(new Error('В метаданных не найдена таблица «' + TABLE.place + '»'));
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            self.places = (rows || []).map(function(r) {
-                return { id: String(r.i), label: (r.r && r.r[0]) || ('#' + r.i) };
-            });
         });
     };
 
@@ -575,27 +560,15 @@
         });
     };
 
-    // ── Память о выборе (localStorage) ──
+    // ── Упаковочное место (#4852) ──
 
-    AtexPacker.prototype.storePlace = function() {
-        try {
-            if (!window.localStorage) return;
-            window.localStorage.setItem(STORE_PLACE_ID, (this.place && this.place.id) || '');
-            window.localStorage.setItem(STORE_PLACE_LABEL, (this.place && this.place.label) || '');
-        } catch (e) { /* приватный режим — просто не запоминаем */ }
-    };
+    // Место у упаковщика ОДНО — то, что настроено в записи планшета («Планшет»,
+    // колонка «Упаковочное место», #4789). Прежний выбор из localStorage и диалог
+    // выбора убраны (#4852): настраивает планшет диспетчер. Настройки нет — список
+    // не показывается, экран называет код устройства (см. renderList).
     AtexPacker.prototype.restorePlace = function() {
-        try {
-            var store = window.localStorage;
-            if (!store) return;
-            var id = store.getItem(STORE_PLACE_ID);
-            var label = store.getItem(STORE_PLACE_LABEL);
-            if (id) this.place = { id: String(id), label: String(label || id) };
-        } catch (e) { /* приватный режим — считаем, что места нет */ }
-        // #4789: упаковочное место планшета (таблица «Планшет») сильнее памяти браузера —
-        // упаковка открывается сразу на своём месте, справочник мест для этого не нужен.
         var padPlace = this.padPlace();
-        if (padPlace) { this.place = padPlace; this.storePlace(); }
+        if (padPlace) this.place = padPlace;
     };
 
     // #4789: место из настройки планшета. В «Планшете» оно лежит ссылкой («id:Номер»)
@@ -608,21 +581,8 @@
         return { id: id || label, label: label || id };
     };
 
-    // #4789: выбранное место уходит в запись планшета — так диспетчер настраивает планшет
-    // прямо из пульта. Прав на запись нет (упаковщик) — тихо ничего не пишем.
-    AtexPacker.prototype.savePadPlace = function() {
-        var self = this;
-        var pad = window.atexPad || null;
-        if (!pad || typeof pad.setObject !== 'function' || !this.place) return;
-        pad.setObject('place', { id: this.place.id, label: this.place.label }).then(function(res) {
-            if (res && res.saved) self.notify('Планшет настроен на упаковочное место ' + self.place.label, 'success');
-        }).catch(function(err) {
-            self.notify('Планшет не настроен: ' + (err && err.message ? err.message : err), 'error');
-        });
-    };
-    // Нужен ли поход в таблицу «Упаковочное место»: место из localStorage избавляет от запроса.
-    AtexPacker.prototype.needsPlacePick = function() {
-        return !(this.place && this.place.id);
+    AtexPacker.prototype.hasPlace = function() {
+        return !!(this.place && this.place.id);
     };
     AtexPacker.prototype.storeShowPacked = function() {
         try { if (window.localStorage) window.localStorage.setItem(STORE_SHOW_PACKED, this.showPacked ? '1' : '0'); } catch (e) {}
@@ -653,13 +613,11 @@
         refresh.addEventListener('click', function() { self.refresh(); });
         tools.appendChild(refresh);
 
-        // Упаковочное место — в правом верхнем углу, кликом меняется.
-        var place = el('button', { class: 'atex-pk-place', type: 'button' }, [
+        // #4852: упаковочное место задаёт планшет — плашка без клика, менять нечем.
+        tools.appendChild(el('div', { class: 'atex-pk-place' }, [
             el('span', { class: 'atex-pk-place-label', text: 'Упаковочное место' }),
             el('span', { class: 'atex-pk-place-value', text: (this.place && this.place.label) || '—' })
-        ]);
-        place.addEventListener('click', function() { self.pickPlace(); });
-        tools.appendChild(place);
+        ]));
         box.appendChild(tools);
     };
 
@@ -669,8 +627,13 @@
         if (!host) return;
         host.innerHTML = '';
 
-        if (this.needsPlacePick()) {
-            host.appendChild(el('div', { class: 'atex-pk-placeholder', text: 'Укажите упаковочное место, чтобы увидеть задания.' }));
+        if (!this.hasPlace()) {
+            // #4852: места нет — планшет не настроен. Экран называет код устройства,
+            // чтобы диспетчер вписал его в первую колонку «Планшета» и заполнил место.
+            var padToken = (window.atexPad && window.atexPad.token) || '';
+            host.appendChild(el('div', { class: 'atex-pk-placeholder',
+                text: 'Рабочее место не настроено: в записи планшета не заполнено упаковочное место.'
+                    + (padToken ? ' Код этого планшета — ' + padToken + ' (первая колонка таблицы «Планшет»).' : '') }));
             return;
         }
         if (!this.items.length) {
@@ -803,45 +766,6 @@
     };
 
     // ── Диалоги ──
-
-    // Выбор упаковочного места: справочник читается здесь, а не при загрузке —
-    // пока место лежит в localStorage, запрос к таблице не делается вовсе.
-    AtexPacker.prototype.pickPlace = function() {
-        var self = this;
-        if (this.busy) return;
-        this.setBusy(true);
-        this.loadPlaces().then(function() {
-            self.setBusy(false);
-            self.showPlaceDialog();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось прочитать упаковочные места: ' + err.message, 'error');
-        });
-    };
-
-    AtexPacker.prototype.showPlaceDialog = function() {
-        var self = this;
-        var list = el('div', { class: 'atex-pk-place-list' });
-        (this.places || []).forEach(function(place) {
-            var btn = el('button', {
-                class: 'atex-pk-place-option' + (self.place && String(self.place.id) === place.id ? ' is-current' : ''),
-                type: 'button', text: place.label
-            });
-            btn.addEventListener('click', function() {
-                self.place = { id: place.id, label: place.label };
-                self.storePlace();
-                self.savePadPlace();   // #4789: и настраиваем сам планшет
-                close();
-                self.renderHead();
-                self.refresh();
-            });
-            list.appendChild(btn);
-        });
-        if (!this.places.length) list.appendChild(el('div', { class: 'atex-pk-empty', text: 'Справочник упаковочных мест пуст.' }));
-
-        var overlay = this.modal('Упаковочное место', [list], []);
-        function close() { overlay.close(); }
-    };
 
     // Правка количества — по клику на само количество в карточке (#4680). Подставляется
     // то, что в карточке и стоит; поправил — обязательно примечание. У НЕупакованной
@@ -1021,15 +945,13 @@
         return this.loadMetadata()
             .then(function() { return self.loadSizes(); })
             .then(function() {
-                // Без упаковочного места список всё равно не показываем, а отчёт без него
+                // Без упаковочного места список не показываем (#4852), а отчёт без него
                 // отдал бы чужие позиции — он фильтруется по месту (#4681).
-                if (self.needsPlacePick()) return null;
+                if (!self.hasPlace()) return null;
                 return self.loadItems();
             })
             .then(function() {
                 self.render();
-                // Место ещё не выбрано — спрашиваем сразу, до работы со списком.
-                if (self.needsPlacePick()) self.pickPlace();
             })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

@@ -126,10 +126,12 @@ var TOKEN = 'dc8b920daba7af5fb5065cf81abebb59';
 (function() {
     assertEqual(home.parseRoles('1621, 1622;1623'), ['1621', '1622', '1623'],
         '#4789: список ролей планшета читается через запятую/пробел');
+    // #4852: роль планшета уводим в её пульт с ЛЮБОЙ страницы базы — оператору нельзя
+    // быть нигде, кроме своего рабочего места. Цикл «уже на месте» гасит boot.
     assert(home.shouldRedirect({ action: '', roleId: '1621', roles: ['1621'] }),
-        '#4789: роль планшета на КОРНЕ базы — уводим в её рабочее место');
-    assert(!home.shouldRedirect({ action: 'slitter', roleId: '1621', roles: ['1621'] }),
-        '#4789: внутренняя страница редиректом не перебивается (иначе из пульта не выйти)');
+        '#4789/#4852: роль планшета на корне базы — уводим в её рабочее место');
+    assert(home.shouldRedirect({ action: 'object', roleId: '1621', roles: ['1621'] }),
+        '#4852: роль планшета на внутренней странице — тоже уводим в её пульт');
     assert(!home.shouldRedirect({ action: '', roleId: '2', roles: ['1621'] }),
         '#4789: другая роль (диспетчер) ходит по базе как раньше');
     assertEqual(home.workspaceUrl('ateh', 'sleeve-cutter'), '/ateh/sleeve-cutter',
@@ -336,10 +338,12 @@ var PAD_MENU = [{ menu_id: '10', menu_up: '', name: 'Пульт слиттера
     assert(homeNode && /atex-brand\.css\?7\.\d+/.test(homeNode.attrs['data-pad-css'] || ''),
         '#4789: адрес стилей экрана — с версией (на корне базы atex-brand.css не подключён)');
 
-    // Роль планшета, но страница внутренняя — ничего не грузим и никуда не уводим.
+    // #4852: роль планшета и на ВНУТРЕННЕЙ странице грузит скрипты планшета — оператору
+    // нельзя быть нигде, кроме своего пульта: pad-home уведёт его в настроенное рабочее
+    // место (или покажет экран конфигурации с кодом устройства).
     var inside = runHead({ roleId: '1621', action: 'slitter', pathname: '/ateh/slitter', menu: PAD_MENU });
-    assert(inside.appended.every(function(n) { return !/pad-(guard|home)\.js/.test(n.src || ''); }),
-        '#4789: внутри рабочего места скрипты планшета не грузятся');
+    assert(inside.appended.some(function(n) { return /pad-guard\.js/.test(n.src || ''); }),
+        '#4852: внутри рабочего места роль планшета тоже грузит сторож — уводим в свой пульт');
 
     // Другая роль — прежнее поведение: скриптов планшета нет, редирект #4690 работает.
     var dispatcher = runHead({ roleId: '2', action: '', pathname: '/ateh', menu: PAD_MENU });

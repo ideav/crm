@@ -16,6 +16,15 @@
 </div>
 
 <script>
+// #4852: место упаковщика задаёт планшет — стенд прикидывается настроенным
+// планшетом (таблица «Планшет»: токен, наименование, упаковочное место).
+window.atexPad = {
+    token: 'stand0123456789abcdef',
+    name: 'Стенд упаковки',
+    canWrite: false,
+    workspace: { ok: true, action: 'packer', kind: 'place', object: { id: '669275', label: '2' }, reason: '' },
+    config: { place: { id: '669275', label: '2' } }
+};
 // ── Мок боевой схемы ateh ──
 var META = [
     { id: 1081, val: 'Партия ГП', reqs: [

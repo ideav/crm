@@ -47,10 +47,13 @@
         return trimText(value).split(/[\s,;]+/).map(trimText).filter(Boolean);
     }
 
-    // Ведём в пульт только роль из списка и только с корня базы.
+    // #4852: роль из списка уводим в пульт планшета с ЛЮБОЙ страницы базы — оператору
+    // нельзя быть нигде, кроме своего рабочего места (прошлее правило «только с корня»
+    // оставляло ему внутренние страницы). Цикл гасит проверка «уже на месте» в boot:
+    // когда пульт планшета совпадает с открытой страницей, экран убирается и ничего
+    // не перезагружается.
     function shouldRedirect(ctx) {
         if (!ctx) return false;
-        if (trimText(ctx.action) !== '') return false;
         var roles = ctx.roles || [];
         return roles.indexOf(trimText(ctx.roleId)) !== -1;
     }
@@ -58,6 +61,12 @@
     // Адрес рабочего места планшета: `/{db}/{action}`.
     function workspaceUrl(db, action) {
         return '/' + encodeURIComponent(trimText(db)) + '/' + trimText(action);
+    }
+
+    // #4852: открытая страница — и есть пульт этого планшета → остаёмся (иначе цикл
+    // «страница → редирект → страница»). target — то, что вернул guard.padWorkspace.
+    function stayOnTarget(target, action) {
+        return !!target && target.ok === true && trimText(action) === trimText(target.action);
     }
 
     // Чего не хватает для однозначного выбора — человеческим языком.
@@ -186,6 +195,12 @@
                     'Планшет «' + (res.pad.name || res.pad.token) + '»: ' + reasonText(target.reason), token);
                 return;
             }
+            // #4852: открытая страница и есть пульт этого планшета — остаёмся здесь,
+            // ничего не перезагружаем (иначе цикл «страница → редирект → страница»).
+            if (stayOnTarget(target, ctx.action)) {
+                hideScreen();
+                return;
+            }
             root.location.replace(workspaceUrl(ctx.db, target.action));
         }).catch(function(err) {
             // Молча оставлять оператора на пустом корне нельзя — говорим, что случилось.
@@ -198,6 +213,7 @@
         TABLE_NAME: TABLE_NAME,
         parseRoles: parseRoles,
         shouldRedirect: shouldRedirect,
+        stayOnTarget: stayOnTarget,     // #4852: открытая страница — свой пульт, не перезагружаем
         workspaceUrl: workspaceUrl,
         reasonText: reasonText,
         boot: boot

@@ -228,31 +228,26 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
         'eventFields: без задания и оператора — пишем что есть, примечание попадает в событие');
 })();
 
-// ── Упаковочное место: помним выбор, к таблице повторно не ходим ──
+// ── Упаковочное место: только из настройки планшета (#4852) ──
 (function() {
-    var store = {};
     var savedWindow = global.window;
-    global.window = { localStorage: {
-        getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-        setItem: function(k, v) { store[k] = String(v); }
-    } };
     var Controller = mod.Controller;
-    var inst = Object.create(Controller.prototype);
-    inst.place = { id: '669275', label: '2' };
-    inst.storePlace();
 
-    var fresh = Object.create(Controller.prototype);
-    fresh.place = null;
-    fresh.restorePlace();
-    assertEqual(fresh.place, { id: '669275', label: '2' }, 'restorePlace: место поднимается из localStorage');
-    assertEqual(fresh.needsPlacePick(), false, 'needsPlacePick: место есть — таблицу не запрашиваем');
+    // Настройка планшета задана → место берётся из «Планшета»…
+    global.window = { atexPad: { token: 'abcdef0123', config: { place: { id: '669275', label: '2' } } } };
+    var withPad = Object.create(Controller.prototype);
+    withPad.place = null;
+    withPad.restorePlace();
+    assertEqual(withPad.place, { id: '669275', label: '2' }, '#4852 restorePlace: место из настройки планшета');
+    assertEqual(withPad.hasPlace(), true, '#4852 hasPlace: место есть — список показываем');
 
+    // …настройки нет → места нет, и рабочий место зовёт настраивать планшет.
+    global.window = { atexPad: { token: 'abcdef0123', config: { place: null } } };
     var virgin = Object.create(Controller.prototype);
     virgin.place = null;
-    store = {};
     virgin.restorePlace();
-    assertEqual(virgin.place, null, 'restorePlace: пусто — места нет');
-    assertEqual(virgin.needsPlacePick(), true, 'needsPlacePick: без места идём в таблицу «Упаковочное место»');
+    assertEqual(virgin.place, null, '#4852 restorePlace: настройки нет — места нет');
+    assertEqual(virgin.hasPlace(), false, '#4852 hasPlace: места нет — экран конфигурации');
     global.window = savedWindow;
 })();
 

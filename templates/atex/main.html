@@ -240,17 +240,19 @@
     </script>
     <script>
         (function() {
-            // #4789: оператор вошёл с планшета и стоит на корне базы — уводим его в
-            // рабочее место, на которое планшет настроен (таблица «Планшет»). Скрипты
-            // грузим ТОЛЬКО в этом случае: остальным ролям и страницам они не нужны.
-            // Сторож планшета идёт первым — pad-home.js пользуется его разбором таблицы.
-            if (!isPadRole || action !== '') return;
+            // #4789: оператор вошёл с планшета — уводим его в рабочее место, на которое
+            // планшет настроен (таблица «Планшет»). #4852: с ЛЮБОЙ страницы базы, не только
+            // с корня — оператору нельзя быть нигде, кроме своего пульта; pad-home.js сам
+            // гасит цикл, когда открытая страница и есть пульт этого планшета. Скрипты
+            // грузим только для роли планшета: остальным они не нужны. Сторож планшета
+            // идёт первым — pad-home.js пользуется его разбором таблицы.
+            if (!isPadRole) return;
             var base = '/download/' + db + '/js/';
             var guard = document.createElement('script');
             guard.src = base + 'pad-guard.js?{_global_.version}.2';
             guard.onload = function() {
                 var home = document.createElement('script');
-                home.src = base + 'pad-home.js?{_global_.version}.1';
+                home.src = base + 'pad-home.js?{_global_.version}.2';
                 home.setAttribute('data-pad-roles', PAD_ROLE_IDS.join(','));
                 home.setAttribute('data-pad-db', db);
                 home.setAttribute('data-pad-action', action);
