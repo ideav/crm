@@ -201,6 +201,22 @@ assertEqual(core.planningTimeUnits(66), { minutes: 66, hours: 1.1, days: 0.1 },
 assertEqual(core.planningTimeUnits(900), { minutes: 900, hours: 15, days: 2 },
     'planningTimeUnits: 900 мин = 15 ч = 2 дня');
 
+// ── #4848: в расчёте резки — только «Вид сырья» с галкой «Для расчета резки» ──
+// Галка приходит из JSON_OBJ как 'X' (BOOLEAN); пусто/'0' — не отмечено. Реквизита
+// нет в сборке (hasFlag=false) — список не режем: старая база не остаётся пустой.
+var mats = [
+    { id: '1', label: 'MW308', cutFlag: 'X' },
+    { id: '2', label: 'Фольга', cutFlag: '' },
+    { id: '3', label: 'MWR074', cutFlag: '0' },
+    { id: '4', label: 'MR132' }
+];
+assertEqual(core.materialsForCutting(mats, true).map(function(m) { return m.id; }), ['1'],
+    '#4848 материалыForCutting: остаются только с галкой X');
+assertEqual(core.materialsForCutting(mats, false).length, 4,
+    '#4848 реквизита нет в сборке — список не режется (старая база не остаётся пустой)');
+assertEqual(core.materialsForCutting([], true), [], '#4848 пустой справочник остаётся пустым');
+assertEqual(core.materialsForCutting(null, false), [], '#4848 null-список → пустой без фильтра');
+
 // ── #4779: стандартные длины рулона (заказчик добавил 360, 74, 110) ──
 assertEqual(core.lengthPresets, [74, 110, 300, 360, 450, 600, 700, 900, 1000],
     'lengthPresets keeps the standard lengths and adds 74/110/360 (#4779)');

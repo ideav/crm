@@ -69,7 +69,8 @@
         maxStock: 'Максимальный запас',  // #4779: точки запаса (table/67113) — что целесообразно нарезать впрок
         sleeveMaterial: 'Материал втулки'  // #4804: справочник материалов втулки (table/740264)
     };
-    var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм' };
+    var MATERIAL_REQ = { width: 'Ширина, мм', length: 'Длина рулона, м', tolerance: 'Допуск, мм',
+        cutFlag: 'Для расчета резки' };  // #4848: галка BOOLEAN — в расчёте только отмеченные
     // Справочник «Фактическая ширина резки»: главное значение записи — факт. ширина,
     // «Ширина в заказе» — номинал, «Код» — условие применения.
     var ACTUAL_WIDTH_REQ = { order: 'Ширина в заказе', code: 'Код' };
@@ -743,6 +744,18 @@
             });
     }
 
+    // #4848: в расчёте резки — только виды сырья с галкой «Для расчета резки».
+    // Галка приходит из JSON_OBJ как 'X' (BOOLEAN); пусто и '0' — не отмечено.
+    // hasFlag=false (реквизита нет в этой сборке) — список НЕ режем: фильтр живёт
+    // в реквизите, и старая база не должна остаться с пустым справочником.
+    function materialsForCutting(list, hasFlag) {
+        if (!hasFlag) return (list || []).slice();
+        return (list || []).filter(function(m) {
+            var v = m && m.cutFlag;
+            return v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '0';
+        });
+    }
+
     var core = {
         toNumber: toNumber,
         round3: round3,
@@ -764,6 +777,7 @@
         normWinding: normWinding,                 // #4779
         stockPointMatches: stockPointMatches,     // #4779
         matchStockPoints: matchStockPoints,       // #4779
+        materialsForCutting: materialsForCutting, // #4848: виды сырья с галкой «Для расчета резки»
         lengthPresets: LENGTH_PRESETS,            // #4779: стандартные длины рулона
         // #4804 п.1: втулка выбирается диаметром и материалом, запись справочника
         // подбирается под ширину полосы.
@@ -961,19 +975,23 @@
     };
 
     // Список «Видов сырья» с шириной и длиной рулона — для поиска и автоподстановки.
+    // #4848: показываются только виды сырья с галкой «Для расчета резки» (BOOLEAN 'X');
+    // реквизита нет в сборке — список не фильтруется (старая база не остаётся пустой).
     AtexCutOptimizer.prototype.loadMaterials = function() {
         var self = this;
         var meta = this.meta.material;
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
-            self.materials = (rows || []).map(function(rec) {
+            var list = (rows || []).map(function(rec) {
                 return {
                     id: String(rec.i),
                     label: (rec.r && rec.r[0]) || ('#' + rec.i),
                     width: cellValue(rec, meta, MATERIAL_REQ.width) || '',
                     length: cellValue(rec, meta, MATERIAL_REQ.length) || '',
-                    tolerance: cellValue(rec, meta, MATERIAL_REQ.tolerance) || ''
+                    tolerance: cellValue(rec, meta, MATERIAL_REQ.tolerance) || '',
+                    cutFlag: cellValue(rec, meta, MATERIAL_REQ.cutFlag)
                 };
             });
+            self.materials = materialsForCutting(list, colIndex(meta, MATERIAL_REQ.cutFlag) >= 0);
         });
     };
 
