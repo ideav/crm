@@ -66,6 +66,16 @@ const fmtSource = fs.readFileSync(
 const fmtAssignments = fmtSource.match(/this\.tableGranted = \w+\.granted !== undefined \? \w+\.granted : 'READ';/g) || [];
 check(fmtAssignments.length >= 3, '#4851 02-format-helpers: отсутствующий ключ → READ везде');
 
+// ── форма редактирования (19-form-edit.js): granted отсутствует → форма read-only ──
+const formSource = fs.readFileSync(
+    path.join(__dirname, '..', 'js', 'integram-table', '19-form-edit.js'), 'utf8');
+check(formSource.includes("metadata.granted !== undefined ? metadata.granted : 'READ'"),
+    '#4851 форма редактирования: отсутствующий granted нормализован в READ');
+check(!formSource.includes("metadataGranted !== null && metadataGranted !== 'WRITE'"),
+    '#4851 форма редактирования: прежнее «null → форма редактируется» убрано');
+check(formSource.includes("const formIsReadOnly = metadataGranted !== 'WRITE';"),
+    '#4851 форма редактирования: formIsReadOnly = (granted !== WRITE)');
+
 // ── прежнее поведение #1508 для явных значений не изменилось ──
 check(coreSource.includes("this.tableGranted === 'WRITE'"), 'проверка осталась строгим сравнением с WRITE');
 
