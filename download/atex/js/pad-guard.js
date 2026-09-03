@@ -170,6 +170,34 @@
         return WORKSPACE_ALIASES[s] || '';
     }
 
+    // #4868: список ролей, которым разрешён пульт (атрибут data-pad-roles шаблона),
+    // и проверка вошедшего. Пустой список — гейт роли выключен (атрибут не задан).
+    function parseRoleIds(value) {
+        return trimText(value).split(/[\s,;]+/).filter(Boolean);
+    }
+
+    function isRoleAllowed(roles, roleId) {
+        var list = roles || [];
+        if (!list.length) return true;
+        return list.indexOf(trimText(roleId)) !== -1;
+    }
+
+    // #4868: отказ «планшету не назначен объект этого рабочего места». kind — колонка
+    // настройки ('slitter' | 'cutter' | 'place'); kind не задан или это не объект
+    // («Рабочее место» и прочее) — пульт не блокируем. Нет планшета — тоже: это другой
+    // экран допуска. Объект задан (ссылка или подпись) — отказа нет.
+    function missingObject(pad, kind) {
+        if (!WORKSPACE_ACTION[kind]) return null;
+        if (!pad) return null;
+        if (hasObject(pad.config && pad.config[kind])) return null;
+        var padName = trimText(pad && pad.name) || trimText(pad && pad.token);
+        return {
+            title: 'Планшет не настроен',
+            text: 'Планшету «' + padName + '» не назначено значение колонки «' + CONFIG_REQS[kind]
+                + '» в таблице «' + TABLE_NAME + '». Её заполняет диспетчер — после этого пульт откроется.'
+        };
+    }
+
     // Настройка планшета из строки JSON_OBJ.
     function padConfigFromRow(table, cols) {
         var config = { slitter: null, cutter: null, place: null, workspace: '' };
@@ -344,8 +372,10 @@
     }
 
     // Экран отказа. Тому, кому таблица открыта на запись, предлагаем тут же
-    // зарегистрировать планшет — остальным остаётся сообщение.
-    function showBlocked(ctx, title, text) {
+    // зарегистрировать планшет — остальным остаётся сообщение. noRegister — форма
+    // регистрации не нужна: отказ не про отсутствие записи, а про роль (#4868)
+    // или незаполненную настройку уже зарегистрированного планшета.
+    function showBlocked(ctx, title, text, noRegister) {
         var container = ctx.root;
         container.innerHTML = '';
         var card = el('div', { class: 'atex-pad-card' }, [
@@ -361,7 +391,7 @@
         } else {
             card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
         }
-        if (canRegister(ctx.table, ctx)) {
+        if (canRegister(ctx.table, ctx) && !noRegister) {
             var input = el('input', {
                 class: 'atex-pad-input', id: 'atex-pad-name', type: 'text',
                 placeholder: 'Например, Планшет слиттера №1', autocomplete: 'off'
@@ -535,8 +565,22 @@
             xsrf: container.getAttribute('data-xsrf') || (root.xsrf || ''),
             user: container.getAttribute('data-user') || (root.user || ''),
             role: root.role || '',
+            // #4868: шаблон пульта объявляет, кому место разрешено (data-pad-roles —
+            // id ролей, как PAD_ROLE_IDS в main.html) и какой объект планшета нужен
+            // этому пульту (data-pad-kind: slitter | cutter | place).
+            allowedRoles: parseRoleIds(script.getAttribute('data-pad-roles')),
+            kind: trimText(script.getAttribute('data-pad-kind')),
             table: null
         };
+        // #4868: РОЛЬ проверяем до всяких запросов — пульт оператора, чужому роли
+        // он и не должен начинать грузиться.
+        if (!isRoleAllowed(ctx.allowedRoles, root.roleId)) {
+            showBlocked(ctx, 'Это операторское место',
+                'Пульт доступен только пользователю с ролью «Оператор».'
+                + (ctx.role ? ' Ваша роль: «' + ctx.role + '».' : ' Роль не определена.'),
+                true);
+            return;
+        }
         showNote(container, 'Проверка устройства…', '');
 
         getJson(ctx, 'metadata')
@@ -556,6 +600,14 @@
                         canRegister(ctx.table, ctx)
                             ? 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Дайте ему название и зарегистрируйте — рабочее место откроется сразу после этого.'
                             : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.');
+                    return;
+                }
+                // #4868: планшету назначен объект ЭТОГО рабочего места? Не назначен —
+                // пульт не открывается: выбор объекта в пульте остался в прошлом, место
+                // задаётся настройкой планшета. Код планшета на экране — по нему запись находят.
+                var missing = missingObject(pad, ctx.kind);
+                if (missing) {
+                    showBlocked(ctx, missing.title, missing.text, true);
                     return;
                 }
                 publishPad(ctx, pad);
@@ -581,6 +633,9 @@
         padConfigFromRow: padConfigFromRow, // #4789
         padWorkspace: padWorkspace,         // #4789
         matchPadObject: matchPadObject,     // #4789
+        parseRoleIds: parseRoleIds,         // #4868
+        isRoleAllowed: isRoleAllowed,       // #4868
+        missingObject: missingObject,       // #4868
         canRegister: canRegister,
         isOwner: isOwner,
         nameReqId: nameReqId,
