@@ -9075,6 +9075,14 @@ function NormalSize($size)
    else
        return round($size/1099511627776, 2)." TB";
 }
+// Env-обёртка над getenv(): false и пустая строка означают «не задано» — берём default.
+// smtp_helo_name()/smtpmail() зовут её с фикса #4639 (#4640), но сама определена не была —
+// на проде фатал «Call to undefined function integram_env()» при отправке кода на почту.
+// Issue #4862. Определение обязано идти до первого вызова.
+function integram_env($name, $default = ''){
+	$v = getenv($name);
+	return ($v === false || $v === '') ? $default : $v;
+}
 // RFC 2047 encoded-word для заголовков с не-ASCII. Закрывается "?=", а не "=?=":
 // лишний "=" ломал base64-паддинг во всех заголовках писем (Subject, To, From).
 // Кавычки вокруг encoded-word тоже недопустимы — RFC 2047 §5. Issue #4639.
