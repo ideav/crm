@@ -12,6 +12,10 @@
 // Решение ideav/crm#2916 (часть #2903); перестройка по образцу пульта слиттера
 // (#3869); выравнивание под БОЕВУЮ схему ateh + выбор даты. Правила разработки —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.6.
+// #4861: пульт показывает ОКНО плана «вчера · сегодня · ещё 2 заполненных дня»
+// (вчера и сегодня — всегда, даже пустые; впереди берутся только дни с заданиями,
+// выходные и пустые дни пропускаются). Список сгруппирован по дням: у каждого дня
+// своя сводка и своё «✓✓ Закрыть все» — закрывают кончившийся день, а не завтра.
 //
 // БОЕВАЯ СХЕМА (live ateh): «Задание на втулки» — подчинённая таблица позиции, её
 // ГЛАВНОЕ ЗНАЧЕНИЕ (первая колонка) — это ДАТА/ВРЕМЯ планового старта (Unix), а не
@@ -157,6 +161,30 @@
     function formatRuDate(iso) {
         var p = isoParts(iso);
         return p ? pad2(p.d) + '.' + pad2(p.mo) + '.' + p.y : String(iso == null ? '' : iso);
+    }
+
+    // #4861: сдвиг локальной даты на N дней (−1 = вчера). Через Date(y, mo, d+N) —
+    // границы месяца и года Date переносит сам. Некорректная дата → ''.
+    function shiftIso(iso, days) {
+        var p = isoParts(iso);
+        if (!p) return '';
+        var d = new Date(p.y, p.mo - 1, p.d + (Number(days) || 0));
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+
+    // #4861: короткие дни недели для заголовков дней окна (не Intl — одна и та же
+    // строка в браузере и в тестах Node).
+    var WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+
+    // #4861: подпись дня в заголовке группы: «Вчера, 02.09», «Сегодня, 03.09»,
+    // дальше — день недели с датой («пт, 04.09»). Нераспознанное — как есть.
+    function dayHeading(iso, todayIso) {
+        var p = isoParts(iso);
+        if (!p) return str(iso);
+        var label = pad2(p.d) + '.' + pad2(p.mo);
+        if (iso === todayIso) return 'Сегодня, ' + label;
+        if (iso === shiftIso(todayIso, -1)) return 'Вчера, ' + label;
+        return WEEKDAYS[new Date(p.y, p.mo - 1, p.d).getDay()] + ', ' + label;
     }
 
     // #4798: подпись пульта в шапке страницы (.navbar-workspace) —
@@ -313,6 +341,62 @@
         return showDone ? list : list.filter(function(t) { return !isTerminal(t.status); });
     }
 
+    // #4861: СКОЛЬКО ДНЕЙ ВПЕРЁД искать заполненные (выходные и пустые дни между ними
+    // пропускаются). План строится на пару недель — этого горизонта достаточно; дальше
+    // заданий всё равно нет.
+    var WINDOW_SCAN_AHEAD = 14;
+
+    // #4861: ОКНО ПЛАНА пульта — «вчера · сегодня · ещё 2 заполненных дня». Вчера и
+    // сегодня входят ВСЕГДА (даже пустые — оператору видно, что заданий нет), дальше
+    // берутся следующие дни С заданиями этого втулкореза: выходной или день без заданий
+    // пропускается (в окно не попадает вовсе, дырки в списке нет). Горизонт поиска —
+    // WINDOW_SCAN_AHEAD дней; меньше двух заполненных — окно короче.
+    //   → [{ iso, filled }]
+    function planDays(tasks, cutterId, todayIso, opts) {
+        var o = opts || {};
+        var wantNext = o.wantNext != null ? o.wantNext : 2;
+        var scanAhead = o.scanAhead != null ? o.scanAhead : WINDOW_SCAN_AHEAD;
+        var filled = {};
+        (tasks || []).forEach(function(t) {
+            if (str(t.cutterId) !== str(cutterId)) return;
+            if (t.dateIso) filled[t.dateIso] = true;
+        });
+        var days = [
+            { iso: shiftIso(todayIso, -1), filled: !!filled[shiftIso(todayIso, -1)] },
+            { iso: todayIso, filled: !!filled[todayIso] }
+        ];
+        var taken = 0;
+        for (var i = 1; i <= scanAhead && taken < wantNext; i++) {
+            var iso = shiftIso(todayIso, i);
+            if (!filled[iso]) continue;
+            days.push({ iso: iso, filled: true });
+            taken++;
+        }
+        return days;
+    }
+
+    // #4861: границы чтения отчёта для окна — от вчерашней полуночи до конца
+    // горизонта поиска. Серверный фильтр отчёта (FR_/TO_) остаётся узким: пульт
+    // качает весь скан-горизонт одним запросом и режет его на дни сам.
+    function windowBoundsUnix(todayIso, scanAhead) {
+        var ahead = scanAhead != null ? scanAhead : WINDOW_SCAN_AHEAD;
+        var from = dayBoundsUnix(shiftIso(todayIso, -1));
+        var to = dayBoundsUnix(shiftIso(todayIso, ahead));
+        return from && to ? { start: from.start, end: to.end } : null;
+    }
+
+    // #4861: подпись окна для шапки пульта: «02.09 – 08.09.2026» (год один раз,
+    // в конце); один день — полной датой; через новый год — обе с годом.
+    function windowLabel(days) {
+        var list = (days || []).map(function(d) { return d && d.iso ? d.iso : d; }).filter(Boolean);
+        if (!list.length) return '';
+        if (list.length === 1) return formatRuDate(list[0]);
+        var first = isoParts(list[0]), last = isoParts(list[list.length - 1]);
+        var from = pad2(first.d) + '.' + pad2(first.mo);
+        var to = pad2(last.d) + '.' + pad2(last.mo) + '.' + last.y;
+        return first.y === last.y ? (from + ' – ' + to) : (formatRuDate(list[0]) + ' – ' + to);
+    }
+
     // Сколько заданий дня уже завершено или пропущено (столько прячет переключатель).
     function terminalCount(tasks) {
         return (tasks || []).filter(function(t) { return isTerminal(t.status); }).length;
@@ -404,6 +488,11 @@
         todayLocalIso: todayLocalIso,
         dayBoundsUnix: dayBoundsUnix,
         formatRuDate: formatRuDate,
+        shiftIso: shiftIso,                    // #4861: сдвиг даты на N дней
+        dayHeading: dayHeading,                // #4861: «Вчера, 02.09» / «пт, 04.09»
+        planDays: planDays,                    // #4861: окно «вчера·сегодня+2 заполненных»
+        windowBoundsUnix: windowBoundsUnix,    // #4861: границы чтения отчёта для окна
+        windowLabel: windowLabel,              // #4861: подпись окна «02.09 – 08.09.2026»
         workspaceTitleParts: workspaceTitleParts,   // #4798: подпись пульта в шапке страницы
         taskFromReportRow: taskFromReportRow,
         isChecked: isChecked,                     // #4786
@@ -452,7 +541,7 @@
         this.cutters = [];             // справочник втулкорезов [{ id, label, diaMin, diaMax }]
         this.tasks = [];               // задания выбранного втулкореза на выбранную дату
         this.selectedCutterId = null;  // выбранный втулкорез (localStorage)
-        this.selectedDate = core.todayLocalIso(); // #4798: день пульта — всегда текущий, выбора дня нет
+        this.selectedDate = core.todayLocalIso(); // #4798: день пульта — всегда текущий; #4861: якорь окна
         this.showDone = false;         // показывать выполненные/пропущенные (localStorage)
         this.missingCols = [];         // #4786: колонки «что режем», которых нет в отчёте
         this.busy = false;
@@ -536,14 +625,16 @@
 
     // ── Чтение заданий на втулки (отчёт sleeve_tasks, серверный фильтр) ──
 
-    // Задания выбранного втулкореза на выбранную дату. Без выбранного втулкореза —
-    // ничего не грузим. Отчёт фильтруется серверно по cutter_id и диапазону даты дня.
+    // Задания выбранного втулкореза на ОКНО плана (#4861: вчера · сегодня · ещё 2
+    // заполненных дня). Без выбранного втулкореза — ничего не грузим. Отчёт
+    // фильтруется серверно по cutter_id и диапазону всего окна (от вчерашней
+    // полуночи до конца горизонта поиска); на дни его режет planDays.
     AtexSleeveCutter.prototype.loadTasks = function() {
         var self = this;
         if (!this.selectedCutterId) { this.tasks = []; return Promise.resolve(); }
         var path = 'report/' + REPORT + '?JSON_KV&LIMIT=0,5000' +
             '&FR_' + COL.cutterId + '=' + encodeURIComponent(this.selectedCutterId);
-        var bounds = core.dayBoundsUnix(this.selectedDate);
+        var bounds = core.windowBoundsUnix(this.selectedDate);
         if (bounds) {
             path += '&FR_' + COL.date + '=' + bounds.start + '&TO_' + COL.date + '=' + bounds.end;
         }
@@ -561,14 +652,19 @@
         });
     };
 
-    // Все задания дня (с постоянными номерами) — для сводки, «Закрыть все» и счётчика
-    // скрытых; список на экране — visibleTasks (без выполненных, пока не включён показ).
+    // Все задания ОКНА (с постоянными номерами по каждому дню) — для верхней сводки и
+    // счётчика скрытых; список на экране — группы по дням (renderDaySection).
     AtexSleeveCutter.prototype.dayTasks = function() {
-        return core.dayTasks(this.tasks, this.selectedCutterId, this.selectedDate);
+        return core.dayTasks(this.tasks, this.selectedCutterId, '');   // '' — без фильтра дня: всё окно
+    };
+
+    // Дни окна пульта: вчера · сегодня · ещё 2 заполненных (#4861).
+    AtexSleeveCutter.prototype.planDays = function() {
+        return core.planDays(this.tasks, this.selectedCutterId, this.selectedDate);
     };
 
     AtexSleeveCutter.prototype.visibleTasks = function() {
-        return core.visibleTasks(this.tasks, this.selectedCutterId, this.selectedDate, this.showDone);
+        return core.visibleTasks(this.tasks, this.selectedCutterId, '', this.showDone);
     };
 
     // ── Запоминание выбора втулкореза, даты и показа выполненных (localStorage) ──
@@ -660,8 +756,8 @@
     };
 
     // #4798: дата и втулкорез ушли из формы в шапку страницы (.navbar-workspace):
-    // «{имя планшета} · {дата} · {втулкорез}». Дата — всегда текущая календарная (выбор дня
-    // убран), втулкорез — кнопка: сменить станок оператору иногда нужно, менять день — нет.
+    // «{имя планшета} · {окно плана} · {втулкорез}». #4861: вместо одной даты — период
+    // окна («02.09 – 08.09.2026»), дни расписаны группами списка; втулкорез — кнопка.
     AtexSleeveCutter.prototype.renderWorkspaceTitle = function() {
         var self = this;
         if (typeof document === 'undefined' || !document.querySelector) return;
@@ -669,7 +765,9 @@
         if (!slot) return;
         slot.innerHTML = '';
         slot.classList.add('atex-sc-nav');
-        var parts = core.workspaceTitleParts(this.padName(), this.selectedDate, this.selectedCutterLabel());
+        // formatRuDate внутри workspaceTitleParts нераспознанное возвращает как есть —
+        // подпись окна («02.09 – 08.09.2026») проходит не свёрнутой.
+        var parts = core.workspaceTitleParts(this.padName(), core.windowLabel(this.planDays()), this.selectedCutterLabel());
         parts.forEach(function(part, idx) {
             var last = idx === parts.length - 1;   // втулкорез — всегда последняя часть
             if (idx) slot.appendChild(el('span', { class: 'atex-sc-nav-sep', text: '·' }));
@@ -730,9 +828,6 @@
             return;
         }
 
-        // #4798: подписи «Задания на ДД.ММ.ГГГГ» здесь нет — день пульта стои́т в шапке
-        // страницы (renderWorkspaceTitle), и повторять его над списком незачем.
-
         // #4786: отчёт без колонок «что режем» — пульт показывает меньше, чем должен, и
         // называет причину. Иначе пустая карточка выглядит как «в базе ничего нет».
         if ((this.missingCols || []).length) {
@@ -743,39 +838,22 @@
             }));
         }
 
-        // Сводка и номера — по ВСЕМ заданиям дня, независимо от того, что скрыто.
-        var tasks = this.dayTasks();
-        if (!tasks.length) {
-            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'На эту дату заданий для этого втулкореза нет.' }));
-            return;
-        }
-
-        var s = core.summarize(tasks);
-        var hidden = core.terminalCount(tasks);
-        var summaryParts = [
+        // #4861: список — ГРУППАМИ ПО ДНЯМ окна (вчера · сегодня · ещё 2 заполненных).
+        // Верхняя сводка — по всему окну; у каждого дня — свой заголовок с датой,
+        // сводкой дня и своим «✓✓ Закрыть все»: день закрывают, когда он кончился,
+        // а не завтрашние задания.
+        var days = this.planDays();
+        var allTasks = this.dayTasks();
+        var s = core.summarize(allTasks);
+        var hidden = core.terminalCount(allTasks);
+        host.appendChild(el('div', { class: 'atex-sc-summary' }, [
             metric('Заданий', s.total),
             metric('Готово', s.done + ' / ' + s.total),
             metric('План, шт', s.planQty),
             this.showDoneToggle(hidden)
-        ];
-        // #4798: «✓✓ Закрыть все» — в сводке дня, а не в тулбаре (тулбара больше нет).
-        // Кнопка стои́т там, где написано, сколько заданий осталось: закрывают именно их.
-        if (core.hasActiveTasks(this.tasks, this.selectedCutterId, this.selectedDate)) {
-            var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-summary-all', type: 'button', text: '✓✓ Закрыть все' });
-            allBtn.addEventListener('click', function() { self.closeAll(); });
-            summaryParts.push(allBtn);
-        }
-        host.appendChild(el('div', { class: 'atex-sc-summary' }, summaryParts));
+        ]));
 
-        var shown = this.visibleTasks();
-        if (!shown.length) {
-            host.appendChild(el('div', { class: 'atex-sc-empty', text: 'Все задания на эту дату закрыты — включите «Показать выполненные», чтобы их увидеть.' }));
-            return;
-        }
-
-        var listWrap = el('div', { class: 'atex-sc-tasks' });
-        shown.forEach(function(task) { listWrap.appendChild(self.renderTaskRow(task)); });
-        host.appendChild(listWrap);
+        days.forEach(function(day) { host.appendChild(self.renderDaySection(day.iso)); });
 
         function metric(label, value) {
             return el('div', { class: 'atex-sc-metric' }, [
@@ -783,6 +861,46 @@
                 el('span', { class: 'atex-sc-metric-value', text: String(value) })
             ]);
         }
+    };
+
+    // Группа одного дня окна: заголовок (подпись дня + сводка дня + «✓✓ Закрыть все»)
+    // и карточки заданий дня. Номера заданий — плановые ВНУТРИ дня (№1 — у самого
+    // раннего старта этого дня); выполненные скрыты, пока не включён показ (#4612).
+    AtexSleeveCutter.prototype.renderDaySection = function(iso) {
+        var self = this;
+        var tasks = core.dayTasks(this.tasks, this.selectedCutterId, iso);
+        var shown = this.showDone ? tasks : tasks.filter(function(t) { return !core.isTerminal(t.status); });
+        var s = core.summarize(tasks);
+
+        var section = el('div', { class: 'atex-sc-day' });
+        var head = el('div', { class: 'atex-sc-day-head' }, [
+            el('span', { class: 'atex-sc-day-title', text: core.dayHeading(iso, this.selectedDate) }),
+            el('span', { class: 'atex-sc-day-metrics', text: 'заданий: ' + s.total
+                + ' · готово: ' + s.done + ' из ' + s.total
+                + ' · план: ' + s.planQty + ' шт' })
+        ]);
+        // «✓✓ Закрыть все» — своя у каждого дня: закрывают именно этот день, а не всё окно.
+        if (core.hasActiveTasks(this.tasks, this.selectedCutterId, iso)) {
+            var allBtn = el('button', { class: 'atex-sc-btn atex-sc-btn-advance atex-sc-summary-all', type: 'button', text: '✓✓ Закрыть все' });
+            allBtn.addEventListener('click', function() { self.closeAll(iso); });
+            head.appendChild(allBtn);
+        }
+        section.appendChild(head);
+
+        if (!tasks.length) {
+            section.appendChild(el('div', { class: 'atex-sc-empty', text: 'Заданий на этот день нет.' }));
+            return section;
+        }
+        if (!shown.length) {
+            section.appendChild(el('div', { class: 'atex-sc-empty',
+                text: 'Все задания дня закрыты — включите «Показать выполненные», чтобы их увидеть.' }));
+            return section;
+        }
+
+        var listWrap = el('div', { class: 'atex-sc-tasks' });
+        shown.forEach(function(task) { listWrap.appendChild(self.renderTaskRow(task)); });
+        section.appendChild(listWrap);
+        return section;
     };
 
     // Переключатель «показать выполненные» в сводке: со счётчиком того, сколько
@@ -935,15 +1053,18 @@
         });
     };
 
-    // «Закрыть все» — пометить все незавершённые задания «Готово» (с подтверждением);
-    // последовательная запись, затем перерисовка.
-    AtexSleeveCutter.prototype.closeAll = function() {
+    // «Закрыть все» — пометить все незавершённые задания ДНЯ «Готово» (с подтверждением);
+    // последовательная запись, затем перерисовка. #4861: у каждого дня своя кнопка —
+    // закрывают кончившийся день, а не всё окно (завтрашние задания не трогаем).
+    AtexSleeveCutter.prototype.closeAll = function(iso) {
         var self = this;
         if (this.busy) return;
+        var day = iso || this.selectedDate;
         // Закрываем все незавершённые задания дня — независимо от того, что сейчас показано.
-        var pending = this.dayTasks().filter(function(t) { return !core.isTerminal(t.status) && t.id; });
+        var pending = core.dayTasks(this.tasks, this.selectedCutterId, day)
+            .filter(function(t) { return !core.isTerminal(t.status) && t.id; });
         if (!pending.length) { this.notify('Нет незавершённых заданий', 'info'); return; }
-        this.confirmModal('Отметить все ' + pending.length + ' заданий «Готово»?', function() {
+        this.confirmModal('Отметить все ' + pending.length + ' заданий «Готово» на ' + core.dayHeading(day, this.selectedDate) + '?', function() {
             self.setBusy(true);
             var chain = Promise.resolve();
             pending.forEach(function(t) { chain = chain.then(function() { return self.writeCompletion(t, true); }); });

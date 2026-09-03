@@ -221,11 +221,13 @@ assertEqual(core.colIndex(taskMeta, 'Втулкорез'), 1, 'colIndex: гла�
     inst.getJson = function(path) { captured = path; return Promise.resolve([]); };
 
     inst.loadTasks();
-    var b = core.dayBoundsUnix('2026-06-01');
+    // #4861: пульт читает ОКНО плана (вчера · сегодня · ещё 2 заполненных) одним
+    // запросом — нижняя граница ушла на вчерашнюю полночь, верхняя — на конец горизонта.
+    var b = core.windowBoundsUnix('2026-06-01');
     assertEqual(captured.indexOf('report/sleeve_tasks?JSON_KV') === 0, true, 'loadTasks: читает отчёт sleeve_tasks');
     assertEqual(captured.indexOf('FR_cutter_id=2257') >= 0, true, 'loadTasks: серверный фильтр по втулкорезу');
-    assertEqual(captured.indexOf('FR_task_date=' + b.start) >= 0, true, 'loadTasks: нижняя граница дня');
-    assertEqual(captured.indexOf('TO_task_date=' + b.end) >= 0, true, 'loadTasks: верхняя граница дня');
+    assertEqual(captured.indexOf('FR_task_date=' + b.start) >= 0, true, 'loadTasks: нижняя граница окна — вчерашняя полночь');
+    assertEqual(captured.indexOf('TO_task_date=' + b.end) >= 0, true, 'loadTasks: верхняя граница окна — конец горизонта');
 
     var inst2 = Object.create(Controller.prototype);
     inst2.selectedCutterId = null;

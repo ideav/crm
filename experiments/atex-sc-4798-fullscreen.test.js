@@ -2,7 +2,8 @@
 //   1. левого меню на странице пульта нет (решение принимается в head main.html);
 //   2. даты и выбора втулкореза в форме нет — они ушли в шапку страницы
 //      (.navbar-workspace), дата — текущая календарная, втулкорез выбирается кнопкой;
-//   3. «✓✓ Закрыть все» переехала из тулбара в сводку (.atex-sc-summary).
+//   3. «✓✓ Закрыть все» в тулбаре нет: #4798 переехал её из тулбара к сводке,
+//      #4861 — в заголовок дня (.atex-sc-day-head), ведь день закрывают целиком.
 //
 // Run with: node experiments/atex-sc-4798-fullscreen.test.js
 
@@ -205,15 +206,16 @@ function task(id, extra) {
         assert(false, '#4798 п.2: клик по втулкорезу открывает выбор из справочника');
     }
 
-    // п.3: «Закрыть все» лежит ВНУТРИ сводки
+    // п.3 (#4861): «Закрыть все» — в заголовке ДНЯ (.atex-sc-day-head), рядом со сводкой
+    // этого дня: день закрывают целиком, а не окно. В тулбаре её по-прежнему нет.
     var summary = inst.root.querySelector('.atex-sc-summary');
-    assert(!!summary, '#4798 п.3: сводка дня отрисована');
+    assert(!!summary, '#4798 п.3: сводка окна отрисована');
     var allBtn = inst.root.querySelectorAll('.atex-sc-btn').filter(function(n) {
         return n.textContent.indexOf('Закрыть все') !== -1;
     })[0];
     assert(!!allBtn, '#4798 п.3: кнопка «✓✓ Закрыть все» на месте');
-    assert(!!allBtn && !!summary && allBtn.parentNode === summary,
-        '#4798 п.3: «✓✓ Закрыть все» — внутри .atex-sc-summary, а не в тулбаре');
+    assert(!!allBtn && !!allBtn.parentNode && allBtn.parentNode.classList.contains('atex-sc-day-head'),
+        '#4798 п.3/#4861: «✓✓ Закрыть все» — в заголовке дня, а не в тулбаре');
 })();
 
 (function() {

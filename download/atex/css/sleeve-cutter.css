@@ -143,9 +143,24 @@
     background: var(--sc-surface);
     border: 1px solid var(--sc-border);
 }
-/* #4798: «✓✓ Закрыть все» живёт в сводке, следом за переключателем «показать
-   выполненные» — тот уже прижат к правому краю своим margin-left:auto. */
+/* #4798: «✓✓ Закрыть все» живёт в сводке дня (кнопка справа в заголовке дня). */
 .atex-sc-summary-all { align-self: center; }
+
+/* #4861: группы дней окна «вчера · сегодня · ещё 2 заполненных». Заголовок дня —
+   подпись, сводка дня и кнопка «Закрыть все» этого дня одной строкой. */
+.atex-sc-day { margin-bottom: 22px; }
+.atex-sc-day-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--sc-border);
+}
+.atex-sc-day-title { font-size: 18px; font-weight: 700; }
+.atex-sc-day-metrics { color: var(--sc-muted); font-size: 14px; }
+.atex-sc-day-head .atex-sc-summary-all { margin-left: auto; }
 .atex-sc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 96px; }
 .atex-sc-metric-label { font-size: 12px; color: var(--sc-muted); text-transform: uppercase; letter-spacing: .03em; }
 .atex-sc-metric-value { font-size: 22px; font-weight: 700; }
