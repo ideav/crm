@@ -202,8 +202,15 @@ function makeInst(opts) {
     assert(section.textContent.indexOf('остаток партии') === -1,
         '#4785 п.3: остаток партии под «Счётчиком нач.» не дублируется');
 
-    // ввод брака больше не рисует пересчёт «= N м²», но сам пересчёт живёт
-    var defect = section.querySelectorAll('.atex-sl-grid')[0].querySelectorAll('.atex-sl-input')[3];
+    // ввод брака больше не рисует пересчёт «= N м²», но сам пересчёт живёт.
+    // #4860: в сетке показаний появились поля расхода джамбо (после «Счётчика кон.»),
+    // поэтому поле «Брак, м» ищем ПО ПОДПИСИ, а не позицией: порядок полей — продукт,
+    // а не контракт теста; проверяемое поведение (пересчёт м² при вводе) не менялось.
+    var defectField = section.querySelectorAll('.atex-sl-field').filter(function(f) {
+        var lbl = f.querySelector('.atex-sl-label');
+        return lbl && lbl.textContent === 'Брак, м';
+    })[0];
+    var defect = defectField.querySelectorAll('.atex-sl-input')[0];
     defect.value = '12';
     defect.dispatch('input');
     assertEqual(inst.currentCut.defect, String(core.defectM2('12', 910)),

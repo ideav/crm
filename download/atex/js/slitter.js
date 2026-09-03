@@ -49,7 +49,20 @@
         batch: 'Партия сырья',
         material: 'Вид сырья',
         slitter: 'Слиттер',
-        finishedBatch: 'Партия ГП'   // #3433: состав резки — для записи факт. рулонов
+        finishedBatch: 'Партия ГП',  // #3433: состав резки — для записи факт. рулонов
+        jumbo: 'Номер джамбо'        // #4860: расход джамбо под заданием (up = задание)
+    };
+    // #4860: реквизиты «Номера джамбо». Джамбо хранится одной партией (16–20 км);
+    // помимо нарезанного метража из него тратится протяжка перед резкой («Рабочий
+    // расход») и остаток под утиль («К списанию») — обе величины прибавляются
+    // к разнице счётчиков, конечная длина джамбо получается за их вычетом.
+    var JUMBO_REQ = {
+        startLength: 'Начальная длина, м',
+        runs: 'Кол-во резок',
+        endLength: 'Конечная длина, м',
+        workSpent: 'Рабочий расход, м',
+        writeOff: 'К списанию, м',
+        defect: 'Брак, м'
     };
     // #3433: реквизиты «Партии ГП» (состав резки, up = резка), нужные слиттеру для
     // записи факта: «Кол-во полос» (за проход) и «Кол-во факт» (произведённые рулоны).
@@ -168,6 +181,64 @@
     // даёт 0, и завершение резки его не пропустит. Записи с прежней формулой заказчик чистит.
     function meterageFromCounters(start, end) {
         return round3(Math.max(0, toNumber(start) - toNumber(end)));
+    }
+
+    // #4860: финальный «Счётчик кон.» с вычетом расхода джамбо. Рабочий расход
+    // (протяжка перед резкой) и «К списанию» (остаток в утиль) ПРИБАВЛЯЮТСЯ к
+    // разнице значений счётчика — конечная длина джамбо получается за их вычетом:
+    // кон = показание счётчика после резки − рабочий расход − к списанию.
+    function jumboFinalCounter(counterEnd, workSpent, writeOff) {
+        return round3(toNumber(counterEnd) - toNumber(workSpent) - toNumber(writeOff));
+    }
+
+    // #4860: есть ли что учитывать в записи «Номера джамбо» — заполнен номер,
+    // или расход/списание больше нуля.
+    function hasJumboData(jumboNo, workSpent, writeOff) {
+        if (String(jumboNo == null ? '' : jumboNo).trim() !== '') return true;
+        return toNumber(workSpent) > 0 || toNumber(writeOff) > 0;
+    }
+
+    // #4860: что делать с записью «Номера джамбо» при сохранении: данные есть и
+    // записи ещё нет → 'new'; есть существующая → 'set'; учитывать нечего и записи
+    // нет → null (пустых записей не плодим).
+    function jumboSaveAction(recordId, hasData) {
+        if (recordId != null && String(recordId).trim() !== '') return 'set';
+        return hasData ? 'new' : null;
+    }
+
+    // #4860: подпись расхода джамбо — что именно ушло бы в запись. По ней отметка
+    // «уже сохранено» отличает выход из нетронутой ячейки от настоящей правки
+    // (та же схема, что у показаний — readingsSignature, #4783 п.10).
+    function jumboSignature(cut) {
+        if (!cut) return '';
+        return [cut.jumboNo, cut.jumboWorkSpent, cut.jumboWriteOff]
+            .map(function(v) { return String(v == null ? '' : v).trim(); }).join('|');
+    }
+
+    // #4860: поля записи «Номера джамбо» (t{id} → значение) из метаданных таблицы.
+    // Главное значение — сам номер (ключ = id таблицы, не t3 — см. docs/kb/crud.md);
+    // реквизиты ищутся ПО ИМЕНИ, каких нет — имена собираются в missing (вызывающий
+    // ругается в консоль: молча терять поля нельзя, как в #4564). Конечная длина —
+    // за вычетом рабочего расхода и списания; кол-во резок — факт, без него план.
+    function jumboRecordFields(tableMeta, cut) {
+        var fields = {}, missing = [];
+        if (!tableMeta) return { fields: fields, missing: missing };
+        function put(reqName, value) {
+            var req = (tableMeta.reqs || []).filter(function(r) {
+                return r && String(r.val).trim().toLowerCase() === String(reqName).trim().toLowerCase();
+            })[0];
+            if (req) fields['t' + req.id] = value;
+            else missing.push(reqName);
+        }
+        fields['t' + tableMeta.id] = String(cut.jumboNo == null ? '' : cut.jumboNo).trim();
+        put(JUMBO_REQ.startLength, cut.counterStart || '');
+        put(JUMBO_REQ.runs, cut.actualRuns || plannedRunsForCut(cut) || '');
+        put(JUMBO_REQ.endLength, jumboFinalCounter(cut.counterEnd,
+            toNumber(cut.jumboWorkSpent), toNumber(cut.jumboWriteOff)));
+        put(JUMBO_REQ.workSpent, toNumber(cut.jumboWorkSpent) || '');
+        put(JUMBO_REQ.writeOff, toNumber(cut.jumboWriteOff) || '');
+        put(JUMBO_REQ.defect, cut.defectM || '');
+        return { fields: fields, missing: missing };
     }
 
     // #3433: фактически произведённые рулоны полосы = полос за проход × факт. проходов.
@@ -1112,6 +1183,11 @@
         nextStatus: nextStatus,
         isDone: isDone,
         meterageFromCounters: meterageFromCounters,
+        jumboFinalCounter: jumboFinalCounter,       // #4860: счётчик кон. за вычетом расхода джамбо
+        hasJumboData: hasJumboData,                 // #4860: есть ли что учитывать в «Номере джамбо»
+        jumboSaveAction: jumboSaveAction,           // #4860: new/set/null для записи «Номера джамбо»
+        jumboSignature: jumboSignature,             // #4860: подпись расхода джамбо (след правки)
+        jumboRecordFields: jumboRecordFields,       // #4860: поля записи «Номера джамбо» по метаданным
         actualRollsForStrip: actualRollsForStrip,
         sumConsumption: sumConsumption,
         sortFifo: sortFifo,
@@ -1244,7 +1320,7 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
-        this.meta = { cut: null, event: null, batch: null, material: null, slitter: null, finishedBatch: null };
+        this.meta = { cut: null, event: null, batch: null, material: null, slitter: null, finishedBatch: null, jumboTable: null };
         this.slitters = [];
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder, materialId }]
         this.materialWidths = {}; // { materialId: widthMm }
@@ -1429,6 +1505,9 @@
             self.meta.slitter = byName(TABLE.slitter);
             // #3433: необязательна (старое окружение без «Партии ГП» → факт не пишем).
             self.meta.finishedBatch = byName(TABLE.finishedBatch);
+            // #4860: необязательна — нет таблицы «Номер джамбо» (82374), расход джамбо
+            // не ведётся: поля ввода остаются, но ни в какую запись они не пишутся.
+            self.meta.jumboTable = byName(TABLE.jumbo);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
         });
     };
@@ -2735,6 +2814,42 @@
         autosave(cEnd);
         grid.appendChild(field('Счётчик кон.', cEnd));
 
+        // #4860: расход джамбо. Номер джамбо увидит упаковщик; рабочий расход —
+        // протяжка перед резкой, «К списанию» — остаток джамбо под утиль. Обе величины
+        // прибавляются к разнице счётчиков при завершении (конечная длина джамбо —
+        // за их вычетом) и живут в записи «Номера джамбо» (table 82374, up = задание).
+        // Карта инпутов пересоздаётся КАЖДЫЙ рендер: иначе здесь остались бы узлы,
+        // отвязанные от DOM, и предзаполнение из loadJumboRecord писало бы в мёртвые.
+        this.jumboInputs = {};
+        function jumboAutosave(input) {
+            input.addEventListener('change', function() { self.saveJumboIfChanged(); });
+            input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
+        }
+        var jumboNo = el('input', {
+            class: 'atex-sl-input', type: 'text', placeholder: 'номер джамбо',
+            value: cut.jumboNo || ''
+        });
+        jumboNo.addEventListener('input', function() { cut.jumboNo = jumboNo.value; });
+        jumboAutosave(jumboNo);
+        grid.appendChild(field('Номер джамбо', jumboNo));
+        this.jumboInputs.no = jumboNo;
+
+        var jumboWork = numInput(cut.jumboWorkSpent, '0');
+        jumboWork.addEventListener('input', function() { cut.jumboWorkSpent = jumboWork.value; });
+        jumboAutosave(jumboWork);
+        grid.appendChild(field('Рабочий расход, м', jumboWork));
+        this.jumboInputs.work = jumboWork;
+
+        var jumboOff = numInput(cut.jumboWriteOff, '0');
+        jumboOff.addEventListener('input', function() { cut.jumboWriteOff = jumboOff.value; });
+        jumboAutosave(jumboOff);
+        grid.appendChild(field('К списанию, м', jumboOff));
+        this.jumboInputs.off = jumboOff;
+
+        // Предзаполнение из существующей записи «Номера джамбо» этого задания —
+        // асинхронно: inputs обновятся, когда запись доедет (пульт не ждёт).
+        this.loadJumboRecord(cut);
+
         // #3459: Погонаж факт — вычисляемый (read-only), не сохраняется в БД отдельно
         var meterageDisplay = el('input', {
             class: 'atex-sl-input', type: 'text', readonly: 'readonly',
@@ -3013,24 +3128,45 @@
         // #4321: счётчик мотает назад, поэтому «Счётчик кон.» = 0 — законное показание (рулон
         // домотали в ноль). Пустоту от нуля отличаем по самой строке, а не по числу.
         var cEndFilled = String(cut.counterEnd == null ? '' : cut.counterEnd).trim() !== '';
+        // #4860: расход джамбо помимо резки — протяжка перед ней («Рабочий расход»)
+        // и списание остатка («К списанию»). Обе величины ПРИБАВЛЯЮТСЯ к разнице
+        // значений счётчика: «Счётчик кон.» и погонаж убывают... точнее, погонаж
+        // (расход сырья) растёт на них, а конечная длина джамбо — за их вычетом.
+        var jumboWork = core.toNumber(cut.jumboWorkSpent);
+        var jumboOff = core.toNumber(cut.jumboWriteOff);
+        var jumboExtra = core.round3(jumboWork + jumboOff);
+        if (jumboWork < 0 || jumboOff < 0) { this.notify('Рабочий расход и К списанию — неотрицательные метры', 'error'); return; }
+        if (jumboExtra > 0 && String(cut.jumboNo == null ? '' : cut.jumboNo).trim() === '') {
+            this.notify('Укажите «Номер джамбо»: без него нельзя списать рабочий расход/списание', 'error');
+            return;
+        }
         var meterage = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
         if (!(cStart > 0)) { this.notify('Заполните «Счётчик нач.» перед завершением', 'error'); return; }
         if (!cEndFilled) { this.notify('Заполните «Счётчик кон.» перед завершением', 'error'); return; }
         if (meterage <= 0) { this.notify('Погонаж факт не может быть нулевым (счётчик кон. < счётчик нач. — счётчик мотает назад)', 'error'); return; }
+        // #4860: вычет делаем ПОСЛЕ проверок — при отказе поле не показывает несохранённое.
+        if (jumboExtra > 0) {
+            cut.counterEnd = String(core.jumboFinalCounter(cut.counterEnd, jumboWork, jumboOff));
+            meterage = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
+        }
 
         this.setBusy(true);
 
-        // 1. Погонаж + «Закончено»=now + снять галку «В работе» (#4366: нулём, и пустые
-        //    значения теперь доезжают до сервера — см. post)
+        // 1. Погонаж (резка + расход джамбо, #4860) + «Закончено»=now + снять галку «В работе»
+        //    (#4366: нулём, и пустые значения теперь доезжают до сервера — см. post)
         var meta = this.meta.cut;
         var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
         var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
+        var counterEndRid = reqIdByName(meta, CUT_REQ.counterEnd);
         var finishedRid = reqIdByAnyName(meta, ['Закончено', 'Дата завершения', 'Завершено', 'finished_at']);
         var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
 
         var fields = {};
         if (meterageRid) fields['t' + meterageRid] = meterage;
         if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры
+        // #4860: счётчик кон. с вычетом расхода джамбо — иначе партия спишет меньше,
+        // чем ушло джамбо (расход на протяжку и списание остались бы в остатке).
+        if (jumboExtra > 0 && counterEndRid) fields['t' + counterEndRid] = core.toNumber(cut.counterEnd);
         if (finishedRid) { cut.finishedAt = this.eventDateTime(); fields['t' + finishedRid] = cut.finishedAt; }
         if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = '0'; }
 
@@ -3048,6 +3184,16 @@
             // #3433: зафиксировать факт рулонов в «Партиях ГП»
             return self.recordActualRolls(cut);
         }).then(function() {
+            // #4860: рабочий расход и «К списанию» расходуют джамбо помимо резки —
+            // списываем их с остатка партии, иначе остаток окажется завышен ровно на них.
+            if (jumboExtra > 0) return self.applyBatchConsumption(cut, jumboExtra, true);
+            return null;
+        }).then(function() {
+            // #4860: запись «Номера джамбо» (up = задание) со всеми полями —
+            // в т.ч. Конечная длина за вычетом расхода и списания. Финальная запись —
+            // всегда, не по подписи: за резку счётчики и резки уехали вперёд.
+            return self.saveJumbo(cut, { quiet: true });
+        }).then(function() {
             return self.loadBatches();
         }).then(function() {
             return self.loadCuts(); // #3557: обновить атрибуты резок в списке
@@ -3059,6 +3205,7 @@
             // а форма оставалась со старым статусом и показывала «Ошибка завершения».
             var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
             self.notify('Резка завершена. Погонаж: ' + meterage + ' м'
+                + (jumboExtra > 0 ? ' (вкл. расход джамбо: ' + jumboExtra + ' м)' : '')
                 + (batch ? '. Остаток партии: ' + core.round3(batch.remainderM || 0) + ' м' : ''), 'success');
             self.advanceToNextCut(); // #3583: переключить на следующее задание
         }).catch(function(err) {
@@ -3295,6 +3442,124 @@
 
     AtexSlitter.prototype.findBatch = function(batchId) {
         return this.batches.filter(function(b) { return String(b.id) === String(batchId); })[0] || null;
+    };
+
+    // ── #4860: запись «Номера джамбо» (table 82374, up = задание) ────────────────
+
+    // Метаданные «Номера джамбо» резолвятся в loadMetadata (таблица необязательна:
+    // в окружении её нет — расход джамбо не ведётся, фича выключена).
+
+    // Существующая запись «Номера джамбо» этого задания (up = задание). Нет — null.
+    // Читается ОДИН РАЗ на объект резки: renderReadings перестраивается чаще, чем
+    // меняется резка, а loadCuts пересоздаёт объекты — тогда чтение повторится само.
+    // Пока запрос летел, оператор что-то ввёл — заполняем только пустые поля.
+    // r[]: [гл. значение, ...реквизиты по порядку метаданных]; индексы берём по ИМЕНИ
+    // (colIndex), а не позицией: в таблице есть и «Фото», коду не нужная.
+    AtexSlitter.prototype.loadJumboRecord = function(cut) {
+        var self = this;
+        if (!cut || cut.id == null || cut.id === '') return Promise.resolve(null);
+        if (cut.jumboLoaded) return Promise.resolve(cut.jumboRecordId || null);
+        cut.jumboLoaded = true;
+        // this.meta может быть не инициализирован (минимальные инстансы в тестах) —
+        // отсутствие таблицы значит «фича выключена», а не падение рендера.
+        var table = (this.meta && this.meta.jumboTable) || null;
+        if (!table) return Promise.resolve(null);   // нет таблицы (старое окружение)
+        return this.getJson('object/' + encodeURIComponent(table.id)
+            + '/?JSON_OBJ&F_U=' + encodeURIComponent(cut.id) + '&LIMIT=0,10').then(function(rows) {
+            if (self.currentCut !== cut) return null;   // пока летел запрос, переключились
+            var list = Array.isArray(rows) ? rows : ((rows && rows.object) || []);
+            var row = list[0];
+            cut.jumboRecordId = row ? String(row.i) : '';
+            var r = (row && row.r) || [];
+            var workIdx = colIndex(table, JUMBO_REQ.workSpent);
+            var offIdx = colIndex(table, JUMBO_REQ.writeOff);
+            var no = String(r[0] == null ? '' : r[0]);
+            var work = workIdx >= 0 ? String(r[workIdx] == null ? '' : r[workIdx]) : '';
+            var off = offIdx >= 0 ? String(r[offIdx] == null ? '' : r[offIdx]) : '';
+            // «Уже сохранено» — ровно то, что прочитано из БД: если оператор успел ввести
+            // своё, предзаполнение его не затрёт, и выход из ячейки запишет его правку.
+            self.savedJumbo = core.jumboSignature({ jumboNo: no, jumboWorkSpent: work, jumboWriteOff: off });
+            function empty(v) { return String(v == null ? '' : v).trim() === ''; }
+            if (empty(cut.jumboNo)) cut.jumboNo = no;
+            if (empty(cut.jumboWorkSpent)) cut.jumboWorkSpent = work;
+            if (empty(cut.jumboWriteOff)) cut.jumboWriteOff = off;
+            var inputs = self.jumboInputs || {};
+            function put(input, val) { if (input && empty(input.value)) input.value = val; }
+            put(inputs.no, cut.jumboNo);
+            put(inputs.work, cut.jumboWorkSpent);
+            put(inputs.off, cut.jumboWriteOff);
+            return cut.jumboRecordId || null;
+        }).catch(function(err) {
+            self.notify('Запись «Номера джамбо» не прочитана: ' + (err && err.message ? err.message : err), 'error');
+            return null;
+        });
+    };
+
+    // Поля записи «Номера джамбо» — соответствие имён и арифметика в core.jumboRecordFields
+    // (покрыта тестом #4860 по боевой схеме 82374). Здесь только разбор её ответа: каких-то
+    // реквизитов в таблице нет — молча терять поля нельзя (#4564), ругаемся в консоль.
+    AtexSlitter.prototype.jumboFields = function(cut) {
+        var parsed = core.jumboRecordFields((this.meta && this.meta.jumboTable) || null, cut);
+        if (parsed.missing.length) {
+            console.error('[slitter] #4860: в таблице «' + TABLE.jumbo + '» нет реквизитов: '
+                + parsed.missing.join(', ') + ' — запись «Номера джамбо» будет неполной');
+        }
+        return parsed.fields;
+    };
+
+    // Выход из ячейки .atex-sl-grid сохраняет расход джамбо. Ячейку не трогали — записи
+    // нет (подпись сверяется с сохранённой, как у показаний). Пульт занят предыдущей
+    // записью — правку не теряем: jumboRetry, и сохранение повторится, как только
+    // текущее доедет.
+    AtexSlitter.prototype.saveJumboIfChanged = function() {
+        var cut = this.currentCut;
+        if (!cut) return;
+        if (core.jumboSignature(cut) === this.savedJumbo) return;
+        if (this.busy) { this.jumboRetry = true; return; }
+        this.saveJumbo(cut);
+    };
+
+    // Сохраняет запись «Номера джамбо»: new — записи ещё не было, set — обновление
+    // существующей; учитывать нечего — null (и записи не создаём). quiet — без тоста:
+    // завершение резки сообщает сводку сам. Родитель — в URL (?JSON&up=), как во всех
+    // _m_new под родителя (cut-optimizer, export.js), а не полем тела.
+    AtexSlitter.prototype.saveJumbo = function(cut, opts) {
+        var self = this;
+        opts = opts || {};
+        var table = (this.meta && this.meta.jumboTable) || null;
+        if (!table) return Promise.resolve(null);   // нет таблицы (старое окружение)
+        var action = core.jumboSaveAction(cut.jumboRecordId,
+            core.hasJumboData(cut.jumboNo, cut.jumboWorkSpent, cut.jumboWriteOff));
+        if (!action) return Promise.resolve(null);
+        var fields = this.jumboFields(cut);
+        if (!fields['t' + table.id]) {
+            self.notify('Укажите «Номер джамбо» — без него запись расхода не ведётся', 'error');
+            return Promise.resolve(null);
+        }
+        // Подпись снимаем ДО запроса: правку, сделанную пока запрос летел, эта запись не
+        // увезла — повторит jumboRetry (та же схема, что у показаний).
+        var sent = core.jumboSignature(cut);
+        var path = action === 'set'
+            ? '_m_set/' + cut.jumboRecordId + '?JSON'
+            : '_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id);
+        return this.post(path, fields).then(function(res) {
+            // ID новой записи приходит в res.obj (см. orders.js), fallback — id/i.
+            var newId = res && ((res.obj != null && String(res.obj))
+                || (res.id != null && String(res.id)) || (res.i != null && String(res.i))) || '';
+            if (action === 'new' && !newId) {
+                // Без id следующее сохранение создало бы ВТОРУЮ запись тому же заданию.
+                throw new Error('сервер не вернул id новой записи «Номера джамбо»');
+            }
+            if (action === 'new') cut.jumboRecordId = newId;
+            self.savedJumbo = sent;
+            if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
+            if (self.jumboRetry) { self.jumboRetry = false; self.saveJumboIfChanged(); }
+            return newId || cut.jumboRecordId;
+        }).catch(function(err) {
+            self.jumboRetry = false;   // повтор — по следующему выходу из ячейки, а не циклом
+            self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
+            return null;
+        });
     };
 
     // Событие смены: пишется с датой/временем (главное значение), типом,
