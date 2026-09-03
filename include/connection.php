@@ -30,10 +30,11 @@ $GLOBALS["SQL_THREAD_ID"] = mysqli_thread_id($connection);
 Limit_sql_time(isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : TIME_LIMIT_DEFAULT, $connection);
 
 global $mail_config;
-$mail_config['smtp_username'] = integram_env('INTEGRAM_SMTP_USERNAME', 'a@bi.com'); //$replyto;  // Default reply address
-$mail_config['smtp_port'] = integram_env('INTEGRAM_SMTP_PORT', '465'); // Порт работы.
-$mail_config['smtp_host'] = integram_env('INTEGRAM_SMTP_HOST', 'ssl://smtp.yandex.ru');  //сервер для отправки почты
-$mail_config['smtp_password'] = integram_env('INTEGRAM_SMTP_PASSWORD', 'xxx');  //Измените пароль
+// Почта ideav.ru — свой сервер (MX mail.ideav.ru), а не яндекс; как на integram.io (atex issue #127).
+$mail_config['smtp_username'] = integram_env('INTEGRAM_SMTP_USERNAME', 'care@ideav.ru'); // учётная запись отправителя ideav.ru
+$mail_config['smtp_port'] = integram_env('INTEGRAM_SMTP_PORT', '25'); // SMTP порт ideav.ru (25 — без шифрования; 465 — SSL/TLS)
+$mail_config['smtp_host'] = integram_env('INTEGRAM_SMTP_HOST', 'mail.ideav.ru'); // сервер исходящей почты ideav.ru
+$mail_config['smtp_password'] = integram_env('INTEGRAM_SMTP_PASSWORD', '');  // <-- впишите пароль care@ideav.ru перед деплоем
 $mail_config['smtp_debug'] = filter_var(integram_env('INTEGRAM_SMTP_DEBUG', 'true'), FILTER_VALIDATE_BOOLEAN);  //Если Вы хотите видеть сообщения ошибок, укажите true вместо false
 $mail_config['smtp_charset'] = integram_env('INTEGRAM_SMTP_CHARSET', 'utf-8');	//кодировка сообщений. (windows-1251 или utf-8, итд)
 $mail_config['smtp_from'] = integram_env('INTEGRAM_SMTP_FROM', 'Integram'); // "From" by default
