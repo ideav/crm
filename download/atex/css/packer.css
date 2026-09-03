@@ -4,6 +4,14 @@
    привычная подпись ролика, кнопка отметки под палец. */
 
 .atex-pk {
+    /* #4856: пульт занимает высоту рабочей области целиком; прокручивается только
+       список позиций (.atex-pk-main) — шапка с упаковочным местом всегда на виду.
+       Тот же приём, что у пульта слиттера (#4783). */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     --pk-border: var(--input-border, #d9dee5);
     --pk-border-soft: var(--border-color, #eef1f5);
     --pk-bg: var(--input-bg, #ffffff);
@@ -36,10 +44,18 @@
 .atex-pk-fatal { padding: 24px; color: var(--pk-warn); }
 .atex-pk-empty { padding: 20px; color: var(--pk-muted); }
 
-.atex-pk-layout { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.atex-pk-layout {
+    flex: 1 1 auto;
+    min-height: 0;          /* #4856: иначе flex-элемент растягивается по содержимому */
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
 
 /* Шапка: заголовок слева, упаковочное место — в правом верхнем углу */
 .atex-pk-head {
+    flex: 0 0 auto;         /* #4856: шапка не сжимается — весь скролл уходит списку */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -97,7 +113,15 @@
 .atex-pk-toggle { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--pk-muted); }
 
 /* Список */
-.atex-pk-main { display: flex; flex-direction: column; gap: 12px; }
+.atex-pk-main {
+    flex: 1 1 auto;
+    min-height: 0;          /* #4856: список прокручивается сам, страница целиком — нет */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
 .atex-pk-group { display: flex; flex-direction: column; gap: 8px; }
 .atex-pk-group-head { font-size: 13px; color: var(--pk-muted); padding-left: 4px; }
 
