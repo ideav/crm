@@ -212,7 +212,9 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
         else if (path.indexOf('dir_admin') !== -1) {
             body = '<input name="add_path" type="hidden" value="/js">'
                 + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=slitter.js">slitter.js</a></td>'
-                + '<td align="right"> &nbsp;12.34 KB</td></tr>';
+                + '<td align="right"> &nbsp;12.34 KB</td></tr>'
+                + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=pf-core.js">pf-core.js</a></td>'
+                + '<td align="right"> &nbsp;3 KB</td></tr>';
         } else body = {};
         return Promise.resolve({ ok: true, text: function() { return Promise.resolve(JSON.stringify(body)); }, json: function() { return Promise.resolve(body); } });
     };
@@ -228,6 +230,10 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
             '#4876 без настройки GIT в поле — дефолтный репозиторий');
         assertTrue(panel.textContent.indexOf('Сводка по репозиторию') !== -1,
             '#4876 после open() в панели — сводка расхождений (браузерный слой жив)');
+        // #4878: «только на сервере» показывается С ПОЛНЫМ путём — голое имя
+        // pf-core.js выглядело как тот же файл, что и в «отличаются».
+        assertTrue(panel.textContent.indexOf('download/atex/js/pf-core.js') !== -1,
+            '#4878 лишний на сервере файл назван с путём папки базы');
         global.document = savedDoc;
         global.fetch = savedFetch;
     });

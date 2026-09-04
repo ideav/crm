@@ -501,7 +501,12 @@
                             if (one[bucket].length) merged[bucket].push(one[bucket][0]);
                         });
                         (one.extra || []).forEach(function(name) {
-                            if (merged.extra.indexOf(name) === -1) merged.extra.push(name);
+                            // #4878: «только на сервере» — с ПОЛНЫМ репо-путём: голое
+                            // имя (pf-dicts.js) читалось как тот же файл из «отличаются»,
+                            // хотя это другая копия в другой папке сервера.
+                            var base = f.tree === 'templates' ? folders.templates : folders.download + f.sub;
+                            var label = base + '/' + name;
+                            if (merged.extra.indexOf(label) === -1) merged.extra.push(label);
                         });
                         merged.meta[f.repoPath] = f;
                     });
