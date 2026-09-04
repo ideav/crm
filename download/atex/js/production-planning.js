@@ -3146,6 +3146,26 @@
             if (!c || c.id == null) return;
             var planned = Math.floor(Number(c.plannedRuns) || 0);
             var done = cutDoneRuns(c);
+            // #4885: СМЕНА ЗАКРЫТА, задание НАЧАТО, резок 0 — настройка выполнена в день
+            // раньше план-дня (оператор наладил станок под завтрашнюю резку). Настройка
+            // переезжает записью с 0 резок в день выполнения (обычный setup-сегмент #3635),
+            // проходы остаются на плановом времени задания; записи связываются
+            // «ID выполненной части» (#4651).
+            if (done != null && done <= 0
+                    && shiftClosedSet[String(c.id)] && cutIsStarted(c)) {
+                var setupTs = planTsSeconds(c.startDate);
+                if (setupTs != null
+                        && planDateDayKey(setupTs) !== planDateDayKey(c.planDate)) {
+                    var spSetup = {
+                        id: String(c.id), doneRuns: 0, restRuns: planned,
+                        donePlanStart: setupTs,
+                        doneCloseTs: doneCloseMoment(cuts, c, setupTs, Number(o.shiftEndMin)),
+                        restPlanStart: planTsSeconds(c.planDate), restReason: 'stay'
+                    };
+                    splits.push(spSetup);
+                    splitById[String(c.id)] = spSetup;
+                }
+            }
             if (planned <= 0 || done == null || done <= 0) return;   // делить нечего / факт неизвестен
             var doneRuns = Math.min(done, planned);
             var startTs = planTsSeconds(c.startDate);
