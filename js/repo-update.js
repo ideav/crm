@@ -216,7 +216,13 @@
             else if (k === 'class') node.className = attrs[k];
             else node.setAttribute(k, attrs[k]);
         });
-        (children || []).forEach(function(c) { if (c) node.appendChild(c); });
+        // #4878: строки в children — это текстовые узлы; узел в appendChild передаёт
+        // только Node, сырая строка в реальном DOM даёт «parameter 1 is not of type
+        // 'Node'» (боевое: пробел-разделитель в repoRow).
+        (children || []).forEach(function(c) {
+            if (c == null || c === '') return;
+            node.appendChild(typeof c === 'string' ? root.document.createTextNode(c) : c);
+        });
         return node;
     }
     function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }

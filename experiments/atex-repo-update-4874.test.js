@@ -164,7 +164,21 @@ Object.defineProperty(PanelNode.prototype, 'textContent', {
     get: function() { return this.childNodes.length
         ? this.childNodes.map(function(c) { return c.textContent; }).join(' ') : this._text; },
     set: function(v) { this._text = String(v == null ? '' : v); this.childNodes = []; } });
-PanelNode.prototype.appendChild = function(n) { this.childNodes.push(n); return n; };
+// appendChild строгий, как реальный DOM: не-Node (сырая строка и т.п.) — ошибка.
+// Именно это пропустил прежний стаб: на бою строка-ребёнок в repoRow роняла панель
+// с «parameter 1 is not of type 'Node'».
+PanelNode.prototype.appendChild = function(n) {
+    if (!(n instanceof PanelNode) && !(n instanceof TextNode)) {
+        throw new TypeError("Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'.");
+    }
+    this.childNodes.push(n);
+    n.parentNode = this;
+    return n;
+};
+function TextNode(text) {
+    this._text = String(text == null ? '' : text);
+    this.textContent = this._text;
+}
 PanelNode.prototype.removeChild = function(n) {
     this.childNodes = this.childNodes.filter(function(c) { return c !== n; }); return n; };
 PanelNode.prototype.setAttribute = function(k, v) {
@@ -187,6 +201,7 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
     panel.setAttribute('id', 'repo-update');
     global.document = {
         createElement: function(t) { return new PanelNode(t); },
+        createTextNode: function(t) { return new TextNode(t); },
         getElementById: function(id) { return id === 'repo-update' ? panel : null; }
     };
     global.fetch = function(url) {
@@ -228,6 +243,7 @@ setTimeout(function() {
     panel.setAttribute('id', 'repo-update');
     global.document = {
         createElement: function(t) { return new PanelNode(t); },
+        createTextNode: function(t) { return new TextNode(t); },
         getElementById: function(id) { return id === 'repo-update' ? panel : null; }
     };
     var posted = [];
