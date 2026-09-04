@@ -207,7 +207,16 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
     global.fetch = function(url) {
         var path = String(url);
         var body;
-        if (path.indexOf('api.github.com') !== -1 && path.indexOf('/git/trees/') !== -1) body = TREE;
+        if (path.indexOf('api.github.com') !== -1 && path.indexOf('/git/trees/') !== -1) {
+            // Дерево с ДВУМЯ файлами в download/js: slitter.js и pf-entry.js — оба
+            // отличаются от сервера. Слог #4878: при пофайловом сравнении второй
+            // файл папки попадал и в «отличаются», и в «только на сервере».
+            body = {
+                tree: TREE.tree.concat([
+                    { path: 'download/atex/js/pf-entry.js', type: 'blob', size: 800 }
+                ])
+            };
+        }
         else if (path.indexOf('object/269') !== -1) body = { object: [], reqs: {} };   // настройки нет — дефолт
         else if (path.indexOf('dir_admin') !== -1) {
             body = '<input name="add_path" type="hidden" value="/js">'
@@ -216,7 +225,9 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
                 + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=pf-core.js">pf-core.js</a></td>'
                 + '<td align="right"> &nbsp;3 KB</td></tr>';
         } else body = {};
-        return Promise.resolve({ ok: true, text: function() { return Promise.resolve(JSON.stringify(body)); }, json: function() { return Promise.resolve(body); } });
+        // dir_admin отвечает СЫРЫМ HTML — JSON.stringify здесь ломал парсер:
+        // экранированные кавычки прятали add_path и листинг «сходился» всюду (#4878)
+        return Promise.resolve({ ok: true, text: function() { return Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)); }, json: function() { return Promise.resolve(body); } });
     };
 
     mod.init({ db: 'ateh', xsrf: 'x' });
@@ -234,6 +245,10 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
         // pf-core.js выглядело как тот же файл, что и в «отличаются».
         assertTrue(panel.textContent.indexOf('download/atex/js/pf-core.js') !== -1,
             '#4878 лишний на сервере файл назван с путём папки базы');
+        // #4878: файл, изменившийся в папке, НЕ попадает в «только на сервере» —
+        // сравнение с листингом идёт ПАПКОЙ, а не по одному файлу.
+        assertTrue(panel.textContent.indexOf('только на сервере 1') !== -1,
+            '#4878 в «только на сервере» — только посторонний файл, без изменившихся');
         global.document = savedDoc;
         global.fetch = savedFetch;
     });

@@ -324,8 +324,9 @@
             .then(function(resp) { return resp.text(); })
             .then(function(html) {
                 var got = /name="add_path" type="hidden" value="([^"]*)"/.exec(html);
-                var effective = got ? got[1] : want;
-                if ((effective || '') !== want) return [];
+                if (!got) return [];   // нет отметки папки (не та страница/ошибка) — пусто
+                var effective = got[1];
+                if (effective !== want) return [];   // папки нет — менеджер молча вернул корень
                 return core.parseDirListing(html);
             });
     }
@@ -488,27 +489,28 @@
                     });
                 });
                 return Promise.all(listings).then(function(results) {
-                    // Слияние листингов одного дерева: имена уникальны внутри (sub, tree),
-                    // но сверять надо по (tree, sub, name) — diffFiles сверяет по имени
-                    // внутри пары, поэтому группируем строго по ключу.
+                    // Слияние листингов: сравнение идёт ПАПКОЙ ЦЕЛИКОМ (репо-файлы
+                    // папки против её листинга). Пофайловое сравнение (#4878) делало
+                    // все остальные файлы папки «только на сервере» — файл оказывался
+                    // и в «отличаются», и в «лишних».
                     var grouped = {};
                     results.forEach(function(r) { grouped[r.key] = r.list; });
                     var merged = { same: [], changed: [], added: [], extra: [], meta: {} };
-                    files.forEach(function(f) {
-                        var key = f.tree + '|' + f.sub;
-                        var one = core.diffWithMeta([f], grouped[key] || []);
-                        ['same', 'changed', 'added'].forEach(function(bucket) {
-                            if (one[bucket].length) merged[bucket].push(one[bucket][0]);
-                        });
-                        (one.extra || []).forEach(function(name) {
-                            // #4878: «только на сервере» — с ПОЛНЫМ репо-путём: голое
-                            // имя (pf-dicts.js) читалось как тот же файл из «отличаются»,
-                            // хотя это другая копия в другой папке сервера.
-                            var base = f.tree === 'templates' ? folders.templates : folders.download + f.sub;
+                    Object.keys(subs).forEach(function(key) {
+                        var s = subs[key];
+                        var repoInFolder = files.filter(function(f) { return f.tree + '|' + f.sub === key; });
+                        var one = core.diffWithMeta(repoInFolder, grouped[key] || []);
+                        merged.same = merged.same.concat(one.same);
+                        merged.changed = merged.changed.concat(one.changed);
+                        merged.added = merged.added.concat(one.added);
+                        one.extra.forEach(function(name) {
+                            // «Только на сервере» — с полным репо-путём: голое имя
+                            // читалось как тот же файл из «отличаются».
+                            var base = s.tree === 'templates' ? folders.templates : folders.download + s.sub;
                             var label = base + '/' + name;
                             if (merged.extra.indexOf(label) === -1) merged.extra.push(label);
                         });
-                        merged.meta[f.repoPath] = f;
+                        repoInFolder.forEach(function(f) { merged.meta[f.repoPath] = f; });
                     });
                     renderSummary(merged, url);
                 });
