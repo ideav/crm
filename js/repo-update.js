@@ -325,6 +325,7 @@
     }
 
     function renderSummary(diff, repoUrl) {
+        ctx.diff = diff;   // план для кнопки «Обновить» (api.run)
         clear(ctx.panel);
         ctx.panel.appendChild(repoRow(repoUrl));
         var head = el('p', {}, [
@@ -348,13 +349,48 @@
 
         if (diff.added.length + diff.changed.length) {
             var btn = el('button', { class: 'btn btn-default', type: 'button', text: 'Обновить (' + (diff.added.length + diff.changed.length) + ')' });
-            btn.addEventListener('click', function() { runUpdate(diff, btn); });
+            btn.addEventListener('click', function() { api.run(); });
             ctx.panel.appendChild(el('p', {}, [btn]));
         } else {
             ctx.panel.appendChild(el('p', { text: 'Всё актуально — обновлять нечего.' }));
         }
         var log = el('div', { class: 'ru-log', style: 'font-family:monospace;font-size:12px;white-space:pre-wrap' });
         ctx.panel.appendChild(log);
+        ctx.panel.appendChild(el('p', { class: 'ru-status', text: '' }));
+    }
+
+    // #4878: ИТОГОВЫЙ ОТЧЁТ по кнопке «Обновить» — что получилось сделать.
+    // Залитые файлы и ошибки с причинами сервера, время запуска; рядом кнопка
+    // «Перепроверить» (свежая сводка сразу после отчёта).
+    function renderReport(results, plan, startedMs) {
+        var okList = results.filter(function(r) { return r.ok; });
+        var errList = results.filter(function(r) { return !r.ok; });
+        clear(ctx.panel);
+        ctx.panel.appendChild(repoRow(ctx.repoUrl || ''));
+        var report = el('div', { class: 'ru-report' });
+        report.appendChild(el('h4', { text: 'Отчёт об обновлении (' + core.BRANCH + ')'
+            + (startedMs ? ' — ' + new Date(startedMs).toLocaleString() : '') }));
+        report.appendChild(el('p', {}, [
+            el('b', { text: 'Залито: ' + okList.length + ' из ' + plan.length + '.' }),
+            el('span', { text: errList.length ? ' С ошибками: ' + errList.length + '.' : ' Все файлы обновлены.' })
+        ]));
+        if (okList.length) {
+            report.appendChild(el('b', { text: 'Обновлены:' }));
+            okList.forEach(function(r) {
+                report.appendChild(el('div', { text: '✓ ' + r.repoPath }));
+            });
+        }
+        if (errList.length) {
+            report.appendChild(el('b', { text: 'Не удалось:' }));
+            errList.forEach(function(r) {
+                report.appendChild(el('div', { text: '✗ ' + r.repoPath + ' — ' + r.error, style: 'color:#b91c1c' }));
+            });
+            report.appendChild(el('p', { text: 'Ошибка прав не снимает остальные файлы: исправьте причину и нажмите «Перепроверить», затем «Обновить» ещё раз.' }));
+        }
+        var again = el('button', { class: 'btn btn-default', type: 'button', text: 'Перепроверить' });
+        again.addEventListener('click', function() { refresh(); });
+        report.appendChild(el('p', {}, [again]));
+        ctx.panel.appendChild(report);
         ctx.panel.appendChild(el('p', { class: 'ru-status', text: '' }));
     }
 
@@ -375,11 +411,16 @@
         if (log) log.appendChild(el('div', { text: text }));
     }
 
-    function runUpdate(diff, btn) {
-        btn.disabled = true;
-        var urls = core.githubUrls(core.parseRepoUrl(ctx.panel.querySelector('.ru-repo').value), core.BRANCH);
+    // Заливка по текущему плану (ctx.diff) с журналом прогресса и ИТОГОВЫМ
+    // отчётом (#4878): залито/ошибки с причинами. Ошибка одного файла не мешает
+    // остальным — все попытки выполняются, отчёт собирается по факту.
+    function runUpdate() {
+        var diff = ctx.diff;
+        if (!diff) return Promise.resolve();
+        var startedMs = Date.now();
+        var urls = core.githubUrls(core.parseRepoUrl(ctx.repoUrl || core.DEFAULT_REPO), core.BRANCH);
         var plan = core.updatePlan(diff);
-        var failed = 0;
+        var results = [];
         var chain = Promise.resolve();
         plan.forEach(function(item) {
             chain = chain.then(function() {
@@ -396,23 +437,23 @@
                     });
                 }).then(function() {
                     logLine('✓ ' + item.repoPath);
+                    results.push({ repoPath: item.repoPath, ok: true });
                 }).catch(function(err) {
-                    failed++;
-                    logLine('✗ ' + item.repoPath + ' — ' + (err && err.message ? err.message : err));
-                    throw err;
+                    results.push({ repoPath: item.repoPath, ok: false,
+                        error: err && err.message ? err.message : String(err) });
+                    logLine('✗ ' + item.repoPath + ' — ' + results[results.length - 1].error);
                 });
-            }).catch(function() { /* цепочку не рвём: остальные файлы тоже пробуем */ });
+            });
         });
-        chain.then(function() {
-            status(failed ? 'Готово с ошибками: ' + failed + ' из ' + plan.length : 'Обновлено файлов: ' + plan.length);
-            if (!failed) refresh();
-            else btn.disabled = false;
+        return chain.then(function() {
+            renderReport(results, plan, startedMs);
         });
     }
 
     function refresh() {
         status('Читаем дерево репозитория…');
         return currentRepoUrl().then(function(url) {
+            ctx.repoUrl = url;
             clear(ctx.panel);
             ctx.panel.appendChild(repoRow(url));
             ctx.panel.appendChild(el('p', { class: 'ru-status', text: 'Читаем дерево репозитория…' }));
@@ -462,7 +503,12 @@
                 });
             });
         }).catch(function(err) {
-            status('Не получилось: ' + (err && err.message ? err.message : err));
+            // Ошибка — не строчкой в углу, а текстом в панели: «в базе нет папок в
+            // репозитории» читался бы пустотой (#4878).
+            var text = 'Не получилось: ' + (err && err.message ? err.message : err);
+            var existing = ctx.panel.querySelector('.ru-status');
+            if (existing) existing.textContent = text;
+            else ctx.panel.appendChild(el('p', { text: text }));
         });
     }
 
@@ -486,6 +532,7 @@
         // Шаблон: RepoUpdate.init({db: db, xsrf: document.view_dir._xsrf.value});
         // #4876: каким бы ни было окружение, init не роняет страницу — нет панели
         // (или document без getElementById) — open() молча не делает ничего.
+        run: function() { return runUpdate(); },
         init: function(opts) {
             ctx.db = trimText(opts && opts.db);
             ctx.xsrf = trimText(opts && opts.xsrf);

@@ -1,9 +1,10 @@
-// #4874 — «Обновление из репозитория» в dir_admin: сводная расхождений и заливка файлов.
+// #4874/#4876/#4878 — «Обновление из репозитория» в dir_admin: сводная расхождений,
+// заливка файлов и отчёт по кнопке.
 //
 // Логика живёт в js/repo-update.js (глобальный ассет — js/* деплоится во все базы,
-// dir_admin.html один на все базы). Здесь проверяется ЧИСТЫЙ слой: разбор адреса
-// репозитория, выбор папок базы в дереве репозитория, разбор листинга файлового
-// менеджера, расхождение по размерам и план заливки.
+// dir_admin.html один на все базы). Здесь проверяются ЧИСТЫЙ слой (разбор адреса
+// репозитория, выбор папок базы, разбор листинга менеджера, расхождения, план
+// заливки) и БРАУЗЕРНЫЙ слой (init/open/run со стабами DOM и fetch).
 //
 // Run with: node experiments/atex-repo-update-4874.test.js
 
@@ -41,8 +42,7 @@ assertEqual(urls.raw('templates/atex/slitter.html'),
     '#4874 сырой файл по ветке');
 
 // ── 3) папки базы в дереве репозитория ──
-// У базы ateh папки в репо называются atex (маппинг update.conf), у остальных —
-// имя базы. Кандидаты: {db}, затем псевдоним atex.
+// У базы ateh папки в репо называются atex (маппинг update.conf), у остальных — имя базы.
 var TREE = {
     tree: [
         { path: 'templates/dir_admin.html', type: 'blob', size: 100 },
@@ -76,20 +76,12 @@ assertEqual(files[2], { repoPath: 'download/atex/js/slitter.js', tree: 'download
 var LISTING_HTML = '<table>'
     + '<tr><td><input type="checkbox" name="del[]" value="js"></td>'
     + '<td colspan="2"><a href="/ateh/dir_admin/?download=1&add_path=/"><b>js</b></a></td></tr>'
-    + '<!-- Begin:&File_list -->'
-    + '<tr><td><input type="checkbox"  id="cheks" name="del[]" value="app.js"></td>'
-    + '<td style="vertical-align:middle;">&nbsp;<a href="/ateh/dir_admin/?download=1&add_path=/js&gf=app.js">app.js</a>&nbsp;</td>'
-    + '<td style="padding:2px;">&nbsp;<a href="#">иконки</a></td>'
+    + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=app.js">app.js</a></td>'
     + '<td align="right"> &nbsp;12.34 KB</td>'
     + '<td align="left"> &nbsp;03.09.2026 10:00:00</td></tr>'
-    + '<!-- End:&File_list -->'
-    + '<!-- Begin:&File_list -->'
-    + '<tr><td><input type="checkbox"  id="cheks" name="del[]" value="readme.txt"></td>'
-    + '<td style="vertical-align:middle;">&nbsp;<a href="/ateh/dir_admin/?download=1&add_path=/&gf=readme.txt">readme.txt</a>&nbsp;</td>'
-    + '<td style="padding:2px;">&nbsp;<a href="#">иконки</a></td>'
+    + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/&gf=readme.txt">readme.txt</a></td>'
     + '<td align="right"> &nbsp;512 B</td>'
     + '<td align="left"> &nbsp;03.09.2026 10:00:00</td></tr>'
-    + '<!-- End:&File_list -->'
     + '</table>';
 var listing = core.parseDirListing(LISTING_HTML);
 assertEqual(listing, [
@@ -104,8 +96,6 @@ assertEqual(core.toBytes('2 MB'), 2097152, '#4874 мегабайты');
 assertEqual(core.toBytes('мусор'), 0, '#4874 не размер — ноль (файл посчитается изменившимся)');
 
 // ── 6) расхождение репозитория с сервером ──
-// added — в репозитории есть, на сервере нет; changed — есть на обоих, размеры разные;
-// same — размеры совпали; extra — на сервере лишнее (только информация, не удаляем).
 var repoList = [
     { repoPath: 'download/atex/js/app.js', tree: 'download', sub: '/js', name: 'app.js', size: 12636 },
     { repoPath: 'download/atex/js/slitter.js', tree: 'download', sub: '/js', name: 'slitter.js', size: 50000 },
@@ -140,10 +130,9 @@ assertEqual(core.repoFromSetting({ val: '', r: ['main', 'GIT', '273-value'] }), 
 assertEqual(core.repoFromSetting(null), '', '#4874 настройки нет — пусто (будет дефолт)');
 
 // ── 9) инициализация не падает в неожиданном окружении (#4876) ──
-// Боевая страница отчиталась об ошибке внутри init (repo-update.js:489 — строка
-// «ctx.panel = root.document.getElementById(...)»). Каким бы ни было окружение,
-// init не имеет права ронять страницу: нет document.getElementById — панель
-// остаётся null, open() молча не делает ничего.
+// Боевая страница отчиталась об ошибке внутри init. Каким бы ни было окружение,
+// init не имеет права ронять страницу: нет document.getElementById — панель null,
+// open() молча не делает ничего.
 (function() {
     var savedDoc = global.document;
     global.document = {};   // document БЕЗ getElementById
@@ -155,15 +144,14 @@ assertEqual(core.repoFromSetting(null), '', '#4874 настройки нет —
     assertEqual(openThrew, null, '#4876 open() без панели не падает');
 })();
 
-// ── 10) БРАУЗЕРНЫЙ СЛОЙ: init+open рисуют сводку (DOM+fetch стабы) ───────────────
-// Поймал бы баг #4876: фабрика модуля вызывалась без root, и весь браузерный слой
-// падал «root is not defined» при первом же init — чистое ядро при этом было зелёным.
+// ── DOM-стаб для браузерных сценариев ──
 function PanelNode(tag) {
     this.tagName = String(tag || '').toUpperCase();
     this.childNodes = [];
     this.attributes = {};
     this.style = {};
     this.value = '';
+    this.disabled = false;
     this._className = '';
     this._text = '';
     var self = this;
@@ -183,8 +171,8 @@ PanelNode.prototype.setAttribute = function(k, v) {
     this.attributes[k] = String(v);
     if (k === 'value') this.value = String(v);   // как в DOM: value-атрибут видно в свойстве
 };
-PanelNode.prototype.getAttribute = function(k) { return this.attributes[k] == null ? null : this.attributes[k]; };
-PanelNode.prototype.addEventListener = function() {};
+PanelNode.prototype.addEventListener = function(ev, fn) { this._onClick = fn; };
+PanelNode.prototype.click = function() { if (this._onClick) this._onClick(); };
 PanelNode.prototype._all = function(acc) {
     this.childNodes.forEach(function(c) { if (c instanceof PanelNode) { acc.push(c); c._all(acc); } }); return acc; };
 PanelNode.prototype.querySelectorAll = function(sel) {
@@ -192,6 +180,7 @@ PanelNode.prototype.querySelectorAll = function(sel) {
     return this._all([]).filter(function(n) { return n.classList.contains(cls); }); };
 PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll(sel)[0] || null; };
 
+// ── 10) init+open: панель получает сводку, дефолтный репозиторий в поле ──
 (function() {
     var savedDoc = global.document, savedFetch = global.fetch;
     var panel = new PanelNode('div');
@@ -204,10 +193,8 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
         var path = String(url);
         var body;
         if (path.indexOf('api.github.com') !== -1 && path.indexOf('/git/trees/') !== -1) body = TREE;
-        else if (path.indexOf('object/269') !== -1) {
-            body = { object: [], reqs: {} };   // настройки GIT нет — работает дефолт
-        } else if (path.indexOf('dir_admin') !== -1) {
-            // листинг: одна строка File_list с размером 12.34 KB и add_path=/js
+        else if (path.indexOf('object/269') !== -1) body = { object: [], reqs: {} };   // настройки нет — дефолт
+        else if (path.indexOf('dir_admin') !== -1) {
             body = '<input name="add_path" type="hidden" value="/js">'
                 + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=slitter.js">slitter.js</a></td>'
                 + '<td align="right"> &nbsp;12.34 KB</td></tr>';
@@ -228,7 +215,73 @@ PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll
             '#4876 после open() в панели — сводка расхождений (браузерный слой жив)');
         global.document = savedDoc;
         global.fetch = savedFetch;
-        console.log('\n' + passed + '/' + total + ' passed');
-        if (process.exitCode) process.exit(process.exitCode);
     });
 })();
+
+// ── 11) ОТЧЁТ ПОСЛЕ ОБНОВЛЕНИЯ (#4878) ──────────────────────────────────────────
+// По кнопке «Обновить» обязан появляться отчёт: что залито, что с ошибками и по
+// какой причине. «Непонятно что произошло» — тикет #4878. Секция стартует после
+// секции 10 (у модуля один ctx — синглтон, сценарии не должны интерливиться).
+setTimeout(function() {
+    var savedDoc = global.document, savedFetch = global.fetch;
+    var panel = new PanelNode('div');
+    panel.setAttribute('id', 'repo-update');
+    global.document = {
+        createElement: function(t) { return new PanelNode(t); },
+        getElementById: function(id) { return id === 'repo-update' ? panel : null; }
+    };
+    var posted = [];
+    global.fetch = function(url, opts) {
+        var path = String(url);
+        if (path.indexOf('raw.githubusercontent.com') !== -1) {
+            return Promise.resolve({ ok: true, text: function() { return Promise.resolve('// fresh build'); } });
+        }
+        if (path.indexOf('dir_admin') !== -1 && opts && opts.method === 'POST') {
+            posted.push(path);
+            var fail = path.indexOf('templates') !== -1;   // шаблон — отказ в правах
+            return Promise.resolve({
+                ok: !fail, redirected: !fail,
+                text: function() { return Promise.resolve(fail ? 'Недостаточно прав для загрузки файлов' : ''); }
+            });
+        }
+        if (path.indexOf('api.github.com') !== -1 && path.indexOf('/git/trees/') !== -1) {
+            return Promise.resolve({ ok: true, json: function() { return Promise.resolve(TREE); } });
+        }
+        if (path.indexOf('object/269') !== -1) {
+            return Promise.resolve({ ok: true, text: function() { return Promise.resolve(JSON.stringify({ object: [], reqs: {} })); } });
+        }
+        if (path.indexOf('dir_admin') !== -1) {
+            return Promise.resolve({ ok: true, text: function() {
+                return Promise.resolve('<input name="add_path" type="hidden" value="/js">'
+                    + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=slitter.js">slitter.js</a></td>'
+                    + '<td align="right"> &nbsp;12.34 KB</td></tr>');
+            } });
+        }
+        return Promise.resolve({ ok: true, text: function() { return Promise.resolve('{}'); }, json: function() { return Promise.resolve({}); } });
+    };
+
+    mod.init({ db: 'ateh', xsrf: 'x' });
+    mod.open();
+    Promise.resolve().then(function() { return new Promise(function(r) { setTimeout(r, 10); }); }).then(function() {
+        assertTrue(typeof mod.run === 'function', '#4878 у пульта есть запуск обновления (mod.run)');
+        assertTrue(posted.length === 0, '#4878 до запуска обновления в менеджер ничего не льётся');
+        return mod.run();
+    }).then(function() {
+        return new Promise(function(r) { setTimeout(r, 10); });
+    }).then(function() {
+        var report = panel.querySelector('.ru-report');
+        assertTrue(!!report, '#4878 после обновления в панели — блок отчёта');
+        assertTrue(report.textContent.indexOf('Отчёт об обновлении') !== -1,
+            '#4878 отчёт назван отчётом');
+        assertTrue(report.textContent.indexOf('Залито: 3 из 5') !== -1,
+            '#4878 в отчёте — сколько файлов залито из плана');
+        assertTrue(report.textContent.indexOf('С ошибками: 2.') !== -1,
+            '#4878 в отчёте — сколько файлов с ошибками');
+        assertTrue(report.textContent.indexOf('нет прав на запись файлов') !== -1,
+            '#4878 причина ошибки названа словами сервера');
+        assertTrue(posted.length === 5, '#4878 попытка заливки была для каждого файла плана');
+        console.log('');
+        console.log(passed + '/' + total + ' passed');
+        if (process.exitCode) process.exit(process.exitCode);
+    });
+}, 60);
