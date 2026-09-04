@@ -4855,42 +4855,6 @@
         };
     }
 
-    // #4883: ФАКТ НАЛАДКИ — задание «Начато» в день РАНЬШЕ его план-дня: оператор
-    // наладил станок под завтрашнюю резку (пульт, кнопка «Наладка»), проходы остались
-    // на план-дне. Планировщик показывает такой факт в дне наладки («наладка во вчера»),
-    // чтобы задание не читалось как неначатое. «Начато» ставит только пульт — событий
-    // смены планировщик не читает. Наладка в СВОЙ план-день и «начато позже плана» —
-    // штатные случаи, фактом не считаются.
-    // fmt — { dayIso(ts), dayLabel(iso), clock(ts) } — колбэки форматирования (как у
-    // daySplitChainNote: чистая функция, покрыта тестом — atex-pp-4883-setup-fact).
-    // → [{ cutId, orderNo, factDayIso, factDayLabel, clock }] по дню наладки, затем по времени.
-    function setupFactNotes(cuts, fmt) {
-        var f = fmt || {};
-        var out = [];
-        (cuts || []).forEach(function(c) {
-            if (!cutIsStarted(c)) return;   // не начато — факта наладки нет
-            var started = planTsSeconds(c.startDate);
-            var plan = planTsSeconds(c && c.planDate);
-            if (started == null || plan == null) return;
-            var startedDay = planDateDayKey(started);
-            if (startedDay === planDateDayKey(plan)) return;   // наладка в свой план-день
-            if (startedDay > planDateDayKey(plan)) return;     // «начато» позже плана — не наладка наперёд
-            var iso = planDateIso(started);
-            out.push({
-                cutId: String(c.id),
-                orderNo: String(c.orderNo == null ? '' : c.orderNo).trim(),
-                factDayIso: iso,
-                factDayLabel: typeof f.dayLabel === 'function' ? f.dayLabel(iso) : iso,
-                clock: typeof f.clock === 'function' ? f.clock(started) : ''
-            });
-        });
-        out.sort(function(a, b) {
-            return (a.factDayIso < b.factDayIso ? -1 : a.factDayIso > b.factDayIso ? 1 : 0)
-                || (a.clock < b.clock ? -1 : a.clock > b.clock ? 1 : 0);
-        });
-        return out;
-    }
-
     // #4651: КАРТОЧКА НАЗЫВАЕТ СВОЮ ПОЛОВИНУ — «сделано 27 из 45 · остаток 18 → 11.08.2026».
     // «Урегулировать» делит частично выполненное задание по ФАКТУ (#4564): выполненная часть —
     // исходная запись (при ней «Начато», погонаж, события смены), остаток — новая. Цепочки

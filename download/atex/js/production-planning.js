@@ -10016,42 +10016,6 @@
         };
     }
 
-    // #4883: ФАКТ НАЛАДКИ — задание «Начато» в день РАНЬШЕ его план-дня: оператор
-    // наладил станок под завтрашнюю резку (пульт, кнопка «Наладка»), проходы остались
-    // на план-дне. Планировщик показывает такой факт в дне наладки («наладка во вчера»),
-    // чтобы задание не читалось как неначатое. «Начато» ставит только пульт — событий
-    // смены планировщик не читает. Наладка в СВОЙ план-день и «начато позже плана» —
-    // штатные случаи, фактом не считаются.
-    // fmt — { dayIso(ts), dayLabel(iso), clock(ts) } — колбэки форматирования (как у
-    // daySplitChainNote: чистая функция, покрыта тестом — atex-pp-4883-setup-fact).
-    // → [{ cutId, orderNo, factDayIso, factDayLabel, clock }] по дню наладки, затем по времени.
-    function setupFactNotes(cuts, fmt) {
-        var f = fmt || {};
-        var out = [];
-        (cuts || []).forEach(function(c) {
-            if (!cutIsStarted(c)) return;   // не начато — факта наладки нет
-            var started = planTsSeconds(c.startDate);
-            var plan = planTsSeconds(c && c.planDate);
-            if (started == null || plan == null) return;
-            var startedDay = planDateDayKey(started);
-            if (startedDay === planDateDayKey(plan)) return;   // наладка в свой план-день
-            if (startedDay > planDateDayKey(plan)) return;     // «начато» позже плана — не наладка наперёд
-            var iso = planDateIso(started);
-            out.push({
-                cutId: String(c.id),
-                orderNo: String(c.orderNo == null ? '' : c.orderNo).trim(),
-                factDayIso: iso,
-                factDayLabel: typeof f.dayLabel === 'function' ? f.dayLabel(iso) : iso,
-                clock: typeof f.clock === 'function' ? f.clock(started) : ''
-            });
-        });
-        out.sort(function(a, b) {
-            return (a.factDayIso < b.factDayIso ? -1 : a.factDayIso > b.factDayIso ? 1 : 0)
-                || (a.clock < b.clock ? -1 : a.clock > b.clock ? 1 : 0);
-        });
-        return out;
-    }
-
     // #4651: КАРТОЧКА НАЗЫВАЕТ СВОЮ ПОЛОВИНУ — «сделано 27 из 45 · остаток 18 → 11.08.2026».
     // «Урегулировать» делит частично выполненное задание по ФАКТУ (#4564): выполненная часть —
     // исходная запись (при ней «Начато», погонаж, события смены), остаток — новая. Цепочки
@@ -14806,7 +14770,6 @@
         daySplitBadges: daySplitBadges,
         daySplitWarning: daySplitWarning,   // #4304: плашка «разорвано по дням» (просрочено ИЛИ зафиксировано)
         daySplitChainNote: daySplitChainNote,   // #4617: «проходов 1 из 5 · остальные 4 → 07.08»
-        setupFactNotes: setupFactNotes,         // #4883: факт наладки («Начато» раньше план-дня)
         settleSplitNote: settleSplitNote,       // #4651: «сделано 27 из 45 · остаток 18 → 11.08» на ОБЕИХ половинах
         boundaryDaySibling: boundaryDaySibling,   // #3737
         mergeContinuationChains: mergeContinuationChains,
@@ -28581,38 +28544,6 @@
         // намотки нет, длительность в расписании 0, чтобы настройка встала в конце дня N, а
         // намотка — на день N+1. Карточка таких заданий показывает «Настройка ножей и сырья».
         var setupTaskIds = setupTaskIdSet(activeGroup.cuts);
-        // #4883: ФАКТ НАЛАДКИ из пульта — «Начато» заданием раньше его план-дня
-        // (оператор наладил станок под завтрашнюю резку). Показываем записи наладки
-        // в дне наладки и строку на карточке план-дня; минуты расписания не трогаем.
-        var setupFmt = {
-            dayIso: function(ts) { return planDateIso(ts); },
-            dayLabel: function(iso) { return formatPlanDayLabel(iso); },
-            clock: function(ts) {
-                var s = planTsSeconds(ts);
-                if (s == null) return '';
-                var d = new Date(s * 1000);
-                return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
-            }
-        };
-        var setupFactsByCut = {};
-        setupFactNotes(activeGroup.cuts, setupFmt).forEach(function(f) { setupFactsByCut[f.cutId] = f; });
-        var pendingSetupFacts = setupFactNotes(activeGroup.cuts, setupFmt);
-        function flushSetupFacts(beforeIso) {
-            while (pendingSetupFacts.length && (!beforeIso || pendingSetupFacts[0].factDayIso < beforeIso)) {
-                var g = pendingSetupFacts.shift();
-                groupEl.appendChild(el('div', { class: 'atex-pp-day-date atex-pp-day-fact' }, [
-                    g.factDayLabel,
-                    el('span', { class: 'atex-pp-day-mins', text: ' · наладка (факт из пульта)' })
-                ]));
-                groupEl.appendChild(el('div', { class: 'atex-pp-setup-fact-row', text: 'Наладка · '
-                    + (g.orderNo ? 'заказ ' + g.orderNo : 'задание #' + g.cutId) + ' · ' + g.clock }));
-                while (pendingSetupFacts.length && pendingSetupFacts[0].factDayIso === g.factDayIso) {
-                    var n = pendingSetupFacts.shift();
-                    groupEl.appendChild(el('div', { class: 'atex-pp-setup-fact-row', text: 'Наладка · '
-                        + (n.orderNo ? 'заказ ' + n.orderNo : 'задание #' + n.cutId) + ' · ' + n.clock }));
-                }
-            }
-        }
         // #3688: текущая заправка активного станка → синтетическая
         // «предыдущая резка» для МОДАЛКИ тайминга первой резки очереди (#3240): смена сырья +
         // ножи, если осталось другое. Нет данных → null + firstCutSetup (настройка ножей с нуля).
@@ -28695,7 +28626,6 @@
         var lastDayDateRendered = null;   // #3616: дата-заголовок дня вставляется один раз на рабочий день
 
         activeGroup.cuts.forEach(function(c, idx) {
-            flushSetupFacts(planDateIso(c.planDate));   // #4883: наладка раньше план-дня — факт-день
             // #3411: при поиске показываем только совпавшие карточки. Расписание/индексы
             // (idx, sameDayCuts) считаются по полной очереди станка, поэтому номера и
             // перестановки ↑/↓ остаются корректными — прячем лишь несовпавшие карточки.
@@ -29303,14 +29233,6 @@
             if (settleNote) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note is-settle',
                     title: settleNote.title, text: 'ℹ ' + settleNote.text }));
-            }
-            // #4883: факт наладки из пульта — «Начато» раньше план-дня: оператор
-            // наладил станок под эту резку заранее; проходы ещё не делались.
-            var setupFact = setupFactsByCut[String(c.id)];
-            if (setupFact) {
-                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note is-setup-fact',
-                    title: 'Оператор наладил станок под эту резку заранее (кнопка «Наладка» в пульте); проходы ещё не делались.',
-                    text: 'ℹ наладка выполнена ' + setupFact.factDayLabel + ' ' + setupFact.clock }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {
