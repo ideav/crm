@@ -235,13 +235,24 @@
 <!-- Обновление из репозитория (#4874): сводная templates/download базы против
      репозитория и заливка изменившихся файлов под токеном текущего пользователя.
      Скрипт глобальный (js деплоится во все базы), кэш сбрасывается числом-версией
-     в адресе — при правках файла поднимать вручную. -->
-<script src="/js/repo-update.js?4874.1" defer></script>
+     в адресе — при правках файла поднимать вручную. #4876: инициализация в try/catch —
+     любая ошибка видна текстом в панели, а не только в консоли планшета. -->
+<script src="/js/repo-update.js?4876.1" defer></script>
 <script>
     window.addEventListener('load', function() {
-        if (window.RepoUpdate && document.view_dir) {
+        if (!window.RepoUpdate || !document.view_dir) return;
+        var box = document.getElementById('repo-update');
+        try {
             RepoUpdate.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+        } catch (e) {
+            if (box) {
+                box.style.display = 'block';
+                box.textContent = 'Ошибка инициализации обновления из репозитория: '
+                    + (e && e.message ? e.message : e);
+            }
+            return;
         }
+        if (box) box.textContent = 'Нажмите «Обновление из репозитория», чтобы проверить расхождения.';
     });
 </script>
 <script>

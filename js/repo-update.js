@@ -24,14 +24,15 @@
  */
 (function(root, factory) {
     'use strict';
-    var api = factory();
+    var api = factory(root);   // #4876: root обязана доехать до фабрики — без неё
+                               // браузерный слой не видел ни document, ни fetch
     if (typeof module === 'object' && module.exports) {
         module.exports = api;
     }
     if (root && root.document) {
         root.RepoUpdate = api;
     }
-})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function() {
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function(root) {
     'use strict';
 
     // Дефолтный репозиторий и ветка (issue #4874).
@@ -483,14 +484,27 @@
     var api = {
         core: core,
         // Шаблон: RepoUpdate.init({db: db, xsrf: document.view_dir._xsrf.value});
+        // #4876: каким бы ни было окружение, init не роняет страницу — нет панели
+        // (или document без getElementById) — open() молча не делает ничего.
         init: function(opts) {
             ctx.db = trimText(opts && opts.db);
             ctx.xsrf = trimText(opts && opts.xsrf);
-            ctx.panel = root.document.getElementById('repo-update');
+            try {
+                ctx.panel = root.document && root.document.getElementById
+                    ? root.document.getElementById('repo-update')
+                    : null;
+            } catch (e) {
+                ctx.panel = null;
+                if (root.console) root.console.error('[repo-update] панель «repo-update» недоступна:', e && e.message ? e.message : e);
+            }
         },
         open: function() {
             if (!ctx.panel) return;
-            refresh();
+            try {
+                refresh();
+            } catch (e) {
+                status('Не получилось: ' + (e && e.message ? e.message : e));
+            }
         }
     };
     return api;

@@ -139,5 +139,96 @@ assertEqual(core.repoFromSetting({ val: '', r: ['main', 'GIT', '273-value'] }), 
     '#4874 пустое главное значение — берём реквизит «Значение» (273)');
 assertEqual(core.repoFromSetting(null), '', '#4874 настройки нет — пусто (будет дефолт)');
 
-console.log('\n' + passed + '/' + total + ' passed');
-if (process.exitCode) process.exit(process.exitCode);
+// ── 9) инициализация не падает в неожиданном окружении (#4876) ──
+// Боевая страница отчиталась об ошибке внутри init (repo-update.js:489 — строка
+// «ctx.panel = root.document.getElementById(...)»). Каким бы ни было окружение,
+// init не имеет права ронять страницу: нет document.getElementById — панель
+// остаётся null, open() молча не делает ничего.
+(function() {
+    var savedDoc = global.document;
+    global.document = {};   // document БЕЗ getElementById
+    var initThrew = null, openThrew = null;
+    try { mod.init({ db: 'ateh', xsrf: 'x' }); } catch (e) { initThrew = e.message; }
+    global.document = savedDoc;
+    try { mod.open(); } catch (e) { openThrew = e.message; }
+    assertEqual(initThrew, null, '#4876 init не падает, если у document нет getElementById');
+    assertEqual(openThrew, null, '#4876 open() без панели не падает');
+})();
+
+// ── 10) БРАУЗЕРНЫЙ СЛОЙ: init+open рисуют сводку (DOM+fetch стабы) ───────────────
+// Поймал бы баг #4876: фабрика модуля вызывалась без root, и весь браузерный слой
+// падал «root is not defined» при первом же init — чистое ядро при этом было зелёным.
+function PanelNode(tag) {
+    this.tagName = String(tag || '').toUpperCase();
+    this.childNodes = [];
+    this.attributes = {};
+    this.style = {};
+    this.value = '';
+    this._className = '';
+    this._text = '';
+    var self = this;
+    this.classList = { contains: function(c) { return self._cls().indexOf(c) !== -1; } };
+}
+PanelNode.prototype._cls = function() { return this._className.split(/\s+/).filter(Boolean); };
+Object.defineProperty(PanelNode.prototype, 'className', {
+    get: function() { return this._className; }, set: function(v) { this._className = String(v || ''); } });
+Object.defineProperty(PanelNode.prototype, 'textContent', {
+    get: function() { return this.childNodes.length
+        ? this.childNodes.map(function(c) { return c.textContent; }).join(' ') : this._text; },
+    set: function(v) { this._text = String(v == null ? '' : v); this.childNodes = []; } });
+PanelNode.prototype.appendChild = function(n) { this.childNodes.push(n); return n; };
+PanelNode.prototype.removeChild = function(n) {
+    this.childNodes = this.childNodes.filter(function(c) { return c !== n; }); return n; };
+PanelNode.prototype.setAttribute = function(k, v) {
+    this.attributes[k] = String(v);
+    if (k === 'value') this.value = String(v);   // как в DOM: value-атрибут видно в свойстве
+};
+PanelNode.prototype.getAttribute = function(k) { return this.attributes[k] == null ? null : this.attributes[k]; };
+PanelNode.prototype.addEventListener = function() {};
+PanelNode.prototype._all = function(acc) {
+    this.childNodes.forEach(function(c) { if (c instanceof PanelNode) { acc.push(c); c._all(acc); } }); return acc; };
+PanelNode.prototype.querySelectorAll = function(sel) {
+    var cls = sel.replace(/^\./, '');
+    return this._all([]).filter(function(n) { return n.classList.contains(cls); }); };
+PanelNode.prototype.querySelector = function(sel) { return this.querySelectorAll(sel)[0] || null; };
+
+(function() {
+    var savedDoc = global.document, savedFetch = global.fetch;
+    var panel = new PanelNode('div');
+    panel.setAttribute('id', 'repo-update');
+    global.document = {
+        createElement: function(t) { return new PanelNode(t); },
+        getElementById: function(id) { return id === 'repo-update' ? panel : null; }
+    };
+    global.fetch = function(url) {
+        var path = String(url);
+        var body;
+        if (path.indexOf('api.github.com') !== -1 && path.indexOf('/git/trees/') !== -1) body = TREE;
+        else if (path.indexOf('object/269') !== -1) {
+            body = { object: [], reqs: {} };   // настройки GIT нет — работает дефолт
+        } else if (path.indexOf('dir_admin') !== -1) {
+            // листинг: одна строка File_list с размером 12.34 KB и add_path=/js
+            body = '<input name="add_path" type="hidden" value="/js">'
+                + '<tr><td></td><td><a href="/ateh/dir_admin/?download=1&add_path=/js&gf=slitter.js">slitter.js</a></td>'
+                + '<td align="right"> &nbsp;12.34 KB</td></tr>';
+        } else body = {};
+        return Promise.resolve({ ok: true, text: function() { return Promise.resolve(JSON.stringify(body)); }, json: function() { return Promise.resolve(body); } });
+    };
+
+    mod.init({ db: 'ateh', xsrf: 'x' });
+    mod.open();
+
+    Promise.resolve().then(function() {
+        return new Promise(function(r) { setTimeout(r, 10); });
+    }).then(function() {
+        var repoInput = panel.querySelector('.ru-repo');
+        assertEqual(repoInput && repoInput.value, 'https://github.com/ideav/crm/',
+            '#4876 без настройки GIT в поле — дефолтный репозиторий');
+        assertTrue(panel.textContent.indexOf('Сводка по репозиторию') !== -1,
+            '#4876 после open() в панели — сводка расхождений (браузерный слой жив)');
+        global.document = savedDoc;
+        global.fetch = savedFetch;
+        console.log('\n' + passed + '/' + total + ' passed');
+        if (process.exitCode) process.exit(process.exitCode);
+    });
+})();
